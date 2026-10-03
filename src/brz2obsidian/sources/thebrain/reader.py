@@ -1,7 +1,6 @@
 """Read-only BRZ interpretation and scoped payload access."""
 
 import hashlib
-import json
 from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from uuid import UUID, uuid5
@@ -11,8 +10,6 @@ from pydantic import ValidationError
 
 from brz2obsidian.contracts import (
     AccountingEntry,
-    Asset,
-    Document,
     Issue,
     Item,
     MigrationFailed,
@@ -23,8 +20,8 @@ from brz2obsidian.contracts import (
     SourceSnapshot,
 )
 
+from .attachments import normalize_attachments
 from .decoding import ROOT_FILES, decode_records
-from .notes import trace_note_references
 
 
 def _refuse(code, message, affected=()):
@@ -210,121 +207,18 @@ class BrzSession:
             _refuse("invalid_entry", "Home setting is not a valid thought identity")
         if entry not in thoughts:
             _refuse("invalid_entry", "Home does not identify a live ordinary thought")
-        assets, documents = [], []
-        attachment_ids = set()
-        for index, record in enumerate(records["attachments.json"]):
-            asset_id = _uuid(record["Id"])
-            owner = _uuid(record["SourceId"])
-            if (
-                asset_id in attachment_ids
-                or owner not in thoughts
-                or record.get("BrainId") != brain_id
-            ):
-                _refuse("invalid_source", "Attachment identity or ownership is invalid")
-            attachment_ids.add(asset_id)
-            if (
-                record.get("SourceType"),
-                record.get("Type"),
-                record.get("NoteType"),
-            ) not in {(2, 1, 4), (2, 1, 0)}:
-                _refuse(
-                    "unsupported_feature",
-                    "Minimal profile implements Markdown note attachments only",
-                )
-            location = record["Location"]
-            if (
-                type(location) is not str
-                or PurePosixPath(location).name != location
-                or location != "Notes.md"
-            ):
-                _refuse(
-                    "unsupported_feature",
-                    "Minimal profile requires Notes.md thought-note location",
-                )
-            member = owner + "/" + location
-            if meta["AttachmentFileStates"].get(asset_id) != 1:
-                _refuse(
-                    "missing_required_payload",
-                    "Thought note payload state is not present",
-                    (asset_id,),
-                )
-            if member not in names:
-                _refuse(
-                    "missing_required_payload",
-                    "Required thought note payload is absent",
-                    (asset_id,),
-                )
-            raw = self.archive.read(member)
-            if type(record.get("DataLength")) is not int or record["DataLength"] != len(
-                raw
-            ):
-                _refuse(
-                    "invalid_source",
-                    "Thought note metadata length differs from present bytes",
-                )
-            text = raw.decode("utf-8-sig")
-            if record["NoteType"] == 0 and text.strip():
-                _refuse(
-                    "unsupported_feature",
-                    "Nonempty Notes.md placeholder has ambiguous meaning",
-                )
-            references = trace_note_references(text)
-            if references:
-                _refuse(
-                    "unsupported_feature",
-                    "Source-local note links require the link-adaptation slice",
-                )
-            if any(doc.owner == owner for doc in documents):
-                _refuse(
-                    "invalid_source", "Multiple thought notes have ambiguous ownership"
-                )
-            pointer = f"attachments.json:{index}"
-            assets.append(
-                Asset(
-                    asset_id=asset_id,
-                    owner=owner,
-                    naming_seed=asset_id.replace("-", ""),
-                    original_name=location,
-                    role="note_original",
-                    availability="present",
-                    actual_length=len(raw),
-                    actual_sha256=hashlib.sha256(raw).hexdigest(),
-                    evidence=(pointer,),
-                )
+        assets, documents, self.members, payload_evidence, payload_accounting = (
+            normalize_attachments(
+                self.archive,
+                records["attachments.json"],
+                meta,
+                thoughts,
+                _refuse,
+                _uuid,
             )
-            documents.append(
-                Document(
-                    key=asset_id,
-                    owner=owner,
-                    text=text,
-                    text_digest=hashlib.sha256(text.encode()).hexdigest(),
-                    original_asset_id=asset_id,
-                    references=references,
-                    evidence=(pointer,),
-                )
-            )
-            self.members[asset_id] = member
-            payload_pointer = f"payload:{member}"
-            evidence.append(
-                OriginalEvidence(
-                    key=payload_pointer,
-                    kind="payload",
-                    original_json=json.dumps(
-                        {
-                            "member": member,
-                            "length": len(raw),
-                            "sha256": hashlib.sha256(raw).hexdigest(),
-                        }
-                    ),
-                )
-            )
-            accounting.append(
-                AccountingEntry(
-                    identity=payload_pointer,
-                    disposition="normalized",
-                    references=(asset_id,),
-                )
-            )
+        )
+        evidence.extend(payload_evidence)
+        accounting.extend(payload_accounting)
         resources = {
             name for name in names if name not in ROOT_FILES and not name.endswith("/")
         }
@@ -341,7 +235,11 @@ class BrzSession:
                 title=record["Name"],
                 label=record.get("Label"),
                 document_ids=tuple(d.key for d in documents if d.owner == key),
-                resource_ids=(),
+                resource_ids=tuple(
+                    a.asset_id
+                    for a in assets
+                    if a.owner == key and a.role != "note_original"
+                ),
                 evidence=(f"thoughts.json:{i}",),
             )
             for i, (key, record) in enumerate(thoughts.items())
