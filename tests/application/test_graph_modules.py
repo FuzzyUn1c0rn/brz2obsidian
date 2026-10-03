@@ -249,6 +249,14 @@ def test_exhausted_short_seeds_resolve_by_suffixing_natural_name_contender():
     assert names["c"] == "Notes/Foo — ab — ef.md"
 
 
+def test_indistinguishable_full_seeds_refuse_with_actionable_source_guidance():
+    facts = snapshot((item("a", "Duplicate", "ab"), item("b", "duplicate", "ab")))
+    with pytest.raises(MigrationRefused) as error:
+        plan(analyze(facts, POLICY))
+    assert error.value.issues[0].code == "invalid_source"
+    assert "distinct stable naming seeds" in error.value.issues[0].guidance
+
+
 def test_decorative_assets_labels_and_empty_placeholders_alone_leave_targets_uncreated():
     original = Asset(
         asset_id="empty",

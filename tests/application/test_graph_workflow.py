@@ -272,8 +272,8 @@ def test_inspect_leaves_path_feasibility_pending_and_convert_refuses_long_destin
     assert inspected.outcome == "clean"
     assert "destination feasibility" in inspected.inspection.pending_checks
     destination = tmp_path / ("destination" * 10)
-    # The full manifest also includes conditional listings; this path exceeds
-    # the accepted conservative absolute-path bound before staging is made.
+    # The assigned uncreated note path must also be feasible for later native
+    # click-to-create, even though it is absent from the emitted-file manifest.
     result = workflow.convert(source, destination)
     assert result.outcome == "refused"
     assert result.issues[0].code == "target_path_too_long"
