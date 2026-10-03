@@ -1,10 +1,10 @@
 """Source-neutral resource eligibility and stable preservation assignments."""
 
-import re
-import unicodedata
 from pathlib import PurePosixPath
 
 from brz2obsidian.contracts import AssetTarget, Issue, MigrationRefused
+
+from .naming import readable_filename
 
 
 def resource_owners(snapshot):
@@ -52,13 +52,7 @@ def _tokens(values):
 
 
 def _name(original):
-    value = unicodedata.normalize("NFC", PurePosixPath(original).name)
-    value = value.replace(":", " - ").replace("[", "(").replace("]", ")")
-    value = re.sub(r'[<>"/\\|?*#^%\x00-\x1f]', " ", value)
-    value = " ".join(value.split()).strip(" .") or "Untitled"
-    if re.match(r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)", value, re.IGNORECASE):
-        value = "Note - " + value
-    return value
+    return readable_filename(PurePosixPath(original).name)
 
 
 def assign_asset_targets(snapshot):

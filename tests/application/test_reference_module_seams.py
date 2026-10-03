@@ -5,7 +5,7 @@ import pytest
 from brz2obsidian.contracts import Asset, Document, MigrationRefused, ReferenceSpan
 from brz2obsidian.core import analyze, plan
 from brz2obsidian.obsidian import render
-from tests.application.test_graph_modules import POLICY, generated, item, snapshot
+from tests.application.test_graph_modules import POLICY, edge, generated, item, snapshot
 from tests.application.test_module_seams import METADATA
 
 
@@ -127,3 +127,113 @@ def test_public_renderer_refuses_reference_without_its_assigned_item_target():
     with pytest.raises(MigrationRefused) as error:
         render(changed, METADATA)
     assert error.value.issues[0].code == "invalid_reference"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "~~~python\r\nprint(42)",
+        "<!-- Authored comment\r\nkept open",
+        "> ```python\n> print(42)",
+        "- example\n\n  ```python\n  print(42)",
+        "    indented example\n",
+        "```python\nprint(42)\n```",
+    ],
+)
+def test_reusable_renderer_keeps_following_documents_and_navigation_visible(body):
+    from markdown_it import MarkdownIt
+
+    bodies = (body, "# Second document\n\nAuthored follow-up.\n")
+    documents, assets = [], []
+    for index, text in enumerate(bodies):
+        key = f"doc-{index}"
+        digest = hashlib.sha256(text.encode()).hexdigest()
+        documents.append(
+            Document(
+                key=key,
+                owner="entry",
+                text=text,
+                text_digest=digest,
+                original_asset_id=key,
+            )
+        )
+        assets.append(
+            Asset(
+                asset_id=key,
+                owner="entry",
+                naming_seed=f"aa{index}",
+                original_name=f"note-{index}.md",
+                role="note_original",
+                availability="present",
+                actual_length=len(text.encode()),
+                actual_sha256=digest,
+            )
+        )
+    assets.append(
+        Asset(
+            asset_id="manual",
+            owner="entry",
+            naming_seed="bb",
+            original_name="manual.pdf",
+            role="file",
+            availability="present",
+            actual_length=1,
+            actual_sha256=hashlib.sha256(b"x").hexdigest(),
+        )
+    )
+    facts = snapshot(
+        (item("child"),),
+        relationships=(edge("parent-child", "entry", "child"),),
+        documents=tuple(documents),
+        assets=tuple(assets),
+    )
+    facts = facts.model_copy(
+        update={
+            "items": (
+                facts.items[0].model_copy(
+                    update={"document_ids": tuple(d.key for d in documents)}
+                ),
+                facts.items[1],
+            )
+        }
+    )
+    note = generated(render(plan(analyze(facts, POLICY)), METADATA), "Home — Entry.md")
+    assert body in note
+    assert bodies[1] in note
+    tokens = MarkdownIt("commonmark").parse(note)
+    headings = [
+        tokens[index + 1].content
+        for index, token in enumerate(tokens)
+        if token.type == "heading_open" and token.level == 0
+    ]
+    assert headings == ["Entry", "Second document", "Resources", "Children"]
+    assert "Authored follow-up." in [
+        token.content for token in tokens if token.type == "inline"
+    ]
+    assert "[[Notes/CHILD.md|CHILD]]" in [
+        token.content for token in tokens if token.type == "inline"
+    ]
+
+
+def test_reusable_renderer_refuses_an_unprovable_trailing_block_boundary():
+    facts = reference_snapshot()
+    body = "<script>\nUnclosed raw block"
+    digest = hashlib.sha256(body.encode()).hexdigest()
+    document = facts.documents[0].model_copy(
+        update={"text": body, "text_digest": digest, "references": ()}
+    )
+    asset = facts.assets[0].model_copy(
+        update={"actual_length": len(body), "actual_sha256": digest}
+    )
+    facts = facts.model_copy(
+        update={
+            "documents": (document,),
+            "assets": (asset,),
+            "relationships": (edge("context", "entry", "opaque:target"),),
+        }
+    )
+    with pytest.raises(MigrationRefused) as caught:
+        render(plan(analyze(facts, POLICY)), METADATA)
+    assert caught.value.issues[0].code == "unsupported_feature"
+    assert caught.value.issues[0].phase == "rendering"
+    assert "Close the trailing Markdown block" in caught.value.issues[0].guidance

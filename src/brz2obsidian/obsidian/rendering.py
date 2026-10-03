@@ -16,6 +16,7 @@ from brz2obsidian.contracts import (
 from brz2obsidian.core.references import validate_references
 
 from .documents import render_document
+from .markdown import append_boundary
 from .relationships import relationship_sections, uncreated_listing
 from .resources import resource_section
 from .tags import tag_frontmatter, tag_listing, tag_records
@@ -70,14 +71,17 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         text = tag_frontmatter(plan, item.key) + "# " + heading + "\n\n"
         if item.label:
             text += item.label + "\n\n"
-        text += "\n\n".join(
-            render_document(documents[key], target.relative_path, plan)
-            for key in item.document_ids
-        )
+        for index, key in enumerate(item.document_ids):
+            text += append_boundary(text)
+            if index:
+                text += "\n\n"
+            text += render_document(documents[key], target.relative_path, plan)
         resources = resource_section(plan, item.key)
+        relationships = relationship_sections(plan, item.key)
+        if resources or relationships:
+            text += append_boundary(text)
         if resources:
             text += "\n\n" + resources
-        relationships = relationship_sections(plan, item.key)
         if relationships:
             endings = text.replace("\r\n", "\n").replace("\r", "\n")
             separator = (

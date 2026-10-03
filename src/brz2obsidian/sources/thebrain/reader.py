@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from uuid import UUID, uuid5
 from zipfile import BadZipFile, ZipFile
+from zlib import error as DeflateError
 
 from pydantic import ValidationError
 
@@ -122,8 +123,12 @@ class BrzSourceModule:
             session = BrzSession(Path(source_ref))
         except MigrationRefused:
             raise
+        except NotImplementedError as error:
+            _refuse("unsupported_feature", f"Unsupported BRZ ZIP compression: {error}")
         except (
             BadZipFile,
+            DeflateError,
+            EOFError,
             UnicodeError,
             ValueError,
             KeyError,

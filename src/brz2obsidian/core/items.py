@@ -1,9 +1,10 @@
 """Deterministic item eligibility, hierarchy coverage and target reservation."""
 
-import re
 import unicodedata
 
 from brz2obsidian.contracts import Issue, ItemTarget, MigrationRefused
+
+from .naming import collision_keys, extended_seed_width, readable_filename
 
 SUPPORTING_NAMES = {
     "migration report",
@@ -14,20 +15,11 @@ SUPPORTING_NAMES = {
 
 
 def _readable(title):
-    value = (
-        "".join(
-            " " if unicodedata.category(char) == "Cc" else char
-            for char in unicodedata.normalize("NFC", title)
-        )
-        .replace(":", " - ")
-        .replace("[", "(")
-        .replace("]", ")")
+    # Note titles discard all Unicode control characters; resource names retain
+    # the original non-ASCII controls under their established naming policy.
+    return readable_filename(
+        "".join(" " if unicodedata.category(char) == "Cc" else char for char in title)
     )
-    value = re.sub(r'[<>"/\\|?*#^%\x00-\x1f\x7f]', " ", value)
-    value = " ".join(value.split()).strip(" .") or "Untitled"
-    if re.match(r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)", value, re.IGNORECASE):
-        value = "Note - " + value
-    return value
 
 
 def _bounded(readable, prefix, suffix):
@@ -92,27 +84,13 @@ def assign_item_targets(analysis, resource_owners=()):
             )
             for item in items
         }
-        groups = {}
-        for key, stem in stems.items():
-            groups.setdefault(stem.casefold(), []).append(key)
-        collisions = set()
-        for name, group in groups.items():
-            if name in SUPPORTING_NAMES:
-                collisions.update(group)
-            elif len(group) > 1:
-                extendable = [
-                    key
-                    for key in group
-                    if widths[key] and widths[key] < len(seeds[key])
-                ]
-                natural = [key for key in group if not widths[key]]
-                collisions.update(extendable or natural or group)
+        collisions = collision_keys(stems, widths, seeds, SUPPORTING_NAMES)
         if not collisions:
             break
         for item in items:
             if item.key in collisions:
-                new_width = 8 if not widths[item.key] else widths[item.key] + 4
-                if widths[item.key] and widths[item.key] >= len(item.naming_seed):
+                new_width = extended_seed_width(widths[item.key], item.naming_seed)
+                if new_width is None:
                     raise MigrationRefused(
                         (
                             Issue(
