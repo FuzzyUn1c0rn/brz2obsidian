@@ -2,10 +2,12 @@
 
 import hashlib
 import unicodedata
+from compression.zstd import ZstdError
 from contextlib import contextmanager
+from lzma import LZMAError
 from pathlib import Path, PurePosixPath
 from uuid import UUID, uuid5
-from zipfile import BadZipFile, ZipFile
+from zipfile import ZIP_BZIP2, BadZipFile, ZipFile
 from zlib import error as DeflateError
 
 from pydantic import ValidationError
@@ -84,7 +86,14 @@ class _PayloadStream:
         def read(*args, **kwargs):
             try:
                 return value(*args, **kwargs)
-            except (BadZipFile, OSError, EOFError) as error:
+            except (
+                BadZipFile,
+                OSError,
+                EOFError,
+                DeflateError,
+                LZMAError,
+                ZstdError,
+            ) as error:
                 raise MigrationFailed(
                     (
                         Issue(
@@ -128,6 +137,8 @@ class BrzSourceModule:
         except (
             BadZipFile,
             DeflateError,
+            LZMAError,
+            ZstdError,
             EOFError,
             UnicodeError,
             ValueError,
@@ -204,8 +215,26 @@ class BrzSession:
                 or (info.external_attr >> 16) & 0o170000 == 0o120000
             ):
                 _refuse("invalid_source", "Unsafe, encrypted or symlink archive member")
-        if self.archive.testzip() is not None:
-            _refuse("invalid_source", "Archive CRC failure")
+        for info in self.archive.infolist():
+            try:
+                with self.archive.open(info) as stream:
+                    while stream.read(1024 * 1024):
+                        pass
+            except OSError as error:
+                # bz2 reports corrupt compressed bytes with a plain OSError.
+                # Translate only that known decoder error on a BZIP2 member;
+                # filesystem/access errors keep their operational failure path.
+                if (
+                    info.compress_type == ZIP_BZIP2
+                    and type(error) is OSError
+                    and error.args == ("Invalid data stream",)
+                ):
+                    _refuse(
+                        "invalid_source",
+                        f"Invalid BRZ compressed data: {error}",
+                        (info.filename,),
+                    )
+                raise
         if not set(ROOT_FILES).issubset(names):
             _refuse("invalid_source", "Missing required root record collections")
         records, evidence, accounting = {}, [], []
@@ -416,7 +445,14 @@ class BrzSession:
             _refuse("invalid_reference", "Unknown payload identity", (asset_id,))
         try:
             stream = self.archive.open(self.members[asset_id])
-        except (BadZipFile, OSError, EOFError) as error:
+        except (
+            BadZipFile,
+            OSError,
+            EOFError,
+            DeflateError,
+            LZMAError,
+            ZstdError,
+        ) as error:
             raise MigrationFailed(
                 (
                     Issue(
