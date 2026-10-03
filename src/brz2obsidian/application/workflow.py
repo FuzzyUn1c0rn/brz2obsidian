@@ -4,9 +4,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from pydantic import ValidationError
+
 from brz2obsidian import __version__
 from brz2obsidian.contracts import (
+    Counts,
     Inspection,
+    Issue,
     MigrationFailed,
     MigrationRefused,
     Publisher,
@@ -57,27 +61,92 @@ class Workflow:
     def _run(self, operation, source_ref, destination):
         identity = counts = inspection = receipt = None
         issues = ()
-        try:
-            with self.binding.source.open(source_ref) as session:
-                identity = session.snapshot.identity
-                analysis = analyze(session.snapshot, self.binding.policy)
-                migration_plan = plan(analysis)
-                counts, issues = migration_plan.counts, migration_plan.issues
-                if operation == "inspect":
-                    inspection = Inspection(item_targets=migration_plan.item_targets)
-                else:
-                    artifacts = self.renderer.render(
-                        migration_plan, self.metadata_factory()
-                    )
-                    receipt = self.publisher.publish(artifacts, session, destination)
-                    counts = receipt.counts
-            outcome = "warnings" if issues else "clean"
-        except (MigrationRefused, MigrationFailed) as error:
-            issues += error.issues
-            receipt = error.receipt or receipt
+        failures = []
+        phase = "source"
+
+        def retain(error):
+            nonlocal issues, receipt, counts
+            if isinstance(error, (MigrationRefused, MigrationFailed)):
+                issues += error.issues
+                receipt = error.receipt or receipt
+                failures.append(
+                    "refused" if isinstance(error, MigrationRefused) else "failed"
+                )
+            else:
+                issues += (
+                    Issue(
+                        code="session_teardown_failure"
+                        if phase == "session_teardown"
+                        else "operation_failure",
+                        phase=phase,
+                        message=str(error),
+                        guidance="Check source and filesystem access, then retry with a fresh destination.",
+                    ),
+                )
+                failures.append("failed")
             if receipt is not None:
                 counts = receipt.counts
-            outcome = "refused" if isinstance(error, MigrationRefused) else "failed"
+
+        try:
+            with self.binding.source.open(source_ref) as session:
+                try:
+                    identity = session.snapshot.identity
+                    counts = Counts(
+                        source_items=len(session.snapshot.items),
+                        source_relationships=len(session.snapshot.relationships),
+                        present_assets=sum(
+                            asset.availability == "present"
+                            for asset in session.snapshot.assets
+                        ),
+                    )
+                    phase = "analysis"
+                    analysis = analyze(session.snapshot, self.binding.policy)
+                    counts, issues = analysis.counts, analysis.issues
+                    migration_plan = plan(analysis)
+                    counts, issues = migration_plan.counts, migration_plan.issues
+                    if operation == "inspect":
+                        session.verify_consistency()
+                        inspection = Inspection(
+                            item_targets=migration_plan.item_targets
+                        )
+                    else:
+                        phase = "rendering"
+                        artifacts = self.renderer.render(
+                            migration_plan, self.metadata_factory()
+                        )
+                        phase = "publication"
+                        receipt = self.publisher.publish(
+                            artifacts, session, destination
+                        )
+                        counts = receipt.counts
+                except (
+                    MigrationRefused,
+                    MigrationFailed,
+                    OSError,
+                    ValidationError,
+                ) as error:
+                    retain(error)
+                phase = "session_teardown"
+        except (MigrationRefused, MigrationFailed, OSError, ValidationError) as error:
+            retain(error)
+        if failures and receipt is not None:
+            issues += (
+                Issue(
+                    code="publication_occurred",
+                    phase="publication",
+                    message=f"The verified vault was published at {receipt.destination} before the later failure.",
+                    guidance="Review the published vault; conversion cannot reuse that nonempty destination.",
+                ),
+            )
+        outcome = (
+            "failed"
+            if "failed" in failures
+            else "refused"
+            if failures
+            else "warnings"
+            if issues
+            else "clean"
+        )
         return RunResult(
             converter_version=__version__,
             operation=operation,
