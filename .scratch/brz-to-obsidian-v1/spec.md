@@ -1,12 +1,12 @@
 # Convert a TheBrain BRZ archive into a new Obsidian vault
 
-Status: claimed
+Status: resolved
 
 Assignee: /root
 
 Integration branch: `codex/brz-to-obsidian-v1`
 
-Accepted: 2026-10-03. The user confirmed the consolidated specification, including its seams, schemas, tooling choices, and verification gates. This file publishes that accepted scope in the to-spec format. Production implementation has not begun.
+Accepted: 2026-10-03. The user confirmed the consolidated specification, including its seams, schemas, tooling choices, and verification gates. This file publishes that accepted scope in the to-spec format. Production implementation and all accepted gates completed on 2026-10-04; see [final verification](research/final-review.md#final-closure).
 
 ## Problem Statement
 
@@ -318,7 +318,7 @@ Initial coverage is the verified feature classes in the two supplied TheBrain 15
 
 ### Full-source preservation and expected baselines
 
-The real acceptance fingerprints are fixed in [the preservation report](../brz-to-obsidian/research/brz-preservation.md). A fresh read-only Python 3.14 check on 2026-10-03 reconfirmed both fingerprints and the agreed greedy selections. The following are expected full-conversion results, not claims that production conversion has already passed:
+The real acceptance fingerprints are fixed in [the preservation report](../brz-to-obsidian/research/brz-preservation.md). A fresh read-only Python 3.14 check on 2026-10-03 reconfirmed both fingerprints and the agreed greedy selections. The following accepted baselines were subsequently verified by complete [production preservation acceptance](research/real-export-acceptance.md):
 
 | Measure | A | B |
 | --- | ---: | ---: |
@@ -385,7 +385,7 @@ The [initial folder-layout proposal](architecture-layout.md) retains the concret
 
 The [BRZ preservation report](../brz-to-obsidian/research/brz-preservation.md) identifies the exact A/B acceptance inputs by size and SHA-256. [Controlled relationship evidence](../brz-to-obsidian/research/extended-relationship-fixture.md), [Home evidence](../brz-to-obsidian/research/home-thought.md), [uncreated-target evidence](../brz-to-obsidian/research/uncreated-targets.md), [parent-materialization evidence](../brz-to-obsidian/research/parent-materialization.md), and [native vault trial](../brz-to-obsidian/research/vault-trial.md) supply the measured basis for the accepted behavior.
 
-Dependency metadata and primary documentation were checked on 2026-10-03. The selected candidate releases have not been installed or exercised as a production package in the native project environment. Native compatibility and exact Markdown span tracing are deliberate early implementation gates. The two real exports are acceptance cases, not a fingerprint allowlist.
+Dependency metadata and primary documentation were checked on 2026-10-03. The selected releases were then installed only in the project virtual environment and exercised on native Windows/Python 3.14.8. Native compatibility and exact Markdown span tracing passed their early implementation gates. The two real exports are acceptance cases, not a fingerprint allowlist.
 
 ### Implementation sequence and completion
 
@@ -398,3 +398,7 @@ Dependency metadata and primary documentation were checked on 2026-10-03. The se
 Each stage has observable gates. First-version acceptance requires all applicable automated, private-source and native-review checks; no production result is declared merely because a prototype or partial slice works. Usage documentation explains fresh-vault use, expected warnings, uncreated-target behavior, source scope and optional JSON results. Architecture documentation records interfaces/dependency direction; Testing documentation records public/private acceptance commands and native-review procedure.
 
 The completed Wayfinder map and decision tickets remain in the separate planning area. This accepted specification now defines the first-version implementation in its own tracker area. The [implementation tickets](README.md) record the approved vertical slices and their dependencies. Completion of wayfinding does not mean the converter or its acceptance checks have been completed.
+
+## Comments
+
+- 2026-10-04 (/root): Implementation is complete and accepted. All ten slices and final review repairs are resolved. Final integrated production head `93cdcce` passed 295 public tests, Ruff lint/format and dependency checks; the six exact/repeat/reordered private conversions passed complete independent preservation with the agreed 49/42 notes, 60/50 present payloads and 2/9 warning items. Native Obsidian 1.13.7 checks passed on fresh copies. Final output matches the native-reviewed presentation and pristine evidence remains unchanged. Both Standards and Spec reviewers independently confirmed all findings resolved. [Preservation](research/real-export-acceptance.md), [native review](research/native-acceptance.md), and [final review](research/final-review.md) record the evidence and tested scope.

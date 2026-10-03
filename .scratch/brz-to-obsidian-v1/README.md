@@ -1,6 +1,6 @@
 # First-version implementation tickets
 
-Status: claimed
+Status: resolved
 
 Assignee: /root
 
@@ -8,9 +8,9 @@ Integration branch: `codex/brz-to-obsidian-v1`
 
 The accepted [migration specification](spec.md) and [initial folder layout](architecture-layout.md) now live in this implementation area. The [completed Wayfinder map](../brz-to-obsidian/map.md), its resolved decision tickets, and research remain in their original planning area; these implementation slices are not children of that map.
 
-The user approved this breakdown on 2026-10-03. Each linked implementation ticket is published with Status: ready-for-agent, scope, acceptance checkboxes, specification-story coverage, and test seams. Work any ticket whose listed blockers have completed; the first ticket has no blockers. Follow the [claim and completion process](../../docs/agents/issue-tracker.md#implementation-operations), [domain vocabulary](../../GLOSSARY.md), and [accepted architecture decision](../../docs/adr/0001-source-neutral-core.md).
+The user approved this breakdown on 2026-10-03. Each linked implementation ticket was published with Status: ready-for-agent, scope, acceptance checkboxes, specification-story coverage, and test seams. All ten slices and the [final review repair](issues/11-final-review-repairs.md) are now resolved; no implementation frontier remains. Follow the [claim and completion process](../../docs/agents/issue-tracker.md#implementation-operations), [domain vocabulary](../../GLOSSARY.md), and [accepted architecture decision](../../docs/adr/0001-source-neutral-core.md).
 
-No standalone prefactoring is needed: there is no production converter. The first slice establishes a narrow working path through the reusable modules, library workflow, CLI, and actual vault publication. Each later feature slice extends that usable path with its source-to-vault behavior and tests; the last gates verify the complete first version.
+No standalone prefactoring was needed: implementation started without a production converter. The first slice established a narrow working path through the reusable modules, library workflow, CLI, and actual vault publication. Later feature slices extended that usable path; the final gates verified the complete first version.
 
 | Slice | Blocked by | Demonstrable result |
 | --- | --- | --- |
@@ -40,3 +40,7 @@ Retain strict inward Pydantic contracts, reusable deep modules, the highest prac
 ## Environment and bootstrap
 
 The user requires a minimal project Python virtual environment before implementation. Install every runtime, build, and development package only inside it, adding packages gradually when needed. See the [development setup](../../README.md#development-environment) for commands and manifest roles. The first ticket uses that setup to complete package installation and native compatibility gates; environment provisioning alone does not complete its conversion criteria.
+
+## Comments
+
+- 2026-10-04 (/root): The full accepted specification is implemented on `codex/brz-to-obsidian-v1`. All ten implementation tickets and the final review repair are resolved. Final gates: 295 public tests, Ruff lint/format, pip check, complete independent preservation across six exact/repeat/reordered A/B conversions, alternate-source reuse, documented library/CLI examples, and representative native Obsidian 1.13.7 acceptance. Both independent review axes have zero outstanding findings. See [preservation acceptance](research/real-export-acceptance.md), [native acceptance](research/native-acceptance.md), [final review](research/final-review.md), and [usage](../../README.md).

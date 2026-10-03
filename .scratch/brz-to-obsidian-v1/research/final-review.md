@@ -27,8 +27,20 @@ Implemented in [review repair ticket 11](../issues/11-final-review-repairs.md) b
 
 **Public verification:** Root project `.venv/Scripts/python.exe`, with worktree `src` in `PYTHONPATH`: `-m pytest -q` (287 passed), `-m ruff check .`, `-m ruff format --check .`, `-m pip check`, and `git diff --check` pass. Latest integration branch merged before completion. Private archives and native acceptance vaults were not modified by the repair implementer.
 
-**Pending integration verification:** Root will integrate the repair commit, rerun the six independent real-export acceptance conversions, compare emitted content with prior output, and repeat native observations if emitted behavior changed. Overall specification closure and ticket 11's final criterion remain pending until those checks are recorded.
+**Initial integration verification:** The first repair was integrated at `63b506d`; all six independent real-export conversions passed. Follow-up verification and final closure are recorded below.
 
 **Independent repair follow-up:** The Spec reviewer confirmed the original DEFLATE/method-99 and Markdown repairs, then reproduced the same structured archive-boundary defect with corrupt ZIP LZMA. The same implementer merged integration head `63b506d` and checked the installed Python 3.14 decoder set. Real corrupt LZMA, BZIP2 and Zstandard regressions first failed, then passed with `invalid_source` refusals through source/Workflow/JSON CLI. BZIP2 corruption previously became an access/write failure; streamed member validation now distinguishes only its exact plain decoder `OSError("Invalid data stream")` on a BZIP2 member. A standard-library archive I/O fault remains an operational failure. Scoped payload API regressions also prove late recognized decoder exceptions yield structured `payload_read_failure`. Valid archives using each compressed method inspect cleanly before corruption. No dependencies or source semantic coverage were added; successful rendered artifacts are unchanged by this follow-up.
 
 **Follow-up public gates:** Full pytest (295 passed), Ruff lint/format, pip check and Git diff check pass with the root project interpreter and worktree `src` in `PYTHONPATH`. Root reports all six private acceptance conversions passed after the earlier repair integration; final output comparison and integration closure remain pending with root. The repair implementer did not modify private inputs or native vaults.
+
+## Final closure
+
+Final repair integration: `93cdcceb8f645b041c21ae09fc924b56947f46f6`, verified on 2026-10-04. Root public gates passed: 295 tests, Ruff lint/format, pip check and diff check. All six exact/repeat/reordered private conversions passed again after this final merge, with the original note/payload/warning counts and no unexplained discrepancies.
+
+The final A/B vaults match the native-reviewed pristine output in assigned names, rendered notes/reports/listings/configuration, copied resource bytes and logical migration records. Only permitted explicit run metadata and bookmark time differ. Pristine inventories and all 114/96 file hashes remain unchanged. Native observations are still applicable because emitted presentation did not change; no affected native observation required repetition.
+
+**Standards:** The original reviewer independently confirmed all three findings resolved; no relevant regression or hard documented-standard violation remained.
+
+**Spec:** The original reviewer independently confirmed both findings resolved, including the LZMA follow-up, with 48 focused tests. No concrete relevant regression remained.
+
+Final findings: Standards 0 outstanding; Spec 0 outstanding. Ticket 11 and the complete first-version specification are resolved.

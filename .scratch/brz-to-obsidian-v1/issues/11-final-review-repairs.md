@@ -1,6 +1,6 @@
 # 11: Resolve final Standards and Spec review findings
 
-Status: claimed
+Status: resolved
 
 Assignee: /root/review_repairs
 
@@ -19,11 +19,13 @@ Assignee: /root/review_repairs
 - [x] Share collision decisions and suffix-width progression between note and tag naming while retaining their presentation and diagnostics.
 - [x] Share the common readable filename sanitation while retaining resource basename extraction and intentional distinctions.
 - [x] Renderer consumes planned inline-resource eligibility without rescanning snapshot image references.
-- [ ] Meaningful public regression tests and the full applicable public gates pass; independent real-export acceptance remains valid, and affected native observations are repeated if emitted behavior changes.
+- [x] Meaningful public regression tests and the full applicable public gates pass; independent real-export acceptance remains valid, and affected native observations are repeated if emitted behavior changes.
 
 **Testing seam:** Accepted public source, Workflow, CLI, core and renderer interfaces. Use synthetic real ZIPs and temporary destinations; never assert private helper calls or modify pristine/private native acceptance vaults.
 
 ## Comments
+
+- 2026-10-04 (/root): Final repairs integrated at `93cdcce`. Root gates passed: 295 public tests, Ruff lint/format, pip check and diff check. The original Standards reviewer independently confirmed all three maintenance findings resolved; the Spec reviewer confirmed both defects resolved with 48 focused tests. All six exact/repeat/reordered private conversions passed again after the final merge (exit 2, original 49/42 notes, 60/50 payloads, 2/9 warning items). Independent comparison against native-reviewed pristine vaults found unchanged names, rendered note/report/listing/configuration bytes, resources and logical mappings, with only permitted run metadata/bookmark time differences. All 114/96 pristine files and hashes remained unchanged. No affected native behavior required repetition. Every criterion is satisfied.
 
 - 2026-10-04: The implement-spec final parallel review reported two reproduced P2 Spec defects and three nonblocking Duplicated Code judgments. One implementer will repair all five findings in an isolated worktree based on the complete integration branch. This is review repair, not additional feature scope.
 - 2026-10-04 (/root/review_repairs): Claimed on `codex/brz-v1-review-repairs`, based on the complete integration head `21f3d28`; applied the TDD skill at the accepted public source/Workflow/CLI/core/renderer seams. Each reproduced Spec defect failed a real-input regression before its repair. Corrupt DEFLATE now yields `invalid_source`; method 99 yields `unsupported_feature`. Both are durable structured refusals through the source, inspect/convert Workflow, and JSON CLI, with guidance, no receipt and no publication.
