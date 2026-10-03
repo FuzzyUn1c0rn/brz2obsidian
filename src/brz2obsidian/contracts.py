@@ -165,6 +165,12 @@ class Counts(Contract):
     actual_notes: int | None = None
     actual_assets: int | None = None
     actual_files: int | None = None
+    source_tags: int | None = None
+    tag_memberships: int | None = None
+    native_tag_memberships: int | None = None
+    uncreated_tag_memberships: int | None = None
+    created_tag_items: int | None = None
+    uncreated_tag_items: int | None = None
 
 
 class Analysis(Contract):
@@ -182,6 +188,7 @@ class ItemTarget(Contract):
     relative_path: str
     created: bool
     creation_reasons: tuple[str, ...]
+    vault_tag_token: str | None = None
 
 
 class AssetTarget(Contract):
@@ -196,6 +203,20 @@ class Adaptation(Contract):
     description: str
 
 
+class TagTarget(Contract):
+    tag_key: str
+    original_identity: str
+    original_name: str
+    token: str
+
+
+class TagMembership(Contract):
+    relationship_key: str
+    tag_key: str
+    item_key: str
+    native: bool
+
+
 class MigrationPlan(Contract):
     analysis: Analysis
     source_identity: SourceIdentity
@@ -203,6 +224,9 @@ class MigrationPlan(Contract):
     profile_version: str
     item_targets: tuple[ItemTarget, ...]
     asset_targets: tuple[AssetTarget, ...]
+    tag_targets: tuple[TagTarget, ...] = ()
+    tag_memberships: tuple[TagMembership, ...] = ()
+    tag_memberships_path: str | None = None
     isolated_item_keys: tuple[str, ...] = ()
     uncreated_related_pairs: tuple[tuple[str, str], ...] = ()
     adaptations: tuple[Adaptation, ...] = ()
@@ -259,6 +283,9 @@ class Receipt(Contract):
 
 class Inspection(Contract):
     item_targets: tuple[ItemTarget, ...]
+    tag_targets: tuple[TagTarget, ...] = ()
+    tag_memberships: tuple[TagMembership, ...] = ()
+    tag_memberships_path: str | None = None
     pending_checks: tuple[str, ...] = (
         "destination feasibility",
         "payload copy verification",

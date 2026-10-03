@@ -77,6 +77,13 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
         if relation.item_a not in items or relation.item_b not in items:
             refuse("invalid_reference", "Relationship endpoint is absent")
         endpoints = items[relation.item_a], items[relation.item_b]
+        if relation.kind == "tag" and (
+            endpoints[0].role != "tag" or relation.item_a == relation.item_b
+        ):
+            refuse(
+                "invalid_reference",
+                "Tag classification requires a source tag and a distinct assigned item",
+            )
         if any(not item.live for item in endpoints) or (
             relation.kind != "system"
             and any(item.role == "system" for item in endpoints)

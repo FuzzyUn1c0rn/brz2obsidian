@@ -48,6 +48,8 @@ def decode_relationships(records, thoughts, brain_id, refuse, uuid):
             kind = "related"
         elif signature == (1, 1, 6, -1) and roles[0] == 5 and roles[1] in {1, 4}:
             kind = "system"
+        elif signature == (1, 1, 5, -1) and roles == (4, 1):
+            kind = "tag"
         if kind is None:
             refuse(
                 "unsupported_feature",
