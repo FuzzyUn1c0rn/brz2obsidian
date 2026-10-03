@@ -2,27 +2,23 @@
 
 from pathlib import PurePosixPath
 
-from brz2obsidian.contracts import Adaptation, Analysis, AssetTarget, MigrationPlan
+from brz2obsidian.contracts import Adaptation, Analysis, MigrationPlan
 
 from .items import assign_item_targets, select_fallbacks
+from .resources import assign_asset_targets, resource_owners
 
 
 def plan(analysis: Analysis) -> MigrationPlan:
     snapshot = analysis.snapshot
-    targets = assign_item_targets(analysis)
+    targets = assign_item_targets(analysis, resource_owners(snapshot))
     isolated, related_pairs = select_fallbacks(snapshot, targets)
-    owners = {item.key: item.naming_seed[:8] for item in snapshot.items}
-    asset_targets = tuple(
-        AssetTarget(
-            asset_id=asset.asset_id,
-            relative_path=f"Attachments/{owners[asset.owner]}/{asset.original_name}.original",
-        )
-        for asset in snapshot.assets
-    )
+    asset_targets = assign_asset_targets(snapshot)
     counts = analysis.counts.model_copy(
         update={
             "planned_notes": sum(target.created for target in targets),
-            "planned_assets": len(asset_targets),
+            "planned_assets": sum(
+                asset.availability == "present" for asset in snapshot.assets
+            ),
         }
     )
     return MigrationPlan(

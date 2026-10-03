@@ -15,6 +15,7 @@ from brz2obsidian.contracts import (
 )
 
 from .relationships import relationship_sections, uncreated_listing
+from .resources import resource_section
 
 
 def _json(value):
@@ -56,6 +57,9 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         if item.label:
             text += item.label + "\n\n"
         text += "\n\n".join(documents[key].text for key in item.document_ids)
+        resources = resource_section(plan, item.key)
+        if resources:
+            text += "\n\n" + resources
         relationships = relationship_sections(plan, item.key)
         if relationships:
             endings = text.replace("\r\n", "\n").replace("\r", "\n")

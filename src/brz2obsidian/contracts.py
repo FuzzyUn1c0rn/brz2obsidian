@@ -90,8 +90,9 @@ class Document(Contract):
 class Asset(Contract):
     asset_id: str
     owner: str
-    naming_seed: str
+    naming_seed: str = Field(pattern=r"^[0-9a-f]+$")
     original_name: str
+    display_name: str | None = None
     role: Literal["note_original", "file", "image", "icon", "url", "directory"]
     availability: Literal["present", "absent", "external"]
     actual_length: int | None = None
