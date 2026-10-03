@@ -1,7 +1,18 @@
+import errno
 import json
 import struct
+from compression.zstd import ZstdError
 from decimal import Decimal
-from zipfile import ZIP_DEFLATED, ZipFile
+from lzma import LZMAError
+from zipfile import (
+    ZIP_BZIP2,
+    ZIP_DEFLATED,
+    ZIP_LZMA,
+    ZIP_ZSTANDARD,
+    ZipExtFile,
+    ZipFile,
+)
+from zlib import error as DeflateError
 
 import pytest
 
@@ -91,21 +102,32 @@ def test_retained_evidence_keeps_high_precision_numbers_and_omitted_fields(tmp_p
     assert "Label" not in thought
 
 
-def test_corrupt_deflate_is_a_durable_structured_refusal(tmp_path, capsys):
+@pytest.mark.parametrize(
+    "compression,header_bytes",
+    [(ZIP_DEFLATED, 0), (ZIP_LZMA, 9), (ZIP_BZIP2, 0), (ZIP_ZSTANDARD, 0)],
+)
+def test_corrupt_compressed_data_is_a_durable_structured_refusal(
+    tmp_path, capsys, compression, header_bytes
+):
     from brz2obsidian.cli import main
 
     source = make_archive(tmp_path / "brain.brz")
     with ZipFile(source) as archive:
         files = [(info.filename, archive.read(info)) for info in archive.infolist()]
-    with ZipFile(source, "w", compression=ZIP_DEFLATED) as archive:
+    with ZipFile(source, "w", compression=compression) as archive:
         for name, data in files:
             archive.writestr(name, data)
+    assert default_workflow().inspect(source).outcome == "clean"
     with ZipFile(source) as archive:
         info = archive.getinfo("meta.json")
     raw = bytearray(source.read_bytes())
     name_length, extra_length = struct.unpack_from("<HH", raw, info.header_offset + 26)
     start = info.header_offset + 30 + name_length + extra_length
-    raw[start : start + info.compress_size] = b"\xff" * info.compress_size
+    # Preserve the ZIP LZMA header/properties so the damaged data reaches its
+    # decompressor rather than failing header validation.
+    raw[start + header_bytes : start + info.compress_size] = b"\xff" * (
+        info.compress_size - header_bytes
+    )
     source.write_bytes(raw)
 
     with pytest.raises(MigrationRefused) as caught, BrzSourceModule().open(source):
@@ -120,7 +142,9 @@ def test_corrupt_deflate_is_a_durable_structured_refusal(tmp_path, capsys):
     assert converted.issues[0].guidance
     assert not (tmp_path / "vault").exists()
     assert main(["inspect", str(source), "--json"]) == 1
-    envelope = json.loads(capsys.readouterr().out)
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    envelope = json.loads(captured.out)
     assert envelope["outcome"] == "refused"
     assert envelope["issues"][0]["code"] == "invalid_source"
 
@@ -153,3 +177,56 @@ def test_unsupported_zip_compression_is_a_structured_refusal(tmp_path, capsys):
     assert envelope["outcome"] == "refused"
     assert envelope["issues"][0]["code"] == "unsupported_feature"
     assert not (tmp_path / "cli-vault").exists()
+
+
+def test_archive_member_io_failure_remains_an_operational_failure(
+    tmp_path, monkeypatch
+):
+    source = make_archive(tmp_path / "brain.brz")
+    with ZipFile(source) as archive:
+        files = [(info.filename, archive.read(info)) for info in archive.infolist()]
+    with ZipFile(source, "w", compression=ZIP_BZIP2) as archive:
+        for name, data in files:
+            archive.writestr(name, data)
+
+    def unavailable_stream(*args, **kwargs):
+        raise OSError(errno.EIO, "Archive read device failure")
+
+    monkeypatch.setattr(ZipExtFile, "read", unavailable_stream)
+    with pytest.raises(MigrationFailed) as caught, BrzSourceModule().open(source):
+        pass
+    workflow = default_workflow()
+    inspected = workflow.inspect(source)
+    converted = workflow.convert(source, tmp_path / "vault")
+    assert inspected.outcome == converted.outcome == "failed"
+    assert inspected.issues == converted.issues == caught.value.issues
+    assert converted.issues[0].code == "write_failure"
+    assert converted.issues[0].phase == "source"
+    assert converted.receipt is None
+    assert not (tmp_path / "vault").exists()
+
+
+@pytest.mark.parametrize("error_type", [DeflateError, LZMAError, ZstdError, OSError])
+def test_open_source_payload_decoder_errors_remain_structured(
+    tmp_path, monkeypatch, error_type
+):
+    source = make_archive(tmp_path / "brain.brz")
+    with BrzSourceModule().open(source) as session:
+        asset_id = session.snapshot.assets[0].asset_id
+
+        def corrupt_stream(*args, **kwargs):
+            raise error_type("Decoder data failure")
+
+        # Inject at the standard-library archive I/O boundary after successful
+        # source validation; consumers still use the public scoped payload API.
+        monkeypatch.setattr(ZipExtFile, "read", corrupt_stream)
+        with (
+            pytest.raises(MigrationFailed) as caught,
+            session.open_payload(asset_id) as stream,
+        ):
+            stream.read()
+    issue = caught.value.issues[0]
+    assert issue.code == "payload_read_failure"
+    assert issue.phase == "source"
+    assert issue.affected == (asset_id,)
+    assert issue.guidance
