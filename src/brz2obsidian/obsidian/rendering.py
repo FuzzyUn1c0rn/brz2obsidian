@@ -7,11 +7,14 @@ import re
 from brz2obsidian.contracts import (
     CopyEntry,
     GeneratedFile,
+    Issue,
     MigrationPlan,
+    MigrationRefused,
     RenderedVault,
     RunMetadata,
 )
 
+from .relationships import relationship_sections, uncreated_listing
 from .resources import resource_section
 
 
@@ -21,6 +24,17 @@ def _json(value):
 
 def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     snapshot = plan.analysis.snapshot
+    if plan.source_identity != snapshot.identity:
+        raise MigrationRefused(
+            (
+                Issue(
+                    code="source_changed",
+                    phase="rendering",
+                    message="Plan is bound to a different source snapshot",
+                    guidance="Analyze and plan this snapshot again before rendering.",
+                ),
+            )
+        )
     items = {item.key: item for item in snapshot.items}
     documents = {document.key: document for document in snapshot.documents}
     files = []
@@ -46,6 +60,17 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         resources = resource_section(plan, item.key)
         if resources:
             text += "\n\n" + resources
+        relationships = relationship_sections(plan, item.key)
+        if relationships:
+            endings = text.replace("\r\n", "\n").replace("\r", "\n")
+            separator = (
+                ""
+                if endings.endswith("\n\n")
+                else "\n"
+                if endings.endswith("\n")
+                else "\n\n"
+            )
+            text += separator + relationships
         add(target.relative_path, text.encode("utf-8"))
     home = next(
         target.relative_path
@@ -79,9 +104,16 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     )
     report = "# Migration report\n\nOpen the root Home note to begin. Original note bytes are retained under Attachments.\n\n"
     report += f"Created {plan.counts.planned_notes} thought notes; preserved {plan.counts.planned_assets} present payloads.\n\n"
-    report += "This release currently supports the minimal ordinary Markdown profile. Unsupported feature classes are refused explicitly.\n"
+    report += "Unsupported feature classes are refused explicitly.\n"
+    if any(r.kind in {"hierarchy", "related"} for r in snapshot.relationships):
+        report += "\nRelationships use simple Parents, Children and Related links. Original arrows and one-way visibility details remain in the migration record.\n"
+    listing = uncreated_listing(plan)
+    if listing:
+        add("Uncreated targets.md", listing.encode("utf-8"))
+        report += "\n[[Uncreated targets.md|Uncreated targets]] lists otherwise unrepresented empty thoughts and Related pairs.\n"
     add("MIGRATION REPORT.md", report.encode())
     assets = {asset.asset_id: asset for asset in snapshot.assets}
+    item_targets = {target.item_key: target for target in plan.item_targets}
     copies = tuple(
         CopyEntry(
             relative_path=target.relative_path,
@@ -110,7 +142,24 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
             )
             for target in plan.asset_targets
         ],
-        "relationships": [relation.model_dump() for relation in snapshot.relationships],
+        "relationships": [
+            dict(
+                **relation.model_dump(),
+                target_a=item_targets[relation.item_a].relative_path
+                if relation.item_a in item_targets
+                else None,
+                target_b=item_targets[relation.item_b].relative_path
+                if relation.item_b in item_targets
+                else None,
+                presentation={
+                    "hierarchy": "Parents/Children",
+                    "related": "Related",
+                    "tag": "native tags",
+                    "system": "retained_only",
+                }[relation.kind],
+            )
+            for relation in snapshot.relationships
+        ],
         "tag_memberships": [],
         "adaptations": [value.model_dump() for value in plan.adaptations],
         "source_accounting": snapshot.accounting.model_dump(),
@@ -146,6 +195,9 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         generated_files=tuple(files),
         copies=copies,
         manifest=manifest,
+        reserved_paths=tuple(
+            t.relative_path for t in plan.item_targets if not t.created
+        ),
         counts=plan.counts,
     )
 

@@ -1,64 +1,17 @@
 """Pure target selection and assignment."""
 
-import re
-import unicodedata
+from pathlib import PurePosixPath
 
-from brz2obsidian.contracts import Analysis, ItemTarget, MigrationPlan
+from brz2obsidian.contracts import Adaptation, Analysis, MigrationPlan
 
+from .items import assign_item_targets, select_fallbacks
 from .resources import assign_asset_targets, resource_owners
-
-
-def _stem(title):
-    value = (
-        unicodedata.normalize("NFC", title)
-        .replace(":", " - ")
-        .replace("[", "(")
-        .replace("]", ")")
-    )
-    value = re.sub(r'[<>"/\\|?*#^%\x00-\x1f]', " ", value)
-    value = " ".join(value.split()).strip(" .") or "Untitled"
-    if re.match(r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)", value, re.IGNORECASE):
-        value = "Note - " + value
-    while len(value.encode("utf-16-le")) // 2 > 100:
-        value = value[:-1]
-    return value.rstrip(" .")
 
 
 def plan(analysis: Analysis) -> MigrationPlan:
     snapshot = analysis.snapshot
-    targets = []
-    docs = {document.key: document for document in snapshot.documents}
-    stems = {item.key: _stem(item.title) for item in snapshot.items}
-    for item in sorted(snapshot.items, key=lambda item: item.key):
-        stem = stems[item.key]
-        if sum(
-            value.casefold() == stem.casefold() for value in stems.values()
-        ) > 1 or stem.casefold() in {
-            "migration report",
-            "tag memberships",
-            "uncreated targets",
-        }:
-            stem += " — " + item.naming_seed[:8]
-        is_home = item.key == analysis.entry_key
-        if is_home:
-            stem = "Home — " + stem
-        content = any(docs[key].text.strip() for key in item.document_ids)
-        created = is_home or content or item.key in resource_owners(snapshot)
-        reasons = (
-            ("home",)
-            if is_home
-            else (("content",) if content else (("resources",) if created else ()))
-        )
-        targets.append(
-            ItemTarget(
-                item_key=item.key,
-                original_identity=item.original_identity,
-                original_title=item.title,
-                relative_path=("" if is_home else "Notes/") + stem + ".md",
-                created=created,
-                creation_reasons=reasons,
-            )
-        )
+    targets = assign_item_targets(analysis, resource_owners(snapshot))
+    isolated, related_pairs = select_fallbacks(snapshot, targets)
     asset_targets = assign_asset_targets(snapshot)
     counts = analysis.counts.model_copy(
         update={
@@ -75,6 +28,28 @@ def plan(analysis: Analysis) -> MigrationPlan:
         profile_version=analysis.policy.profile_version,
         item_targets=tuple(targets),
         asset_targets=asset_targets,
+        isolated_item_keys=isolated,
+        uncreated_related_pairs=related_pairs,
+        adaptations=tuple(
+            Adaptation(
+                kind="item_target",
+                affected=t.item_key,
+                description="Original title reserved as " + t.relative_path,
+            )
+            for t in targets
+            if PurePosixPath(t.relative_path).stem != t.original_title
+        )
+        + tuple(
+            Adaptation(
+                kind="relationship_presentation",
+                affected=r.key,
+                description="Simple "
+                + ("Parents/Children" if r.kind == "hierarchy" else "Related")
+                + " links; original source arrow and visibility details remain in evidence.",
+            )
+            for r in snapshot.relationships
+            if r.kind in {"hierarchy", "related"}
+        ),
         issues=analysis.issues,
         counts=counts,
     )

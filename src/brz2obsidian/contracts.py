@@ -203,6 +203,8 @@ class MigrationPlan(Contract):
     profile_version: str
     item_targets: tuple[ItemTarget, ...]
     asset_targets: tuple[AssetTarget, ...]
+    isolated_item_keys: tuple[str, ...] = ()
+    uncreated_related_pairs: tuple[tuple[str, str], ...] = ()
     adaptations: tuple[Adaptation, ...] = ()
     issues: tuple[Issue, ...] = ()
     counts: Counts
