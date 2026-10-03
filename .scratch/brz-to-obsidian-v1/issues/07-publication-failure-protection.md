@@ -1,6 +1,8 @@
 # 07: Protect publication against source and I/O failures
 
-Status: ready-for-agent
+Status: claimed
+
+Assignee: /root/implement_07
 
 Published: 2026-10-03 after the user approved ticket granularity and blocking dependencies.
 
@@ -32,3 +34,4 @@ Published: 2026-10-03 after the user approved ticket granularity and blocking de
 ## Comments
 
 - 2026-10-03: The user approved the breakdown. This is an implementation ticket in the separate first-version tracker; the completed Wayfinder map is not its parent. All Python packages used for development, builds, and runtime must be installed only in the project virtual environment as needed.
+

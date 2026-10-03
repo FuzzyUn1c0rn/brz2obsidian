@@ -46,10 +46,55 @@ def _fingerprint(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
+def _stream_fingerprint(stream):
+    position = stream.tell()
+    try:
+        stream.seek(0)
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+    finally:
+        stream.seek(position)
+
+
 def _uuid(value):
     if type(value) is not str or str(UUID(value)) != value:
         raise ValueError("Expected canonical UUID text")
     return value
+
+
+class _PayloadStream:
+    """Translate archive read errors without translating a consumer's writes."""
+
+    def __init__(self, stream, asset_id):
+        self.stream, self.asset_id = stream, asset_id
+
+    def __getattr__(self, name):
+        value = getattr(self.stream, name)
+        if name not in {"read", "read1", "readinto", "readline", "readlines", "seek"}:
+            return value
+
+        def read(*args, **kwargs):
+            try:
+                return value(*args, **kwargs)
+            except (BadZipFile, OSError, EOFError) as error:
+                raise MigrationFailed(
+                    (
+                        Issue(
+                            code="payload_read_failure",
+                            phase="source",
+                            message=str(error),
+                            affected=(self.asset_id,),
+                            guidance="Check the source archive and re-export before retrying.",
+                        ),
+                    )
+                ) from error
+
+        return read
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.stream.close()
 
 
 class BrzSourceModule:
@@ -90,17 +135,25 @@ class BrzSession:
     def __init__(self, path):
         self.path = path
         self.closed = False
-        self.archive = ZipFile(path, "r")
+        self.streams = set()
+        self.source_stream = path.open("rb")
         self.members = {}
         try:
+            self.initial_hash = _stream_fingerprint(self.source_stream)
+            self.archive = ZipFile(self.source_stream, "r")
             self.snapshot = self._read()
             self.source_identity = self.snapshot.identity
+            self.verify_consistency()
         except BaseException:
-            self.archive.close()
+            try:
+                if hasattr(self, "archive"):
+                    self.archive.close()
+            finally:
+                self.source_stream.close()
             raise
 
     def _read(self):
-        source_hash = _fingerprint(self.path)
+        source_hash = self.initial_hash
         names = self.archive.namelist()
         folded = [name.casefold() for name in names]
         if len(set(folded)) != len(folded):
@@ -383,13 +436,55 @@ class BrzSession:
             )
         if asset_id not in self.members:
             _refuse("invalid_reference", "Unknown payload identity", (asset_id,))
-        with self.archive.open(self.members[asset_id]) as stream:
-            yield stream
+        try:
+            stream = self.archive.open(self.members[asset_id])
+        except (BadZipFile, OSError, EOFError) as error:
+            raise MigrationFailed(
+                (
+                    Issue(
+                        code="payload_read_failure",
+                        phase="source",
+                        message=str(error),
+                        affected=(asset_id,),
+                        guidance="Check the source archive and re-export before retrying.",
+                    ),
+                )
+            ) from error
+        with stream:
+            self.streams.add(stream)
+            try:
+                yield _PayloadStream(stream, asset_id)
+            finally:
+                self.streams.discard(stream)
 
     def verify_consistency(self):
-        if self.closed or _fingerprint(self.path) != self.source_identity.source_sha256:
-            _refuse("source_changed", "Source changed or the source session is closed")
+        if self.closed:
+            _refuse("source_changed", "Source session is closed")
+        try:
+            if (
+                _stream_fingerprint(self.source_stream)
+                != self.source_identity.source_sha256
+                or _fingerprint(self.path) != self.source_identity.source_sha256
+            ):
+                _refuse("source_changed", "Source changed during conversion")
+        except OSError as error:
+            _refuse("source_changed", f"Source is no longer readable: {error}")
 
     def close(self):
-        self.archive.close()
         self.closed = True
+        issues = []
+        for resource in (*tuple(self.streams), self.archive, self.source_stream):
+            try:
+                resource.close()
+            except OSError as error:
+                issues.append(
+                    Issue(
+                        code="session_teardown_failure",
+                        phase="session_teardown",
+                        message=str(error),
+                        guidance="Check source access; any published receipt remains valid.",
+                    )
+                )
+        self.streams.clear()
+        if issues:
+            raise MigrationFailed(tuple(issues))
