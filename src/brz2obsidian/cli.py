@@ -30,6 +30,11 @@ def main(argv=None):
             print(
                 f"Planned thought notes: {result.counts.planned_notes}; present payloads: {result.counts.present_assets}"
             )
+            print(
+                f"Local references: {result.counts.source_references}; planned conversions: {result.counts.planned_references}"
+            )
+            if result.counts.actual_references is not None:
+                print(f"Converted local references: {result.counts.actual_references}")
         if result.receipt:
             print(f"Verified vault published: {result.receipt.destination}")
         if result.inspection:

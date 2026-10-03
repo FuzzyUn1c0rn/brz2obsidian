@@ -13,7 +13,9 @@ from brz2obsidian.contracts import (
     RenderedVault,
     RunMetadata,
 )
+from brz2obsidian.core.references import validate_references
 
+from .documents import render_document
 from .relationships import relationship_sections, uncreated_listing
 from .resources import resource_section
 from .tags import tag_frontmatter, tag_listing, tag_records
@@ -37,8 +39,19 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
             )
         )
     items = {item.key: item for item in snapshot.items}
+    validate_references(snapshot, "rendering")
     documents = {document.key: document for document in snapshot.documents}
     files = []
+    counts = plan.counts.model_copy(
+        update={
+            "actual_references": sum(
+                len(documents[key].references)
+                for target in plan.item_targets
+                if target.created
+                for key in items[target.item_key].document_ids
+            )
+        }
+    )
 
     def add(path, content):
         files.append(
@@ -57,7 +70,10 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         text = tag_frontmatter(plan, item.key) + "# " + heading + "\n\n"
         if item.label:
             text += item.label + "\n\n"
-        text += "\n\n".join(documents[key].text for key in item.document_ids)
+        text += "\n\n".join(
+            render_document(documents[key], target.relative_path, plan)
+            for key in item.document_ids
+        )
         resources = resource_section(plan, item.key)
         if resources:
             text += "\n\n" + resources
@@ -165,11 +181,20 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
             )
             for relation in snapshot.relationships
         ],
+        "documents": [
+            dict(
+                **d.model_dump(exclude={"text"}),
+                owner_target=item_targets[d.owner].relative_path
+                if d.owner in item_targets
+                else None,
+            )
+            for d in snapshot.documents
+        ],
         "tag_memberships": tag_records(plan),
         "adaptations": [value.model_dump() for value in plan.adaptations],
         "source_accounting": snapshot.accounting.model_dump(),
         "issues": [issue.model_dump() for issue in plan.issues],
-        "counts": plan.counts.model_dump(),
+        "counts": counts.model_dump(),
         "obsidian_configuration": configuration,
     }
     # Embed retained JSON directly: decoding/dumping would round large or
@@ -203,7 +228,7 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         reserved_paths=tuple(
             t.relative_path for t in plan.item_targets if not t.created
         ),
-        counts=plan.counts,
+        counts=counts,
     )
 
 

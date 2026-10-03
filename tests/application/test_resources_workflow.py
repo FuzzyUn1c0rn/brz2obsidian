@@ -312,7 +312,7 @@ def test_corrupt_binary_crc_prevents_publication(tmp_path):
     assert not (tmp_path / "vault").exists()
 
 
-def test_inline_image_adaptation_is_explicitly_pending(tmp_path):
+def test_inline_image_adaptation_is_available_through_inspection(tmp_path):
     source = resource_archive(
         tmp_path / "source.brz",
         [({"Type": 12, "Location": "photo.png"}, b"image bytes")],
@@ -327,6 +327,5 @@ def test_inline_image_adaptation_is_explicitly_pending(tmp_path):
         for name, data in files.items():
             archive.writestr(name, data)
     result = default_workflow().inspect(source)
-    assert result.outcome == "refused"
-    assert result.issues[0].code == "unsupported_feature"
-    assert "link-adaptation" in result.issues[0].message
+    assert result.outcome == "clean"
+    assert result.counts.planned_references == 1

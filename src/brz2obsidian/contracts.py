@@ -54,6 +54,9 @@ class ReferenceSpan(Contract):
     target: str
     display_text: str
     document_digest: str
+    source_target: str | None = None
+    destination_start: int | None = None
+    destination_end: int | None = None
 
 
 class Item(Contract):
@@ -159,12 +162,15 @@ class SourcePolicy(Contract):
 class Counts(Contract):
     source_items: int | None = None
     source_relationships: int | None = None
+    source_references: int | None = None
     present_assets: int | None = None
     planned_notes: int | None = None
     planned_assets: int | None = None
+    planned_references: int | None = None
     actual_notes: int | None = None
     actual_assets: int | None = None
     actual_files: int | None = None
+    actual_references: int | None = None
     source_tags: int | None = None
     tag_memberships: int | None = None
     native_tag_memberships: int | None = None
