@@ -38,6 +38,17 @@ def plan(analysis: Analysis) -> MigrationPlan:
             )
             for t in targets
             if PurePosixPath(t.relative_path).stem != t.original_title
+        )
+        + tuple(
+            Adaptation(
+                kind="relationship_presentation",
+                affected=r.key,
+                description="Simple "
+                + ("Parents/Children" if r.kind == "hierarchy" else "Related")
+                + " links; original source arrow and visibility details remain in evidence.",
+            )
+            for r in snapshot.relationships
+            if r.kind in {"hierarchy", "related"}
         ),
         issues=analysis.issues,
         counts=counts,

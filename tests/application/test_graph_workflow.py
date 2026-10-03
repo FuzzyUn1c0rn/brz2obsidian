@@ -113,6 +113,11 @@ def test_empty_chain_materializes_middle_and_renders_complete_context(tmp_path):
     assert record["relationships"][0]["target_a"] == "Notes/A.md"
     assert record["relationships"][0]["target_b"] == "Notes/B.md"
     assert record["relationships"][0]["presentation"] == "Parents/Children"
+    assert {
+        a["affected"]
+        for a in record["adaptations"]
+        if a["kind"] == "relationship_presentation"
+    } == {identity(1000), identity(1001)}
     assert record["original_evidence"][2]["records"][0]["Direction"] == 7
 
 

@@ -105,6 +105,8 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     report = "# Migration report\n\nOpen the root Home note to begin. Original note bytes are retained under Attachments.\n\n"
     report += f"Created {plan.counts.planned_notes} thought notes; preserved {plan.counts.planned_assets} present payloads.\n\n"
     report += "Unsupported feature classes are refused explicitly.\n"
+    if any(r.kind in {"hierarchy", "related"} for r in snapshot.relationships):
+        report += "\nRelationships use simple Parents, Children and Related links. Original arrows and one-way visibility details remain in the migration record.\n"
     listing = uncreated_listing(plan)
     if listing:
         add("Uncreated targets.md", listing.encode("utf-8"))
