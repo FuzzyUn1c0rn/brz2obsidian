@@ -94,6 +94,9 @@ class Workflow:
                     counts = Counts(
                         source_items=len(session.snapshot.items),
                         source_relationships=len(session.snapshot.relationships),
+                        source_references=sum(
+                            len(d.references) for d in session.snapshot.documents
+                        ),
                         present_assets=sum(
                             asset.availability == "present"
                             for asset in session.snapshot.assets

@@ -1,6 +1,8 @@
 # 04: Adapt thought and image links without rewriting notes
 
-Status: ready-for-agent
+Status: claimed
+
+Assignee: /root/implement_04
 
 Published: 2026-10-03 after the user approved ticket granularity and blocking dependencies.
 

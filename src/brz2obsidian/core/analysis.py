@@ -9,6 +9,8 @@ from brz2obsidian.contracts import (
     SourceSnapshot,
 )
 
+from .references import validate_references
+
 
 def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
     def refuse(code, message):
@@ -73,6 +75,7 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
             asset.actual_length is None or asset.actual_sha256 is None
         ):
             refuse("invalid_source", "Present asset lacks actual byte inventory")
+    validate_references(snapshot)
     for relation in snapshot.relationships:
         if relation.item_a not in items or relation.item_b not in items:
             refuse("invalid_reference", "Relationship endpoint is absent")
@@ -98,6 +101,7 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
     counts = Counts(
         source_items=len(items),
         source_relationships=len(snapshot.relationships),
+        source_references=sum(len(d.references) for d in snapshot.documents),
         present_assets=sum(
             asset.availability == "present" for asset in assets.values()
         ),

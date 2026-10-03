@@ -13,11 +13,15 @@ def plan(analysis: Analysis) -> MigrationPlan:
     targets = assign_item_targets(analysis, resource_owners(snapshot))
     isolated, related_pairs = select_fallbacks(snapshot, targets)
     asset_targets = assign_asset_targets(snapshot)
+    created = {t.item_key for t in targets if t.created}
     counts = analysis.counts.model_copy(
         update={
             "planned_notes": sum(target.created for target in targets),
             "planned_assets": sum(
                 asset.availability == "present" for asset in snapshot.assets
+            ),
+            "planned_references": sum(
+                len(d.references) for d in snapshot.documents if d.owner in created
             ),
         }
     )
@@ -49,6 +53,18 @@ def plan(analysis: Analysis) -> MigrationPlan:
             )
             for r in snapshot.relationships
             if r.kind in {"hierarchy", "related"}
+        )
+        + tuple(
+            Adaptation(
+                kind=reference.kind + "_reference",
+                affected=f"reference:{document.key}:{index}",
+                description="Inline source reference resolves to canonical "
+                + reference.target
+                + "; original display and syntax remain in document evidence.",
+            )
+            for document in sorted(snapshot.documents, key=lambda d: d.key)
+            for index, reference in enumerate(document.references)
+            if document.owner in created
         ),
         issues=analysis.issues,
         counts=counts,

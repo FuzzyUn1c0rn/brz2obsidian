@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 
 from brz2obsidian.contracts import AccountingEntry, Asset, Document, OriginalEvidence
 
-from .notes import trace_note_references
+from .notes import bind_note_references, trace_note_references
 
 SPECIAL_FLAGS = (
     "IsBrainAttachment",
@@ -195,12 +195,6 @@ def normalize_attachments(archive, records, meta, thoughts, refuse, uuid):
                     (asset_id,),
                 )
             references = trace_note_references(text)
-            if references:
-                refuse(
-                    "unsupported_feature",
-                    "Source-local references require the link-adaptation slice",
-                    (asset_id,),
-                )
             documents.append(
                 Document(
                     key=asset_id,
@@ -242,4 +236,14 @@ def normalize_attachments(archive, records, meta, thoughts, refuse, uuid):
         )
     if set(states) - {a.asset_id for a in assets}:
         refuse("invalid_source", "File states refer to an absent attachment")
+    documents = [bind_note_references(d, assets, thoughts) for d in documents]
+    accounting.extend(
+        AccountingEntry(
+            identity=f"reference:{document.key}:{index}",
+            disposition="normalized",
+            references=(document.key, reference.target),
+        )
+        for document in documents
+        for index, reference in enumerate(document.references)
+    )
     return assets, documents, members, evidence, accounting

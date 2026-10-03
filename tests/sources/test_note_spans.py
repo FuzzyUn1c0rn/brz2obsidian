@@ -25,3 +25,42 @@ def test_active_html_local_reference_is_explicitly_unsupported():
     with pytest.raises(MigrationRefused) as error:
         trace_note_references('<img src=".data/md-images/x.png">')
     assert error.value.issues[0].code == "unsupported_feature"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "prefix\u2028[local](brain://abc/title)",
+        "- paragraph\n\t[local](brain://abc/title)",
+        "> - nested\r\n>   [local](brain://abc/title)\r\n",
+    ],
+)
+def test_normalization_and_block_indentation_retain_exact_original_offsets(text):
+    spans = trace_note_references(text)
+    assert len(spans) == 1
+    assert spans[0].expected_original == "[local](brain://abc/title)"
+    assert text[spans[0].start : spans[0].end] == "[local](brain://abc/title)"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "[local][ref]\n\n[ref]: brain://abc/title",
+        "![local][ref]\n\n[ref]: .data/md-images/x.png",
+        "<brain://abc/title>",
+        "[local](../other.md)",
+        "![local](other.png)",
+        '<a href="brain://abc/title">local</a>',
+        "[![alt](.data/md-images/a.png)](brain://abc/title)",
+    ],
+)
+def test_unsupported_active_local_syntax_is_a_typed_actionable_refusal(text):
+    with pytest.raises(MigrationRefused) as error:
+        trace_note_references(text)
+    assert error.value.issues[0].code == "unsupported_feature"
+    assert error.value.issues[0].guidance
+
+
+def test_local_examples_in_comments_code_and_escaped_literals_remain_untouched():
+    text = "<!-- example brain://abc/title -->\n\n`<brain://abc/title>`\n\\[literal](brain://abc/title)\n\n    <brain://abc/title>\n\n[external](https://example.invalid/a)\n"
+    assert trace_note_references(text) == ()

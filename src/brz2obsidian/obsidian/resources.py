@@ -7,9 +7,17 @@ from pathlib import PurePosixPath
 def resource_section(plan, owner):
     targets = {target.asset_id: target for target in plan.asset_targets}
     lines = []
+    inline = {
+        (d.owner, r.target)
+        for d in plan.analysis.snapshot.documents
+        for r in d.references
+        if r.kind == "image"
+    }
     for asset in sorted(plan.analysis.snapshot.assets, key=lambda a: a.asset_id):
         target = targets[asset.asset_id]
         if asset.owner != owner or target.resource_link is None:
+            continue
+        if (owner, asset.asset_id) in inline:
             continue
         label = asset.display_name or PurePosixPath(asset.original_name).name
         label = re.sub(r"[\[\]|\r\n]", " ", label).strip() or "Resource"
