@@ -12,7 +12,10 @@ def main(argv=None):
         if name == "convert":
             command.add_argument("destination")
         command.add_argument("--json", action="store_true", dest="json_output")
-    args = parser.parse_args(argv)
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as error:
+        return 0 if error.code == 0 else 1
     workflow = default_workflow()
     result = (
         workflow.inspect(args.source)

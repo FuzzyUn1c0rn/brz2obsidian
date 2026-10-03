@@ -236,6 +236,7 @@ class RenderedVault(Contract):
     generated_files: tuple[GeneratedFile, ...]
     copies: tuple[CopyEntry, ...]
     manifest: tuple[str, ...]
+    reserved_paths: tuple[str, ...] = ()
     counts: Counts
 
 
