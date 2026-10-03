@@ -1,6 +1,7 @@
 # Private archives, generated review vaults, and UI evidence
 /brz/
 *.[bB][rR][zZ]
+!tests/fixtures/*.brz
 
 # Project environment and Python caches
 /.venv/
