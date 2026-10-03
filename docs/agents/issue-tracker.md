@@ -23,6 +23,24 @@ creating directories as needed.
 Read the referenced file. Resolve an issue number within its
 feature directory; ask for the feature when ambiguous.
 
+## Implementation operations
+
+1. Read the feature's index and accepted specification. Choose a
+   `ready-for-agent` ticket whose linked blockers are all `resolved`.
+   Ready-for-agent means specified; blockers still govern when work starts.
+2. Before implementation, set `Status: claimed` and record `Assignee:`
+   with the working session or agent identifier. Save the claim.
+3. Implement the ticket's scope and verify its acceptance criteria through
+   the documented test seams. Record a scope conflict or unresolved
+   criterion in Comments rather than treating it as complete.
+4. Check each acceptance box only after its criterion is satisfied.
+   Append the verification commands/results and any material limits under
+   Comments. Set `Status: resolved` only when all criteria are satisfied.
+
+Dependencies and issue numbers are local to the implementation feature.
+Completed Wayfinder tickets remain decision evidence; implementation has
+its own index and tickets rather than new children on the completed map.
+
 ## Wayfinding operations
 
 - Map: `.scratch/<effort>/map.md`, containing Notes,

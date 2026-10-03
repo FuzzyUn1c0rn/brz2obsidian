@@ -14,3 +14,16 @@ See `docs/agents/triage-labels.md`.
 
 Use a single-context layout with root `GLOSSARY.md` and `docs/adr/`.
 See `docs/agents/domain.md`.
+
+## First-version implementation
+
+Before implementing, read the accepted scope and ticket frontier in
+[the implementation index](.scratch/brz-to-obsidian-v1/README.md).
+
+## Python environment
+
+Use the project `.venv` interpreter for Python development and tooling
+(`.venv\Scripts\python.exe` on Windows). Create it with the available base
+Python using `python -m venv .venv` if missing. Install runtime, build,
+and development packages only inside this environment, as they become
+needed. See `README.md` for bootstrap commands and dependency manifests.

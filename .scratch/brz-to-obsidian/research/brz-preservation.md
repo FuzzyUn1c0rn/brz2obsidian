@@ -1,6 +1,6 @@
 # BRZ preservation evidence
 
-Investigated 2026-10-03 for [ticket 01](../issues/01-brz-preservation-evidence.md). This is evidence for later conversion decisions, not a converter specification. **Observed** means measured in the two supplied archives; **documented** means first-party descriptions; **inference** is identified explicitly. Private content, identifiers, and external destinations are excluded.
+Investigated 2026-10-03 for [Determine what the BRZ export can preserve](../issues/01-brz-preservation-evidence.md). This is evidence for later conversion decisions, not a converter specification. **Observed** means measured in the two supplied archives; **documented** means first-party descriptions; **inference** is identified explicitly. Private content, identifiers, and external destinations are excluded.
 
 ## Reproducible inputs and method
 
@@ -11,8 +11,10 @@ Investigated 2026-10-03 for [ticket 01](../issues/01-brz-preservation-evidence.m
 
 The [inspection script](inspect_brz.py) uses Python's standard library, opens ZIPs read-only, parses every root record, checks all live graph references and attachment metadata, reads note files in memory, and validates ZIP CRCs. It neither extracts nor uploads resources. Run from the repository root, supplying these two archive paths in A/B order:
 
+Both inspections and an independent repeat used the installed Windows Python 3.14.8. The script's Python 3.11+ declaration is its minimum runtime requirement, not the version used for this investigation.
+
 ```powershell
-python .scratch/brz-to-obsidian/research/inspect_brz.py 'brz/D&D_ The Rise of Anzoras 2026-10-03.brz' 'brz/Dungeons & Dragons 2026-10-03.brz'
+.\.venv\Scripts\python.exe .scratch/brz-to-obsidian/research/inspect_brz.py 'brz/D&D_ The Rise of Anzoras 2026-10-03.brz' 'brz/Dungeons & Dragons 2026-10-03.brz'
 ```
 
 Full aggregate results and schema keys are in [archive-inventory.json](archive-inventory.json). Note syntax scans are regex probes, not a complete Markdown parser. The script is an investigation aid for this format, not a hardened validator for arbitrary inputs.
@@ -36,6 +38,8 @@ Both have the same 13 root files. All begin with a UTF-8 BOM. `meta.json` contai
 | calendarevents, access, fielddefinitions, fieldinstances | 0 each | 0 each |
 
 Every collection has unique `Id` values within that collection and a matching `BrainId`. IDs checked by the script are canonical UUID strings; settings IDs are also UUIDs. Recorded datetime strings have no timezone suffix. Preserve their original values; assigning UTC would add an unsupported interpretation. The archive does not declare the producing application version, so format version 5 does not verify a particular TheBrain release or note dialect.
+
+Subsequent user clarification on 2026-10-03 identifies the application as TheBrain 15. This supplies application-version context independently of the observed exchange format; the exact build and note-dialect setting remain unrecorded.
 
 ## Thoughts and graph integrity
 
@@ -64,7 +68,9 @@ B has one repeated exact title. Windows-invalid filename characters occur in thr
 
 A has three named relationships, all explicitly directed. Flag decoding documents `5` as one-way A→B and `7` as one-way B→A. Hierarchical placement and arrow direction cannot safely be collapsed: the reversed arrow still has `Relation=1`. All other links carry `Direction=-1`; this sentinel is **not defined by the first-party sources inspected**, and must not be decoded as an ordinary bitmask. A third-party reply calls it bidirectional, which is insufficient evidence to adopt that label.
 
-**Inference needing corroboration:** `Relation=1` stores parent A / child B, rather than saying that A is B's child. The official API describes creation relation relative to a source thought but the consulted export reference does not explicitly pin the stored A/B orientation. The script's incoming-parent counts use this interpretation. A controlled export should establish it before final user-facing labels are specified.
+**Initially an inference, subsequently verified:** `Relation=1` stores parent A / child B in the observed ordinary hierarchy records. The consulted official export reference did not explicitly pin the stored A/B orientation, so the script's incoming-parent counts initially relied on an inference. The later [controlled export and UI comparison](relationship-fixture-records.md) confirms this orientation and shows `Direction=-1` for default no-arrow hierarchy/jump presentation, plus `Direction=1` for an explicit A→B arrow without the one-way bit. Custom link-type inheritance remains unexercised; keep the sentinel separate from bitmask decoding.
+
+**Additional controlled observation:** The [extended fixture](extended-relationship-fixture.md) confirms jump directions 3 (B→A arrow), 5 (A→B with One Way), and 7 (B→A with One Way). The explicit One Way control affects normal Plex neighbor visibility; immediate previous-thought context can temporarily retain a hidden neighbor. These observations corroborate the direction flags without selecting a vault representation.
 
 All eleven system relationships in A start at the system thought; six end at normal thoughts and five at tags. This establishes their topology, not their user-facing purpose or whether they belong in vault navigation. Positional values also exist (`PositionAToB` nonzero on eleven links); no general interpretation of these settings was established.
 
@@ -109,9 +115,11 @@ All two A and three B relative image references resolve to the archived `.data/m
 
 Evidence supports **these two format-5 exports with their observed features**, not all format-5 archives or all TheBrain versions. Unexercised features include types and subtype hierarchies, typed links, events, nonempty custom fields/access lists, HTML notes, internal directories, linked external files, link-owned content, and cross-Brain embedded links. Empty collection files prove layout, not semantic support.
 
-Precise remaining evidence requests for a controlled-fixture ticket:
+The [accepted first-version specification](../../brz-to-obsidian-v1/spec.md) sets the implementation boundary. The unresolved investigations below are future coverage work, not prerequisites for the initial version; unknown TXT purpose and additional styling fidelity are explicitly deferred.
 
-1. Create an identified parent/child pair once by creating a child and once by creating a parent, plus default and one-way links; inspect A/B endpoint order and default `Direction=-1` alongside the application UI. This settles stored hierarchy orientation and the sentinel without guessing.
+Historical and future controlled-fixture evidence requests:
+
+1. **Completed for the initial scope:** [Verify hierarchy and default direction with a controlled export](../issues/07-relationship-fixture.md) confirms parent A / child B and the observed default sentinel using a separate TheBrain 15 export. [Verify reverse arrows and one-way relationship behavior](../issues/08-reverse-and-one-way-evidence.md) additionally confirms jump directions 3/5/7 and one-way Plex visibility. Creation via adding a parent and custom link-type inheritance remain unexercised and are additional evidence cases only if required by the chosen coverage.
 2. Attach one simple PDF with a unique text token; export before/after indexing, inspect type 15 payload presence and state values, and obtain the vendor's type/state names if available. This distinguishes primary content from derived search text and missing versus deliberately excluded data.
 3. If styling beyond the observed note subset enters initial scope, export one existing Brain note before/after switching content settings, with underline, color, table, callout and line breaks. Compare Markdown and rendered output. No claim of general legacy-style fidelity is justified by these inputs.
 

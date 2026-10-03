@@ -10,5 +10,5 @@ Use these strings in each issue's `Status:` line.
 | ready-for-human | ready-for-human | Requires human implementation |
 | wontfix | wontfix | Will not be actioned |
 
-Wayfinding uses `claimed` and `resolved` for execution state,
+Implementation and wayfinding use `claimed` and `resolved` for execution state,
 as described in `issue-tracker.md`.

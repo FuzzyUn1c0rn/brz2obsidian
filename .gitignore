@@ -1,0 +1,20 @@
+# Private archives, generated review vaults, and UI evidence
+/brz/
+*.[bB][rR][zZ]
+
+# Project environment and Python caches
+/.venv/
+__pycache__/
+*.py[cod]
+/.pytest_cache/
+/.ruff_cache/
+/.mypy_cache/
+
+# Coverage and package build artifacts
+/.coverage
+/.coverage.*
+/coverage.xml
+/htmlcov/
+/build/
+/dist/
+*.egg-info/

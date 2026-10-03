@@ -1,0 +1,13 @@
+# Keep versioned text consistent across Windows and WSL.
+* text=auto eol=lf
+
+# Preserve archive and binary fixture bytes.
+*.brz -text
+*.BRZ -text
+*.zip -text
+*.pdf -text
+*.png -text
+*.jpg -text
+*.jpeg -text
+*.gif -text
+*.webp -text

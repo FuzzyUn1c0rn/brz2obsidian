@@ -1,0 +1,97 @@
+# TheBrain to Obsidian Migration
+
+The vocabulary of moving a Brain into an Obsidian vault while preserving its content and relationships.
+
+## Language
+
+**Source collection**:
+A collection of knowledge being migrated into a vault. A Brain is TheBrain's source collection.
+_Avoid_: Brain when referring to another application's collection
+
+**Source item**:
+A named item of knowledge in a source collection that may have content, attachments, and relationships. A thought is TheBrain's source item.
+_Avoid_: Thought when referring to another application's item
+
+**Entry item**:
+The item explicitly designated as a source collection's starting point. TheBrain's Home thought is its entry item.
+_Avoid_: Graph root when implying a unique parentless item
+
+**Brain**:
+A collection of linked knowledge in TheBrain, including its content and associated files.
+_Avoid_: Vault when referring to the source collection
+
+**BRZ archive**:
+A Brain exported by TheBrain as a `.brz` archive.
+_Avoid_: Sample when referring to the supplied real export
+
+**Thought**:
+A named item in a Brain that can have relationships, note content, and attachments. TheBrain distinguishes ordinary thoughts from special roles such as tags, types, and system items.
+_Avoid_: Node when referring to a source item; note when referring to the item rather than its text content
+
+**Thought note**:
+The text content associated with a thought in TheBrain, distinct from the thought and its relationships.
+_Avoid_: Thought when referring only to its text content
+
+**Home thought**:
+The thought designated in a Brain as its entry point when loading the Brain or invoking Home. This role is independent of its title, content, and position in the hierarchy.
+_Avoid_: Graph root when implying that it must be the only parentless thought
+
+**Source tag**:
+A special thought used to classify other items in a Brain. It can also have its own thought-note content.
+_Avoid_: Vault tag when referring to the source thought
+
+**Vault tag**:
+A keyword attached to a note in Obsidian to classify it and support discovery.
+_Avoid_: Source tag thought; note when referring to the keyword
+
+**Attachment**:
+A file or external-resource reference associated with an item in a Brain.
+_Avoid_: Archived file when the resource is an external reference
+
+**Absent payload**:
+A file described by a BRZ attachment record for which no corresponding bytes are present in that archive. Absence alone does not establish whether the file is primary content or derived data.
+_Avoid_: Uncreated target; missing PDF when only a separate TXT payload is absent
+
+**Forgotten thought**:
+A live thought marked forgotten in TheBrain, distinct from a deleted object that is absent from the live export records.
+_Avoid_: Deleted thought
+
+**Vault**:
+A collection of notes and associated files opened by Obsidian as one knowledge workspace.
+_Avoid_: Brain when referring to the destination collection
+
+**Uncreated target**:
+A destination named by an internal vault link for which no note file exists yet.
+_Avoid_: Missing source thought; broken link when the absence is intentional
+
+**Relationship**:
+A connection between items in a Brain, including the meaning of that connection.
+_Avoid_: Ordinary link when the connection's type or direction matters
+
+**Parent/child relationship**:
+A hierarchy connection in which one thought is the parent of another. A thought can have multiple parents.
+_Avoid_: Folder nesting, single-parent tree
+
+**Jump relationship**:
+A connection between thoughts that designates neither thought as the other's parent or child.
+_Avoid_: Sibling relationship, which implies a shared parent
+
+**Arrow direction**:
+The visual direction indicated on a relationship, independent of whether the relationship is parent/child or jump.
+_Avoid_: Hierarchy when referring to an arrow
+
+**One-way relationship**:
+A directed relationship whose destination normally does not display the source as a neighbor in TheBrain's Plex. This is a separate setting from a visible arrow and does not remove either thought from the Brain.
+_Avoid_: Arrow when referring to the one-way setting; access restriction
+
+**Migration**:
+A one-time transfer from a source collection into a new vault.
+_Avoid_: Synchronization, update of an existing vault
+
+**Migration record**:
+A record connecting source items and relationships to their destination representations, including source details retained for traceability.
+_Avoid_: Synchronization state; editable vault note
+
+**Migration report**:
+A readable account of a migration's outcome, preserved material, adaptations, and unresolved source gaps.
+_Avoid_: Migration record when referring to the account intended for human review

@@ -1,0 +1,4 @@
+# Intentionally empty at bootstrap: add dependencies as implementation needs them.
+# Install requirements only through the project virtual environment.
+# Future pyproject.toml metadata declares package dependencies; this file records
+# the resolved, compatibility-checked development environment when introduced.
