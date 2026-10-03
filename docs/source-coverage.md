@@ -1,88 +1,104 @@
-# Reviewed format-5 source coverage
+# Reviewed source coverage
 
-The `thebrain-format5-reviewed` version-1 profile supports the accepted BRZ
-format-5 interpretation. It uses structural predicates rather than archive
-fingerprint exceptions. Inspect and convert both repeat source validation;
-neither command accepts a missing-file allowlist.
+First-version support covers reviewed feature classes in the two accepted
+TheBrain 15 BRZ exchange-format-5 exports and controlled synthetic fixtures.
+Those archives are acceptance cases, not a fingerprint allowlist. Another
+format-5 Brain may convert if it fits these meanings; its version alone does
+not establish support. Invalid, ambiguous, corrupt or unsupported input refuses.
 
-The adapter validates ZIP identities, CRCs, live identities, ownership and
-references before returning a durable snapshot. Duplicate live identities,
-live/deleted overlap, ambiguous physical assignments, malformed JSON,
-duplicate JSON keys and nonstandard nonfinite values refuse conversion.
-Original JSON is retained independently of normalized facts, including every
-field, omitted/null distinctions, original numeric spelling and naive dates.
-JSON Lines split only at CR/LF; Unicode separators inside strings remain data.
-Historical references can be nonlive and remain retained evidence. Forgotten
-live thoughts keep ordinary eligibility.
+## Records, Home and relationships
 
-Ordinary/tag/system thought roles are Kind 1/4/5 with ACType 0. Populated
-custom type IDs, nonempty TagIds and unverified semantic role flags refuse.
-Additional uninterpreted metadata remains evidence. Nonempty calendar, access
-and custom-field collections refuse; retaining their bytes does not establish
-semantic support. Home comes exclusively from the collection's UUIDv5 `20`
-setting and must identify a live ordinary thought.
+Known root files are `meta.json`, `thoughts.json`, `links.json`,
+`attachments.json`, `settings.json`, `modificationlogs.json`, `brainusers.json`,
+`syncpoints.json`, `tombstones.json`, `calendarevents.json`, `access.json`,
+`fielddefinitions.json` and `fieldinstances.json`. UTF-8 accepts an optional
+BOM. Meta is one object; other collections have one object per nonempty
+CR/LF-delimited line, with empty collections valid. Duplicate JSON keys,
+nonfinite values, ambiguous ZIP names, unsafe members, corrupt CRCs and invalid
+live identities/ownership/references refuse. Every original field/history record,
+omitted/null distinction, exact numeric value and raw date string remains
+in the migration record. Forgotten live thoughts stay eligible; history and
+tombstones do not resurrect deleted items.
 
-All supported relationships have Kind 1:
+Live/deleted identity overlap and ambiguous physical assignments also refuse.
+Unicode separators inside JSON strings remain data; record splitting uses only
+CR/LF. Additional uninterpreted metadata remains evidence.
 
-| Meaning | Relation / Meaning / Direction | Endpoints |
+Thought roles are ordinary Kind 1, tag Kind 4 and retained system Kind 5,
+with ACType 0 and no populated thought/link type IDs or TagIds membership
+arrays. Home is the valid live ordinary thought referenced by the setting whose
+ID is UUIDv5 of BrainId with name `20`. Missing/invalid Home refuses with
+instructions to set Home in TheBrain and re-export.
+
+All reviewed links use Kind 1:
+
+| Meaning | Relation / Meaning / Direction | Endpoints / representation |
 | --- | --- | --- |
-| Hierarchy | 1 / 1 / -1, 1, or 7 | Ordinary parent to ordinary child |
-| Hierarchy | 1 / 1 / -1 | Ordinary parent to tag child |
-| Related | 3 / 1 / -1, 3, 5, or 7 | Ordinary to ordinary |
-| Classification | 1 / 5 / -1 | Tag to ordinary |
-| Retained system connection | 1 / 6 / -1 | System to ordinary or tag |
+| Hierarchy | 1 / 1 / -1, 1 or 7 | Ordinary A parent, ordinary B child |
+| Hierarchy to source tag | 1 / 1 / -1 | Ordinary A parent, tag B child |
+| Jump | 3 / 1 / -1, 3, 5 or 7 | Ordinary endpoints; Related |
+| Tag assignment | 1 / 5 / -1 | Tag A classifies ordinary B; native tags or hidden-membership listing |
+| System connection | 1 / 6 / -1 | System A to ordinary/tag B; retained only |
 
-Other signatures refuse. Original arrow/visibility details remain evidence;
-simple vault navigation is a recorded adaptation, not a warning.
+Original arrow/one-way details remain evidence, while navigation uses simple
+Parents/Children/Related links. Other combinations, including Relation 2/4 or
+Direction 0, are unsupported. After content and Home selection, the greedy
+hierarchy cover selects parents covering the most uncovered incident edges,
+with canonical key ties. It preserves cycles/multiple parents and does not
+claim a global minimum.
 
-Thought-owned attachments use SourceType 2. Supported Type/NoteType roles are
-Markdown 1/4, ordinary file or empty Notes.md placeholder 1/0, URL 3/0,
-icon 5/0 with IsIcon true, absolute Windows directory 8/0, and image 12/0.
-Present local assets require state 1, uniquely assigned CRC-valid bytes and
-matching declared length, with the precise icon exception below. A BOM-only
-Notes.md placeholder is decoded empty and preserves its original bytes.
-External references have no local file state and are never fetched/opened.
-Unknown ownership/role combinations, special attachment flags, unaccounted
-payloads, ambiguous notes and unsupported absence patterns refuse.
+## Notes and resources
 
-Supported active source-local Markdown is inline compact-GUID thought links
-and owner-relative `.data/md-images/` images. The adapter emits exact Unicode
-code-point spans; all other authored characters and CR/LF spelling survive.
-Code examples and literal HTML comments remain text. Rich/legacy HTML notes,
-attributed HTML, HTML local references, cross-Brain links and unsupported
-active local reference forms refuse. The exact accepted A export contains two
-attribute-free `<br>` line breaks in Markdown; those bare line breaks are
-preserved verbatim, including `<br/>` serialization, without transforming
-HTML content or admitting additional tags/attributes.
+Thought-owned attachments use SourceType 2:
 
-## Approved anomaly findings
+| Type / NoteType | Supported interpretation |
+| --- | --- |
+| 1 / 4 | Thought Markdown at owner/Location; active content plus exact `.md.original` backup |
+| 1 / 0 | Ordinary file; empty decoded `Notes.md` placeholder remains a backup without content eligibility |
+| 3 / 0 | External HTTP/HTTPS URL reference |
+| 5 / 0 | Decorative icon at owner/.data/Location; copied without Resources clutter |
+| 8 / 0 | Absolute Windows directory reference rendered as file URI |
+| 12 / 0 | Markdown image at owner/.data/md-images/Location; inline when referenced, otherwise Resources |
+| 15 / 0 | Only the approved absent-TXT rule below |
 
-The source adapter owns numeric predicates and versioned recognition rules.
-Generic core matches findings to a compatible reviewed kind/rule/disposition
-and validates their evidence and subjects. Unknown rules/kinds, missing
-evidence and profile incompatibility refuse. There is no generic numeric BRZ
-interpretation or unrestricted warning allowlist.
-Reviewed dispositions can emit warnings only with the two approved warning
-codes; a caller cannot downgrade required refusal codes to warnings.
+Present local payload states are 1; every physical resource must be accounted
+for with uniquely assigned CRC-valid bytes and matching declared length, apart
+from the exact icon exception below. External references have no local file
+state. BOM-only Notes.md is decoded empty while its original bytes survive.
+Generic files are preserved regardless of preview support. Nonempty
+ambiguous Notes.md placeholders and other ownership/roles/states or unverified
+semantic flags refuse. External resources are never fetched.
 
-| Rule | Required evidence | Result |
-| --- | --- | --- |
-| `thebrain-format5/absent-txt/v1` | Thought owner, SourceType 2, Type 15, NoteType 0, `.txt` location, positive declared length, state 2, absent owner/location bytes, intact archived PDF under the same owner | `approved_source_gap` warning (source finding kind `known_absent_payload`); retain metadata, no file/link or inferred purpose, optionality or particular PDF pairing |
-| `thebrain-format5/icon-length/v1` | Verified icon role, state 1, present CRC-valid bytes, declared/actual length difference | `approved_metadata_discrepancy` warning; preserve actual bytes and both lengths |
+Supported active local syntax is inline `[label](brain://<compact-id>/<suffix>)`
+and `![alt](.data/md-images/<location>)`; compact GUIDs use .NET bytes_le
+URL-safe base64. Exact spans adapt only those references, retaining other text
+and CRLF/CR/LF spelling. Code examples/literal link-like text remain unchanged.
+Source-local reference-style, autolink, HTML-link and cross-Brain forms outside
+reviewed syntax refuse. Observed bare, attribute-free `<br>` Markdown line
+breaks, including `<br/>` spelling, are preserved; literal HTML comments remain
+text. Rich HTML notes and unverified rich/legacy transformations
+are unsupported. Nonempty events/access/custom-field collections and custom
+types also refuse.
 
-Warnings do not make an item eligible for a note. An absent-filename notice
-appears only in an existing owner note's Resources section; icon discrepancies
-appear in the report/record. Inspect returns planned counts; a published
-conversion returns actual verified counts and a receipt. Both warning outcomes
-exit 2. Structured issues agree across library/JSON output and the migration
-record; the report carries the same warning code, rule and observed evidence.
-The migration record keeps the specified top-level field set. Each affected
-asset target contains its versioned `source_findings`; item targets contain
-their `documents` and exact reference spans. Documents belonging to retained
-system items appear under their original asset target's `retained_documents`,
-with no invented navigation target.
+## Approved warnings
 
-Normal tests use synthetic archives at the accepted workflow and public module
-interfaces. Ticket 06's read-only smoke on the exact private A/B archives
-matched 49/42 planned notes, 60/50 payloads and 2/9 warnings. Independent full
-preservation and native Obsidian acceptance remain separate gates.
+The fixed profile `thebrain-format5-reviewed`, version `1`, permits exactly:
+
+Findings must have the reviewed kind, compatible rule/profile, subject and
+evidence. Missing evidence and unknown kinds refuse; generic core contains no
+numeric BRZ recognition predicates.
+
+| Issue code / rule ID | Required conditions and result |
+| --- | --- |
+| `approved_source_gap` / `thebrain-format5/absent-txt/v1` | Thought-owned Type 15, NoteType 0, `.txt` Location, positive declared length, state 2, absent owner/Location bytes, with intact archived PDF under the same owner. Retain metadata/evidence; brief filename notice only on an existing owner note. No fake file/link or note solely for this gap. |
+| `approved_metadata_discrepancy` / `thebrain-format5/icon-length/v1` | Verified icon role, present CRC-valid payload, declared length different from actual length. Copy actual bytes and retain both lengths; report discrepancy. |
+
+The TXT rule makes no claim of derived purpose, optionality or particular PDF
+pairing. A has two icon warnings; B has nine absent-TXT warnings under seven
+owners. Both successful conversions exit 2. Unmatched missing notes/files/images
+refuse as missing required payload. Unknown findings/profile incompatibility and
+unsupported meanings cannot be downgraded by caller allowlists.
+
+Name sanitation, simple graph presentation and intentional uncreated targets
+are adaptations rather than extra warnings. See [complete independent
+preservation results](../.scratch/brz-to-obsidian-v1/research/real-export-acceptance.md).

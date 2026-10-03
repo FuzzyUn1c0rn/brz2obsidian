@@ -1,77 +1,104 @@
 # brz2obsidian
 
-A Python library and thin CLI for migrating verified TheBrain BRZ exports into
-a fresh standard Obsidian vault. The accepted specification and implementation
-tickets describe the full first-version scope. The current production slice
-converts a synthetic minimal format-5 Brain with ordinary Markdown Home into
-a verified fresh vault. Relationships, tags, resources and local-reference
-adaptation are explicitly refused until their implementation slices complete.
+A local Python library and thin CLI that migrates reviewed TheBrain BRZ
+exchange-format-5 exports into a fresh standard Obsidian vault. It preserves
+Markdown, present attachment bytes, original JSON evidence, Home, hierarchy,
+Related links and tags. Unsupported source meanings are refused.
 
-- [Accepted first-version specification](.scratch/brz-to-obsidian-v1/spec.md)
-- [Implementation tickets and dependencies](.scratch/brz-to-obsidian-v1/README.md)
-- [Initial module and folder layout](.scratch/brz-to-obsidian-v1/architecture-layout.md)
-- [Completed Wayfinder map and research](.scratch/brz-to-obsidian/map.md)
-- [Domain glossary](GLOSSARY.md)
-
-Start implementation with [01: Convert a minimal Brain into a fresh vault](.scratch/brz-to-obsidian-v1/issues/01-minimal-brain-vault.md), following the [ticket claim and completion process](docs/agents/issue-tracker.md#implementation-operations).
+The first-version scope is the feature classes verified in two supplied
+TheBrain 15 exports and controlled synthetic fixtures. See [source coverage
+and warnings](docs/source-coverage.md), the [accepted specification](.scratch/brz-to-obsidian-v1/spec.md)
+and [implementation gates](.scratch/brz-to-obsidian-v1/README.md).
 
 ## Development environment
 
-Use the project virtual environment for all runtime, build, and development
-packages. The initial target is native Windows with Python 3.14. Create the
-environment from the available base Python if it is missing:
+Use the project virtual environment for all runtime, build and development
+packages. From this checkout, create it if missing and install:
 
 ```powershell
 python -m venv .venv
-```
-
-Commands can use its interpreter directly, without activating the environment:
-
-```powershell
-.\.venv\Scripts\python.exe --version
-.\.venv\Scripts\python.exe -m pip list
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-```
-
-Install the recorded native-compatible environment, then the package:
-
-```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe -m pip install --no-build-isolation -e ".[dev]"
+.\.venv\Scripts\python.exe -m pip check
 ```
 
-Package metadata declares dependency families; `requirements.txt` records the
-resolved Windows/Python 3.14.8 development environment. Install all packages
-inside this environment, adding them only as needed.
+Direct commands work without activation; optional activation is
+`.\.venv\Scripts\Activate.ps1`. Keep every package inside this environment and
+recreate it on a fresh checkout. `pyproject.toml` declares dependency families;
+`requirements.txt` pins the compatibility-checked runtime/build/development
+packages. Tested runtime support is native Windows / CPython 3.14.8. Package
+metadata requires Python >=3.14; other platforms and later runtimes have not
+been accepted. Native presentation uses Obsidian 1.13.7.
 
-The virtual environment is local and must be recreated on a fresh checkout.
-
-Optional activation in PowerShell:
+## Inspect and convert
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
+.\.venv\Scripts\brz2obsidian.exe inspect 'C:\exports\source.brz'
+.\.venv\Scripts\brz2obsidian.exe inspect 'C:\exports\source.brz' --json
+.\.venv\Scripts\python.exe -m brz2obsidian convert 'C:\exports\source.brz' 'C:\vaults\new-vault'
+.\.venv\Scripts\python.exe -m brz2obsidian convert 'C:\exports\source.brz' 'C:\vaults\another-new-vault' --json
 ```
 
-Direct interpreter commands work even when local policy prevents activation.
-## Usage
+For a synthetic trial, use `tests/fixtures/minimal.brz` and a fresh short
+output path such as `brz/minimal-vault`. Console and module entry points behave
+alike. Inspect is optional read-only preflight: it reports planned targets and
+counts, with destination feasibility, payload copy verification and publication
+pending. Convert repeats preparation, streams copies into owned staging,
+verifies the complete manifest, then publishes.
 
-```powershell
-.\.venv\Scripts\brz2obsidian.exe inspect tests/fixtures/minimal.brz --json
-.\.venv\Scripts\python.exe -m brz2obsidian convert tests/fixtures/minimal.brz brz/minimal-vault
-```
+Only an absent or empty destination is accepted. A nonempty destination is
+refused without modifying it. Choose a short path: the conservative final
+absolute-path limit is 240 UTF-16 units, including reserved uncreated targets.
+This is a one-time migration with no merging, overwrite, synchronization or
+Home override. External URLs/directories remain references; conversion does
+not fetch or open them.
 
-Inspect is read-only preflight. Convert repeats preparation and accepts only
-an absent or empty destination; it stages and verifies the complete manifest
-before publishing. Exit codes are 0 for clean success, 2 for approved warnings,
-and 1 for refusal/failure. JSON mode emits one version-1 result envelope;
-unmeasured counts are null and receipts appear only after verified publication.
+| Outcome | Exit code | Result |
+| --- | ---: | --- |
+| `clean` | 0 | Successful inspection or verified publication without warnings |
+| `warnings` | 2 | Successful inspection or verified publication with approved warnings |
+| `refused` | 1 | Source, feature or destination prevents proceeding |
+| `failed` | 1 | Operational failure |
 
-The root `Home — Entry thought.md` is the entry note, with native Home bookmark
-and startup selection. `MIGRATION REPORT.md` explains the result;
-`migration-record.json` retains source evidence, mappings and byte inventory.
-Exact original-note bytes reside under Attachments with `.md.original` ending.
+Text mode prints concise counts, issues and guidance. JSON mode writes one
+version-1 `brz2obsidian.result` envelope to stdout. Unmeasured counts are `null`,
+and `receipt` is `null` until actual verified publication. A later teardown
+failure can return `failed` with a retained receipt and `publication_occurred`
+issue: inspect that vault before retrying. Argument errors exit 1; help exits 0.
 
-Library callers can use default composition or inject their own interfaces:
+For scripts that capture stdout as UTF-8, set
+`$env:PYTHONIOENCODING = 'utf-8'` before running the CLI; otherwise Python uses
+the Windows stream encoding. This affects encoding, not the JSON schema.
+
+## Use the vault
+
+Open the generated folder in standard Obsidian. The root `Home — <title>.md`
+is the starting note and native Home bookmark; other thought notes are under
+`Notes/`. Original headings, labels and bodies are retained, with supported
+local references adapted to assigned paths. Parents/Children/Related sections
+provide navigation; native Backlinks, Graph and tag search provide discovery
+without community plugins.
+
+Empty thoughts remain distinct intentional uncreated targets unless they need
+files for Home or hierarchy coverage. Click a native link to create one later
+under its assigned `Notes/` path. That note does not automatically receive
+reciprocal migration sections. Conditional `Uncreated targets.md` and
+`Tag memberships.md` preserve otherwise hidden items/connections/memberships;
+created-note memberships are available through native tag search.
+
+`Attachments/` groups resources by owner. Thought-note backups end in
+`.md.original`; decorative icons remain preserved without Resources clutter.
+Inline images stay inline; additional files/external references appear in
+Resources. `MIGRATION REPORT.md` explains warnings and simplifications;
+`migration-record.json` retains source evidence, identities, target assignments,
+relationships, edits and byte inventory. Original JSON preserves numeric
+values, raw dates and omitted-versus-null distinctions.
+
+Two exact warning rules cover one absent-TXT pattern and intact icons with
+length discrepancies. See [conditions and issue codes](docs/source-coverage.md#approved-warnings).
+Other missing required content and unverified meanings stop conversion.
+
+## Library usage
 
 ```python
 from brz2obsidian.application.wiring import default_workflow
@@ -79,21 +106,26 @@ from brz2obsidian.application.wiring import default_workflow
 workflow = default_workflow()
 inspection = workflow.inspect("source.brz")
 result = workflow.convert("source.brz", "new-vault")
+if result.receipt is not None:
+    print(result.receipt.destination)
+print(result.model_dump_json(by_alias=True))
 ```
 
-See [architecture](docs/architecture.md) and [testing](docs/testing.md).
+The workflow returns durable `RunResult` values and does not print, parse
+arguments or exit the process. Callers can inject a source/profile, renderer,
+publisher and metadata factory, or invoke modules directly. See [architecture
+and runnable composition examples](docs/architecture.md).
 
-## Private data and generated output
+## Verification and private data
 
-Keep real BRZ inputs, generated review vaults, and UI evidence in the ignored
-`brz` directory. Use synthetic data for checked-in fixtures and aggregate
-results in shareable research reports. The virtual environment, Python caches,
-test caches, coverage output, and package build output are also ignored.
+See [test commands and native-review procedure](docs/testing.md), [complete
+real-export preservation](.scratch/brz-to-obsidian-v1/research/real-export-acceptance.md)
+and [native review](.scratch/brz-to-obsidian-v1/research/native-acceptance.md).
+Keep private archives, generated vaults and UI evidence under ignored `brz/`.
+Ordinary tests use synthetic inputs and need neither private archives nor GUI
+access. Public reports contain aggregate evidence only. The virtual environment,
+tool caches and build output are ignored.
 
-Private acceptance inputs and disposable prototype artifacts are not included
-in a checkout. Ordinary automated tests will use synthetic inputs; full-source
-and native acceptance use the explicitly selected local archives and fresh
-test vaults described in the specification.
-
-The completed Wayfinder decisions remain separate from implementation tickets.
-Older specification links redirect to the accepted first-version specification.
+The [glossary](GLOSSARY.md) and [architecture decision](docs/adr/0001-source-neutral-core.md)
+record terminology and design. Completed Wayfinder research remains decision
+evidence; actual implementation acceptance is tracked separately.
