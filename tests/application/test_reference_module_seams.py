@@ -117,3 +117,13 @@ def test_public_core_refuses_embedded_links_to_nonlive_or_retained_only_items(ch
     with pytest.raises(MigrationRefused) as error:
         analyze(changed, POLICY)
     assert error.value.issues[0].code == "invalid_reference"
+
+
+def test_public_renderer_refuses_reference_without_its_assigned_item_target():
+    migration = plan(analyze(reference_snapshot(), POLICY))
+    changed = migration.model_copy(
+        update={"item_targets": (migration.item_targets[0],)}
+    )
+    with pytest.raises(MigrationRefused) as error:
+        render(changed, METADATA)
+    assert error.value.issues[0].code == "invalid_reference"

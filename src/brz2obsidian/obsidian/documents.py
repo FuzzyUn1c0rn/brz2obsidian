@@ -3,6 +3,8 @@
 import posixpath
 from urllib.parse import quote
 
+from brz2obsidian.contracts import Issue, MigrationRefused
+
 from .relationships import note_link
 
 
@@ -11,11 +13,24 @@ def render_document(document, note_path, plan):
     assets = {t.asset_id: t for t in plan.asset_targets}
     text = document.text
     for span in sorted(document.references, key=lambda s: s.start, reverse=True):
+        assigned = (items if span.kind == "item" else assets).get(span.target)
+        if assigned is None or assigned.relative_path is None:
+            raise MigrationRefused(
+                (
+                    Issue(
+                        code="invalid_reference",
+                        phase="rendering",
+                        message="Canonical reference has no assigned vault target",
+                        affected=(document.key, span.target),
+                        guidance="Plan every referenced item and preserved image before rendering.",
+                    ),
+                )
+            )
         if span.kind == "item":
-            replacement = note_link(items[span.target], span.display_text)
+            replacement = note_link(assigned, span.display_text)
         else:
             relative = posixpath.relpath(
-                assets[span.target].relative_path, posixpath.dirname(note_path) or "."
+                assigned.relative_path, posixpath.dirname(note_path) or "."
             )
             # Keep the original authored image alt/title and replace only its destination.
             replacement = (

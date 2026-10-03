@@ -4,6 +4,7 @@ import base64
 import re
 from hashlib import sha256
 from html.parser import HTMLParser
+from itertools import pairwise
 from urllib.parse import unquote, urlsplit
 from uuid import UUID
 
@@ -199,16 +200,20 @@ def trace_note_references(text: str) -> tuple[ReferenceSpan, ...]:
                 label_end = state.md.helpers.parseLinkLabel(
                     state, begin + (1 if kind == "image" else 0), kind == "item"
                 )
-            if kind == "image" and not silent:
-                if label_end >= 0 and state.src[label_end + 1 : label_end + 2] == "(":
-                    pos = label_end + 2
-                    while pos < state.posMax and state.src[pos] in " \t\n":
-                        pos += 1
-                    parsed = state.md.helpers.parseLinkDestination(
-                        state.src, pos, state.posMax
-                    )
-                    if parsed.ok:
-                        destination = (pos, parsed.pos)
+            if (
+                kind == "image"
+                and not silent
+                and label_end >= 0
+                and state.src[label_end + 1 : label_end + 2] == "("
+            ):
+                pos = label_end + 2
+                while pos < state.posMax and state.src[pos] in " \t\n":
+                    pos += 1
+                parsed = state.md.helpers.parseLinkDestination(
+                    state.src, pos, state.posMax
+                )
+                if parsed.ok:
+                    destination = (pos, parsed.pos)
             success = rule(state, silent)
             if success and not silent:
                 new = state.tokens[count:]
@@ -334,7 +339,7 @@ def trace_note_references(text: str) -> tuple[ReferenceSpan, ...]:
                 )
             )
     result.sort(key=lambda span: span.start)
-    if any(a.end > b.start for a, b in zip(result, result[1:])):
+    if any(a.end > b.start for a, b in pairwise(result)):
         _refuse(
             "unsupported_feature",
             "Nested local image/link references overlap; this rich-content form is unsupported",

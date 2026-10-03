@@ -22,16 +22,16 @@ def links_archive(path, body, *, resources=(), others=(), other_notes=()):
         key = "bbbbbbbb-0000-4000-8000-000000000001"
         data = text.encode("utf-8")
         records.append(
-            dict(
-                Id=key,
-                BrainId=meta["BrainId"],
-                SourceId=owner,
-                SourceType=2,
-                Type=1,
-                NoteType=4,
-                Location="Notes.md",
-                DataLength=len(data),
-            )
+            {
+                "Id": key,
+                "BrainId": meta["BrainId"],
+                "SourceId": owner,
+                "SourceType": 2,
+                "Type": 1,
+                "NoteType": 4,
+                "Location": "Notes.md",
+                "DataLength": len(data),
+            }
         )
         meta["AttachmentFileStates"][key] = 1
         files[owner + "/Notes.md"] = data
@@ -193,3 +193,45 @@ def test_inspect_and_convert_refuse_invalid_or_unsupported_active_references(
     assert converted.issues[0].guidance
     assert converted.receipt is None
     assert not (tmp_path / "vault").exists()
+
+
+def test_dotted_collision_target_uses_assigned_path_and_safe_original_alias(tmp_path):
+    body = f"[pipe | [x]](brain://{COMPACT}/ignored-title)"
+    source = links_archive(
+        tmp_path / "source.brz",
+        body,
+        others=[thought("fedcba98-7654-4321-8765-abcdef012345", "topic.v2")],
+    )
+    vault = tmp_path / "vault"
+    result = default_workflow().convert(source, vault)
+    assert result.outcome == "clean"
+    assert (vault / "Home — Entry thought.md").read_bytes().decode() == (
+        "# Entry thought\n\n[[Notes/Topic.v2 — 01234567.md|pipe x]]"
+    )
+    record = json.loads((vault / "migration-record.json").read_bytes())
+    assert record["documents"][0]["references"][0]["display_text"] == "pipe | [x]"
+    assert record["documents"][0]["references"][0]["expected_original"] == body
+
+
+def test_terminal_and_json_results_report_actual_reference_conversions(
+    tmp_path, capsys
+):
+    from brz2obsidian.cli import main
+
+    source = links_archive(tmp_path / "source.brz", f"[Topic](brain://{COMPACT}/title)")
+    assert main(["inspect", str(source)]) == 0
+    captured = capsys.readouterr()
+    assert "Local references: 1; planned conversions: 1" in captured.out
+    assert "Converted local references" not in captured.out
+    assert captured.err == ""
+    assert main(["convert", str(source), str(tmp_path / "vault"), "--json"]) == 0
+    captured = capsys.readouterr()
+    envelope = json.loads(captured.out)
+    assert (
+        envelope["counts"]["source_references"]
+        == envelope["counts"]["planned_references"]
+        == envelope["counts"]["actual_references"]
+        == 1
+    )
+    assert envelope["receipt"]["counts"]["actual_references"] == 1
+    assert captured.err == ""
