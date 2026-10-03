@@ -16,6 +16,7 @@ from brz2obsidian.contracts import (
 
 from .relationships import relationship_sections, uncreated_listing
 from .resources import resource_section
+from .tags import tag_frontmatter, tag_listing, tag_records
 
 
 def _json(value):
@@ -53,7 +54,7 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
             continue
         item = items[target.item_key]
         heading = re.sub(r"([\\`*_{}\[\]<>#])", r"\\\1", item.title)
-        text = "# " + heading + "\n\n"
+        text = tag_frontmatter(plan, item.key) + "# " + heading + "\n\n"
         if item.label:
             text += item.label + "\n\n"
         text += "\n\n".join(documents[key].text for key in item.document_ids)
@@ -111,6 +112,10 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     if listing:
         add("Uncreated targets.md", listing.encode("utf-8"))
         report += "\n[[Uncreated targets.md|Uncreated targets]] lists otherwise unrepresented empty thoughts and Related pairs.\n"
+    listing = tag_listing(plan)
+    if listing:
+        add(plan.tag_memberships_path, listing.encode("utf-8"))
+        report += "\n[[Tag memberships.md|Tag memberships]] lists assignments on uncreated targets and source tags without assignments.\n"
     add("MIGRATION REPORT.md", report.encode())
     assets = {asset.asset_id: asset for asset in snapshot.assets}
     item_targets = {target.item_key: target for target in plan.item_targets}
@@ -160,7 +165,7 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
             )
             for relation in snapshot.relationships
         ],
-        "tag_memberships": [],
+        "tag_memberships": tag_records(plan),
         "adaptations": [value.model_dump() for value in plan.adaptations],
         "source_accounting": snapshot.accounting.model_dump(),
         "issues": [issue.model_dump() for issue in plan.issues],

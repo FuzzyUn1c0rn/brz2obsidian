@@ -107,7 +107,10 @@ class Workflow:
                     if operation == "inspect":
                         session.verify_consistency()
                         inspection = Inspection(
-                            item_targets=migration_plan.item_targets
+                            item_targets=migration_plan.item_targets,
+                            tag_targets=migration_plan.tag_targets,
+                            tag_memberships=migration_plan.tag_memberships,
+                            tag_memberships_path=migration_plan.tag_memberships_path,
                         )
                     else:
                         phase = "rendering"
