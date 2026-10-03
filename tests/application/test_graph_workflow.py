@@ -3,6 +3,7 @@ from uuid import UUID, uuid5
 from zipfile import ZipFile
 
 import pytest
+from markdown_it import MarkdownIt
 
 from brz2obsidian.application.wiring import default_workflow
 from tests.application.test_minimal_workflow import FIXTURE
@@ -84,6 +85,62 @@ def graph_archive(
         for name in sorted(records, reverse=reverse):
             archive.writestr(name, records[name])
     return path
+
+
+def test_generated_resources_and_children_render_outside_unclosed_authored_fence(
+    tmp_path,
+):
+    body = b"Authored example\r\n\r\n````python\r\nprint(42)\r"
+    source = graph_archive(
+        tmp_path / "fence.brz",
+        {1: "Home", 2: "Child"},
+        [(1, 2, 1, 1, -1)],
+        notes={1: (body, 4)},
+    )
+    with ZipFile(source) as archive:
+        files = {name: archive.read(name) for name in archive.namelist()}
+    resource = {
+        "Id": identity(3000),
+        "BrainId": BRAIN,
+        "SourceId": identity(1),
+        "SourceType": 2,
+        "Type": 1,
+        "NoteType": 0,
+        "Location": "manual.pdf",
+        "DataLength": 6,
+    }
+    meta = json.loads(files["meta.json"])
+    meta["AttachmentFileStates"][resource["Id"]] = 1
+    files["meta.json"] = json.dumps(meta).encode()
+    files["attachments.json"] += b"\n" + json.dumps(resource).encode()
+    files[identity(1) + "/manual.pdf"] = b"manual"
+    with ZipFile(source, "w") as archive:
+        for name, data in files.items():
+            archive.writestr(name, data)
+    destination = tmp_path / "vault"
+    result = default_workflow().convert(source, destination)
+    assert result.outcome == "clean"
+    note = (destination / "Home — Home.md").read_bytes()
+    assert note.startswith(b"# Home\n\n" + body)
+    original = destination / next(
+        entry.relative_path
+        for entry in result.receipt.manifest
+        if entry.relative_path.endswith("Notes.md.original")
+    )
+    assert original.read_bytes() == body
+    tokens = MarkdownIt("commonmark").parse(note.decode())
+    assert [token.content for token in tokens if token.type == "fence"] == [
+        "print(42)\n\n"
+    ]
+    headings = [
+        tokens[index + 1].content
+        for index, token in enumerate(tokens)
+        if token.type == "heading_open" and token.tag == "h2" and token.level == 0
+    ]
+    assert headings == ["Resources", "Children"]
+    assert "[[Notes/Child.md|Child]]" in [
+        token.content for token in tokens if token.type == "inline"
+    ]
 
 
 def test_empty_chain_materializes_middle_and_renders_complete_context(tmp_path):

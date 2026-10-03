@@ -5,6 +5,8 @@ import unicodedata
 
 from brz2obsidian.contracts import Issue, MigrationRefused, TagMembership, TagTarget
 
+from .naming import collision_keys, extended_seed_width
+
 
 def _token(title):
     normalized = unicodedata.normalize("NFC", title)
@@ -39,23 +41,12 @@ def assign_tags(snapshot, item_targets):
             if base.isnumeric():
                 base = "tag-" + base[: 116 - len(suffix)]
             tokens[tag.key] = base + suffix
-        groups = {}
-        for key, token in tokens.items():
-            groups.setdefault(token.casefold(), []).append(key)
-        collisions = set()
-        for group in groups.values():
-            if len(group) > 1:
-                extendable = [
-                    key
-                    for key in group
-                    if widths[key] and widths[key] < len(seeds[key])
-                ]
-                natural = [key for key in group if not widths[key]]
-                collisions.update(extendable or natural or group)
+        collisions = collision_keys(tokens, widths, seeds)
         if not collisions:
             break
         for key in sorted(collisions):
-            if widths[key] and widths[key] >= len(seeds[key]):
+            new_width = extended_seed_width(widths[key], seeds[key])
+            if new_width is None:
                 raise MigrationRefused(
                     (
                         Issue(
@@ -67,7 +58,7 @@ def assign_tags(snapshot, item_targets):
                         ),
                     )
                 )
-            widths[key] = 8 if not widths[key] else widths[key] + 4
+            widths[key] = new_width
     targets = {t.item_key: t for t in item_targets}
     memberships = tuple(
         TagMembership(

@@ -19,4 +19,12 @@ Initial findings: Standards 3 maintenance judgments, no hard violations; Spec 2 
 
 ## Repair verification
 
-Pending [review repair ticket 11](../issues/11-final-review-repairs.md). Overall specification closure waits for verified repair integration.
+Implemented in [review repair ticket 11](../issues/11-final-review-repairs.md) by `/root/review_repairs` on `codex/brz-v1-review-repairs`, based on complete integration head `21f3d28`. The original reviewer findings above remain separate from this repair evidence.
+
+**Standards repair:** Note and tag targets now share collision grouping, contender selection and seed-width progression while retaining their formatting, reserved-name handling and diagnostics. Note/resource names share readable filename sanitation; resource basename extraction and note-only Unicode control replacement remain intentional caller decisions. Resource rendering consumes planned `resource_link` eligibility and no longer rescans document image references. Existing public naming, resource and image regressions pass.
+
+**Spec repair:** Real synthetic ZIP regressions first reproduced escaping `zlib.error` and `NotImplementedError`, then passed with structured `invalid_source` and `unsupported_feature` refusals at source/Workflow/JSON CLI boundaries (no receipt or destination publication). Renderer composition now preserves authored text and newline bytes while adding a generated fence/comment closing boundary only where parsing proves later content would otherwise be absorbed. A complete source-to-vault regression independently parses visible Resources and Children after an unclosed four-backtick fence and verifies the original backup. Reusable renderer regressions cover following authored documents, tilde fences, comments, quote/list containers, indented code and closed fences. Unprovable trailing block contexts are explicitly refused with actionable `unsupported_feature` diagnostics; this conservative limit does not widen TheBrain HTML-note coverage.
+
+**Public verification:** Root project `.venv/Scripts/python.exe`, with worktree `src` in `PYTHONPATH`: `-m pytest -q` (287 passed), `-m ruff check .`, `-m ruff format --check .`, `-m pip check`, and `git diff --check` pass. Latest integration branch merged before completion. Private archives and native acceptance vaults were not modified by the repair implementer.
+
+**Pending integration verification:** Root will integrate the repair commit, rerun the six independent real-export acceptance conversions, compare emitted content with prior output, and repeat native observations if emitted behavior changed. Overall specification closure and ticket 11's final criterion remain pending until those checks are recorded.
