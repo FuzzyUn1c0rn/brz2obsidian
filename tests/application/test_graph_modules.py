@@ -162,6 +162,14 @@ def test_renderer_refuses_a_plan_bound_to_another_snapshot():
     assert error.value.issues[0].code == "source_changed"
 
 
+@pytest.mark.parametrize("values", [{"live": False}, {"role": "system"}])
+def test_core_refuses_navigation_relationships_to_retained_only_items(values):
+    facts = snapshot((item("a", **values),), (edge("entry-a", "entry", "a"),))
+    with pytest.raises(MigrationRefused) as error:
+        analyze(facts, POLICY)
+    assert error.value.issues[0].code == "invalid_reference"
+
+
 def test_greedy_parent_score_counts_incident_edges_then_recomputes_and_ties_by_key():
     facts = snapshot(
         tuple(item(k) for k in "abcdef"),
