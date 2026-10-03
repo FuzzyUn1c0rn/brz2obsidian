@@ -1,6 +1,10 @@
 # Convert a TheBrain BRZ archive into a new Obsidian vault
 
-Status: ready-for-agent
+Status: claimed
+
+Assignee: /root
+
+Integration branch: `codex/brz-to-obsidian-v1`
 
 Accepted: 2026-10-03. The user confirmed the consolidated specification, including its seams, schemas, tooling choices, and verification gates. This file publishes that accepted scope in the to-spec format. Production implementation has not begun.
 
