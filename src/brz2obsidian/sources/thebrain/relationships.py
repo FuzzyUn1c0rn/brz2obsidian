@@ -2,10 +2,13 @@
 
 from brz2obsidian.contracts import Relationship
 
+from .semantics import validate_semantic_fields
+
 
 def decode_relationships(records, thoughts, brain_id, refuse, uuid):
     result, keys = [], set()
     for index, record in enumerate(records):
+        validate_semantic_fields(record, refuse)
         fields = ("Kind", "Relation", "Meaning", "Direction")
         if any(type(record.get(field)) is not int for field in fields):
             refuse(

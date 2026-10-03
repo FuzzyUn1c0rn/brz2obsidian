@@ -148,6 +148,16 @@ class SourceSnapshot(Contract):
     accounting: SourceAccounting
 
 
+class FindingDisposition(Contract):
+    rule_id: str
+    kind: str
+    disposition: Literal["warning", "refuse"]
+    issue_code: str
+    message: str
+    guidance: str
+    permits_absent_payload: bool = False
+
+
 class SourcePolicy(Contract):
     profile_id: str
     profile_version: str
@@ -156,7 +166,7 @@ class SourcePolicy(Contract):
     format_version: str
     contract_version: Literal[1] = 1
     entry_required: bool = True
-    permitted_finding_rules: tuple[str, ...] = ()
+    finding_dispositions: tuple[FindingDisposition, ...] = ()
 
 
 class Counts(Contract):

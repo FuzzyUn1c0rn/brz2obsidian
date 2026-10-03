@@ -246,7 +246,7 @@ def test_resource_collisions_extend_seeds_preserve_extensions_and_ignore_record_
         ),
         ({"Type": 99}, b"unknown", (), "unsupported_feature"),
         (
-            {"Type": 5, "IsIcon": True, "Location": "icon.png", "DataLength": 99},
+            {"Type": 5, "IsIcon": True, "Location": "icon.png", "DataLength": -1},
             b"icon",
             (),
             "invalid_source",

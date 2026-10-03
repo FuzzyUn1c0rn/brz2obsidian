@@ -44,6 +44,8 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
     items = {item.key: item for item in snapshot.items}
     if len(items) != len(snapshot.items):
         refuse("invalid_source", "Duplicate canonical item keys")
+    if len({i.original_identity for i in snapshot.items}) != len(snapshot.items):
+        refuse("invalid_source", "Duplicate original item identities")
     if (
         snapshot.entry_key not in items
         or not items[snapshot.entry_key].live
@@ -68,6 +70,16 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
     for document in snapshot.documents:
         if document.owner not in items or document.original_asset_id not in assets:
             refuse("invalid_reference", "Document owner/original payload is invalid")
+        original = assets[document.original_asset_id]
+        if (
+            original.owner != document.owner
+            or original.role != "note_original"
+            or original.availability != "present"
+        ):
+            refuse(
+                "invalid_reference",
+                "Document original must be its owner's present note-original asset",
+            )
     for asset in snapshot.assets:
         if asset.owner not in items:
             refuse("invalid_reference", "Asset owner is invalid")
@@ -75,7 +87,16 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
             asset.actual_length is None or asset.actual_sha256 is None
         ):
             refuse("invalid_source", "Present asset lacks actual byte inventory")
+        if asset.availability == "external" and (
+            asset.role not in {"url", "directory"} or not asset.external_uri
+        ):
+            refuse(
+                "invalid_reference",
+                "External resource lacks its destination URI or supported role",
+            )
     validate_references(snapshot)
+    if len({r.key for r in snapshot.relationships}) != len(snapshot.relationships):
+        refuse("invalid_source", "Duplicate canonical relationship keys")
     for relation in snapshot.relationships:
         if relation.item_a not in items or relation.item_b not in items:
             refuse("invalid_reference", "Relationship endpoint is absent")
@@ -103,8 +124,60 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
             "invalid_source",
             "Declared source accounting is duplicate, unresolved or incomplete",
         )
-    if snapshot.findings:
-        refuse("unsupported_feature", "Source findings require a reviewed disposition")
+    dispositions = {d.rule_id: d for d in policy.finding_dispositions}
+    if len(dispositions) != len(policy.finding_dispositions):
+        refuse("unsupported_feature", "Reviewed finding dispositions are ambiguous")
+    issues = []
+    known_evidence = {e.identity for e in entries} | {
+        e.key for e in snapshot.original_evidence
+    }
+    known_subjects = (
+        set(items)
+        | set(assets)
+        | set(documents)
+        | {r.key for r in snapshot.relationships}
+    )
+    for finding in sorted(snapshot.findings, key=lambda f: (f.rule_id, f.affected)):
+        disposition = dispositions.get(finding.rule_id)
+        if (
+            disposition is None
+            or disposition.kind != finding.kind
+            or not finding.evidence
+            or not finding.affected
+            or not set(finding.evidence) <= known_evidence
+            or not set(finding.affected) <= known_subjects
+        ):
+            refuse(
+                "unsupported_feature",
+                "Source finding lacks a compatible reviewed disposition or evidence",
+            )
+        issue = Issue(
+            code=disposition.issue_code,
+            severity="warning" if disposition.disposition == "warning" else "error",
+            phase="analysis",
+            message=disposition.message + " Observed: " + finding.observed_json,
+            affected=finding.affected,
+            evidence=finding.evidence,
+            rule_id=finding.rule_id,
+            guidance=disposition.guidance,
+        )
+        if disposition.disposition == "refuse":
+            raise MigrationRefused(tuple(issues) + (issue,))
+        issues.append(issue)
+    recognized_absences = {
+        key
+        for f in snapshot.findings
+        for key in f.affected
+        if dispositions[f.rule_id].disposition == "warning"
+        and dispositions[f.rule_id].permits_absent_payload
+    }
+    if any(
+        a.availability == "absent" and a.asset_id not in recognized_absences
+        for a in assets.values()
+    ):
+        refuse(
+            "missing_required_payload", "Absent asset lacks a reviewed source finding"
+        )
     counts = Counts(
         source_items=len(items),
         source_relationships=len(snapshot.relationships),
@@ -114,5 +187,9 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
         ),
     )
     return Analysis(
-        snapshot=snapshot, policy=policy, entry_key=snapshot.entry_key, counts=counts
+        snapshot=snapshot,
+        policy=policy,
+        entry_key=snapshot.entry_key,
+        counts=counts,
+        issues=tuple(issues),
     )

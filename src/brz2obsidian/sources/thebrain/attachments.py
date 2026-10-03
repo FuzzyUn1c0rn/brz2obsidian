@@ -5,9 +5,17 @@ import json
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from urllib.parse import urlsplit
 
-from brz2obsidian.contracts import AccountingEntry, Asset, Document, OriginalEvidence
+from brz2obsidian.contracts import (
+    AccountingEntry,
+    Asset,
+    Document,
+    OriginalEvidence,
+    SourceFinding,
+)
 
+from .findings import ABSENT_TXT_RULE, ICON_LENGTH_RULE
 from .notes import bind_note_references, trace_note_references
+from .semantics import validate_semantic_fields
 
 SPECIAL_FLAGS = (
     "IsBrainAttachment",
@@ -20,7 +28,8 @@ SPECIAL_FLAGS = (
 
 
 def normalize_attachments(archive, records, meta, thoughts, refuse, uuid):
-    assets, documents, members, evidence, accounting = [], [], {}, [], []
+    assets, documents, members, evidence, accounting, findings = [], [], {}, [], [], []
+    absent_records = []
     states = meta["AttachmentFileStates"]
     names = set(archive.namelist())
     for key, state in states.items():
@@ -29,6 +38,7 @@ def normalize_attachments(archive, records, meta, thoughts, refuse, uuid):
             refuse("invalid_source", "Invalid attachment file state", (key,))
     for index, record in enumerate(records):
         asset_id, owner = uuid(record["Id"]), uuid(record["SourceId"])
+        validate_semantic_fields(record, refuse, ("IsIcon",) + SPECIAL_FLAGS)
         if (
             any(a.asset_id == asset_id for a in assets)
             or owner not in thoughts
@@ -71,6 +81,7 @@ def normalize_attachments(archive, records, meta, thoughts, refuse, uuid):
             (5, 0),
             (8, 0),
             (12, 0),
+            (15, 0),
         }:
             refuse(
                 "unsupported_feature",
@@ -156,6 +167,23 @@ def normalize_attachments(archive, records, meta, thoughts, refuse, uuid):
             )
         prefix = ".data/" if kind == 5 else (".data/md-images/" if kind == 12 else "")
         member = owner + "/" + prefix + location
+        if kind == 15:
+            if (
+                local.suffix.casefold() != ".txt"
+                or record["DataLength"] <= 0
+                or states.get(asset_id) != 2
+                or member in names
+            ):
+                refuse(
+                    "unsupported_feature",
+                    "Type 15 attachment does not match the reviewed absent TXT rule",
+                    (asset_id,),
+                )
+            assets.append(Asset(**common, role="file", availability="absent"))
+            absent_records.append(
+                (asset_id, owner, location, record["DataLength"], pointer)
+            )
+            continue
         if states.get(asset_id) != 1 or member not in names:
             refuse(
                 "missing_required_payload",
@@ -174,10 +202,28 @@ def normalize_attachments(archive, records, meta, thoughts, refuse, uuid):
                 length += len(chunk)
                 digest.update(chunk)
         if length != record["DataLength"]:
-            refuse(
-                "invalid_source",
-                "Attachment metadata length differs from actual bytes",
-                (asset_id,),
+            if kind != 5:
+                refuse(
+                    "invalid_source",
+                    "Attachment metadata length differs from actual bytes",
+                    (asset_id,),
+                )
+            findings.append(
+                SourceFinding(
+                    kind="approved_metadata_discrepancy",
+                    rule_id=ICON_LENGTH_RULE,
+                    affected=(asset_id,),
+                    evidence=(pointer, "payload:" + member),
+                    observed_json=json.dumps(
+                        {
+                            "member": member,
+                            "declared_length": record["DataLength"],
+                            "actual_length": length,
+                            "actual_sha256": digest.hexdigest(),
+                            "crc_valid": True,
+                        }
+                    ),
+                )
             )
         role = "icon" if kind == 5 else ("image" if kind == 12 else "file")
         if kind == 1 and (note_type == 4 or location == "Notes.md"):
@@ -236,6 +282,42 @@ def normalize_attachments(archive, records, meta, thoughts, refuse, uuid):
         )
     if set(states) - {a.asset_id for a in assets}:
         refuse("invalid_source", "File states refer to an absent attachment")
+    for asset_id, owner, location, declared, pointer in absent_records:
+        pdfs = tuple(
+            sorted(
+                a.asset_id
+                for a in assets
+                if a.owner == owner
+                and a.availability == "present"
+                and a.role == "file"
+                and PurePosixPath(a.original_name).suffix.casefold() == ".pdf"
+            )
+        )
+        if not pdfs:
+            refuse(
+                "missing_required_payload",
+                "Absent TXT lacks an intact archived PDF under the same owner",
+                (asset_id,),
+            )
+        findings.append(
+            SourceFinding(
+                kind="known_absent_payload",
+                rule_id=ABSENT_TXT_RULE,
+                affected=(asset_id,),
+                evidence=(pointer, "meta.json")
+                + tuple(p for a in assets if a.asset_id in pdfs for p in a.evidence),
+                observed_json=json.dumps(
+                    {
+                        "owner": owner,
+                        "filename": location,
+                        "declared_length": declared,
+                        "state": 2,
+                        "present": False,
+                        "intact_same_owner_pdfs": pdfs,
+                    }
+                ),
+            )
+        )
     documents = [bind_note_references(d, assets, thoughts) for d in documents]
     accounting.extend(
         AccountingEntry(
@@ -246,4 +328,4 @@ def normalize_attachments(archive, records, meta, thoughts, refuse, uuid):
         for document in documents
         for index, reference in enumerate(document.references)
     )
-    return assets, documents, members, evidence, accounting
+    return assets, documents, members, evidence, accounting, findings

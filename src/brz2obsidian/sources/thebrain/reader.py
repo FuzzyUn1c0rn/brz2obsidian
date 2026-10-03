@@ -1,6 +1,7 @@
 """Read-only BRZ interpretation and scoped payload access."""
 
 import hashlib
+import unicodedata
 from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from uuid import UUID, uuid5
@@ -23,6 +24,7 @@ from brz2obsidian.contracts import (
 from .attachments import normalize_attachments
 from .decoding import ROOT_FILES, decode_records
 from .relationships import decode_relationships
+from .semantics import validate_semantic_fields
 
 
 def _refuse(code, message, affected=()):
@@ -181,13 +183,15 @@ class BrzSession:
     def _read(self):
         source_hash = self.initial_hash
         names = self.archive.namelist()
-        folded = [name.casefold() for name in names]
+        folded = [unicodedata.normalize("NFC", name).casefold() for name in names]
         if len(set(folded)) != len(folded):
             _refuse("invalid_source", "Duplicate or case-ambiguous archive members")
         for info in self.archive.infolist():
             path = PurePosixPath(info.filename)
             if (
                 path.is_absolute()
+                or str(path) != info.filename.removesuffix("/")
+                or info.filename in {"", ".", "./"}
                 or ".." in path.parts
                 or "\\" in info.filename
                 or ":" in info.filename
@@ -244,19 +248,31 @@ class BrzSession:
             if records[name]:
                 _refuse(
                     "unsupported_feature",
-                    f"This minimal profile does not yet implement {name}",
+                    f"The reviewed profile does not implement nonempty {name}",
                 )
         thought_records = records["thoughts.json"]
-        live_ids = {
+        live_id_list = [
             record.get("Id")
             for name in ("thoughts.json", "links.json", "attachments.json")
             for record in records[name]
-        }
+        ]
+        live_ids = set(live_id_list)
+        if len(live_ids) != len(live_id_list):
+            _refuse("invalid_source", "Duplicate live identities across source records")
         if any(record.get("Id") in live_ids for record in records["tombstones.json"]):
             _refuse("invalid_source", "A live identity also occurs in deleted history")
         thoughts = {}
         for record in thought_records:
             key = _uuid(record["Id"])
+            validate_semantic_fields(record, _refuse)
+            if "TagIds" in record and type(record["TagIds"]) is not list:
+                _refuse("invalid_source", "TagIds must be an array", (key,))
+            if record.get("Aliases"):
+                _refuse(
+                    "unsupported_feature",
+                    "Thought aliases are outside reviewed content coverage",
+                    (key,),
+                )
             if key in thoughts or record.get("BrainId") != brain_id:
                 _refuse(
                     "invalid_source",
@@ -281,6 +297,18 @@ class BrzSession:
                 _refuse("invalid_source", "Thought title/label is invalid")
             thoughts[key] = record
         setting_id = str(uuid5(UUID(brain_id), "20"))
+        setting_keys = set()
+        for record in records["settings.json"]:
+            key = _uuid(record.get("Id"))
+            if key in setting_keys or (
+                "BrainId" in record and record["BrainId"] != brain_id
+            ):
+                _refuse(
+                    "invalid_source",
+                    "Setting identity or collection ownership is invalid",
+                    (key,),
+                )
+            setting_keys.add(key)
         home = [
             record
             for record in records["settings.json"]
@@ -297,15 +325,20 @@ class BrzSession:
             _refuse("invalid_entry", "Home setting is not a valid thought identity")
         if entry not in thoughts or thoughts[entry]["Kind"] != 1:
             _refuse("invalid_entry", "Home does not identify a live ordinary thought")
-        assets, documents, self.members, payload_evidence, payload_accounting = (
-            normalize_attachments(
-                self.archive,
-                records["attachments.json"],
-                meta,
-                thoughts,
-                _refuse,
-                _uuid,
-            )
+        (
+            assets,
+            documents,
+            self.members,
+            payload_evidence,
+            payload_accounting,
+            findings,
+        ) = normalize_attachments(
+            self.archive,
+            records["attachments.json"],
+            meta,
+            thoughts,
+            _refuse,
+            _uuid,
         )
         evidence.extend(payload_evidence)
         accounting.extend(payload_accounting)
@@ -357,6 +390,7 @@ class BrzSession:
             documents=tuple(documents),
             assets=tuple(assets),
             original_evidence=tuple(evidence),
+            findings=tuple(findings),
             accounting=SourceAccounting(entries=tuple(accounting)),
         )
 

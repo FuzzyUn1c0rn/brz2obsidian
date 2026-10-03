@@ -122,6 +122,15 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     report = "# Migration report\n\nOpen the root Home note to begin. Original note bytes are retained under Attachments.\n\n"
     report += f"Created {plan.counts.planned_notes} thought notes; preserved {plan.counts.planned_assets} present payloads.\n\n"
     report += "Unsupported feature classes are refused explicitly.\n"
+    if plan.issues:
+        report += "\n## Source warnings\n\n"
+        for issue in plan.issues:
+            message = (
+                re.sub(r"([\\`*_{}\[\]<>#])", r"\\\1", issue.message)
+                .replace("\r", " ")
+                .replace("\n", " ")
+            )
+            report += f"- {issue.code} ({issue.rule_id}): {message} {issue.guidance}\n"
     if any(r.kind in {"hierarchy", "related"} for r in snapshot.relationships):
         report += "\nRelationships use simple Parents, Children and Related links. Original arrows and one-way visibility details remain in the migration record.\n"
     listing = uncreated_listing(plan)
@@ -146,6 +155,15 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         if target.relative_path is not None
         and assets[target.asset_id].availability == "present"
     )
+    document_records = {
+        d.key: dict(
+            **d.model_dump(exclude={"text"}),
+            owner_target=item_targets[d.owner].relative_path
+            if d.owner in item_targets
+            else None,
+        )
+        for d in snapshot.documents
+    }
     record = {
         "schema": "brz2obsidian.migration",
         "schema_version": 1,
@@ -155,11 +173,32 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         "profile_id": plan.profile_id,
         "profile_version": plan.profile_version,
         "run_metadata": run_metadata.model_dump(),
-        "item_targets": [target.model_dump() for target in plan.item_targets],
+        "item_targets": [
+            dict(
+                **target.model_dump(),
+                documents=[
+                    document_records[d.key]
+                    for d in snapshot.documents
+                    if d.owner == target.item_key
+                ],
+            )
+            for target in plan.item_targets
+        ],
         "asset_targets": [
             dict(
                 **assets[target.asset_id].model_dump(),
                 **target.model_dump(exclude={"asset_id"}),
+                source_findings=[
+                    finding.model_dump()
+                    for finding in snapshot.findings
+                    if target.asset_id in finding.affected
+                ],
+                retained_documents=[
+                    document_records[d.key]
+                    for d in snapshot.documents
+                    if d.owner not in item_targets
+                    and d.original_asset_id == target.asset_id
+                ],
             )
             for target in plan.asset_targets
         ],
@@ -180,15 +219,6 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
                 }[relation.kind],
             )
             for relation in snapshot.relationships
-        ],
-        "documents": [
-            dict(
-                **d.model_dump(exclude={"text"}),
-                owner_target=item_targets[d.owner].relative_path
-                if d.owner in item_targets
-                else None,
-            )
-            for d in snapshot.documents
         ],
         "tag_memberships": tag_records(plan),
         "adaptations": [value.model_dump() for value in plan.adaptations],

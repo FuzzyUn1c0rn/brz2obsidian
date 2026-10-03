@@ -15,7 +15,22 @@ def resource_section(plan, owner):
     }
     for asset in sorted(plan.analysis.snapshot.assets, key=lambda a: a.asset_id):
         target = targets[asset.asset_id]
-        if asset.owner != owner or target.resource_link is None:
+        if asset.owner != owner:
+            continue
+        if asset.availability == "absent":
+            label = PurePosixPath(asset.original_name).name
+            label = (
+                re.sub(r"([\\`*_{}\[\]<>#])", r"\\\1", label)
+                .replace("\r", " ")
+                .replace("\n", " ")
+            )
+            lines.append(
+                "- Absent source file: "
+                + label
+                + " (metadata retained; bytes absent from the source)."
+            )
+            continue
+        if target.resource_link is None:
             continue
         if (owner, asset.asset_id) in inline:
             continue
