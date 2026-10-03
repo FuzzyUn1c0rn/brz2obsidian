@@ -208,6 +208,12 @@ def test_greedy_parent_score_counts_incident_edges_then_recomputes_and_ties_by_k
     assert {
         t.item_key for t in plan(analyze(recomputed, POLICY)).item_targets if t.created
     } == {"entry", "a", "c"}
+    tied = snapshot(
+        (item("a"), item("b")), (edge("ab", "a", "b"), edge("ba", "b", "a"))
+    )
+    assert {
+        t.item_key for t in plan(analyze(tied, POLICY)).item_targets if t.created
+    } == {"entry", "a"}
 
 
 def test_bounded_names_keep_home_and_seed_markers_without_splitting_unicode():
