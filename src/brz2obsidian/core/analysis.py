@@ -59,6 +59,10 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
             refuse(
                 "invalid_reference", "Item references an absent document or resource"
             )
+        if any(documents[key].owner != item.key for key in item.document_ids) or any(
+            assets[key].owner != item.key for key in item.resource_ids
+        ):
+            refuse("invalid_reference", "Item references another owner's content")
     for document in snapshot.documents:
         if document.owner not in items or document.original_asset_id not in assets:
             refuse("invalid_reference", "Document owner/original payload is invalid")

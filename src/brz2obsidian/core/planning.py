@@ -3,7 +3,9 @@
 import re
 import unicodedata
 
-from brz2obsidian.contracts import Analysis, AssetTarget, ItemTarget, MigrationPlan
+from brz2obsidian.contracts import Analysis, ItemTarget, MigrationPlan
+
+from .resources import assign_asset_targets, resource_owners
 
 
 def _stem(title):
@@ -41,8 +43,12 @@ def plan(analysis: Analysis) -> MigrationPlan:
         if is_home:
             stem = "Home — " + stem
         content = any(docs[key].text.strip() for key in item.document_ids)
-        created = is_home or content
-        reasons = ("home",) if is_home else (("content",) if content else ())
+        created = is_home or content or item.key in resource_owners(snapshot)
+        reasons = (
+            ("home",)
+            if is_home
+            else (("content",) if content else (("resources",) if created else ()))
+        )
         targets.append(
             ItemTarget(
                 item_key=item.key,
@@ -53,18 +59,13 @@ def plan(analysis: Analysis) -> MigrationPlan:
                 creation_reasons=reasons,
             )
         )
-    owners = {item.key: item.naming_seed[:8] for item in snapshot.items}
-    asset_targets = tuple(
-        AssetTarget(
-            asset_id=asset.asset_id,
-            relative_path=f"Attachments/{owners[asset.owner]}/{asset.original_name}.original",
-        )
-        for asset in snapshot.assets
-    )
+    asset_targets = assign_asset_targets(snapshot)
     counts = analysis.counts.model_copy(
         update={
             "planned_notes": sum(target.created for target in targets),
-            "planned_assets": len(asset_targets),
+            "planned_assets": sum(
+                asset.availability == "present" for asset in snapshot.assets
+            ),
         }
     )
     return MigrationPlan(

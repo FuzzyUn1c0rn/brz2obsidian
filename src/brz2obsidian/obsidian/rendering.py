@@ -12,6 +12,8 @@ from brz2obsidian.contracts import (
     RunMetadata,
 )
 
+from .resources import resource_section
+
 
 def _json(value):
     return (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
@@ -41,6 +43,9 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         if item.label:
             text += item.label + "\n\n"
         text += "\n\n".join(documents[key].text for key in item.document_ids)
+        resources = resource_section(plan, item.key)
+        if resources:
+            text += "\n\n" + resources
         add(target.relative_path, text.encode("utf-8"))
     home = next(
         target.relative_path
