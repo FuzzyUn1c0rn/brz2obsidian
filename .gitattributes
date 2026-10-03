@@ -11,3 +11,6 @@
 *.jpeg -text
 *.gif -text
 *.webp -text
+
+# Authored note evidence deliberately tests exact CRLF spelling.
+tests/fixtures/minimal/*/Notes.md -text whitespace=cr-at-eol

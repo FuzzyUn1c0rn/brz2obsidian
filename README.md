@@ -2,7 +2,10 @@
 
 A Python library and thin CLI for migrating verified TheBrain BRZ exports into
 a fresh standard Obsidian vault. The accepted specification and implementation
-tickets are ready; the production converter has not been implemented yet.
+tickets describe the full first-version scope. The current production slice
+converts a synthetic minimal format-5 Brain with ordinary Markdown Home into
+a verified fresh vault. Relationships, tags, resources and local-reference
+adaptation are explicitly refused until their implementation slices complete.
 
 - [Accepted first-version specification](.scratch/brz-to-obsidian-v1/spec.md)
 - [Implementation tickets and dependencies](.scratch/brz-to-obsidian-v1/README.md)
@@ -30,12 +33,16 @@ Commands can use its interpreter directly, without activating the environment:
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-The initial environment contains only the bundled packaging bootstrap. The
-requirements manifest is intentionally empty. Introduce packages gradually when
-the implementation needs them, verify native compatibility, and record the
-resolved versions. When package metadata is introduced, it will declare the
-library's dependencies; the requirements manifest will record the tested
-development environment. Keep those roles consistent.
+Install the recorded native-compatible environment, then the package:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install --no-build-isolation -e ".[dev]"
+```
+
+Package metadata declares dependency families; `requirements.txt` records the
+resolved Windows/Python 3.14.8 development environment. Install all packages
+inside this environment, adding them only as needed.
 
 The virtual environment is local and must be recreated on a fresh checkout.
 
@@ -46,8 +53,35 @@ Optional activation in PowerShell:
 ```
 
 Direct interpreter commands work even when local policy prevents activation.
-The first implementation ticket owns installation, dependency checks, and the
-first complete inspect/convert behavior.
+## Usage
+
+```powershell
+.\.venv\Scripts\brz2obsidian.exe inspect tests/fixtures/minimal.brz --json
+.\.venv\Scripts\python.exe -m brz2obsidian convert tests/fixtures/minimal.brz brz/minimal-vault
+```
+
+Inspect is read-only preflight. Convert repeats preparation and accepts only
+an absent or empty destination; it stages and verifies the complete manifest
+before publishing. Exit codes are 0 for clean success, 2 for approved warnings,
+and 1 for refusal/failure. JSON mode emits one version-1 result envelope;
+unmeasured counts are null and receipts appear only after verified publication.
+
+The root `Home — Entry thought.md` is the entry note, with native Home bookmark
+and startup selection. `MIGRATION REPORT.md` explains the result;
+`migration-record.json` retains source evidence, mappings and byte inventory.
+Exact original-note bytes reside under Attachments with `.md.original` ending.
+
+Library callers can use default composition or inject their own interfaces:
+
+```python
+from brz2obsidian.application.wiring import default_workflow
+
+workflow = default_workflow()
+inspection = workflow.inspect("source.brz")
+result = workflow.convert("source.brz", "new-vault")
+```
+
+See [architecture](docs/architecture.md) and [testing](docs/testing.md).
 
 ## Private data and generated output
 
