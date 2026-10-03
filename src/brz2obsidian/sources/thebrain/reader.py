@@ -25,6 +25,7 @@ from brz2obsidian.contracts import (
 
 from .decoding import ROOT_FILES, decode_records
 from .notes import trace_note_references
+from .relationships import decode_relationships
 
 
 def _refuse(code, message, affected=()):
@@ -137,6 +138,7 @@ class BrzSession:
                         in {
                             "meta.json",
                             "thoughts.json",
+                            "links.json",
                             "attachments.json",
                             "settings.json",
                         }
@@ -156,7 +158,6 @@ class BrzSession:
         if type(meta.get("AttachmentFileStates")) is not dict:
             _refuse("invalid_source", "AttachmentFileStates must be an object")
         for name in (
-            "links.json",
             "calendarevents.json",
             "access.json",
             "fielddefinitions.json",
@@ -168,6 +169,13 @@ class BrzSession:
                     f"This minimal profile does not yet implement {name}",
                 )
         thought_records = records["thoughts.json"]
+        live_ids = {
+            record.get("Id")
+            for name in ("thoughts.json", "links.json", "attachments.json")
+            for record in records[name]
+        }
+        if any(record.get("Id") in live_ids for record in records["tombstones.json"]):
+            _refuse("invalid_source", "A live identity also occurs in deleted history")
         thoughts = {}
         for record in thought_records:
             key = _uuid(record["Id"])
@@ -178,15 +186,16 @@ class BrzSession:
                 )
             if (
                 type(record.get("Kind")) is not int
-                or record["Kind"] != 1
+                or record["Kind"] not in {1, 4, 5}
                 or type(record.get("ACType", 0)) is not int
                 or record.get("ACType", 0) != 0
                 or record.get("TagIds")
                 or record.get("ThoughtTypeId")
+                or record.get("TypeId")
             ):
                 _refuse(
                     "unsupported_feature",
-                    "Only ordinary untyped thoughts are implemented in the minimal profile",
+                    "Only reviewed ordinary, tag and system roles without custom types are supported",
                 )
             if type(record.get("Name")) is not str or (
                 record.get("Label") is not None and type(record["Label"]) is not str
@@ -208,7 +217,7 @@ class BrzSession:
             entry = _uuid(home[0].get("Value"))
         except ValueError, TypeError, AttributeError:
             _refuse("invalid_entry", "Home setting is not a valid thought identity")
-        if entry not in thoughts:
+        if entry not in thoughts or thoughts[entry]["Kind"] != 1:
             _refuse("invalid_entry", "Home does not identify a live ordinary thought")
         assets, documents = [], []
         attachment_ids = set()
@@ -340,6 +349,7 @@ class BrzSession:
                 naming_seed=key.replace("-", ""),
                 title=record["Name"],
                 label=record.get("Label"),
+                role={1: "ordinary", 4: "tag", 5: "system"}[record["Kind"]],
                 document_ids=tuple(d.key for d in documents if d.owner == key),
                 resource_ids=(),
                 evidence=(f"thoughts.json:{i}",),
@@ -362,6 +372,9 @@ class BrzSession:
             collection_title=meta.get("Name", "TheBrain collection"),
             entry_key=entry,
             items=items,
+            relationships=decode_relationships(
+                records["links.json"], thoughts, brain_id, _refuse, _uuid
+            ),
             documents=tuple(documents),
             assets=tuple(assets),
             original_evidence=tuple(evidence),

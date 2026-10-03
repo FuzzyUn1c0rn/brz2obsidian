@@ -1,6 +1,8 @@
 # 02: Preserve hierarchy and empty thought targets
 
-Status: ready-for-agent
+Status: claimed
+
+Assignee: /root/implement_02
 
 Published: 2026-10-03 after the user approved ticket granularity and blocking dependencies.
 
@@ -30,3 +32,4 @@ Published: 2026-10-03 after the user approved ticket granularity and blocking de
 ## Comments
 
 - 2026-10-03: The user approved the breakdown. This is an implementation ticket in the separate first-version tracker; the completed Wayfinder map is not its parent. All Python packages used for development, builds, and runtime must be installed only in the project virtual environment as needed.
+- 2026-10-03 (/root/implement_02): Claimed after ticket 01 resolved. TDD used the accepted workflow/core/rendering seams. Observed red failures for the empty hierarchy chain, conditional Uncreated listing, naming safety/natural suffix reservation, fallback plan fields, renderer binding, relationship target mappings, and live/deleted overlap; each became green after its implementation slice. `PYTHONPATH=<ticket-02>/src` and the root `.venv/Scripts/python.exe` were used on every Python invocation. Intermediate full-suite result: 36 passed, one expected pending failure for uncreated-target absolute path feasibility. Coordinated `RenderedVault.reserved_paths` with ticket 07 so publication checks future click-to-create paths as well as emitted paths; completion waits for that integration. Native Obsidian review belongs to ticket 10.
