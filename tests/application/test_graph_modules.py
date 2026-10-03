@@ -229,6 +229,18 @@ def test_bounded_names_keep_home_and_seed_markers_without_splitting_unicode():
     assert names["entry"] == "Home — " + "H" * 113 + ".md"
 
 
+def test_exhausted_short_seeds_resolve_by_suffixing_natural_name_contender():
+    facts = snapshot(
+        (item("a", "Foo", "ab"), item("b", "foo", "cd"), item("c", "Foo — ab", "ef"))
+    )
+    names = {
+        t.item_key: t.relative_path for t in plan(analyze(facts, POLICY)).item_targets
+    }
+    assert names["a"] == "Notes/Foo — ab.md"
+    assert names["b"] == "Notes/foo — cd.md"
+    assert names["c"] == "Notes/Foo — ab — ef.md"
+
+
 def test_decorative_assets_labels_and_empty_placeholders_alone_leave_targets_uncreated():
     original = Asset(
         asset_id="empty",

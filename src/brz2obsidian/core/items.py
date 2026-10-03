@@ -80,6 +80,7 @@ def assign_item_targets(analysis, resource_owners=()):
         reasons[chosen] = ("hierarchy",)
     readable = {item.key: _readable(item.title) for item in items}
     widths = {item.key: 0 for item in items}
+    seeds = {item.key: item.naming_seed for item in items}
     while True:
         stems = {
             item.key: _bounded(
@@ -99,8 +100,13 @@ def assign_item_targets(analysis, resource_owners=()):
             if name in SUPPORTING_NAMES:
                 collisions.update(group)
             elif len(group) > 1:
-                suffixed = [key for key in group if widths[key]]
-                collisions.update(suffixed or group)
+                extendable = [
+                    key
+                    for key in group
+                    if widths[key] and widths[key] < len(seeds[key])
+                ]
+                natural = [key for key in group if not widths[key]]
+                collisions.update(extendable or natural or group)
         if not collisions:
             break
         for item in items:
