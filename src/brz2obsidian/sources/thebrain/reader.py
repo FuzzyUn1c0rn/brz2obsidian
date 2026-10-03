@@ -66,7 +66,15 @@ class _PayloadStream:
 
     def __getattr__(self, name):
         value = getattr(self.stream, name)
-        if name not in {"read", "read1", "readinto", "readline", "readlines", "seek"}:
+        if name not in {
+            "read",
+            "read1",
+            "readinto",
+            "readinto1",
+            "readline",
+            "readlines",
+            "seek",
+        }:
             return value
 
         def read(*args, **kwargs):
@@ -92,6 +100,15 @@ class _PayloadStream:
 
     def __exit__(self, *args):
         self.stream.close()
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        line = self.readline()
+        if not line:
+            raise StopIteration
+        return line
 
 
 class BrzSourceModule:
@@ -124,7 +141,18 @@ class BrzSourceModule:
             ) from error
         try:
             yield session
-        finally:
+        except BaseException as error:
+            try:
+                session.close()
+            except MigrationFailed as teardown:
+                if isinstance(error, (MigrationRefused, MigrationFailed)):
+                    raise MigrationFailed(
+                        error.issues + teardown.issues, receipt=error.receipt
+                    ) from error
+                for issue in teardown.issues:
+                    error.add_note(f"{issue.code}: {issue.message}")
+            raise
+        else:
             session.close()
 
 

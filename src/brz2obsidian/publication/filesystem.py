@@ -106,14 +106,15 @@ def publish(
         actual_paths = tuple(
             file.relative_path for file in artifacts.generated_files
         ) + tuple(copy.relative_path for copy in artifacts.copies)
+        assigned_paths = manifest + artifacts.reserved_paths
         normalized = {
-            unicodedata.normalize("NFC", path).casefold() for path in manifest
+            unicodedata.normalize("NFC", path).casefold() for path in assigned_paths
         }
-        if manifest != actual_paths or len(normalized) != len(manifest):
+        if manifest != actual_paths or len(normalized) != len(assigned_paths):
             raise MigrationRefused(
                 (_issue("unsafe_target_path", "Manifest paths are missing or collide"),)
             )
-        for path in manifest:
+        for path in assigned_paths:
             parts = PurePosixPath(path)
             if (
                 parts.is_absolute()

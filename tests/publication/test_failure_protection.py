@@ -413,3 +413,65 @@ def test_source_change_during_staged_validation_is_rechecked_before_commit(
     assert error.value.issues[0].code == "source_changed"
     assert not (tmp_path / "vault").exists()
     assert list(tmp_path.glob(".brz2obsidian-*")) == []
+
+
+@pytest.mark.parametrize(
+    "reserved",
+    [("migration-record.json",), ("folder", "folder/child.md"), ("../escape.md",)],
+)
+def test_uncreated_target_paths_are_reserved_and_validated_with_emitted_files(
+    tmp_path, reserved
+):
+    with BrzSourceModule().open(make_archive(tmp_path / "source.brz")) as session:
+        artifacts = artifacts_for(session).model_copy(
+            update={"reserved_paths": reserved}
+        )
+        with pytest.raises(MigrationRefused) as error:
+            publish(artifacts, session, tmp_path / "vault")
+    assert error.value.issues[0].code == "unsafe_target_path"
+    assert not (tmp_path / "vault").exists()
+
+
+def test_uncreated_target_final_path_uses_240_utf16_unit_limit(tmp_path):
+    with BrzSourceModule().open(make_archive(tmp_path / "source.brz")) as session:
+        artifacts = artifacts_for(session).model_copy(
+            update={"reserved_paths": ("Notes/" + "\U0001f600" * 100 + ".md",)}
+        )
+        with pytest.raises(MigrationRefused) as error:
+            publish(artifacts, session, tmp_path / "vault")
+    assert error.value.issues[0].code == "target_path_too_long"
+    assert not (tmp_path / "vault").exists()
+    assert list(tmp_path.glob(".brz2obsidian-*")) == []
+
+
+def test_public_source_context_preserves_material_diagnostics_when_teardown_fails(
+    tmp_path, monkeypatch
+):
+    import zipfile
+
+    from brz2obsidian.contracts import Issue, MigrationFailed
+
+    original = zipfile.ZipFile.close
+
+    def failing_close(archive):
+        original(archive)
+        raise OSError("Controlled archive close failure")
+
+    source = make_archive(tmp_path / "source.brz")
+    with pytest.raises(MigrationFailed) as error, BrzSourceModule().open(source):
+        monkeypatch.setattr(zipfile.ZipFile, "close", failing_close)
+        raise MigrationRefused(
+            (
+                Issue(
+                    code="material_refusal",
+                    phase="publication",
+                    message="Caller content exists",
+                    guidance="Use fresh vault",
+                ),
+            )
+        )
+    assert [issue.code for issue in error.value.issues] == [
+        "material_refusal",
+        "session_teardown_failure",
+    ]
+    monkeypatch.setattr(zipfile.ZipFile, "close", original)
