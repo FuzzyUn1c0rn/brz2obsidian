@@ -127,6 +127,15 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
     dispositions = {d.rule_id: d for d in policy.finding_dispositions}
     if len(dispositions) != len(policy.finding_dispositions):
         refuse("unsupported_feature", "Reviewed finding dispositions are ambiguous")
+    if any(
+        d.disposition == "warning"
+        and d.issue_code not in {"approved_source_gap", "approved_metadata_discrepancy"}
+        for d in policy.finding_dispositions
+    ):
+        refuse(
+            "unsupported_feature",
+            "A reviewed profile cannot downgrade required refusal codes to warnings",
+        )
     issues = []
     known_evidence = {e.identity for e in entries} | {
         e.key for e in snapshot.original_evidence

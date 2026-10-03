@@ -62,6 +62,8 @@ Generic core matches findings to a compatible reviewed kind/rule/disposition
 and validates their evidence and subjects. Unknown rules/kinds, missing
 evidence and profile incompatibility refuse. There is no generic numeric BRZ
 interpretation or unrestricted warning allowlist.
+Reviewed dispositions can emit warnings only with the two approved warning
+codes; a caller cannot downgrade required refusal codes to warnings.
 
 | Rule | Required evidence | Result |
 | --- | --- | --- |

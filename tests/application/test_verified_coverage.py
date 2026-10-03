@@ -711,3 +711,27 @@ def test_warning_report_order_is_independent_of_attachment_record_order(tmp_path
     assert (tmp_path / "first/MIGRATION REPORT.md").read_bytes() == (
         tmp_path / "second/MIGRATION REPORT.md"
     ).read_bytes()
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "invalid_source",
+        "unsupported_feature",
+        "invalid_reference",
+        "missing_required_payload",
+        "source_changed",
+    ],
+)
+def test_reviewed_policy_cannot_downgrade_stable_error_codes_to_warning(tmp_path, code):
+    with BrzSourceModule().open(
+        write_source(tmp_path, absent_parts(tmp_path))
+    ) as session:
+        snapshot = session.snapshot
+    disposition = BRZ_POLICY.finding_dispositions[0].model_copy(
+        update={"issue_code": code}
+    )
+    policy = BRZ_POLICY.model_copy(update={"finding_dispositions": (disposition,)})
+    with pytest.raises(MigrationRefused) as refused:
+        analyze(snapshot, policy)
+    assert refused.value.issues[0].code == "unsupported_feature"
