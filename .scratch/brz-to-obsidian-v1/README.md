@@ -1,6 +1,10 @@
 # First-version implementation tickets
 
-Status: ready-for-agent
+Status: claimed
+
+Assignee: /root
+
+Integration branch: `codex/brz-to-obsidian-v1`
 
 The accepted [migration specification](spec.md) and [initial folder layout](architecture-layout.md) now live in this implementation area. The [completed Wayfinder map](../brz-to-obsidian/map.md), its resolved decision tickets, and research remain in their original planning area; these implementation slices are not children of that map.
 
