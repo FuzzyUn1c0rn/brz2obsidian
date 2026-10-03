@@ -37,12 +37,35 @@ def _local(target):
 
 class _HtmlReferences(HTMLParser):
     def handle_starttag(self, tag, attrs):
-        if any(
-            name in {"href", "src"} and value and _local(value) for name, value in attrs
-        ):
-            _refuse(
-                "unsupported_feature", "HTML source-local references are not supported"
-            )
+        # The accepted format-5 Markdown includes attribute-free line breaks.
+        # Preserve them verbatim; this does not interpret legacy HTML notes.
+        if tag == "br" and not attrs:
+            return
+        _refuse(
+            "unsupported_feature",
+            "HTML note content is outside reviewed Markdown coverage",
+        )
+
+    def handle_endtag(self, tag):
+        _refuse(
+            "unsupported_feature",
+            "HTML note content is outside reviewed Markdown coverage",
+        )
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+
+    def handle_decl(self, decl):
+        _refuse(
+            "unsupported_feature",
+            "HTML declarations are outside reviewed Markdown coverage",
+        )
+
+    def handle_pi(self, data):
+        _refuse(
+            "unsupported_feature",
+            "HTML processing instructions are outside reviewed Markdown coverage",
+        )
 
 
 def bind_note_references(document, assets, thoughts):

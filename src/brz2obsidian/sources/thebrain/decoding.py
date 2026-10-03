@@ -1,6 +1,7 @@
 """Strict JSON decoding without silent duplicate-key or nonfinite loss."""
 
 import json
+import re
 
 ROOT_FILES = (
     "meta.json",
@@ -35,7 +36,7 @@ def decode_records(name: str, raw: bytes) -> tuple[tuple[dict, ...], str]:
     values = (
         [text]
         if name == "meta.json"
-        else [line for line in text.splitlines() if line.strip()]
+        else [line for line in re.split(r"\r\n|\r|\n", text) if line.strip(" \t")]
     )
     decoded = tuple(
         json.loads(value, object_pairs_hook=pairs, parse_constant=nonfinite)

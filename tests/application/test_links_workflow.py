@@ -75,7 +75,8 @@ def test_local_thought_and_image_links_convert_without_inventing_related_edges(
     assert inspected.counts.actual_references is None
     assert converted.counts.actual_references == 2
     assert record["counts"]["actual_references"] == 2
-    references = record["documents"][0]["references"]
+    home_record = next(t for t in record["item_targets"] if t["item_key"] == HOME)
+    references = home_record["documents"][0]["references"]
     assert [(r["kind"], r["target"]) for r in references] == [
         ("item", TARGET),
         ("image", "aaaaaaaa-0000-4000-8000-000000000001"),
@@ -209,8 +210,9 @@ def test_dotted_collision_target_uses_assigned_path_and_safe_original_alias(tmp_
         "# Entry thought\n\n[[Notes/Topic.v2 — 01234567.md|pipe x]]"
     )
     record = json.loads((vault / "migration-record.json").read_bytes())
-    assert record["documents"][0]["references"][0]["display_text"] == "pipe | [x]"
-    assert record["documents"][0]["references"][0]["expected_original"] == body
+    home_record = next(t for t in record["item_targets"] if t["item_key"] == HOME)
+    assert home_record["documents"][0]["references"][0]["display_text"] == "pipe | [x]"
+    assert home_record["documents"][0]["references"][0]["expected_original"] == body
 
 
 def test_terminal_and_json_results_report_actual_reference_conversions(
