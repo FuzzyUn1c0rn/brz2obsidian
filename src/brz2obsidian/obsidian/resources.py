@@ -1,5 +1,6 @@
 """Ordinary resource links backed by the one planned asset assignment."""
 
+import html
 import re
 from pathlib import PurePosixPath
 
@@ -31,6 +32,14 @@ def resource_section(plan, owner):
         if asset.availability == "external":
             label = re.sub(r"([\\`*_{}<>])", r"\\\1", label)
             lines.append(f"- [{label}](<{target.resource_link}>)")
+            if asset.video_presentation:
+                uri = html.escape(asset.video_presentation.embed_uri, quote=True)
+                lines.append(
+                    '\n<iframe src="'
+                    + uri
+                    + '" width="560" height="315" title="YouTube video player" '
+                    'frameborder="0" allowfullscreen></iframe>\n'
+                )
         else:
             lines.append(f"- [[{target.resource_link}|{label}]]")
     return "## Resources\n\n" + "\n".join(lines) + "\n" if lines else ""

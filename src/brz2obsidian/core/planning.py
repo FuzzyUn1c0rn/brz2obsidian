@@ -185,6 +185,28 @@ def plan(analysis: Analysis) -> MigrationPlan:
             for document in sorted(snapshot.documents, key=lambda d: d.key)
             for index, reference in enumerate(document.references)
             if document.owner in created
+        )
+        + tuple(
+            Adaptation(
+                kind="video_embed",
+                affected=asset.asset_id,
+                description="Native "
+                + asset.video_presentation.provider
+                + " embed derived from validated presentation facts: "
+                + asset.video_presentation.embed_uri
+                + ". The exact original external URI remains the resource link; archived HTML remains source evidence.",
+            )
+            for asset in sorted(snapshot.assets, key=lambda a: a.asset_id)
+            if asset.video_presentation
+        )
+        + tuple(
+            Adaptation(
+                kind="video_timing",
+                affected=asset.asset_id,
+                description=f"Native video start at {asset.video_presentation.start_seconds} seconds from validated source URL timing; original metadata remains independent evidence.",
+            )
+            for asset in sorted(snapshot.assets, key=lambda a: a.asset_id)
+            if asset.video_presentation and asset.video_presentation.start_seconds
         ),
         issues=analysis.issues,
         counts=counts,

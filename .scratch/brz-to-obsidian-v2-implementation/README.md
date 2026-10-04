@@ -34,7 +34,7 @@ Read the accepted [implementation specification](spec.md), [source-feature compa
 
 ## Working the frontier
 
-**Current work: [04: Native templates and maintenance](issues/04-native-templates-maintenance.md) and [07: Native video resources](issues/07-native-video-resources.md), claimed for isolated implementation.** Tickets 01, 02, 03, 05 and 06 are resolved and integrated. Ready-for-agent means specified; blockers still govern when a ticket can start.
+**Current work: [04: Native templates and maintenance](issues/04-native-templates-maintenance.md), claimed for isolated implementation.** Tickets 01, 02, 03, 05, 06 and 07 are resolved and integrated. Ready-for-agent means specified; blockers still govern when a ticket can start.
 
 After 01 resolves, 02, 05, 06 and 07 become eligible. Metadata/icons lead to dashboards (03), native templates (04) and the read-only checker (08). Dashboard ticket 03 enables Bases for its first native check; ticket 04 preserves that configuration and adds Templates. Ticket 09 joins 05, 06, 07 and 08; their transitive prerequisites already include 01–04. The independent full-archive audit (10) follows integration, and native final acceptance (11) follows the audit. Dependencies are acyclic and numbered blockers-first; redundant transitive edges are omitted.
 
@@ -91,6 +91,8 @@ All 82 stories have primary owners below; the individual tickets include additio
 - Publication of these tickets, passing the convention checker or acceptance of the earlier prototype does not satisfy full migration preservation or the final delivery gate. Keep raw private archives, outputs and native evidence ignored; publish aggregate findings and honest limitations.
 
 ## Comments
+
+- 2026-10-05 (/root): Ticket 07 integrated through merger commit f6d3eca, with 490 passing tests and clean lint/format/dependency checks. Its bounded converter-output native video check passed remote playback and the evidenced 18-second offset; players were left paused and all three review Markdown files stayed byte-identical. Ticket 04 continues; the public read-only checker follows its completed native template gate.
 
 - 2026-10-05 (/root): Ticket 03 integrated through merger commit c5881d2, with 445 passing tests and clean lint/format/dependency checks. Its actual synthetic native dashboards passed live-image/provider controls, support exclusions, direct membership discovery and native category rename. Claimed 04; bounded template evidence remains separate from final all-archive acceptance. The user explicitly confirmed f4627d9 as the final full-v2 code-review base.
 
