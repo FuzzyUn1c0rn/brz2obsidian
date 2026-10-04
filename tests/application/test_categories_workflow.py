@@ -74,7 +74,9 @@ def test_inspection_and_conversion_materialize_categories_and_typed_empty_member
     assert (
         (vault / "Categories/Concept.md")
         .read_text(encoding="utf-8")
-        .endswith("# Concept\n\n")
+        .endswith(
+            "# Concept\n\n## Members\n\n![[Templates/Bases/Members.base#Members]]\n\n## Gallery\n\n![[Templates/Bases/Gallery.base#Gallery]]\n"
+        )
     )
     assert not (vault / "Notes/Untyped empty.md").exists()
     record = json.loads((vault / "migration-record.json").read_bytes())
@@ -218,9 +220,9 @@ def test_category_content_resources_graph_tags_and_support_names_are_preserved(
     assert (vault / copied["relative_path"]).read_bytes() == payload
     assert result.counts.actual_notes == 5 and result.counts.actual_assets == 3
     assert (
-        result.counts.planned_support_files == result.counts.actual_support_files == 5
+        result.counts.planned_support_files == result.counts.actual_support_files == 10
     )
-    assert len(record["support_artifacts"]) == 5
+    assert len(record["support_artifacts"]) == 10
     before = {
         p.relative_to(vault): p.read_bytes() for p in vault.rglob("*") if p.is_file()
     }
@@ -306,7 +308,7 @@ def test_typed_cli_matches_read_only_inspection_obligations_and_verified_convers
     assert envelope == expected.model_dump(mode="json", by_alias=True)
     assert envelope["inspection"]["asset_targets"] == []
     assert envelope["inspection"]["documents"] == []
-    assert len(envelope["inspection"]["support_artifacts"]) == 5
+    assert len(envelope["inspection"]["support_artifacts"]) == 10
     assert (
         envelope["receipt"] is None
         and envelope["counts"]["actual_support_files"] is None
@@ -318,7 +320,7 @@ def test_typed_cli_matches_read_only_inspection_obligations_and_verified_convers
     assert (
         converted["counts"]["planned_support_files"]
         == converted["counts"]["actual_support_files"]
-        == 5
+        == 10
     )
     assert main(["convert", str(source), str(tmp_path / "vault"), "--json"]) == 1
     refused = json.loads(capsys.readouterr().out)
@@ -346,7 +348,10 @@ def test_future_support_names_are_reserved_for_imported_definitions(tmp_path, ti
     )
     assert category.original_title == title
     assert category.relative_path == "Categories/" + title + " — 00000000.md"
-    assert "Categories.md" in inspected.inspection.reserved_support_paths
+    assert "Templates/New note.md" in inspected.inspection.reserved_support_paths
+    assert "Categories.md" in {
+        a.relative_path for a in inspected.inspection.support_artifacts
+    }
 
 
 def test_definition_owned_reference_spans_and_payloads_agree_with_inspection(tmp_path):

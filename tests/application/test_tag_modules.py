@@ -55,7 +55,9 @@ def test_native_frontmatter_keeps_yaml_boolean_and_null_names_as_string_tags():
     )
     artifacts = render(plan(analyze(facts, POLICY)), METADATA)
     assert 'tags:\n  - "null"\n  - "true"\n' in generated(artifacts, "Home — Entry.md")
-    assert note_body(generated(artifacts, "Home — Entry.md")) == "# Entry\n\n"
+    assert note_body(generated(artifacts, "Home — Entry.md")) == (
+        "# Entry\n\n## Categories\n\n[[Categories.md|Browse categories]]\n"
+    )
 
 
 def test_numeric_token_created_by_truncation_still_has_a_nonnumeric_prefix():
