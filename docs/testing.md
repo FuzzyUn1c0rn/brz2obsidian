@@ -64,6 +64,15 @@ vaults and UI evidence remain ignored under `brz/`; public reports are aggregate
 
 ## Native review procedure
 
+The [v2 dashboard slice](../.scratch/brz-to-obsidian-v2-implementation/issues/03-native-category-dashboards.md)
+has an earlier bounded native gate on a fresh review copy of an actual synthetic
+converter output. Use valid distinct image payloads and check contextual
+membership, role/support exclusions, table/card images, provider/override edits
+and a native link-preserving category rename. Keep the exact published baseline
+unchanged. Public ZIP/workflow tests check generated obligations and byte
+preservation; the native check verifies Obsidian evaluates those queries and
+images. This early check remains separate from final complete-output acceptance.
+
 After full independent acceptance, make fresh copies of both accepted generated
 vaults and preserve pre-click originals. Open only those copies in standard
 Obsidian and record its observed version. Use original-source candidates joined
