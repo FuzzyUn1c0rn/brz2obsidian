@@ -26,16 +26,24 @@ def test_inspection_plans_and_conversion_accounts_for_native_category_support(tm
         "Templates/Bases/Members.base": "base",
         "Templates/Bases/Gallery.base": "base",
         "Templates/Bases/Categories.base": "base",
+        ".obsidian/templates.json": "configuration",
+        ".obsidian/types.json": "configuration",
+        "Vault guide.md": "guide",
+        "Templates/New note.md": "template",
+        "Templates/Concept.md": "template",
+        "Templates/Category starter.md": "starter",
+        "Templates/Member template starter.md": "starter",
+        "Templates/Bases/Starter.base": "starter",
     }
     assert inspected.outcome == "clean", inspected.issues
     assert {
         a.relative_path: a.purpose for a in inspected.inspection.support_artifacts
     } == expected
-    assert inspected.counts.planned_support_files == 10
+    assert inspected.counts.planned_support_files == 18
     assert inspected.counts.actual_support_files is None
     assert inspected.receipt is None
     assert "Categories.md" not in inspected.inspection.reserved_support_paths
-    assert "Templates/New note.md" in inspected.inspection.reserved_support_paths
+    assert "Templates/New note.md" not in inspected.inspection.reserved_support_paths
     assert sorted(p.name for p in tmp_path.iterdir()) == ["typed.brz"]
 
     vault = tmp_path / "vault"
@@ -43,7 +51,7 @@ def test_inspection_plans_and_conversion_accounts_for_native_category_support(tm
     assert converted.outcome == "clean", converted.issues
     assert converted.receipt.verified and converted.receipt.published
     assert converted.counts.actual_notes == 3
-    assert converted.counts.actual_support_files == 10
+    assert converted.counts.actual_support_files == 18
     record = json.loads((vault / "migration-record.json").read_bytes())
     assert {
         a["relative_path"]: a["purpose"] for a in record["support_artifacts"]

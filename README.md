@@ -98,8 +98,19 @@ remain visible with blank or invalid providers. Category icon changes update
 inherited dashboard images; note-body images are separately editable migration
 snapshots. Declared colours remain metadata. Imported created/updated dates use
 source calendar components, with complete original strings retained as evidence.
-Templates and additional source
-coverage remain tracked in the [implementation index](.scratch/brz-to-obsidian-v2-implementation/README.md).
+Bundled Templates is also enabled, with the Templates folder and ISO date format.
+Create a new note, switch to Editing view, run **Templates: Insert template**,
+and choose the generic New note or the complete template for its category.
+Templates use each assigned category stem under `Templates/`, initialize both
+dates on insertion, leave overrides blank and omit imported source IDs.
+For existing notes, edit `categories` directly: full templates can overwrite
+shared scalar properties, including dates and providers. Maintain `updated`
+explicitly. `Vault guide.md` documents duplicate lookup, canonical properties,
+meaningful entity links, safe editing and the category/member-template/Base
+starters for future categories. This follows the actual kepano manual template
+pattern with contextual queries and collision-safe links; no registry or
+community plugin is required. Additional delivery gates remain tracked in the
+[implementation index](.scratch/brz-to-obsidian-v2-implementation/README.md).
 Original headings, labels and bodies are retained, with supported
 local references adapted to assigned paths. Parents/Children/Related sections
 provide navigation; native Backlinks, Graph and tag search provide discovery

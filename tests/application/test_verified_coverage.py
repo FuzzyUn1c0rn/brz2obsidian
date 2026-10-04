@@ -96,6 +96,9 @@ def test_exact_absent_txt_publishes_warning_with_metadata_and_no_fake_payload(tm
         "issues",
         "counts",
         "obsidian_configuration",
+        "obsidian_core_plugins_configuration",
+        "obsidian_templates_configuration",
+        "obsidian_property_types_configuration",
         "original_evidence",
     }
     asset = next(a for a in record["asset_targets"] if a["asset_id"] == TXT)

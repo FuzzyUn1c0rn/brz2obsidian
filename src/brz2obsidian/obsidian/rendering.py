@@ -24,6 +24,13 @@ from .properties import property_frontmatter
 from .relationships import relationship_sections, uncreated_listing
 from .resources import resource_section
 from .tags import tag_listing, tag_records
+from .templates import (
+    PROPERTY_TYPES,
+    TEMPLATE_CONFIGURATION,
+)
+from .templates import (
+    support_files as template_support_files,
+)
 
 
 def _json(value):
@@ -164,28 +171,29 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         "attachmentFolderPath": "Attachments",
     }
     add(".obsidian/app.json", _json(configuration))
-    add(
-        ".obsidian/core-plugins.json",
-        _json(
-            dict.fromkeys(
-                (
-                    "file-explorer",
-                    "global-search",
-                    "switcher",
-                    "graph",
-                    "backlink",
-                    "tag-pane",
-                    "page-preview",
-                    "command-palette",
-                    "bookmarks",
-                    "properties",
-                    "bases",
-                ),
-                True,
-            )
+    core_plugins = dict.fromkeys(
+        (
+            "file-explorer",
+            "global-search",
+            "switcher",
+            "graph",
+            "backlink",
+            "tag-pane",
+            "page-preview",
+            "command-palette",
+            "bookmarks",
+            "properties",
+            "bases",
+            "templates",
         ),
+        True,
     )
+    add(".obsidian/core-plugins.json", _json(core_plugins))
     for path, content in support_files():
+        add(path, content.encode("utf-8"))
+    add(".obsidian/templates.json", _json(TEMPLATE_CONFIGURATION))
+    add(".obsidian/types.json", _json({"types": PROPERTY_TYPES}))
+    for path, content in template_support_files(plan):
         add(path, content.encode("utf-8"))
     add(
         ".obsidian/bookmarks.json",
@@ -205,6 +213,7 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     report = "# Migration report\n\nOpen the root Home note to begin. Original note bytes are retained under Attachments.\n\n"
     report += f"Created {plan.counts.planned_notes} thought notes; preserved {plan.counts.planned_assets} present payloads.\n\n"
     report += "Unsupported feature classes are refused explicitly.\n"
+    report += "\n[[Vault guide.md|Vault guide]] explains manual full-template selection for new objects, direct membership edits on existing notes, canonical properties and future-category starters. Bundled Templates is configured for insertion-day ISO dates; update dates are maintained explicitly.\n"
     report += (
         "\nOpen [[Categories.md|Categories]] from Home, then a category dashboard "
         "for its native Members table and Gallery. These contextual Bases use the "
@@ -344,6 +353,9 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         "issues": [issue.model_dump() for issue in plan.issues],
         "counts": counts.model_dump(),
         "obsidian_configuration": configuration,
+        "obsidian_core_plugins_configuration": core_plugins,
+        "obsidian_templates_configuration": TEMPLATE_CONFIGURATION,
+        "obsidian_property_types_configuration": {"types": PROPERTY_TYPES},
     }
     # Embed retained JSON directly: decoding/dumping would round large or
     # high-precision numeric source values. Never reconstruct evidence from facts.

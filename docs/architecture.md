@@ -213,11 +213,30 @@ The publisher verifies those obligations before reporting actual support counts.
 `core/support.py` reserves the complete v2 static support namespace before
 imported naming: root overview/guide, generic template and category/member
 starters, member/gallery/overview/starter Bases and required configuration.
-Reserved future paths create no files. All imported created and intentional
+Only unused conditional listing paths remain reserved without files. All imported created and intentional
 uncreated names share the established sanitation, identity-marker collision and
 120-unit stem limits; the publisher includes support reservations in its
 240-unit absolute-path and collision checks. Per-category template paths can
-reuse the already assigned distinct category stems under `Templates/`.
+reuse the already assigned distinct category stems under `Templates/`; their
+planned SupportArtifact obligations drive verified support accounting. The
+generic template, complete category templates and category/member/Base starters
+are generated support rather than imported note counts.
+
+The renderer enables only required native plugins, including Bases/Templates,
+configures `Templates` with ISO date insertion and canonical property types,
+and preserves Home/bookmark/link settings. `obsidian_configuration` retains the
+existing application configuration shape in migration-record schema 2.
+`obsidian_core_plugins_configuration`, `obsidian_templates_configuration` and
+`obsidian_property_types_configuration` explicitly retain the other generated
+configuration dictionaries. Their actual files remain hash/length-manifested.
+
+Templates provide the canonical new-object structure and insertion variables,
+with linked membership/provider for category templates, blank icon/colour
+overrides and no source identity. Manual Templates selection is independent of
+membership-driven Bases; no template/base/vault_role registry exists. Existing
+memberships are edited directly because full native templates can overwrite
+shared scalar fields. `Vault guide.md` documents manual update dates, duplicate
+lookup, meaningful entity links, source/new identity and reference adaptations.
 
 Every exported JSON record/field remains in original evidence independently
 of normalized facts. Consumers needing exact numeric comparisons should use
