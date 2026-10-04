@@ -61,7 +61,7 @@ not fetch or open them.
 | `failed` | 1 | Operational failure |
 
 Text mode prints concise counts, issues and guidance. JSON mode writes one
-version-1 `brz2obsidian.result` envelope to stdout. Unmeasured counts are `null`,
+version-2 `brz2obsidian.result` envelope to stdout. Unmeasured counts are `null`,
 and `receipt` is `null` until actual verified publication. A later teardown
 failure can return `failed` with a retained receipt and `publication_occurred`
 issue: inspect that vault before retrying. Argument errors exit 1; help exits 0.
@@ -74,13 +74,20 @@ the Windows stream encoding. This affects encoding, not the JSON schema.
 
 Open the generated folder in standard Obsidian. The root `Home — <title>.md`
 is the starting note and native Home bookmark; other thought notes are under
-`Notes/`. Original headings, labels and bodies are retained, with supported
+`Notes/`; reviewed thought types become notes under `Categories/`. Each typed
+ordinary member is materialized, including empty members, and receives linked
+`categories` and `appearance_category` properties. Categories retain their own
+authored content/resources; members do not inherit that content. Ordinary links
+and native Backlinks provide category navigation in this first v2 slice. Later
+v2 dashboards, templates, appearance/date presentation and additional source
+coverage remain tracked in the [implementation index](.scratch/brz-to-obsidian-v2-implementation/README.md).
+Original headings, labels and bodies are retained, with supported
 local references adapted to assigned paths. Parents/Children/Related sections
 provide navigation; native Backlinks, Graph and tag search provide discovery
 without community plugins.
 
 Empty thoughts remain distinct intentional uncreated targets unless they need
-files for Home or hierarchy coverage. Click a native link to create one later
+files for Home, a definition, typed membership or hierarchy coverage. Click a native link to create one later
 under its assigned `Notes/` path. That note does not automatically receive
 reciprocal migration sections. Conditional `Uncreated targets.md` and
 `Tag memberships.md` preserve otherwise hidden items/connections/memberships;

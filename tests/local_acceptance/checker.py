@@ -92,6 +92,9 @@ def check_vault(source, vault):
         "asset_targets",
         "relationships",
         "tag_memberships",
+        "classification_assignments",
+        "support_artifacts",
+        "reserved_support_paths",
         "adaptations",
         "source_accounting",
         "issues",
@@ -101,7 +104,7 @@ def check_vault(source, vault):
     }, "migration record schema fields"
     assert (record["schema"], record["schema_version"]) == (
         "brz2obsidian.migration",
-        1,
+        2,
     ), "record schema version"
     with Path(source).open("rb") as stream:
         assert (
@@ -117,7 +120,7 @@ def check_vault(source, vault):
         ), "collection source identity"
         assert (record["profile_id"], record["profile_version"]) == (
             "thebrain-format5-reviewed",
-            "1",
+            "2",
         ), "reviewed source profile"
         originals = {e["key"]: e for e in record["original_evidence"]}
         for name in ROOTS:
@@ -153,7 +156,7 @@ def check_vault(source, vault):
         summary.update(check_assets(raw, record, archive, vault, targets))
         check_accounting(raw, record, checked, references)
         files = check_actual_files(vault, record, targets, names)
-        check_counts(raw, record, summary, references, targets)
+        check_counts(raw, record, summary, references, targets, files)
     return {
         "payloads": len(checked),
         "files": files,
@@ -212,6 +215,19 @@ def expected_names(thoughts, home):
         "migration-record",
         "tag memberships",
         "uncreated targets",
+        "categories",
+        "vault guide",
+        "new note",
+        "category starter",
+        "member template starter",
+        "members",
+        "gallery",
+        "starter",
+        "app",
+        "bookmarks",
+        "core-plugins",
+        "templates",
+        "types",
     }
     for _ in range(10):
         paths = {
@@ -1108,6 +1124,22 @@ def check_actual_files(vault, record, targets, names):
             expected.add(name)
     actual = {p.relative_to(vault).as_posix() for p in vault.rglob("*") if p.is_file()}
     assert actual == expected, "complete actual vault file accounting"
+    support = {
+        ".obsidian/app.json": "configuration",
+        ".obsidian/bookmarks.json": "configuration",
+        "MIGRATION REPORT.md": "report",
+        "migration-record.json": "migration_record",
+    }
+    for name in ("Uncreated targets.md", "Tag memberships.md"):
+        if name in actual:
+            support[name] = "listing"
+    assert {
+        a["relative_path"]: a["purpose"] for a in record["support_artifacts"]
+    } == support, "support artifact accounting"
+    assert len(record["support_artifacts"]) == len(support), (
+        "duplicate support artifact"
+    )
+    assert record["classification_assignments"] == [], "baseline classifications"
     reserved = set(names.values()) | {
         ".obsidian/app.json",
         ".obsidian/bookmarks.json",
@@ -1133,7 +1165,7 @@ def check_actual_files(vault, record, targets, names):
     return len(actual)
 
 
-def check_counts(raw, record, summary, references, targets):
+def check_counts(raw, record, summary, references, targets, files):
     created = {t["item_key"] for t in record["item_targets"] if t["created"]}
     assigned = [r for r in raw["links.json"] if r["Meaning"] == 5]
     native = sum(r["ThoughtIdB"] in created for r in assigned)
@@ -1159,6 +1191,15 @@ def check_counts(raw, record, summary, references, targets):
         "uncreated_tag_memberships": len(assigned) - native,
         "created_tag_items": len(tags & created),
         "uncreated_tag_items": len(tags - created),
+        "source_definitions": 0,
+        "classification_assignments": 0,
+        "typed_members": 0,
+        "planned_category_notes": 0,
+        "actual_category_notes": None,
+        "planned_support_files": files
+        - summary["notes"]
+        - sum(a["availability"] == "present" for a in targets.values()),
+        "actual_support_files": None,
     }
     assert record["counts"] == expected, "independent counts"
 
@@ -1224,6 +1265,8 @@ def check_run_result(result, vault, summary):
         "actual_notes": summary["notes"],
         "actual_assets": summary["payloads"],
         "actual_files": summary["files"],
+        "actual_category_notes": 0,
+        "actual_support_files": record["counts"]["planned_support_files"],
     }
     assert result["counts"] == expected and result["receipt"]["counts"] == expected, (
         "actual result counts"
@@ -1257,6 +1300,6 @@ def check_run_result(result, vault, summary):
     }, "receipt file evidence"
     assert (
         result["operation"] == "convert"
-        and result["schema_version"] == 1
+        and result["schema_version"] == 2
         and result["outcome"] == ("warnings" if summary["warnings"] else "clean")
     ), "result envelope"

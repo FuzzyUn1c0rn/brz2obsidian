@@ -1,6 +1,7 @@
 """Durable source-neutral contracts. No outer implementations or I/O."""
 
 from contextlib import AbstractContextManager
+from datetime import date
 from typing import BinaryIO, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -59,24 +60,56 @@ class ReferenceSpan(Contract):
     destination_end: int | None = None
 
 
+class DeclaredAppearance(Contract):
+    """Owned declarations; raw source encoding remains independent evidence."""
+
+    icon_asset_id: str | None = None
+    foreground_color: str | None = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
+    background_color: str | None = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
+
+
+class CalendarDates(Contract):
+    """Source-encoded calendar components, without timezone conversion."""
+
+    created: date | None = None
+    updated: date | None = None
+
+
+class VideoPresentation(Contract):
+    """Reviewed display facts, independently of the preserved external URI."""
+
+    provider: Literal["youtube"]
+    embed_uri: str
+    start_seconds: int = Field(default=0, ge=0)
+
+
 class Item(Contract):
     key: str
     original_identity: str
     naming_seed: str = Field(pattern=r"^[0-9a-f]+$")
     title: str
     label: str | None = None
-    role: Literal["ordinary", "tag", "system"] = "ordinary"
+    role: Literal["ordinary", "definition", "tag", "system"] = "ordinary"
     live: bool = True
     document_ids: tuple[str, ...] = ()
     resource_ids: tuple[str, ...] = ()
+    declared_appearance: DeclaredAppearance | None = None
+    calendar_dates: CalendarDates | None = None
     evidence: tuple[str, ...] = ()
 
 
 class Relationship(Contract):
     key: str
-    kind: Literal["hierarchy", "related", "tag", "system"]
+    kind: Literal["hierarchy", "related", "tag", "system", "classification"]
     item_a: str
     item_b: str
+    evidence: tuple[str, ...] = ()
+
+
+class ClassificationAssignment(Contract):
+    relationship_key: str
+    definition_key: str
+    item_key: str
     evidence: tuple[str, ...] = ()
 
 
@@ -101,6 +134,7 @@ class Asset(Contract):
     actual_length: int | None = None
     actual_sha256: str | None = None
     external_uri: str | None = None
+    video_presentation: VideoPresentation | None = None
     evidence: tuple[str, ...] = ()
 
 
@@ -135,12 +169,13 @@ class SourceAccounting(Contract):
 
 
 class SourceSnapshot(Contract):
-    contract_version: Literal[1] = 1
+    contract_version: Literal[2] = 2
     identity: SourceIdentity
     collection_title: str
     entry_key: str | None
     items: tuple[Item, ...]
     relationships: tuple[Relationship, ...] = ()
+    classification_assignments: tuple[ClassificationAssignment, ...] = ()
     documents: tuple[Document, ...] = ()
     assets: tuple[Asset, ...] = ()
     original_evidence: tuple[OriginalEvidence, ...] = ()
@@ -164,7 +199,7 @@ class SourcePolicy(Contract):
     module_id: str
     module_version: str
     format_version: str
-    contract_version: Literal[1] = 1
+    contract_version: Literal[2] = 2
     entry_required: bool = True
     finding_dispositions: tuple[FindingDisposition, ...] = ()
 
@@ -187,6 +222,13 @@ class Counts(Contract):
     uncreated_tag_memberships: int | None = None
     created_tag_items: int | None = None
     uncreated_tag_items: int | None = None
+    source_definitions: int | None = None
+    classification_assignments: int | None = None
+    typed_members: int | None = None
+    planned_category_notes: int | None = None
+    actual_category_notes: int | None = None
+    planned_support_files: int | None = None
+    actual_support_files: int | None = None
 
 
 class Analysis(Contract):
@@ -233,6 +275,21 @@ class TagMembership(Contract):
     native: bool
 
 
+class SupportArtifact(Contract):
+    relative_path: str
+    purpose: Literal[
+        "report",
+        "migration_record",
+        "configuration",
+        "listing",
+        "overview",
+        "guide",
+        "template",
+        "base",
+        "starter",
+    ]
+
+
 class MigrationPlan(Contract):
     analysis: Analysis
     source_identity: SourceIdentity
@@ -245,6 +302,8 @@ class MigrationPlan(Contract):
     tag_memberships_path: str | None = None
     isolated_item_keys: tuple[str, ...] = ()
     uncreated_related_pairs: tuple[tuple[str, str], ...] = ()
+    support_artifacts: tuple[SupportArtifact, ...] = ()
+    reserved_support_paths: tuple[str, ...] = ()
     adaptations: tuple[Adaptation, ...] = ()
     issues: tuple[Issue, ...] = ()
     counts: Counts
@@ -279,6 +338,7 @@ class RenderedVault(Contract):
     copies: tuple[CopyEntry, ...]
     manifest: tuple[str, ...]
     reserved_paths: tuple[str, ...] = ()
+    support_artifacts: tuple[SupportArtifact, ...] = ()
     counts: Counts
 
 
@@ -297,8 +357,26 @@ class Receipt(Contract):
     verified: Literal[True] = True
 
 
+class DocumentInspection(Contract):
+    """Durable document obligations without duplicating authored text in results."""
+
+    key: str
+    owner: str
+    text_digest: str
+    original_asset_id: str
+    references: tuple[ReferenceSpan, ...] = ()
+    evidence: tuple[str, ...] = ()
+
+
 class Inspection(Contract):
     item_targets: tuple[ItemTarget, ...]
+    classification_assignments: tuple[ClassificationAssignment, ...] = ()
+    asset_targets: tuple[AssetTarget, ...] = ()
+    assets: tuple[Asset, ...] = ()
+    documents: tuple[DocumentInspection, ...] = ()
+    adaptations: tuple[Adaptation, ...] = ()
+    support_artifacts: tuple[SupportArtifact, ...] = ()
+    reserved_support_paths: tuple[str, ...] = ()
     tag_targets: tuple[TagTarget, ...] = ()
     tag_memberships: tuple[TagMembership, ...] = ()
     tag_memberships_path: str | None = None
@@ -313,7 +391,7 @@ class RunResult(Contract):
     schema_: Literal["brz2obsidian.result"] = Field(
         default="brz2obsidian.result", alias="schema"
     )
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     converter_version: str
     operation: Literal["inspect", "convert"]
     outcome: Literal["clean", "warnings", "refused", "failed"]

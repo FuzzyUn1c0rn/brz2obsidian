@@ -6,6 +6,7 @@ from brz2obsidian.contracts import Adaptation, Analysis, MigrationPlan
 
 from .items import assign_item_targets, select_fallbacks
 from .resources import assign_asset_targets, resource_owners
+from .support import SUPPORT_NAMESPACE, support_artifacts
 from .tags import assign_tags
 
 
@@ -15,7 +16,9 @@ def plan(analysis: Analysis) -> MigrationPlan:
     isolated, related_pairs = select_fallbacks(snapshot, targets)
     asset_targets = assign_asset_targets(snapshot)
     created = {t.item_key for t in targets if t.created}
+    definitions = {i.key for i in snapshot.items if i.role == "definition"}
     tag_targets, tag_memberships, listing_path = assign_tags(snapshot, targets)
+    supporting = support_artifacts(bool(isolated or related_pairs), listing_path)
     tokens = {t.tag_key: t.token for t in tag_targets}
     targets = tuple(
         t.model_copy(update={"vault_tag_token": tokens.get(t.item_key)})
@@ -24,6 +27,8 @@ def plan(analysis: Analysis) -> MigrationPlan:
     counts = analysis.counts.model_copy(
         update={
             "planned_notes": sum(target.created for target in targets),
+            "planned_category_notes": len(created & definitions),
+            "planned_support_files": len(supporting),
             "planned_assets": sum(
                 asset.availability == "present" for asset in snapshot.assets
             ),
@@ -54,6 +59,10 @@ def plan(analysis: Analysis) -> MigrationPlan:
         tag_memberships_path=listing_path,
         isolated_item_keys=isolated,
         uncreated_related_pairs=related_pairs,
+        support_artifacts=supporting,
+        reserved_support_paths=tuple(
+            a.relative_path for a in SUPPORT_NAMESPACE if a not in supporting
+        ),
         adaptations=tuple(
             Adaptation(
                 kind="item_target",

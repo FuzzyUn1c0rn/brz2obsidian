@@ -1,11 +1,32 @@
 # Reusable migration interfaces
 
-`contracts.py` owns version-1 strict, closed, frozen Pydantic values with
+`contracts.py` owns version-2 strict, closed, frozen Pydantic values with
 immutable nested tuples. Generic modules treat identities/keys as opaque;
 source modules supply stable hexadecimal naming seeds. Original JSON is
 independently retained as immutable text and embedded directly in the record,
 preserving numeric precision, raw dates and omitted/null distinctions.
 Sessions and binary streams are scoped outer resources rather than model fields.
+
+Version 2 adds `Item.role="definition"`, `Relationship.kind="classification"`
+and immutable `ClassificationAssignment(relationship_key, definition_key,
+item_key, evidence)` values on `SourceSnapshot.classification_assignments`.
+Every classification relationship must correspond to exactly one assignment;
+members are distinct ordinary items and definitions are live definition items.
+The TheBrain adapter additionally joins each populated `TypeId` to exactly one
+matching exported instance relationship in both directions. These facts remain
+independent of hierarchy and source tags. The core requires contract version 2
+even when both supplied snapshot and policy claim the same older version.
+
+The shared contract reserves optional immutable facts for subsequent v2 slices:
+`Item.declared_appearance` uses `DeclaredAppearance(icon_asset_id,
+foreground_color, background_color)` with normalized `#RRGGBB` colours;
+`Item.calendar_dates` uses `CalendarDates(created, updated)` with Python date
+values, strict JSON date round-tripping and no timezone conversion;
+`Asset.video_presentation` uses `VideoPresentation(provider="youtube", embed_uri,
+start_seconds)` with a nonnegative start. These currently remain `None` in the
+source adapters. Later interpretation must preserve exact raw source encoding,
+timestamps and URLs independently in original evidence; an embed URI never
+replaces an external resource's original URI.
 
 ## Public boundaries
 
@@ -82,7 +103,7 @@ from brz2obsidian.sources.thebrain.profile import BRZ_POLICY
 
 metadata = RunMetadata(
     converter_version="0.1.0",
-    renderer_version="1",
+    renderer_version="2",
     run_id="example-run",
     run_time="2026-10-04T00:00:00+00:00",
     obsidian_version="1.13.7",
@@ -105,23 +126,54 @@ reads time at the outer boundary; callers may inject a metadata factory.
 ## Result and migration-record schemas
 
 `RunResult.model_dump_json(by_alias=True)` exposes `schema="brz2obsidian.result"`,
-`schema_version=1`, `converter_version`, `operation`, `outcome`, `source_identity`,
+`schema_version=2`, `converter_version`, `operation`, `outcome`, `source_identity`,
 `profile_id`, `profile_version`, `counts`, `issues`, `inspection`, `receipt`.
 Unavailable fields/counts are `null`; issues is an array. Inspect returns planned
-item/tag targets and pending checks with no receipt. Convert returns no inspection
+item/tag targets, classification assignments, asset targets/inventory,
+`DocumentInspection` metadata (digests, original asset, traced references and
+evidence, without authored text), adaptations, support artifacts, reserved
+support paths and pending checks with no receipt. These are planned obligations;
+inspection neither renders nor copies files. Convert returns no inspection
 and, after commit, a receipt with actual inventory/counts. The result supports
 `RunResult.model_validate_json(...)` round-tripping.
 
-`migration-record.json` exposes `schema="brz2obsidian.migration"`, version 1,
+`migration-record.json` exposes `schema="brz2obsidian.migration"`, version 2,
 converter/renderer versions, `source_identity`, profile identity, `run_metadata`,
 `original_evidence`, `item_targets`, `asset_targets`, `relationships`,
-`tag_memberships`, `adaptations`, `source_accounting`, `issues`, `counts` and
+`tag_memberships`, `classification_assignments`, `support_artifacts`,
+`reserved_support_paths`, `adaptations`, `source_accounting`, `issues`, `counts` and
 `obsidian_configuration`. Document metadata/digests/references/owner targets
 are nested in item targets' `documents`; original bodies remain in copied
 `.md.original` files. Asset entries include normalized facts, assigned paths or
 external links, `source_findings`, and `retained_documents` for owners without
 ordinary targets. System relationships retain evidence without navigation.
 There is no standalone top-level documents/findings collection.
+
+Schema identities, workflow signatures, existing result fields and outcome/exit
+behavior are retained. The closed shapes have changed explicitly: consumers
+must accept version 2 rather than interpreting it as version 1. The reviewed
+TheBrain module/profile and renderer now use version `2`; BRZ format stays `5`.
+`RunMetadata.renderer_version` must be `2` when invoking the renderer directly.
+The alternate Folio adapter uses the current contracts with empty classification
+and optional appearance/date/video facts, while its source format stays `folio/1`.
+
+Counts add `source_definitions`, `classification_assignments`, `typed_members`,
+`planned_category_notes` / `actual_category_notes` and
+`planned_support_files` / `actual_support_files`. Imported note counts include
+definition and member notes; support counts are separate. Actual publication
+counts remain unavailable until the publisher verifies and commits the files.
+`SupportArtifact(relative_path, purpose)` describes each planned generated
+support file and appears in the plan, rendered vault and migration record.
+The publisher verifies those obligations before reporting actual support counts.
+
+`core/support.py` reserves the complete v2 static support namespace before
+imported naming: root overview/guide, generic template and category/member
+starters, member/gallery/overview/starter Bases and required configuration.
+Reserved future paths create no files. All imported created and intentional
+uncreated names share the established sanitation, identity-marker collision and
+120-unit stem limits; the publisher includes support reservations in its
+240-unit absolute-path and collision checks. Per-category template paths can
+reuse the already assigned distinct category stems under `Templates/`.
 
 Every exported JSON record/field remains in original evidence independently
 of normalized facts. Consumers needing exact numeric comparisons should use
