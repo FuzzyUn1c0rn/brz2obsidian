@@ -24,9 +24,12 @@ Live/deleted identity overlap and ambiguous physical assignments also refuse.
 Unicode separators inside JSON strings remain data; record splitting uses only
 CR/LF. Additional uninterpreted metadata remains evidence.
 
-Thought roles are ordinary Kind 1, tag Kind 4 and retained system Kind 5,
-with ACType 0 and no populated thought/link type IDs or TagIds membership
-arrays. Home is the valid live ordinary thought referenced by the setting whose
+Thought roles are ordinary Kind 1, definition Kind 2, tag Kind 4 and retained
+system Kind 5, with ACType 0. A populated ordinary `TypeId` must identify a live
+definition and agree with exactly one type-to-member instance link; the converse
+is also required. Missing, conflicting, duplicate, wrong-role and dangling
+assignments refuse. Populated `ThoughtTypeId`, custom link IDs, type inheritance
+and TagIds membership arrays remain unsupported. Home is the valid live ordinary thought referenced by the setting whose
 ID is UUIDv5 of BrainId with name `20`. Missing/invalid Home refuses with
 instructions to set Home in TheBrain and re-export.
 
@@ -38,11 +41,13 @@ All reviewed links use Kind 1:
 | Hierarchy to source tag | 1 / 1 / -1 | Ordinary A parent, tag B child |
 | Jump | 3 / 1 / -1, 3, 5 or 7 | Ordinary endpoints; Related |
 | Tag assignment | 1 / 5 / -1 | Tag A classifies ordinary B; native tags or hidden-membership listing |
-| System connection | 1 / 6 / -1 | System A to ordinary/tag B; retained only |
+| Instance assignment | 1 / 2 / -1 | Definition A classifies ordinary B; linked category membership |
+| System connection | 1 / 6 / -1 | System A to ordinary/definition/tag B; retained only |
 
 Original arrow/one-way details remain evidence, while navigation uses simple
 Parents/Children/Related links. Other combinations, including Relation 2/4 or
-Direction 0, are unsupported. After content and Home selection, the greedy
+Direction 0 and subtype Meaning 3, are unsupported. After content, Home,
+definition and typed-member selection, the greedy
 hierarchy cover selects parents covering the most uncovered incident edges,
 with canonical key ties. It preserves cycles/multiple parents and does not
 claim a global minimum.
@@ -78,11 +83,11 @@ reviewed syntax refuse. Observed bare, attribute-free `<br>` Markdown line
 breaks, including `<br/>` spelling, are preserved; literal HTML comments remain
 text. Rich HTML notes and unverified rich/legacy transformations
 are unsupported. Nonempty events/access/custom-field collections and custom
-types also refuse.
+type hierarchies/custom link types also refuse.
 
 ## Approved warnings
 
-The fixed profile `thebrain-format5-reviewed`, version `1`, permits exactly:
+The fixed profile `thebrain-format5-reviewed`, version `2`, currently permits exactly:
 
 Findings must have the reviewed kind, compatible rule/profile, subject and
 evidence. Missing evidence and unknown kinds refuse; generic core contains no

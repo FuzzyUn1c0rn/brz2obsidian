@@ -7,14 +7,15 @@ from .relationships import note_link
 
 def tag_frontmatter(plan, item_key):
     tokens = {t.tag_key: t.token for t in plan.tag_targets}
-    assigned = sorted(
-        {
-            tokens[m.tag_key]
-            for m in plan.tag_memberships
-            if m.item_key == item_key and m.native
-        },
-        key=str.casefold,
-    )
+    assigned = {
+        tokens[m.tag_key]
+        for m in plan.tag_memberships
+        if m.item_key == item_key and m.native
+    }
+    item = next(i for i in plan.analysis.snapshot.items if i.key == item_key)
+    if item.role == "definition":
+        assigned.add("categories")
+    assigned = sorted(assigned, key=str.casefold)
     return (
         "---\ntags:\n"
         + "".join(

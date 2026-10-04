@@ -25,6 +25,7 @@ from brz2obsidian.contracts import (
 )
 
 from .attachments import normalize_attachments
+from .classifications import decode_classifications
 from .decoding import ROOT_FILES, decode_records
 from .relationships import decode_relationships
 from .semantics import validate_semantic_fields
@@ -298,7 +299,7 @@ class BrzSession:
         thoughts = {}
         for record in thought_records:
             key = _uuid(record["Id"])
-            validate_semantic_fields(record, _refuse)
+            validate_semantic_fields(record, _refuse, known_type_fields=("TypeId",))
             if "TagIds" in record and type(record["TagIds"]) is not list:
                 _refuse("invalid_source", "TagIds must be an array", (key,))
             if record.get("Aliases"):
@@ -314,16 +315,15 @@ class BrzSession:
                 )
             if (
                 type(record.get("Kind")) is not int
-                or record["Kind"] not in {1, 4, 5}
+                or record["Kind"] not in {1, 2, 4, 5}
                 or type(record.get("ACType", 0)) is not int
                 or record.get("ACType", 0) != 0
                 or record.get("TagIds")
                 or record.get("ThoughtTypeId")
-                or record.get("TypeId")
             ):
                 _refuse(
                     "unsupported_feature",
-                    "Only reviewed ordinary, tag and system roles without custom types are supported",
+                    "Only reviewed ordinary, type, tag and system roles are supported",
                 )
             if type(record.get("Name")) is not str or (
                 record.get("Label") is not None and type(record["Label"]) is not str
@@ -391,7 +391,9 @@ class BrzSession:
                 naming_seed=key.replace("-", ""),
                 title=record["Name"],
                 label=record.get("Label"),
-                role={1: "ordinary", 4: "tag", 5: "system"}[record["Kind"]],
+                role={1: "ordinary", 2: "definition", 4: "tag", 5: "system"}[
+                    record["Kind"]
+                ],
                 document_ids=tuple(d.key for d in documents if d.owner == key),
                 resource_ids=tuple(
                     a.asset_id
@@ -408,19 +410,22 @@ class BrzSession:
         identity = SourceIdentity(
             source_id=brain_id,
             module_id="thebrain-brz",
-            module_version="1",
+            module_version="2",
             format_version="5",
             source_sha256=source_hash,
             snapshot_digest=snapshot_digest,
         )
+        relationships = decode_relationships(
+            records["links.json"], thoughts, brain_id, _refuse, _uuid
+        )
+        assignments = decode_classifications(thoughts, relationships, _refuse, _uuid)
         return SourceSnapshot(
             identity=identity,
             collection_title=meta.get("Name", "TheBrain collection"),
             entry_key=entry,
             items=items,
-            relationships=decode_relationships(
-                records["links.json"], thoughts, brain_id, _refuse, _uuid
-            ),
+            relationships=relationships,
+            classification_assignments=assignments,
             documents=tuple(documents),
             assets=tuple(assets),
             original_evidence=tuple(evidence),

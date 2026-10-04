@@ -15,11 +15,12 @@ from brz2obsidian.contracts import (
 )
 from brz2obsidian.core.references import validate_references
 
+from .categories import category_frontmatter, classification_records
 from .documents import render_document
 from .markdown import append_boundary
 from .relationships import relationship_sections, uncreated_listing
 from .resources import resource_section
-from .tags import tag_frontmatter, tag_listing, tag_records
+from .tags import tag_listing, tag_records
 
 
 def _json(value):
@@ -28,6 +29,21 @@ def _json(value):
 
 def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     snapshot = plan.analysis.snapshot
+    if (
+        run_metadata.renderer_version != "2"
+        or snapshot.contract_version != 2
+        or plan.analysis.policy.contract_version != 2
+    ):
+        raise MigrationRefused(
+            (
+                Issue(
+                    code="unsupported_format",
+                    phase="rendering",
+                    message="Renderer requires version-2 contracts and renderer metadata",
+                    guidance="Use the current contract and set renderer_version to 2.",
+                ),
+            )
+        )
     if plan.source_identity != snapshot.identity:
         raise MigrationRefused(
             (
@@ -68,7 +84,7 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
             continue
         item = items[target.item_key]
         heading = re.sub(r"([\\`*_{}\[\]<>#])", r"\\\1", item.title)
-        text = tag_frontmatter(plan, item.key) + "# " + heading + "\n\n"
+        text = category_frontmatter(plan, item.key) + "# " + heading + "\n\n"
         if item.label:
             text += item.label + "\n\n"
         for index, key in enumerate(item.document_ids):
@@ -170,7 +186,7 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     }
     record = {
         "schema": "brz2obsidian.migration",
-        "schema_version": 1,
+        "schema_version": 2,
         "converter_version": run_metadata.converter_version,
         "renderer_version": run_metadata.renderer_version,
         "source_identity": plan.source_identity.model_dump(),
@@ -220,11 +236,15 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
                     "related": "Related",
                     "tag": "native tags",
                     "system": "retained_only",
+                    "classification": "linked category membership",
                 }[relation.kind],
             )
             for relation in snapshot.relationships
         ],
         "tag_memberships": tag_records(plan),
+        "classification_assignments": classification_records(plan),
+        "support_artifacts": [a.model_dump() for a in plan.support_artifacts],
+        "reserved_support_paths": list(plan.reserved_support_paths),
         "adaptations": [value.model_dump() for value in plan.adaptations],
         "source_accounting": snapshot.accounting.model_dump(),
         "issues": [issue.model_dump() for issue in plan.issues],
@@ -253,6 +273,20 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     manifest = tuple(file.relative_path for file in files) + tuple(
         copy.relative_path for copy in copies
     )
+    generated_support = {f.relative_path for f in files} - {
+        t.relative_path for t in plan.item_targets if t.created
+    }
+    if generated_support != {a.relative_path for a in plan.support_artifacts}:
+        raise MigrationRefused(
+            (
+                Issue(
+                    code="invalid_source",
+                    phase="rendering",
+                    message="Generated support differs from planned artifact obligations",
+                    guidance="Plan all generated support artifacts before rendering.",
+                ),
+            )
+        )
     return RenderedVault(
         source_identity=plan.source_identity,
         renderer_version=run_metadata.renderer_version,
@@ -261,7 +295,9 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         manifest=manifest,
         reserved_paths=tuple(
             t.relative_path for t in plan.item_targets if not t.created
-        ),
+        )
+        + plan.reserved_support_paths,
+        support_artifacts=plan.support_artifacts,
         counts=counts,
     )
 

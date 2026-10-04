@@ -29,10 +29,11 @@ from brz2obsidian.contracts import (
 
 FOLIO_POLICY = SourcePolicy(
     profile_id="synthetic-folio-reviewed",
-    profile_version="1",
+    profile_version="2",
     module_id="synthetic-folio",
-    module_version="1",
+    module_version="2",
     format_version="folio/1",
+    contract_version=2,
 )
 
 
@@ -91,6 +92,7 @@ class FolioSession:
                 else None,
                 external_uri=a.get("uri"),
                 evidence=("folio.json",),
+                video_presentation=None,
             )
             for a in data["assets"]
         )
@@ -123,6 +125,8 @@ class FolioSession:
                 role=i.get("role", "ordinary"),
                 document_ids=tuple(d.key for d in documents if d.owner == i["key"]),
                 resource_ids=tuple(a.asset_id for a in assets if a.owner == i["key"]),
+                declared_appearance=None,
+                calendar_dates=None,
                 evidence=("folio.json",),
             )
             for i in data["entries"]
@@ -133,12 +137,13 @@ class FolioSession:
         identity = SourceIdentity(
             source_id=data["collection"],
             module_id="synthetic-folio",
-            module_version="1",
+            module_version="2",
             format_version="folio/1",
             source_sha256=digest(raw),
             snapshot_digest="",
         )
         snapshot = SourceSnapshot(
+            contract_version=2,
             identity=identity,
             collection_title=data["collection"],
             entry_key=data["start"],
@@ -146,6 +151,7 @@ class FolioSession:
             documents=tuple(documents),
             assets=assets,
             relationships=relationships,
+            classification_assignments=(),
             findings=tuple(
                 SourceFinding(
                     **{key: value for key, value in f.items() if key != "affected"},

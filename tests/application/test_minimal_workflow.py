@@ -40,7 +40,7 @@ def test_minimal_brain_inspects_then_converts_into_verified_home(tmp_path):
     ).read_bytes() == b"# Entry thought\n\nAuthored body.\r\n"
     record = json.loads((destination / "migration-record.json").read_bytes())
     assert record["schema"] == "brz2obsidian.migration"
-    assert record["schema_version"] == 1
+    assert record["schema_version"] == 2
     assert record["original_evidence"][0]["records"][0]["Uninterpreted"] == {
         "nullable": None,
         "number": 1.5,
