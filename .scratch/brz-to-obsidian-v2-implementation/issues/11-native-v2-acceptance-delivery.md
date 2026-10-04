@@ -1,0 +1,45 @@
+# 11: Accept actual v2 vaults in Obsidian and finish delivery guidance
+
+Status: ready-for-agent
+
+Labels: ready-for-agent
+
+Published: 2026-10-04 after the user approved the 11-slice breakdown and dependencies.
+
+**Specification:** [Version 2 implementation specification](../spec.md)
+
+**Implementation set:** [Version 2 implementation index](../README.md)
+
+**Source-feature comparison:** [Accepted representations and limitations](../source-feature-mapping.md)
+
+**What to build:** The user reviews the actual independently verified vaults in standard Obsidian and receives the final installation, library/CLI, maintenance and limitations guidance for a finished v2.
+
+**Blocked by:** [10: Independently verify complete preservation across all three real archives](10-three-archive-preservation.md).
+
+**Specification stories:** 1–82, with final acceptance ownership for 34–51, 56–60, 66–72, 79–82.
+
+## Acceptance criteria
+
+- [ ] Preserve audited outputs and perform Computer checks on fresh review copies of all three actual full converter outputs, recording the real application version and private native evidence.
+- [ ] Verify Home/bookmark/overview, representative complete category membership, Members/Gallery, Icon-before-Note with no Appearance display, inherited/overridden/blank/invalid-provider behavior and separately editable body icons.
+- [ ] Exercise native full-template insertion/date initialization on new notes, direct existing-note membership edits, link-preserving category rename with contextual discovery, stable identity and shortened links, plus future-category/manual membership discovery.
+- [ ] Review the unusual Markdown/local image, intact PDFs, URL/embed/timing and accepted Search/remote limits, along with earlier source tags, hierarchy, resources, Backlinks, Graph and intentional uncreated targets.
+- [ ] Run the public checker on representative valid/invalid edits and explain that it reports without repair or source-preservation claims. Leave original vaults/Brains unchanged and remote playback paused.
+- [ ] Finish the accurate installation/environment, library/CLI/schema, property/template/rename/checker, reference-adaptation, source-feature and native-review guidance; do not present prototypes or accepted limitations as equivalent source functionality.
+- [ ] Complete an independent specification/standards review and final applicable public/tooling/acceptance checks, with no unresolved in-scope defects. Obtain and record the user's actual converted-vault verdict before declaring v2 finished; repairs repeat affected automatic, independent and native evidence.
+
+## Testing boundaries
+
+Computer review of actual audited outputs, read-only checker behavior on review copies, final public/tooling gates and independent implementation review. Native inspection remains representative; independent audit establishes complete preservation.
+
+Prefer public inspect/convert workflow calls over private helpers, with actual synthetic archives and temporary vaults. Thin CLI checks verify observable output and exit codes. The vault checker uses its public library/command seam. Focused existing public source, core, renderer and publisher boundaries remain available where the criterion requires precise evidence or failure injection. Native review checks converter-produced output and does not replace independent preservation auditing. Use the specification's Testing Decisions for the complete agreed boundaries.
+
+## Standing constraints and completion
+
+Use the accepted specification, source-feature comparison, domain vocabulary and source-neutral architecture. Use the project virtual environment for Python, packages and tooling. Public automated fixtures are synthetic; real archives, extracted content, vaults and native screenshots stay private. Preserve strict inward contracts, exact source evidence and bytes, deterministic identity/naming and fresh-destination safety. Run applicable cumulative public checks and record the result rather than weakening earlier behavior checks. Early slices demonstrate their own supported subset; full Software Engineering support and finished-v2 acceptance require the later delivery gates.
+
+Follow the [local claim and completion process](../../../docs/agents/issue-tracker.md#implementation-operations), [domain glossary](../../../GLOSSARY.md) and [accepted architecture decision](../../../docs/adr/0001-source-neutral-core.md). Claim only after all linked blockers are resolved; save the claim and assignee before implementation. Check each acceptance box only after its criterion passes, record evidence and material limits under Comments, and resolve only when every criterion is satisfied.
+
+## Comments
+
+- 2026-10-04 (/root): Published from the user-approved to-tickets breakdown. Dependencies are local to this implementation set; planning ticket numbers are not implementation blockers. No implementation has started and no acceptance criterion is marked complete.
