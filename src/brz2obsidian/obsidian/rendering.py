@@ -222,6 +222,8 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         for a in snapshot.assets
     ):
         report += "\nPDF files are preserved and can be opened in Obsidian. Vault Search does not search PDF body text; this conversion does not extract or index it, or reproduce TheBrain's PDF body search.\n"
+    if any(a.video_presentation for a in snapshot.assets):
+        report += "\nVideo playback depends on the remote service and network. Offline playback and service availability are not guaranteed. The original resource links remain available; no remote video bytes were archived or downloaded by this conversion.\n"
     if plan.issues:
         report += "\n## Source warnings\n\n"
         for issue in plan.issues:

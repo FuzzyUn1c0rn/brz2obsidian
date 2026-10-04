@@ -16,6 +16,7 @@ from brz2obsidian.contracts import (
 from .findings import ABSENT_TXT_RULE, ICON_LENGTH_RULE, ZERO_LENGTH_ABSENT_TXT_RULE
 from .notes import bind_note_references, trace_note_references
 from .semantics import validate_semantic_fields
+from .videos import reviewed_video
 
 SPECIAL_FLAGS = (
     "IsBrainAttachment",
@@ -112,6 +113,7 @@ def normalize_attachments(archive, records, meta, thoughts, refuse, uuid):
             "display_name": record.get("Name"),
             "evidence": (pointer,),
         }
+        video = reviewed_video(record, refuse)
         if kind in {3, 8}:
             if asset_id in states:
                 refuse(
@@ -151,6 +153,7 @@ def normalize_attachments(archive, records, meta, thoughts, refuse, uuid):
                     role="url" if kind == 3 else "directory",
                     availability="external",
                     external_uri=uri,
+                    video_presentation=video,
                 )
             )
             continue

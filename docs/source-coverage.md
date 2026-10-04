@@ -85,7 +85,7 @@ Thought-owned attachments use SourceType 2:
 | --- | --- |
 | 1 / 4 | Thought Markdown at owner/Location; active content plus exact `.md.original` backup |
 | 1 / 0 | Ordinary file, except a sole nonempty canonical `Notes.md` on an ordinary thought: active Markdown plus exact original backup. Empty decoded placeholders remain backups without content eligibility. |
-| 3 / 0 | External HTTP/HTTPS URL reference |
+| 3 / 0 | Exact external HTTP/HTTPS URL reference; populated reviewed YouTube metadata adds independently derived native video presentation |
 | 5 / 0 | Decorative icon at owner/.data/Location; copied without Resources clutter |
 | 8 / 0 | Absolute Windows directory reference rendered as file URI |
 | 12 / 0 | Markdown image at owner/.data/md-images/Location; inline when referenced, otherwise Resources |
@@ -104,6 +104,25 @@ content does not by itself materialize an otherwise empty owner; its original
 backup survives. Arbitrary Markdown files are resources rather than active
 thought notes. The numeric marker is not interpreted as UI selection state.
 External resources are never fetched.
+
+Populated `VideoHtml` is accepted only for the reviewed zero-length external URL
+role: an HTTPS `www.youtube.com/watch` URL with one 11-character `v` identity and
+optional integer-seconds `t` value ending in `s`, plus the reviewed single iframe
+metadata form with a matching YouTube identity and baseline `start=0`. Other
+providers, metadata markup/attributes, extra query semantics, conflicting
+identities or nonbaseline metadata starts refuse. Empty/null/omitted metadata
+does not infer a video from an ordinary URL.
+
+The original URL spelling/query and complete raw metadata survive independently.
+Obsidian receives a fresh fixed iframe generated only from validated provider,
+identity and timing facts beside the exact original clickable link. A URL such as
+`t=18s` becomes the separate derived embed's `start=18`, even though the retained
+archive metadata says `start=0`; the native embed and timing adaptations are
+accounted separately in inspection and the migration record. Archived HTML is
+never copied into active note content or executed by inspection/conversion.
+No local video payload is invented or downloaded. One report paragraph explains
+remote service/network/offline dependence outside individual source-gap warnings;
+an unavailable remote preview does not mean archived bytes are missing.
 
 Supported active local syntax is inline `[label](brain://<compact-id>/<suffix>)`
 and `![alt](.data/md-images/<location>)`; compact GUIDs use .NET bytes_le
