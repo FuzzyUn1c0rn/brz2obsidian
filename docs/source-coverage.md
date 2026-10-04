@@ -52,6 +52,31 @@ hierarchy cover selects parents covering the most uncovered incident edges,
 with canonical key ties. It preserves cycles/multiple parents and does not
 claim a global minimum.
 
+## Imported metadata and icon snapshots
+
+Created ordinary thoughts, definitions and authored/resource-bearing source tags
+share the canonical linked property core and paired original identities. Their
+`created` and `updated` properties use valid encoded calendar dates from
+`CreationDateTime` and overall `ModificationDateTime`; source timestamps retain
+full precision independently, without timezone conversion. Missing/null/empty
+dates remain empty, while invalid populated timestamps refuse. Display/file/note
+modification timestamps remain uninterpreted evidence rather than update-date
+fallbacks.
+
+One owned Type-5 icon supplies an explicit local-image property. A typed member
+without one keeps its override blank and receives its category's effective icon
+as an initial editable body snapshot. Each icon is copied once, including icons
+whose untyped owner remains uncreated; decorative icons never become Resources.
+Multiple owned icon declarations refuse because a single displayed override
+would otherwise require an unevidenced selection. Each item's own label survives;
+type labels are not synthesized on members and `ThoughtIconInfo` remains opaque.
+
+Declared integer `ForegroundColor`/`BackgroundColor` values in the reviewed
+signed opaque ARGB range (`-16777216` through `-1`) normalize to `#RRGGBB`.
+Other encodings refuse instead of inventing alpha/channel meaning. Declared
+values remain distinct from inheritance and raw numeric evidence survives.
+These colours are preserved metadata; no decorative Appearance display is added.
+
 ## Notes and resources
 
 Thought-owned attachments use SourceType 2:

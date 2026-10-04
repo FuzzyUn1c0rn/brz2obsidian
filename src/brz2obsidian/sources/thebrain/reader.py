@@ -27,6 +27,7 @@ from brz2obsidian.contracts import (
 from .attachments import normalize_attachments
 from .classifications import decode_classifications
 from .decoding import ROOT_FILES, decode_records
+from .metadata import calendar_dates, declared_appearance
 from .relationships import decode_relationships
 from .semantics import validate_semantic_fields
 
@@ -391,6 +392,8 @@ class BrzSession:
                 naming_seed=key.replace("-", ""),
                 title=record["Name"],
                 label=record.get("Label"),
+                calendar_dates=calendar_dates(record, _refuse),
+                declared_appearance=declared_appearance(record, assets, _refuse),
                 role={1: "ordinary", 2: "definition", 4: "tag", 5: "system"}[
                     record["Kind"]
                 ],

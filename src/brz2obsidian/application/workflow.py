@@ -122,6 +122,7 @@ class Workflow:
                             adaptations=migration_plan.adaptations,
                             support_artifacts=migration_plan.support_artifacts,
                             reserved_support_paths=migration_plan.reserved_support_paths,
+                            icon_snapshots=migration_plan.icon_snapshots,
                             tag_targets=migration_plan.tag_targets,
                             tag_memberships=migration_plan.tag_memberships,
                             tag_memberships_path=migration_plan.tag_memberships_path,

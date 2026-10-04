@@ -17,16 +17,43 @@ matching exported instance relationship in both directions. These facts remain
 independent of hierarchy and source tags. The core requires contract version 2
 even when both supplied snapshot and policy claim the same older version.
 
-The shared contract reserves optional immutable facts for subsequent v2 slices:
+The shared contract includes optional immutable destination-independent facts:
 `Item.declared_appearance` uses `DeclaredAppearance(icon_asset_id,
 foreground_color, background_color)` with normalized `#RRGGBB` colours;
 `Item.calendar_dates` uses `CalendarDates(created, updated)` with Python date
 values, strict JSON date round-tripping and no timezone conversion;
 `Asset.video_presentation` uses `VideoPresentation(provider="youtube", embed_uri,
-start_seconds)` with a nonnegative start. These currently remain `None` in the
-source adapters. Later interpretation must preserve exact raw source encoding,
-timestamps and URLs independently in original evidence; an embed URI never
-replaces an external resource's original URI.
+start_seconds)` with a nonnegative start. The TheBrain adapter now supplies
+declared appearance and dates. It recognizes one owned decorative icon,
+normalizes only the reviewed signed opaque ARGB colour range, and derives
+calendar components from valid creation/overall-modification timestamps without
+timezone conversion. Missing/null/empty dates remain empty; invalid populated
+dates and unreviewed colour encodings refuse. Exact source values and omitted/null
+distinctions remain in independent original evidence. Video interpretation is a
+later slice; an embed URI never replaces an external resource's original URI.
+
+`MigrationPlan.icon_snapshots` and read-only `Inspection.icon_snapshots` contain
+immutable `IconSnapshot(item_key, explicit_icon_asset_id,
+appearance_category_key, effective_icon_asset_id)` decisions for created notes.
+An owned icon wins; otherwise the validated classification supplies its
+definition's icon. The renderer rejects altered snapshot obligations. The
+generated member `icon` property remains empty when using a category default;
+the body receives a separately editable reference to the effective image.
+Each source image is copied once through its existing ownership/path assignment,
+and decorative images remain outside Resources. Untyped icon-only items remain
+uncreated under the existing selection policy.
+
+All imported item notes, including materialized source tags and definitions,
+receive the canonical core: linked `categories`, optional single
+`appearance_category` and local-image `icon`, declared `foreground_color` and
+`background_color`, optional `created`/`updated`, native `tags`/`aliases` lists,
+and paired opaque `source_collection_id`/`source_item_id`. Native scalar links
+and identity strings use JSON quoting, which is safe YAML; dates use ISO
+calendar spelling. Aliases and semantic properties are not inferred from prose.
+Source tags retain their independent native adaptation. Migration item records
+retain declared appearance, normalized dates, original metadata evidence and
+snapshot decisions; adaptations distinguish these generated additions from
+authored content and full source evidence. Migration run time remains separate.
 
 ## Public boundaries
 
