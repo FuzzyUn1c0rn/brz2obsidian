@@ -5,6 +5,7 @@ import pytest
 
 from brz2obsidian.application.wiring import default_workflow
 from tests.application.test_resources_workflow import HOME, resource_archive, thought
+from tests.support.notes import note_body
 
 TARGET = "01234567-89ab-4cde-8f01-23456789abcd"
 COMPACT = "Z0UjAauJ3kyPASNFZ4mrzQ"
@@ -58,7 +59,7 @@ def test_local_thought_and_image_links_convert_without_inventing_related_edges(
     vault = tmp_path / "vault"
     converted = workflow.convert(source, vault)
     assert converted.outcome == "clean"
-    assert (vault / "Home — Entry thought.md").read_bytes() == (
+    assert note_body((vault / "Home — Entry thought.md").read_bytes()) == (
         b"# Entry thought\n\nBefore\r\n[[Notes/Topic.v2.md|Topic]]\r\n"
         b"![photo](Attachments/22222222/photo.png)\r\nAfter\r"
     )
@@ -124,11 +125,11 @@ def test_image_paths_are_relative_encoded_and_preserve_alt_title_and_external_te
     expected_alt = ".data/md-images/A%20photo%20(%C3%A9).png"
     home = (vault / "Home — Entry thought.md").read_bytes().decode()
     note = (vault / "Notes/Topic.v2.md").read_bytes().decode()
-    assert home.startswith(
+    assert note_body(home).startswith(
         f'# Entry thought\n\n![{expected_alt}](Attachments/22222222/A%20photo%20%28%C3%A9%29.png "Caption")\r\n![remote](https://example.invalid/x.png)\r'
     )
     assert (
-        note
+        note_body(note)
         == f'# Topic.v2\n\n![{expected_alt}](../Attachments/01234567/A%20photo%20%28%C3%A9%29.png "Caption")\r\n![remote](https://example.invalid/x.png)\r'
     )
     assert "[[Attachments/22222222/extra.png|extra.png]]" in home
@@ -152,7 +153,7 @@ def test_complete_workflow_span_gate_preserves_all_nonadapted_text_and_newlines(
     vault = tmp_path / "vault"
     result = default_workflow().convert(source, vault)
     assert result.outcome == "clean"
-    assert (vault / "Home — Entry thought.md").read_bytes().decode() == (
+    assert note_body((vault / "Home — Entry thought.md").read_bytes().decode()) == (
         "# Entry thought\n\nprefix\u2028[[Notes/Topic.v2.md|one]]\r\n"
         "> - [[Notes/Topic.v2.md|two bold]] and [[Notes/Topic.v2.md|escaped end]]\r"
         "- paragraph\n\t[[Notes/Topic.v2.md|one]]\n\n"
@@ -206,7 +207,7 @@ def test_dotted_collision_target_uses_assigned_path_and_safe_original_alias(tmp_
     vault = tmp_path / "vault"
     result = default_workflow().convert(source, vault)
     assert result.outcome == "clean"
-    assert (vault / "Home — Entry thought.md").read_bytes().decode() == (
+    assert note_body((vault / "Home — Entry thought.md").read_bytes().decode()) == (
         "# Entry thought\n\n[[Notes/Topic.v2 — 01234567.md|pipe x]]"
     )
     record = json.loads((vault / "migration-record.json").read_bytes())

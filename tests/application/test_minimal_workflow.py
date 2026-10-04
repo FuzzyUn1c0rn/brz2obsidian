@@ -6,6 +6,12 @@ from zipfile import ZipFile
 from brz2obsidian.application.wiring import default_workflow
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "minimal"
+PROPERTIES = (
+    b"---\ncategories: []\nappearance_category:\nicon:\nforeground_color:\n"
+    b"background_color:\ncreated: 2026-10-03\nupdated:\ntags: []\naliases: []\n"
+    b'source_collection_id: "11111111-1111-4111-8111-111111111111"\n'
+    b'source_item_id: "22222222-2222-4222-8222-222222222222"\n---\n\n'
+)
 
 
 def make_archive(path, *, empty=False):
@@ -37,7 +43,7 @@ def test_minimal_brain_inspects_then_converts_into_verified_home(tmp_path):
     assert converted.receipt.destination == str(destination.resolve())
     assert (
         destination / "Home — Entry thought.md"
-    ).read_bytes() == b"# Entry thought\n\nAuthored body.\r\n"
+    ).read_bytes() == PROPERTIES + b"# Entry thought\n\nAuthored body.\r\n"
     record = json.loads((destination / "migration-record.json").read_bytes())
     assert record["schema"] == "brz2obsidian.migration"
     assert record["schema_version"] == 2
@@ -70,7 +76,7 @@ def test_empty_home_is_materialized_and_existing_destination_is_protected(tmp_pa
     assert first.outcome == "clean"
     assert (
         destination / "Home — Entry thought.md"
-    ).read_bytes() == b"# Entry thought\n\n"
+    ).read_bytes() == PROPERTIES + b"# Entry thought\n\n"
     before = {
         p.relative_to(destination).as_posix(): p.read_bytes()
         for p in destination.rglob("*")

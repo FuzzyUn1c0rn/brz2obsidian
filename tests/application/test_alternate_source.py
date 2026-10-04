@@ -18,6 +18,7 @@ from brz2obsidian.sources.thebrain import BrzSourceModule
 from brz2obsidian.sources.thebrain.profile import BRZ_POLICY
 from tests.application.test_module_seams import METADATA
 from tests.support.folio_source import FOLIO_POLICY, FolioSourceModule
+from tests.support.notes import note_body
 from tests.support.paired_sources import paired_sources
 
 
@@ -72,7 +73,16 @@ def test_opaque_source_and_real_brz_publish_corresponding_vaults(tmp_path, capsy
         "Attachments/00000001/manual.bin",
         "Attachments/00000006/Notes.md.original",
     ):
-        assert (vaults[0] / name).read_bytes() == (vaults[1] / name).read_bytes()
+        a, b = (vaults[0] / name).read_bytes(), (vaults[1] / name).read_bytes()
+        if name in {"Home — Opening.md", "Notes/Middle.md", "Notes/Focus.md"}:
+            assert note_body(a) == note_body(b)
+            for index, data in enumerate((a, b)):
+                assert (
+                    json.dumps(results[index].source_identity.source_id).encode()
+                    in data
+                )
+        else:
+            assert a == b
     records = [json.loads((v / "migration-record.json").read_bytes()) for v in vaults]
     assert {t["item_key"] for t in records[1]["item_targets"]} == {
         "entry:opening",
@@ -121,7 +131,7 @@ def test_opaque_source_and_real_brz_publish_corresponding_vaults(tmp_path, capsy
             ("Home — Opening.md", "Focus", True),
             ("Notes/Empty.md", "Focus", False),
         }
-    assert (vaults[1] / "Notes/Middle.md").read_bytes() == (
+    assert note_body((vaults[1] / "Notes/Middle.md").read_bytes()) == (
         b"# Middle\n\n## Parents\n\n- [[Notes/First.md|First]]\n\n## Children\n\n- [[Notes/Last.md|Last]]\n"
     )
     assert (

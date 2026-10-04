@@ -9,6 +9,7 @@ from brz2obsidian.contracts import (
     SourceSnapshot,
 )
 
+from .appearance import validate_appearance
 from .classifications import validate_classifications
 from .references import validate_references
 
@@ -101,6 +102,7 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
                 "External resource lacks its destination URI or supported role",
             )
     validate_references(snapshot)
+    validate_appearance(snapshot, refuse)
     if len({r.key for r in snapshot.relationships}) != len(snapshot.relationships):
         refuse("invalid_source", "Duplicate canonical relationship keys")
     for relation in snapshot.relationships:

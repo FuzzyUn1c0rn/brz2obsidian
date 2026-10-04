@@ -17,6 +17,7 @@ from brz2obsidian.contracts import (
 from brz2obsidian.core import analyze, plan
 from brz2obsidian.obsidian import render
 from tests.application.test_module_seams import METADATA
+from tests.support.notes import note_body
 
 POLICY = SourcePolicy(
     profile_id="synthetic",
@@ -330,7 +331,7 @@ def test_rendering_preserves_authored_body_and_uses_exact_qualified_dotted_targe
     )
     artifacts = render(plan(analyze(facts, POLICY)), METADATA)
     assert (
-        generated(artifacts, "Notes/( ) Title.md")
+        note_body(generated(artifacts, "Notes/( ) Title.md"))
         == "# \\[\\*\\] \\<Title\\>\n\n"
         + body
         + "## Children\n\n- [[Notes/B.v2.md|B.v2]]\n"

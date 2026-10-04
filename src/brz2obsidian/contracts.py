@@ -83,6 +83,15 @@ class VideoPresentation(Contract):
     start_seconds: int = Field(default=0, ge=0)
 
 
+class IconSnapshot(Contract):
+    """Planned image snapshot, independent of editable dashboard properties."""
+
+    item_key: str
+    explicit_icon_asset_id: str | None = None
+    appearance_category_key: str | None = None
+    effective_icon_asset_id: str | None = None
+
+
 class Item(Contract):
     key: str
     original_identity: str
@@ -304,6 +313,7 @@ class MigrationPlan(Contract):
     uncreated_related_pairs: tuple[tuple[str, str], ...] = ()
     support_artifacts: tuple[SupportArtifact, ...] = ()
     reserved_support_paths: tuple[str, ...] = ()
+    icon_snapshots: tuple[IconSnapshot, ...] = ()
     adaptations: tuple[Adaptation, ...] = ()
     issues: tuple[Issue, ...] = ()
     counts: Counts
@@ -377,6 +387,7 @@ class Inspection(Contract):
     adaptations: tuple[Adaptation, ...] = ()
     support_artifacts: tuple[SupportArtifact, ...] = ()
     reserved_support_paths: tuple[str, ...] = ()
+    icon_snapshots: tuple[IconSnapshot, ...] = ()
     tag_targets: tuple[TagTarget, ...] = ()
     tag_memberships: tuple[TagMembership, ...] = ()
     tag_memberships_path: str | None = None
