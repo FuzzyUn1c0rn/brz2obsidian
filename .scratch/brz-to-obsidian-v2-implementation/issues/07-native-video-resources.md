@@ -1,6 +1,6 @@
 # 07: Present reviewed video resources without changing their source URLs
 
-Status: claimed
+Status: resolved
 
 Assignee: /root/v2_implement_07
 
@@ -26,7 +26,7 @@ Published: 2026-10-04 after the user approved the 11-slice breakdown and depende
 - [x] Offer the embed alongside the retained original link and account separately for any derived embed URL and timing adaptation, including the demonstrated 18-second start.
 - [x] Do not fetch/download remote resources during inspection/conversion, invent a local video payload or silently support unreviewed video semantics/providers.
 - [x] Explain remote/offline/service dependence once in report/guide, without treating an unavailable remote preview as missing archived bytes or hiding the original link.
-- [ ] Verify native rendering/playback/timing on a review copy of converter-produced output when service availability permits; record material limits honestly and leave playback paused.
+- [x] Verify native rendering/playback/timing on a review copy of converter-produced output when service availability permits; record material limits honestly and leave playback paused.
 
 ## Testing boundaries
 
@@ -41,6 +41,10 @@ Use the accepted specification, source-feature comparison, domain vocabulary and
 Follow the [local claim and completion process](../../../docs/agents/issue-tracker.md#implementation-operations), [domain glossary](../../../GLOSSARY.md) and [accepted architecture decision](../../../docs/adr/0001-source-neutral-core.md). Claim only after all linked blockers are resolved; save the claim and assignee before implementation. Check each acceptance box only after its criterion passes, record evidence and material limits under Comments, and resolve only when every criterion is satisfied.
 
 ## Comments
+
+- 2026-10-05 (/root/v2_implement_07, root native evidence): Root's bounded Computer check passed in standard Obsidian 1.13.7 using ignored `brz/v2-ticket07/review-vault`, a fresh converter-produced output copy. The original clickable resource links and generated players rendered. The untimed player's source was `start=0`; real playback was paused at 0:16. The timed player's source was `start=18`; it played and was paused at 0:36 after observation delay. Root reopened that note to reset the embed, observed fresh `start=18`, played again and paused at 0:31 after roughly 13 seconds of observation/action latency. These observations support the evidenced offset without claiming frame-accurate start measurement. Both players were left paused; service availability worked for this check, while remote/offline limits remain. No sign-in, download, source/authored-note edit or third-party submission occurred. Root's independent stdlib comparison also confirmed all three converted Markdown files remained byte-identical to the pristine converter-output copy after the native check. Private screenshots/JSON are `brz/v2-native/evidence/07-01-untimed-player` through `07-05-fresh-timed-start-paused`; outside handoff is `C:/Users/stefa/projects/brz2obsidian-agent-notes/v2-ticket-07-native-outcome.md`. This subset check does not replace tickets 10/11's full-archive audit/final native acceptance.
+
+- 2026-10-05 (/root/v2_implement_07): Automatic implementation commits `bada9c9` and `46b9846` merged current integration `ee203ec` as `ac8cd62`, cleanly retaining 03's dashboard/support changes and both separate PDF/video limitation paragraphs. After that merge, worktree import location was reconfirmed; cumulative `pytest -q`: 490 passed in 37.55 seconds. Ruff lint passed; Ruff format check passed for 78 files; `pip check` found no broken requirements; `git diff --check` passed. Every acceptance criterion is satisfied for this slice, so ticket 07 is resolved. Root alone performed native UI; the implementer made no root tracked-code edits, shared install changes, source mutations, remote publication, PR, cleanup or subagents. Ticket 04 will preserve the limit in its generated guide, and complete v2 delivery remains gated by the accepted downstream tickets.
 
 - 2026-10-05 (/root/v2_implement_07): Automated implementation is complete at the confirmed workflow/CLI seams. `tests/application/test_video_workflow.py` has 45 synthetic cases covering exact source URLs and raw VideoHtml, separate provider/embed/start facts, timed/untimed native presentation, separate inspect/record adaptations, 31 unknown/conflicting metadata/provider/role controls, plain-URL non-inference, denied socket access, absent local-video states/unassigned bytes, CLI exit codes, exact note backups/image bytes/bound spans and repeat/ZIP-record reorder output. The red/green cycles first demonstrated missing derived facts, missing adaptation accounting and missing remote-limit reporting. `sources/thebrain/videos.py` recognizes only the reviewed HTTPS watch URL and exact matching single-iframe baseline metadata; the source URL's `t=18s` supplies the derived `start=18`, while the original metadata's `start=0` survives independently. `obsidian/resources.py` generates a fresh fixed iframe from the neutral facts, never copying archived HTML. One remote/offline paragraph is separate from the retained single PDF Search limitation and source gaps. `docs/source-coverage.md` records the supported forms and limits.
 
