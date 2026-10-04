@@ -59,7 +59,7 @@ Thought-owned attachments use SourceType 2:
 | Type / NoteType | Supported interpretation |
 | --- | --- |
 | 1 / 4 | Thought Markdown at owner/Location; active content plus exact `.md.original` backup |
-| 1 / 0 | Ordinary file; empty decoded `Notes.md` placeholder remains a backup without content eligibility |
+| 1 / 0 | Ordinary file, except a sole nonempty canonical `Notes.md` on an ordinary thought: active Markdown plus exact original backup. Empty decoded placeholders remain backups without content eligibility. |
 | 3 / 0 | External HTTP/HTTPS URL reference |
 | 5 / 0 | Decorative icon at owner/.data/Location; copied without Resources clutter |
 | 8 / 0 | Absolute Windows directory reference rendered as file URI |
@@ -70,9 +70,15 @@ Present local payload states are 1; every physical resource must be accounted
 for with uniquely assigned CRC-valid bytes and matching declared length, apart
 from the exact icon exception below. External references have no local file
 state. BOM-only Notes.md is decoded empty while its original bytes survive.
-Generic files are preserved regardless of preview support. Nonempty
-ambiguous Notes.md placeholders and other ownership/roles/states or unverified
-semantic flags refuse. External resources are never fetched.
+Generic files are preserved regardless of preview support. A differently marked
+active note requires exactly `Notes.md`, an ordinary owner and no competing
+thought-note candidate, including an empty marked note. Nonempty NoteType-0
+canonical notes on type/tag/system owners, competing candidates and other
+ownership/roles/states or unverified semantic flags refuse. Whitespace-only
+content does not by itself materialize an otherwise empty owner; its original
+backup survives. Arbitrary Markdown files are resources rather than active
+thought notes. The numeric marker is not interpreted as UI selection state.
+External resources are never fetched.
 
 Supported active local syntax is inline `[label](brain://<compact-id>/<suffix>)`
 and `![alt](.data/md-images/<location>)`; compact GUIDs use .NET bytes_le
