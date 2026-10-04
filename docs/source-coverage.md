@@ -89,7 +89,7 @@ Thought-owned attachments use SourceType 2:
 | 5 / 0 | Decorative icon at owner/.data/Location; copied without Resources clutter |
 | 8 / 0 | Absolute Windows directory reference rendered as file URI |
 | 12 / 0 | Markdown image at owner/.data/md-images/Location; inline when referenced, otherwise Resources |
-| 15 / 0 | Only the approved absent-TXT rule below |
+| 15 / 0 | Only the approved absent-TXT rules below |
 
 Present local payload states are 1; every physical resource must be accounted
 for with uniquely assigned CRC-valid bytes and matching declared length, apart
@@ -127,13 +127,22 @@ numeric BRZ recognition predicates.
 | Issue code / rule ID | Required conditions and result |
 | --- | --- |
 | `approved_source_gap` / `thebrain-format5/absent-txt/v1` | Thought-owned Type 15, NoteType 0, `.txt` Location, positive declared length, state 2, absent owner/Location bytes, with intact archived PDF under the same owner. Retain metadata/evidence; brief filename notice only on an existing owner note. No fake file/link or note solely for this gap. |
+| `approved_source_gap` / `thebrain-format5/zero-length-absent-txt/v1` | Thought-owned Type 15, NoteType 0, safe `.txt` Location, declared length exactly zero, state 2, absent owner/Location bytes. The filename stem must equal one same-owner PDF attachment identity with ordinary Type 1/NoteType 0, state 1, present CRC-valid bytes and matching declared/actual length. Retain each declaration, exact PDF association and integrity evidence individually; apply the same existing-owner notice and no-fabrication rules. |
 | `approved_metadata_discrepancy` / `thebrain-format5/icon-length/v1` | Verified icon role, present CRC-valid payload, declared length different from actual length. Copy actual bytes and retain both lengths; report discrepancy. |
 
-The TXT rule makes no claim of derived purpose, optionality or particular PDF
-pairing. A has two icon warnings; B has nine absent-TXT warnings under seven
+The positive-length TXT rule makes no claim of particular PDF pairing; the
+separate zero-length rule requires the identity association. Neither rule claims
+derived purpose, optionality, extraction failure or search after a fresh restore.
+Wrong state, ownership, role, stem, ambiguous identity or absent/corrupt PDF
+refuses rather than widening the zero-length rule. A has two icon warnings; B has nine absent-TXT warnings under seven
 owners. Both successful conversions exit 2. Unmatched missing notes/files/images
 refuse as missing required payload. Unknown findings/profile incompatibility and
 unsupported meanings cannot be downgraded by caller allowlists.
+
+PDF bytes are preserved for normal native opening. The migration report explains
+once, separately from individual source gaps, that Obsidian vault Search does not
+search PDF body text. This converter does not extract/index PDFs or promise
+equivalent TheBrain PDF body search.
 
 Name sanitation, simple graph presentation and intentional uncreated targets
 are adaptations rather than extra warnings. See [complete independent

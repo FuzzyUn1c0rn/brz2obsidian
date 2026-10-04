@@ -34,7 +34,7 @@ Read the accepted [implementation specification](spec.md), [source-feature compa
 
 ## Working the frontier
 
-**Current work: [03: Native category dashboards](issues/03-native-category-dashboards.md) and [06: Zero-length TXT/PDF gaps](issues/06-zero-length-txt-pdf-gaps.md), claimed for isolated implementation.** Tickets 01, 02 and 05 are resolved and integrated. Ticket 07 is eligible but waits for the shared attachment boundary in 06. Ready-for-agent means specified; blockers still govern when a ticket can start.
+**Current work: [03: Native category dashboards](issues/03-native-category-dashboards.md) and [07: Native video resources](issues/07-native-video-resources.md), claimed for isolated implementation.** Tickets 01, 02, 05 and 06 are resolved and integrated. Ready-for-agent means specified; blockers still govern when a ticket can start.
 
 After 01 resolves, 02, 05, 06 and 07 become eligible. Metadata/icons lead to dashboards (03), native templates (04) and the read-only checker (08). Dashboard ticket 03 enables Bases for its first native check; ticket 04 preserves that configuration and adds Templates. Ticket 09 joins 05, 06, 07 and 08; their transitive prerequisites already include 01–04. The independent full-archive audit (10) follows integration, and native final acceptance (11) follows the audit. Dependencies are acyclic and numbered blockers-first; redundant transitive edges are omitted.
 
@@ -91,6 +91,8 @@ All 82 stories have primary owners below; the individual tickets include additio
 - Publication of these tickets, passing the convention checker or acceptance of the earlier prototype does not satisfy full migration preservation or the final delivery gate. Keep raw private archives, outputs and native evidence ignored; publish aggregate findings and honest limitations.
 
 ## Comments
+
+- 2026-10-05 (/root): Ticket 06 integrated through merger commit fe9325c with 443 passing tests and clean lint/format/dependency checks. Claimed 07; its bounded native video check and the dashboard trial remain subset evidence, separate from the final all-archive audit/native acceptance.
 
 - 2026-10-05 (/root): Ticket 02 integrated through merger commit 61b9df3 with 386 passing tests and clean lint/format/dependency checks. Claimed 03 for contextual dashboards and first-use Bases configuration. Its early native check uses actual converter output and remains separate from complete archive acceptance.
 
