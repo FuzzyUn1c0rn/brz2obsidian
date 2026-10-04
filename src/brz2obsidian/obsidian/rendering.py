@@ -13,11 +13,13 @@ from brz2obsidian.contracts import (
     RenderedVault,
     RunMetadata,
 )
+from brz2obsidian.core.appearance import icon_snapshots as expected_icon_snapshots
 from brz2obsidian.core.references import validate_references
 
-from .categories import category_frontmatter, classification_records
+from .categories import classification_records
 from .documents import render_document
 from .markdown import append_boundary
+from .properties import property_frontmatter
 from .relationships import relationship_sections, uncreated_listing
 from .resources import resource_section
 from .tags import tag_listing, tag_records
@@ -57,7 +59,22 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         )
     items = {item.key: item for item in snapshot.items}
     validate_references(snapshot, "rendering")
+    if plan.icon_snapshots != expected_icon_snapshots(
+        snapshot, {t.item_key for t in plan.item_targets if t.created}
+    ):
+        raise MigrationRefused(
+            (
+                Issue(
+                    code="invalid_reference",
+                    phase="rendering",
+                    message="Planned icon snapshots differ from owned declarations and classification defaults",
+                    guidance="Analyze and plan this snapshot again before rendering.",
+                ),
+            )
+        )
     documents = {document.key: document for document in snapshot.documents}
+    icon_snapshots = {s.item_key: s for s in plan.icon_snapshots}
+    asset_paths = {t.asset_id: t.relative_path for t in plan.asset_targets}
     files = []
     counts = plan.counts.model_copy(
         update={
@@ -84,7 +101,10 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
             continue
         item = items[target.item_key]
         heading = re.sub(r"([\\`*_{}\[\]<>#])", r"\\\1", item.title)
-        text = category_frontmatter(plan, item.key) + "# " + heading + "\n\n"
+        text = property_frontmatter(plan, item) + "# " + heading + "\n\n"
+        icon = icon_snapshots[item.key].effective_icon_asset_id
+        if icon is not None:
+            text += "![[" + asset_paths[icon] + "]]\n\n"
         if item.label:
             text += item.label + "\n\n"
         for index, key in enumerate(item.document_ids):
@@ -201,6 +221,20 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         "item_targets": [
             dict(
                 **target.model_dump(),
+                declared_appearance=items[
+                    target.item_key
+                ].declared_appearance.model_dump()
+                if items[target.item_key].declared_appearance
+                else None,
+                calendar_dates=items[target.item_key].calendar_dates.model_dump(
+                    mode="json"
+                )
+                if items[target.item_key].calendar_dates
+                else None,
+                metadata_evidence=list(items[target.item_key].evidence),
+                icon_snapshot=icon_snapshots[target.item_key].model_dump()
+                if target.created
+                else None,
                 documents=[
                     document_records[d.key]
                     for d in snapshot.documents

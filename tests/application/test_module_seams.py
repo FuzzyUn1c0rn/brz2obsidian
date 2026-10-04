@@ -8,6 +8,7 @@ from brz2obsidian.application.wiring import default_workflow
 from brz2obsidian.contracts import (
     CalendarDates,
     DeclaredAppearance,
+    IconSnapshot,
     Item,
     MigrationFailed,
     MigrationRefused,
@@ -20,7 +21,7 @@ from brz2obsidian.obsidian import render
 from brz2obsidian.publication import publish
 from brz2obsidian.sources.thebrain import BrzSourceModule
 from brz2obsidian.sources.thebrain.profile import BRZ_POLICY
-from tests.application.test_minimal_workflow import make_archive
+from tests.application.test_minimal_workflow import PROPERTIES, make_archive
 
 METADATA = RunMetadata(
     converter_version="0.1.0",
@@ -43,7 +44,7 @@ def test_public_modules_compose_without_workflow_and_verify_full_manifest(tmp_pa
     assert len(receipt.manifest) == 6
     assert receipt.counts.actual_notes == 1
     assert receipt.counts.actual_assets == 1
-    assert receipt.manifest[0].length == 33
+    assert receipt.manifest[0].length == len(PROPERTIES) + 33
 
 
 def test_strict_contracts_reject_coercion_mutation_and_unknown_fields(tmp_path):
@@ -75,7 +76,12 @@ def test_optional_version_two_facts_are_strict_immutable_durable_values():
         embed_uri="https://www.youtube.com/embed/example",
         start_seconds=18,
     )
-    for value in (appearance, dates, video):
+    snapshot = IconSnapshot(
+        item_key="item:opaque",
+        appearance_category_key="category:opaque",
+        effective_icon_asset_id="image:opaque",
+    )
+    for value in (appearance, dates, video, snapshot):
         assert type(value).model_validate_json(value.model_dump_json()) == value
         with pytest.raises(ValidationError):
             type(value)(**(value.model_dump() | {"unknown": "unreviewed"}))

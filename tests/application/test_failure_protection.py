@@ -6,7 +6,7 @@ from brz2obsidian.obsidian.rendering import ObsidianRenderer
 from brz2obsidian.publication.filesystem import FilesystemPublisher
 from brz2obsidian.sources.thebrain import BrzSourceModule
 from brz2obsidian.sources.thebrain.profile import BRZ_POLICY
-from tests.application.test_minimal_workflow import make_archive
+from tests.application.test_minimal_workflow import PROPERTIES, make_archive
 
 
 class TeardownFailureSource:
@@ -29,7 +29,7 @@ def test_workflow_preserves_verified_receipt_after_session_teardown_failure(tmp_
     assert result.counts.actual_files == 6
     assert (
         tmp_path / "vault" / "Home — Entry thought.md"
-    ).read_bytes() == b"# Entry thought\n\nAuthored body.\r\n"
+    ).read_bytes() == PROPERTIES + b"# Entry thought\n\nAuthored body.\r\n"
     assert {i.code for i in result.issues} == {
         "session_teardown_failure",
         "publication_occurred",
