@@ -34,7 +34,7 @@ Read the accepted [implementation specification](spec.md), [source-feature compa
 
 ## Working the frontier
 
-**Current work: [01: Convert thought types and all their members into linked category notes](issues/01-typed-category-conversion.md), claimed for isolated implementation.** No other ticket is eligible until it resolves. Ready-for-agent means specified; blockers still govern when a ticket can start.
+**Current work: [02: Canonical properties, dates and icon snapshots](issues/02-properties-dates-icon-snapshots.md) and [05: Exceptional Markdown note](issues/05-exceptional-markdown-note.md), claimed for isolated implementation.** Ticket 01 is resolved and integrated. Tickets 06 and 07 are eligible but wait for the shared attachment boundary in 05. Ready-for-agent means specified; blockers still govern when a ticket can start.
 
 After 01 resolves, 02, 05, 06 and 07 become eligible. Metadata/icons lead to dashboards (03), native templates (04) and the read-only checker (08). Dashboard ticket 03 enables Bases for its first native check; ticket 04 preserves that configuration and adds Templates. Ticket 09 joins 05, 06, 07 and 08; their transitive prerequisites already include 01–04. The independent full-archive audit (10) follows integration, and native final acceptance (11) follows the audit. Dependencies are acyclic and numbered blockers-first; redundant transitive edges are omitted.
 
@@ -91,6 +91,8 @@ All 82 stories have primary owners below; the individual tickets include additio
 - Publication of these tickets, passing the convention checker or acceptance of the earlier prototype does not satisfy full migration preservation or the final delivery gate. Keep raw private archives, outputs and native evidence ignored; publish aggregate findings and honest limitations.
 
 ## Comments
+
+- 2026-10-04 (/root): Ticket 01 integrated through merger commit 13080df with 327 passing tests, Ruff lint/format and dependency checks clean. Claimed 02 and 05 on separate branches with coordinated ownership; 06/07 will follow sequentially at the shared attachment boundary. Native and real-archive delivery gates remain pending.
 
 - 2026-10-04 (/root): The user approved the proposed ticket sizes, deliverables and blocker edges with “Agreed”. Published all 11 individual tickets. Only 01 is initially unblocked. Parent planning records and the accepted specification are preserved; production implementation has not begun.
 - 2026-10-04 (/root): Independent documentation validation clarified read-only inspection, the already accepted operational folder layout and first-use Bases configuration in ticket 03. The 11 approved slices and their dependencies are unchanged; story 34 is now explicitly shared by 03 and 04.

@@ -1,6 +1,8 @@
 # 05: Convert the evidenced differently marked thought note safely
 
-Status: ready-for-agent
+Status: claimed
+
+Assignee: /root/v2_implement_05
 
 Labels: ready-for-agent
 
@@ -39,5 +41,7 @@ Use the accepted specification, source-feature comparison, domain vocabulary and
 Follow the [local claim and completion process](../../../docs/agents/issue-tracker.md#implementation-operations), [domain glossary](../../../GLOSSARY.md) and [accepted architecture decision](../../../docs/adr/0001-source-neutral-core.md). Claim only after all linked blockers are resolved; save the claim and assignee before implementation. Check each acceptance box only after its criterion passes, record evidence and material limits under Comments, and resolve only when every criterion is satisfied.
 
 ## Comments
+
+- 2026-10-04 (/root): Claimed after ticket 01 was merged and independently checked on the integration branch. Isolated implementation owns the exceptional active-note candidate rule and its public tests; canonical properties are owned separately by ticket 02.
 
 - 2026-10-04 (/root): Published from the user-approved to-tickets breakdown. Dependencies are local to this implementation set; planning ticket numbers are not implementation blockers. No implementation has started and no acceptance criterion is marked complete.
