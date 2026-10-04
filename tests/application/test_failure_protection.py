@@ -26,10 +26,13 @@ def test_workflow_preserves_verified_receipt_after_session_teardown_failure(tmp_
     result = workflow.convert(make_archive(tmp_path / "source.brz"), tmp_path / "vault")
     assert result.outcome == "failed"
     assert result.receipt.published and result.receipt.verified
-    assert result.counts.actual_files == 6
+    assert result.counts.actual_files == 11
     assert (
         tmp_path / "vault" / "Home — Entry thought.md"
-    ).read_bytes() == PROPERTIES + b"# Entry thought\n\nAuthored body.\r\n"
+    ).read_bytes() == PROPERTIES + (
+        b"# Entry thought\n\nAuthored body.\r\n\n"
+        b"## Categories\n\n[[Categories.md|Browse categories]]\n"
+    )
     assert {i.code for i in result.issues} == {
         "session_teardown_failure",
         "publication_occurred",

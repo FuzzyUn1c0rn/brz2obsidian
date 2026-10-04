@@ -41,9 +41,10 @@ def test_minimal_brain_inspects_then_converts_into_verified_home(tmp_path):
     converted = workflow.convert(source, destination)
     assert converted.outcome == "clean"
     assert converted.receipt.destination == str(destination.resolve())
-    assert (
-        destination / "Home — Entry thought.md"
-    ).read_bytes() == PROPERTIES + b"# Entry thought\n\nAuthored body.\r\n"
+    assert (destination / "Home — Entry thought.md").read_bytes() == PROPERTIES + (
+        b"# Entry thought\n\nAuthored body.\r\n\n"
+        b"## Categories\n\n[[Categories.md|Browse categories]]\n"
+    )
     record = json.loads((destination / "migration-record.json").read_bytes())
     assert record["schema"] == "brz2obsidian.migration"
     assert record["schema_version"] == 2
@@ -74,9 +75,9 @@ def test_empty_home_is_materialized_and_existing_destination_is_protected(tmp_pa
     destination.mkdir()
     first = workflow.convert(source, destination)
     assert first.outcome == "clean"
-    assert (
-        destination / "Home — Entry thought.md"
-    ).read_bytes() == PROPERTIES + b"# Entry thought\n\n"
+    assert (destination / "Home — Entry thought.md").read_bytes() == PROPERTIES + (
+        b"# Entry thought\n\n## Categories\n\n[[Categories.md|Browse categories]]\n"
+    )
     before = {
         p.relative_to(destination).as_posix(): p.read_bytes()
         for p in destination.rglob("*")

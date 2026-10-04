@@ -43,6 +43,11 @@ def support_artifacts(has_uncreated_listing, tag_listing_path):
         "migration-record.json",
         ".obsidian/app.json",
         ".obsidian/bookmarks.json",
+        ".obsidian/core-plugins.json",
+        "Categories.md",
+        "Templates/Bases/Members.base",
+        "Templates/Bases/Gallery.base",
+        "Templates/Bases/Categories.base",
     }
     if has_uncreated_listing:
         paths.add("Uncreated targets.md")

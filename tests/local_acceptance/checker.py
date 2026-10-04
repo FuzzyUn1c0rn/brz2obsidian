@@ -506,6 +506,16 @@ def check_items(raw, record, archive, vault, assets):
                 else "\n\n"
             )
             expected += "\n".join(sections)
+        if key == home:
+            normalized_end = expected.replace("\r\n", "\n").replace("\r", "\n")
+            expected += (
+                ""
+                if normalized_end.endswith("\n\n")
+                else "\n"
+                if normalized_end.endswith("\n")
+                else "\n\n"
+            )
+            expected += "## Categories\n\n[[Categories.md|Browse categories]]\n"
         actual_note = (vault / names[key]).read_bytes()
         assert actual_note == expected.encode(), (
             "complete note/body/graph/tag bytes: ordinal="
@@ -534,6 +544,8 @@ def check_items(raw, record, archive, vault, assets):
         "useMarkdownLinks": False,
         "newLinkFormat": "absolute",
         "openBehavior": "file:" + names[home],
+        "alwaysUpdateLinks": True,
+        "attachmentFolderPath": "Attachments",
     }
     assert load_json((vault / ".obsidian/app.json").read_bytes()) == expected_config, (
         "native Home configuration"
@@ -1205,6 +1217,11 @@ def check_actual_files(vault, record, targets, names):
     expected |= {
         ".obsidian/app.json",
         ".obsidian/bookmarks.json",
+        ".obsidian/core-plugins.json",
+        "Categories.md",
+        "Templates/Bases/Members.base",
+        "Templates/Bases/Gallery.base",
+        "Templates/Bases/Categories.base",
         "MIGRATION REPORT.md",
         "migration-record.json",
     }
@@ -1216,6 +1233,11 @@ def check_actual_files(vault, record, targets, names):
     support = {
         ".obsidian/app.json": "configuration",
         ".obsidian/bookmarks.json": "configuration",
+        ".obsidian/core-plugins.json": "configuration",
+        "Categories.md": "overview",
+        "Templates/Bases/Members.base": "base",
+        "Templates/Bases/Gallery.base": "base",
+        "Templates/Bases/Categories.base": "base",
         "MIGRATION REPORT.md": "report",
         "migration-record.json": "migration_record",
     }
@@ -1229,6 +1251,22 @@ def check_actual_files(vault, record, targets, names):
         "duplicate support artifact"
     )
     assert record["classification_assignments"] == [], "baseline classifications"
+    assert (vault / "Categories.md").read_bytes() == (
+        b"# Categories\n\n![[Templates/Bases/Categories.base]]\n"
+    ), "native categories overview"
+    assert load_json((vault / ".obsidian/core-plugins.json").read_bytes()) == {
+        "file-explorer": True,
+        "global-search": True,
+        "switcher": True,
+        "graph": True,
+        "backlink": True,
+        "tag-pane": True,
+        "page-preview": True,
+        "command-palette": True,
+        "bookmarks": True,
+        "properties": True,
+        "bases": True,
+    }, "native Bases configuration"
     reserved = set(names.values()) | {
         ".obsidian/app.json",
         ".obsidian/bookmarks.json",

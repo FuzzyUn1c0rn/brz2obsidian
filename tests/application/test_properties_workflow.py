@@ -406,4 +406,6 @@ def test_generic_renderer_quotes_opaque_identity_strings_as_yaml_data():
         in metadata
     )
     assert 'source_item_id: "item: \\"quoted\\"\\nicon: fake"\n' in metadata
-    assert note.endswith(b"---\n\n# Entry\n\n")
+    assert note.endswith(
+        b"---\n\n# Entry\n\n## Categories\n\n[[Categories.md|Browse categories]]\n"
+    )

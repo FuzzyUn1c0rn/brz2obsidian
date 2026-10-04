@@ -37,7 +37,10 @@ def test_verified_assignments_use_native_tags_and_retain_hidden_memberships(tmp_
     assert result.counts.actual_notes == 2
     home = (vault / "Home — Entry.md").read_bytes()
     assert b'tags:\n  - "Project-Work"\n' in home
-    assert note_body(home) == b"# Entry\n\n"
+    assert (
+        note_body(home)
+        == b"# Entry\n\n## Categories\n\n[[Categories.md|Browse categories]]\n"
+    )
     tag_body = (vault / "Notes/Project Work!.md").read_bytes()
     assert note_body(tag_body) == b"# Project / Work!\n\nTag-authored text.\r\n"
     assert not (vault / "Notes/Empty.md").exists()
