@@ -107,16 +107,27 @@ def test_remote_video_limit_is_once_and_separate_from_pdf_and_source_gaps(tmp_pa
         "manual.pdf",
         b"%PDF synthetic",
     )
+    add_attachment(
+        parts,
+        "55555555-5555-4555-8555-555555555555",
+        15,
+        "66666666-6666-4666-8666-666666666666.txt",
+        declared=0,
+        state=2,
+    )
     result = default_workflow().convert(
         write_source(tmp_path, parts), tmp_path / "vault"
     )
-    assert result.outcome == "clean" and result.issues == ()
+    assert result.outcome == "warnings" and len(result.issues) == 1
+    assert result.issues[0].affected == ("55555555-5555-4555-8555-555555555555",)
     report = (tmp_path / "vault/MIGRATION REPORT.md").read_text()
     assert report.count("Video playback depends on the remote service and network") == 1
     assert "Offline playback and service availability are not guaranteed" in report
     assert "The original resource links remain available" in report
     assert report.count("Vault Search does not search PDF body text") == 1
-    assert "Source warnings" not in report
+    limits, warnings = report.split("## Source warnings", 1)
+    assert "Video playback" in limits and "Vault Search" in limits
+    assert "Video playback" not in warnings and "Vault Search" not in warnings
 
 
 @pytest.mark.parametrize(
