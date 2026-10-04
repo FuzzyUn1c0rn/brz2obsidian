@@ -1,10 +1,18 @@
 # Version 2 implementation tickets
 
-Status: ready-for-agent
+Status: claimed
 
 Labels: ready-for-agent
 
-The user approved the 11-ticket breakdown and dependencies on 2026-10-04. Each ticket below is published separately with ready-for-agent status, acceptance checkboxes, specification-story coverage and the confirmed testing boundaries. All tickets are unclaimed and unfinished. This index tracks implementation toward a **finished, verified version 2**, rather than treating ticket publication as delivery.
+Assignee: /root
+
+Integration branch: `codex/brz-to-obsidian-v2`
+
+Implementation baseline: `f4627d9cbadb2bec4b97c946dce4cc9f9946adb0` (completed v1).
+
+Validated planning commit: `d71fac34f412fe0871ca0e9b81b25e98f604a213`.
+
+The user approved the 11-ticket breakdown and dependencies on 2026-10-04. Each ticket below was published separately with ready-for-agent status, acceptance checkboxes, specification-story coverage and the confirmed testing boundaries. The user invoked implement-spec to begin the complete implementation on the integration branch. Ticket files record current claims and verified completion. This index tracks implementation toward a **finished, verified version 2**, rather than treating ticket publication as delivery.
 
 Read the accepted [implementation specification](spec.md), [source-feature comparison](source-feature-mapping.md) and [approved breakdown](ticket-breakdown.md). The [Wayfinder map](../brz-to-obsidian-v2/map.md) and its research remain decision evidence. The specification and parent planning issues are unchanged by this to-tickets publication.
 
@@ -26,7 +34,7 @@ Read the accepted [implementation specification](spec.md), [source-feature compa
 
 ## Working the frontier
 
-**Current frontier: [01: Convert thought types and all their members into linked category notes](issues/01-typed-category-conversion.md) only.** Every ticket is ready-for-agent because it is specified; its blockers still govern when it can start. No ticket has been claimed.
+**Current work: [01: Convert thought types and all their members into linked category notes](issues/01-typed-category-conversion.md), claimed for isolated implementation.** No other ticket is eligible until it resolves. Ready-for-agent means specified; blockers still govern when a ticket can start.
 
 After 01 resolves, 02, 05, 06 and 07 become eligible. Metadata/icons lead to dashboards (03), native templates (04) and the read-only checker (08). Dashboard ticket 03 enables Bases for its first native check; ticket 04 preserves that configuration and adds Templates. Ticket 09 joins 05, 06, 07 and 08; their transitive prerequisites already include 01–04. The independent full-archive audit (10) follows integration, and native final acceptance (11) follows the audit. Dependencies are acyclic and numbered blockers-first; redundant transitive edges are omitted.
 
@@ -87,3 +95,4 @@ All 82 stories have primary owners below; the individual tickets include additio
 - 2026-10-04 (/root): The user approved the proposed ticket sizes, deliverables and blocker edges with “Agreed”. Published all 11 individual tickets. Only 01 is initially unblocked. Parent planning records and the accepted specification are preserved; production implementation has not begun.
 - 2026-10-04 (/root): Independent documentation validation clarified read-only inspection, the already accepted operational folder layout and first-use Bases configuration in ticket 03. The 11 approved slices and their dependencies are unchanged; story 34 is now explicitly shared by 03 and 04.
 - 2026-10-04 (/root): The same validation made materialized source-tag notes explicit in ticket 02's imported metadata/date criteria and synthetic case. The separate Wayfinder handoff was reconciled after publication so it now points at this implementation frontier and its delivery gates.
+- 2026-10-04 (/root): The user invoked implement-spec for complete v2 delivery. Created the integration branch, committed validated planning as d71fac3 and claimed the first eligible slice. Implementer worktrees use TDD at the already-confirmed public boundaries; merger agents integrate completed slices before the frontier advances. Parallel execution is now authorized by the invoked skill, with isolated branches and coordinated shared-boundary changes.

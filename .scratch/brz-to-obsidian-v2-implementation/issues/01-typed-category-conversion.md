@@ -1,8 +1,10 @@
 # 01: Convert thought types and all their members into linked category notes
 
-Status: ready-for-agent
+Status: claimed
 
 Labels: ready-for-agent
+
+Assignee: /root/v2_implement_01
 
 Published: 2026-10-04 after the user approved the 11-slice breakdown and dependencies.
 
@@ -43,3 +45,4 @@ Follow the [local claim and completion process](../../../docs/agents/issue-track
 
 - 2026-10-04 (/root): Published from the user-approved to-tickets breakdown. Dependencies are local to this implementation set; planning ticket numbers are not implementation blockers. No implementation has started and no acceptance criterion is marked complete.
 - 2026-10-04 (/root): Independent documentation validation clarified that inspect remains read-only and only convert publishes. The approved behavior and dependencies are unchanged.
+- 2026-10-04 (/root): Claimed for implementation in an isolated worktree based on codex/brz-to-obsidian-v2. The user invoked implement-spec; approved TDD seams are already confirmed in the specification.
