@@ -187,17 +187,23 @@ def test_resource_eligibility_and_original_backups_use_verified_roles(tmp_path):
     )
 
 
-def test_nonempty_notes_placeholder_is_refused_even_when_only_whitespace(tmp_path):
+def test_whitespace_canonical_note_does_not_force_materialization(tmp_path):
     owner = "cccccccc-0000-4000-8000-000000000003"
     source = resource_archive(
         tmp_path / "source.brz",
         [({"SourceId": owner, "Location": "Notes.md"}, b" \r\n")],
-        thoughts=[thought(owner, "Ambiguous")],
+        thoughts=[thought(owner, "Whitespace")],
     )
-    result = default_workflow().convert(source, tmp_path / "vault")
-    assert result.outcome == "refused"
-    assert result.issues[0].code == "unsupported_feature"
-    assert not (tmp_path / "vault").exists()
+    workflow = default_workflow()
+    inspected = workflow.inspect(source)
+    result = workflow.convert(source, tmp_path / "vault")
+    assert inspected.outcome == result.outcome == "clean"
+    target = next(t for t in inspected.inspection.item_targets if t.item_key == owner)
+    assert not target.created
+    assert not (tmp_path / "vault/Notes/Whitespace.md").exists()
+    assert (
+        tmp_path / "vault/Attachments/cccccccc/Notes.md.original"
+    ).read_bytes() == b" \r\n"
 
 
 def test_resource_collisions_extend_seeds_preserve_extensions_and_ignore_record_order(
