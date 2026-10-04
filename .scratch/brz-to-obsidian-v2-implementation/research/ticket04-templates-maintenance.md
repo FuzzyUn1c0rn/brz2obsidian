@@ -57,6 +57,14 @@ the root .venv interpreter with this isolated worktree's src on PYTHONPATH,
 verified by imported package location. The final cumulative gate will be recorded
 after merging latest integration and completing native evidence.
 
+After merging integration 7bef5bc (including ticket 07): 494 tests passed in 41.82s;
+Ruff lint, format on 91 files, pip check and git diff --check passed. The merge
+preserved video source facts/presentation/adaptations and its report limitation.
+The private native fixture is verified clean with six imported notes, two
+categories, three typed members, five payloads, eighteen support files and 29
+manifested files. It records a nonempty 2010/2011 source-date member with exact
+authored CRLF content, provider, paired IDs and body hash for direct-edit checks.
+
 ## Native gate
 
 Root will open a fresh review copy of a pristine synthetic converter output.
