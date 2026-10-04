@@ -142,6 +142,11 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     report = "# Migration report\n\nOpen the root Home note to begin. Original note bytes are retained under Attachments.\n\n"
     report += f"Created {plan.counts.planned_notes} thought notes; preserved {plan.counts.planned_assets} present payloads.\n\n"
     report += "Unsupported feature classes are refused explicitly.\n"
+    if any(
+        a.availability == "present" and a.original_name.casefold().endswith(".pdf")
+        for a in snapshot.assets
+    ):
+        report += "\nPDF files are preserved and can be opened in Obsidian. Vault Search does not search PDF body text; this conversion does not extract or index it, or reproduce TheBrain's PDF body search.\n"
     if plan.issues:
         report += "\n## Source warnings\n\n"
         for issue in plan.issues:
