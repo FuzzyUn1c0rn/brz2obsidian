@@ -16,6 +16,7 @@ from brz2obsidian.contracts import (
 from brz2obsidian.core.appearance import icon_snapshots as expected_icon_snapshots
 from brz2obsidian.core.references import validate_references
 
+from .bases import CATEGORY_VIEWS, HOME_CATEGORIES, support_files
 from .categories import classification_records
 from .documents import render_document
 from .markdown import append_boundary
@@ -128,6 +129,23 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
                 else "\n\n"
             )
             text += separator + relationships
+        navigation = ""
+        if item.role == "definition":
+            navigation += CATEGORY_VIEWS
+        if item.key == plan.analysis.entry_key:
+            if navigation:
+                navigation += "\n"
+            navigation += HOME_CATEGORIES
+        if navigation:
+            text += append_boundary(text)
+            endings = text.replace("\r\n", "\n").replace("\r", "\n")
+            text += (
+                ""
+                if endings.endswith("\n\n")
+                else "\n"
+                if endings.endswith("\n")
+                else "\n\n"
+            ) + navigation
         add(target.relative_path, text.encode("utf-8"))
     home = next(
         target.relative_path
@@ -142,8 +160,33 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         "useMarkdownLinks": False,
         "newLinkFormat": "absolute",
         "openBehavior": "file:" + home,
+        "alwaysUpdateLinks": True,
+        "attachmentFolderPath": "Attachments",
     }
     add(".obsidian/app.json", _json(configuration))
+    add(
+        ".obsidian/core-plugins.json",
+        _json(
+            dict.fromkeys(
+                (
+                    "file-explorer",
+                    "global-search",
+                    "switcher",
+                    "graph",
+                    "backlink",
+                    "tag-pane",
+                    "page-preview",
+                    "command-palette",
+                    "bookmarks",
+                    "properties",
+                    "bases",
+                ),
+                True,
+            )
+        ),
+    )
+    for path, content in support_files():
+        add(path, content.encode("utf-8"))
     add(
         ".obsidian/bookmarks.json",
         _json(
@@ -162,6 +205,18 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     report = "# Migration report\n\nOpen the root Home note to begin. Original note bytes are retained under Attachments.\n\n"
     report += f"Created {plan.counts.planned_notes} thought notes; preserved {plan.counts.planned_assets} present payloads.\n\n"
     report += "Unsupported feature classes are refused explicitly.\n"
+    report += (
+        "\nOpen [[Categories.md|Categories]] from Home, then a category dashboard "
+        "for its native Members table and Gallery. These contextual Bases use the "
+        "embedding category and follow link-preserving category renames; a standalone "
+        "member Base has no category context. Edit categories to change membership "
+        "and appearance_category to choose a member's icon provider independently "
+        "of membership order. A valid local icon override wins, an empty provider "
+        "opts out, and an invalid provider is shown without selecting a substitute. "
+        "Category icon edits update inherited dashboard images; note-body image "
+        "references remain separately editable migration-time snapshots. Declared "
+        "colours remain metadata. Bundled Bases and link updates are configured.\n"
+    )
     if plan.issues:
         report += "\n## Source warnings\n\n"
         for issue in plan.issues:

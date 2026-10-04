@@ -68,6 +68,26 @@ def plan(analysis: Analysis) -> MigrationPlan:
         ),
         adaptations=tuple(
             Adaptation(
+                kind="category_dashboard",
+                affected=key,
+                description="Embedded native contextual Members and Gallery Bases discover linked memberships from this category after link-preserving renames.",
+            )
+            for key in sorted(created & definitions)
+        )
+        + (
+            Adaptation(
+                kind="categories_overview",
+                affected=analysis.entry_key,
+                description="Preserved Home with an added Categories overview entry; overview uses the Categories folder and native categories tag role guard.",
+            ),
+            Adaptation(
+                kind="native_bases_configuration",
+                affected=".obsidian/core-plugins.json",
+                description="Enabled bundled Bases and required native navigation; preserved Home/bookmark settings and enabled link-preserving renames.",
+            ),
+        )
+        + tuple(
+            Adaptation(
                 kind="canonical_properties",
                 affected=key,
                 description="Generated canonical linked properties and paired original identities; no prose-derived aliases or semantic fields.",

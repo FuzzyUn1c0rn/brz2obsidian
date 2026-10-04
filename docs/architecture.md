@@ -55,6 +55,23 @@ retain declared appearance, normalized dates, original metadata evidence and
 snapshot decisions; adaptations distinguish these generated additions from
 authored content and full source evidence. Migration run time remains separate.
 
+The renderer adds category dashboard embeds, a Home-linked `Categories.md`
+overview and three shared native `.base` files under `Templates/Bases/`.
+Member queries use `list(categories).contains(this)` with the embedding category
+identity; their filters exclude Templates/Attachments folders and descendants,
+not filename substrings. Overview/provider role guards require a Markdown note
+under Categories with the native categories tag. Native image formulas validate
+a local nonempty supported-image target before applying an explicit override or
+the current valid appearance category's image. Provider validity is separate
+from icon override validity, so blank and invalid providers remain distinguishable
+without losing a valid override. Membership order never selects a provider.
+The source-neutral planner activates and accounts for all Base/overview/native
+configuration obligations; renderer adaptations identify added entry/dashboard
+content. The native core plugin configuration enables Bases and navigation,
+and app configuration keeps Home/bookmarks while enabling link-preserving renames.
+Open contextual member Bases through dashboards; standalone Bases have no
+embedding category. Template configuration remains the next implementation slice.
+
 ## Public boundaries
 
 | Operation | Responsibility |

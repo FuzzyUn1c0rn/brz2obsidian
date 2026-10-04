@@ -61,7 +61,8 @@ def test_local_thought_and_image_links_convert_without_inventing_related_edges(
     assert converted.outcome == "clean"
     assert note_body((vault / "Home — Entry thought.md").read_bytes()) == (
         b"# Entry thought\n\nBefore\r\n[[Notes/Topic.v2.md|Topic]]\r\n"
-        b"![photo](Attachments/22222222/photo.png)\r\nAfter\r"
+        b"![photo](Attachments/22222222/photo.png)\r\nAfter\r\n"
+        b"## Categories\n\n[[Categories.md|Browse categories]]\n"
     )
     assert not (vault / "Notes/Topic.v2.md").exists()
     assert (
@@ -160,7 +161,8 @@ def test_complete_workflow_span_gate_preserves_all_nonadapted_text_and_newlines(
         f"`[one]({local})`\r\n\\[literal]({local})\r\n"
         f"```md\r\n[one]({local})\r\n```\r\n"
         f"<!-- example {local} -->\r\n"
-        "[external](https://example.invalid/path)\r\n"
+        "[external](https://example.invalid/path)\r\n\n"
+        "## Categories\n\n[[Categories.md|Browse categories]]\n"
     )
     assert result.counts.actual_references == 4
 
@@ -208,7 +210,8 @@ def test_dotted_collision_target_uses_assigned_path_and_safe_original_alias(tmp_
     result = default_workflow().convert(source, vault)
     assert result.outcome == "clean"
     assert note_body((vault / "Home — Entry thought.md").read_bytes().decode()) == (
-        "# Entry thought\n\n[[Notes/Topic.v2 — 01234567.md|pipe x]]"
+        "# Entry thought\n\n[[Notes/Topic.v2 — 01234567.md|pipe x]]\n\n"
+        "## Categories\n\n[[Categories.md|Browse categories]]\n"
     )
     record = json.loads((vault / "migration-record.json").read_bytes())
     home_record = next(t for t in record["item_targets"] if t["item_key"] == HOME)

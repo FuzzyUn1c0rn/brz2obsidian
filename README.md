@@ -77,9 +77,28 @@ is the starting note and native Home bookmark; other thought notes are under
 `Notes/`; reviewed thought types become notes under `Categories/`. Each typed
 ordinary member is materialized, including empty members, and receives linked
 `categories` and `appearance_category` properties. Categories retain their own
-authored content/resources; members do not inherit that content. Ordinary links
-and native Backlinks provide category navigation in this first v2 slice. Later
-v2 dashboards, templates, appearance/date presentation and additional source
+authored content/resources; members do not inherit that content. Home links to
+`Categories.md`, whose native overview discovers category dashboards under
+`Categories/` with the `categories` tag. Each dashboard embeds Members and
+Gallery Bases from `Templates/Bases/`. Tables start Icon, Note, Inheritance,
+categories, created, updated. Gallery uses native image cards. The bundled Bases
+plugin and automatic link updates are enabled, alongside native navigation.
+Open member views through their category dashboard: a standalone contextual
+Base has no embedding category. Native category renames with link updates keep
+member discovery working. Membership comes from linked `categories` properties;
+Templates/Attachments areas are excluded while legitimate Template-named members
+remain visible. Ordinary prose, hierarchy and provider links do not classify notes.
+
+Edit membership directly. `appearance_category` independently chooses a category
+in the member's memberships; reordering or adding categories does not choose a
+new provider. A valid local `icon` override wins; otherwise the valid provider's
+current local image is used. A blank provider opts out, and an invalid provider
+shows Invalid provider without borrowing another category's icon. Valid overrides
+remain visible with blank or invalid providers. Category icon changes update
+inherited dashboard images; note-body images are separately editable migration
+snapshots. Declared colours remain metadata. Imported created/updated dates use
+source calendar components, with complete original strings retained as evidence.
+Templates and additional source
 coverage remain tracked in the [implementation index](.scratch/brz-to-obsidian-v2-implementation/README.md).
 Original headings, labels and bodies are retained, with supported
 local references adapted to assigned paths. Parents/Children/Related sections

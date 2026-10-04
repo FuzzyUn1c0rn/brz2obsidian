@@ -138,7 +138,7 @@ def test_generated_resources_and_children_render_outside_unclosed_authored_fence
         for index, token in enumerate(tokens)
         if token.type == "heading_open" and token.tag == "h2" and token.level == 0
     ]
-    assert headings == ["Resources", "Children"]
+    assert headings == ["Resources", "Children", "Categories"]
     assert "[[Notes/Child.md|Child]]" in [
         token.content for token in tokens if token.type == "inline"
     ]
@@ -208,7 +208,10 @@ def test_uncreated_listing_focuses_on_isolated_items_and_uncovered_related_pairs
         destination / "MIGRATION REPORT.md"
     ).read_text(encoding="utf-8")
     home = (destination / "Home — Entry.md").read_text(encoding="utf-8")
-    assert note_body(home) == "# Entry\n\n## Related\n\n- [[Notes/Linked.md|Linked]]\n"
+    assert note_body(home) == (
+        "# Entry\n\n## Related\n\n- [[Notes/Linked.md|Linked]]\n\n"
+        "## Categories\n\n[[Categories.md|Browse categories]]\n"
+    )
     record = json.loads((destination / "migration-record.json").read_bytes())
     assert len(record["relationships"]) == 4
     assert len(record["item_targets"]) == 5

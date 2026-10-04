@@ -58,7 +58,8 @@ def test_public_core_and_renderer_use_canonical_opaque_keys_and_exact_document_s
     artifacts = render(migration, METADATA)
     assert (
         note_body(generated(artifacts, "Home — Entry.md"))
-        == "# Entry\n\nBefore\r\n[[Notes/Dotted.v2.md|shown]]\rAfter\n"
+        == "# Entry\n\nBefore\r\n[[Notes/Dotted.v2.md|shown]]\rAfter\n\n"
+        "## Categories\n\n[[Categories.md|Browse categories]]\n"
     )
     assert (
         migration.counts.planned_references == artifacts.counts.actual_references == 1
@@ -207,7 +208,13 @@ def test_reusable_renderer_keeps_following_documents_and_navigation_visible(body
         for index, token in enumerate(tokens)
         if token.type == "heading_open" and token.level == 0
     ]
-    assert headings == ["Entry", "Second document", "Resources", "Children"]
+    assert headings == [
+        "Entry",
+        "Second document",
+        "Resources",
+        "Children",
+        "Categories",
+    ]
     assert "Authored follow-up." in [
         token.content for token in tokens if token.type == "inline"
     ]
