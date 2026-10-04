@@ -228,10 +228,10 @@ def normalize_attachments(archive, records, meta, thoughts, refuse, uuid):
         role = "icon" if kind == 5 else ("image" if kind == 12 else "file")
         if kind == 1 and (note_type == 4 or location == "Notes.md"):
             text = archive.read(member).decode("utf-8-sig")
-            if note_type == 0 and text:
+            if note_type == 0 and text and thoughts[owner]["Kind"] != 1:
                 refuse(
                     "unsupported_feature",
-                    "Nonempty Notes.md placeholder has ambiguous meaning",
+                    "Nonempty NoteType-0 Notes.md requires an ordinary thought owner",
                     (asset_id,),
                 )
             if any(d.owner == owner for d in documents):
