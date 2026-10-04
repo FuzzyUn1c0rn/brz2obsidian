@@ -22,10 +22,10 @@ Published: 2026-10-04 after the user approved the 11-slice breakdown and depende
 
 ## Acceptance criteria
 
-- [ ] Preserve original URL spelling/query parameters and VideoHtml evidence while deriving native presentation from validated reviewed provider facts, not executing archived iframe HTML.
-- [ ] Offer the embed alongside the retained original link and account separately for any derived embed URL and timing adaptation, including the demonstrated 18-second start.
-- [ ] Do not fetch/download remote resources during inspection/conversion, invent a local video payload or silently support unreviewed video semantics/providers.
-- [ ] Explain remote/offline/service dependence once in report/guide, without treating an unavailable remote preview as missing archived bytes or hiding the original link.
+- [x] Preserve original URL spelling/query parameters and VideoHtml evidence while deriving native presentation from validated reviewed provider facts, not executing archived iframe HTML.
+- [x] Offer the embed alongside the retained original link and account separately for any derived embed URL and timing adaptation, including the demonstrated 18-second start.
+- [x] Do not fetch/download remote resources during inspection/conversion, invent a local video payload or silently support unreviewed video semantics/providers.
+- [x] Explain remote/offline/service dependence once in report/guide, without treating an unavailable remote preview as missing archived bytes or hiding the original link.
 - [ ] Verify native rendering/playback/timing on a review copy of converter-produced output when service availability permits; record material limits honestly and leave playback paused.
 
 ## Testing boundaries
@@ -41,6 +41,10 @@ Use the accepted specification, source-feature comparison, domain vocabulary and
 Follow the [local claim and completion process](../../../docs/agents/issue-tracker.md#implementation-operations), [domain glossary](../../../GLOSSARY.md) and [accepted architecture decision](../../../docs/adr/0001-source-neutral-core.md). Claim only after all linked blockers are resolved; save the claim and assignee before implementation. Check each acceptance box only after its criterion passes, record evidence and material limits under Comments, and resolve only when every criterion is satisfied.
 
 ## Comments
+
+- 2026-10-05 (/root/v2_implement_07): Automated implementation is complete at the confirmed workflow/CLI seams. `tests/application/test_video_workflow.py` has 45 synthetic cases covering exact source URLs and raw VideoHtml, separate provider/embed/start facts, timed/untimed native presentation, separate inspect/record adaptations, 31 unknown/conflicting metadata/provider/role controls, plain-URL non-inference, denied socket access, absent local-video states/unassigned bytes, CLI exit codes, exact note backups/image bytes/bound spans and repeat/ZIP-record reorder output. The red/green cycles first demonstrated missing derived facts, missing adaptation accounting and missing remote-limit reporting. `sources/thebrain/videos.py` recognizes only the reviewed HTTPS watch URL and exact matching single-iframe baseline metadata; the source URL's `t=18s` supplies the derived `start=18`, while the original metadata's `start=0` survives independently. `obsidian/resources.py` generates a fresh fixed iframe from the neutral facts, never copying archived HTML. One remote/offline paragraph is separate from the retained single PDF Search limitation and source gaps. `docs/source-coverage.md` records the supported forms and limits.
+
+- 2026-10-05 (/root/v2_implement_07): Before integration refresh, cumulative `pytest -q`: 488 passed in 31.70 seconds; `ruff check src tests`, `ruff format --check src tests` (76 files), `pip check` and `git diff --check` passed. Only the root project's `.venv/Scripts/python.exe` ran, with per-process PYTHONPATH pointing to this worktree's `src`; the import location was confirmed. Native criterion remains unchecked pending root's bounded Computer review of the private converter-produced copy under ignored `brz/v2-ticket07/review-vault`, reproduced by `prepare_review.py` there. It uses synthetic identities and the reviewed actual timed public-video URL/metadata, retains `converter-output` unchanged, and leaves the original archive untouched. No native interaction, shared editable install, source-archive mutation, remote publication or cleanup was performed by this implementer. Guide preservation belongs to ticket 04; full three-archive audit and finished-v2 native acceptance remain tickets 10/11.
 
 - 2026-10-05 (/root): Claimed after resolved ticket 01 and integration of 06 freed the attachment boundary. The implementer owns validated video facts and native resource output; root performs the bounded Computer playback/timing check on a converter-produced review copy before resolution.
 
