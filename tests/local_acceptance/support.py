@@ -63,8 +63,6 @@ def template(category=None, role_tag=False):
         "categories": [linked] if linked else [],
         "appearance_category": linked,
         "icon": None,
-        "foreground_color": None,
-        "background_color": None,
         "created": "{{date:YYYY-MM-DD}}",
         "updated": "{{date:YYYY-MM-DD}}",
         "tags": ["categories"] if role_tag else [],
@@ -121,6 +119,9 @@ def check_support_content(vault, names, definitions):
             "canonical template membership/provider/date/identity contract"
         )
     guide = (vault / "Vault guide.md").read_bytes().decode()
+    assert all(
+        name not in guide for name in ("foreground_color", "background_color")
+    ), "removed colour properties in maintenance guide"
     obligations = (
         "## Find and create an object",
         "look up existing names and aliases",
@@ -136,6 +137,7 @@ def check_support_content(vault, names, definitions):
         "Empty means no inheritance",
         "Invalid provider",
         "body-icon snapshots",
+        "source colours remain in migration-record.json without vault colour properties",
         "without timezone conversion",
         "## Canonical properties and relationships",
         "Custom future",

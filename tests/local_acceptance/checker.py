@@ -561,13 +561,6 @@ def check_items(raw, record, archive, vault, assets):
             )
             + "\n"
         )
-        for name in ("foreground_color", "background_color"):
-            expected += (
-                name
-                + ":"
-                + (" " + json.dumps(declared[name]) if declared[name] else "")
-                + "\n"
-            )
         for name in ("created", "updated"):
             expected += (
                 name + ":" + (" " + calendar[name] if calendar[name] else "") + "\n"
@@ -1615,8 +1608,6 @@ def check_actual_files(vault, record, targets, names, raw, summary):
             "categories": "multitext",
             "appearance_category": "text",
             "icon": "text",
-            "foreground_color": "text",
-            "background_color": "text",
             "created": "date",
             "updated": "date",
             "tags": "tags",
@@ -1812,7 +1803,7 @@ def check_report(vault, raw, summary, payloads):
         "empty provider",
         "invalid provider",
         "migration-time snapshots",
-        "Declared colours remain metadata",
+        "Declared colours remain in migration-record.json only",
     )
     assert all(value in report for value in obligations), "required report obligations"
     if any(

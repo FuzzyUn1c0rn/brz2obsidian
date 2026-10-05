@@ -26,8 +26,6 @@ def imported_properties(plan, item):
         "categories": categories,
         "appearance_category": categories[0] if categories else None,
         "icon": "[[" + asset_targets[icon] + "]]" if icon else None,
-        "foreground_color": appearance.foreground_color if appearance else None,
-        "background_color": appearance.background_color if appearance else None,
         "created": dates.created if dates else None,
         "updated": dates.updated if dates else None,
         "tags": sorted(tags, key=str.casefold),

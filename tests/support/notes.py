@@ -16,8 +16,6 @@ def note_body(content):
         "categories",
         "appearance_category",
         "icon",
-        "foreground_color",
-        "background_color",
         "created",
         "updated",
         "tags",
