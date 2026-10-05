@@ -374,6 +374,11 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
             "brz2obsidian.core",
             "brz2obsidian.application.workflow",
         },
+        "vault_check": {
+            "brz2obsidian",
+            "brz2obsidian.contracts",
+            "brz2obsidian.vault_check",
+        },
     }
     for area, permitted in allowed.items():
         files = (

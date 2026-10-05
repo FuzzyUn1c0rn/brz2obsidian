@@ -83,7 +83,15 @@ embedding category. Template configuration remains the next implementation slice
 | `publication.publish(artifacts, payloads, destination)` | Fresh-destination checks, streamed staging, hashes/lengths/manifest verification, commit and owned cleanup |
 | `Workflow.inspect(source_ref)` | Shared preparation and planned result with destination/publication checks pending |
 | `Workflow.convert(source_ref, destination)` | Fresh preparation, render/publish, session closure and durable actual result |
+| `vault_check.check_vault(vault)` | Source-independent contained reads of actual mutable vault conventions and a separate strict version-1 checker result |
 | `cli.main(argv)` | Arguments, default wiring, text/JSON presentation and exit-code translation |
+
+The `vault_check` package depends inward on the shared `Contract` policy and
+data parsers only. It owns all convention-checking behavior and filesystem
+error translation without source, workflow, renderer or publisher dependencies.
+The CLI loads migration wiring only for inspect/convert; check-vault operates
+with those outer imports unavailable. Its contracts and outcomes are distinct
+from migration evidence and receipts. See [checker scope and schema](vault-checker.md).
 
 Operations below Workflow return contracts or raise `MigrationRefused` /
 `MigrationFailed` with structured immutable issues on known refusals/failures.

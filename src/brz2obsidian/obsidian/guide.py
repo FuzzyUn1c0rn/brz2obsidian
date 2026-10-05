@@ -111,6 +111,28 @@ category/member-template links may become shorter unambiguous links. Contextual
 member queries follow the renamed dashboard; source IDs remain unchanged. Prefer
 qualified links when similarly named targets are ambiguous.
 
+## Check current vault conventions
+
+From the installed converter environment, run these read-only commands with
+this vault's folder path:
+
+```text
+brz2obsidian check-vault "C:/vaults/this-vault"
+brz2obsidian check-vault "C:/vaults/this-vault" --json
+```
+
+Python callers use brz2obsidian.vault_check.check_vault(vault). The checker reads
+actual current notes, properties, Bases and required local-image references;
+it needs no source archive or migration-record.json and never repairs files.
+Custom properties, template date variables and intentional uncreated ordinary
+targets are allowed. Required category/provider/media links must resolve
+unambiguously; blank appearance providers opt out. Results are clean/issues/failed
+with command exits 0/2/1 and a separate version-1 brz2obsidian.vault-check JSON
+envelope. Read failures retain other readable-note diagnostics and unavailable
+measurements are null. This checks structural conventions, not Base formula
+execution, native rendering or continuing date maintenance. A clean editable
+vault does not replace the independent migration source-preservation audit.
+
 ## Reference adaptations and migration limits
 
 This follows kepano's real vault: manual full-template selection, linked category

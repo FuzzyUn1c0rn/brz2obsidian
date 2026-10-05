@@ -32,6 +32,18 @@ The parser instruments base markdown-it-py rules and maps transformed inline
 positions back to exact decoded source offsets; tokens' line maps alone are
 not treated as character spans.
 
+`tests/vault_check` exercises the public source-free `check_vault` operation on
+handwritten actual mutable vaults and its thin command. Controls cover known
+properties, safe YAML/duplicates, roles/providers, qualified/shortened/ambiguous
+references, active Base/images versus code/comments, imported identity pairs,
+customs/uncreated targets/template dates, external paths, linked files and real
+Windows junctions. OS/file-boundary failures retain readable-note diagnostics
+and honest available/null counts. Complete before/after directory inventory and
+byte hashes prove normal/problem/failure checks preserve caller files. Console
+and module entry points agree with the API, and the checker still works when
+source/workflow/renderer/publisher imports are blocked. This suite remains
+separate from the independent migration preservation checker below.
+
 The suite includes 22 synthetic corruption proofs for the independent acceptance
 checker. The checker imports only the standard library and reads archives/output
 directly; production manifest/counts do not provide expected preservation facts.
