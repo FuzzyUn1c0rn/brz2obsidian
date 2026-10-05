@@ -23,7 +23,7 @@ created: "{{date:YYYY-MM-DD}}". Native Templates still inserts the date; quoting
 also protects the variable when Obsidian rewrites YAML during link updates.
 
 A full category template initializes linked categories and appearance_category;
-optional icon/colour overrides stay blank. Templates initialize structure rather
+the optional icon override stays blank. Templates initialize structure rather
 than enforcing a continuing schema. Selecting a category in a property does not
 select or apply a template, and Base queries discover membership independently.
 
@@ -46,7 +46,8 @@ provider shows Invalid provider; it never selects a substitute. A valid local
 icon override wins even with an empty or invalid provider. Otherwise dashboards
 use the valid provider's current local image. Category changes do not rewrite
 body-icon snapshots; those image references are separately editable. Declared
-colours remain metadata, without the decorative Appearance display.
+source colours remain in migration-record.json without vault colour properties
+or the decorative Appearance display.
 
 Imported created/updated are source creation/overall-modification calendar dates,
 without timezone conversion. Full timestamps remain in migration-record.json.
@@ -59,7 +60,6 @@ An ordinary manual membership edit does not automatically change updated.
 | categories | List of links to category notes; empty is valid. |
 | appearance_category | Optional single category link also in categories. |
 | icon | Optional single link to a local image; category default or member override. |
-| foreground_color, background_color | Optional declared colour metadata. |
 | created, updated | Optional ISO calendar dates; new templates initialize insertion day. |
 | tags, aliases | Native lists; source tags are distinct from categories. |
 | source_collection_id, source_item_id | Paired opaque imported identity; absent for new objects. |

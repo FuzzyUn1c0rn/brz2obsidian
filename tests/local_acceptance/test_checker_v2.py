@@ -55,6 +55,81 @@ def fixture(tmp_path):
     return source, vault, result, record
 
 
+@pytest.mark.parametrize("property", ["foreground_color", "background_color"])
+def test_oracle_rejects_removed_colour_guidance_after_consistent_rehash(
+    tmp_path, property
+):
+    source, vault, result, record = fixture(tmp_path)
+    guide = vault / "Vault guide.md"
+    guide.write_bytes(
+        guide.read_bytes() + f"\n| {property} | Category default colour. |\n".encode()
+    )
+    rewrite_record(vault, record, result)
+    with pytest.raises(AssertionError, match="removed colour"):
+        check_vault(source, vault)
+
+
+@pytest.mark.parametrize("property", ["foreground_color", "background_color"])
+@pytest.mark.parametrize(
+    "surface",
+    [
+        "imported_note",
+        "full_template",
+        "generic_template",
+        "category_starter",
+        "member_starter",
+        "base",
+        "configuration",
+    ],
+)
+def test_oracle_rejects_obsolete_generated_properties_after_consistent_rehash(
+    tmp_path, property, surface
+):
+    source, vault, result, record = fixture(tmp_path)
+    if surface == "configuration":
+        config = record["obsidian_property_types_configuration"]
+        config["types"][property] = "text"
+        (vault / ".obsidian/types.json").write_text(
+            json.dumps(config), encoding="utf-8"
+        )
+    else:
+        name = {
+            "imported_note": "Categories/Concept.md",
+            "full_template": "Templates/Concept.md",
+            "generic_template": "Templates/New note.md",
+            "category_starter": "Templates/Category starter.md",
+            "member_starter": "Templates/Member template starter.md",
+            "base": "Templates/Bases/Members.base",
+        }[surface]
+        path = vault / name
+        data = path.read_bytes()
+        addition = f'{property}: "#FF0000"\n'.encode()
+        path.write_bytes(
+            addition + data
+            if surface == "base"
+            else data.replace(b"icon:\n", b"icon:\n" + addition)
+            if surface != "imported_note"
+            else data.replace(b"created:", addition + b"created:", 1)
+        )
+        assert addition in path.read_bytes(), "corruption hook must fire"
+    rewrite_record(vault, record, result)
+    with pytest.raises(AssertionError):
+        check_vault(source, vault)
+
+
+@pytest.mark.parametrize("property", ["foreground_color", "background_color"])
+def test_oracle_still_rejects_changed_declared_source_colours_after_consistent_rehash(
+    tmp_path, property
+):
+    source, vault, result, record = fixture(tmp_path)
+    category = next(t for t in record["item_targets"] if t["item_key"] == identity(2))
+    assert category["declared_appearance"][property] in {"#FF0000", "#00FF00"}
+    category["declared_appearance"][property] = "#000000"
+    rewrite_record(vault, record, result)
+    with pytest.raises(AssertionError, match="declared icon/colour facts"):
+        check_vault(source, vault)
+
+
 @pytest.mark.parametrize(
     "damage",
     [

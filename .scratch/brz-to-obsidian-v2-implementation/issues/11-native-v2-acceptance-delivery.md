@@ -16,7 +16,7 @@ Published: 2026-10-04 after the user approved the 11-slice breakdown and depende
 
 **What to build:** The user reviews the actual independently verified vaults in standard Obsidian and receives the final installation, library/CLI, maintenance and limitations guidance for a finished v2.
 
-**Blocked by:** [10: Independently verify complete preservation across all three real archives](10-three-archive-preservation.md).
+**Blocked by:** [10: Independently verify complete preservation across all three real archives](10-three-archive-preservation.md), [12: Remove unused colour properties from vault presentation](12-remove-unused-colour-properties.md).
 
 **Specification stories:** 1–82, with final acceptance ownership for 34–51, 56–60, 66–72, 79–82.
 
@@ -43,6 +43,8 @@ Use the accepted specification, source-feature comparison, domain vocabulary and
 Follow the [local claim and completion process](../../../docs/agents/issue-tracker.md#implementation-operations), [domain glossary](../../../GLOSSARY.md) and [accepted architecture decision](../../../docs/adr/0001-source-neutral-core.md). Claim only after all linked blockers are resolved; save the claim and assignee before implementation. Check each acceptance box only after its criterion passes, record evidence and material limits under Comments, and resolve only when every criterion is satisfied.
 
 ## Comments
+
+- 2026-10-05 (/root): During native review the user explicitly requested removal of foreground/background colour properties. Appended refinement 12 blocks final acceptance; this already-started ticket remains claimed for independent documentation work. Affected native checks pause until fresh refined outputs pass independent preservation. Original colour facts stay in migration evidence; old audited outputs and review copies remain historical and untouched by regeneration. Final wheel/examples and affected native checks will repeat against the integrated refinement.
 
 - 2026-10-05 (/root): Claimed after ticket 10 resolved and integrated at `a8c3d53b2eaff7ec46af287a56429bc40418c89a`. All nine exact/repeat/reordered conversions passed independent preservation with unchanged source fingerprints; 748 cumulative tests, Ruff lint/format, dependency/import/version and diff gates pass. The isolated implementer owns final documentation and real packaging/library/CLI example checks. Root owns Computer review of fresh actual A/B/C output copies, private native evidence, the independent two-axis review from completed v1 `f4627d9`, and the user's actual converted-vault verdict. Audited outputs remain pristine. This claim does not assert native or finished-v2 acceptance.
 

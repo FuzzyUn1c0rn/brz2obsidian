@@ -296,8 +296,6 @@ def test_combined_v2_vault_preserves_independent_facts_and_checks_without_source
             "categories": "multitext",
             "appearance_category": "text",
             "icon": "text",
-            "foreground_color": "text",
-            "background_color": "text",
             "created": "date",
             "updated": "date",
             "tags": "tags",

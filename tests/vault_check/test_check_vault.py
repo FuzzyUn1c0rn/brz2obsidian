@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from brz2obsidian.cli import main
 from brz2obsidian.vault_check import check_vault
 
 
@@ -127,6 +128,25 @@ aliases: []
     assert result.counts.category_notes == 0
 
 
+def test_removed_colour_names_are_custom_fields_in_read_only_library_and_cli(
+    tmp_path, capsys
+):
+    write(
+        tmp_path,
+        "Notes/Manual.md",
+        "---\nforeground_color: {custom: [1, true, null]}\n"
+        "background_color: false\n---\n# Manual\n",
+    )
+    result = checked(tmp_path)
+    assert result.outcome == "clean"
+    before = inventory(tmp_path)
+    assert main(["check-vault", str(tmp_path), "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == result.model_dump(
+        mode="json", by_alias=True
+    )
+    assert inventory(tmp_path) == before
+
+
 @pytest.mark.parametrize(
     "property,value",
     [
@@ -136,8 +156,6 @@ aliases: []
         ("icon", "42"),
         ("tags", "topic"),
         ("aliases", "[true]"),
-        ("foreground_color", "'#123'"),
-        ("background_color", "false"),
         ("created", "'2025-02-29'"),
         ("updated", "true"),
         ("created", "'{{date:YYYY-MM-DD}}'"),
