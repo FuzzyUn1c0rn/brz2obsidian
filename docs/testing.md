@@ -73,6 +73,24 @@ unchanged. Public ZIP/workflow tests check generated obligations and byte
 preservation; the native check verifies Obsidian evaluates those queries and
 images. This early check remains separate from final complete-output acceptance.
 
+The [v2 templates slice](../.scratch/brz-to-obsidian-v2-implementation/issues/04-native-templates-maintenance.md)
+adds workflow checks of actual full templates, insertion variables, configured
+native property types, future-category starters/guide, complete support records
+and manifests, and reserved-title/NFC/duplicate/long-stem reproducibility.
+Its separate bounded native gate uses a pristine synthetic converter output and
+an editable review copy: select a full template in Editing view, verify current
+insertion-day dates and inherited dashboard discovery, edit an existing note's
+memberships without changing its dates/body/provider/source IDs, create a future
+category from its starter and discover a handwritten member, then adapt/select
+its full member template. Test a native category rename with automatic link
+updates. Nested .base files are not Markdown templates. Do not apply a full
+template to the established imported note as a membership-edit mechanism.
+An actual category rename exposed unquoted template dates becoming YAML mappings.
+The public workflow regression now verifies every generated Markdown template's
+quoted date variables survive safe YAML parsing/rewriting and later insertion.
+PyYAML is declared as a development dependency for this data-level regression;
+the converter itself continues to serialize through its existing JSON quoting.
+
 After full independent acceptance, make fresh copies of both accepted generated
 vaults and preserve pre-click originals. Open only those copies in standard
 Obsidian and record its observed version. Use original-source candidates joined
@@ -108,6 +126,7 @@ prior prototype/Wayfinder results are not implementation acceptance.
 | Pydantic / pydantic-core | 2.13.5 / 2.46.5 |
 | markdown-it-py / mdurl | 4.2.0 / 0.1.2 |
 | pytest | 9.1.1 |
+| PyYAML (template rewrite regression) | 6.0.3 |
 | Ruff | 0.16.10 |
 | setuptools / pip | 84.0.0 / 26.2.1 |
 | Obsidian native presentation target | 1.13.7 |

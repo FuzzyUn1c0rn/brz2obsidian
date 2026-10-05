@@ -1,7 +1,4 @@
-"""Version-two support namespace, reserved before imported target assignment.
-
-Later slices activate these obligations; reservation alone creates no files.
-"""
+"""Version-two generated support, reserved before imported target assignment."""
 
 from pathlib import PurePosixPath
 
@@ -37,20 +34,22 @@ SUPPORTING_NAMES = frozenset(
 )
 
 
-def support_artifacts(has_uncreated_listing, tag_listing_path):
+def category_template_path(target):
+    """Reuse the already reserved, collision-safe imported category stem."""
+    return "Templates/" + PurePosixPath(target.relative_path).name
+
+
+def support_artifacts(has_uncreated_listing, tag_listing_path, category_targets):
     paths = {
-        "MIGRATION REPORT.md",
-        "migration-record.json",
-        ".obsidian/app.json",
-        ".obsidian/bookmarks.json",
-        ".obsidian/core-plugins.json",
-        "Categories.md",
-        "Templates/Bases/Members.base",
-        "Templates/Bases/Gallery.base",
-        "Templates/Bases/Categories.base",
+        a.relative_path
+        for a in SUPPORT_NAMESPACE
+        if a.relative_path not in {"Uncreated targets.md", "Tag memberships.md"}
     }
     if has_uncreated_listing:
         paths.add("Uncreated targets.md")
     if tag_listing_path:
         paths.add(tag_listing_path)
-    return tuple(a for a in SUPPORT_NAMESPACE if a.relative_path in paths)
+    return tuple(a for a in SUPPORT_NAMESPACE if a.relative_path in paths) + tuple(
+        SupportArtifact(relative_path=category_template_path(t), purpose="template")
+        for t in category_targets
+    )

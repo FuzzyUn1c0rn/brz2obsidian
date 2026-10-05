@@ -20,7 +20,11 @@ def plan(analysis: Analysis) -> MigrationPlan:
     snapshots = icon_snapshots(snapshot, created)
     definitions = {i.key for i in snapshot.items if i.role == "definition"}
     tag_targets, tag_memberships, listing_path = assign_tags(snapshot, targets)
-    supporting = support_artifacts(bool(isolated or related_pairs), listing_path)
+    supporting = support_artifacts(
+        bool(isolated or related_pairs),
+        listing_path,
+        tuple(t for t in targets if t.item_key in definitions),
+    )
     tokens = {t.tag_key: t.token for t in tag_targets}
     targets = tuple(
         t.model_copy(update={"vault_tag_token": tokens.get(t.item_key)})
@@ -76,6 +80,16 @@ def plan(analysis: Analysis) -> MigrationPlan:
         )
         + (
             Adaptation(
+                kind="native_templates_configuration",
+                affected=".obsidian/templates.json",
+                description="Enabled bundled Templates for manual selection, Templates folder and ISO insertion dates; configured canonical native property types without unrelated reference toggles.",
+            ),
+            Adaptation(
+                kind="vault_maintenance_guide",
+                affected="Vault guide.md",
+                description="Documented new-object templates, direct existing-note membership edits, explicit update dates and category/member/Base starters without a custom registry.",
+            ),
+            Adaptation(
                 kind="categories_overview",
                 affected=analysis.entry_key,
                 description="Preserved Home with an added Categories overview entry; overview uses the Categories folder and native categories tag role guard.",
@@ -85,6 +99,14 @@ def plan(analysis: Analysis) -> MigrationPlan:
                 affected=".obsidian/core-plugins.json",
                 description="Enabled bundled Bases and required native navigation; preserved Home/bookmark settings and enabled link-preserving renames.",
             ),
+        )
+        + tuple(
+            Adaptation(
+                kind="category_template",
+                affected=key,
+                description="Full native new-note template initializes linked category membership/provider and insertion-day dates, with blank overrides and no imported identities.",
+            )
+            for key in sorted(created & definitions)
         )
         + tuple(
             Adaptation(

@@ -101,6 +101,9 @@ def check_vault(source, vault):
         "issues",
         "counts",
         "obsidian_configuration",
+        "obsidian_core_plugins_configuration",
+        "obsidian_templates_configuration",
+        "obsidian_property_types_configuration",
         "original_evidence",
     }, "migration record schema fields"
     assert (record["schema"], record["schema_version"]) == (
@@ -1222,6 +1225,13 @@ def check_actual_files(vault, record, targets, names):
         "Templates/Bases/Members.base",
         "Templates/Bases/Gallery.base",
         "Templates/Bases/Categories.base",
+        "Templates/Bases/Starter.base",
+        "Templates/New note.md",
+        "Templates/Category starter.md",
+        "Templates/Member template starter.md",
+        "Vault guide.md",
+        ".obsidian/templates.json",
+        ".obsidian/types.json",
         "MIGRATION REPORT.md",
         "migration-record.json",
     }
@@ -1238,6 +1248,13 @@ def check_actual_files(vault, record, targets, names):
         "Templates/Bases/Members.base": "base",
         "Templates/Bases/Gallery.base": "base",
         "Templates/Bases/Categories.base": "base",
+        "Templates/Bases/Starter.base": "starter",
+        "Templates/New note.md": "template",
+        "Templates/Category starter.md": "starter",
+        "Templates/Member template starter.md": "starter",
+        "Vault guide.md": "guide",
+        ".obsidian/templates.json": "configuration",
+        ".obsidian/types.json": "configuration",
         "MIGRATION REPORT.md": "report",
         "migration-record.json": "migration_record",
     }
@@ -1266,7 +1283,39 @@ def check_actual_files(vault, record, targets, names):
         "bookmarks": True,
         "properties": True,
         "bases": True,
+        "templates": True,
     }, "native Bases configuration"
+    assert record["obsidian_core_plugins_configuration"] == load_json(
+        (vault / ".obsidian/core-plugins.json").read_bytes()
+    ), "record core plugin configuration"
+    template_config = {"folder": "Templates", "dateFormat": "YYYY-MM-DD"}
+    assert (
+        load_json((vault / ".obsidian/templates.json").read_bytes()) == template_config
+    ), "native template configuration"
+    assert record["obsidian_templates_configuration"] == template_config, (
+        "record template configuration"
+    )
+    types_config = {
+        "types": {
+            "categories": "multitext",
+            "appearance_category": "text",
+            "icon": "text",
+            "foreground_color": "text",
+            "background_color": "text",
+            "created": "date",
+            "updated": "date",
+            "tags": "tags",
+            "aliases": "aliases",
+            "source_collection_id": "text",
+            "source_item_id": "text",
+        }
+    }
+    assert load_json((vault / ".obsidian/types.json").read_bytes()) == types_config, (
+        "native property type configuration"
+    )
+    assert record["obsidian_property_types_configuration"] == types_config, (
+        "record property type configuration"
+    )
     reserved = set(names.values()) | {
         ".obsidian/app.json",
         ".obsidian/bookmarks.json",
@@ -1279,8 +1328,22 @@ def check_actual_files(vault, record, targets, names):
         if not name.endswith(".md"):
             continue
         text = (vault / name).read_bytes().decode()
+        # Examples are documentation, not live navigation obligations. Bound
+        # Markdown fences independently rather than importing converter parsing.
+        active = []
+        fence = None
+        for line in text.splitlines(keepends=True):
+            marker = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
+            if fence:
+                if marker and marker[1][0] == fence[0] and len(marker[1]) >= len(fence):
+                    fence = None
+            elif marker:
+                fence = marker[1]
+            else:
+                active.append(line)
+        text = "".join(active)
         for match in re.finditer(r"\[\[([^\]\n]+)\]\]", text):
-            destination = match[1].split("|")[0]
+            destination = match[1].split("|")[0].split("#")[0]
             assert destination in reserved | actual, "actual local wikilink destination"
         for match in re.finditer(r"!\[[^\]]*\]\((<[^>]+>|[^\s)]+)", text):
             destination = unquote(match[1].strip("<>"))

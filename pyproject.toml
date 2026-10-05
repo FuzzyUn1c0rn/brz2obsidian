@@ -10,7 +10,7 @@ requires-python = ">=3.14"
 dependencies = ["pydantic>=2.13,<3", "markdown-it-py>=4.2,<4.3"]
 
 [project.optional-dependencies]
-dev = ["pytest>=9.1,<10", "ruff>=0.16,<0.17"]
+dev = ["pytest>=9.1,<10", "ruff>=0.16,<0.17", "PyYAML>=6.0.3,<7"]
 
 [project.scripts]
 brz2obsidian = "brz2obsidian.cli:main"

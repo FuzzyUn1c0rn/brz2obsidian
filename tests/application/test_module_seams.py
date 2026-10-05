@@ -41,7 +41,7 @@ def test_public_modules_compose_without_workflow_and_verify_full_manifest(tmp_pa
         artifacts = render(migration_plan, METADATA)
         receipt = publish(artifacts, session, tmp_path / "vault")
     assert receipt.verified and receipt.published
-    assert len(receipt.manifest) == 11
+    assert len(receipt.manifest) == 18
     assert receipt.counts.actual_notes == 1
     assert receipt.counts.actual_assets == 1
     assert receipt.manifest[0].length == len(PROPERTIES) + 85
