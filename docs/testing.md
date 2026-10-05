@@ -32,6 +32,24 @@ The parser instruments base markdown-it-py rules and maps transformed inline
 positions back to exact decoded source offsets; tokens' line maps alone are
 not treated as character spans.
 
+The combined v2 actual-ZIP fixture independently checks seven imported notes,
+eight byte-preserved payloads and 19 support artifacts, including exceptional
+Markdown/image references, graph/tags, category membership/icon snapshots/dates,
+the TXT/PDF gap and timed video. Library/CLI schema 2, warning exit 2 and the
+source-free checker schema 1/clean exit 0 agree. Exact/repeat/reordered synthetic
+outputs retain logical records and output bytes; caller inventory/bytes remain
+unchanged by inspection/checking/refused reconversion.
+
+Focused v2 controls reach each selected template/Base/configuration/guide before
+injecting partial writes, deletion/truncation/same-length corruption or source
+changes. Actual Windows support-directory junctions and native rename/rmdir races
+retain caller files and safe cleanup/leftover evidence. Category/default and
+member/override streams are selected separately; post-commit/teardown failures
+retain complete verified manifests and available actual counts. The additive
+Folio fixture independently authors compatible classification, dates, icons and
+video facts, with constructor/core version controls and active outer-import
+barriers. These public checks do not replace the complete private archive audit.
+
 `tests/vault_check` exercises the public source-free `check_vault` operation on
 handwritten actual mutable vaults and its thin command. Controls cover known
 properties, safe YAML/duplicates, roles/providers, qualified/shortened/ambiguous
@@ -100,8 +118,9 @@ template to the established imported note as a membership-edit mechanism.
 An actual category rename exposed unquoted template dates becoming YAML mappings.
 The public workflow regression now verifies every generated Markdown template's
 quoted date variables survive safe YAML parsing/rewriting and later insertion.
-PyYAML is declared as a development dependency for this data-level regression;
-the converter itself continues to serialize through its existing JSON quoting.
+PyYAML is a runtime dependency for the convention checker and is also used by
+this data-level regression; the converter continues to serialize through its
+existing JSON quoting.
 
 After full independent acceptance, make fresh copies of both accepted generated
 vaults and preserve pre-click originals. Open only those copies in standard
@@ -138,7 +157,7 @@ prior prototype/Wayfinder results are not implementation acceptance.
 | Pydantic / pydantic-core | 2.13.5 / 2.46.5 |
 | markdown-it-py / mdurl | 4.2.0 / 0.1.2 |
 | pytest | 9.1.1 |
-| PyYAML (template rewrite regression) | 6.0.3 |
+| PyYAML (checker/template rewrite regression) | 6.0.3 |
 | Ruff | 0.16.10 |
 | setuptools / pip | 84.0.0 / 26.2.1 |
 | Obsidian native presentation target | 1.13.7 |

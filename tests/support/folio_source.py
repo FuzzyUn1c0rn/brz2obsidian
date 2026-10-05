@@ -3,16 +3,23 @@
 Folio JSON has named entries, connections, documents and local payload files.
 It knows no Brain metadata, UUID conventions or numeric source enums. Its
 declared references are already traced spans, as a compatible source requires.
+Optional assignments pair named classification connections with definitions and
+members. Appearance and video values are explicit Folio declarations; calendar
+dates are Folio year/month/day triplets, independently of source timestamps.
 """
 
 import hashlib
 import json
 from contextlib import contextmanager
+from datetime import date
 from pathlib import Path
 
 from brz2obsidian.contracts import (
     AccountingEntry,
     Asset,
+    CalendarDates,
+    ClassificationAssignment,
+    DeclaredAppearance,
     Document,
     Issue,
     Item,
@@ -25,6 +32,7 @@ from brz2obsidian.contracts import (
     SourceIdentity,
     SourcePolicy,
     SourceSnapshot,
+    VideoPresentation,
 )
 
 FOLIO_POLICY = SourcePolicy(
@@ -92,7 +100,9 @@ class FolioSession:
                 else None,
                 external_uri=a.get("uri"),
                 evidence=("folio.json",),
-                video_presentation=None,
+                video_presentation=VideoPresentation(**a["video"])
+                if a.get("video")
+                else None,
             )
             for a in data["assets"]
         )
@@ -125,8 +135,17 @@ class FolioSession:
                 role=i.get("role", "ordinary"),
                 document_ids=tuple(d.key for d in documents if d.owner == i["key"]),
                 resource_ids=tuple(a.asset_id for a in assets if a.owner == i["key"]),
-                declared_appearance=None,
-                calendar_dates=None,
+                declared_appearance=DeclaredAppearance(**i["appearance"])
+                if i.get("appearance")
+                else None,
+                calendar_dates=CalendarDates(
+                    **{
+                        field: date(*parts) if parts is not None else None
+                        for field, parts in i["calendar"].items()
+                    }
+                )
+                if i.get("calendar")
+                else None,
                 evidence=("folio.json",),
             )
             for i in data["entries"]
@@ -151,7 +170,10 @@ class FolioSession:
             documents=tuple(documents),
             assets=assets,
             relationships=relationships,
-            classification_assignments=(),
+            classification_assignments=tuple(
+                ClassificationAssignment(**assignment, evidence=("folio.json",))
+                for assignment in data.get("assignments", [])
+            ),
             findings=tuple(
                 SourceFinding(
                     **{key: value for key, value in f.items() if key != "affected"},
@@ -171,7 +193,8 @@ class FolioSession:
                         identity="folio.json",
                         disposition="normalized",
                         references=tuple(i.key for i in items)
-                        + tuple(a.asset_id for a in assets),
+                        + tuple(a.asset_id for a in assets)
+                        + tuple(r.key for r in relationships),
                     ),
                 )
             ),
