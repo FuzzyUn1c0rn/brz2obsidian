@@ -1,6 +1,6 @@
 # 04: Create and extend objects with native templates and a maintenance guide
 
-Status: claimed
+Status: resolved
 
 Assignee: /root/v2_implement_04
 
@@ -24,10 +24,10 @@ Published: 2026-10-04 after the user approved the 11-slice breakdown and depende
 
 - [x] Retain and verify the bundled Bases configuration established by ticket 03; enable/configure bundled Templates, native property types, required Home/link preferences and template-folder/date insertion settings. Account for configuration without copying unrelated reference toggles or requiring community plugins.
 - [x] Deliver a generic template and complete templates for the actual categories with linked membership/provider, blank overrides, insertion-date variables and no imported source IDs or invented domain-specific schema.
-- [ ] Deliver category-note, member-template and contextual Base starter examples that discover a manually classified future note using the same native mechanisms.
+- [x] Deliver category-note, member-template and contextual Base starter examples that discover a manually classified future note using the same native mechanisms.
 - [x] Document template selection, lookup before creation, meaningful entity links, canonical vocabulary, source versus new identity, existing-note membership editing and explicitly maintained update dates.
 - [x] Existing memberships are edited directly; do not ship additive category-only templates or promise native protection against arbitrary full-template scalar overwrites.
-- [ ] Native insertion on a new note initializes membership/dates, whereas a membership edit on an existing note preserves its established dates, content, provider and identity. User/agent extension does not depend on folders as the type system or registry fields.
+- [x] Native insertion on a new note initializes membership/dates, whereas a membership edit on an existing note preserves its established dates, content, provider and identity. User/agent extension does not depend on folders as the type system or registry fields.
 - [x] Document deliberate reference adaptations, dashboard entry points and editable snapshots; prove all support/configuration artifacts are manifested and collision-safe.
 
 ## Testing boundaries
@@ -43,6 +43,8 @@ Use the accepted specification, source-feature comparison, domain vocabulary and
 Follow the [local claim and completion process](../../../docs/agents/issue-tracker.md#implementation-operations), [domain glossary](../../../GLOSSARY.md) and [accepted architecture decision](../../../docs/adr/0001-source-neutral-core.md). Claim only after all linked blockers are resolved; save the claim and assignee before implementation. Check each acceptance box only after its criterion passes, record evidence and material limits under Comments, and resolve only when every criterion is satisfied.
 
 ## Comments
+
+- 2026-10-05 (/root/v2_implement_04): Resolved after root's complete bounded native check passed in Obsidian 1.13.7, including the date repair correction gate. Native picker excluded nested Bases; full/generic insertion resolved title and current-day ISO dates without source IDs. Direct existing-note membership add/reorder/removal preserved old dates, paired IDs and explicit provider, with visible invalid-provider behavior and restored inherited icon. A category starter, handwritten future member and adapted full member template worked through the same contextual Members/Gallery and overview mechanisms without a registry. The second native category rename retained quoted date tokens, updated membership/provider links, and a subsequent new-note insertion initialized the final category/provider, blank overrides and 2026-10-05 dates; table/gallery discovery passed with Icon before Note and no Appearance display. Read-only verification retained all six imported identities, five payloads and both 29-file pristine manifests. Native Properties saves changed only three CRLF body endings to LF; all other authored bytes matched, and original outputs/backups remain exact. This editor limitation and the quoted-variable reference adaptation are documented. Final automatic gate remains 495 tests plus clean Ruff lint/format, pip and diff checks. All ticket criteria pass; this subset acceptance does not complete v2's remaining checker, integration, all-archive preservation, native delivery, final review or actual-vault user verdict gates. Aggregate evidence is in [template slice evidence](../research/ticket04-templates-maintenance.md); private captures and verification JSON remain ignored.
 
 - 2026-10-05 (/root/v2_implement_04): Date-token repair cumulative gate passes: 495 tests in 45.60 seconds, Ruff lint/format on 91 files, pip check and git diff --check. The new pristine repaired output has quoted native date variables across every full/generic/category/member starter, current guide warnings and all 29 manifest obligations; original native fixture remains exact. The outside checker supplement now describes the safe quoted final form and treats bounded unquoted reference handling as a separate compatibility decision. Native correction evidence remains pending.
 
