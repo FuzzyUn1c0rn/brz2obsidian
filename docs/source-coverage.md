@@ -77,7 +77,9 @@ Declared integer `ForegroundColor`/`BackgroundColor` values in the reviewed
 signed opaque ARGB range (`-16777216` through `-1`) normalize to `#RRGGBB`.
 Other encodings refuse instead of inventing alpha/channel meaning. Declared
 values remain distinct from inheritance and raw numeric evidence survives.
-These colours are preserved metadata; no decorative Appearance display is added.
+These colours remain migration/source evidence rather than vault properties.
+Generated notes, templates, property-type configuration and Bases expose neither
+foreground/background colour fields nor a decorative Appearance display.
 
 ## Notes and resources
 
@@ -169,5 +171,5 @@ equivalent TheBrain PDF body search.
 
 Name sanitation, simple graph presentation and intentional uncreated targets
 are adaptations rather than extra warnings. See [complete independent
-preservation results](../.scratch/brz-to-obsidian-v2-implementation/research/three-archive-preservation.md)
+preservation results after the presentation refinement](../.scratch/brz-to-obsidian-v2-implementation/research/colour-property-refinement.md)
 and the [source-feature-to-vault comparison](../.scratch/brz-to-obsidian-v2-implementation/source-feature-mapping.md).

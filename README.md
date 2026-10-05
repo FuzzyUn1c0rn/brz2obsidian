@@ -10,12 +10,12 @@ and templates, source dates, editable icon inheritance, the reviewed unusual
 Markdown note, zero-length absent-TXT findings, YouTube presentation and a
 read-only vault checker. All three supplied exports use the same TheBrain
 version and exercise different features. Nine complete exact/repeat/reordered
-conversions passed [independent preservation](.scratch/brz-to-obsidian-v2-implementation/research/three-archive-preservation.md).
+conversions passed [independent preservation after the presentation refinement](.scratch/brz-to-obsidian-v2-implementation/research/colour-property-refinement.md).
 See [source coverage and warnings](docs/source-coverage.md), the
 [accepted v2 specification](.scratch/brz-to-obsidian-v2-implementation/spec.md)
 and [delivery gates](.scratch/brz-to-obsidian-v2-implementation/README.md).
-Actual-output native review, independent final review and the user's verdict
-remain separate gates before declaring v2 finished.
+V2 delivery also requires native review of actual outputs, independent final
+review and the user's verdict recorded in those delivery gates.
 
 ## Development environment
 
@@ -113,7 +113,8 @@ current local image is used. A blank provider opts out, and an invalid provider
 shows Invalid provider without borrowing another category's icon. Valid overrides
 remain visible with blank or invalid providers. Category icon changes update
 inherited dashboard images; note-body images are separately editable migration
-snapshots. Declared colours remain metadata. Imported created/updated dates use
+snapshots. Source colours remain in migration evidence; note properties,
+templates and Bases omit foreground/background colour fields. Imported created/updated dates use
 source calendar components, with complete original strings retained as evidence.
 Bundled Templates is also enabled, with the Templates folder and ISO date format.
 Create a new note, switch to Editing view, run **Templates: Insert template**,
@@ -198,8 +199,10 @@ and runnable composition examples](docs/architecture.md).
 ## Verification and private data
 
 See [test commands and native-review procedure](docs/testing.md), [complete
-v2 preservation](.scratch/brz-to-obsidian-v2-implementation/research/three-archive-preservation.md)
+current v2 preservation](.scratch/brz-to-obsidian-v2-implementation/research/colour-property-refinement.md)
 and the [current actual-vault acceptance gate](.scratch/brz-to-obsidian-v2-implementation/issues/11-native-v2-acceptance-delivery.md).
+The [initial v2 preservation report](.scratch/brz-to-obsidian-v2-implementation/research/three-archive-preservation.md)
+retains the complete audit before the colour-property refinement.
 The [v1 preservation](.scratch/brz-to-obsidian-v1/research/real-export-acceptance.md)
 and [v1 native report](.scratch/brz-to-obsidian-v1/research/native-acceptance.md)
 remain historical evidence.

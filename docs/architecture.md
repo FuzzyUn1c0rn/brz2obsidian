@@ -47,8 +47,8 @@ uncreated under the existing selection policy.
 
 All imported item notes, including materialized source tags and definitions,
 receive the canonical core: linked `categories`, optional single
-`appearance_category` and local-image `icon`, declared `foreground_color` and
-`background_color`, optional `created`/`updated`, native `tags`/`aliases` lists,
+`appearance_category` and local-image `icon`, optional `created`/`updated`,
+native `tags`/`aliases` lists,
 and paired opaque `source_collection_id`/`source_item_id`. Native scalar links
 and identity strings use JSON quoting, which is safe YAML; dates use ISO
 calendar spelling. Aliases and semantic properties are not inferred from prose.
@@ -56,6 +56,8 @@ Source tags retain their independent native adaptation. Migration item records
 retain declared appearance, normalized dates, original metadata evidence and
 snapshot decisions; adaptations distinguish these generated additions from
 authored content and full source evidence. Migration run time remains separate.
+Declared colours remain source/migration evidence; generated note properties,
+templates, property-type configuration and Base views omit colour fields.
 
 The renderer adds category dashboard embeds, a Home-linked `Categories.md`
 overview and three shared native `.base` files under `Templates/Bases/`.
@@ -257,8 +259,8 @@ existing application configuration shape in migration-record schema 2.
 configuration dictionaries. Their actual files remain hash/length-manifested.
 
 Templates provide the canonical new-object structure and insertion variables,
-with linked membership/provider for category templates, blank icon/colour
-overrides and no source identity. Manual Templates selection is independent of
+with linked membership/provider for category templates, a blank icon override
+and no source identity. Manual Templates selection is independent of
 membership-driven Bases; no template/base/vault_role registry exists. Existing
 memberships are edited directly because full native templates can overwrite
 shared scalar fields. `Vault guide.md` documents manual update dates, duplicate
@@ -268,7 +270,7 @@ Every exported JSON record/field remains in original evidence independently
 of normalized facts. Consumers needing exact numeric comparisons should use
 an exact decimal JSON representation. Reproducibility compares logical decisions
 and content while handling explicit run metadata, original evidence order and
-reordered-source fingerprints separately. See [v2 independent preservation](../.scratch/brz-to-obsidian-v2-implementation/research/three-archive-preservation.md).
+reordered-source fingerprints separately. See [current v2 independent preservation](../.scratch/brz-to-obsidian-v2-implementation/research/colour-property-refinement.md).
 
 | Versioned component | Current value |
 | --- | --- |

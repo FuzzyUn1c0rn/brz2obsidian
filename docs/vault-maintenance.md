@@ -15,7 +15,7 @@ Create a suitably named note, switch to Editing view, run **Templates: Insert
 template**, and select `New note` or the full template named for the category's
 assigned stem. For example, the source type Book yields `Categories/Book.md`
 and `Templates/Book.md` when no naming collision requires a suffix. The template
-initializes linked membership/provider and leaves optional icon/colours blank.
+initializes linked membership/provider and leaves the optional icon blank.
 Both dates begin on the insertion day. Maintain `updated` explicitly thereafter.
 
 Keep template variables quoted, for example `created: "{{date:YYYY-MM-DD}}"`.
@@ -37,7 +37,6 @@ category. Reordering memberships never chooses a different provider.
 | `categories` | List of links to category notes; empty is valid. |
 | `appearance_category` | Optional single category link also in `categories`. |
 | `icon` | Optional single local-image link: category default or member override. |
-| `foreground_color`, `background_color` | Optional declared `#RRGGBB` colour metadata. |
 | `created`, `updated` | Optional ISO calendar dates. Imported values use source creation/overall modification, without timezone conversion. |
 | `tags`, `aliases` | Native string lists; source tags remain distinct from categories. |
 | `source_collection_id`, `source_item_id` | Paired opaque imported identities; absent on new objects. |
@@ -51,7 +50,8 @@ A valid local `icon` wins. Otherwise dashboards use the current icon of a valid
 appearance category. A blank provider opts out; a dangling/nonmember provider
 shows Invalid provider and is reported by the checker, without reselection.
 A valid override remains visible in either case. The icon field links to a real
-preserved image; it is not an emoji field. Declared colours remain metadata,
+preserved image; it is not an emoji field. Source colours stay in migration
+evidence; notes/templates/Bases expose no foreground/background colour fields
 and member views have no decorative Appearance column.
 
 Body-icon references are migration-time snapshots. Changing category/provider

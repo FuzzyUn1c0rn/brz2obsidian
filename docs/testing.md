@@ -62,15 +62,21 @@ and module entry points agree with the API, and the checker still works when
 source/workflow/renderer/publisher imports are blocked. This suite remains
 separate from the independent migration preservation checker below.
 
-The independent acceptance suite retains all 22 earlier corruption proofs and
-adds 69 v2 corruption/interaction checks, five driver corruption controls, two
-positive v2 audit tracers and a standard-library import check: 99 tests in total.
+The independent acceptance suite retains all 22 earlier corruption proofs,
+69 v2 corruption/interaction checks, five driver corruption controls, two
+positive v2 audit tracers and a standard-library import check. Eighteen additional
+presentation-refinement controls bring the current group to 117 tests.
 False receipts are rehashed and recounted consistently before the oracle rejects
 incorrect assignments, materialization, icons/dates, note/reference evidence,
 TXT/PDF/video facts, Bases/templates/configuration and required support. The
 expected-fact modules import only the standard library and local oracle modules;
 production manifests/counts do not provide expected preservation facts.
-See [v2 complete preservation](../.scratch/brz-to-obsidian-v2-implementation/research/three-archive-preservation.md)
+Refinement controls reject obsolete colour fields in generated notes, templates,
+starters, Bases, property typing and guide while still rejecting falsified source
+colour evidence. The checker permits manually added colour-named properties as
+ordinary custom extensions.
+See [current complete preservation](../.scratch/brz-to-obsidian-v2-implementation/research/colour-property-refinement.md),
+the [historical pre-refinement v2 report](../.scratch/brz-to-obsidian-v2-implementation/research/three-archive-preservation.md)
 and the [earlier v1 report](../.scratch/brz-to-obsidian-v1/research/real-export-acceptance.md).
 
 ## Private full-export acceptance
@@ -94,6 +100,9 @@ $output = 'C:\short\ignored\new-acceptance-run'
 ```
 
 All nine accepted conversions passed independent comparisons with exit 2.
+The current fresh outputs omit colour properties and retain all source colour
+facts in migration evidence; the earlier audit outputs remain intact as historical
+evidence. Each original archive remains unchanged.
 A produced 49 thought notes/60 present payloads/two exact icon warnings; B
 produced 42 thought notes/50 present payloads/nine exact absent-TXT warnings. C
 produced 305 imported notes, including seven definitions and all 195 typed members,
@@ -124,7 +133,10 @@ independently expected 22 files: three imported notes, two exact payloads and
 matched the same independent inventory, properties and payload-byte expectations.
 Migration schemas 2 and checker schema 1 round-tripped separately; inspection
 had no receipt/actual counts. Repeated checking preserved complete inventories
-and bytes, and nonempty destination refusals preserved caller files. Help and
+and bytes. The refined smoke confirmed colour fields are absent from generated
+notes/templates/Bases/types while exact original colour evidence remains; a
+separate edited copy accepted arbitrary colour-named custom properties without
+writes. Nonempty destination refusals preserved caller files. Help and
 invalid arguments returned the documented exits. These local smoke results
 supplement the public suite and private preservation audit; they make no native
 rendering or user-acceptance claim.
@@ -186,7 +198,8 @@ not guess filenames or reuse prototype paths.
 8. Exercise live inherited icons, the actual owned override, blank opt-out and
    invalid/nonmember provider controls on disposable copies. Membership order
    must not choose a provider. Keep source identities/dates unchanged and verify
-   body snapshots remain independently editable; declared colours are metadata.
+   body snapshots remain independently editable. Source colours stay in migration
+   evidence, with no foreground/background colour properties or Base columns.
 9. Confirm bundled Templates/Bases settings. Insert a full category template into
    a new note in Editing view; verify insertion-day dates, no imported IDs,
    blank overrides and member discovery. Edit an existing note's membership

@@ -43,9 +43,9 @@ are allowed. Notes need not contain the entire imported canonical core.
 
 When present, `categories` is a list of wikilinks; `appearance_category` and
 `icon` are optional single wikilinks. `tags` and `aliases` are string lists.
-Declared colours are optional `#RRGGBB` strings. `created` and `updated` are
-optional valid calendar dates (YAML date scalars or ISO strings). Null and blank
-strings are valid optional scalar values. Under the root `Templates` folder,
+`created` and `updated` are optional valid calendar dates (YAML date scalars or
+ISO strings). Null and blank strings are valid optional scalar values. Under
+the root `Templates` folder,
 quoted literal `{{date}}` and `{{date:YYYY-MM-DD}}` strings are also valid dates.
 Variables are never substituted. Use the quoted ISO form produced by the
 converter so native link updates preserve it; malformed unquoted mappings are
