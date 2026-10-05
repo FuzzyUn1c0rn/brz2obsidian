@@ -86,3 +86,25 @@ All 29 pristine output hashes and original backups remain exact. The generated
 guide and usage document this observed editor limitation without changing the
 converter's byte-preservation requirement. Remaining native scenarios and the
 full native verdict are pending; this is not final ticket acceptance.
+
+The native category rename subsequently exposed a concrete defect: Obsidian's
+link-update YAML rewrite converted unquoted template date tokens to nested
+mappings. The converter now quotes all full/generic/starter date variables as
+literal strings. A red-before-green public workflow test reads actual published
+template frontmatter, safely parses and reserializes a membership/provider
+change, then proves both date tokens remain strings and substitute to calendar
+dates. PyYAML 6.0.3 is declared/pinned as a development dependency for this
+regression; production template serialization continues to use JSON quoting.
+This deliberately adapts the reference's unquoted syntax to the observed native
+rename behavior without changing the manual bundled Templates mechanism.
+
+A new ignored pristine repaired conversion retains the original synthetic
+feature counts and all 29 file obligations. The original native baseline and
+its manifest remain unchanged. Root will verify another native category rename
+followed by insertion from the corrected full template before final resolution.
+
+After the date repair, all 495 public tests passed in 45.60 seconds; Ruff lint
+and format on 91 files, pip check and git diff --check passed. No package install
+or editable-install repointing was needed because the pinned PyYAML version was
+already present in the project virtual environment. Native correction remains
+the pending gate.

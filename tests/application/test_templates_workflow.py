@@ -3,11 +3,46 @@
 import hashlib
 import json
 
+import yaml
+
 from brz2obsidian.application.wiring import default_workflow
 from tests.application.test_categories_workflow import typed_archive
 from tests.application.test_graph_workflow import graph_archive, identity
 from tests.local_acceptance.checker import compare_vaults
 from tests.local_acceptance.run import reordered_archive
+
+
+def test_native_template_date_tokens_survive_safe_yaml_rewriting_and_insertion(
+    tmp_path,
+):
+    source = typed_archive(tmp_path / "typed.brz")
+    vault = tmp_path / "vault"
+    result = default_workflow().convert(source, vault)
+    assert result.outcome == "clean", result.issues
+    templates = sorted((vault / "Templates").glob("*.md"))
+    assert {p.name for p in templates} == {
+        "New note.md",
+        "Concept.md",
+        "Category starter.md",
+        "Member template starter.md",
+    }
+    for path in templates:
+        frontmatter = path.read_text(encoding="utf-8").split("---", 2)[1]
+        properties = yaml.safe_load(frontmatter)
+        assert properties["created"] == "{{date:YYYY-MM-DD}}"
+        assert properties["updated"] == "{{date:YYYY-MM-DD}}"
+        if path.name == "Concept.md":
+            properties["categories"] = ["[[Categories/Concept Renamed]]"]
+            properties["appearance_category"] = "[[Categories/Concept Renamed]]"
+        rewritten = yaml.safe_dump(properties, allow_unicode=True, sort_keys=False)
+        reread = yaml.safe_load(rewritten)
+        assert reread["created"] == "{{date:YYYY-MM-DD}}"
+        assert reread["updated"] == "{{date:YYYY-MM-DD}}"
+        inserted = yaml.safe_load(
+            rewritten.replace("{{date:YYYY-MM-DD}}", "2030-04-05")
+        )
+        assert inserted["created"] == "2030-04-05"
+        assert inserted["updated"] == "2030-04-05"
 
 
 def test_full_templates_initialize_new_objects_without_imported_identity(tmp_path):
@@ -20,14 +55,14 @@ def test_full_templates_initialize_new_objects_without_imported_identity(tmp_pat
         '---\ncategories:\n  - "[[Categories/Concept.md]]"\n'
         'appearance_category: "[[Categories/Concept.md]]"\n'
         "icon:\nforeground_color:\nbackground_color:\n"
-        "created: {{date:YYYY-MM-DD}}\nupdated: {{date:YYYY-MM-DD}}\n"
+        'created: "{{date:YYYY-MM-DD}}"\nupdated: "{{date:YYYY-MM-DD}}"\n'
         "tags: []\naliases: []\n---\n\n# {{title}}\n"
     )
     generic = (vault / "Templates/New note.md").read_text(encoding="utf-8")
     assert generic == (
         "---\ncategories: []\nappearance_category:\n"
         "icon:\nforeground_color:\nbackground_color:\n"
-        "created: {{date:YYYY-MM-DD}}\nupdated: {{date:YYYY-MM-DD}}\n"
+        'created: "{{date:YYYY-MM-DD}}"\nupdated: "{{date:YYYY-MM-DD}}"\n'
         "tags: []\naliases: []\n---\n\n# {{title}}\n"
     )
     assert "source_collection_id" not in template + generic

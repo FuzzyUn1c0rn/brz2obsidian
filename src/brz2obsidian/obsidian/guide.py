@@ -18,6 +18,10 @@ for an unclassified object. The configured Templates folder is Templates; nested
 and date variables on insertion. Both dates begin on the insertion day, not the
 conversion day. Maintain updated explicitly after later meaningful edits.
 
+Keep template date variables quoted as literal strings, for example
+created: "{{date:YYYY-MM-DD}}". Native Templates still inserts the date; quoting
+also protects the variable when Obsidian rewrites YAML during link updates.
+
 A full category template initializes linked categories and appearance_category;
 optional icon/colour overrides stay blank. Templates initialize structure rather
 than enforcing a continuing schema. Selecting a category in a property does not
@@ -114,7 +118,8 @@ properties, independent native Bases and embeds in category-note bodies. It adap
 that pattern using faithful imported names, complete typed membership, explicit
 icon providers, qualified collision-safe links, operational folder exclusions and
 contextual queries that survive native category renames. It adds the canonical
-core and explicit update-date maintenance; it does not clone reference domain
+core, quoted date variables that survive native link updates and explicit
+update-date maintenance; it does not clone reference domain
 properties, unrelated plugin toggles, styling or community plugins.
 
 The original Home/bookmark, source content/resources, source tags and graph links

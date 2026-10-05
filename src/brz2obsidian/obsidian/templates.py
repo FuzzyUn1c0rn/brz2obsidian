@@ -37,9 +37,7 @@ def new_object_template(category=None, tags=()):
     }
     lines = ["---"]
     for name, value in properties.items():
-        if name in {"created", "updated"}:
-            lines.append(name + ": " + value)
-        elif isinstance(value, list) and value:
+        if isinstance(value, list) and value:
             lines.append(name + ":")
             lines.extend("  - " + json.dumps(v, ensure_ascii=False) for v in value)
         elif value is None:

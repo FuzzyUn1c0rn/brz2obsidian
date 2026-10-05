@@ -85,6 +85,11 @@ category from its starter and discover a handwritten member, then adapt/select
 its full member template. Test a native category rename with automatic link
 updates. Nested .base files are not Markdown templates. Do not apply a full
 template to the established imported note as a membership-edit mechanism.
+An actual category rename exposed unquoted template dates becoming YAML mappings.
+The public workflow regression now verifies every generated Markdown template's
+quoted date variables survive safe YAML parsing/rewriting and later insertion.
+PyYAML is declared as a development dependency for this data-level regression;
+the converter itself continues to serialize through its existing JSON quoting.
 
 After full independent acceptance, make fresh copies of both accepted generated
 vaults and preserve pre-click originals. Open only those copies in standard
@@ -121,6 +126,7 @@ prior prototype/Wayfinder results are not implementation acceptance.
 | Pydantic / pydantic-core | 2.13.5 / 2.46.5 |
 | markdown-it-py / mdurl | 4.2.0 / 0.1.2 |
 | pytest | 9.1.1 |
+| PyYAML (template rewrite regression) | 6.0.3 |
 | Ruff | 0.16.10 |
 | setuptools / pip | 84.0.0 / 26.2.1 |
 | Obsidian native presentation target | 1.13.7 |

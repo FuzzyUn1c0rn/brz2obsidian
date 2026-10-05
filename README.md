@@ -103,6 +103,8 @@ Create a new note, switch to Editing view, run **Templates: Insert template**,
 and choose the generic New note or the complete template for its category.
 Templates use each assigned category stem under `Templates/`, initialize both
 dates on insertion, leave overrides blank and omit imported source IDs.
+Date variables are quoted literal strings so native link-update YAML rewrites
+preserve them; the bundled Templates plugin still inserts the calendar date.
 For existing notes, edit `categories` directly: full templates can overwrite
 shared scalar properties, including dates and providers. Maintain `updated`
 explicitly. In the reviewed Obsidian build, a Properties save normalized CRLF
