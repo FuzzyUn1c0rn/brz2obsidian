@@ -10,7 +10,7 @@ A finished, verified version 2 that successfully converts `brz/Software Engineer
 
 ## Notes
 
-- [Repair final implementation-review findings](../brz-to-obsidian-v2-implementation/issues/13-final-review-repairs.md): all three findings are repaired and integrated, with 776 passing tests, nine fresh independent archive audits and verified final packaging. The current implementation frontier is [Accept actual v2 vaults in Obsidian and finish delivery guidance](../brz-to-obsidian-v2-implementation/issues/11-native-v2-acceptance-delivery.md); remaining native checks, review follow-up and the user's actual-vault verdict keep the map open.
+- [Repair final implementation-review findings](../brz-to-obsidian-v2-implementation/issues/13-final-review-repairs.md): all three findings are repaired and integrated, with 776 passing tests, nine fresh independent archive audits and verified final packaging. The current implementation frontier is [Accept actual v2 vaults in Obsidian and finish delivery guidance](../brz-to-obsidian-v2-implementation/issues/11-native-v2-acceptance-delivery.md); [actual-output native review](../brz-to-obsidian-v2-implementation/research/native-v2-acceptance.md) and independent review follow-up are complete. The user's actual-vault verdict, requested after opening a clean final vault, keeps the map open.
 
 - [Remove unused colour properties from vault presentation](../brz-to-obsidian-v2-implementation/issues/12-remove-unused-colour-properties.md): the user's 2026-10-05 feedback is implemented and integrated. Nine fresh outputs passed independent preservation; source colours remain in migration evidence while generated notes, templates and property settings omit the unused fields. Affected native acceptance now uses fresh review copies.
 

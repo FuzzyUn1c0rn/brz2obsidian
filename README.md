@@ -201,6 +201,8 @@ and runnable composition examples](docs/architecture.md).
 See [test commands and native-review procedure](docs/testing.md), [complete
 current v2 preservation](.scratch/brz-to-obsidian-v2-implementation/research/colour-property-refinement.md)
 and the [current actual-vault acceptance gate](.scratch/brz-to-obsidian-v2-implementation/issues/11-native-v2-acceptance-delivery.md).
+The [final native review](.scratch/brz-to-obsidian-v2-implementation/research/native-v2-acceptance.md)
+records complete technical checks, independent review and the remaining user verdict.
 The [initial v2 preservation report](.scratch/brz-to-obsidian-v2-implementation/research/three-archive-preservation.md)
 retains the complete audit before the colour-property refinement.
 The [v1 preservation](.scratch/brz-to-obsidian-v1/research/real-export-acceptance.md)

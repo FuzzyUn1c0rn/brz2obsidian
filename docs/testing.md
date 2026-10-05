@@ -230,6 +230,12 @@ and earlier bounded synthetic/prototype trials remain historical evidence.
 
 ## Recorded versions
 
+The [final actual-output native review](../.scratch/brz-to-obsidian-v2-implementation/research/native-v2-acceptance.md)
+records the completed three-vault matrix, read-only edit controls and clean user
+copy. Final root verification passes 776 tests and Ruff lint/format on 114 files;
+independent Spec/Standards follow-up leaves no findings. The user's actual-vault
+verdict remains required before ticket 11 and the delivery map resolve.
+
 | Component | Verified version |
 | --- | --- |
 | CPython on native Windows | 3.14.8 |
