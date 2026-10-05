@@ -10,6 +10,12 @@ TheBrain 15 exports and controlled synthetic fixtures. See [source coverage
 and warnings](docs/source-coverage.md), the [accepted specification](.scratch/brz-to-obsidian-v1/spec.md)
 and [implementation gates](.scratch/brz-to-obsidian-v1/README.md).
 
+Version 2 development uses package/converter version `0.2.0`, migration
+result/record schema 2 and the independent convention-checker schema 1.
+Its combined synthetic behavior and cumulative regressions are verified through
+public interfaces; complete three-archive preservation and final native/user
+acceptance remain tracked in the [v2 implementation gates](.scratch/brz-to-obsidian-v2-implementation/README.md).
+
 ## Development environment
 
 Use the project virtual environment for all runtime, build and development

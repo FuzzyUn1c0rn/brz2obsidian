@@ -154,7 +154,7 @@ from brz2obsidian.sources.thebrain import BrzSourceModule
 from brz2obsidian.sources.thebrain.profile import BRZ_POLICY
 
 metadata = RunMetadata(
-    converter_version="0.1.0",
+    converter_version="0.2.0",
     renderer_version="2",
     run_id="example-run",
     run_time="2026-10-04T00:00:00+00:00",
@@ -206,8 +206,15 @@ behavior are retained. The closed shapes have changed explicitly: consumers
 must accept version 2 rather than interpreting it as version 1. The reviewed
 TheBrain module/profile and renderer now use version `2`; BRZ format stays `5`.
 `RunMetadata.renderer_version` must be `2` when invoking the renderer directly.
-The alternate Folio adapter uses the current contracts with empty classification
-and optional appearance/date/video facts, while its source format stays `folio/1`.
+The alternate Folio adapter retains the earlier empty optional facts and also
+exercises independently authored opaque category assignments, owned icons,
+calendar triplets and explicit video facts. Its source format stays `folio/1`;
+it imports only contracts and does not decode TheBrain fields.
+
+The package and default workflow identify the converter as `0.2.0`. Migration
+result/record schemas remain version 2, and the separately versioned convention
+checker remains `brz2obsidian.vault-check` version 1. This release version does
+not imply that the independent complete-archive/native delivery gates passed.
 
 Counts add `source_definitions`, `classification_assignments`, `typed_members`,
 `planned_category_notes` / `actual_category_notes` and
