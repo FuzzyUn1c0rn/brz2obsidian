@@ -40,7 +40,13 @@ appearance_category_key, effective_icon_asset_id)` decisions for created notes.
 An owned icon wins; otherwise the validated classification supplies its
 definition's icon. The renderer rejects altered snapshot obligations. The
 generated member `icon` property remains empty when using a category default;
-the body receives a separately editable reference to the effective image.
+the ordinary/member body receives a separately editable reference to the effective
+image. Category notes instead place contextual Members/Gallery immediately after
+the heading and omit a generated introductory image. Their icon properties,
+copied assets and neutral effective-icon decisions remain available to Bases.
+Source labels, authored Markdown/images, resources and relationships follow the
+dashboard views. Adaptations identify this presentation without claiming a
+category body snapshot that was not generated.
 Each source image is copied once through its existing ownership/path assignment,
 and decorative images remain outside Resources. Untyped icon-only items remain
 uncreated under the existing selection policy.

@@ -54,7 +54,7 @@ preserved image; it is not an emoji field. Source colours stay in migration
 evidence; notes/templates/Bases expose no foreground/background colour fields
 and member views have no decorative Appearance column.
 
-Body-icon references are migration-time snapshots. Changing category/provider
+Ordinary/member body-icon references are migration-time snapshots. Changing category/provider
 properties does not rewrite them; edit those references separately. Replacing a
 shared image's bytes can naturally affect all references to that file. Original
 timestamps and colour values remain in `migration-record.json` independently.
@@ -63,8 +63,11 @@ pristine converter output and `.md.original` backups for exact pre-edit evidence
 
 ## Browse and rename categories
 
-Home links to `Categories.md`. A category dashboard embeds contextual Members
-and Gallery views from `Templates/Bases/`. Tables begin Icon, Note, Inheritance,
+Home links to `Categories.md`. A category dashboard places contextual Members
+and Gallery views from `Templates/Bases/` immediately after its title, with no
+generated introductory icon image. Its icon property remains available to
+overview/member tables and cards. Retained source labels, authored text/images,
+resources and graph links follow the Bases. Tables begin Icon, Note, Inheritance,
 categories, created, updated; cards use the effective image. Open these views
 through the dashboard, since a standalone contextual Base has no embedding
 category. Prose links, hierarchy, source tags and provider links do not create

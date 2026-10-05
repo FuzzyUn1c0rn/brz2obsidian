@@ -139,7 +139,9 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         heading = re.sub(r"([\\`*_{}\[\]<>#])", r"\\\1", item.title)
         text = property_frontmatter(plan, item) + "# " + heading + "\n\n"
         icon = icon_snapshots[item.key].effective_icon_asset_id
-        if icon is not None:
+        if item.role == "definition":
+            text += CATEGORY_VIEWS + "\n"
+        elif icon is not None:
             text += "![[" + asset_paths[icon] + "]]\n\n"
         if item.label:
             text += item.label + "\n\n"
@@ -165,11 +167,7 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
             )
             text += separator + relationships
         navigation = ""
-        if item.role == "definition":
-            navigation += CATEGORY_VIEWS
         if item.key == plan.analysis.entry_key:
-            if navigation:
-                navigation += "\n"
             navigation += HOME_CATEGORIES
         if navigation:
             text += append_boundary(text)
@@ -244,13 +242,16 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     report += "\n[[Vault guide.md|Vault guide]] explains manual full-template selection for new objects, direct membership edits on existing notes, canonical properties and future-category starters. Bundled Templates is configured for insertion-day ISO dates; update dates are maintained explicitly.\n"
     report += (
         "\nOpen [[Categories.md|Categories]] from Home, then a category dashboard "
-        "for its native Members table and Gallery. These contextual Bases use the "
+        "for its native Members table and Gallery immediately after the title, "
+        "without a generated introductory category image. Retained source content "
+        "and resources follow the Bases; category icon properties remain available "
+        "for dashboard images. These contextual Bases use the "
         "embedding category and follow link-preserving category renames; a standalone "
         "member Base has no category context. Edit categories to change membership "
         "and appearance_category to choose a member's icon provider independently "
         "of membership order. A valid local icon override wins, an empty provider "
         "opts out, and an invalid provider is shown without selecting a substitute. "
-        "Category icon edits update inherited dashboard images; note-body image "
+        "Category icon edits update inherited dashboard images; ordinary/member note-body image "
         "references remain separately editable migration-time snapshots. Declared "
         "colours remain in migration-record.json only. Bundled Bases and link updates are configured.\n"
     )

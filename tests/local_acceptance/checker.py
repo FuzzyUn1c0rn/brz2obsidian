@@ -579,7 +579,9 @@ def check_items(raw, record, archive, vault, assets):
             + "\n---\n\n"
         )
         expected += "# " + escaped(thoughts[key]["Name"]) + "\n\n"
-        if effective:
+        if key in definitions:
+            expected += "## Members\n\n![[Templates/Bases/Members.base#Members]]\n\n## Gallery\n\n![[Templates/Bases/Gallery.base#Gallery]]\n\n"
+        elif effective:
             expected += "![[" + assets[effective]["relative_path"] + "]]\n\n"
         if thoughts[key].get("Label"):
             expected += thoughts[key]["Label"] + "\n\n"
@@ -631,16 +633,6 @@ def check_items(raw, record, archive, vault, assets):
                 else "\n\n"
             )
             expected += "## Categories\n\n[[Categories.md|Browse categories]]\n"
-        if key in definitions:
-            normalized_end = expected.replace("\r\n", "\n").replace("\r", "\n")
-            expected += (
-                ""
-                if normalized_end.endswith("\n\n")
-                else "\n"
-                if normalized_end.endswith("\n")
-                else "\n\n"
-            )
-            expected += "## Members\n\n![[Templates/Bases/Members.base#Members]]\n\n## Gallery\n\n![[Templates/Bases/Gallery.base#Gallery]]\n"
         actual_note = (vault / names[key]).read_bytes()
         assert actual_note == expected.encode(), (
             "complete note/body/graph/tag bytes: ordinal="
@@ -1743,7 +1735,7 @@ def check_adaptations(raw, record, documents, names, assets):
         effective = icon or (
             expected_metadata(raw, provider, assets)[2] if provider else None
         )
-        if effective:
+        if effective and key not in definitions:
             expected.add(("body_icon_snapshot", key))
     for a in raw["attachments.json"]:
         presentation = video(a)
@@ -1759,6 +1751,16 @@ def check_adaptations(raw, record, documents, names, assets):
     )
     assert all(type(d) is str and d for d in actual.values()), "adaptation descriptions"
     for kind, key in expected:
+        if kind == "category_dashboard":
+            assert all(
+                fact in actual[kind, key]
+                for fact in (
+                    "immediately follow the category title",
+                    "before retained source content",
+                    "without a generated introductory icon image",
+                    "link-preserving renames",
+                )
+            ), "category dashboard adaptation factual presentation"
         if kind == "item_target":
             assert names[key] in actual[kind, key], "naming adaptation factual target"
         if kind == "video_embed":
@@ -1800,6 +1802,10 @@ def check_report(vault, raw, summary, payloads):
         "insertion-day ISO dates",
         "update dates are maintained explicitly",
         "embedding category",
+        "Members table and Gallery immediately after the title",
+        "without a generated introductory category image",
+        "Retained source content and resources follow the Bases",
+        "ordinary/member note-body image",
         "empty provider",
         "invalid provider",
         "migration-time snapshots",

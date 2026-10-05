@@ -97,7 +97,10 @@ ordinary member is materialized, including empty members, and receives linked
 authored content/resources; members do not inherit that content. Home links to
 `Categories.md`, whose native overview discovers category dashboards under
 `Categories/` with the `categories` tag. Each dashboard embeds Members and
-Gallery Bases from `Templates/Bases/`. Tables start Icon, Note, Inheritance,
+Gallery Bases from `Templates/Bases/` immediately after its heading, without a
+generated introductory category image. Retained source content/resources follow
+the Bases; category icon properties/assets still supply dashboard images.
+Tables start Icon, Note, Inheritance,
 categories, created, updated. Gallery uses native image cards. The bundled Bases
 plugin and automatic link updates are enabled, alongside native navigation.
 Open member views through their category dashboard: a standalone contextual
@@ -112,7 +115,7 @@ new provider. A valid local `icon` override wins; otherwise the valid provider's
 current local image is used. A blank provider opts out, and an invalid provider
 shows Invalid provider without borrowing another category's icon. Valid overrides
 remain visible with blank or invalid providers. Category icon changes update
-inherited dashboard images; note-body images are separately editable migration
+inherited dashboard images; ordinary/member note-body images are separately editable migration
 snapshots. Source colours remain in migration evidence; note properties,
 templates and Bases omit foreground/background colour fields. Imported created/updated dates use
 source calendar components, with complete original strings retained as evidence.
