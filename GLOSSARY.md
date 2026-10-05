@@ -81,7 +81,7 @@ A vault entry point listing the available category dashboards.
 _Avoid_: Category dashboard when referring to the overview of all categories
 
 **Appearance category**:
-An optional vault category chosen from a note's memberships to supply default icon and colours, independently of membership order. A note with no appearance category receives no inherited appearance; explicit values take precedence over corresponding defaults.
+An optional vault category chosen from a note's memberships to supply a default dashboard icon, independently of membership order and separately from declared colour metadata. An explicit note icon takes precedence; an empty choice opts out and an invalid choice does not select a substitute.
 _Avoid_: First category when implying that list order chooses the appearance; source thought type when referring to the editable destination choice
 
 **Attachment**:

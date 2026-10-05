@@ -1,7 +1,9 @@
 # Reviewed source coverage
 
-First-version support covers reviewed feature classes in the two accepted
+Version 2 support covers reviewed feature classes in all three accepted
 TheBrain 15 BRZ exchange-format-5 exports and controlled synthetic fixtures.
+All three archives use the same application version; the newer acceptance case
+exercises additional features rather than a new source-format version.
 Those archives are acceptance cases, not a fingerprint allowlist. Another
 format-5 Brain may convert if it fits these meanings; its version alone does
 not establish support. Invalid, ambiguous, corrupt or unsupported input refuses.
@@ -153,8 +155,10 @@ The positive-length TXT rule makes no claim of particular PDF pairing; the
 separate zero-length rule requires the identity association. Neither rule claims
 derived purpose, optionality, extraction failure or search after a fresh restore.
 Wrong state, ownership, role, stem, ambiguous identity or absent/corrupt PDF
-refuses rather than widening the zero-length rule. A has two icon warnings; B has nine absent-TXT warnings under seven
-owners. Both successful conversions exit 2. Unmatched missing notes/files/images
+refuses rather than widening the zero-length rule. A has two icon warnings; B has
+nine positive-length absent-TXT warnings under seven owners; C has four
+zero-length absent-TXT warnings under two owners, each associated with its intact
+PDF. All nine exact/repeat/reordered conversions exit 2. Unmatched missing notes/files/images
 refuse as missing required payload. Unknown findings/profile incompatibility and
 unsupported meanings cannot be downgraded by caller allowlists.
 
@@ -165,4 +169,5 @@ equivalent TheBrain PDF body search.
 
 Name sanitation, simple graph presentation and intentional uncreated targets
 are adaptations rather than extra warnings. See [complete independent
-preservation results](../.scratch/brz-to-obsidian-v1/research/real-export-acceptance.md).
+preservation results](../.scratch/brz-to-obsidian-v2-implementation/research/three-archive-preservation.md)
+and the [source-feature-to-vault comparison](../.scratch/brz-to-obsidian-v2-implementation/source-feature-mapping.md).

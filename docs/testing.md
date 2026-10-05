@@ -104,6 +104,31 @@ reordered vault behavior is stable, with documented source-order/fingerprint
 and explicit run-metadata differences. Private archives, results, generated
 vaults and UI evidence remain ignored under `brz/`; public reports are aggregate.
 
+## Local package and documented examples
+
+On 2026-10-05, the local `0.2.0` wheel built through the project environment with
+`pip wheel --no-deps --no-build-isolation`. Its metadata declares Python >=3.14,
+Pydantic, markdown-it-py and runtime PyYAML; the console entry point is
+`brz2obsidian.cli:main`. Inspection found exactly the 52 source package modules
+and distribution metadata, with no private extracts, vaults or test fixtures.
+A subprocess imported directly from that wheel without installation and passed
+module inspect/check-vault JSON calls.
+
+The actual Python examples in README, architecture and checker guidance were
+executed on an independently authored synthetic ZIP with a type, an empty typed
+member, source dates, an authored CRLF Home body and a local category image.
+Default Workflow, explicit Workflow, direct analyze/plan/render/publish, and
+console/module text/JSON routes produced seven complete vaults, each with the
+independently expected 22 files: three imported notes, two exact payloads and
+17 support artifacts. API receipts matched every actual length/hash; CLI outputs
+matched the same independent inventory, properties and payload-byte expectations.
+Migration schemas 2 and checker schema 1 round-tripped separately; inspection
+had no receipt/actual counts. Repeated checking preserved complete inventories
+and bytes, and nonempty destination refusals preserved caller files. Help and
+invalid arguments returned the documented exits. These local smoke results
+supplement the public suite and private preservation audit; they make no native
+rendering or user-acceptance claim.
+
 ## Native review procedure
 
 The [v2 dashboard slice](../.scratch/brz-to-obsidian-v2-implementation/issues/03-native-category-dashboards.md)
@@ -134,10 +159,11 @@ PyYAML is a runtime dependency for the convention checker and is also used by
 this data-level regression; the converter continues to serialize through its
 existing JSON quoting.
 
-After full independent acceptance, make fresh copies of both accepted generated
-vaults and preserve pre-click originals. Open only those copies in standard
-Obsidian and record its observed version. Use original-source candidates joined
-to final migration-record paths/tokens; do not guess filenames.
+After full independent acceptance, make fresh copies of all three accepted
+generated vaults and preserve complete pre-click file inventories/hashes. Open
+only those copies in standard Obsidian using Computer and record its observed
+version. Join raw-source candidates to independently audited paths/tokens; do
+not guess filenames or reuse prototype paths.
 
 1. Confirm startup opens assigned root Home in Reading view and native Home
    bookmark opens the same file. Review original heading/body.
@@ -152,14 +178,41 @@ to final migration-record paths/tokens; do not guess filenames.
    root-relative image behavior is covered by synthetic renderer tests.
 6. Verify preserved external URL/directory destinations without opening/fetching
    them. B Home has an external URL; remaining classes occur on ordinary notes.
-7. If output defects appear, repair through the responsible public seam, rerun
+7. For C, verify all seven category dashboards and their raw-derived membership
+   sizes: Book 7, Code Smell 23, Design Pattern 145, Development Practice 1,
+   Language 1, Refactoring Technique 16 and Tool 2. Check Members/Gallery,
+   Icon-before-Note, no Appearance column, typed empty notes and preserved
+   definition-owned content/resources. A/B have no imported thought types.
+8. Exercise live inherited icons, the actual owned override, blank opt-out and
+   invalid/nonmember provider controls on disposable copies. Membership order
+   must not choose a provider. Keep source identities/dates unchanged and verify
+   body snapshots remain independently editable; declared colours are metadata.
+9. Confirm bundled Templates/Bases settings. Insert a full category template into
+   a new note in Editing view; verify insertion-day dates, no imported IDs,
+   blank overrides and member discovery. Edit an existing note's membership
+   directly. Native rename with link updates must preserve contextual discovery,
+   stable IDs and quoted template variables; insert the template after rename.
+10. Extend a future category from the generated category/member/Base starters.
+    Independently discover handwritten and template-created members. Check
+    unambiguous shortened links and report ambiguous required references.
+11. Review C's exceptional active Markdown/local image, blockquote/code examples,
+    intact PDFs and individual absent-TXT notices. Inspect all four reviewed
+    video resources, original URLs and the evidenced 18-second embed where
+    service availability permits. Leave playback paused. PDF vault Search and
+    remote/offline playback retain their documented limits.
+12. Run the public checker on representative valid/invalid current edits. Compare
+    complete before/after inventory and bytes for each call; it reports without
+    repair. Keep a separate clean actual C copy for the user's verdict.
+13. If output defects appear, repair through the responsible public seam, rerun
    affected automatic/independent checks and repeat affected native observations.
 
 No community plugins or replacement discovery features are required. This is
 representative presentation review, not every note/PDF page. The user's normal
-vault is never used. Native evidence and checked limitations are recorded in
-[the native report](../.scratch/brz-to-obsidian-v1/research/native-acceptance.md);
-prior prototype/Wayfinder results are not implementation acceptance.
+vault is never used. Ticket 11 records actual-output native evidence, final
+two-axis review from completed v1 `f4627d9`, applicable final checks and the
+required user's actual converted-vault verdict. Until those pass, v2 is not
+declared finished. The [v1 native report](../.scratch/brz-to-obsidian-v1/research/native-acceptance.md)
+and earlier bounded synthetic/prototype trials remain historical evidence.
 
 ## Recorded versions
 

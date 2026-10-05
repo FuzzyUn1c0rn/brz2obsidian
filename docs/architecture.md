@@ -29,8 +29,10 @@ normalizes only the reviewed signed opaque ARGB colour range, and derives
 calendar components from valid creation/overall-modification timestamps without
 timezone conversion. Missing/null/empty dates remain empty; invalid populated
 dates and unreviewed colour encodings refuse. Exact source values and omitted/null
-distinctions remain in independent original evidence. Video interpretation is a
-later slice; an embed URI never replaces an external resource's original URI.
+distinctions remain in independent original evidence. Reviewed YouTube metadata
+supplies validated identity/timing facts for a fresh native embed; the exact
+external resource URI and original VideoHtml remain separate evidence. Conversion
+does not execute archived HTML or fetch remote resources.
 
 `MigrationPlan.icon_snapshots` and read-only `Inspection.icon_snapshots` contain
 immutable `IconSnapshot(item_key, explicit_icon_asset_id,
@@ -70,7 +72,11 @@ configuration obligations; renderer adaptations identify added entry/dashboard
 content. The native core plugin configuration enables Bases and navigation,
 and app configuration keeps Home/bookmarks while enabling link-preserving renames.
 Open contextual member Bases through dashboards; standalone Bases have no
-embedding category. Template configuration remains the next implementation slice.
+embedding category. The renderer also enables bundled Templates, configures its
+folder and ISO insertion dates, and manifests canonical property-type settings.
+Full templates and future-category starters initialize linked metadata without
+imported identities; they neither bind automatically to categories nor enforce
+continuing schemas. See [maintenance conventions](vault-maintenance.md).
 
 ## Public boundaries
 
@@ -119,8 +125,11 @@ Unknown rules and incompatible versions refuse. There is no registry framework
 or runtime warning allowlist.
 
 The test-only Folio adapter in `tests/support/folio_source.py` uses non-UUID
-identities and another on-disk format. It proves the same generic modules work
-with source/CLI imports blocked; it is not a supported production source format.
+identities and another on-disk format. The original substitution fixture and
+its richer classification/icon/date/video fixture prove the same generic modules
+work with source/CLI/wiring imports blocked. Folio calendar triplets and explicit
+neutral presentation facts are independently authored rather than decoded from
+TheBrain metadata. Folio is not a supported production source format.
 
 ## Compose a workflow
 
@@ -214,7 +223,9 @@ it imports only contracts and does not decode TheBrain fields.
 The package and default workflow identify the converter as `0.2.0`. Migration
 result/record schemas remain version 2, and the separately versioned convention
 checker remains `brz2obsidian.vault-check` version 1. This release version does
-not imply that the independent complete-archive/native delivery gates passed.
+not imply native acceptance. The complete three-archive audit has passed;
+actual-output native review, final review and the user verdict are tracked in the
+[delivery gate](../.scratch/brz-to-obsidian-v2-implementation/issues/11-native-v2-acceptance-delivery.md).
 
 Counts add `source_definitions`, `classification_assignments`, `typed_members`,
 `planned_category_notes` / `actual_category_notes` and
@@ -257,4 +268,17 @@ Every exported JSON record/field remains in original evidence independently
 of normalized facts. Consumers needing exact numeric comparisons should use
 an exact decimal JSON representation. Reproducibility compares logical decisions
 and content while handling explicit run metadata, original evidence order and
-reordered-source fingerprints separately. See [independent preservation](../.scratch/brz-to-obsidian-v1/research/real-export-acceptance.md).
+reordered-source fingerprints separately. See [v2 independent preservation](../.scratch/brz-to-obsidian-v2-implementation/research/three-archive-preservation.md).
+
+| Versioned component | Current value |
+| --- | --- |
+| Package / converter | `0.2.0` |
+| Migration result / record schema | `2` |
+| Snapshot / source policy contract | `2` |
+| Reviewed TheBrain module / profile | `2` |
+| Obsidian renderer | `2` |
+| BRZ exchange format | `5` |
+| Independent vault-check schema | `1` |
+
+These versions describe different interfaces. A package release is not an
+Obsidian application version or a change in the supplied archives' format.
