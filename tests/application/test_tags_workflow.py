@@ -6,6 +6,7 @@ from brz2obsidian.application.wiring import default_workflow
 from tests.application.test_graph_workflow import graph_archive, identity
 from tests.application.test_resources_workflow import resource_archive, thought
 from tests.sources.test_reader import rewrite
+from tests.support.notes import note_body
 
 
 def test_verified_assignments_use_native_tags_and_retain_hidden_memberships(tmp_path):
@@ -34,11 +35,14 @@ def test_verified_assignments_use_native_tags_and_retain_hidden_memberships(tmp_
     result = workflow.convert(source, vault)
     assert result.outcome == "clean"
     assert result.counts.actual_notes == 2
-    assert (vault / "Home — Entry.md").read_bytes() == (
-        b'---\ntags:\n  - "Project-Work"\n---\n\n# Entry\n\n'
+    home = (vault / "Home — Entry.md").read_bytes()
+    assert b'tags:\n  - "Project-Work"\n' in home
+    assert (
+        note_body(home)
+        == b"# Entry\n\n## Categories\n\n[[Categories.md|Browse categories]]\n"
     )
     tag_body = (vault / "Notes/Project Work!.md").read_bytes()
-    assert tag_body == b"# Project / Work!\n\nTag-authored text.\r\n"
+    assert note_body(tag_body) == b"# Project / Work!\n\nTag-authored text.\r\n"
     assert not (vault / "Notes/Empty.md").exists()
     listing = (vault / "Tag memberships.md").read_text(encoding="utf-8")
     assert "#Project-Work" in listing
@@ -158,9 +162,10 @@ def test_tag_hierarchy_and_classification_keep_independent_meanings(tmp_path):
     result = default_workflow().convert(source, vault)
     assert result.outcome == "clean"
     assert result.counts.actual_notes == 2
-    assert (vault / "Notes/Parent.md").read_text(
-        encoding="utf-8"
-    ) == "# Parent\n\n## Children\n\n- [[Notes/Tag.md|Tag]]\n"
+    assert (
+        note_body((vault / "Notes/Parent.md").read_text(encoding="utf-8"))
+        == "# Parent\n\n## Children\n\n- [[Notes/Tag.md|Tag]]\n"
+    )
     assert not (vault / "Notes/Tag.md").exists()
     assert not (vault / "Notes/Assigned.md").exists()
     assert "[[Notes/Assigned.md|Assigned]]" in (vault / "Tag memberships.md").read_text(
@@ -215,7 +220,7 @@ def test_tag_resources_create_normal_notes_but_decorations_remain_uncreated(tmp_
         encoding="utf-8"
     )
     assert not (vault / "Notes/Decorated tag.md").exists()
-    assert not file_body.startswith("---")
+    assert file_body.startswith("---\n") and "tags: []\n" in file_body
     record = json.loads((vault / "migration-record.json").read_bytes())
     assert record["tag_memberships"] == []
     assert (

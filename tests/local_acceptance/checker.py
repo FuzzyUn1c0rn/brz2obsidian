@@ -6,16 +6,31 @@ assignments to audit, never the expected source data, eligibility or graph.
 
 import base64
 import hashlib
+import html
 import json
 import posixpath
 import re
 import unicodedata
 from collections import defaultdict
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from urllib.parse import quote, unquote
 from uuid import UUID, uuid5
 from zipfile import ZipFile
+
+from .facts import (
+    classifications,
+    identities,
+    note_ids,
+    relationships,
+    video,
+    zero_txt_observation,
+)
+from .facts import (
+    member as raw_member,
+)
+from .support import check_support_content
 
 ROOTS = (
     "meta.json",
@@ -92,17 +107,31 @@ def check_vault(source, vault):
         "asset_targets",
         "relationships",
         "tag_memberships",
+        "classification_assignments",
+        "support_artifacts",
+        "reserved_support_paths",
         "adaptations",
         "source_accounting",
         "issues",
         "counts",
         "obsidian_configuration",
+        "obsidian_core_plugins_configuration",
+        "obsidian_templates_configuration",
+        "obsidian_property_types_configuration",
         "original_evidence",
     }, "migration record schema fields"
     assert (record["schema"], record["schema_version"]) == (
         "brz2obsidian.migration",
-        1,
+        2,
     ), "record schema version"
+    assert (
+        record["converter_version"]
+        == record["run_metadata"]["converter_version"]
+        == "0.2.0"
+    ), "converter version"
+    assert (
+        record["renderer_version"] == record["run_metadata"]["renderer_version"] == "2"
+    ), "renderer version"
     with Path(source).open("rb") as stream:
         assert (
             record["source_identity"]["source_sha256"]
@@ -115,9 +144,13 @@ def check_vault(source, vault):
             record["source_identity"]["source_id"] == raw["meta.json"][0]["BrainId"]
             and record["source_identity"]["format_version"] == "5"
         ), "collection source identity"
+        assert (
+            record["source_identity"]["module_id"] == "thebrain-brz"
+            and record["source_identity"]["module_version"] == "2"
+        ), "source module identity"
         assert (record["profile_id"], record["profile_version"]) == (
             "thebrain-format5-reviewed",
-            "1",
+            "2",
         ), "reviewed source profile"
         originals = {e["key"]: e for e in record["original_evidence"]}
         for name in ROOTS:
@@ -148,16 +181,25 @@ def check_vault(source, vault):
         assert checked == {
             n for n in archive.namelist() if n not in ROOTS and not n.endswith("/")
         }, "payload accounting"
+        asset_summary = check_assets(raw, record, archive, vault, targets)
         summary, documents, names = check_items(raw, record, archive, vault, targets)
         references = check_documents(record, documents, names, targets)
-        summary.update(check_assets(raw, record, archive, vault, targets))
+        summary.update(asset_summary)
         check_accounting(raw, record, checked, references)
-        files = check_actual_files(vault, record, targets, names)
-        check_counts(raw, record, summary, references, targets)
+        files = check_actual_files(vault, record, targets, names, raw, summary)
+        check_adaptations(raw, record, documents, names, targets)
+        check_counts(raw, record, summary, references, targets, files)
+        check_report(vault, raw, summary, len(checked))
     return {
+        "source_items": len(raw["thoughts.json"]),
+        "source_relationships": len(raw["links.json"]),
+        "attachment_records": len(raw["attachments.json"]),
         "payloads": len(checked),
         "files": files,
         "references": len(references),
+        "image_references": sum(ref["kind"] == "image" for _, _, ref in references),
+        "thought_references": sum(ref["kind"] == "item" for _, _, ref in references),
+        "documents": len(documents),
         "json_records": sum(map(len, raw.values())),
         **summary,
     }
@@ -175,14 +217,27 @@ def escaped(value):
     return re.sub(r"([\\`*_{}\[\]<>#])", r"\\\1", value)
 
 
-def readable(value):
-    value = "".join(
-        " " if unicodedata.category(c) == "Cc" else c
-        for c in unicodedata.normalize("NFC", value)
+def windows_uri(value):
+    spelling = PureWindowsPath(value).as_posix()
+    return (
+        "file:" + quote(spelling, safe="/")
+        if spelling.startswith("//")
+        else "file:///" + quote(spelling, safe="/:")
+    )
+
+
+def readable(value, controls=True):
+    value = (
+        "".join(
+            " " if unicodedata.category(c) == "Cc" else c
+            for c in unicodedata.normalize("NFC", value)
+        )
+        if controls
+        else unicodedata.normalize("NFC", value)
     )
     value = value.replace(":", " - ").replace("[", "(").replace("]", ")")
     value = (
-        " ".join(re.sub(r'[<>"/\\|?*#^%]', " ", value).split()).strip(" .")
+        " ".join(re.sub(r'[<>"/\\|?*#^%\x00-\x1f]', " ", value).split()).strip(" .")
         or "Untitled"
     )
     if re.match(r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)", value, re.IGNORECASE):
@@ -212,8 +267,21 @@ def expected_names(thoughts, home):
         "migration-record",
         "tag memberships",
         "uncreated targets",
+        "categories",
+        "vault guide",
+        "new note",
+        "category starter",
+        "member template starter",
+        "members",
+        "gallery",
+        "starter",
+        "app",
+        "bookmarks",
+        "core-plugins",
+        "templates",
+        "types",
     }
-    for _ in range(10):
+    while True:
         paths = {
             key: bounded(
                 readable(t["Name"]),
@@ -225,19 +293,41 @@ def expected_names(thoughts, home):
         groups = defaultdict(list)
         for key, stem in paths.items():
             groups[stem.casefold()].append(key)
-        clashes = {
-            k
-            for stem, keys in groups.items()
-            if len(keys) > 1 or stem in reserved
-            for k in keys
-        }
+        clashes = contender_keys(
+            groups, widths, {k: k.replace("-", "") for k in thoughts}, reserved
+        )
         if not clashes:
             return {
-                k: ("" if k == home else "Notes/") + v + ".md" for k, v in paths.items()
+                k: (
+                    ""
+                    if k == home
+                    else "Categories/"
+                    if thoughts[k]["Kind"] == 2
+                    else "Notes/"
+                )
+                + v
+                + ".md"
+                for k, v in paths.items()
             }
         for key in clashes:
+            assert widths[key] < len(key.replace("-", "")), (
+                "independent distinct naming seeds"
+            )
             widths[key] = widths[key] + 4 if widths[key] else 8
-    raise AssertionError("independent filename allocation failed")
+
+
+def contender_keys(groups, widths, seeds, reserved=()):
+    selected = set()
+    for stem, keys in groups.items():
+        if stem in reserved:
+            selected.update(keys)
+        elif len(keys) > 1:
+            selected.update(
+                [k for k in keys if 0 < widths[k] < len(seeds[k])]
+                or [k for k in keys if widths[k] == 0]
+                or keys
+            )
+    return selected
 
 
 def expected_tags(thoughts):
@@ -253,7 +343,7 @@ def expected_tags(thoughts):
         )
         names[key] = "tag-" + name if name.isnumeric() else name
     widths = dict.fromkeys(names, 0)
-    for _ in range(10):
+    while True:
         tokens = {}
         for key, base in names.items():
             suffix = "-" + key.replace("-", "")[: widths[key]] if widths[key] else ""
@@ -261,20 +351,23 @@ def expected_tags(thoughts):
             if value.isnumeric():
                 value = "tag-" + value[: 116 - len(suffix)]
             tokens[key] = value + suffix
-        clashes = {
-            k
-            for k, v in tokens.items()
-            if sum(x.casefold() == v.casefold() for x in tokens.values()) > 1
-        }
+        groups = defaultdict(list)
+        for key, token in tokens.items():
+            groups[token.casefold()].append(key)
+        clashes = contender_keys(
+            groups, widths, {k: k.replace("-", "") for k in tokens}
+        )
         if not clashes:
             return tokens
         for key in clashes:
+            assert widths[key] < len(key.replace("-", "")), (
+                "independent distinct tag seeds"
+            )
             widths[key] = widths[key] + 4 if widths[key] else 8
-    raise AssertionError("independent tag allocation failed")
 
 
 def check_items(raw, record, archive, vault, assets):
-    all_thoughts = {t["Id"]: t for t in raw["thoughts.json"]}
+    all_thoughts = identities(raw["thoughts.json"], "item")
     thoughts = {k: t for k, t in all_thoughts.items() if t["Kind"] != 5}
     setting = str(uuid5(UUID(raw["meta.json"][0]["BrainId"]), "20"))
     home = next(s["Value"] for s in raw["settings.json"] if s["Id"] == setting)
@@ -285,22 +378,27 @@ def check_items(raw, record, archive, vault, assets):
     ), "item identities"
     names = expected_names(thoughts, home)
     tag_tokens = expected_tags(thoughts)
+    assigned_types = classifications(raw)
+    relation_kinds = relationships(raw)
+    definitions = {k for k, t in thoughts.items() if t["Kind"] == 2}
+    originals = note_ids(raw, archive)
     content, documents = set(), {}
     for a in raw["attachments.json"]:
         owner, kind = a["SourceId"], a["Type"]
-        if kind == 1 and (a["NoteType"] == 4 or a["Location"] == "Notes.md"):
+        if a["Id"] in originals:
             text = archive.read(owner + "/" + a["Location"]).decode("utf-8-sig")
+            assert owner not in documents, "raw sole thought-note candidate"
             documents[owner] = (a["Id"], text)
             if text.strip():
                 content.add(owner)
         elif kind in {3, 8} or (kind in {1, 12} and a["DataLength"] > 0):
             content.add(owner)
-    created = (content & thoughts.keys()) | {home}
+    created = (content & thoughts.keys()) | {home} | definitions | assigned_types.keys()
     initial = set(created)
     hierarchy = [
         (r["ThoughtIdA"], r["ThoughtIdB"])
         for r in raw["links.json"]
-        if r["Meaning"] == 1 and r["Relation"] == 1
+        if relation_kinds[r["Id"]] == "hierarchy"
     ]
     while uncovered := [
         (a, b) for a, b in hierarchy if a not in created and b not in created
@@ -317,13 +415,37 @@ def check_items(raw, record, archive, vault, assets):
         ), "item identity assignment"
         assert target["relative_path"] == names[key], "item filename assignment"
         assert target["created"] == (key in created), "greedy eligibility"
-        reasons = (["content"] if key in content else []) + (
-            ["home"] if key == home else []
+        reasons = (
+            (["content"] if key in content else [])
+            + (["home"] if key == home else [])
+            + (["definition"] if key in definitions else [])
+            + (["classification"] if key in assigned_types else [])
         )
         if key in created and key not in initial:
             reasons = ["hierarchy"]
         assert target["creation_reasons"] == reasons, "creation reasons"
         assert target["vault_tag_token"] == tag_tokens.get(key), "native tag token"
+        declared, calendar, icon = expected_metadata(raw, key, assets)
+        provider = assigned_types.get(key, {}).get("definition_key")
+        effective = icon or (
+            expected_metadata(raw, provider, assets)[2] if provider else None
+        )
+        assert target["declared_appearance"] == declared, "declared icon/colour facts"
+        assert target["calendar_dates"] == calendar, "source calendar dates"
+        assert target["metadata_evidence"] == [
+            "thoughts.json:"
+            + str(next(i for i, t in enumerate(raw["thoughts.json"]) if t["Id"] == key))
+        ], "metadata source provenance"
+        assert target["icon_snapshot"] == (
+            {
+                "item_key": key,
+                "explicit_icon_asset_id": icon,
+                "appearance_category_key": provider,
+                "effective_icon_asset_id": effective,
+            }
+            if key in created
+            else None
+        ), "migration-time effective icon decision"
         assert (vault / names[key]).is_file() == (key in created), (
             "created/uncreated file"
         )
@@ -335,20 +457,15 @@ def check_items(raw, record, archive, vault, assets):
         names
     ), "unique basenames"
     relations = {r["key"]: r for r in record["relationships"]}
-    assert relations.keys() == {r["Id"] for r in raw["links.json"]}, (
-        "all relationship identities"
-    )
+    assert len(relations) == len(record["relationships"]) and relations.keys() == {
+        r["Id"] for r in raw["links.json"]
+    }, "all relationship identities"
     for source in raw["links.json"]:
         r = relations[source["Id"]]
         a, b = source["ThoughtIdA"], source["ThoughtIdB"]
-        kind = (
-            "system"
-            if source["Meaning"] == 6
-            else "tag"
-            if source["Meaning"] == 5
-            else "hierarchy"
-            if source["Relation"] == 1
-            else "related"
+        kind = relation_kinds[source["Id"]]
+        assert r["evidence"] == [f"links.json:{raw['links.json'].index(source)}"], (
+            "relationship source provenance"
         )
         assert (r["item_a"], r["item_b"], r["kind"]) == (a, b, kind), (
             "relationship interpretation"
@@ -363,16 +480,22 @@ def check_items(raw, record, archive, vault, assets):
                 "related": "Related",
                 "tag": "native tags",
                 "system": "retained_only",
+                "classification": "linked category membership",
             }[kind]
         ), "relationship presentation"
     memberships = {m["relationship_key"]: m for m in record["tag_memberships"]}
     assignments = [r for r in raw["links.json"] if r["Meaning"] == 5]
-    assert memberships.keys() == {r["Id"] for r in assignments}, (
+    assert len(memberships) == len(
+        record["tag_memberships"]
+    ) and memberships.keys() == {r["Id"] for r in assignments}, (
         "tag membership identities"
     )
     for r in assignments:
         a, b = r["ThoughtIdA"], r["ThoughtIdB"]
         m = memberships[r["Id"]]
+        assert m["evidence"] == [f"links.json:{raw['links.json'].index(r)}"], (
+            "tag source provenance"
+        )
         assert (m["tag_key"], m["item_key"], m["native"], m["token"]) == (
             a,
             b,
@@ -385,6 +508,21 @@ def check_items(raw, record, archive, vault, assets):
             m["tag_target"],
             m["item_target"],
         ) == (a, thoughts[a]["Name"], names[a], names[b]), "tag identity targets"
+    emitted_types = record["classification_assignments"]
+    assert len({a["item_key"] for a in emitted_types}) == len(emitted_types), (
+        "duplicate classification member"
+    )
+    assert len({a["relationship_key"] for a in emitted_types}) == len(emitted_types), (
+        "duplicate classification relationship"
+    )
+    assert emitted_types == [
+        dict(
+            a,
+            definition_target=names[a["definition_key"]],
+            item_target=names[a["item_key"]],
+        )
+        for _, a in sorted(assigned_types.items())
+    ], "classification identity/target/evidence correspondence"
     for key in sorted(created):
         tags = sorted(
             {
@@ -394,18 +532,57 @@ def check_items(raw, record, archive, vault, assets):
             },
             key=str.casefold,
         )
-        expected = (
-            (
-                "---\ntags:\n"
-                + "".join(
-                    "  - " + json.dumps(t, ensure_ascii=False) + "\n" for t in tags
+        declared, calendar, icon = expected_metadata(raw, key, assets)
+        if key in definitions:
+            tags = sorted(set(tags) | {"categories"}, key=str.casefold)
+        provider = assigned_types.get(key, {}).get("definition_key")
+        category = "[[" + names[provider] + "]]" if provider else None
+        effective = icon or (
+            expected_metadata(raw, provider, assets)[2] if provider else None
+        )
+        expected = "---\ncategories:" + (
+            "\n  - "
+            + json.dumps(category, ensure_ascii=False)
+            + "\nappearance_category: "
+            + json.dumps(category, ensure_ascii=False)
+            + "\n"
+            if category
+            else " []\nappearance_category:\n"
+        )
+        expected += (
+            "icon:"
+            + (
+                " "
+                + json.dumps(
+                    "[[" + assets[icon]["relative_path"] + "]]", ensure_ascii=False
                 )
-                + "---\n\n"
+                if icon
+                else ""
             )
+            + "\n"
+        )
+        for name in ("created", "updated"):
+            expected += (
+                name + ":" + (" " + calendar[name] if calendar[name] else "") + "\n"
+            )
+        expected += "tags:" + (
+            "\n"
+            + "".join("  - " + json.dumps(t, ensure_ascii=False) + "\n" for t in tags)
             if tags
-            else ""
+            else " []\n"
+        )
+        expected += (
+            "aliases: []\nsource_collection_id: "
+            + json.dumps(raw["meta.json"][0]["BrainId"])
+            + "\nsource_item_id: "
+            + json.dumps(key)
+            + "\n---\n\n"
         )
         expected += "# " + escaped(thoughts[key]["Name"]) + "\n\n"
+        if key in definitions:
+            expected += "## Members\n\n![[Templates/Bases/Members.base#Members]]\n\n## Gallery\n\n![[Templates/Bases/Gallery.base#Gallery]]\n\n"
+        elif effective:
+            expected += "![[" + assets[effective]["relative_path"] + "]]\n\n"
         if thoughts[key].get("Label"):
             expected += thoughts[key]["Label"] + "\n\n"
         body = documents.get(key, (None, ""))[1]
@@ -446,6 +623,16 @@ def check_items(raw, record, archive, vault, assets):
                 else "\n\n"
             )
             expected += "\n".join(sections)
+        if key == home:
+            normalized_end = expected.replace("\r\n", "\n").replace("\r", "\n")
+            expected += (
+                ""
+                if normalized_end.endswith("\n\n")
+                else "\n"
+                if normalized_end.endswith("\n")
+                else "\n\n"
+            )
+            expected += "## Categories\n\n[[Categories.md|Browse categories]]\n"
         actual_note = (vault / names[key]).read_bytes()
         assert actual_note == expected.encode(), (
             "complete note/body/graph/tag bytes: ordinal="
@@ -474,6 +661,8 @@ def check_items(raw, record, archive, vault, assets):
         "useMarkdownLinks": False,
         "newLinkFormat": "absolute",
         "openBehavior": "file:" + names[home],
+        "alwaysUpdateLinks": True,
+        "attachmentFolderPath": "Attachments",
     }
     assert load_json((vault / ".obsidian/app.json").read_bytes()) == expected_config, (
         "native Home configuration"
@@ -499,11 +688,70 @@ def check_items(raw, record, archive, vault, assets):
             "hierarchy_only": len(created - initial),
             "ordinary_notes": sum(thoughts[k]["Kind"] == 1 for k in created),
             "tag_notes": sum(thoughts[k]["Kind"] == 4 for k in created),
+            "category_notes": len(definitions),
+            "typed_members": len(assigned_types),
+            "membership_sizes": sorted(
+                sum(a["definition_key"] == k for a in assigned_types.values())
+                for k in definitions
+            ),
+            "typed_owned_overrides": sum(
+                expected_metadata(raw, k, assets)[2] is not None for k in assigned_types
+            ),
+            "typed_inherited_icons": sum(
+                expected_metadata(raw, k, assets)[2] is None
+                and expected_metadata(raw, a["definition_key"], assets)[2] is not None
+                for k, a in assigned_types.items()
+            ),
             "uncreated": len(thoughts) - len(created),
         },
         documents,
         names,
     )
+
+
+def expected_metadata(raw, key, assets):
+    """Read reviewed declared facts directly from the original source records."""
+    thought = next(t for t in raw["thoughts.json"] if t["Id"] == key)
+    icons = [
+        a["Id"]
+        for a in raw["attachments.json"]
+        if a["SourceId"] == key and a["Type"] == 5
+    ]
+    assert len(icons) <= 1, "unambiguous source icon"
+    icon = icons[0] if icons else None
+    if icon:
+        assert assets[icon]["relative_path"] and assets[icon]["actual_length"] > 0, (
+            "present declared icon"
+        )
+    declared = {"icon_asset_id": icon}
+    for property_name, field in (
+        ("foreground_color", "ForegroundColor"),
+        ("background_color", "BackgroundColor"),
+    ):
+        number = thought.get(field)
+        if number is not None:
+            assert type(number) is int and -16777216 <= number <= -1, (
+                "reviewed opaque ARGB"
+            )
+            declared[property_name] = "#" + hex(number + 2**32)[4:].upper().zfill(6)
+        else:
+            declared[property_name] = None
+    calendar = {}
+    for property_name, field in (
+        ("created", "CreationDateTime"),
+        ("updated", "ModificationDateTime"),
+    ):
+        value = thought.get(field)
+        calendar[property_name] = (
+            (
+                datetime.fromisoformat(value).date().isoformat()
+                if len(value or "") > 10
+                else date.fromisoformat(value).isoformat()
+            )
+            if value
+            else None
+        )
+    return declared, calendar, icon
 
 
 def check_listings(
@@ -754,15 +1002,20 @@ def expected_resources(raw, owner, body, assets):
             label = re.sub(r"[\[\]|\r\n]", " ", label).strip() or "Resource"
             if kind in {3, 8}:
                 uri = (
-                    source["Location"]
-                    if kind == 3
-                    else PureWindowsPath(source["Location"]).as_uri()
+                    source["Location"] if kind == 3 else windows_uri(source["Location"])
                 )
                 label = re.sub(r"([\\`*_{}<>])", r"\\\1", label)
                 lines.append("- [" + label + "](<" + uri + ">)")
                 assert (
                     assigned["external_uri"] == uri and assigned["resource_link"] == uri
                 ), "external reference destination"
+                presentation = video(source)
+                if presentation:
+                    lines.append(
+                        '\n<iframe src="'
+                        + html.escape(presentation["embed_uri"], quote=True)
+                        + '" width="560" height="315" title="YouTube video player" frameborder="0" allowfullscreen></iframe>\n'
+                    )
             else:
                 lines.append("- [[" + assigned["relative_path"] + "|" + label + "]]")
                 assert assigned["resource_link"] == assigned["relative_path"], (
@@ -793,6 +1046,7 @@ def check_documents(record, documents, names, assets):
             d["text_digest"],
             d["owner_target"],
         ) == (owner, key, digest, names.get(owner)), "document identity/digest"
+        assert d["evidence"] == assets[key]["evidence"], "document source provenance"
         independent = source_references(body, owner, assets)
         assert len(d["references"]) == len(independent), "all source references"
         for emitted_ref, actual in zip(d["references"], independent, strict=True):
@@ -814,6 +1068,12 @@ def check_documents(record, documents, names, assets):
                 == body[actual["start"] : actual["end"]]
                 and emitted_ref["document_digest"] == digest
             ), "reference binding"
+            source_target = body[
+                actual["destination_start"] : actual["destination_end"]
+            ]
+            assert emitted_ref["source_target"] == source_target, (
+                "reference original destination"
+            )
             if actual["kind"] == "image":
                 assert (
                     emitted_ref["destination_start"],
@@ -821,6 +1081,11 @@ def check_documents(record, documents, names, assets):
                 ) == (actual["destination_start"], actual["destination_end"]), (
                     "image destination span"
                 )
+            else:
+                assert (
+                    emitted_ref["destination_start"] is None
+                    and emitted_ref["destination_end"] is None
+                ), "thought reference whole-span adaptation"
         all_references.extend((key, i, ref) for i, ref in enumerate(independent))
     return all_references
 
@@ -828,21 +1093,25 @@ def check_documents(record, documents, names, assets):
 def expected_asset_paths(raw):
     owners = {t["Id"]: t["Id"].replace("-", "") for t in raw["thoughts.json"]}
     owner_widths = dict.fromkeys(owners, 8)
-    for _ in range(8):
+    while True:
         tokens = {k: v[: owner_widths[k]] for k, v in owners.items()}
         clashes = {
             k for k, token in tokens.items() if list(tokens.values()).count(token) > 1
         }
         if not clashes:
             break
+        grew = False
         for k in clashes:
-            owner_widths[k] += 4
+            if owner_widths[k] < len(owners[k]):
+                owner_widths[k] += 4
+                grew = True
+        assert grew, "independent distinct owner seeds"
     present = [a for a in raw["attachments.json"] if a["Type"] not in {3, 8, 15}]
     widths = {a["Id"]: 0 for a in present}
-    for _ in range(8):
+    while True:
         result = {}
         for a in present:
-            base = readable(PurePosixPath(a["Location"]).name)
+            base = readable(PurePosixPath(a["Location"]).name, controls=False)
             extension = PurePosixPath(base).suffix
             stem = base[: -len(extension)] if extension else base
             suffix = (
@@ -869,16 +1138,41 @@ def expected_asset_paths(raw):
         }
         if not clashes:
             return result
+        grew = False
         for k in clashes:
-            widths[k] = widths[k] + 4 if widths[k] else 8
-    raise AssertionError("independent attachment filename allocation")
+            if widths[k] < len(k.replace("-", "")):
+                widths[k] = widths[k] + 4 if widths[k] else 8
+                grew = True
+        assert grew, "independent distinct asset seeds"
 
 
 def check_assets(raw, record, archive, vault, targets):
+    identities(raw["attachments.json"], "attachment")
     assert len(targets) == len(record["asset_targets"]) and targets.keys() == {
         a["Id"] for a in raw["attachments.json"]
     }, "all attachment identities"
     paths = expected_asset_paths(raw)
+    originals = note_ids(raw, archive)
+    raw_documents = {
+        a["SourceId"]: archive.read(raw_member(a)).decode("utf-8-sig")
+        for a in raw["attachments.json"]
+        if a["Id"] in originals
+    }
+    bindings = {
+        a["Id"]: {
+            "asset_id": a["Id"],
+            "owner": a["SourceId"],
+            "role": "image" if a["Type"] == 12 else "other",
+            "original_name": a["Location"],
+        }
+        for a in raw["attachments.json"]
+    }
+    inline = {
+        r["target"]
+        for owner, body in raw_documents.items()
+        for r in source_references(body, owner, bindings)
+        if r["kind"] == "image"
+    }
     expected_warnings = {}
     backups = 0
     for a in raw["attachments.json"]:
@@ -894,7 +1188,7 @@ def check_assets(raw, record, archive, vault, targets):
             else "image"
             if kind == 12
             else "note_original"
-            if kind == 1 and (a["NoteType"] == 4 or a["Location"] == "Notes.md")
+            if key in originals
             else "file"
         )
         availability = (
@@ -917,7 +1211,26 @@ def check_assets(raw, record, archive, vault, targets):
             availability,
             paths.get(key),
         ), "attachment identity/role/path"
+        pointer = "attachments.json:" + str(raw["attachments.json"].index(a))
+        assert target["evidence"] == [pointer], "asset source provenance"
+        assert target["video_presentation"] == video(a), (
+            "reviewed video normalized facts"
+        )
+        assert type(a["DataLength"]) is int and a["DataLength"] >= 0, (
+            "raw attachment declared length"
+        )
+        assert (
+            type(a["SourceType"]) is int
+            and a["SourceType"] == 2
+            and type(a["NoteType"]) is int
+        ), "raw attachment role"
+        assert a["SourceId"] in identities(raw["thoughts.json"], "item"), (
+            "raw attachment owner"
+        )
         if key in paths:
+            assert raw["meta.json"][0]["AttachmentFileStates"][key] == 1, (
+                "present asset ordinary state"
+            )
             assert (
                 units(PurePosixPath(paths[key]).name) <= 120
                 and units(str((vault / paths[key]).resolve())) <= 240
@@ -932,7 +1245,13 @@ def check_assets(raw, record, archive, vault, targets):
             assert (
                 (a["SourceType"], a["NoteType"]) == (2, 0)
                 and PurePosixPath(a["Location"]).suffix.lower() == ".txt"
-                and a["DataLength"] > 0
+                and type(a["DataLength"]) is int
+                and a["DataLength"] >= 0
+                and not PurePosixPath(a["Location"]).is_absolute()
+                and str(PurePosixPath(a["Location"])) == a["Location"]
+                and not any(p in {".", ".."} for p in a["Location"].split("/"))
+                and "\\" not in a["Location"]
+                and ":" not in a["Location"]
                 and raw["meta.json"][0]["AttachmentFileStates"][key] == 2
                 and member not in archive.namelist()
             ), "exact absent TXT predicate"
@@ -946,17 +1265,23 @@ def check_assets(raw, record, archive, vault, targets):
                 and p["Id"] in paths
             )
             assert pdfs, "intact same-owner PDF"
-            observed = {
-                "owner": owner,
-                "filename": a["Location"],
-                "declared_length": a["DataLength"],
-                "state": 2,
-                "present": False,
-                "intact_same_owner_pdfs": pdfs,
-            }
+            observed = (
+                zero_txt_observation(raw, archive, a)
+                if a["DataLength"] == 0
+                else {
+                    "owner": owner,
+                    "filename": a["Location"],
+                    "declared_length": a["DataLength"],
+                    "state": 2,
+                    "present": False,
+                    "intact_same_owner_pdfs": pdfs,
+                }
+            )
             expected_warnings[key] = (
                 "known_absent_payload",
-                "thebrain-format5/absent-txt/v1",
+                "thebrain-format5/zero-length-absent-txt/v1"
+                if a["DataLength"] == 0
+                else "thebrain-format5/absent-txt/v1",
                 "approved_source_gap",
                 observed,
             )
@@ -1004,9 +1329,47 @@ def check_assets(raw, record, archive, vault, targets):
                 if kind == 15
                 else [pointer, "payload:" + observed["member"]]
             )
+            if kind == 15 and a["DataLength"] == 0:
+                pdf_pointer = "attachments.json:" + str(
+                    next(
+                        i
+                        for i, p in enumerate(raw["attachments.json"])
+                        if p["Id"] == observed["pdf_attachment_id"]
+                    )
+                )
+                evidence = [
+                    pointer,
+                    "meta.json",
+                    pdf_pointer,
+                    "payload:" + observed["pdf"]["member"],
+                ]
             assert finding["evidence"] == evidence, "warning source evidence pointers"
         else:
             assert not target["source_findings"], "no unexplained source finding"
+        if kind not in {3, 8}:
+            assert target["external_uri"] is None, "local asset no external URI"
+        elif kind == 3:
+            assert target["external_uri"] == a["Location"], (
+                "exact original external URL"
+            )
+        if kind in {3, 8}:
+            assert key not in raw["meta.json"][0]["AttachmentFileStates"], (
+                "external reference no file state"
+            )
+        resource = (
+            a["Location"]
+            if kind == 3
+            else windows_uri(a["Location"])
+            if kind == 8
+            else paths[key]
+            if role in {"file", "image"}
+            and availability == "present"
+            and key not in inline
+            else None
+        )
+        assert target["resource_link"] == resource, (
+            "all raw-derived resource destinations/suppression"
+        )
     issues = {i["affected"][0]: i for i in record["issues"]}
     assert (
         len(issues) == len(record["issues"])
@@ -1036,6 +1399,27 @@ def check_assets(raw, record, archive, vault, targets):
         "backups": backups,
         "warnings": len(expected_warnings),
         "warning_owners": len({targets[k]["owner"] for k in expected_warnings}),
+        "videos": sum(video(a) is not None for a in raw["attachments.json"]),
+        "zero_txt_gaps": sum(
+            a["Type"] == 15 and type(a["DataLength"]) is int and a["DataLength"] == 0
+            for a in raw["attachments.json"]
+        ),
+        "exceptional_notes": sum(
+            a["Id"] in originals
+            and a["NoteType"] == 0
+            and archive.read(raw_member(a)).decode("utf-8-sig").strip() != ""
+            for a in raw["attachments.json"]
+        ),
+        "bom_documents": sum(
+            archive.read(raw_member(a)).startswith(b"\xef\xbb\xbf")
+            for a in raw["attachments.json"]
+            if a["Id"] in originals
+        ),
+        "crlf_documents": sum(
+            b"\r\n" in archive.read(raw_member(a))
+            for a in raw["attachments.json"]
+            if a["Id"] in originals
+        ),
     }
 
 
@@ -1092,7 +1476,7 @@ def check_accounting(raw, record, checked, references):
         )
 
 
-def check_actual_files(vault, record, targets, names):
+def check_actual_files(vault, record, targets, names, raw, summary):
     created = {t["relative_path"] for t in record["item_targets"] if t["created"]}
     expected = created | {
         t["relative_path"] for t in targets.values() if t["relative_path"] is not None
@@ -1100,14 +1484,136 @@ def check_actual_files(vault, record, targets, names):
     expected |= {
         ".obsidian/app.json",
         ".obsidian/bookmarks.json",
+        ".obsidian/core-plugins.json",
+        "Categories.md",
+        "Templates/Bases/Members.base",
+        "Templates/Bases/Gallery.base",
+        "Templates/Bases/Categories.base",
+        "Templates/Bases/Starter.base",
+        "Templates/New note.md",
+        "Templates/Category starter.md",
+        "Templates/Member template starter.md",
+        "Vault guide.md",
+        ".obsidian/templates.json",
+        ".obsidian/types.json",
         "MIGRATION REPORT.md",
         "migration-record.json",
     }
     for name in ("Uncreated targets.md", "Tag memberships.md"):
         if (vault / name).exists():
             expected.add(name)
+    definitions = {t["Id"] for t in raw["thoughts.json"] if t["Kind"] == 2}
+    expected |= {"Templates/" + PurePosixPath(names[k]).name for k in definitions}
     actual = {p.relative_to(vault).as_posix() for p in vault.rglob("*") if p.is_file()}
     assert actual == expected, "complete actual vault file accounting"
+    support = {
+        ".obsidian/app.json": "configuration",
+        ".obsidian/bookmarks.json": "configuration",
+        ".obsidian/core-plugins.json": "configuration",
+        "Categories.md": "overview",
+        "Templates/Bases/Members.base": "base",
+        "Templates/Bases/Gallery.base": "base",
+        "Templates/Bases/Categories.base": "base",
+        "Templates/Bases/Starter.base": "starter",
+        "Templates/New note.md": "template",
+        "Templates/Category starter.md": "starter",
+        "Templates/Member template starter.md": "starter",
+        "Vault guide.md": "guide",
+        ".obsidian/templates.json": "configuration",
+        ".obsidian/types.json": "configuration",
+        "MIGRATION REPORT.md": "report",
+        "migration-record.json": "migration_record",
+    }
+    for name in ("Uncreated targets.md", "Tag memberships.md"):
+        if name in actual:
+            support[name] = "listing"
+    support.update(
+        {"Templates/" + PurePosixPath(names[k]).name: "template" for k in definitions}
+    )
+    assert {
+        a["relative_path"]: a["purpose"] for a in record["support_artifacts"]
+    } == support, "support artifact accounting"
+    assert len(record["support_artifacts"]) == len(support), (
+        "duplicate support artifact"
+    )
+    check_support_content(vault, names, definitions)
+    inactive = {"Uncreated targets.md", "Tag memberships.md"} - actual
+    assert (
+        len(record["reserved_support_paths"]) == len(inactive)
+        and set(record["reserved_support_paths"]) == inactive
+    ), "inactive support reservations"
+    all_paths = actual | set(names.values()) | inactive
+    normalized = {unicodedata.normalize("NFC", p).casefold() for p in all_paths}
+    assert len(normalized) == len(all_paths), "full path collisions"
+    for name in all_paths:
+        path = PurePosixPath(name)
+        assert (
+            not path.is_absolute()
+            and str(path) == name
+            and all(
+                p not in {"", ".", ".."}
+                and not re.search(r'[<>:"\\|?*\x00-\x1f]', p)
+                and not p.endswith((".", " "))
+                and not re.match(
+                    r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)", p, re.IGNORECASE
+                )
+                for p in path.parts
+            )
+        ), "safe actual/reserved paths"
+        assert units(str((vault / name).resolve())) <= 240, (
+            "actual/reserved absolute path bounds"
+        )
+        assert all(
+            unicodedata.normalize("NFC", str(parent)).casefold() not in normalized
+            for parent in path.parents
+            if str(parent) != "."
+        ), "file/directory path prefix"
+    assert (vault / "Categories.md").read_bytes() == (
+        b"# Categories\n\n![[Templates/Bases/Categories.base]]\n"
+    ), "native categories overview"
+    assert load_json((vault / ".obsidian/core-plugins.json").read_bytes()) == {
+        "file-explorer": True,
+        "global-search": True,
+        "switcher": True,
+        "graph": True,
+        "backlink": True,
+        "tag-pane": True,
+        "page-preview": True,
+        "command-palette": True,
+        "bookmarks": True,
+        "properties": True,
+        "bases": True,
+        "templates": True,
+    }, "native Bases configuration"
+    assert record["obsidian_core_plugins_configuration"] == load_json(
+        (vault / ".obsidian/core-plugins.json").read_bytes()
+    ), "record core plugin configuration"
+    template_config = {"folder": "Templates", "dateFormat": "YYYY-MM-DD"}
+    assert (
+        load_json((vault / ".obsidian/templates.json").read_bytes()) == template_config
+    ), "native template configuration"
+    assert record["obsidian_templates_configuration"] == template_config, (
+        "record template configuration"
+    )
+    types_config = {
+        "types": {
+            "categories": "multitext",
+            "appearance_category": "text",
+            "icon": "text",
+            "created": "date",
+            "updated": "date",
+            "tags": "tags",
+            "aliases": "aliases",
+            "source_collection_id": "text",
+            "source_item_id": "text",
+        }
+    }
+    assert load_json((vault / ".obsidian/types.json").read_bytes()) == types_config, (
+        "native property type configuration"
+    )
+    assert record["obsidian_property_types_configuration"] == types_config, (
+        "record property type configuration"
+    )
     reserved = set(names.values()) | {
         ".obsidian/app.json",
         ".obsidian/bookmarks.json",
@@ -1120,8 +1626,22 @@ def check_actual_files(vault, record, targets, names):
         if not name.endswith(".md"):
             continue
         text = (vault / name).read_bytes().decode()
+        # Examples are documentation, not live navigation obligations. Bound
+        # Markdown fences independently rather than importing converter parsing.
+        active = []
+        fence = None
+        for line in text.splitlines(keepends=True):
+            marker = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
+            if fence:
+                if marker and marker[1][0] == fence[0] and len(marker[1]) >= len(fence):
+                    fence = None
+            elif marker:
+                fence = marker[1]
+            else:
+                active.append(line)
+        text = "".join(active)
         for match in re.finditer(r"\[\[([^\]\n]+)\]\]", text):
-            destination = match[1].split("|")[0]
+            destination = match[1].split("|")[0].split("#")[0]
             assert destination in reserved | actual, "actual local wikilink destination"
         for match in re.finditer(r"!\[[^\]]*\]\((<[^>]+>|[^\s)]+)", text):
             destination = unquote(match[1].strip("<>"))
@@ -1133,7 +1653,7 @@ def check_actual_files(vault, record, targets, names):
     return len(actual)
 
 
-def check_counts(raw, record, summary, references, targets):
+def check_counts(raw, record, summary, references, targets, files):
     created = {t["item_key"] for t in record["item_targets"] if t["created"]}
     assigned = [r for r in raw["links.json"] if r["Meaning"] == 5]
     native = sum(r["ThoughtIdB"] in created for r in assigned)
@@ -1159,8 +1679,152 @@ def check_counts(raw, record, summary, references, targets):
         "uncreated_tag_memberships": len(assigned) - native,
         "created_tag_items": len(tags & created),
         "uncreated_tag_items": len(tags - created),
+        "source_definitions": summary["category_notes"],
+        "classification_assignments": summary["typed_members"],
+        "typed_members": summary["typed_members"],
+        "planned_category_notes": summary["category_notes"],
+        "actual_category_notes": None,
+        "planned_support_files": files
+        - summary["notes"]
+        - sum(a["availability"] == "present" for a in targets.values()),
+        "actual_support_files": None,
     }
     assert record["counts"] == expected, "independent counts"
+
+
+def check_adaptations(raw, record, documents, names, assets):
+    created = {t["item_key"] for t in record["item_targets"] if t["created"]}
+    definitions = {t["Id"] for t in raw["thoughts.json"] if t["Kind"] == 2}
+    home = next(k for k, name in names.items() if name.startswith("Home — "))
+    expected = {
+        ("native_templates_configuration", ".obsidian/templates.json"),
+        ("vault_maintenance_guide", "Vault guide.md"),
+        ("categories_overview", home),
+        ("native_bases_configuration", ".obsidian/core-plugins.json"),
+    }
+    expected |= {
+        (kind, k)
+        for kind in ("category_dashboard", "category_template")
+        for k in definitions
+    }
+    expected |= {("canonical_properties", k) for k in created}
+    expected |= {
+        ("item_target", t["Id"])
+        for t in raw["thoughts.json"]
+        if t["Id"] in names and PurePosixPath(names[t["Id"]]).stem != t["Name"]
+    }
+    expected |= {
+        ("relationship_presentation", k)
+        for k, kind in relationships(raw).items()
+        if kind in {"hierarchy", "related"}
+    }
+    for owner, (key, body) in documents.items():
+        if owner in created:
+            expected |= {
+                (ref["kind"] + "_reference", f"reference:{key}:{i}")
+                for i, ref in enumerate(source_references(body, owner, assets))
+            }
+    assignments = classifications(raw)
+    for key in created:
+        declared, calendar, icon = expected_metadata(raw, key, assets)
+        if any(calendar.values()):
+            expected.add(("source_calendar_dates", key))
+        if any(declared.values()):
+            expected.add(("declared_appearance", key))
+        provider = assignments.get(key, {}).get("definition_key")
+        effective = icon or (
+            expected_metadata(raw, provider, assets)[2] if provider else None
+        )
+        if effective and key not in definitions:
+            expected.add(("body_icon_snapshot", key))
+    for a in raw["attachments.json"]:
+        presentation = video(a)
+        if presentation:
+            expected.add(("video_embed", a["Id"]))
+            if presentation["start_seconds"]:
+                expected.add(("video_timing", a["Id"]))
+    actual = {
+        (a["kind"], a["affected"]): a["description"] for a in record["adaptations"]
+    }
+    assert len(actual) == len(record["adaptations"]) and set(actual) == expected, (
+        "complete adaptation obligations"
+    )
+    assert all(type(d) is str and d for d in actual.values()), "adaptation descriptions"
+    for kind, key in expected:
+        if kind == "category_dashboard":
+            assert all(
+                fact in actual[kind, key]
+                for fact in (
+                    "immediately follow the category title",
+                    "before retained source content",
+                    "without a generated introductory icon image",
+                    "link-preserving renames",
+                )
+            ), "category dashboard adaptation factual presentation"
+        if kind == "item_target":
+            assert names[key] in actual[kind, key], "naming adaptation factual target"
+        if kind == "video_embed":
+            a = next(a for a in raw["attachments.json"] if a["Id"] == key)
+            assert video(a)["embed_uri"] in actual[kind, key], (
+                "video adaptation factual URI"
+            )
+        if kind == "video_timing":
+            a = next(a for a in raw["attachments.json"] if a["Id"] == key)
+            assert str(video(a)["start_seconds"]) + " seconds" in actual[kind, key], (
+                "video adaptation factual timing"
+            )
+        if kind == "body_icon_snapshot":
+            provider = assignments.get(key, {}).get("definition_key")
+            icon = expected_metadata(raw, key, assets)[2]
+            effective = icon or expected_metadata(raw, provider, assets)[2]
+            assert (
+                effective in actual[kind, key]
+                and ("owned icon" if icon else provider) in actual[kind, key]
+            ), "icon adaptation factual asset/provider"
+    for owner, (key, body) in documents.items():
+        if owner in created:
+            for i, ref in enumerate(source_references(body, owner, assets)):
+                assert (
+                    ref["target"]
+                    in actual[ref["kind"] + "_reference", f"reference:{key}:{i}"]
+                ), "reference adaptation factual identity"
+
+
+def check_report(vault, raw, summary, payloads):
+    report = (vault / "MIGRATION REPORT.md").read_bytes().decode()
+    assert (
+        f"Created {summary['notes']} thought notes; preserved {payloads} present payloads."
+        in report
+    ), "independent report counts"
+    obligations = (
+        "Unsupported feature classes are refused",
+        "[[Vault guide.md|Vault guide]]",
+        "insertion-day ISO dates",
+        "update dates are maintained explicitly",
+        "embedding category",
+        "Members table and Gallery immediately after the title",
+        "without a generated introductory category image",
+        "Retained source content and resources follow the Bases",
+        "ordinary/member note-body image",
+        "empty provider",
+        "invalid provider",
+        "migration-time snapshots",
+        "Declared colours remain in migration-record.json only",
+    )
+    assert all(value in report for value in obligations), "required report obligations"
+    if any(
+        a["Type"] == 1 and a["Location"].casefold().endswith(".pdf")
+        for a in raw["attachments.json"]
+    ):
+        assert (
+            "Vault Search does not search PDF body text" in report
+            and "does not extract or index it" in report
+        ), "PDF Search report limitation"
+    if any(video(a) for a in raw["attachments.json"]):
+        assert (
+            "Offline playback and service availability are not guaranteed" in report
+            and "original resource links remain available" in report
+        ), "remote video report limitation"
 
 
 def normalized_record(record):
@@ -1175,7 +1839,13 @@ def normalized_record(record):
             return {
                 k: normalize(v)
                 for k, v in value.items()
-                if k not in {"evidence", "original_evidence", "source_accounting"}
+                if k
+                not in {
+                    "evidence",
+                    "metadata_evidence",
+                    "original_evidence",
+                    "source_accounting",
+                }
             }
         if isinstance(value, list):
             return sorted(
@@ -1224,6 +1894,8 @@ def check_run_result(result, vault, summary):
         "actual_notes": summary["notes"],
         "actual_assets": summary["payloads"],
         "actual_files": summary["files"],
+        "actual_category_notes": summary["category_notes"],
+        "actual_support_files": record["counts"]["planned_support_files"],
     }
     assert result["counts"] == expected and result["receipt"]["counts"] == expected, (
         "actual result counts"
@@ -1257,6 +1929,6 @@ def check_run_result(result, vault, summary):
     }, "receipt file evidence"
     assert (
         result["operation"] == "convert"
-        and result["schema_version"] == 1
+        and result["schema_version"] == 2
         and result["outcome"] == ("warnings" if summary["warnings"] else "clean")
     ), "result envelope"

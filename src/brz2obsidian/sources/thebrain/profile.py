@@ -1,12 +1,12 @@
 from brz2obsidian.contracts import FindingDisposition, SourcePolicy
 
-from .findings import ABSENT_TXT_RULE, ICON_LENGTH_RULE
+from .findings import ABSENT_TXT_RULE, ICON_LENGTH_RULE, ZERO_LENGTH_ABSENT_TXT_RULE
 
 BRZ_POLICY = SourcePolicy(
     profile_id="thebrain-format5-reviewed",
-    profile_version="1",
+    profile_version="2",
     module_id="thebrain-brz",
-    module_version="1",
+    module_version="2",
     format_version="5",
     finding_dispositions=(
         FindingDisposition(
@@ -25,6 +25,15 @@ BRZ_POLICY = SourcePolicy(
             issue_code="approved_metadata_discrepancy",
             message="Present icon bytes differ from the declared length; actual CRC-valid bytes are preserved.",
             guidance="Review the declared and actual lengths in the migration record.",
+        ),
+        FindingDisposition(
+            rule_id=ZERO_LENGTH_ABSENT_TXT_RULE,
+            kind="known_absent_payload",
+            disposition="warning",
+            issue_code="approved_source_gap",
+            permits_absent_payload=True,
+            message="Zero-length source TXT is absent; its filename identifies an intact PDF under the same owner.",
+            guidance="Review the retained declaration and PDF association; absent bytes have no inferred purpose.",
         ),
     ),
 )

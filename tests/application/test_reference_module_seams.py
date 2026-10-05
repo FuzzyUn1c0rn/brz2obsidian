@@ -7,6 +7,7 @@ from brz2obsidian.core import analyze, plan
 from brz2obsidian.obsidian import render
 from tests.application.test_graph_modules import POLICY, edge, generated, item, snapshot
 from tests.application.test_module_seams import METADATA
+from tests.support.notes import note_body
 
 
 def reference_snapshot():
@@ -56,8 +57,9 @@ def test_public_core_and_renderer_use_canonical_opaque_keys_and_exact_document_s
     migration = plan(analyze(reference_snapshot(), POLICY))
     artifacts = render(migration, METADATA)
     assert (
-        generated(artifacts, "Home — Entry.md")
-        == "# Entry\n\nBefore\r\n[[Notes/Dotted.v2.md|shown]]\rAfter\n"
+        note_body(generated(artifacts, "Home — Entry.md"))
+        == "# Entry\n\nBefore\r\n[[Notes/Dotted.v2.md|shown]]\rAfter\n\n"
+        "## Categories\n\n[[Categories.md|Browse categories]]\n"
     )
     assert (
         migration.counts.planned_references == artifacts.counts.actual_references == 1
@@ -200,13 +202,19 @@ def test_reusable_renderer_keeps_following_documents_and_navigation_visible(body
     note = generated(render(plan(analyze(facts, POLICY)), METADATA), "Home — Entry.md")
     assert body in note
     assert bodies[1] in note
-    tokens = MarkdownIt("commonmark").parse(note)
+    tokens = MarkdownIt("commonmark").parse(note_body(note))
     headings = [
         tokens[index + 1].content
         for index, token in enumerate(tokens)
         if token.type == "heading_open" and token.level == 0
     ]
-    assert headings == ["Entry", "Second document", "Resources", "Children"]
+    assert headings == [
+        "Entry",
+        "Second document",
+        "Resources",
+        "Children",
+        "Categories",
+    ]
     assert "Authored follow-up." in [
         token.content for token in tokens if token.type == "inline"
     ]

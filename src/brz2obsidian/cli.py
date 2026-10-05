@@ -1,7 +1,5 @@
 import argparse
 
-from brz2obsidian.application.wiring import default_workflow
-
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="brz2obsidian")
@@ -12,10 +10,38 @@ def main(argv=None):
         if name == "convert":
             command.add_argument("destination")
         command.add_argument("--json", action="store_true", dest="json_output")
+    checker = commands.add_parser("check-vault")
+    checker.add_argument("vault")
+    checker.add_argument("--json", action="store_true", dest="json_output")
     try:
         args = parser.parse_args(argv)
     except SystemExit as error:
         return 0 if error.code == 0 else 1
+    if args.operation == "check-vault":
+        from brz2obsidian.vault_check import check_vault
+
+        result = check_vault(args.vault)
+        if args.json_output:
+            print(result.model_dump_json(by_alias=True))
+        else:
+            print(f"check-vault: {result.outcome}")
+            print(f"Vault: {result.vault.location}")
+            print(
+                f"Read Markdown files: {result.counts.read_markdown_files}; "
+                f"read Bases: {result.counts.read_base_files}"
+            )
+            for issue in result.issues:
+                location = issue.artifact or "vault"
+                if issue.property:
+                    location += ":" + issue.property
+                print(f"{issue.code} ({location}): {issue.message} {issue.guidance}")
+                if issue.reference:
+                    print(f"Reference: {issue.reference}")
+                if issue.candidates:
+                    print("Candidates: " + ", ".join(issue.candidates))
+        return {"clean": 0, "issues": 2, "failed": 1}[result.outcome]
+    from brz2obsidian.application.wiring import default_workflow
+
     workflow = default_workflow()
     result = (
         workflow.inspect(args.source)

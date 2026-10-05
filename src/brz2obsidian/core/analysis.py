@@ -9,6 +9,8 @@ from brz2obsidian.contracts import (
     SourceSnapshot,
 )
 
+from .appearance import validate_appearance
+from .classifications import validate_classifications
 from .references import validate_references
 
 
@@ -26,6 +28,11 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
         )
 
     identity = snapshot.identity
+    if snapshot.contract_version != 2 or policy.contract_version != 2:
+        refuse(
+            "unsupported_format",
+            "Only source snapshot and policy contract version 2 is supported",
+        )
     if (
         identity.module_id,
         identity.module_version,
@@ -95,6 +102,7 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
                 "External resource lacks its destination URI or supported role",
             )
     validate_references(snapshot)
+    validate_appearance(snapshot, refuse)
     if len({r.key for r in snapshot.relationships}) != len(snapshot.relationships):
         refuse("invalid_source", "Duplicate canonical relationship keys")
     for relation in snapshot.relationships:
@@ -117,6 +125,7 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
                 "Navigation relationship endpoint is not a live nonsystem item",
             )
     entries = snapshot.accounting.entries
+    validate_classifications(snapshot, refuse)
     if len({entry.identity for entry in entries}) != len(entries) or any(
         entry.disposition == "unresolved" or not entry.references for entry in entries
     ):
@@ -194,6 +203,9 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
         present_assets=sum(
             asset.availability == "present" for asset in assets.values()
         ),
+        source_definitions=sum(i.role == "definition" for i in snapshot.items),
+        classification_assignments=len(snapshot.classification_assignments),
+        typed_members=len({a.item_key for a in snapshot.classification_assignments}),
     )
     return Analysis(
         snapshot=snapshot,

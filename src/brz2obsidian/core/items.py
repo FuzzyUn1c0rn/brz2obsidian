@@ -5,13 +5,7 @@ import unicodedata
 from brz2obsidian.contracts import Issue, ItemTarget, MigrationRefused
 
 from .naming import collision_keys, extended_seed_width, readable_filename
-
-SUPPORTING_NAMES = {
-    "migration report",
-    "tag memberships",
-    "uncreated targets",
-    "migration-record",
-}
+from .support import SUPPORTING_NAMES
 
 
 def _readable(title):
@@ -48,6 +42,7 @@ def assign_item_targets(analysis, resource_owners=()):
     )
     documents = {d.key: d for d in snapshot.documents}
     reasons = {}
+    classified = {a.item_key for a in snapshot.classification_assignments}
     for item in items:
         selected = []
         if (
@@ -57,6 +52,10 @@ def assign_item_targets(analysis, resource_owners=()):
             selected.append("content")
         if item.key == analysis.entry_key:
             selected.append("home")
+        if item.role == "definition":
+            selected.append("definition")
+        if item.key in classified:
+            selected.append("classification")
         if selected:
             reasons[item.key] = tuple(selected)
     edges = [
@@ -108,7 +107,13 @@ def assign_item_targets(analysis, resource_owners=()):
             item_key=i.key,
             original_identity=i.original_identity,
             original_title=i.title,
-            relative_path=("" if i.key == analysis.entry_key else "Notes/")
+            relative_path=(
+                ""
+                if i.key == analysis.entry_key
+                else "Categories/"
+                if i.role == "definition"
+                else "Notes/"
+            )
             + stems[i.key]
             + ".md",
             created=i.key in reasons,

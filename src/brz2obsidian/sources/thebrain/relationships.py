@@ -49,8 +49,10 @@ def decode_relationships(records, thoughts, brain_id, refuse, uuid):
             (1, 3, 1, 7),
         } and roles == (1, 1):
             kind = "related"
-        elif signature == (1, 1, 6, -1) and roles[0] == 5 and roles[1] in {1, 4}:
+        elif signature == (1, 1, 6, -1) and roles[0] == 5 and roles[1] in {1, 2, 4}:
             kind = "system"
+        elif signature == (1, 1, 2, -1) and roles == (2, 1):
+            kind = "classification"
         elif signature == (1, 1, 5, -1) and roles == (4, 1):
             kind = "tag"
         if kind is None:

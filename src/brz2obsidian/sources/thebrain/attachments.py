@@ -13,9 +13,10 @@ from brz2obsidian.contracts import (
     SourceFinding,
 )
 
-from .findings import ABSENT_TXT_RULE, ICON_LENGTH_RULE
+from .findings import ABSENT_TXT_RULE, ICON_LENGTH_RULE, ZERO_LENGTH_ABSENT_TXT_RULE
 from .notes import bind_note_references, trace_note_references
 from .semantics import validate_semantic_fields
+from .videos import reviewed_video
 
 SPECIAL_FLAGS = (
     "IsBrainAttachment",
@@ -30,6 +31,7 @@ SPECIAL_FLAGS = (
 def normalize_attachments(archive, records, meta, thoughts, refuse, uuid):
     assets, documents, members, evidence, accounting, findings = [], [], {}, [], [], []
     absent_records = []
+    asset_records = {}
     states = meta["AttachmentFileStates"]
     names = set(archive.namelist())
     for key, state in states.items():
@@ -102,6 +104,7 @@ def normalize_attachments(archive, records, meta, thoughts, refuse, uuid):
         ):
             refuse("invalid_source", "Attachment location/name is invalid", (asset_id,))
         pointer = f"attachments.json:{index}"
+        asset_records[asset_id] = record
         common = {
             "asset_id": asset_id,
             "owner": owner,
@@ -110,6 +113,7 @@ def normalize_attachments(archive, records, meta, thoughts, refuse, uuid):
             "display_name": record.get("Name"),
             "evidence": (pointer,),
         }
+        video = reviewed_video(record, refuse)
         if kind in {3, 8}:
             if asset_id in states:
                 refuse(
@@ -149,6 +153,7 @@ def normalize_attachments(archive, records, meta, thoughts, refuse, uuid):
                     role="url" if kind == 3 else "directory",
                     availability="external",
                     external_uri=uri,
+                    video_presentation=video,
                 )
             )
             continue
@@ -170,7 +175,6 @@ def normalize_attachments(archive, records, meta, thoughts, refuse, uuid):
         if kind == 15:
             if (
                 local.suffix.casefold() != ".txt"
-                or record["DataLength"] <= 0
                 or states.get(asset_id) != 2
                 or member in names
             ):
@@ -228,10 +232,10 @@ def normalize_attachments(archive, records, meta, thoughts, refuse, uuid):
         role = "icon" if kind == 5 else ("image" if kind == 12 else "file")
         if kind == 1 and (note_type == 4 or location == "Notes.md"):
             text = archive.read(member).decode("utf-8-sig")
-            if note_type == 0 and text:
+            if note_type == 0 and text and thoughts[owner]["Kind"] != 1:
                 refuse(
                     "unsupported_feature",
-                    "Nonempty Notes.md placeholder has ambiguous meaning",
+                    "Nonempty NoteType-0 Notes.md requires an ordinary thought owner",
                     (asset_id,),
                 )
             if any(d.owner == owner for d in documents):
@@ -283,6 +287,64 @@ def normalize_attachments(archive, records, meta, thoughts, refuse, uuid):
     if set(states) - {a.asset_id for a in assets}:
         refuse("invalid_source", "File states refer to an absent attachment")
     for asset_id, owner, location, declared, pointer in absent_records:
+        if declared == 0:
+            stem = PurePosixPath(location).stem
+            associated = tuple(
+                a
+                for a in assets
+                if a.asset_id == stem
+                and a.owner == owner
+                and a.availability == "present"
+                and a.role == "file"
+                and PurePosixPath(a.original_name).suffix.casefold() == ".pdf"
+                and asset_records[a.asset_id]["Type"] == 1
+                and asset_records[a.asset_id]["NoteType"] == 0
+            )
+            if len(associated) != 1:
+                refuse(
+                    "missing_required_payload",
+                    "Zero-length absent TXT does not identify one intact same-owner PDF attachment",
+                    (asset_id,),
+                )
+            pdf = associated[0]
+            member = members[pdf.asset_id]
+            findings.append(
+                SourceFinding(
+                    kind="known_absent_payload",
+                    rule_id=ZERO_LENGTH_ABSENT_TXT_RULE,
+                    affected=(asset_id,),
+                    evidence=(pointer, "meta.json")
+                    + pdf.evidence
+                    + ("payload:" + member,),
+                    observed_json=json.dumps(
+                        {
+                            "owner": owner,
+                            "filename": location,
+                            "declared_length": declared,
+                            "state": 2,
+                            "present": False,
+                            "filename_stem": stem,
+                            "pdf_attachment_id": pdf.asset_id,
+                            "pdf": {
+                                "owner": pdf.owner,
+                                "filename": pdf.original_name,
+                                "source_type": 2,
+                                "type": 1,
+                                "note_type": 0,
+                                "state": states[pdf.asset_id],
+                                "member": member,
+                                "declared_length": asset_records[pdf.asset_id][
+                                    "DataLength"
+                                ],
+                                "actual_length": pdf.actual_length,
+                                "actual_sha256": pdf.actual_sha256,
+                                "crc_valid": True,
+                            },
+                        }
+                    ),
+                )
+            )
+            continue
         pdfs = tuple(
             sorted(
                 a.asset_id

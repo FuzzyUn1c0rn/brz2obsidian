@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from brz2obsidian import __version__
 from brz2obsidian.contracts import (
     Counts,
+    DocumentInspection,
     Inspection,
     Issue,
     MigrationFailed,
@@ -45,7 +46,7 @@ class Workflow:
         now = datetime.now(UTC)
         return RunMetadata(
             converter_version=__version__,
-            renderer_version="1",
+            renderer_version="2",
             run_id=str(uuid4()),
             run_time=now.isoformat(),
             obsidian_version="1.13.7",
@@ -111,6 +112,17 @@ class Workflow:
                         session.verify_consistency()
                         inspection = Inspection(
                             item_targets=migration_plan.item_targets,
+                            classification_assignments=session.snapshot.classification_assignments,
+                            asset_targets=migration_plan.asset_targets,
+                            assets=session.snapshot.assets,
+                            documents=tuple(
+                                DocumentInspection(**d.model_dump(exclude={"text"}))
+                                for d in session.snapshot.documents
+                            ),
+                            adaptations=migration_plan.adaptations,
+                            support_artifacts=migration_plan.support_artifacts,
+                            reserved_support_paths=migration_plan.reserved_support_paths,
+                            icon_snapshots=migration_plan.icon_snapshots,
                             tag_targets=migration_plan.tag_targets,
                             tag_memberships=migration_plan.tag_memberships,
                             tag_memberships_path=migration_plan.tag_memberships_path,

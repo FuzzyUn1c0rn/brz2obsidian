@@ -88,11 +88,17 @@ def test_exact_absent_txt_publishes_warning_with_metadata_and_no_fake_payload(tm
         "asset_targets",
         "relationships",
         "tag_memberships",
+        "classification_assignments",
+        "support_artifacts",
+        "reserved_support_paths",
         "adaptations",
         "source_accounting",
         "issues",
         "counts",
         "obsidian_configuration",
+        "obsidian_core_plugins_configuration",
+        "obsidian_templates_configuration",
+        "obsidian_property_types_configuration",
         "original_evidence",
     }
     asset = next(a for a in record["asset_targets"] if a["asset_id"] == TXT)
@@ -128,7 +134,10 @@ def test_crc_valid_icon_length_discrepancy_copies_actual_bytes_and_retains_lengt
     asset = next(a for a in record["asset_targets"] if a["asset_id"] == ICON)
     observed = json.loads(asset["source_findings"][0]["observed_json"])
     assert observed["declared_length"] == 999 and observed["actual_length"] == 14
-    assert "icon.png" not in (tmp_path / "vault/Home — Entry thought.md").read_text()
+    note = (tmp_path / "vault/Home — Entry thought.md").read_text()
+    assert 'icon: "[[Attachments/22222222/icon.png]]"' in note
+    assert "![[Attachments/22222222/icon.png]]" in note
+    assert "## Resources" not in note
 
 
 def change_record(parts, key, **updates):
@@ -695,11 +704,23 @@ def test_system_document_facts_and_original_bytes_are_retained_without_navigatio
 
 def test_warning_report_order_is_independent_of_attachment_record_order(tmp_path):
     parts = source_parts(tmp_path)
+    other_owner = "88888888-8888-4888-8888-888888888888"
+    thought = json.loads(parts["thoughts.json"].splitlines()[0])
+    parts["thoughts.json"] += (
+        b"\n"
+        + json.dumps(thought | {"Id": other_owner, "Name": "Other icon owner"}).encode()
+    )
     add_attachment(parts, ICON, 5, "z-icon.png", b"icon-one", declared=100)
-    add_attachment(parts, TXT, 5, "a-icon.png", b"icon-two", declared=200)
+    add_attachment(
+        parts, TXT, 5, "a-icon.png", b"icon-two", declared=200, owner=other_owner
+    )
     source = write_source(tmp_path, parts)
     first = default_workflow().convert(source, tmp_path / "first")
     assert first.outcome == "warnings"
+    assert (
+        tmp_path / "first/Attachments/88888888/a-icon.png"
+    ).read_bytes() == b"icon-two"
+    assert not (tmp_path / "first/Notes/Other icon owner.md").exists()
     parts["attachments.json"] = b"\n".join(
         reversed(
             [line for line in parts["attachments.json"].splitlines() if line.strip()]

@@ -1,11 +1,97 @@
 # Reusable migration interfaces
 
-`contracts.py` owns version-1 strict, closed, frozen Pydantic values with
+`contracts.py` owns version-2 strict, closed, frozen Pydantic values with
 immutable nested tuples. Generic modules treat identities/keys as opaque;
 source modules supply stable hexadecimal naming seeds. Original JSON is
 independently retained as immutable text and embedded directly in the record,
 preserving numeric precision, raw dates and omitted/null distinctions.
 Sessions and binary streams are scoped outer resources rather than model fields.
+
+Version 2 adds `Item.role="definition"`, `Relationship.kind="classification"`
+and immutable `ClassificationAssignment(relationship_key, definition_key,
+item_key, evidence)` values on `SourceSnapshot.classification_assignments`.
+Every classification relationship must correspond to exactly one assignment;
+members are distinct ordinary items and definitions are live definition items.
+The TheBrain adapter additionally joins each populated `TypeId` to exactly one
+matching exported instance relationship in both directions. These facts remain
+independent of hierarchy and source tags. The core requires contract version 2
+even when both supplied snapshot and policy claim the same older version.
+
+The shared contract includes optional immutable destination-independent facts:
+`Item.declared_appearance` uses `DeclaredAppearance(icon_asset_id,
+foreground_color, background_color)` with normalized `#RRGGBB` colours;
+`Item.calendar_dates` uses `CalendarDates(created, updated)` with Python date
+values, strict JSON date round-tripping and no timezone conversion;
+`Asset.video_presentation` uses `VideoPresentation(provider="youtube", embed_uri,
+start_seconds)` with a nonnegative start. The TheBrain adapter now supplies
+declared appearance and dates. It recognizes one owned decorative icon,
+normalizes only the reviewed signed opaque ARGB colour range, and derives
+calendar components from valid creation/overall-modification timestamps without
+timezone conversion. Missing/null/empty dates remain empty; invalid populated
+dates and unreviewed colour encodings refuse. Exact source values and omitted/null
+distinctions remain in independent original evidence. Reviewed YouTube metadata
+supplies validated identity/timing facts for a fresh native embed; the exact
+external resource URI and original VideoHtml remain separate evidence. Conversion
+does not execute archived HTML or fetch remote resources.
+
+`MigrationPlan.icon_snapshots` and read-only `Inspection.icon_snapshots` contain
+immutable `IconSnapshot(item_key, explicit_icon_asset_id,
+appearance_category_key, effective_icon_asset_id)` decisions for created notes.
+An owned icon wins; otherwise the validated classification supplies its
+definition's icon. The renderer rejects altered snapshot obligations. The
+generated member `icon` property remains empty when using a category default;
+the ordinary/member body receives a separately editable reference to the effective
+image. Category notes instead place contextual Members/Gallery immediately after
+the heading and omit a generated introductory image. Their icon properties,
+copied assets and neutral effective-icon decisions remain available to Bases.
+Source labels, authored Markdown/images, resources and relationships follow the
+dashboard views. Adaptations identify this presentation without claiming a
+category body snapshot that was not generated.
+Each source image is copied once through its existing ownership/path assignment,
+and decorative images remain outside Resources. Untyped icon-only items remain
+uncreated under the existing selection policy.
+Before generating an icon property or body snapshot, the Obsidian renderer
+requires the selected target to have a reviewed image extension: AVIF, BMP,
+GIF, JPEG/JPG, PNG, SVG or WebP. Other selected kinds, including ICO, are
+refused before publication. Inspection retains neutral icon evidence with
+destination feasibility pending; it does not establish renderability. The
+core remains independent of this destination policy, and unselected decorative
+payloads are still preserved without creating a note or image presentation.
+
+All imported item notes, including materialized source tags and definitions,
+receive the canonical core: linked `categories`, optional single
+`appearance_category` and local-image `icon`, optional `created`/`updated`,
+native `tags`/`aliases` lists,
+and paired opaque `source_collection_id`/`source_item_id`. Native scalar links
+and identity strings use JSON quoting, which is safe YAML; dates use ISO
+calendar spelling. Aliases and semantic properties are not inferred from prose.
+Source tags retain their independent native adaptation. Migration item records
+retain declared appearance, normalized dates, original metadata evidence and
+snapshot decisions; adaptations distinguish these generated additions from
+authored content and full source evidence. Migration run time remains separate.
+Declared colours remain source/migration evidence; generated note properties,
+templates, property-type configuration and Base views omit colour fields.
+
+The renderer adds category dashboard embeds, a Home-linked `Categories.md`
+overview and three shared native `.base` files under `Templates/Bases/`.
+Member queries use `list(categories).contains(this)` with the embedding category
+identity; their filters exclude Templates/Attachments folders and descendants,
+not filename substrings. Overview/provider role guards require a Markdown note
+under Categories with the native categories tag. Native image formulas validate
+a local nonempty supported-image target before applying an explicit override or
+the current valid appearance category's image. Provider validity is separate
+from icon override validity, so blank and invalid providers remain distinguishable
+without losing a valid override. Membership order never selects a provider.
+The source-neutral planner activates and accounts for all Base/overview/native
+configuration obligations; renderer adaptations identify added entry/dashboard
+content. The native core plugin configuration enables Bases and navigation,
+and app configuration keeps Home/bookmarks while enabling link-preserving renames.
+Open contextual member Bases through dashboards; standalone Bases have no
+embedding category. The renderer also enables bundled Templates, configures its
+folder and ISO insertion dates, and manifests canonical property-type settings.
+Full templates and future-category starters initialize linked metadata without
+imported identities; they neither bind automatically to categories nor enforce
+continuing schemas. See [maintenance conventions](vault-maintenance.md).
 
 ## Public boundaries
 
@@ -18,7 +104,15 @@ Sessions and binary streams are scoped outer resources rather than model fields.
 | `publication.publish(artifacts, payloads, destination)` | Fresh-destination checks, streamed staging, hashes/lengths/manifest verification, commit and owned cleanup |
 | `Workflow.inspect(source_ref)` | Shared preparation and planned result with destination/publication checks pending |
 | `Workflow.convert(source_ref, destination)` | Fresh preparation, render/publish, session closure and durable actual result |
+| `vault_check.check_vault(vault)` | Source-independent contained reads of actual mutable vault conventions and a separate strict version-1 checker result |
 | `cli.main(argv)` | Arguments, default wiring, text/JSON presentation and exit-code translation |
+
+The `vault_check` package depends inward on the shared `Contract` policy and
+data parsers only. It owns all convention-checking behavior and filesystem
+error translation without source, workflow, renderer or publisher dependencies.
+The CLI loads migration wiring only for inspect/convert; check-vault operates
+with those outer imports unavailable. Its contracts and outcomes are distinct
+from migration evidence and receipts. See [checker scope and schema](vault-checker.md).
 
 Operations below Workflow return contracts or raise `MigrationRefused` /
 `MigrationFailed` with structured immutable issues on known refusals/failures.
@@ -46,8 +140,11 @@ Unknown rules and incompatible versions refuse. There is no registry framework
 or runtime warning allowlist.
 
 The test-only Folio adapter in `tests/support/folio_source.py` uses non-UUID
-identities and another on-disk format. It proves the same generic modules work
-with source/CLI imports blocked; it is not a supported production source format.
+identities and another on-disk format. The original substitution fixture and
+its richer classification/icon/date/video fixture prove the same generic modules
+work with source/CLI/wiring imports blocked. Folio calendar triplets and explicit
+neutral presentation facts are independently authored rather than decoded from
+TheBrain metadata. Folio is not a supported production source format.
 
 ## Compose a workflow
 
@@ -81,8 +178,8 @@ from brz2obsidian.sources.thebrain import BrzSourceModule
 from brz2obsidian.sources.thebrain.profile import BRZ_POLICY
 
 metadata = RunMetadata(
-    converter_version="0.1.0",
-    renderer_version="1",
+    converter_version="0.2.0",
+    renderer_version="2",
     run_id="example-run",
     run_time="2026-10-04T00:00:00+00:00",
     obsidian_version="1.13.7",
@@ -105,17 +202,22 @@ reads time at the outer boundary; callers may inject a metadata factory.
 ## Result and migration-record schemas
 
 `RunResult.model_dump_json(by_alias=True)` exposes `schema="brz2obsidian.result"`,
-`schema_version=1`, `converter_version`, `operation`, `outcome`, `source_identity`,
+`schema_version=2`, `converter_version`, `operation`, `outcome`, `source_identity`,
 `profile_id`, `profile_version`, `counts`, `issues`, `inspection`, `receipt`.
 Unavailable fields/counts are `null`; issues is an array. Inspect returns planned
-item/tag targets and pending checks with no receipt. Convert returns no inspection
+item/tag targets, classification assignments, asset targets/inventory,
+`DocumentInspection` metadata (digests, original asset, traced references and
+evidence, without authored text), adaptations, support artifacts, reserved
+support paths and pending checks with no receipt. These are planned obligations;
+inspection neither renders nor copies files. Convert returns no inspection
 and, after commit, a receipt with actual inventory/counts. The result supports
 `RunResult.model_validate_json(...)` round-tripping.
 
-`migration-record.json` exposes `schema="brz2obsidian.migration"`, version 1,
+`migration-record.json` exposes `schema="brz2obsidian.migration"`, version 2,
 converter/renderer versions, `source_identity`, profile identity, `run_metadata`,
 `original_evidence`, `item_targets`, `asset_targets`, `relationships`,
-`tag_memberships`, `adaptations`, `source_accounting`, `issues`, `counts` and
+`tag_memberships`, `classification_assignments`, `support_artifacts`,
+`reserved_support_paths`, `adaptations`, `source_accounting`, `issues`, `counts` and
 `obsidian_configuration`. Document metadata/digests/references/owner targets
 are nested in item targets' `documents`; original bodies remain in copied
 `.md.original` files. Asset entries include normalized facts, assigned paths or
@@ -123,8 +225,75 @@ external links, `source_findings`, and `retained_documents` for owners without
 ordinary targets. System relationships retain evidence without navigation.
 There is no standalone top-level documents/findings collection.
 
+Schema identities, workflow signatures, existing result fields and outcome/exit
+behavior are retained. The closed shapes have changed explicitly: consumers
+must accept version 2 rather than interpreting it as version 1. The reviewed
+TheBrain module/profile and renderer now use version `2`; BRZ format stays `5`.
+`RunMetadata.renderer_version` must be `2` when invoking the renderer directly.
+The alternate Folio adapter retains the earlier empty optional facts and also
+exercises independently authored opaque category assignments, owned icons,
+calendar triplets and explicit video facts. Its source format stays `folio/1`;
+it imports only contracts and does not decode TheBrain fields.
+
+The package and default workflow identify the converter as `0.2.0`. Migration
+result/record schemas remain version 2, and the separately versioned convention
+checker remains `brz2obsidian.vault-check` version 1. This release version does
+not imply native acceptance. The complete three-archive audit has passed;
+actual-output native review, final review and the user verdict are tracked in the
+[delivery gate](../.scratch/brz-to-obsidian-v2-implementation/issues/11-native-v2-acceptance-delivery.md).
+
+Counts add `source_definitions`, `classification_assignments`, `typed_members`,
+`planned_category_notes` / `actual_category_notes` and
+`planned_support_files` / `actual_support_files`. Imported note counts include
+definition and member notes; support counts are separate. Actual publication
+counts remain unavailable until the publisher verifies and commits the files.
+`SupportArtifact(relative_path, purpose)` describes each planned generated
+support file and appears in the plan, rendered vault and migration record.
+The publisher verifies those obligations before reporting actual support counts.
+
+`core/support.py` reserves the complete v2 static support namespace before
+imported naming: root overview/guide, generic template and category/member
+starters, member/gallery/overview/starter Bases and required configuration.
+Only unused conditional listing paths remain reserved without files. All imported created and intentional
+uncreated names share the established sanitation, identity-marker collision and
+120-unit stem limits; the publisher includes support reservations in its
+240-unit absolute-path and collision checks. Per-category template paths can
+reuse the already assigned distinct category stems under `Templates/`; their
+planned SupportArtifact obligations drive verified support accounting. The
+generic template, complete category templates and category/member/Base starters
+are generated support rather than imported note counts.
+
+The renderer enables only required native plugins, including Bases/Templates,
+configures `Templates` with ISO date insertion and canonical property types,
+and preserves Home/bookmark/link settings. `obsidian_configuration` retains the
+existing application configuration shape in migration-record schema 2.
+`obsidian_core_plugins_configuration`, `obsidian_templates_configuration` and
+`obsidian_property_types_configuration` explicitly retain the other generated
+configuration dictionaries. Their actual files remain hash/length-manifested.
+
+Templates provide the canonical new-object structure and insertion variables,
+with linked membership/provider for category templates, a blank icon override
+and no source identity. Manual Templates selection is independent of
+membership-driven Bases; no template/base/vault_role registry exists. Existing
+memberships are edited directly because full native templates can overwrite
+shared scalar fields. `Vault guide.md` documents manual update dates, duplicate
+lookup, meaningful entity links, source/new identity and reference adaptations.
+
 Every exported JSON record/field remains in original evidence independently
 of normalized facts. Consumers needing exact numeric comparisons should use
 an exact decimal JSON representation. Reproducibility compares logical decisions
 and content while handling explicit run metadata, original evidence order and
-reordered-source fingerprints separately. See [independent preservation](../.scratch/brz-to-obsidian-v1/research/real-export-acceptance.md).
+reordered-source fingerprints separately. See [current v2 independent preservation](../.scratch/brz-to-obsidian-v2-implementation/research/colour-property-refinement.md).
+
+| Versioned component | Current value |
+| --- | --- |
+| Package / converter | `0.2.0` |
+| Migration result / record schema | `2` |
+| Snapshot / source policy contract | `2` |
+| Reviewed TheBrain module / profile | `2` |
+| Obsidian renderer | `2` |
+| BRZ exchange format | `5` |
+| Independent vault-check schema | `1` |
+
+These versions describe different interfaces. A package release is not an
+Obsidian application version or a change in the supplied archives' format.

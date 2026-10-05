@@ -5,6 +5,7 @@ from brz2obsidian.core import analyze, plan
 from brz2obsidian.obsidian import render
 from tests.application.test_graph_modules import POLICY, edge, generated, snapshot
 from tests.application.test_module_seams import METADATA
+from tests.support.notes import note_body
 
 
 def tag(key, title, seed=None, **values):
@@ -53,9 +54,9 @@ def test_native_frontmatter_keeps_yaml_boolean_and_null_names_as_string_tags():
         (edge("a-entry", "a", "entry", "tag"), edge("b-entry", "b", "entry", "tag")),
     )
     artifacts = render(plan(analyze(facts, POLICY)), METADATA)
-    assert (
-        generated(artifacts, "Home — Entry.md")
-        == '---\ntags:\n  - "null"\n  - "true"\n---\n\n# Entry\n\n'
+    assert 'tags:\n  - "null"\n  - "true"\n' in generated(artifacts, "Home — Entry.md")
+    assert note_body(generated(artifacts, "Home — Entry.md")) == (
+        "# Entry\n\n## Categories\n\n[[Categories.md|Browse categories]]\n"
     )
 
 

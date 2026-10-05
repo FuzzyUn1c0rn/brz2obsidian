@@ -18,7 +18,9 @@ from brz2obsidian.sources.thebrain import BrzSourceModule
 from brz2obsidian.sources.thebrain.profile import BRZ_POLICY
 from tests.application.test_module_seams import METADATA
 from tests.support.folio_source import FOLIO_POLICY, FolioSourceModule
+from tests.support.notes import note_body
 from tests.support.paired_sources import paired_sources
+from tests.support.paired_v2_sources import paired_v2_sources
 
 
 def workflow(source, policy):
@@ -72,7 +74,16 @@ def test_opaque_source_and_real_brz_publish_corresponding_vaults(tmp_path, capsy
         "Attachments/00000001/manual.bin",
         "Attachments/00000006/Notes.md.original",
     ):
-        assert (vaults[0] / name).read_bytes() == (vaults[1] / name).read_bytes()
+        a, b = (vaults[0] / name).read_bytes(), (vaults[1] / name).read_bytes()
+        if name in {"Home — Opening.md", "Notes/Middle.md", "Notes/Focus.md"}:
+            assert note_body(a) == note_body(b)
+            for index, data in enumerate((a, b)):
+                assert (
+                    json.dumps(results[index].source_identity.source_id).encode()
+                    in data
+                )
+        else:
+            assert a == b
     records = [json.loads((v / "migration-record.json").read_bytes()) for v in vaults]
     assert {t["item_key"] for t in records[1]["item_targets"]} == {
         "entry:opening",
@@ -121,7 +132,7 @@ def test_opaque_source_and_real_brz_publish_corresponding_vaults(tmp_path, capsy
             ("Home — Opening.md", "Focus", True),
             ("Notes/Empty.md", "Focus", False),
         }
-    assert (vaults[1] / "Notes/Middle.md").read_bytes() == (
+    assert note_body((vaults[1] / "Notes/Middle.md").read_bytes()) == (
         b"# Middle\n\n## Parents\n\n- [[Notes/First.md|First]]\n\n## Children\n\n- [[Notes/Last.md|Last]]\n"
     )
     assert (
@@ -310,10 +321,15 @@ def test_alternate_public_modules_and_another_presentation_need_no_cli(
     assert capsys.readouterr() == ("", "")
 
 
+@pytest.mark.parametrize(
+    "source_factory,notes", [(paired_sources, 3), (paired_v2_sources, 5)]
+)
 def test_generic_package_initializers_and_workflow_operate_with_source_and_cli_imports_blocked(
     tmp_path,
+    source_factory,
+    notes,
 ):
-    _, source = paired_sources(tmp_path)
+    _, source = source_factory(tmp_path)
     code = """
 import importlib.abc, sys
 class BlockOuter(importlib.abc.MetaPathFinder):
@@ -330,10 +346,24 @@ from brz2obsidian.publication import FilesystemPublisher
 from tests.support.folio_source import FolioSourceModule, FOLIO_POLICY
 result = Workflow(SourceModuleBinding(FolioSourceModule(), FOLIO_POLICY), ObsidianRenderer(), FilesystemPublisher()).convert(sys.argv[1], sys.argv[2])
 assert result.outcome == "clean" and result.receipt.verified
-assert result.counts.actual_notes == 3
+assert result.counts.actual_notes == int(sys.argv[3])
+if int(sys.argv[3]) == 5:
+    from pathlib import Path
+    root = Path(sys.argv[2])
+    assert result.counts.actual_category_notes == 1
+    for name in ('Categories/Concept.md', 'Templates/Concept.md', 'Templates/Bases/Members.base', '.obsidian/templates.json'):
+        assert (root / name).is_file()
+    assert 'appearance_category: "[[Categories/Concept.md]]"' in (root / 'Notes/Empty.md').read_text()
 """
     completed = subprocess.run(
-        [sys.executable, "-c", code, str(source), str(tmp_path / "isolated")],
+        [
+            sys.executable,
+            "-c",
+            code,
+            str(source),
+            str(tmp_path / "isolated"),
+            str(notes),
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -363,6 +393,11 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
             "brz2obsidian.contracts",
             "brz2obsidian.core",
             "brz2obsidian.application.workflow",
+        },
+        "vault_check": {
+            "brz2obsidian",
+            "brz2obsidian.contracts",
+            "brz2obsidian.vault_check",
         },
     }
     for area, permitted in allowed.items():

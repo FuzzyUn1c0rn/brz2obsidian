@@ -8,6 +8,7 @@ from markdown_it import MarkdownIt
 from brz2obsidian.application.wiring import default_workflow
 from tests.application.test_minimal_workflow import FIXTURE
 from tests.sources.test_reader import rewrite
+from tests.support.notes import note_body
 
 BRAIN = "11111111-1111-4111-8111-111111111111"
 
@@ -121,14 +122,14 @@ def test_generated_resources_and_children_render_outside_unclosed_authored_fence
     result = default_workflow().convert(source, destination)
     assert result.outcome == "clean"
     note = (destination / "Home — Home.md").read_bytes()
-    assert note.startswith(b"# Home\n\n" + body)
+    assert note_body(note).startswith(b"# Home\n\n" + body)
     original = destination / next(
         entry.relative_path
         for entry in result.receipt.manifest
         if entry.relative_path.endswith("Notes.md.original")
     )
     assert original.read_bytes() == body
-    tokens = MarkdownIt("commonmark").parse(note.decode())
+    tokens = MarkdownIt("commonmark").parse(note_body(note).decode())
     assert [token.content for token in tokens if token.type == "fence"] == [
         "print(42)\n\n"
     ]
@@ -137,7 +138,7 @@ def test_generated_resources_and_children_render_outside_unclosed_authored_fence
         for index, token in enumerate(tokens)
         if token.type == "heading_open" and token.tag == "h2" and token.level == 0
     ]
-    assert headings == ["Resources", "Children"]
+    assert headings == ["Resources", "Children", "Categories"]
     assert "[[Notes/Child.md|Child]]" in [
         token.content for token in tokens if token.type == "inline"
     ]
@@ -161,7 +162,7 @@ def test_empty_chain_materializes_middle_and_renders_complete_context(tmp_path):
     result = workflow.convert(source, destination)
     assert result.outcome == "clean"
     assert (
-        (destination / "Notes/B.md").read_text(encoding="utf-8")
+        note_body((destination / "Notes/B.md").read_text(encoding="utf-8"))
         == "# B\n\nUseful label\n\n## Parents\n\n- [[Notes/A.md|A]]\n\n## Children\n\n- [[Notes/C.md|C]]\n"
     )
     assert not (destination / "Uncreated targets.md").exists()
@@ -207,7 +208,10 @@ def test_uncreated_listing_focuses_on_isolated_items_and_uncovered_related_pairs
         destination / "MIGRATION REPORT.md"
     ).read_text(encoding="utf-8")
     home = (destination / "Home — Entry.md").read_text(encoding="utf-8")
-    assert home == "# Entry\n\n## Related\n\n- [[Notes/Linked.md|Linked]]\n"
+    assert note_body(home) == (
+        "# Entry\n\n## Related\n\n- [[Notes/Linked.md|Linked]]\n\n"
+        "## Categories\n\n[[Categories.md|Browse categories]]\n"
+    )
     record = json.loads((destination / "migration-record.json").read_bytes())
     assert len(record["relationships"]) == 4
     assert len(record["item_targets"]) == 5
@@ -253,9 +257,10 @@ def test_ordinary_parent_tag_child_keeps_hierarchy_without_forcing_tag_file(tmp_
     destination = tmp_path / "vault"
     result = default_workflow().convert(source, destination)
     assert result.outcome == "clean"
-    assert (destination / "Notes/Parent.md").read_text(
-        encoding="utf-8"
-    ) == "# Parent\n\n## Children\n\n- [[Notes/Tag.md|Tag]]\n"
+    assert (
+        note_body((destination / "Notes/Parent.md").read_text(encoding="utf-8"))
+        == "# Parent\n\n## Children\n\n- [[Notes/Tag.md|Tag]]\n"
+    )
     assert not (destination / "Notes/Tag.md").exists()
 
 

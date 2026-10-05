@@ -158,6 +158,21 @@ def publish(
                         ),
                     )
                 )
+        support_paths = tuple(a.relative_path for a in artifacts.support_artifacts)
+        if (
+            len(set(support_paths)) != len(support_paths)
+            or not set(support_paths)
+            <= {f.relative_path for f in artifacts.generated_files}
+            or artifacts.counts.planned_support_files != len(support_paths)
+        ):
+            raise MigrationRefused(
+                (
+                    _issue(
+                        "invalid_source",
+                        "Support artifact obligations are inconsistent",
+                    ),
+                )
+            )
         destination.parent.mkdir(parents=True, exist_ok=True)
         staging = Path(
             tempfile.mkdtemp(prefix=".brz2obsidian-", dir=destination.parent)
@@ -215,6 +230,8 @@ def publish(
         counts = artifacts.counts.model_copy(
             update={
                 "actual_notes": artifacts.counts.planned_notes,
+                "actual_category_notes": artifacts.counts.planned_category_notes,
+                "actual_support_files": len(artifacts.support_artifacts),
                 "actual_assets": len(artifacts.copies),
                 "actual_files": len(manifest),
             }

@@ -40,9 +40,49 @@ _Avoid_: Graph root when implying that it must be the only parentless thought
 A special thought used to classify other items in a Brain. It can also have its own thought-note content.
 _Avoid_: Vault tag when referring to the source thought
 
+**Thought type**:
+A special thought used as a reusable classification for other thoughts, with shared properties such as appearance.
+_Avoid_: Source tag; attachment type; programming-language class when implying full object-oriented semantics
+
+**Type assignment**:
+The association that gives a thought its thought type, distinct from a tag assignment or a parent/child relationship.
+_Avoid_: Inheritance when referring only to classification membership
+
+**Inherited appearance**:
+Appearance a thought receives from its assigned thought type, distinct from appearance specified directly on that thought.
+_Avoid_: Inherited note content; copied attachment when referring only to displayed appearance
+
+**Effective appearance**:
+The icon and colours displayed for a source item after applying its explicit appearance values and any inherited defaults. Each explicit value takes precedence over the corresponding inherited value.
+_Avoid_: Stored appearance when referring to the displayed result; inherited label when label propagation has not been established
+
 **Vault tag**:
 A keyword attached to a note in Obsidian to classify it and support discovery.
 _Avoid_: Source tag thought; note when referring to the keyword
+
+**Vault category**:
+A note representing a kind of entity in the vault, used to classify other notes and provide a shared point of navigation.
+_Avoid_: Vault tag; thought type when referring to the destination concept
+
+**Category membership**:
+The association of a vault note with a vault category, distinct from an ordinary relationship or tag assignment.
+_Avoid_: Parent/child relationship; source type assignment when referring to destination membership
+
+**Category dashboard**:
+A category note that provides context and views of the notes belonging to that category.
+_Avoid_: Manually maintained index when membership is discovered dynamically
+
+**Category template**:
+A reusable starting structure for a new note belonging to a vault category, providing that category's agreed initial information. It does not impose continuing rules on existing notes.
+_Avoid_: Thought type; enforced schema when referring to initial note structure
+
+**Categories overview**:
+A vault entry point listing the available category dashboards.
+_Avoid_: Category dashboard when referring to the overview of all categories
+
+**Appearance category**:
+An optional vault category chosen from a note's memberships to supply a default dashboard icon, independently of membership order. An explicit note icon takes precedence; an empty choice opts out and an invalid choice does not select a substitute.
+_Avoid_: First category when implying that list order chooses the appearance; source thought type when referring to the editable destination choice
 
 **Attachment**:
 A file or external-resource reference associated with an item in a Brain.

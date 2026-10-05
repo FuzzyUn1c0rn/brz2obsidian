@@ -5,6 +5,40 @@ from tests.application.test_minimal_workflow import make_archive
 from tests.local_acceptance.checker import check_vault
 
 
+def test_independent_checker_derives_required_categories_and_empty_members(tmp_path):
+    from tests.application.test_categories_workflow import typed_archive
+
+    source = typed_archive(tmp_path / "typed.brz")
+    vault = tmp_path / "vault"
+    default_workflow().convert(source, vault)
+    summary = check_vault(source, vault)
+    assert summary["notes"] == 3
+    assert summary["category_notes"] == 1
+    assert summary["typed_members"] == 1
+    assert summary["membership_sizes"] == [1]
+
+
+def test_independent_checker_conserves_complete_mixed_v2_source(tmp_path):
+    from tests.local_acceptance.checker import check_run_result
+    from tests.support.v2_collection import mixed_archive
+
+    source = mixed_archive(tmp_path / "mixed.brz")
+    vault = tmp_path / "vault"
+    result = (
+        default_workflow().convert(source, vault).model_dump(mode="json", by_alias=True)
+    )
+    summary = check_vault(source, vault)
+    check_run_result(result, vault, summary)
+    assert (
+        summary["notes"],
+        summary["payloads"],
+        summary["backups"],
+        summary["references"],
+        summary["warnings"],
+        summary["videos"],
+    ) == (7, 8, 3, 2, 1, 1)
+
+
 def test_independent_checker_compares_every_original_payload(tmp_path):
     source = make_archive(tmp_path / "source.brz")
     vault = tmp_path / "vault"
