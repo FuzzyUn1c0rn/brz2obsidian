@@ -62,31 +62,43 @@ and module entry points agree with the API, and the checker still works when
 source/workflow/renderer/publisher imports are blocked. This suite remains
 separate from the independent migration preservation checker below.
 
-The suite includes 22 synthetic corruption proofs for the independent acceptance
-checker. The checker imports only the standard library and reads archives/output
-directly; production manifest/counts do not provide expected preservation facts.
-See [the full acceptance report](../.scratch/brz-to-obsidian-v1/research/real-export-acceptance.md)
-for audited bytes, original JSON, graph/tags, authored text, references, warning
-conjuncts, identities/accounting, native configuration and reproducibility scope.
+The independent acceptance suite retains all 22 earlier corruption proofs and
+adds 69 v2 corruption/interaction checks, five driver corruption controls, two
+positive v2 audit tracers and a standard-library import check: 99 tests in total.
+False receipts are rehashed and recounted consistently before the oracle rejects
+incorrect assignments, materialization, icons/dates, note/reference evidence,
+TXT/PDF/video facts, Bases/templates/configuration and required support. The
+expected-fact modules import only the standard library and local oracle modules;
+production manifests/counts do not provide expected preservation facts.
+See [v2 complete preservation](../.scratch/brz-to-obsidian-v2-implementation/research/three-archive-preservation.md)
+and the [earlier v1 report](../.scratch/brz-to-obsidian-v1/research/real-export-acceptance.md).
 
 ## Private full-export acceptance
 
-Choose the exact fingerprinted A/B archives from the accepted preservation
-baseline and a fresh short ignored output directory. The driver refuses an
-existing output directory, performs six complete conversions (exact, repeat and
-ZIP/root-record reordered A/B), saves private results, and prints aggregate counts.
+Choose the exact fingerprinted A/B/C archives and a fresh short ignored output
+directory. The driver refuses an existing output directory, performs nine complete
+conversions (exact, repeat and ZIP/root-record reordered for each source), saves
+private results/operation evidence, and prints aggregate counts. It checks source
+fingerprints before/after every operation and at completion, proves reordered
+root-record multisets and physical bytes independently, and verifies the selected
+worktree import. Set PYTHONPATH even in the integration checkout.
 
 ```powershell
 $env:PYTHONIOENCODING = 'utf-8'
+$env:PYTHONPATH = Join-Path (Get-Location) 'src'
 $sourceA = 'C:\path\to\exact-A.brz'
 $sourceB = 'C:\path\to\exact-B.brz'
+$sourceC = 'C:\path\to\exact-C.brz'
 $output = 'C:\short\ignored\new-acceptance-run'
-.\.venv\Scripts\python.exe -m tests.local_acceptance.run --source-a $sourceA --source-b $sourceB --output $output
+.\.venv\Scripts\python.exe -m tests.local_acceptance.run --source-a $sourceA --source-b $sourceB --source-c $sourceC --output $output
 ```
 
-All six accepted conversions passed independent comparisons with exit 2.
+All nine accepted conversions passed independent comparisons with exit 2.
 A produced 49 thought notes/60 present payloads/two exact icon warnings; B
-produced 42 thought notes/50 present payloads/nine exact absent-TXT warnings.
+produced 42 thought notes/50 present payloads/nine exact absent-TXT warnings. C
+produced 305 imported notes, including seven definitions and all 195 typed members,
+232 present payloads and four exact zero-TXT/intact-PDF warnings. Its 122 original
+notes/backups, 84 references and four reviewed videos passed complete audit.
 Supporting files are excluded from thought-note counts. Logical repeated and
 reordered vault behavior is stable, with documented source-order/fingerprint
 and explicit run-metadata differences. Private archives, results, generated
