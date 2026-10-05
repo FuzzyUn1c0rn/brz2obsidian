@@ -1,30 +1,6 @@
-"""Native frontmatter and focused fallback tag navigation."""
-
-import json
+"""Focused fallback tag navigation and retained membership evidence."""
 
 from .relationships import note_link
-
-
-def tag_frontmatter(plan, item_key):
-    tokens = {t.tag_key: t.token for t in plan.tag_targets}
-    assigned = {
-        tokens[m.tag_key]
-        for m in plan.tag_memberships
-        if m.item_key == item_key and m.native
-    }
-    item = next(i for i in plan.analysis.snapshot.items if i.key == item_key)
-    if item.role == "definition":
-        assigned.add("categories")
-    assigned = sorted(assigned, key=str.casefold)
-    return (
-        "---\ntags:\n"
-        + "".join(
-            "  - " + json.dumps(token, ensure_ascii=False) + "\n" for token in assigned
-        )
-        + "---\n\n"
-        if assigned
-        else ""
-    )
 
 
 def tag_listing(plan):
