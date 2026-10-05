@@ -105,7 +105,10 @@ Templates use each assigned category stem under `Templates/`, initialize both
 dates on insertion, leave overrides blank and omit imported source IDs.
 For existing notes, edit `categories` directly: full templates can overwrite
 shared scalar properties, including dates and providers. Maintain `updated`
-explicitly. `Vault guide.md` documents duplicate lookup, canonical properties,
+explicitly. In the reviewed Obsidian build, a Properties save normalized CRLF
+line endings to LF while preserving authored text. Keep pristine converter
+output and original backups for exact pre-edit byte evidence.
+`Vault guide.md` documents duplicate lookup, canonical properties,
 meaningful entity links, safe editing and the category/member-template/Base
 starters for future categories. This follows the actual kepano manual template
 pattern with contextual queries and collision-safe links; no registry or

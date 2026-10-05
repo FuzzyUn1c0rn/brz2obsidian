@@ -74,3 +74,15 @@ preserved authored text, provider and paired source IDs. The checklist covers
 full/generic template insertion in Editing view, direct membership edits,
 future-category/manual discovery, adapted full template insertion and native
 link-preserving rename. Pristine source/output and all screenshots remain ignored.
+
+Root's partial native observations confirmed Books/generic insertion with
+2026-10-05 dates and the correct Markdown-template picker without Base files.
+Direct Properties edits on the established imported member retained its old
+dates, paired source IDs and Books provider while adding People membership.
+The native save normalized its three CRLF sequences to LF: the body changed
+from 179 to 176 bytes, and the edited body exactly equals the pristine body
+with CRLF replaced by LF. Authored text and its body-image snapshot were retained.
+All 29 pristine output hashes and original backups remain exact. The generated
+guide and usage document this observed editor limitation without changing the
+converter's byte-preservation requirement. Remaining native scenarios and the
+full native verdict are pending; this is not final ticket acceptance.

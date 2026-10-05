@@ -31,6 +31,11 @@ content, provider and imported identity. Full native templates can replace share
 scalar properties, including dates and the provider; use them for new notes.
 There are no additive category-only templates or promises of overwrite protection.
 
+In the reviewed Obsidian build, saving a Properties edit normalized existing
+CRLF line endings to LF without changing authored text. Keep the pristine
+converter output and original note backups when exact pre-edit bytes matter.
+Manual editor saves are separate from the converter's byte-preservation checks.
+
 Choose appearance_category explicitly from memberships, independently of
 membership order. Empty means no inheritance. A populated invalid/nonmember
 provider shows Invalid provider; it never selects a substitute. A valid local
