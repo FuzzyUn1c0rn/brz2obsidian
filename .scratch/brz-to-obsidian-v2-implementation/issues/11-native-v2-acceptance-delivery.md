@@ -1,6 +1,8 @@
 # 11: Accept actual v2 vaults in Obsidian and finish delivery guidance
 
-Status: ready-for-agent
+Status: claimed
+
+Assignee: /root/v2_implement_11
 
 Labels: ready-for-agent
 
@@ -41,5 +43,7 @@ Use the accepted specification, source-feature comparison, domain vocabulary and
 Follow the [local claim and completion process](../../../docs/agents/issue-tracker.md#implementation-operations), [domain glossary](../../../GLOSSARY.md) and [accepted architecture decision](../../../docs/adr/0001-source-neutral-core.md). Claim only after all linked blockers are resolved; save the claim and assignee before implementation. Check each acceptance box only after its criterion passes, record evidence and material limits under Comments, and resolve only when every criterion is satisfied.
 
 ## Comments
+
+- 2026-10-05 (/root): Claimed after ticket 10 resolved and integrated at `a8c3d53b2eaff7ec46af287a56429bc40418c89a`. All nine exact/repeat/reordered conversions passed independent preservation with unchanged source fingerprints; 748 cumulative tests, Ruff lint/format, dependency/import/version and diff gates pass. The isolated implementer owns final documentation and real packaging/library/CLI example checks. Root owns Computer review of fresh actual A/B/C output copies, private native evidence, the independent two-axis review from completed v1 `f4627d9`, and the user's actual converted-vault verdict. Audited outputs remain pristine. This claim does not assert native or finished-v2 acceptance.
 
 - 2026-10-04 (/root): Published from the user-approved to-tickets breakdown. Dependencies are local to this implementation set; planning ticket numbers are not implementation blockers. No implementation has started and no acceptance criterion is marked complete.
