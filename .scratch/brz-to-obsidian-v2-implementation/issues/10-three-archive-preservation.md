@@ -1,6 +1,8 @@
 # 10: Independently verify complete preservation across all three real archives
 
-Status: ready-for-agent
+Status: claimed
+
+Assignee: /root/v2_implement_10
 
 Labels: ready-for-agent
 
@@ -42,4 +44,5 @@ Follow the [local claim and completion process](../../../docs/agents/issue-track
 
 ## Comments
 
+- 2026-10-05 (/root): Claimed after ticket 09 resolved and integrated at `f570a663475266b9c95eb09688f5ccaf29c06af7`, with 671 cumulative tests and all lint/format/dependency/import/diff gates passing. Installed root metadata now matches package/module 0.2.0 and runtime PyYAML; source format and independently versioned schemas are unchanged. Isolated implementation will extend the stdlib/raw-source independent oracle and corruption controls, then produce nine fresh exact/repeat/reordered accepted outputs in a new short ignored destination. Source fingerprints, raw materialization/naming/reference expectations and archive immutability govern acceptance; production counts or manifests are not the expected-fact oracle. Final actual native review and user verdict remain ticket 11.
 - 2026-10-04 (/root): Published from the user-approved to-tickets breakdown. Dependencies are local to this implementation set; planning ticket numbers are not implementation blockers. No implementation has started and no acceptance criterion is marked complete.
