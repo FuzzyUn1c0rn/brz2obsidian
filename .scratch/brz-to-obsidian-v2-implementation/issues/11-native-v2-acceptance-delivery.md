@@ -2,7 +2,7 @@
 
 Status: claimed
 
-Assignee: /root/v2_implement_11
+Assignee: /root
 
 Labels: ready-for-agent
 
@@ -43,6 +43,8 @@ Use the accepted specification, source-feature comparison, domain vocabulary and
 Follow the [local claim and completion process](../../../docs/agents/issue-tracker.md#implementation-operations), [domain glossary](../../../GLOSSARY.md) and [accepted architecture decision](../../../docs/adr/0001-source-neutral-core.md). Claim only after all linked blockers are resolved; save the claim and assignee before implementation. Check each acceptance box only after its criterion passes, record evidence and material limits under Comments, and resolve only when every criterion is satisfied.
 
 ## Comments
+
+- 2026-10-05 (/root): Repair 13 is resolved and integrated at `6e2edd17f29f8e482805fc3392b26d917263777d`; all linked blockers are now resolved. Independent root verification passes 776 tests and tooling checks. The recovered worker preserved nine fresh independent audits, byte-equivalence to the accepted refined vaults, 18 historical outputs and final 53-module wheel/eight example conversions. Root owns remaining native acceptance and review follow-up. Actual A has now demonstrated source tags, hierarchy/related navigation, native Graph, intentional uncreated-target creation at its assigned path with Backlinks, inline images and a preserved PNG resource. C's core Bases and Templates settings, template folder and date format are verified in Obsidian 1.13.7. Final resource checks, B review and actual user verdict remain pending; no incomplete acceptance box is checked.
 
 - 2026-10-05 (/root): The independent full-v2 two-axis review at `9d8e743` is complete: zero documented-standard breaches, two P3 duplication suggestions and one reproduced P2 unsupported-ICO presentation mismatch. Claimed repair 13 blocks final acceptance and addresses all findings in one isolated implementer. Documentation and package-example work is integrated. Refined actual C native controls have demonstrated colour-free properties, original category counts, Icon-first views, templates/current dates, native rename, direct imported membership edits, blank/invalid providers, shortened-link ambiguity diagnostics and future-category discovery. All reviewed checker calls preserve complete file/directory inventories. Earlier archive native checks, remaining resource/graph controls, repaired package/output proof, final review follow-up and the actual user verdict remain pending; checkboxes remain honest.
 
