@@ -72,7 +72,7 @@ def test_inspection_plans_and_conversion_accounts_for_native_category_support(tm
         .read_text(encoding="utf-8")
         .endswith(
             "## Members\n\n![[Templates/Bases/Members.base#Members]]\n\n"
-            "## Gallery\n\n![[Templates/Bases/Gallery.base#Gallery]]\n"
+            "## Gallery\n\n![[Templates/Bases/Gallery.base#Gallery]]\n\n"
         )
     )
     configuration = json.loads((vault / ".obsidian/app.json").read_bytes())

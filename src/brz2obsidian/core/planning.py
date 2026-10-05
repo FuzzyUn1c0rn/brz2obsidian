@@ -74,7 +74,7 @@ def plan(analysis: Analysis) -> MigrationPlan:
             Adaptation(
                 kind="category_dashboard",
                 affected=key,
-                description="Embedded native contextual Members and Gallery Bases discover linked memberships from this category after link-preserving renames.",
+                description="Native contextual Members and Gallery Bases immediately follow the category title, before retained source content, without a generated introductory icon image; linked membership discovery survives link-preserving renames.",
             )
             for key in sorted(created & definitions)
         )
@@ -152,7 +152,7 @@ def plan(analysis: Analysis) -> MigrationPlan:
                 + " Later category/property edits do not rewrite this body snapshot.",
             )
             for s in snapshots
-            if s.effective_icon_asset_id is not None
+            if s.effective_icon_asset_id is not None and s.item_key not in definitions
         )
         + tuple(
             Adaptation(

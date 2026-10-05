@@ -55,6 +55,54 @@ def fixture(tmp_path):
     return source, vault, result, record
 
 
+@pytest.mark.parametrize(
+    "damage",
+    ["introductory_image", "bases_after_label", "false_snapshot", "false_description"],
+)
+def test_oracle_rejects_category_presentation_lies_after_consistent_rehash(
+    tmp_path, damage
+):
+    source, vault, result, record = fixture(tmp_path)
+    category = vault / "Categories/Concept.md"
+    data = category.read_bytes()
+    prefix = b"# Concept\n\n"
+    views = (
+        b"## Members\n\n![[Templates/Bases/Members.base#Members]]\n\n"
+        b"## Gallery\n\n![[Templates/Bases/Gallery.base#Gallery]]\n\n"
+    )
+    assert prefix + views + b"Definition label\n\n" in data
+    if damage == "introductory_image":
+        category.write_bytes(
+            data.replace(
+                prefix,
+                prefix
+                + b"![[Attachments/00000000000000000000000000000002/type.png]]\n\n",
+                1,
+            )
+        )
+    elif damage == "bases_after_label":
+        category.write_bytes(
+            data.replace(
+                views + b"Definition label\n\n", b"Definition label\n\n" + views, 1
+            )
+        )
+    elif damage == "false_snapshot":
+        record["adaptations"].append(
+            {
+                "kind": "body_icon_snapshot",
+                "affected": identity(2),
+                "description": "Editable category body icon snapshot.",
+            }
+        )
+    else:
+        next(a for a in record["adaptations"] if a["kind"] == "category_dashboard")[
+            "description"
+        ] = "Introductory image precedes category content and Bases."
+    rewrite_record(vault, record, result)
+    with pytest.raises(AssertionError):
+        check_vault(source, vault)
+
+
 @pytest.mark.parametrize("property", ["foreground_color", "background_color"])
 def test_oracle_rejects_removed_colour_guidance_after_consistent_rehash(
     tmp_path, property

@@ -228,6 +228,18 @@ def test_icons_and_archived_colours_survive_without_exposing_colour_properties(
         a["kind"] == "body_icon_snapshot" and a["affected"] == identity(3)
         for a in record["adaptations"]
     )
+    snapshots = {
+        a["affected"]
+        for a in record["adaptations"]
+        if a["kind"] == "body_icon_snapshot"
+    }
+    assert snapshots == {identity(3), identity(4)}
+    assert {
+        a.affected
+        for a in inspected.inspection.adaptations
+        if a.kind == "body_icon_snapshot"
+    } == snapshots
+    assert imported[identity(2)]["icon_snapshot"] == decisions[identity(2)].model_dump()
 
 
 def test_public_renderer_refuses_a_changed_effective_icon_obligation(tmp_path):

@@ -65,7 +65,8 @@ separate from the independent migration preservation checker below.
 The independent acceptance suite retains all 22 earlier corruption proofs,
 69 v2 corruption/interaction checks, five driver corruption controls, two
 positive v2 audit tracers and a standard-library import check. Eighteen additional
-presentation-refinement controls bring the current group to 117 tests.
+presentation-refinement controls plus four category-layout/evidence controls
+bring the current group to 121 tests.
 False receipts are rehashed and recounted consistently before the oracle rejects
 incorrect assignments, materialization, icons/dates, note/reference evidence,
 TXT/PDF/video facts, Bases/templates/configuration and required support. The
@@ -100,7 +101,18 @@ $output = 'C:\short\ignored\new-acceptance-run'
 ```
 
 All nine accepted conversions passed independent comparisons with exit 2.
-The current fresh outputs omit colour properties and retain all source colour
+The current fresh outputs place category Members/Gallery immediately after their
+heading, omit generated introductory category images and retain category icon
+properties/assets plus ordinary/member body snapshots. Four independent controls
+reject reintroduced category images, Bases moved below labels, fabricated category
+snapshot adaptations and false dashboard descriptions, even after consistent
+receipt rehash/recount. A rich public workflow control audits retained category
+authored images, mixed line endings, labels and resources against raw source facts.
+Exact comparison with the preceding pristine presentation accounts for the seven
+changed category notes, presentation-only adaptation/guide/report changes and
+explicit run metadata; all ordinary notes, payloads, Bases, templates and other
+configuration remain byte-identical. All 27 earlier audited outputs remain intact.
+These outputs also omit colour properties and retain all source colour
 facts in migration evidence; the earlier audit outputs remain intact as historical
 evidence. Each original archive remains unchanged.
 A produced 49 thought notes/60 present payloads/two exact icon warnings; B
@@ -141,6 +153,12 @@ writes. Nonempty destination refusals preserved caller files. Help and
 invalid arguments returned the documented exits. These local smoke results
 supplement the public suite and private preservation audit; they make no native
 rendering or user-acceptance claim.
+
+The refreshed category-presentation wheel and all eight examples also confirm
+Bases immediately follow category headings, introductory category embeds are
+absent, category icon properties/assets remain and member snapshots are unchanged.
+All 53 wheel module bytes match their current worktree sources. The Category
+starter already follows this presentation and remains unchanged.
 
 ## Native review procedure
 
@@ -196,6 +214,8 @@ not guess filenames or reuse prototype paths.
    Language 1, Refactoring Technique 16 and Tool 2. Check Members/Gallery,
    Icon-before-Note, no Appearance column, typed empty notes and preserved
    definition-owned content/resources. A/B have no imported thought types.
+   Members/Gallery must immediately follow the heading, with no generated
+   introductory category image; retained source content follows the Bases.
 8. Exercise live inherited icons, the actual owned override, blank opt-out and
    invalid/nonmember provider controls on disposable copies. Membership order
    must not choose a provider. Keep source identities/dates unchanged and verify
@@ -232,9 +252,12 @@ and earlier bounded synthetic/prototype trials remain historical evidence.
 
 The [final actual-output native review](../.scratch/brz-to-obsidian-v2-implementation/research/native-v2-acceptance.md)
 records the completed three-vault matrix, read-only edit controls and clean user
-copy. Final root verification passes 776 tests and Ruff lint/format on 114 files;
+copy. The preceding final root verification passed 776 tests and Ruff lint/format on 114 files;
 independent Spec/Standards follow-up leaves no findings. The user's actual-vault
 verdict remains required before ticket 11 and the delivery map resolve.
+The category-presentation refinement adds five public regression controls;
+its isolated verification passes 781 tests. Affected independent review and
+native revised-vault verification are recorded by refinement 14 and ticket 11.
 
 | Component | Verified version |
 | --- | --- |

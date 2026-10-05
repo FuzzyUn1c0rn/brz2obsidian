@@ -12,8 +12,10 @@ from brz2obsidian.contracts import MigrationRefused
 from brz2obsidian.core import analyze
 from brz2obsidian.sources.thebrain import BrzSourceModule
 from brz2obsidian.sources.thebrain.profile import BRZ_POLICY
+from brz2obsidian.vault_check import check_vault
 from tests.application.test_graph_workflow import graph_archive, identity
 from tests.application.test_verified_coverage import add_attachment, write_source
+from tests.local_acceptance.checker import check_vault as audit_preservation
 from tests.local_acceptance.checker import compare_vaults
 from tests.local_acceptance.run import reordered_archive
 from tests.sources.test_reader import rewrite
@@ -35,6 +37,77 @@ def typed_archive(path):
         source, "thoughts.json", "\n".join(json.dumps(t) for t in thoughts).encode()
     )
     return source
+
+
+def test_category_bases_precede_preserved_source_content_without_introductory_icon(
+    tmp_path,
+):
+    authored = b"Category prose.\r\n![authored](.data/md-images/photo.png)\r\nTail\r"
+    source = graph_archive(
+        tmp_path / "dashboard.brz",
+        {1: "Entry", 2: "Concept", 3: "Member", 4: "Related", 5: "Child"},
+        [(2, 3, 1, 2, -1), (3, 5, 1, 1, -1), (3, 4, 3, 1, -1)],
+        kinds={2: 2},
+        labels={2: "Definition label"},
+        notes={2: (authored, 4)},
+    )
+    with ZipFile(source) as archive:
+        files = {name: archive.read(name) for name in archive.namelist()}
+    thoughts = [json.loads(line) for line in files["thoughts.json"].splitlines()]
+    thoughts[2]["TypeId"] = identity(2)
+    thoughts[1].update(
+        CreationDateTime="2024-02-29T23:59:00-11:00",
+        ModificationDateTime="2025-01-01T00:00:00+14:00",
+    )
+    files["thoughts.json"] = "\n".join(json.dumps(t) for t in thoughts).encode()
+    for number, kind, filename, data in (
+        (3001, 5, "type.png", b"category icon"),
+        (3002, 12, "photo.png", b"authored image"),
+        (3003, 1, "manual.bin", b"category resource"),
+    ):
+        add_attachment(files, identity(number), kind, filename, data, owner=identity(2))
+    source = write_source(tmp_path, files)
+    source_bytes = source.read_bytes()
+    workflow = default_workflow()
+    inspected = workflow.inspect(source)
+    assert inspected.outcome == "clean", inspected.issues
+    category_icon = next(
+        s for s in inspected.inspection.icon_snapshots if s.item_key == identity(2)
+    )
+    assert category_icon.effective_icon_asset_id == identity(3001)
+    vault = tmp_path / "vault"
+    converted = workflow.convert(source, vault)
+    assert converted.outcome == "clean", converted.issues
+    folder = "Attachments/00000000000000000000000000000002/"
+    category = (vault / "Categories/Concept.md").read_bytes()
+    dashboard = (
+        b"# Concept\n\n## Members\n\n![[Templates/Bases/Members.base#Members]]\n\n"
+        b"## Gallery\n\n![[Templates/Bases/Gallery.base#Gallery]]\n\n"
+    )
+    assert category.split(b"---\n", 2)[2].startswith(b"\n" + dashboard)
+    assert ("![[" + folder + "type.png]]").encode() not in category
+    assert category.split(dashboard, 1)[1] == (
+        b"Definition label\n\nCategory prose.\r\n"
+        b"![authored](../Attachments/00000000000000000000000000000002/photo.png)\r\n"
+        b"Tail\r\n\n## Resources\n\n"
+        b"- [[Attachments/00000000000000000000000000000002/manual.bin|manual.bin]]\n"
+    )
+    assert ('icon: "[[' + folder + 'type.png]]"\n').encode() in category
+    assert b"created: 2024-02-29\nupdated: 2025-01-01\n" in category
+    assert ('source_item_id: "' + identity(2) + '"\n').encode() in category
+    member = (vault / "Notes/Member.md").read_bytes()
+    assert ("# Member\n\n![[" + folder + "type.png]]\n\n").encode() in member
+    assert member.endswith(
+        b"## Children\n\n- [[Notes/Child.md|Child]]\n\n"
+        b"## Related\n\n- [[Notes/Related.md|Related]]\n"
+    )
+    assert (vault / (folder + "type.png")).read_bytes() == b"category icon"
+    assert (vault / (folder + "photo.png")).read_bytes() == b"authored image"
+    assert (vault / (folder + "manual.bin")).read_bytes() == b"category resource"
+    assert (vault / (folder + "Notes.md.original")).read_bytes() == authored
+    assert check_vault(vault).outcome == "clean"
+    audit_preservation(source, vault)
+    assert source.read_bytes() == source_bytes
 
 
 def test_inspection_and_conversion_materialize_categories_and_typed_empty_members(
@@ -75,7 +148,7 @@ def test_inspection_and_conversion_materialize_categories_and_typed_empty_member
         (vault / "Categories/Concept.md")
         .read_text(encoding="utf-8")
         .endswith(
-            "# Concept\n\n## Members\n\n![[Templates/Bases/Members.base#Members]]\n\n## Gallery\n\n![[Templates/Bases/Gallery.base#Gallery]]\n"
+            "# Concept\n\n## Members\n\n![[Templates/Bases/Members.base#Members]]\n\n## Gallery\n\n![[Templates/Bases/Gallery.base#Gallery]]\n\n"
         )
     )
     assert not (vault / "Notes/Untyped empty.md").exists()

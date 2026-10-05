@@ -45,7 +45,7 @@ membership order. Empty means no inheritance. A populated invalid/nonmember
 provider shows Invalid provider; it never selects a substitute. A valid local
 icon override wins even with an empty or invalid provider. Otherwise dashboards
 use the valid provider's current local image. Category changes do not rewrite
-body-icon snapshots; those image references are separately editable. Declared
+ordinary/member body-icon snapshots; those image references are separately editable. Declared
 source colours remain in migration-record.json without vault colour properties
 or the decorative Appearance display.
 
@@ -74,7 +74,11 @@ Keep notes human-readable and preserve their authored content.
 ## Browse and extend categories
 
 Open [[Categories.md]] from Home, then open the category dashboard for its Members
-table and Gallery. A standalone contextual Base has no selected embedding
+table and Gallery immediately after the title. Category notes have no generated
+introductory icon image; their icon property still supplies dashboard images.
+Retained source labels, authored text/images, resources and graph links follow
+the Bases. Ordinary/member notes keep their separately editable body snapshots.
+A standalone contextual Base has no selected embedding
 category. Discovery follows linked membership, with Templates and Attachments
 excluded; filenames containing Template remain valid members. Category role uses
 the Categories folder and native categories tag. Members can live in Notes or
