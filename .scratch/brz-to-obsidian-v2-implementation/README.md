@@ -92,6 +92,8 @@ All 82 stories have primary owners below; the individual tickets include additio
 
 ## Comments
 
+- 2026-10-05 (/root): Ticket 04 automatic work on codex/brz-v2-04 passes 494 tests and tooling checks; its native gate remains pending. Root preserved the pristine synthetic input/output and verified all 29 output hashes plus five review assets. Computer Use returned "failed to activate captured window" on the original attempt and the permitted recovery attempt; the user was asked to bring Obsidian to the foreground with the desktop unlocked. No native completion or ticket resolution is inferred. Read-only checker/audit/delivery preparation continues outside the repository; blocked implementation tickets remain unclaimed.
+
 - 2026-10-05 (/root): Ticket 07 integrated through merger commit f6d3eca, with 490 passing tests and clean lint/format/dependency checks. Its bounded converter-output native video check passed remote playback and the evidenced 18-second offset; players were left paused and all three review Markdown files stayed byte-identical. Ticket 04 continues; the public read-only checker follows its completed native template gate.
 
 - 2026-10-05 (/root): Ticket 03 integrated through merger commit c5881d2, with 445 passing tests and clean lint/format/dependency checks. Its actual synthetic native dashboards passed live-image/provider controls, support exclusions, direct membership discovery and native category rename. Claimed 04; bounded template evidence remains separate from final all-archive acceptance. The user explicitly confirmed f4627d9 as the final full-v2 code-review base.
