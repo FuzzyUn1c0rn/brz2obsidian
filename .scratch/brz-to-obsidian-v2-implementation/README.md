@@ -34,7 +34,7 @@ Read the accepted [implementation specification](spec.md), [source-feature compa
 
 ## Working the frontier
 
-**Current work: [08: Read-only vault checker](issues/08-read-only-vault-checker.md), claimed for isolated implementation.** Tickets 01–07 are resolved and integrated. Ready-for-agent means specified; blockers still govern when a ticket can start.
+**Current work: [09: Combined v2 workflow, publication safety and source neutrality](issues/09-integrated-v2-publication-reuse.md), claimed for isolated implementation.** Tickets 01–08 are resolved and integrated. Ticket 08 passes 564 cumulative tests and an additional read-only check of actual native Obsidian edits. Tickets 10–11 still establish complete independent preservation and final native/user acceptance. Ready-for-agent means specified; blockers still govern when a ticket can start.
 
 After 01 resolves, 02, 05, 06 and 07 become eligible. Metadata/icons lead to dashboards (03), native templates (04) and the read-only checker (08). Dashboard ticket 03 enables Bases for its first native check; ticket 04 preserves that configuration and adds Templates. Ticket 09 joins 05, 06, 07 and 08; their transitive prerequisites already include 01–04. The independent full-archive audit (10) follows integration, and native final acceptance (11) follows the audit. Dependencies are acyclic and numbered blockers-first; redundant transitive edges are omitted.
 

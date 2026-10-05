@@ -1,6 +1,8 @@
 # 09: Prove the combined v2 workflow, publication safety and source neutrality
 
-Status: ready-for-agent
+Status: claimed
+
+Assignee: /root/v2_implement_09
 
 Labels: ready-for-agent
 
@@ -41,3 +43,4 @@ Follow the [local claim and completion process](../../../docs/agents/issue-track
 ## Comments
 
 - 2026-10-04 (/root): Published from the user-approved to-tickets breakdown. Dependencies are local to this implementation set; planning ticket numbers are not implementation blockers. No implementation has started and no acceptance criterion is marked complete.
+- 2026-10-05 (/root): Claimed after all four linked blockers resolved and integrated. Baseline `f9c097a6c7b7defcaa9b34f539fd3259bfa40d2a` passes 564 cumulative tests, Ruff lint/format and environment/diff checks. The public checker additionally passes on the frozen actual Obsidian-edited template review copy with all 38 file hashes/inventory unchanged and equal repeated results. Isolated implementation will use the confirmed public workflow, CLI, checker, publication and alternate-source seams; full private archive preservation and final native/user acceptance remain tickets 10–11.
