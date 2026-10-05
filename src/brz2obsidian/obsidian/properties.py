@@ -1,6 +1,6 @@
 """The small canonical property vocabulary for imported object notes."""
 
-import json
+from ._frontmatter import frontmatter
 
 
 def imported_properties(plan, item):
@@ -36,17 +36,4 @@ def imported_properties(plan, item):
 
 
 def property_frontmatter(plan, item):
-    from datetime import date
-
-    lines = ["---"]
-    for name, value in imported_properties(plan, item).items():
-        if isinstance(value, list) and value:
-            lines.append(name + ":")
-            lines.extend("  - " + json.dumps(v, ensure_ascii=False) for v in value)
-        elif isinstance(value, date):
-            lines.append(name + ": " + value.isoformat())
-        elif value is None:
-            lines.append(name + ":")
-        else:
-            lines.append(name + ": " + json.dumps(value, ensure_ascii=False))
-    return "\n".join(lines) + "\n---\n\n"
+    return frontmatter(imported_properties(plan, item))

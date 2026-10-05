@@ -1,6 +1,8 @@
 """Canonical object metadata observed through real archives and vault files."""
 
+import hashlib
 import json
+import struct
 from zipfile import ZipFile
 
 import pytest
@@ -12,6 +14,7 @@ from brz2obsidian.core import analyze, plan
 from brz2obsidian.obsidian import render
 from brz2obsidian.sources.thebrain import BrzSourceModule
 from brz2obsidian.sources.thebrain.profile import BRZ_POLICY
+from brz2obsidian.vault_check import check_vault
 from tests.application.test_graph_workflow import BRAIN, graph_archive, identity
 from tests.application.test_module_seams import METADATA
 from tests.application.test_verified_coverage import add_attachment, write_source
@@ -243,6 +246,102 @@ def test_public_renderer_refuses_a_changed_effective_icon_obligation(tmp_path):
     with pytest.raises(MigrationRefused) as refused:
         render(migration, METADATA)
     assert refused.value.issues[0].phase == "rendering"
+
+
+@pytest.mark.parametrize("owner", [2, 3], ids=["category-default", "member-override"])
+def test_unsupported_destination_icon_is_refused_before_publication(
+    tmp_path, capsys, owner
+):
+    # A genuine 1x1 PNG-backed ICO, rather than arbitrary bytes with an ICO name.
+    png = bytes.fromhex(
+        "89504e470d0a1a0a0000000d4948445200000001000000010804000000b51c0c02"
+        "0000000b4944415478da6364f80f00010501012718e3660000000049454e44ae426082"
+    )
+    ico = struct.pack("<HHHBBBBHHII", 0, 1, 1, 1, 1, 0, 0, 1, 32, len(png), 22) + png
+    files = parts(
+        graph_archive(
+            tmp_path / "icons.brz",
+            {1: "Entry", 2: "Concept", 3: "Member"},
+            [(2, 3, 1, 2, -1)],
+            kinds={2: 2},
+            notes={1: (b"", 4)},
+        )
+    )
+    set_thoughts(files, {identity(3): {"TypeId": identity(2)}})
+    add_attachment(files, identity(3001), 5, "icon.ico", ico, owner=identity(owner))
+    source = write_source(tmp_path, files)
+    original = source.read_bytes()
+    workflow = default_workflow()
+    inspected = workflow.inspect(source)
+    assert inspected.outcome == "clean", inspected.issues
+    assert "destination feasibility" in inspected.inspection.pending_checks
+    icon = next(a for a in inspected.inspection.assets if a.asset_id == identity(3001))
+    assert icon.owner == identity(owner) and icon.role == "icon"
+    assert icon.actual_length == len(ico)
+    assert icon.actual_sha256 == hashlib.sha256(ico).hexdigest()
+    assert inspected.receipt is None and inspected.counts.actual_notes is None
+
+    absent = tmp_path / "absent-vault"
+    empty = tmp_path / "empty-vault"
+    empty.mkdir()
+    for destination in (absent, empty):
+        result = workflow.convert(source, destination)
+        assert result.outcome == "refused", result.issues
+        assert result.receipt is None and result.counts.actual_notes is None
+        issue = result.issues[0]
+        assert issue.code == "unsupported_feature" and issue.phase == "rendering"
+        assert issue.affected == (identity(owner), identity(3001))
+        assert ".ico" in issue.message and "image" in issue.guidance.lower()
+    assert not absent.exists() and list(empty.iterdir()) == []
+    assert main(["convert", str(source), str(absent), "--json"]) == 1
+    serialized = json.loads(capsys.readouterr().out)
+    assert serialized["outcome"] == "refused" and serialized["receipt"] is None
+    assert not absent.exists() and source.read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    "extension", ["avif", "bmp", "gif", "jpeg", "jpg", "png", "SVG", "webp"]
+)
+def test_reviewed_image_extensions_remain_eligible_for_imported_icons(
+    tmp_path, extension
+):
+    files = parts(
+        graph_archive(tmp_path / "icon.brz", {1: "Entry"}, notes={1: (b"", 4)})
+    )
+    # Public conversion/checking validates file kind and preservation, not codecs.
+    payload = b"nonempty synthetic image payload"
+    add_attachment(
+        files, identity(3001), 5, "icon." + extension, payload, owner=identity(1)
+    )
+    source = write_source(tmp_path, files)
+    vault = tmp_path / "vault"
+    result = default_workflow().convert(source, vault)
+    assert result.outcome == "clean", result.issues
+    checked = check_vault(vault)
+    assert checked.outcome == "clean", checked.issues
+    assert next(vault.rglob("icon." + extension)).read_bytes() == payload
+
+
+def test_unselected_decorative_icon_is_preserved_without_fabricating_presentation(
+    tmp_path,
+):
+    files = parts(
+        graph_archive(
+            tmp_path / "icon.brz",
+            {1: "Entry", 2: "Uncreated"},
+            notes={1: (b"", 4)},
+        )
+    )
+    add_attachment(
+        files, identity(3001), 5, "unselected.ico", b"preserve me", owner=identity(2)
+    )
+    source = write_source(tmp_path, files)
+    vault = tmp_path / "vault"
+    result = default_workflow().convert(source, vault)
+    assert result.outcome == "clean", result.issues
+    assert not (vault / "Notes/Uncreated.md").exists()
+    assert next(vault.rglob("unselected.ico")).read_bytes() == b"preserve me"
+    assert check_vault(vault).outcome == "clean"
 
 
 @pytest.mark.parametrize(

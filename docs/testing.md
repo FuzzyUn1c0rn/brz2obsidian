@@ -118,17 +118,18 @@ vaults and UI evidence remain ignored under `brz/`; public reports are aggregate
 On 2026-10-05, the local `0.2.0` wheel built through the project environment with
 `pip wheel --no-deps --no-build-isolation`. Its metadata declares Python >=3.14,
 Pydantic, markdown-it-py and runtime PyYAML; the console entry point is
-`brz2obsidian.cli:main`. Inspection found exactly the 52 source package modules
+`brz2obsidian.cli:main`. Inspection found exactly the 53 source package modules
 and distribution metadata, with no private extracts, vaults or test fixtures.
 A subprocess imported directly from that wheel without installation and passed
-module inspect/check-vault JSON calls.
+module inspect/convert/check-vault JSON calls.
 
 The actual Python examples in README, architecture and checker guidance were
 executed on an independently authored synthetic ZIP with a type, an empty typed
 member, source dates, an authored CRLF Home body and a local category image.
 Default Workflow, explicit Workflow, direct analyze/plan/render/publish, and
-console/module text/JSON routes produced seven complete vaults, each with the
-independently expected 22 files: three imported notes, two exact payloads and
+console/module text/JSON routes and direct-wheel conversion produced eight
+complete vaults, each with the independently expected 22 files: three imported
+notes, two exact payloads and
 17 support artifacts. API receipts matched every actual length/hash; CLI outputs
 matched the same independent inventory, properties and payload-byte expectations.
 Migration schemas 2 and checker schema 1 round-tripped separately; inspection

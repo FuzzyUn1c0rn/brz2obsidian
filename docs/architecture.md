@@ -44,6 +44,13 @@ the body receives a separately editable reference to the effective image.
 Each source image is copied once through its existing ownership/path assignment,
 and decorative images remain outside Resources. Untyped icon-only items remain
 uncreated under the existing selection policy.
+Before generating an icon property or body snapshot, the Obsidian renderer
+requires the selected target to have a reviewed image extension: AVIF, BMP,
+GIF, JPEG/JPG, PNG, SVG or WebP. Other selected kinds, including ICO, are
+refused before publication. Inspection retains neutral icon evidence with
+destination feasibility pending; it does not establish renderability. The
+core remains independent of this destination policy, and unselected decorative
+payloads are still preserved without creating a note or image presentation.
 
 All imported item notes, including materialized source tags and definitions,
 receive the canonical core: linked `categories`, optional single

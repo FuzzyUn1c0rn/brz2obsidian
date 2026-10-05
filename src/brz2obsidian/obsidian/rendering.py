@@ -3,6 +3,7 @@
 import hashlib
 import json
 import re
+from pathlib import PurePosixPath
 
 from brz2obsidian.contracts import (
     CopyEntry,
@@ -83,6 +84,33 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     documents = {document.key: document for document in snapshot.documents}
     icon_snapshots = {s.item_key: s for s in plan.icon_snapshots}
     asset_paths = {t.asset_id: t.relative_path for t in plan.asset_targets}
+    # Destination eligibility matches the native Base views and source-free
+    # checker. A neutral source icon may be valid without being an Obsidian image.
+    for selection in plan.icon_snapshots:
+        icon = selection.effective_icon_asset_id
+        if icon is not None:
+            suffix = PurePosixPath(asset_paths[icon]).suffix.lower()
+            if suffix not in {
+                ".avif",
+                ".bmp",
+                ".gif",
+                ".jpeg",
+                ".jpg",
+                ".png",
+                ".svg",
+                ".webp",
+            }:
+                raise MigrationRefused(
+                    (
+                        Issue(
+                            code="unsupported_feature",
+                            phase="rendering",
+                            message=f"Selected icon has an unsupported Obsidian image kind: {suffix}",
+                            affected=(selection.item_key, icon),
+                            guidance="Use a supported local image for the source icon, then convert into a fresh vault.",
+                        ),
+                    )
+                )
     files = []
     counts = plan.counts.model_copy(
         update={

@@ -1,9 +1,8 @@
 """Full native templates for new objects, with no imported source identity."""
 
-import json
-
 from brz2obsidian.core.support import category_template_path
 
+from ._frontmatter import frontmatter
 from .bases import CATEGORY_VIEWS, MEMBERS
 from .guide import vault_guide
 
@@ -31,16 +30,7 @@ def new_object_template(category=None, tags=()):
         "tags": list(tags),
         "aliases": [],
     }
-    lines = ["---"]
-    for name, value in properties.items():
-        if isinstance(value, list) and value:
-            lines.append(name + ":")
-            lines.extend("  - " + json.dumps(v, ensure_ascii=False) for v in value)
-        elif value is None:
-            lines.append(name + ":")
-        else:
-            lines.append(name + ": " + json.dumps(value, ensure_ascii=False))
-    return "\n".join(lines) + "\n---\n\n# {{title}}\n"
+    return frontmatter(properties) + "# {{title}}\n"
 
 
 def category_template_files(plan):
