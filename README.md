@@ -140,6 +140,22 @@ Two exact warning rules cover one absent-TXT pattern and intact icons with
 length discrepancies. See [conditions and issue codes](docs/source-coverage.md#approved-warnings).
 Other missing required content and unverified meanings stop conversion.
 
+## Check an editable vault
+
+```powershell
+.\.venv\Scripts\brz2obsidian.exe check-vault 'C:\vaults\editable-vault'
+.\.venv\Scripts\python.exe -m brz2obsidian check-vault 'C:\vaults\editable-vault' --json
+```
+
+The public `brz2obsidian.vault_check.check_vault(vault)` operation checks current
+properties, category/provider references, required Bases/images and imported
+identity pairs without a source archive or migration record. It preserves file
+bytes and inventory. Its distinct strict version-1 `brz2obsidian.vault-check`
+result reports `clean`/`issues`/`failed`, with command exits 0/2/1 and null
+unavailable measurements. Custom properties, template date variables and
+intentional uncreated ordinary targets are allowed. See [checker usage,
+schema, diagnostic codes and structural limits](docs/vault-checker.md).
+
 ## Library usage
 
 ```python
