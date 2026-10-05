@@ -53,7 +53,7 @@ Appearance a thought receives from its assigned thought type, distinct from appe
 _Avoid_: Inherited note content; copied attachment when referring only to displayed appearance
 
 **Effective appearance**:
-The icon and colours displayed for an item after applying its explicit appearance values and any inherited defaults. Each explicit value takes precedence over the corresponding inherited value.
+The icon and colours displayed for a source item after applying its explicit appearance values and any inherited defaults. Each explicit value takes precedence over the corresponding inherited value.
 _Avoid_: Stored appearance when referring to the displayed result; inherited label when label propagation has not been established
 
 **Vault tag**:
@@ -81,7 +81,7 @@ A vault entry point listing the available category dashboards.
 _Avoid_: Category dashboard when referring to the overview of all categories
 
 **Appearance category**:
-An optional vault category chosen from a note's memberships to supply default icon and colours, independently of membership order. A note with no appearance category receives no inherited appearance; explicit values take precedence over corresponding defaults.
+An optional vault category chosen from a note's memberships to supply a default dashboard icon, independently of membership order. An explicit note icon takes precedence; an empty choice opts out and an invalid choice does not select a substitute.
 _Avoid_: First category when implying that list order chooses the appearance; source thought type when referring to the editable destination choice
 
 **Attachment**:

@@ -5,16 +5,17 @@ exchange-format-5 exports into a fresh standard Obsidian vault. It preserves
 Markdown, present attachment bytes, original JSON evidence, Home, hierarchy,
 Related links and tags. Unsupported source meanings are refused.
 
-The first-version scope is the feature classes verified in two supplied
-TheBrain 15 exports and controlled synthetic fixtures. See [source coverage
-and warnings](docs/source-coverage.md), the [accepted specification](.scratch/brz-to-obsidian-v1/spec.md)
-and [implementation gates](.scratch/brz-to-obsidian-v1/README.md).
-
-Version 2 development uses package/converter version `0.2.0`, migration
-result/record schema 2 and the independent convention-checker schema 1.
-Its combined synthetic behavior and cumulative regressions are verified through
-public interfaces; complete three-archive preservation and final native/user
-acceptance remain tracked in the [v2 implementation gates](.scratch/brz-to-obsidian-v2-implementation/README.md).
+Version 2 (`0.2.0`) adds thought types as linked categories, native dashboards
+and templates, source dates, editable icon inheritance, the reviewed unusual
+Markdown note, zero-length absent-TXT findings, YouTube presentation and a
+read-only vault checker. All three supplied exports use the same TheBrain
+version and exercise different features. Nine complete exact/repeat/reordered
+conversions passed [independent preservation after the presentation refinement](.scratch/brz-to-obsidian-v2-implementation/research/colour-property-refinement.md).
+See [source coverage and warnings](docs/source-coverage.md), the
+[accepted v2 specification](.scratch/brz-to-obsidian-v2-implementation/spec.md)
+and [delivery gates](.scratch/brz-to-obsidian-v2-implementation/README.md).
+V2 delivery also requires native review of actual outputs, independent final
+review and the user's verdict recorded in those delivery gates.
 
 ## Development environment
 
@@ -35,6 +36,16 @@ recreate it on a fresh checkout. `pyproject.toml` declares dependency families;
 packages. Tested runtime support is native Windows / CPython 3.14.8. Package
 metadata requires Python >=3.14; other platforms and later runtimes have not
 been accepted. Native presentation uses Obsidian 1.13.7.
+
+Build a local wheel with the same environment when needed:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip wheel --no-deps --no-build-isolation --wheel-dir brz/delivery/wheels .
+```
+
+Runtime dependencies are Pydantic, markdown-it-py and PyYAML. PyYAML serves the
+read-only checker; setuptools builds the package. The checked wheel contains
+package modules and distribution metadata, with no archives, vaults or tests.
 
 ## Inspect and convert
 
@@ -102,7 +113,8 @@ current local image is used. A blank provider opts out, and an invalid provider
 shows Invalid provider without borrowing another category's icon. Valid overrides
 remain visible with blank or invalid providers. Category icon changes update
 inherited dashboard images; note-body images are separately editable migration
-snapshots. Declared colours remain metadata. Imported created/updated dates use
+snapshots. Source colours remain in migration evidence; note properties,
+templates and Bases omit foreground/background colour fields. Imported created/updated dates use
 source calendar components, with complete original strings retained as evidence.
 Bundled Templates is also enabled, with the Templates folder and ISO date format.
 Create a new note, switch to Editing view, run **Templates: Insert template**,
@@ -120,8 +132,8 @@ output and original backups for exact pre-edit byte evidence.
 meaningful entity links, safe editing and the category/member-template/Base
 starters for future categories. This follows the actual kepano manual template
 pattern with contextual queries and collision-safe links; no registry or
-community plugin is required. Additional delivery gates remain tracked in the
-[implementation index](.scratch/brz-to-obsidian-v2-implementation/README.md).
+community plugin is required. See [maintenance and reference adaptations](docs/vault-maintenance.md)
+for the full human/agent workflow.
 Original headings, labels and bodies are retained, with supported
 local references adapted to assigned paths. Parents/Children/Related sections
 provide navigation; native Backlinks, Graph and tag search provide discovery
@@ -142,9 +154,13 @@ Resources. `MIGRATION REPORT.md` explains warnings and simplifications;
 relationships, edits and byte inventory. Original JSON preserves numeric
 values, raw dates and omitted-versus-null distinctions.
 
-Two exact warning rules cover one absent-TXT pattern and intact icons with
-length discrepancies. See [conditions and issue codes](docs/source-coverage.md#approved-warnings).
+Three exact warning rules cover positive-length absent TXT, the reviewed
+zero-length absent-TXT/PDF association, and intact icons with length discrepancies.
+See [conditions and issue codes](docs/source-coverage.md#approved-warnings).
 Other missing required content and unverified meanings stop conversion.
+PDF files open natively, but vault Search does not search their body text.
+Reviewed videos keep their exact original URL beside a derived native embed;
+network/service availability and offline playback remain destination limits.
 
 ## Check an editable vault
 
@@ -183,8 +199,13 @@ and runnable composition examples](docs/architecture.md).
 ## Verification and private data
 
 See [test commands and native-review procedure](docs/testing.md), [complete
-real-export preservation](.scratch/brz-to-obsidian-v1/research/real-export-acceptance.md)
-and [native review](.scratch/brz-to-obsidian-v1/research/native-acceptance.md).
+current v2 preservation](.scratch/brz-to-obsidian-v2-implementation/research/colour-property-refinement.md)
+and the [current actual-vault acceptance gate](.scratch/brz-to-obsidian-v2-implementation/issues/11-native-v2-acceptance-delivery.md).
+The [initial v2 preservation report](.scratch/brz-to-obsidian-v2-implementation/research/three-archive-preservation.md)
+retains the complete audit before the colour-property refinement.
+The [v1 preservation](.scratch/brz-to-obsidian-v1/research/real-export-acceptance.md)
+and [v1 native report](.scratch/brz-to-obsidian-v1/research/native-acceptance.md)
+remain historical evidence.
 Keep private archives, generated vaults and UI evidence under ignored `brz/`.
 Ordinary tests use synthetic inputs and need neither private archives nor GUI
 access. Public reports contain aggregate evidence only. The virtual environment,
