@@ -1,5 +1,7 @@
 # Final actual-output native review
 
+This records native review before the later [category Bases-first refinement](category-bases-first-refinement.md). That refinement updates the reviewed vault without further agent UI checks, following the user's instruction to perform its visual checks personally. Renewed visual acceptance and the actual-vault verdict remain pending in ticket 11.
+
 On 2026-10-05, `/root` completed representative Computer checks of all three
 full converted vaults in standard Obsidian **1.13.7**. Native review used separate
 editable copies. The nine final audited outputs and original archives remain
