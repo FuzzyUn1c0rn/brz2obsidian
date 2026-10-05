@@ -1,6 +1,6 @@
 # 11: Accept actual v2 vaults in Obsidian and finish delivery guidance
 
-Status: claimed
+Status: resolved
 
 Assignee: /root
 
@@ -28,7 +28,7 @@ Published: 2026-10-04 after the user approved the 11-slice breakdown and depende
 - [x] Review the unusual Markdown/local image, intact PDFs, URL/embed/timing and accepted Search/remote limits, along with earlier source tags, hierarchy, resources, Backlinks, Graph and intentional uncreated targets.
 - [x] Run the public checker on representative valid/invalid edits and explain that it reports without repair or source-preservation claims. Leave original vaults/Brains unchanged and remote playback paused.
 - [x] Finish the accurate installation/environment, library/CLI/schema, property/template/rename/checker, reference-adaptation, source-feature and native-review guidance; do not present prototypes or accepted limitations as equivalent source functionality.
-- [ ] Complete an independent specification/standards review and final applicable public/tooling/acceptance checks, with no unresolved in-scope defects. Obtain and record the user's actual converted-vault verdict before declaring v2 finished; repairs repeat affected automatic, independent and native evidence.
+- [x] Complete an independent specification/standards review and final applicable public/tooling/acceptance checks, with no unresolved in-scope defects. Obtain and record the user's actual converted-vault verdict before declaring v2 finished; repairs repeat affected automatic, independent and native evidence.
 
 ## Testing boundaries
 
@@ -43,6 +43,8 @@ Use the accepted specification, source-feature comparison, domain vocabulary and
 Follow the [local claim and completion process](../../../docs/agents/issue-tracker.md#implementation-operations), [domain glossary](../../../GLOSSARY.md) and [accepted architecture decision](../../../docs/adr/0001-source-neutral-core.md). Claim only after all linked blockers are resolved; save the claim and assignee before implementation. Check each acceptance box only after its criterion passes, record evidence and material limits under Comments, and resolve only when every criterion is satisfied.
 
 ## Comments
+
+- 2026-10-05 (/root): The user completed their visual review of the revised actual vault and reported, “I've done the visual review. Looks good.” This supplies the final converted-vault verdict after refinement 14. All seven criteria now pass: 781 public tests and tooling, nine fresh independent archive audits, final wheel/eight examples, actual-output native checks, cleared Spec/Standards reviews and the user's acceptance are recorded. Final bookkeeping review at `93cc314` also clears the map-history observation. All fourteen implementation tickets are resolved and the overarching Wayfinder destination is achieved. [PR #1](https://github.com/FuzzyUn1c0rn/brz2obsidian/pull/1) contains v2 against completed v1; final acceptance bookkeeping is pushed before marking it ready for review. No code, archive or vault changes are required by this closure.
 
 - 2026-10-05 (/root): Refinement 14 is resolved; [affected evidence](../research/category-bases-first-refinement.md) records 781 passing independent root tests, nine fresh preservation audits, 27 unchanged historical outputs, exact final wheel/examples and cleared production Spec/Standards review. The actual reviewed vault has all seven category bodies updated with Bases first and no generated intro image, unchanged frontmatter/assets, nine preimage backups and preserved unrelated files. Public library/JSON CLI checking is clean and read-only at 562 files. The user directly chose to perform these visual checks themselves and was notified readiness; root performed no further UI checks. All blockers are resolved and this is the current frontier. The final criterion remains unchecked until the user's revised actual-vault visual review/verdict is recorded.
 

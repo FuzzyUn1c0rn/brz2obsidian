@@ -1,6 +1,6 @@
 # Version 2 implementation tickets
 
-Status: claimed
+Status: resolved
 
 Labels: ready-for-agent
 
@@ -37,7 +37,7 @@ Read the accepted [implementation specification](spec.md), [source-feature compa
 
 ## Working the frontier
 
-**Current implementation frontier: [11: Accept actual v2 vaults in Obsidian and finish delivery guidance](issues/11-native-v2-acceptance-delivery.md).** Tickets 01–10 and refinements/repair 12–14 are resolved. The current implementation passes 781 cumulative tests, nine fresh complete independent archive audits, final wheel/eight-example checks and affected Spec/Standards review. [Category refinement evidence](research/category-bases-first-refinement.md) records the safe backed-up update of all seven actual reviewed category notes, unchanged icon properties/assets and clean read-only checking. The user chose to perform this refinement's visual checks personally and has been notified readiness. Delivery 11 and the map remain claimed for that revised actual-vault review/verdict. [Earlier native acceptance](research/native-v2-acceptance.md) remains historical; no fresh agent visual acceptance is inferred. Original archives and all 27 earlier audited outputs remain pristine. Ready-for-agent means specified; blockers govern final acceptance.
+**Current implementation frontier: none — version 2 is delivered and accepted.** All fourteen implementation tickets are resolved. The implementation passes 781 cumulative tests, nine fresh complete independent archive audits, final wheel/eight-example checks and Spec/Standards review. [Category refinement evidence](research/category-bases-first-refinement.md) records the safe backed-up update of all seven actual reviewed category notes and clean read-only checking. On 2026-10-05, the user completed their own visual review and reported, “I've done the visual review. Looks good.” [Delivery 11](issues/11-native-v2-acceptance-delivery.md) records this final actual-vault verdict and the Wayfinder map is resolved. Earlier native observations remain separately recorded; no additional agent UI checks are claimed. Source archives and all 27 historical audit outputs were preserved through delivery. [PR #1](https://github.com/FuzzyUn1c0rn/brz2obsidian/pull/1) holds the full v2 change against completed v1.
 
 After 01 resolves, 02, 05, 06 and 07 become eligible. Metadata/icons lead to dashboards (03), native templates (04) and the read-only checker (08). Dashboard ticket 03 enables Bases for its first native check; ticket 04 preserves that configuration and adds Templates. Ticket 09 joins 05, 06, 07 and 08; their transitive prerequisites already include 01–04. The independent full-archive audit (10) follows integration, and native final acceptance (11) follows the audit, presentation refinements (12, 14) and final review repairs (13). Dependencies remain acyclic; appended ticket numbers reflect feedback/review received after 11 began.
 
@@ -96,6 +96,8 @@ Refinement 12 additionally owns the updated presentation/evidence distinction in
 - Publication of these tickets, passing the convention checker or acceptance of the earlier prototype does not satisfy full migration preservation or the final delivery gate. Keep raw private archives, outputs and native evidence ignored; publish aggregate findings and honest limitations.
 
 ## Comments
+
+- 2026-10-05 (/root): The user's own revised-vault visual review is accepted with the explicit verdict, “I've done the visual review. Looks good.” Resolved final delivery 11, checked its seventh criterion and closed this index and the overarching map. All fourteen implementation tickets are complete; existing 781-test, source-preservation, package, native and independent-review proof remains applicable because closure changes documentation only. Final acceptance is recorded on the v2 branch and in PR #1 before ready-for-review promotion.
 
 - 2026-10-05 (/root): Refinement 14 is resolved and integrated, with 781 independent root tests, nine fresh audited outputs, 27 pristine historical outputs, final package/examples and affected independent review. The actual user vault now has Bases-first category bodies without introductory generated images; nine guarded replacements retain backups and all unrelated bytes. Repeated checker/library/CLI calls remain clean and read-only at 562 files. Completed worktree 14 is confirmed archived with all retained proof unchanged. The user explicitly chose to conduct the visual checks personally and was notified readiness; current frontier returns to 11, and finished-v2 acceptance remains pending their revised-vault verdict.
 

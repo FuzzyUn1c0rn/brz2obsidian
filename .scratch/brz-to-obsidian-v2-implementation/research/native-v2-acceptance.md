@@ -1,12 +1,12 @@
 # Final actual-output native review
 
-This records native review before the later [category Bases-first refinement](category-bases-first-refinement.md). That refinement updates the reviewed vault without further agent UI checks, following the user's instruction to perform its visual checks personally. Renewed visual acceptance and the actual-vault verdict remain pending in ticket 11.
+This records native review before the later [category Bases-first refinement](category-bases-first-refinement.md). That refinement updated the reviewed vault without further agent UI checks, following the user's instruction to perform its visual checks personally. The user completed that review and accepted the revised actual vault on 2026-10-05; delivery 11 records the final verdict.
 
 On 2026-10-05, `/root` completed representative Computer checks of all three
 full converted vaults in standard Obsidian **1.13.7**. Native review used separate
 editable copies. The nine final audited outputs and original archives remain
-pristine. This report records technical acceptance; the user's verdict is still
-required by [delivery ticket 11](../issues/11-native-v2-acceptance-delivery.md).
+pristine. This report records technical acceptance; the later user's verdict is
+recorded by [delivery ticket 11](../issues/11-native-v2-acceptance-delivery.md).
 
 ## Complete preservation and final checks
 
@@ -93,7 +93,7 @@ suggests a PDF cover but actually contains the preceding resource view; evidence
 60 is the loaded B PDF proof. No private note text, identities, URLs or screenshots
 are committed in this report.
 
-## Independent review and remaining acceptance
+## Independent review and user acceptance
 
 The full-v2 comparison uses the user's completed-v1 base
 `f4627d9cbadb2bec4b97c946dce4cc9f9946adb0`. Separate Standards and Spec reviewers
@@ -112,9 +112,11 @@ reference-adaptation guidance is complete in [README](../../../README.md),
 evidence establish the reviewed same-version archive feature profiles, without
 claiming universal support for future features or reproducing all TheBrain behavior.
 
-The actual converted-vault verdict was requested after the clean vault opened.
-Ticket 11, the implementation index and the Wayfinder map remain claimed until
-that required human acceptance is recorded.
+After the clean vault opened and category refinement 14 was applied, the user
+performed their own visual review and reported on 2026-10-05, “I've done the
+visual review. Looks good.” Ticket 11, the implementation index and the
+Wayfinder map are now resolved. Existing automatic, independent and native proof
+plus this final actual-vault verdict establish finished-v2 acceptance.
 
 Standards independently reviewed the final six-document acceptance delta at
 `20b1de9602be3ea2867828c5229b5db41fb6bd66`: its added local links resolve,

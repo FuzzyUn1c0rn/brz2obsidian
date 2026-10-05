@@ -4,8 +4,8 @@ On 2026-10-05, the user requested category dashboards without their generated
 introductory images, with Bases as the primary navigation surface. The user then
 specified that they will perform this round's visual checks personally once the
 vault is ready. [Refinement 14](../issues/14-category-bases-first.md) implements
-the presentation change; renewed visual acceptance and the actual-vault verdict
-remain in [delivery 11](../issues/11-native-v2-acceptance-delivery.md).
+the presentation change. The user's completed visual review and final acceptance
+are recorded in [delivery 11](../issues/11-native-v2-acceptance-delivery.md).
 
 ## Implemented behavior
 
@@ -66,11 +66,12 @@ with **562 actual files**, preserving complete file/directory inventories, byte
 hashes and modification times around every call. This establishes convention
 checking without substituting for the complete source-preservation audit.
 
-The user has been notified that the updated vault is ready. No further native
-UI actions or visual acceptance are claimed for this refinement. Earlier
-[native acceptance](native-v2-acceptance.md) remains historical evidence of the
-preceding implementation. The user's visual review and revised-vault verdict
-still precede finished-v2 closure.
+After readiness notification, the user completed their own visual review on
+2026-10-05 and reported, “I've done the visual review. Looks good.” This is the
+revised actual-vault acceptance; no additional agent UI checks are claimed.
+Earlier [native acceptance](native-v2-acceptance.md) remains separately recorded
+evidence of the preceding implementation. Delivery 11, the implementation index
+and the Wayfinder map are resolved, establishing a finished and accepted v2.
 
 Private audits, comparisons, receipts, final package examples and preimage/
 checker proofs remain under ignored `brz/v2d/`, `brz/v2-worktree-evidence/` and

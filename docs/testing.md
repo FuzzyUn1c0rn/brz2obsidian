@@ -252,12 +252,13 @@ and earlier bounded synthetic/prototype trials remain historical evidence.
 
 The [final actual-output native review](../.scratch/brz-to-obsidian-v2-implementation/research/native-v2-acceptance.md)
 records the completed three-vault matrix, read-only edit controls and clean user
-copy. The preceding final root verification passed 776 tests and Ruff lint/format on 114 files;
-independent Spec/Standards follow-up leaves no findings. The user's actual-vault
-verdict remains required before ticket 11 and the delivery map resolve.
-The category-presentation refinement adds five public regression controls;
-its isolated verification passes 781 tests. Affected independent review and
-native revised-vault verification are recorded by refinement 14 and ticket 11.
+copy. The final category-presentation refinement adds five public regression
+controls; independent root verification passes 781 tests and Ruff lint/format
+on 114 files. Spec/Standards follow-up leaves no findings. The user performed
+the revised actual-vault visual review personally and approved it on 2026-10-05;
+ticket 11 and the delivery map are resolved. The earlier 776-test/native
+checkpoint remains historical. Refinement 14 and ticket 11 record affected
+preservation, independent review and the user's final acceptance.
 
 | Component | Verified version |
 | --- | --- |

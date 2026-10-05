@@ -10,12 +10,13 @@ and templates, source dates, editable icon inheritance, the reviewed unusual
 Markdown note, zero-length absent-TXT findings, YouTube presentation and a
 read-only vault checker. All three supplied exports use the same TheBrain
 version and exercise different features. Nine complete exact/repeat/reordered
-conversions passed [independent preservation after the presentation refinement](.scratch/brz-to-obsidian-v2-implementation/research/colour-property-refinement.md).
+conversions passed [independent preservation after the final presentation refinement](.scratch/brz-to-obsidian-v2-implementation/research/category-bases-first-refinement.md).
 See [source coverage and warnings](docs/source-coverage.md), the
 [accepted v2 specification](.scratch/brz-to-obsidian-v2-implementation/spec.md)
 and [delivery gates](.scratch/brz-to-obsidian-v2-implementation/README.md).
-V2 delivery also requires native review of actual outputs, independent final
-review and the user's verdict recorded in those delivery gates.
+Native review of actual outputs, independent final review and the user's
+2026-10-05 actual-vault approval complete those delivery gates. Version 2 is
+delivered and accepted.
 
 ## Development environment
 
@@ -202,10 +203,10 @@ and runnable composition examples](docs/architecture.md).
 ## Verification and private data
 
 See [test commands and native-review procedure](docs/testing.md), [complete
-current v2 preservation](.scratch/brz-to-obsidian-v2-implementation/research/colour-property-refinement.md)
-and the [current actual-vault acceptance gate](.scratch/brz-to-obsidian-v2-implementation/issues/11-native-v2-acceptance-delivery.md).
+current v2 preservation](.scratch/brz-to-obsidian-v2-implementation/research/category-bases-first-refinement.md)
+and the [completed actual-vault acceptance](.scratch/brz-to-obsidian-v2-implementation/issues/11-native-v2-acceptance-delivery.md).
 The [final native review](.scratch/brz-to-obsidian-v2-implementation/research/native-v2-acceptance.md)
-records complete technical checks, independent review and the remaining user verdict.
+records complete technical checks, independent review and the user's final approval.
 The [initial v2 preservation report](.scratch/brz-to-obsidian-v2-implementation/research/three-archive-preservation.md)
 retains the complete audit before the colour-property refinement.
 The [v1 preservation](.scratch/brz-to-obsidian-v1/research/real-export-acceptance.md)
