@@ -7,8 +7,8 @@ from brz2obsidian.application.wiring import default_workflow
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "minimal"
 PROPERTIES = (
-    b"---\ncategories: []\nappearance_category:\nicon:\nforeground_color:\n"
-    b"background_color:\ncreated: 2026-10-03\nupdated:\ntags: []\naliases: []\n"
+    b"---\ncategories: []\nappearance_category:\nicon:\n"
+    b"created: 2026-10-03\nupdated:\ntags: []\naliases: []\n"
     b'source_collection_id: "11111111-1111-4111-8111-111111111111"\n'
     b'source_item_id: "22222222-2222-4222-8222-222222222222"\n---\n\n'
 )

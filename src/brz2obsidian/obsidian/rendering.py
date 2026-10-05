@@ -224,7 +224,7 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         "opts out, and an invalid provider is shown without selecting a substitute. "
         "Category icon edits update inherited dashboard images; note-body image "
         "references remain separately editable migration-time snapshots. Declared "
-        "colours remain metadata. Bundled Bases and link updates are configured.\n"
+        "colours remain in migration-record.json only. Bundled Bases and link updates are configured.\n"
     )
     if any(
         a.availability == "present" and a.original_name.casefold().endswith(".pdf")

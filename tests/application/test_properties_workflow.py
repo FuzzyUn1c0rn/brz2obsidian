@@ -66,8 +66,8 @@ def test_imported_ordinary_definition_and_authored_tag_share_canonical_propertie
     assert result.outcome == "clean", result.issues
     tag = (vault / "Notes/true.md").read_bytes()
     assert property_block(tag) == (
-        "categories: []\nappearance_category:\nicon:\nforeground_color:\n"
-        "background_color:\ncreated: 2024-02-29\nupdated: 2025-01-01\n"
+        "categories: []\nappearance_category:\nicon:\n"
+        "created: 2024-02-29\nupdated: 2025-01-01\n"
         "tags: []\naliases: []\n"
         f'source_collection_id: "{BRAIN}"\nsource_item_id: "{identity(4)}"\n'
     )
@@ -117,7 +117,9 @@ def test_populated_invalid_dates_refuse_inspection_and_conversion(
     assert not (tmp_path / "vault").exists()
 
 
-def test_member_override_category_default_and_owned_colours_remain_distinct(tmp_path):
+def test_icons_and_archived_colours_survive_without_exposing_colour_properties(
+    tmp_path,
+):
     source = graph_archive(
         tmp_path / "icons.brz",
         {1: "Entry", 2: "Concept", 3: "Inherited", 4: "Override", 5: "Icon only"},
@@ -167,14 +169,15 @@ def test_member_override_category_default_and_owned_colours_remain_distinct(tmp_
     inherited = (vault / "Notes/Inherited.md").read_bytes()
     override = (vault / "Notes/Override.md").read_bytes()
     assert f'icon: "[[{default_icon}]]"\n' in property_block(category)
-    assert 'foreground_color: "#6070FF"\nbackground_color: "#FFE050"' in property_block(
-        category
-    )
-    assert "icon:\nforeground_color:\nbackground_color:\n" in property_block(inherited)
-    assert (
-        f'icon: "[[{override_icon}]]"\nforeground_color: "#FF0000"\nbackground_color:\n'
-        in property_block(override)
-    )
+    assert "icon:\ncreated:" in property_block(inherited)
+    assert f'icon: "[[{override_icon}]]"\n' in property_block(override)
+    for generated in vault.rglob("*"):
+        if generated.is_file() and generated.suffix in {".md", ".base", ".json"}:
+            if generated.name == "migration-record.json":
+                continue
+            content = generated.read_bytes()
+            assert b"foreground_color" not in content
+            assert b"background_color" not in content
     assert ("![[" + default_icon + "]]\n\n").encode() in inherited
     assert ("![[" + override_icon + "]]\n\n").encode() in override
     assert b"Type label" not in inherited and b"Own label" in override
@@ -193,6 +196,16 @@ def test_member_override_category_default_and_owned_colours_remain_distinct(tmp_
     assert decisions[identity(4)].explicit_icon_asset_id == identity(3004)
     assert decisions[identity(4)].effective_icon_asset_id == identity(3004)
     imported = {t["item_key"]: t for t in record["item_targets"]}
+    assert imported[identity(2)]["declared_appearance"] == {
+        "icon_asset_id": identity(3002),
+        "foreground_color": "#6070FF",
+        "background_color": "#FFE050",
+    }
+    assert imported[identity(4)]["declared_appearance"] == {
+        "icon_asset_id": identity(3004),
+        "foreground_color": "#FF0000",
+        "background_color": None,
+    }
     assert imported[identity(3)]["declared_appearance"] == {
         "icon_asset_id": None,
         "foreground_color": None,

@@ -54,14 +54,14 @@ def test_full_templates_initialize_new_objects_without_imported_identity(tmp_pat
     assert template == (
         '---\ncategories:\n  - "[[Categories/Concept.md]]"\n'
         'appearance_category: "[[Categories/Concept.md]]"\n'
-        "icon:\nforeground_color:\nbackground_color:\n"
+        "icon:\n"
         'created: "{{date:YYYY-MM-DD}}"\nupdated: "{{date:YYYY-MM-DD}}"\n'
         "tags: []\naliases: []\n---\n\n# {{title}}\n"
     )
     generic = (vault / "Templates/New note.md").read_text(encoding="utf-8")
     assert generic == (
         "---\ncategories: []\nappearance_category:\n"
-        "icon:\nforeground_color:\nbackground_color:\n"
+        "icon:\n"
         'created: "{{date:YYYY-MM-DD}}"\nupdated: "{{date:YYYY-MM-DD}}"\n'
         "tags: []\naliases: []\n---\n\n# {{title}}\n"
     )
@@ -77,8 +77,6 @@ def test_full_templates_initialize_new_objects_without_imported_identity(tmp_pat
             "categories": "multitext",
             "appearance_category": "text",
             "icon": "text",
-            "foreground_color": "text",
-            "background_color": "text",
             "created": "date",
             "updated": "date",
             "tags": "tags",
@@ -135,6 +133,7 @@ def test_starters_and_guide_support_manual_extension_without_a_registry(tmp_path
     assert "vault_role:" not in member + starter
     report = (vault / "MIGRATION REPORT.md").read_text(encoding="utf-8")
     assert "[[Vault guide.md|Vault guide]]" in report
+    assert "Declared colours remain in migration-record.json only" in report
 
 
 def test_inspection_manifest_record_and_configuration_account_for_every_support_file(

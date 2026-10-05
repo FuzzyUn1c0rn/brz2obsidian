@@ -92,14 +92,6 @@ def validate(properties, artifact):
         "icon": lambda v: blank(v) or wikilink(v),
         "tags": lambda v: isinstance(v, list) and all(isinstance(x, str) for x in v),
         "aliases": lambda v: isinstance(v, list) and all(isinstance(x, str) for x in v),
-        "foreground_color": lambda v: (
-            blank(v)
-            or (isinstance(v, str) and bool(re.fullmatch(r"#[0-9a-fA-F]{6}", v)))
-        ),
-        "background_color": lambda v: (
-            blank(v)
-            or (isinstance(v, str) and bool(re.fullmatch(r"#[0-9a-fA-F]{6}", v)))
-        ),
         "created": lambda v: valid_date(v, template),
         "updated": lambda v: valid_date(v, template),
         "source_collection_id": lambda v: isinstance(v, str) and bool(v.strip()),
