@@ -34,7 +34,7 @@ Read the accepted [implementation specification](spec.md), [source-feature compa
 
 ## Working the frontier
 
-**Current work: [04: Native templates and maintenance](issues/04-native-templates-maintenance.md), claimed for isolated implementation.** Tickets 01, 02, 03, 05, 06 and 07 are resolved and integrated. Ready-for-agent means specified; blockers still govern when a ticket can start.
+**Current work: [08: Read-only vault checker](issues/08-read-only-vault-checker.md), claimed for isolated implementation.** Tickets 01–07 are resolved and integrated. Ready-for-agent means specified; blockers still govern when a ticket can start.
 
 After 01 resolves, 02, 05, 06 and 07 become eligible. Metadata/icons lead to dashboards (03), native templates (04) and the read-only checker (08). Dashboard ticket 03 enables Bases for its first native check; ticket 04 preserves that configuration and adds Templates. Ticket 09 joins 05, 06, 07 and 08; their transitive prerequisites already include 01–04. The independent full-archive audit (10) follows integration, and native final acceptance (11) follows the audit. Dependencies are acyclic and numbered blockers-first; redundant transitive edges are omitted.
 
@@ -91,6 +91,8 @@ All 82 stories have primary owners below; the individual tickets include additio
 - Publication of these tickets, passing the convention checker or acceptance of the earlier prototype does not satisfy full migration preservation or the final delivery gate. Keep raw private archives, outputs and native evidence ignored; publish aggregate findings and honest limitations.
 
 ## Comments
+
+- 2026-10-05 (/root): Ticket 04 integrated through merger commit 3b120c9, with 495 passing tests and clean lint/format/dependency checks. Native Templates, direct existing membership edits, future-category discovery and rename-then-insertion passed in Obsidian 1.13.7. The native trial exposed and repaired unquoted template date variables; edited note bodies may normalize CRLF to LF while pristine converter output remains exact. Claimed 08. Combined safety/reuse, nine full-archive audits, actual-output native acceptance and the final user verdict remain required.
 
 - 2026-10-05 (/root): Ticket 04 automatic work on codex/brz-v2-04 passes 494 tests and tooling checks; its native gate remains pending. Root preserved the pristine synthetic input/output and verified all 29 output hashes plus five review assets. Computer Use returned "failed to activate captured window" on the original attempt and the permitted recovery attempt; the user was asked to bring Obsidian to the foreground with the desktop unlocked. No native completion or ticket resolution is inferred. Read-only checker/audit/delivery preparation continues outside the repository; blocked implementation tickets remain unclaimed.
 

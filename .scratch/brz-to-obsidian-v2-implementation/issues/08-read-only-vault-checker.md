@@ -1,6 +1,8 @@
 # 08: Check editable vault conventions through a read-only library and command
 
-Status: ready-for-agent
+Status: claimed
+
+Assignee: /root/v2_implement_08
 
 Labels: ready-for-agent
 
@@ -40,5 +42,7 @@ Use the accepted specification, source-feature comparison, domain vocabulary and
 Follow the [local claim and completion process](../../../docs/agents/issue-tracker.md#implementation-operations), [domain glossary](../../../GLOSSARY.md) and [accepted architecture decision](../../../docs/adr/0001-source-neutral-core.md). Claim only after all linked blockers are resolved; save the claim and assignee before implementation. Check each acceptance box only after its criterion passes, record evidence and material limits under Comments, and resolve only when every criterion is satisfied.
 
 ## Comments
+
+- 2026-10-05 (/root): Claimed after ticket 04's complete native template gate and integration at 3b120c9. The corrected quoted date variables survived native category rename and subsequent insertion. Implement in an isolated worktree using the public source-free checker/CLI seam and project virtual environment; no full-v2 acceptance is inferred.
 
 - 2026-10-04 (/root): Published from the user-approved to-tickets breakdown. Dependencies are local to this implementation set; planning ticket numbers are not implementation blockers. No implementation has started and no acceptance criterion is marked complete.
