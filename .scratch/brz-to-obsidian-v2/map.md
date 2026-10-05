@@ -10,7 +10,7 @@ A finished, verified version 2 that successfully converts `brz/Software Engineer
 
 ## Notes
 
-- [Remove unused colour properties from vault presentation](../brz-to-obsidian-v2-implementation/issues/12-remove-unused-colour-properties.md): on 2026-10-05 the user requested removal of foreground/background properties while observing actual-vault testing; preserve source colours only in migration evidence, regenerate and independently audit outputs, then repeat affected native acceptance. This authorized implementation refinement is currently claimed.
+- [Remove unused colour properties from vault presentation](../brz-to-obsidian-v2-implementation/issues/12-remove-unused-colour-properties.md): the user's 2026-10-05 feedback is implemented and integrated. Nine fresh outputs passed independent preservation; source colours remain in migration evidence while generated notes, templates and property settings omit the unused fields. Affected native acceptance now uses fresh review copies.
 
 - This map explicitly includes execution. The user clarified on 2026-10-04 that its end goal is a finished version 2, overriding Wayfinder's default planning-only destination. Archive analysis, documentation research, controlled exports and a disposable vault trial lead to specification, implementation tickets, delivery and acceptance. The specification or ticket publication alone does not complete the map.
 - The user requires [to-spec](C:/Users/stefa/.agents/skills/to-spec/SKILL.md) to generate the implementation specification, then [to-tickets](C:/Users/stefa/.agents/skills/to-tickets/SKILL.md) to create actual implementation tickets. Use those skills at the handoff milestones after their prerequisites are settled. Confirm the testing seams as required by to-spec; draft a concrete vertical-slice breakdown and obtain the user's review as required by to-tickets before publishing it.
@@ -47,6 +47,7 @@ A finished, verified version 2 that successfully converts `brz/Software Engineer
 - [Choose maintenance adaptations exposed by the native vault trial](issues/12-native-maintenance-adaptations.md): full templates initialize new notes, existing memberships are edited directly, contextual dashboards survive category renames and the checker accepts unambiguously resolved shortened links.
 - [Agree the version 2 specification and conversion acceptance checks](issues/06-version-two-specification.md): to-spec published the 82-story specification and source-feature comparison with confirmed public testing boundaries and complete delivery gates.
 - [Create the approved version 2 implementation tickets with to-tickets](issues/07-version-two-implementation-tickets.md): eleven approved slices are published in their separate implementation index, covering feature delivery, full preservation and final native/user acceptance.
+- [Remove unused colour properties from vault presentation](../brz-to-obsidian-v2-implementation/issues/12-remove-unused-colour-properties.md): direct actual-vault feedback removes foreground/background fields from presentation and generated templates, preserves original facts in migration records and passes nine fresh independent audits; native final acceptance follows on refined review copies.
 
 ## Not yet specified
 
