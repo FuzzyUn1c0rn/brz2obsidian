@@ -16,7 +16,7 @@ Published: 2026-10-04 after the user approved the 11-slice breakdown and depende
 
 **What to build:** The user reviews the actual independently verified vaults in standard Obsidian and receives the final installation, library/CLI, maintenance and limitations guidance for a finished v2.
 
-**Blocked by:** [10: Independently verify complete preservation across all three real archives](10-three-archive-preservation.md), [12: Remove unused colour properties from vault presentation](12-remove-unused-colour-properties.md), [13: Repair final implementation-review findings](13-final-review-repairs.md).
+**Blocked by:** [10: Independently verify complete preservation across all three real archives](10-three-archive-preservation.md), [12: Remove unused colour properties from vault presentation](12-remove-unused-colour-properties.md), [13: Repair final implementation-review findings](13-final-review-repairs.md), [14: Put category Bases first and remove generated introductory images](14-category-bases-first.md).
 
 **Specification stories:** 1–82, with final acceptance ownership for 34–51, 56–60, 66–72, 79–82.
 
@@ -43,6 +43,8 @@ Use the accepted specification, source-feature comparison, domain vocabulary and
 Follow the [local claim and completion process](../../../docs/agents/issue-tracker.md#implementation-operations), [domain glossary](../../../GLOSSARY.md) and [accepted architecture decision](../../../docs/adr/0001-source-neutral-core.md). Claim only after all linked blockers are resolved; save the claim and assignee before implementation. Check each acceptance box only after its criterion passes, record evidence and material limits under Comments, and resolve only when every criterion is satisfied.
 
 ## Comments
+
+- 2026-10-05 (/root): The user's actual-vault review requests category Bases first and no generated introductory category image. Claimed refinement 14 blocks final acceptance. Prior technical checks remain historical evidence; affected preservation/package/native/review checks repeat after the refinement, and the user's verdict must cover the revised actual vault. The unchanged icon property/assets still supply Base icons; ordinary/member body snapshots and source-authored category content remain preserved. No finished-v2 verdict is inferred from the feedback.
 
 - 2026-10-05 (/root): Independent final documentation follow-up at `20b1de9` reports no new Standards findings: all added local links resolve, aggregate counts agree and six checked technical criteria retain the pending human-verdict requirement. All 13 completed implementer worktrees are confirmed archived through the app after clean-state/ancestry checks and preservation of every ignored proof file. Post-archive root verification retains all 699 proof files / 1,861,074 bytes across five historical/final sets. Root integration checkout is clean; the actual converted-vault verdict remains pending and the final criterion is unchecked.
 

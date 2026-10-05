@@ -10,6 +10,8 @@ A finished, verified version 2 that successfully converts `brz/Software Engineer
 
 ## Notes
 
+- [Put category Bases first and remove generated introductory images](../brz-to-obsidian-v2-implementation/issues/14-category-bases-first.md): the user's final actual-vault feedback requests Members/Gallery directly after the category title, with generated introductory category images omitted. Source content remains below the Bases and icon metadata/assets continue to support Base icons. This is the current implementation frontier; affected proof and a revised actual-vault verdict precede map completion.
+
 - [Repair final implementation-review findings](../brz-to-obsidian-v2-implementation/issues/13-final-review-repairs.md): all three findings are repaired and integrated, with 776 passing tests, nine fresh independent archive audits and verified final packaging. The current implementation frontier is [Accept actual v2 vaults in Obsidian and finish delivery guidance](../brz-to-obsidian-v2-implementation/issues/11-native-v2-acceptance-delivery.md); [actual-output native review](../brz-to-obsidian-v2-implementation/research/native-v2-acceptance.md) and independent review follow-up are complete. The user's actual-vault verdict, requested after opening a clean final vault, keeps the map open.
 
 - [Remove unused colour properties from vault presentation](../brz-to-obsidian-v2-implementation/issues/12-remove-unused-colour-properties.md): the user's 2026-10-05 feedback is implemented and integrated. Nine fresh outputs passed independent preservation; source colours remain in migration evidence while generated notes, templates and property settings omit the unused fields. Affected native acceptance now uses fresh review copies.
