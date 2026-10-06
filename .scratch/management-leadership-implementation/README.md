@@ -43,8 +43,9 @@ and actual-user acceptance gates are complete at tested runtime
 `f91043ab7ca8ca5eee85d4e7156a6d2114be5fd9`. The [delivery record](research/delivery.md)
 links current public/source/package/native evidence and review limits. The u4
 rejection, warning-style correction, compact-reference repair and original review
-conclusions remain explicit history. PR creation is the forthcoming coordinator
-action; no package deployment/publication is claimed. The following milestone
+conclusions remain explicit history. The coordinator created and attached
+[PR #2](https://github.com/FuzzyUn1c0rn/brz2obsidian/pull/2), open and ready for review
+against `main`; no package deployment/publication is claimed. The following milestone
 is pre-styling history and does not replace the final accepted record.
 
 Tickets **01–08** are resolved and integrated. Complete original-input
@@ -104,6 +105,16 @@ integrated. The user requested a pull request when everything is complete; creat
 it after implementation and required acceptance, then attach it to this chat.
 
 ## Comments
+
+- 2026-10-06 (/root/native_vault_reviewer, separate merger): Fast-forwarded final
+  PR bookkeeping candidate `e415dfc54e8fc6711277eaf529c4fdb96aef794d` from clean
+  root `090d122305152466d5c27b1e912d6c6b1437c15b`, after exact clean worker/root,
+  ancestry exit 0, diff check and four allowed metadata files were confirmed.
+  Root independently reviewed metadata and privacy PASS on 116 public blobs.
+  [PR #2](https://github.com/FuzzyUn1c0rn/brz2obsidian/pull/2) is created, attached,
+  open and ready against `main` from `codex/management-leadership-v3`; all acceptance
+  and runtime proof pins remain unchanged. No gates, UI, environment, source,
+  push or worktree archive action was performed by this merger.
 
 - 2026-10-06 (/root/native_vault_reviewer, separate merger): Integrated closing
   metadata candidate `52201fd45b5fe6f5e1595d1e20797e86bd20d333` with
