@@ -467,6 +467,13 @@ and earlier bounded synthetic/prototype trials remain historical evidence.
 
 ## Recorded versions
 
+For the Management & Leadership extension, the
+[actual-output native report](../.scratch/management-leadership-implementation/research/native-v3-acceptance.md)
+records strategic rendering/maintenance samples, the retained complete D native
+ledger, native C CSV correspondence limits and independent read-only checker
+controls. The observed app was 1.14.4, while the earlier stored target below
+remains 1.13.7. Native review does not supply the final user's actual-vault verdict.
+
 The [final actual-output native review](../.scratch/brz-to-obsidian-v2-implementation/research/native-v2-acceptance.md)
 records the completed three-vault matrix, read-only edit controls and clean user
 copy. The final category-presentation refinement adds five public regression

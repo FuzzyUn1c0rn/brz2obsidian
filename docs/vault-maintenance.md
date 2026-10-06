@@ -135,3 +135,14 @@ PDFs remain byte-preserved and open natively; vault Search does not search their
 body text. Reviewed videos preserve exact URLs beside derived embeds and retain
 service/network/offline limits. Read `MIGRATION REPORT.md` for per-record source
 gaps and [source coverage](source-coverage.md) for strict refusal boundaries.
+## Native review observations
+
+Insert a full template into the active note in Editing view. The actual-output
+review confirmed insertion-day dates and title expansion for generic, category
+and adapted future-member templates without imported identity fields. Native
+rename with link updates preserves contextual category discovery and quoted
+template variables; the existing Markdown heading is still ordinary text and
+can be edited separately. Native Properties may rewrite frontmatter quoting,
+so preserve identity/date values and independently compare body content when
+checking an intentional edit. See the
+[native review evidence](../.scratch/management-leadership-implementation/research/native-v3-acceptance.md).
