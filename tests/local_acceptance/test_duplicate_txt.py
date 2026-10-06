@@ -392,7 +392,7 @@ def test_oracle_rejects_multiple_txt_semantic_lies_after_consistent_receipt_repa
         for field in ("source_references", "planned_references", "actual_references"):
             record["counts"][field] += 1
     rewrite_record(vault, record, result)
-    Receipt.model_validate(result["receipt"])
+    Receipt.model_validate_json(json.dumps(result["receipt"]))
     assert (
         result["receipt"]["verified"]
         and result["receipt"]["counts"] == result["counts"]
