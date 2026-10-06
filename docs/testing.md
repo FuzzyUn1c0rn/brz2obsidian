@@ -150,7 +150,8 @@ oracle rejects their changed body, generated order or diagnostic facts.
 Repeated local member declarations receive a narrowly bounded raw-source audit
 exception only when every row has a distinct trusted identity, SourceType 2,
 Type 15, NoteType 0, a positive integer declared length, state 2, a safe TXT path,
-no icon or special-role flags and physical ZIP absence. The raw scope retains
+string Name metadata, false Is* flags, null/empty custom type metadata and
+physical ZIP absence. The raw scope retains
 each included declaration and independently omits an eligible excluded-owner
 group. Existing per-declaration auditing still requires intact same-owner PDFs;
 zero-length TXT/PDF handling retains its separate reviewed rule. Public controls
@@ -160,6 +161,11 @@ evidence pointers and observations with no invented payload or reference credit.
 Semantic corruption controls repair actual receipt hashes and counts before
 checking collapsed declarations/warnings, paired lengths/evidence and fabricated
 bytes/reference credit against the raw source.
+Malformed names, unknown active/nonboolean Is* flags and populated/nonstring
+custom attachment types refuse before excluded-group omission. A complete forged
+vault/receipt control rebinds the source fingerprint and repairs every actual file
+hash while confirming that an excluded invalid role still refuses; the adjacent
+false-flag control passes with the same source/receipt rebinding.
 
 The independent image interpreter uses standard-library Python imports and existing
 Windows WIC codecs through `ctypes`, never production image helpers or Pillow.

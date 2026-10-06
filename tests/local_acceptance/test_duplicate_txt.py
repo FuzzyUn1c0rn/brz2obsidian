@@ -273,6 +273,75 @@ def test_raw_scope_omits_entire_eligible_excluded_txt_group(tmp_path):
     }
 
 
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("excluded", [False, True])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("Name", 11),
+        ("IsUnreviewedRole", True),
+        ("IsUnreviewedRole", 0),
+        ("ThoughtTypeId", identity(9000)),
+        ("LinkTypeId", False),
+        ("TypeId", identity(9000)),
+    ],
+)
+def test_raw_scope_refuses_unreviewed_metadata_before_excluded_group_omission(
+    tmp_path, reverse, excluded, field, value
+):
+    parts = duplicate_txt_parts(tmp_path)
+    rows = [json.loads(line) for line in parts["attachments.json"].splitlines()]
+    rows[-1][field] = value
+    if reverse:
+        rows.reverse()
+    parts["attachments.json"] = b"\n".join(json.dumps(a).encode() for a in rows)
+    if excluded:
+        thoughts = [json.loads(line) for line in parts["thoughts.json"].splitlines()]
+        thoughts[1]["ForgottenDateTime"] = "2026-10-01T10:00:00Z"
+        parts["thoughts.json"] = b"\n".join(json.dumps(a).encode() for a in thoughts)
+    source = write_source(tmp_path, parts)
+    with ZipFile(source) as archive, pytest.raises(AssertionError):
+        scope(read_source(archive), archive)
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("excluded", [False, True])
+@pytest.mark.parametrize("custom", [None, ""])
+@pytest.mark.parametrize("name", ["display name", ""])
+def test_raw_scope_retains_reviewed_empty_custom_metadata_and_false_unknown_flags(
+    tmp_path, reverse, excluded, custom, name
+):
+    parts = duplicate_txt_parts(tmp_path)
+    rows = [json.loads(line) for line in parts["attachments.json"].splitlines()]
+    rows[-1].update(
+        Name=name,
+        IsUnreviewedRole=False,
+        ThoughtTypeId=custom,
+        LinkTypeId=custom,
+        TypeId=custom,
+    )
+    if reverse:
+        rows.reverse()
+    parts["attachments.json"] = b"\n".join(json.dumps(a).encode() for a in rows)
+    if excluded:
+        thoughts = [json.loads(line) for line in parts["thoughts.json"].splitlines()]
+        thoughts[1]["ForgottenDateTime"] = "2026-10-01T10:00:00Z"
+        parts["thoughts.json"] = b"\n".join(json.dumps(a).encode() for a in thoughts)
+    source = write_source(tmp_path, parts)
+    with ZipFile(source) as archive:
+        retained = scope(read_source(archive), archive)
+    assert len(retained["attachments.json"]) == (1 if excluded else 5)
+    if not excluded:
+        actual = next(
+            a for a in retained["attachments.json"] if a["Id"] == identity(3003)
+        )
+        assert actual["Name"] == name and actual["IsUnreviewedRole"] is False
+        assert all(
+            actual[field] == custom
+            for field in ("ThoughtTypeId", "LinkTypeId", "TypeId")
+        )
+
+
 def test_oracle_checks_excluded_eligible_group_without_warning_or_payload_credit(
     tmp_path,
 ):
@@ -291,6 +360,51 @@ def test_oracle_checks_excluded_eligible_group_without_warning_or_payload_credit
     summary = check_vault(source, vault)
     assert summary["warnings"] == summary["txt_gaps"] == 0
     assert summary["source_items"] == summary["payloads"] == summary["documents"] == 1
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("flag", [True, 0, False])
+def test_whole_oracle_rejects_malformed_excluded_role_with_rehashed_receipt(
+    tmp_path, reverse, flag
+):
+    import hashlib
+
+    from brz2obsidian.application.wiring import default_workflow
+    from brz2obsidian.contracts import Receipt
+    from tests.local_acceptance.checker import check_vault, load_json
+    from tests.local_acceptance.test_checker_v2 import rewrite_record
+
+    parts = duplicate_txt_parts(tmp_path)
+    thoughts = [json.loads(line) for line in parts["thoughts.json"].splitlines()]
+    thoughts[1]["ForgottenDateTime"] = "2026-10-01T10:00:00Z"
+    parts["thoughts.json"] = b"\n".join(json.dumps(a).encode() for a in thoughts)
+    source = write_source(tmp_path, parts)
+    vault = tmp_path / "vault"
+    result = default_workflow().convert(source, vault).model_dump(mode="json")
+    assert result["outcome"] == "clean", result["issues"]
+    check_vault(source, vault)
+    record = load_json((vault / "migration-record.json").read_bytes())
+    old_hash = record["source_identity"]["source_sha256"]
+    rows = [json.loads(line) for line in parts["attachments.json"].splitlines()]
+    rows[-1]["IsUnreviewedRole"] = flag
+    if reverse:
+        rows.reverse()
+    parts["attachments.json"] = b"\n".join(json.dumps(a).encode() for a in rows)
+    write_source(tmp_path, parts)
+    new_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+    assert new_hash != old_hash
+    record["source_identity"]["source_sha256"] = new_hash
+    report = vault / "MIGRATION REPORT.md"
+    text = report.read_text(encoding="utf-8")
+    if old_hash in text:
+        report.write_text(text.replace(old_hash, new_hash), encoding="utf-8")
+    rewrite_record(vault, record, result)
+    Receipt.model_validate_json(json.dumps(result["receipt"]))
+    if flag is False:
+        assert check_vault(source, vault)["source_items"] == 1
+    else:
+        with pytest.raises(AssertionError, match="raw unique payload declaration"):
+            check_vault(source, vault)
 
 
 @pytest.mark.parametrize(

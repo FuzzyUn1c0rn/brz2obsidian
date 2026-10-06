@@ -133,19 +133,15 @@ def scope(raw, archive):
             )
             and type(row["DataLength"]) is int
             and row["DataLength"] > 0
+            and type(row.get("Name", "")) is str
             and states.get(row["Id"]) == 2
             and PurePosixPath(row["Location"]).suffix.casefold() == ".txt"
             and all(
-                row.get(flag, False) is False
-                for flag in (
-                    "IsIcon",
-                    "IsBrainAttachment",
-                    "IsBrainIcon",
-                    "IsWallpaper",
-                    "IsAiScriptsFile",
-                    "IsKeyboardShortcutsFile",
-                    "IsToolbarConfigFile",
-                )
+                value is False for field, value in row.items() if field.startswith("Is")
+            )
+            and all(
+                row.get(field) is None or type(row[field]) is str and row[field] == ""
+                for field in ("ThoughtTypeId", "LinkTypeId", "TypeId")
             )
             for row in rows
         ), "raw unique payload declaration"
