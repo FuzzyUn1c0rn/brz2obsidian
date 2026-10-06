@@ -2,6 +2,8 @@
 
 import re
 
+from .relationships import note_link
+
 
 def plain(value):
     return (
@@ -34,9 +36,8 @@ def gap_report(plan):
                 continue
             item = items[asset.owner]
             target = targets.get(asset.owner)
-            title = re.sub(r"[\[\]|\r\n]", " ", item.title)
             if target and target.created:
-                owner = "[[" + target.relative_path + "|" + title + "]]"
+                owner = note_link(target, item.title)
             elif target:
                 owner = (
                     plain(item.title)
@@ -63,13 +64,10 @@ def gap_report(plan):
                     text += f"  Affected included members ({len(diagnostic.affected_member_keys)}):\n"
                     for key in diagnostic.affected_member_keys:
                         member = items[key]
-                        title = re.sub(r"[\[\]|\r\n]", " ", member.title)
                         text += (
-                            "  - [["
-                            + targets[key].relative_path
-                            + "|"
-                            + title
-                            + "]]; thought ID "
+                            "  - "
+                            + note_link(targets[key], member.title)
+                            + "; thought ID "
                             + plain(key)
                             + "\n"
                         )

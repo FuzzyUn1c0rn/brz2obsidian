@@ -27,7 +27,7 @@ from .documents import render_document
 from .gaps import gap_report
 from .markdown import append_boundary
 from .properties import property_frontmatter
-from .relationships import relationship_sections, uncreated_listing
+from .relationships import note_link, relationship_sections, uncreated_listing
 from .resources import resource_section
 from .tags import tag_listing, tag_records
 from .templates import (
@@ -223,13 +223,13 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
                 text += "> Source category icon is absent; appearance is neutral. See [[MIGRATION REPORT.md|Migration report]] for provider evidence and optional repair steps.\n\n"
             elif item.key in gap.affected_member_keys:
                 provider = items[gap.provider_key]
-                label = re.sub(r"[\[\]|\r\n]", " ", provider.title)
+                provider_target = next(
+                    t for t in plan.item_targets if t.item_key == provider.key
+                )
                 text += (
-                    "> The inherited icon is unavailable from [["
-                    + gap.owner_target
-                    + "|"
-                    + label
-                    + "]]; appearance is neutral. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
+                    "> The inherited icon is unavailable from "
+                    + note_link(provider_target, provider.title)
+                    + "; appearance is neutral. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
                 )
         if item.label:
             text += item.label + "\n\n"
