@@ -30,6 +30,35 @@ User Stories 16–20, 32–39, 41–49, 54–65, 68–70; Implementation Decisio
 
 ## Comments
 
+- 2026-10-06 (/root/integration_merger): Integrated exact clean repaired candidate
+  `40669c807372c5463de279a3842d55a12f497f0e` from `codex/ml-v3-06-txt` with
+  `git merge --ff-only 40669c807372c5463de279a3842d55a12f497f0e`, based on
+  clean root `098fe473cd5ad44dc3ea1d6564fde958a9665ef6`; ancestry exit 0.
+  Final delta from independent code `fc7d4ad9cf3ec8d3a6373f1af12d73b85f778bbe`
+  lists only this ticket's metadata; runtime/oracle/tests/docs bytes unchanged.
+  Independent `tmp/ml-implementation/06-txt/verifier-code-report-fc7d4ad.json`
+  records bounded PASS: **116 handwritten controls in 10.59s**, **372 maintained
+  oracle/driver/architecture/import controls in 124.95s**, and **eight VideoHtml
+  policy probes**, including rejected included nonempty/nonstring declarations
+  and omitted otherwise eligible excluded duplicates. Prior `2803f92` false
+  acceptance evidence remains retained; adjacent valid metadata still passes.
+
+  Merged root command:
+  `.venv/Scripts/python.exe -m pytest -q tests/local_acceptance/test_duplicate_txt.py tests/local_acceptance/test_driver.py tests/test_architecture.py --basetemp=tmp/m06txt -o cache_dir=tmp/ml-implementation/merger/c06txt`
+  passed **141 tests in 40.07s**, exit 0, including stdlib/local-only expected
+  fact import boundary. Runtime import resolves to root src.
+  `git diff --check 098fe473cd5ad44dc3ea1d6564fde958a9665ef6..40669c807372c5463de279a3842d55a12f497f0e`
+  passed, exit 0. Worker **128 focused in 7.70s**, **1455 full in 256.22s**,
+  Ruff on 132 files and pip PASS remain attributed worker evidence; no redundant
+  full run here. Only small ignored worker progress log copied to
+  `tmp/ml-implementation/06-txt/worker-proof/progress.txt` before future archival.
+
+  Reopened oracle compatibility is resolved with bounded public proof. Ticket 07
+  is eligible and remains claimed for a fresh complete original matrix; tooling
+  success is not original-source, native/user, package/release or overall delivery
+  acceptance. No code edit outside verified merge, original matrix, source or
+  retained-vault mutation, native UI action, PR or push occurred here.
+
 - 2026-10-06 (/root/txt_oracle_implementer): Completed the reopened narrow
   independent scope repair on `codex/ml-v3-06-txt`. Verified runtime integration
   `098fe473cd5ad44dc3ea1d6564fde958a9665ef6` was merged before final validation.

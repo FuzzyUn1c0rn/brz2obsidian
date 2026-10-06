@@ -43,14 +43,15 @@ conversion and publication guarantees** is resolved with bounded synthetic
 proof. **01: Exclude forgotten thoughts throughout inspection and conversion**
 is resolved after the narrow known-absent TXT declaration compatibility repair.
 **06: Extend the independent raw-source audit to the new conversion policy**
-remains reopened and claimed for its separate oracle counterpart. Earlier
+is resolved after its independently verified oracle counterpart repair. Earlier
 privacy, label and audit controls remain retained evidence.
 Bounded evidence does not establish arbitrary representation coverage. **07: Audit complete
 preservation across all four original archives** remains claimed with all criteria
 unchecked. Its first matrix passed nine A/B/C outputs but D refused before
-publication. It remains blocked by the independent oracle duplicate-declaration
-compatibility repair and fresh matrix for included known-absent Type-15 TXT
-declarations; the verified source/global-scope repair is now integrated.
+publication. Both narrow source/global-scope and independent oracle compatibility
+repairs for included known-absent Type-15 TXT declarations are integrated;
+ticket 07 is eligible and remains claimed by the original-matrix implementer
+for a fresh complete matrix.
 Native actual-output and delivery
 tickets remain blocked; a fresh complete twelve-output matrix is required.
 Type gaps consume the shared source-gap capability
@@ -88,6 +89,19 @@ integrated. The user requested a pull request when everything is complete; creat
 it after implementation and required acceptance, then attach it to this chat.
 
 ## Comments
+
+- 2026-10-06 (/root/integration_merger): Integrated repaired reopened 06 with
+  `git merge --ff-only 40669c807372c5463de279a3842d55a12f497f0e` from clean
+  root `098fe473cd5ad44dc3ea1d6564fde958a9665ef6`. Clean exact worker/ancestry
+  confirmed. Final candidate differs from independently verified code
+  `fc7d4ad9cf3ec8d3a6373f1af12d73b85f778bbe` only in ticket 06 metadata.
+  Bounded independent PASS: 116 handwritten controls in 10.59s, 372 maintained
+  in 124.95s and eight VideoHtml scoped-policy probes. Historical `2803f92`
+  FAIL remains retained. Root duplicate-TXT/driver/import/architecture checks
+  pass: **141 tests in 40.07s**; diff check clean. Ticket 06 is resolved;
+  ticket 07 remains claimed by `/root/txt_declaration_implementer` and is eligible
+  for a fresh complete matrix. No original matrix/native/user/release completion
+  is inferred from this tooling merge.
 
 - 2026-10-06 (/root/integration_merger): Integrated reopened ticket 01 TXT repair
   with `git merge --ff-only 88dd6dcb24e818339edd84fc9fe3346c38d4b426` from

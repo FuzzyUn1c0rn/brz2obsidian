@@ -1,7 +1,7 @@
 # 07: Audit complete preservation across all four original archives
 
 Status: claimed
-Assignee: /root/four_archive_implementer
+Assignee: /root/txt_declaration_implementer
 Approved: 2026-10-06
 Specification: [Accepted conversion specification](../spec.md)
 
