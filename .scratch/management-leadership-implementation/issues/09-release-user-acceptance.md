@@ -17,11 +17,11 @@ requires renewed affected checks and a revised user review.
 ## Acceptance criteria
 
 - [ ] Obtain and record the user's actual verdict on a clean actual converter-output Management & Leadership review vault, keeping the audited baseline separate from mutable copies. If changes are requested, repair the responsible seam and repeat affected public/source/native gates before requesting the revised verdict. Do not close delivery while this verdict is pending.
-- [x] Independently review the complete implementation against the accepted specification and documented standards from a fixed recorded baseline/tip. Resolve material findings, rerun affected checks, and record review scope/proof rather than relying on self-review or prototype evidence.
-- [x] Run the final complete public pytest suite, Ruff check/format check and pip check using the project environment. Run affected checks during repairs before the complete final gate; record exact commands/version/results and honest any remaining limits. No required gate is omitted because planning tickets were approved.
-- [x] Build and smoke the delivered 0.3.0 package and documented installation/library/console/module examples. Contracts/source profile/renderer/results/records agree on version 3, format remains 5 and checker remains 1 unless its actual public shape changes; schemas, arguments and outcomes match observed output. Runtime distribution excludes private/dev/prototype artifacts.
+- [ ] Independently review the complete implementation against the accepted specification and documented standards from a fixed recorded baseline/tip. Resolve material findings, rerun affected checks, and record review scope/proof rather than relying on self-review or prototype evidence.
+- [ ] Run the final complete public pytest suite, Ruff check/format check and pip check using the project environment. Run affected checks during repairs before the complete final gate; record exact commands/version/results and honest any remaining limits. No required gate is omitted because planning tickets were approved.
+- [ ] Build and smoke the delivered 0.3.0 package and documented installation/library/console/module examples. Contracts/source profile/renderer/results/records agree on version 3, format remains 5 and checker remains 1 unless its actual public shape changes; schemas, arguments and outcomes match observed output. Runtime distribution excludes private/dev/prototype artifacts.
 - [x] Finish public guidance for source coverage, default exclusion, exact-safe-copy omission, present-body precedence, archive-only image fallback/layout A, unknown missing content, actionable optional source investigation, neutral type icons, category hierarchy, maintenance, checker limits, preservation/receipt claims and four-source acceptance usage.
-- [x] Retain complete independent four-archive matrix and native evidence against the delivered code. If repairs change content/paths/contracts, repeat affected proofs and any invalidated final matrix/native/package gates. Recheck original/retained-vault fingerprints; a repaired/re-exported archive stays a distinct separately accepted source.
+- [ ] Retain complete independent four-archive matrix and native evidence against the delivered code. If repairs change content/paths/contracts, repeat affected proofs and any invalidated final matrix/native/package gates. Recheck original/retained-vault fingerprints; a repaired/re-exported archive stays a distinct separately accepted source.
 - [ ] Publish an aggregate delivery record with the real final user verdict, review/tooling/source/native/package results and honest source-gap limits. Keep detailed private assets/vaults/screenshots/records ignored. Mark implementation delivery complete only after every criterion passes; do not deploy, publish packages or alter retained user vaults without applicable authorization.
 
 ## Verification boundary
@@ -123,3 +123,15 @@ User Stories 49–50, 60–70; Implementation Decisions 1–3, 21–25; Testing 
   m6 D before app interaction (`final-user-copy-receipt.json`). Earlier u3 remains
   untouched. Preparation is not the user's verdict; both final acceptance and
   aggregate delivery criteria remain unchecked.
+
+- 2026-10-06 (/root): The actual user rejected review copy u4: approved layout A
+  had orange warning titles/icons and tinted notice panels, while final notes
+  showed plain purple blockquotes. This is a material presentation defect, not
+  acceptance. Renderer and independent audit currently agree on the wrong
+  blockquote shape. Reopened review/public/package/source-native criteria for an
+  isolated native-callout repair and fresh invalidated proofs; prior successful
+  technical results remain historical. Supplied body/image/graph preservation
+  is not withdrawn, but approved notice appearance is unverified until repaired.
+  Use strategic native samples of affected ordinary/category notice behaviors;
+  do not repeat equivalent unaffected media/dashboard observations. Actual user
+  verdict and delivery remain pending. No PR has been created.

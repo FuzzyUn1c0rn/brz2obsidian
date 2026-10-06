@@ -10,6 +10,17 @@ requested to-tickets on this specification. Product behavior below synthesizes
 the settled policy and the user's choice of layout A.
 This document defines implementation requirements, not completed conversion.
 
+The user's final actual-vault review on 2026-10-06 clarified the approved visual
+treatment: generated source-gap notices use Obsidian warning callouts, with an
+orange warning title/icon and tinted background, rather than ordinary blockquotes.
+The absent ordinary-note title is **Source note unavailable**. Use corresponding
+descriptive titles for unavailable category notes and category/inherited icons.
+Keep truthful existing limitation text and resolving report/provider links.
+Place notices above affected note content; category Parents/Children remain
+immediately below the title, followed by notices before Members/Gallery. Separate
+adjacent notices into individual callouts. This changes generated presentation,
+not supplied Markdown, image order, source evidence or migration accounting.
+
 ## Problem Statement
 
 The user has a larger desktop Backup to BRZ export containing important technique

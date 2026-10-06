@@ -1,7 +1,19 @@
 # Release verification candidate
 
 Date: 2026-10-06
-Status: technical gates passed — actual-vault user verdict and delivery pending.
+Status: user review failed notice styling — repair and refreshed gates pending.
+
+## Actual-vault styling rejection
+
+On 2026-10-06 the user rejected the u4 review because generated source-gap
+notices lacked the approved orange warning title/icon and tinted background.
+The implementation and independent expected Markdown both used plain blockquotes.
+Native evidence below established other observed behaviors, but missed this
+visual requirement. Ticket 09 is reopened for a source-gap warning-callout repair,
+affected independent/native checks and refreshed final runtime/package/source
+gates. The user verdict is **changes required**, not accepted; delivery and PR
+remain pending. The successful technical gates below describe the pre-styling
+runtime and are retained as history.
 
 ## Current repair boundary
 

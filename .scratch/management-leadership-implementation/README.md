@@ -35,6 +35,13 @@ and [workspace housekeeping](../../docs/workspace.md).
 
 ## Working the frontier
 
+**Current frontier: ticket 09 styling repair.** The user rejected final review
+copy u4 because approved orange warning callouts were rendered as ordinary
+blockquotes. The isolated implementer will restore native warning titles/icons
+and tinted panels and refresh invalidated proof. User acceptance/delivery/PR
+remain pending. Use strategic affected native samples; retain equivalent prior
+observations. The following technical milestone describes pre-styling runtime.
+
 Tickets **01–08** are resolved and integrated. Complete original-input
 preservation passed the fresh m5 twelve-output matrix and separate independent
 raw-source verification at frozen runtime `e2c5fc3f05d2daa0d0547d2bbaa2b12557a248b5`.
