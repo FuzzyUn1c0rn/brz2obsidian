@@ -31,6 +31,34 @@ User Stories 15–16, 32–39, 49–50, 56–57, 60–62, 69–70; Implementatio
 
 ## Comments
 
+- 2026-10-06 (/root/integration_merger): Integrated exact clean candidate
+  `88dd6dcb24e818339edd84fc9fe3346c38d4b426` from `codex/ml-v3-01-txt`, based
+  on clean root `45a3bf0abd613838177aa353ad365d8831b39d69`; ancestry check
+  exit 0, `git merge --ff-only 88dd6dcb24e818339edd84fc9fe3346c38d4b426`
+  succeeded. `git diff --name-only 3a4b1db80fef07c1dfaf857dd114ea84beaa5c64..88dd6dcb24e818339edd84fc9fe3346c38d4b426`
+  lists only this ticket's metadata. Runtime/test bytes remain identical to the
+  independently verified runtime head. Bounded independent
+  `tmp/ml-implementation/01-txt/verifier-code-report.json` PASS records
+  **127 handwritten controls**, **264 maintained source/scope/TXT/architecture
+  checks**, exact runtime hashes and clean before/after status.
+
+  Merged root command:
+  `.venv/Scripts/python.exe -m pytest -q tests/application/test_absent_txt_declarations_workflow.py tests/application/test_zero_length_txt_workflow.py tests/application/test_forgotten_workflow.py tests/sources/test_reader.py tests/test_architecture.py --basetemp=tmp/m01txt -o cache_dir=tmp/ml-implementation/merger/c01txt`
+  passed **220 tests in 15.52s**, exit 0, import resolving to root src.
+  `git diff --check 45a3bf0abd613838177aa353ad365d8831b39d69..88dd6dcb24e818339edd84fc9fe3346c38d4b426`
+  passed, exit 0. Worker **306 focused**, **1327 full tests in 235.39s**,
+  Ruff on 131 files and pip PASS remain attributed worker evidence; no redundant
+  full execution here. Seven small worker logs copied before future archival
+  into ignored `tmp/ml-implementation/01-txt/worker-proof/`: affected-final,
+  controls, format, full-suite, pip, ruff and red1-reviewed-fixture text logs.
+
+  The reopened runtime ownership criterion is resolved cumulatively with
+  bounded proof. Separate ticket 06 independent-oracle compatibility remains
+  claimed; 07 remains blocked pending that repair and a fresh complete matrix.
+  No original matrix/native/user/release completion, other-ticket change,
+  production edit outside the verified merge, source/retained-vault change,
+  PR or push was made here.
+
 - 2026-10-06 (/root/txt_declaration_implementer): Implemented the reopened
   declaration-ownership repair at runtime commit
   `3a4b1db80fef07c1dfaf857dd114ea84beaa5c64` on `codex/ml-v3-01-txt`, based

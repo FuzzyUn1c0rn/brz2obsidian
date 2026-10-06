@@ -41,16 +41,17 @@ and integrated. **03: Keep category dashboards usable through missing type
 notes and icons** is also resolved and integrated. **05: Prove the combined
 conversion and publication guarantees** is resolved with bounded synthetic
 proof. **01: Exclude forgotten thoughts throughout inspection and conversion**
-and **06: Extend the independent raw-source audit to the new conversion policy**
-are reopened and claimed for a narrow known-absent TXT declaration compatibility
-repair. Their earlier privacy, label and audit controls remain retained evidence.
+is resolved after the narrow known-absent TXT declaration compatibility repair.
+**06: Extend the independent raw-source audit to the new conversion policy**
+remains reopened and claimed for its separate oracle counterpart. Earlier
+privacy, label and audit controls remain retained evidence.
 Bounded evidence does not establish arbitrary representation coverage. **07: Audit complete
 preservation across all four original archives** remains claimed with all criteria
 unchecked. Its first matrix passed nine A/B/C outputs but D refused before
-publication. It is blocked by newly proved source/global-scope and independent
-oracle duplicate-declaration compatibility repairs for included known-absent
-Type-15 TXT declarations. The responsible 01 and 06 slices now proceed in
-separate isolated branches. Native actual-output and delivery
+publication. It remains blocked by the independent oracle duplicate-declaration
+compatibility repair and fresh matrix for included known-absent Type-15 TXT
+declarations; the verified source/global-scope repair is now integrated.
+Native actual-output and delivery
 tickets remain blocked; a fresh complete twelve-output matrix is required.
 Type gaps consume the shared source-gap capability
 from ordinary fallback. Combined safety and independent audit tooling can then
@@ -87,6 +88,17 @@ integrated. The user requested a pull request when everything is complete; creat
 it after implementation and required acceptance, then attach it to this chat.
 
 ## Comments
+
+- 2026-10-06 (/root/integration_merger): Integrated reopened ticket 01 TXT repair
+  with `git merge --ff-only 88dd6dcb24e818339edd84fc9fe3346c38d4b426` from
+  clean root `45a3bf0abd613838177aa353ad365d8831b39d69`. Independent runtime
+  `3a4b1db80fef07c1dfaf857dd114ea84beaa5c64` PASS covers 127 handwritten
+  and 264 maintained controls; the final delta is only ticket 01 metadata,
+  preserving verified runtime/test bytes. Root TXT/scope/workflow/source-reader/
+  architecture tests pass: **220 in 15.52s**; diff check is clean. Ticket 01
+  is resolved cumulatively. Ticket 06 remains claimed and 07 blocked pending
+  its independent oracle repair and fresh complete matrix. No original-source,
+  native/user or release completion is inferred.
 
 - 2026-10-06 (/root/integration_merger): Integrated **partial evidence only**
   using `git merge --ff-only aadb55521c252708e09fc9d66f5d00a77627e020` from
