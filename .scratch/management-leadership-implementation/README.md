@@ -42,7 +42,7 @@ The prior m3/m4 failures remain retained history; verified source/oracle TXT and
 diagnostic-link repairs precede m5. Actual-output native review passed strategic
 samples in observed Obsidian 1.14.4, with independent source/CSV/ledger/checker
 evidence and retained complete automated preservation. **09: Deliver the reviewed
-release after actual-vault user acceptance** is eligible and unclaimed. Final
+release after actual-vault user acceptance** is claimed by `/root/release_documenter`. Final
 review, package/release checks and the actual-vault user verdict remain pending;
 neither automated nor agent native review supplies user acceptance or arbitrary
 representation coverage.

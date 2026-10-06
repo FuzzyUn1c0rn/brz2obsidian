@@ -1,6 +1,7 @@
 # 09: Deliver the reviewed release after actual-vault user acceptance
 
-Status: ready-for-agent
+Status: claimed
+Assignee: /root/release_documenter
 Approved: 2026-10-06
 Specification: [Accepted conversion specification](../spec.md)
 
@@ -32,6 +33,14 @@ Complete public checks and built-package documented examples; independent fixed-
 User Stories 49–50, 60–70; Implementation Decisions 1–3, 21–25; Testing Decisions 2–3, 10, 14, 16–20.
 
 ## Comments
+
+- 2026-10-06 (/root): Claimed after independently verified native ticket 08
+  integration at `f9d1ba890b6288891b86ccd16432c1782cf79000`. The isolated
+  implementer owns public guidance and final package/documented-example proof;
+  the coordinator arranges independent fixed-point review, any isolated repairs
+  and the user's actual-vault verdict. All acceptance criteria remain pending
+  until their evidence exists. Runtime/tests/config still match the completed
+  1,508-test regression and full m5 source audit.
 
 - 2026-10-06 (/root): Published after the user approved all nine tickets and their
   dependencies, then explicitly invoked implement-spec for complete implementation.
