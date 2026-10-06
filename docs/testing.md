@@ -193,15 +193,26 @@ and the [earlier v1 report](../.scratch/brz-to-obsidian-v1/research/real-export-
 
 ## Private full-export acceptance
 
-The first actual four-original v3 run at `30ed232` on 2026-10-06 passed the
-nine complete A/B/C exact/repeat/reordered raw-source audits, with independently
-recomputed included expectations. Original D refused before publication because
-the ownership guard rejects repeated declarations for five absent TXT members.
-The independent oracle scope guard rejects the same raw pattern. All originals
-and 562 retained-vault files remain unchanged. The complete twelve-output gate
-is pending a responsible-seam repair and fresh matrix; source-free clean checks
-on the nine published vaults do not complete it. See the [aggregate initial
-four-original result](../.scratch/management-leadership-implementation/research/four-archive-preservation.md).
+The complete v3 four-original gate passed on 2026-10-06 at verified clean root
+`e2c5fc3f05d2daa0d0547d2bbaa2b12557a248b5`, in fresh `tmp/m5`. All twelve
+A/B/C/D exact/repeat/reordered outputs passed the driver and a separate complete
+raw-source/result/receipt re-audit. Four reordered-source proofs and eight vault
+comparisons passed; all 7,029 matrix files stayed unchanged. Original D's 359
+supplied bodies, 63 original fallback images, 47 definitions/330 included members,
+distinct type/icon/TXT facts and full ownership/byte/graph/privacy obligations were
+checked by source identities and joins. All four originals and 562 retained-vault
+files stayed unchanged. Twelve library plus twelve CLI source-free checks were
+clean and read-only; they supplement source-bound preservation.
+
+The failed m3 source/oracle duplicate-declaration gate and m4 diagnostic-alias
+gate remain retained history. Responsible public-seam repairs were independently
+verified before m5; no recovered original or weakened oracle substituted for a
+fresh matrix. See the [complete four-original result and failed history](../.scratch/management-leadership-implementation/research/four-archive-preservation.md).
+The ignored raw-source handoff joins actual note/image paths, all supplied bodies,
+D's 47 category/330 member paths and C's 7/195 control memberships for later native
+review. Native Obsidian rendering/Base evaluation, actual user acceptance and final
+review/package/release gates remain pending; this automated gate supplies none of
+those verdicts.
 
 Choose the exact fingerprinted A/B/C/D originals and a fresh short ignored output
 directory. D is the original Management & Leadership export (320,594,486 bytes,
