@@ -39,9 +39,10 @@ Tickets **01: Exclude forgotten thoughts throughout inspection and conversion**,
 **02: Display owned images when an ordinary thought note is absent** and
 **04: Preserve ordinary-to-category hierarchy in both directions** are resolved
 and integrated. **03: Keep category dashboards usable through missing type
-notes and icons** is also resolved and integrated. The unclaimed frontier is
+notes and icons** is also resolved and integrated. The claimed frontier is
 **05: Prove the combined conversion and publication guarantees** and
-**06: Extend the independent raw-source audit to the new conversion policy**.
+**06: Extend the independent raw-source audit to the new conversion policy**,
+each assigned to a separate isolated implementer worktree.
 Type gaps consume the shared source-gap capability
 from ordinary fallback. Combined safety and independent audit tooling can then
 progress independently. Complete four-original proof precedes native actual-output
@@ -77,6 +78,12 @@ integrated. The user requested a pull request when everything is complete; creat
 it after implementation and required acceptance, then attach it to this chat.
 
 ## Comments
+
+- 2026-10-06 (/root): Claimed tickets 05 and 06 after verified type-gap
+  integration at `4d515a62b2ba6552e8e7ca513615cf1b7ffa839c`. Combined workflow
+  safety and independent raw-source tooling proceed in separate managed
+  worktrees. All four original BRZ files and 562 retained-vault files pass the
+  read-only preservation guard. Full-source/native/user/release gates remain pending.
 
 - 2026-10-06 (/root/integration_merger): Integrated ticket 03 with
   `git merge --ff-only 68982810ea2a60ee5eec4d9f14537916815a7c7a` from clean

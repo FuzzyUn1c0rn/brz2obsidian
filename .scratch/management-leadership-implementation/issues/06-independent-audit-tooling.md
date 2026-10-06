@@ -1,6 +1,7 @@
 # 06: Extend the independent raw-source audit to the new conversion policy
 
-Status: ready-for-agent
+Status: claimed
+Assignee: /root/independent_audit_implementer
 Approved: 2026-10-06
 Specification: [Accepted conversion specification](../spec.md)
 
@@ -28,6 +29,13 @@ Existing independent raw-source oracle/driver public callables and CLI with synt
 User Stories 16–20, 32–39, 41–49, 54–65, 68–70; Implementation Decisions 1–25 as independently audited obligations; Testing Decisions 5–10, 12–17, 20.
 
 ## Comments
+
+- 2026-10-06 (/root): Claimed after independently verified tickets 03 and 04
+  were integrated. Implement the independent raw-source oracle and four-input
+  driver in an isolated managed worktree based on integration
+  `4d515a62b2ba6552e8e7ca513615cf1b7ffa839c`. Existing independent decoder research
+  and bounded host probe inform the implementation; they do not complete the
+  full-source gate, which remains ticket 07.
 
 - 2026-10-06 (/root): Published after the user approved all nine tickets and their
   dependencies, then explicitly invoked implement-spec for complete implementation.

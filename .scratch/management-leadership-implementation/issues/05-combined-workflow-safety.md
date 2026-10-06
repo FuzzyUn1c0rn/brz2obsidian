@@ -1,6 +1,7 @@
 # 05: Prove the combined conversion and publication guarantees
 
-Status: ready-for-agent
+Status: claimed
+Assignee: /root/workflow_safety_implementer
 Approved: 2026-10-06
 Specification: [Accepted conversion specification](../spec.md)
 
@@ -33,6 +34,11 @@ Actual synthetic archives/filesystems at public workflow, thin wrappers and sepa
 User Stories 12–20, 31–39, 40–62, 64, 69–70; Implementation Decisions 1–25 except the full-input/native delivery gate; Testing Decisions 1–11, 16–17, 20.
 
 ## Comments
+
+- 2026-10-06 (/root): Claimed after independently verified tickets 03 and 04
+  were integrated. Implement in an isolated managed worktree based on integration
+  `4d515a62b2ba6552e8e7ca513615cf1b7ffa839c`, using the accepted public testing seams.
+  Full original-source, native and actual-user gates remain pending.
 
 - 2026-10-06 (/root): Published after the user approved all nine tickets and their
   dependencies, then explicitly invoked implement-spec for complete implementation.
