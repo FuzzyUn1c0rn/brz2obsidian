@@ -1,6 +1,7 @@
 # 01: Exclude forgotten thoughts throughout inspection and conversion
 
-Status: ready-for-agent
+Status: claimed
+Assignee: /root/forgotten_implementer
 Approved: 2026-10-06
 Specification: [Accepted conversion specification](../spec.md)
 
@@ -29,6 +30,11 @@ Actual synthetic ZIPs through public inspect/convert, thin text/JSON commands an
 User Stories 15–16, 32–39, 49–50, 56–57, 60–62, 69–70; Implementation Decisions 1–8, 20–21, 23, 25; Testing Decisions 1–3, 5, 7, 10, 16–17, 20. Read the accepted specification; these references identify emphasis, not permission to ignore cumulative requirements.
 
 ## Comments
+
+- 2026-10-06 (/root): Claimed the initially unblocked slice for an isolated
+  implementer based on `codex/management-leadership-v3`, planning commit
+  `bb7a5ab6506dce699bb7d8373bf04a25375d5979`. TDD seams are already confirmed in
+  the accepted specification; no new user testing approval is needed.
 
 - 2026-10-06 (/root): Published after the user approved all nine tickets and their
   dependencies, then explicitly invoked implement-spec for complete implementation.
