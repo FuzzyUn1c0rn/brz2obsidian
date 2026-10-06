@@ -1,6 +1,6 @@
 # 06: Extend the independent raw-source audit to the new conversion policy
 
-Status: resolved
+Status: claimed
 Assignee: /root/independent_audit_implementer
 Approved: 2026-10-06
 Specification: [Accepted conversion specification](../spec.md)
@@ -29,6 +29,17 @@ Existing independent raw-source oracle/driver public callables and CLI with synt
 User Stories 16–20, 32–39, 41–49, 54–65, 68–70; Implementation Decisions 1–25 as independently audited obligations; Testing Decisions 5–10, 12–17, 20.
 
 ## Comments
+
+- 2026-10-06 (/root/independent_audit_implementer): Reopened and claimed after
+  independent verification of clean `f70b0237647eff6894dd1224cd5ed79abc98806f`
+  reported overall **FAIL**. Its 24 handwritten replay groups and 235 maintained
+  checks passed, but two additional valid included labels (escaped brackets and
+  balanced bracket text) were rejected by the oracle as nested active syntax.
+  Repair only the independent scanner/tests and this ticket's evidence, preserving
+  recorded display text, established wiki alias sanitation, malformed/nested
+  active-link rejection and complete forgotten-phrase removal. Root integration
+  remains verified `f23a8bee142457cf64a3bba1fd5ce84293bd9dca`; no original/native
+  acceptance is claimed by the historical candidate or this repair.
 
 - 2026-10-06 (/root/independent_audit_implementer): Implemented the approved
   public oracle/Workflow and four-input driver seams through red/green slices in
