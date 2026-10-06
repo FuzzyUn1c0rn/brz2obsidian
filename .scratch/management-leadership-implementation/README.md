@@ -35,24 +35,15 @@ and [workspace housekeeping](../../docs/workspace.md).
 
 ## Working the frontier
 
-Tickets **01**, **03**, **04**, **05** and **06** are resolved and integrated.
-The narrow source and independent audit repairs for repeated known-absent TXT
-declarations retain their earlier privacy, label and audit controls. **02** is
-resolved after verified shared diagnostic-link formatting repair: the prior matrix
-passed nine A/B/C variants and published original D, then its source-required
-audit stopped on checklist alias whitespace after reserved title characters.
-Independent diagnosis confirms the correct source owner, target, identities,
-role and outcome; the renderer must reuse the established note-link formatter.
-The oracle remains unchanged. **07** is eligible and remains claimed by
-`/root/txt_declaration_implementer`, with all criteria unchecked, for a fresh
-complete matrix after the integrated renderer repair.
-Historical failed runs remain evidence; neither completes the twelve-output gate.
-Native actual-output and delivery tickets remain blocked. Bounded synthetic
-proof does not establish full-original or arbitrary representation coverage.
-Type gaps consume the shared source-gap capability
-from ordinary fallback. Combined safety and independent audit tooling can then
-progress independently. Complete four-original proof precedes native actual-output
-review, final release verification and the actual-vault user verdict.
+Tickets **01–07** are resolved and integrated. Complete original-input
+preservation passed the fresh m5 twelve-output matrix and separate independent
+raw-source verification at frozen runtime `e2c5fc3f05d2daa0d0547d2bbaa2b12557a248b5`.
+The prior m3/m4 failures remain retained history; verified source/oracle TXT and
+diagnostic-link repairs precede m5. **08: Verify actual converted vaults in native
+Obsidian** is eligible and unclaimed. Final review, package/release checks and
+the actual-vault user verdict remain pending; automated preservation does not
+supply native application or user acceptance, nor arbitrary representation
+coverage.
 
 Claim an eligible ticket before implementation and record its assignee. Use an
 isolated managed worktree/branch based on this integration tip for each implementer,
@@ -84,6 +75,31 @@ integrated. The user requested a pull request when everything is complete; creat
 it after implementation and required acceptance, then attach it to this chat.
 
 ## Comments
+
+- 2026-10-06 (/root/integration_merger): Integrated complete ticket 07 metadata
+  by `git merge --ff-only c95f23e749f5cbf2bf0aebf1372817a8e3c47e26` from
+  clean root `e2c5fc3f05d2daa0d0547d2bbaa2b12557a248b5`, clean worker/exact
+  candidate and ancestry exit 0 confirmed. Exact delta contains only ticket 07,
+  aggregate preservation research and the narrow private-original testing section.
+  `git diff --exit-code e2c5fc3f05d2daa0d0547d2bbaa2b12557a248b5 c95f23e749f5cbf2bf0aebf1372817a8e3c47e26 -- src tests pyproject.toml requirements.txt`
+  returned 0: runtime/tests/config remain identical to the verified matrix code.
+  Baseline diff check passes. No redundant regression/package/environment/native
+  work was run for this evidence-only integration.
+
+  Reviewed aggregate/document bindings against ignored root 07
+  `m5-gate-summary.json`, `verifier-report-m5.json`,
+  `verifier-m5-handoff-report.json`, `m5-supplementary-checks.json` and
+  `m5-public-privacy-scan.json`. Driver exit 0 and separate independent PASS bind
+  all twelve outputs, four raw reorder multiset/payload proofs and eight vault
+  comparisons to frozen runtime. Twenty-four supplementary library/CLI operations
+  are clean/read-only. All 7,029 matrix files, four originals and 562 retained
+  files remain unchanged. Original D verifies 359 bodies/63 embeds/47 definitions/
+  330 members/1,017 payloads/1,552 files/93 warnings by full source joins, not
+  totals alone. Independent native-handoff joins also PASS without GUI inference.
+  Public three-document canonical source-identity scan PASS with zero matches;
+  aggregate-only manual review and an additional UUID search of ticket/research
+  found no private subjects/assets. m3/m4 FAIL histories remain retained.
+  Ticket 07 is resolved; 08 is eligible and unclaimed, 09 remains blocked.
 
 - 2026-10-06 (/root/integration_merger): Integrated diagnostic-link repair by
   `git merge --ff-only 30beacbdcdd6ee4c8d827db954b273f1d8958cef` from clean
