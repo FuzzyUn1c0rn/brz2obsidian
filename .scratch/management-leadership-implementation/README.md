@@ -43,10 +43,18 @@ diagnostic-link repairs precede m5. Actual-output native review passed strategic
 samples in observed Obsidian 1.14.4, with independent source/CSV/ledger/checker
 evidence and retained complete automated preservation. **09: Deliver the reviewed
 release after actual-vault user acceptance** remains claimed by
-`/root/release_documenter`. Three criteria have bounded evidence: complete public
-checks, final 0.3.0 wheel/documented examples and public guidance. Independent
-cumulative review from `9ddba911eb53e589b53d8059141462ee3a274aea`, the actual-vault
-user verdict, final preserved-input guards and aggregate delivery remain pending.
+`/root/release_documenter`. Only the public-guidance criterion remains checked.
+Spec review at `5f971b96500a33d58ec09f4d9bd6c2d08f9a8cde` reported zero actionable
+findings. Standards initially reported zero documented-rule breaches and an
+optional P3 duplication observation; later clarification confirmed a material P2
+compact-reference validation bypass. Its isolated repair at
+`fc1685aaea691bff47fa47408d37c78b7188f94c` passed separate bounded verification
+before integration. The pre-repair full-suite/package and m5/native results remain
+historical evidence. Fresh complete public/package gates, the four-original
+matrix/re-audit and comparison of native-facing bytes are pending; equivalent
+strategic native observations can be reused only after that comparison. Final
+review closure, the actual-vault user verdict, preserved-input guards and
+aggregate delivery also remain pending.
 Neither automated nor agent native review supplies user acceptance or arbitrary
 representation coverage; no delivery or publication is declared.
 
@@ -80,6 +88,24 @@ integrated. The user requested a pull request when everything is complete; creat
 it after implementation and required acceptance, then attach it to this chat.
 
 ## Comments
+
+- 2026-10-06 (/root/native_vault_reviewer, separate merger): Integrated the
+  independently verified P2 repair candidate
+  `fc1685aaea691bff47fa47408d37c78b7188f94c` with
+  `git merge --ff-only fc1685aaea691bff47fa47408d37c78b7188f94c` from clean root
+  `5f971b96500a33d58ec09f4d9bd6c2d08f9a8cde`. Exact worker HEAD/clean status,
+  root HEAD/clean status and ancestry exit 0 were confirmed; candidate diff check
+  passed. Five candidate files cover the source-local compact-reference validation
+  repair, public workflow regressions and truthful release/ticket metadata.
+  Separate ignored root `tmp/ml-implementation/09/repair-independent/report.md`
+  and `independent-proof.json` record PASS for 13 synthetic controls and 35 public
+  inspect/convert operations, private malformed-reference refusal, unchanged
+  sources/caller inventories and valid compact/literal controls. Spec's zero
+  finding review remains separate from the confirmed Standards P2 and its repair.
+  Ticket 09 stays claimed, with only guidance checked and invalidated final
+  technical proofs reopened. No suite, matrix, package, UI, environment or
+  additional runtime/source change was performed by this merger. Fresh gates,
+  affected native comparison/refresh, user verdict and delivery remain pending.
 
 - 2026-10-06 (/root/integration_merger): Integrated **partial ticket 09** candidate
   `7a18c6bfb02af35c51662376e41308aa167339ea` using
