@@ -5,7 +5,7 @@ Date: 2026-10-06
 These are separate review axes. Their original reports and follow-up chronology
 remain unchanged in root ignored `tmp/ml-implementation/09/`. The human accepted
 the corrected actual u5 vault on 2026-10-06; [delivery](delivery.md) records the
-completed implementation/user gates. PR creation remains forthcoming.
+completed implementation/user gates. [PR #2](https://github.com/FuzzyUn1c0rn/brz2obsidian/pull/2) is open and ready for review.
 
 ## Standards
 
@@ -108,5 +108,5 @@ Current follow-up proof is root `tmp/ml-implementation/07/m7-independent-gate.md
 `tmp/ml-implementation/09/notice-style/native/report.json` with actual retained
 pixels. The human subsequently accepted the corrected actual u5 vault on
 2026-10-06: “I checked the corrected vault, and it looks okay to me now.”
-Implementation/user acceptance is complete; PR creation remains forthcoming.
+Implementation/user acceptance is complete; [PR #2](https://github.com/FuzzyUn1c0rn/brz2obsidian/pull/2) is open and ready for review.
 The earlier u4 rejection and original review limitations remain unchanged history.

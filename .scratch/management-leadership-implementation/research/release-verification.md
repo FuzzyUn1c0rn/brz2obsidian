@@ -1,7 +1,7 @@
 # Accepted release verification
 
 Date: 2026-10-06
-Status: implementation and actual-vault user acceptance complete; PR creation forthcoming.
+Status: implementation and actual-vault user acceptance complete; [PR #2](https://github.com/FuzzyUn1c0rn/brz2obsidian/pull/2) open and ready for review.
 
 ## Final actual-vault verdict
 
@@ -14,8 +14,9 @@ This is the user's actual verdict, not an agent inference or prototype approval.
 The earlier u4 styling rejection remains historical evidence below.
 
 All ticket 09 criteria are satisfied. [Delivery aggregate](delivery.md) records
-completed implementation/user acceptance; PR creation is a forthcoming coordinator
-action, with no package publication implied by this local acceptance record.
+completed implementation/user acceptance. The coordinator created and attached
+[PR #2](https://github.com/FuzzyUn1c0rn/brz2obsidian/pull/2), open and ready for review;
+no package publication is implied by this local acceptance record.
 Missing source prose/captions/authored layout remain unknown; available images
 were displayed from the archive, not reconstructed into unavailable content.
 
@@ -185,7 +186,7 @@ are now complete for runtime `f91043ab7ca8ca5eee85d4e7156a6d2114be5fd9`.
 This document-only candidate must be recorded separately from that execution pin.
 The coordinator prepared the separate clean current u5 copy, and the human
 accepted it on 2026-10-06. The original u4 rejection is retained; this document
-records implementation acceptance, while PR creation remains forthcoming.
+records implementation acceptance; [PR #2](https://github.com/FuzzyUn1c0rn/brz2obsidian/pull/2) is open and ready for review.
 
 ## Historical compact-reference repair boundary
 
@@ -456,7 +457,8 @@ package work neither opens nor mutates it or any private original/retained vault
 All implementation technical and actual-vault user gates are complete at runtime
 `f91043ab7ca8ca5eee85d4e7156a6d2114be5fd9`, with the explicit corrected-vault
 acceptance above. Ticket 09 is resolved. The final metadata commit is separate
-from this executed runtime pin. PR creation remains a forthcoming coordinator
-action; no package deployment/publication is claimed. A later material output
+from this executed runtime pin. The coordinator created and attached
+[PR #2](https://github.com/FuzzyUn1c0rn/brz2obsidian/pull/2), open and ready for review;
+no package deployment/publication is claimed. A later material output
 change requires refreshed affected proof and renewed actual review. Recovered
 or re-exported archives remain separately fingerprinted acceptance inputs.

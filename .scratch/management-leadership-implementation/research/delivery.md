@@ -1,7 +1,7 @@
 # Accepted implementation delivery
 
 Date: 2026-10-06
-Status: implementation and actual-vault user acceptance complete; PR forthcoming.
+Status: implementation and actual-vault user acceptance complete; [PR #2](https://github.com/FuzzyUn1c0rn/brz2obsidian/pull/2) open and ready for review.
 
 The human accepted the corrected fresh actual u5 vault: **“I checked the corrected
 vault, and it looks okay to me now.”** Its 1,552 files initially matched audited
@@ -9,7 +9,7 @@ m7 D byte exactly. Executed runtime:
 `f91043ab7ca8ca5eee85d4e7156a6d2114be5fd9`; closing metadata starts from
 integration `e0d64fa22b97753ba7b051ad71a94f556d96a2c0`. The metadata commit is
 separate from that tested runtime. [Ticket 09](../issues/09-release-user-acceptance.md)
-is resolved. PR creation remains a forthcoming coordinator action.
+is resolved. The coordinator created and attached [PR #2](https://github.com/FuzzyUn1c0rn/brz2obsidian/pull/2), open and ready for review against `main`.
 
 The u4 styling rejection remains explicit history. Native warning callouts and
 category notice placement were repaired, independently verified and reviewed
