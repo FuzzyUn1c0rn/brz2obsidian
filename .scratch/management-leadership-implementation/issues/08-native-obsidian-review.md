@@ -1,6 +1,7 @@
 # 08: Verify actual converted vaults in native Obsidian
 
-Status: ready-for-agent
+Status: claimed
+Assignee: /root/native_vault_reviewer
 Approved: 2026-10-06
 Specification: [Accepted conversion specification](../spec.md)
 
@@ -27,6 +28,13 @@ Native standard Obsidian over fresh actual-output copies after independent full-
 User Stories 3–4, 9–14, 21–31, 40–46, 58–59, 66, 69–70; Implementation Decisions 8, 12–18, 22, 24–25; Testing Decisions 15–18, 20.
 
 ## Comments
+
+- 2026-10-06 (/root): Claimed after independently verified ticket 07 integration
+  at `4dbcd586921816d9b692eb465c3f027990641084`. Complete exact/repeat/reordered
+  original-source audits and the source-to-path handoff passed against runtime
+  `e2c5fc3f05d2daa0d0547d2bbaa2b12557a248b5`; integration changes only evidence.
+  Use fresh disposable native/maintenance/user copies, retaining pristine `tmp/m5`.
+  All native acceptance criteria remain unchecked until actual observations.
 
 - 2026-10-06 (/root): Published after the user approved all nine tickets and their
   dependencies, then explicitly invoked implement-spec for complete implementation.
