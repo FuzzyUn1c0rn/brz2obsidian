@@ -173,6 +173,16 @@ and the [earlier v1 report](../.scratch/brz-to-obsidian-v1/research/real-export-
 
 ## Private full-export acceptance
 
+The first actual four-original v3 run at `30ed232` on 2026-10-06 passed the
+nine complete A/B/C exact/repeat/reordered raw-source audits, with independently
+recomputed included expectations. Original D refused before publication because
+the ownership guard rejects repeated declarations for five absent TXT members.
+The independent oracle scope guard rejects the same raw pattern. All originals
+and 562 retained-vault files remain unchanged. The complete twelve-output gate
+is pending a responsible-seam repair and fresh matrix; source-free clean checks
+on the nine published vaults do not complete it. See the [aggregate initial
+four-original result](../.scratch/management-leadership-implementation/research/four-archive-preservation.md).
+
 Choose the exact fingerprinted A/B/C/D originals and a fresh short ignored output
 directory. D is the original Management & Leadership export (320,594,486 bytes,
 SHA-256 `2b24c1d21b4090f3b0ed3ec0227f269b8c7a4e5b6832ada0e244a1dcfc941ced`);

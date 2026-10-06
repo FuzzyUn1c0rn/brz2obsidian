@@ -31,6 +31,23 @@ User Stories 1–59, 63–65, 68–70; Implementation Decisions 1–25; Testing 
 
 ## Comments
 
+- 2026-10-06 (/root/four_archive_implementer): Initial mandatory-original driver
+  at clean root `30ed23205d5569b1884376ffd559b5d0068f8456`, selected root/src module
+  `0.3.0`, exited **1** in fresh `tmp/m3`. All nine A/B/C exact/repeat/reordered
+  outputs passed complete independent raw-source audits and deterministic
+  comparisons; D refused before publication with `invalid_source`, **Multiple
+  declarations assign one payload**, receipt/counts null. Independent raw scan
+  locates five included-owner absent TXT member groups (ten Type-15/NoteType-0,
+  state-2 declarations, no physical bytes); the oracle's separate scope guard
+  also fails `raw unique payload declaration`. No source/oracle repair or
+  expected-truth relaxation was made. Nine complete source-free library/CLI
+  checks each passed clean (18 operations, CLI exit 0), with full inventories,
+  lengths and hashes unchanged. Before/after/final preservation guard passes
+  four originals and 562 retained-vault files. See [aggregate failed-gate
+  evidence](../research/four-archive-preservation.md). Keep claimed and all
+  criteria unchecked; responsible-seam repair and fresh complete matrix are
+  required before original D, native/user or delivery acceptance.
+
 - 2026-10-06 (/root): Claimed after independently verified ticket 06 integration
   at `867764694da8048b7adca3cddf6e74a196e5c395`. Run the complete four-original
   exact/repeat/reorder matrix through the root project environment and verified
