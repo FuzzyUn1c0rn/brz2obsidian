@@ -21,6 +21,11 @@ live identities/ownership/references refuse. Version 3 excludes live thoughts
 with valid populated ForgottenDateTime markers before destination planning,
 independently of attachment states. Excluded subjects, owned assets, memberships,
 relationships and identifying records do not reach the vault or public output.
+Ownership closure includes nested objects/arrays and valid serialized JSON,
+including Unicode-escaped identifiers and duplicate ownership declarations.
+Associated records and their transitive identities are omitted as a whole;
+provably safe serialized strings retain their exact original spelling and
+numeric precision. Reference refusal messages omit raw source targets.
 Incoming authored phrases/embeds are removed exactly; unrelated included content
 with matching titles or pixels survives. Safe exact originals and provably
 included raw fields preserve omission/null distinctions, exact numeric values

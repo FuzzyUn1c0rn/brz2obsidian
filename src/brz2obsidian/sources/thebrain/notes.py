@@ -90,7 +90,7 @@ def bind_note_references(document, assets, thoughts):
             ):
                 _refuse(
                     "invalid_reference",
-                    "Invalid or unsupported compact thought reference: " + destination,
+                    "Invalid or unsupported compact thought reference",
                 )
             raw = base64.urlsafe_b64decode(compact + "==")
             if base64.urlsafe_b64encode(raw).decode().rstrip("=") != compact:
@@ -99,8 +99,7 @@ def bind_note_references(document, assets, thoughts):
             if canonical not in thoughts or thoughts[canonical]["Kind"] == 5:
                 _refuse(
                     "invalid_reference",
-                    "Local thought reference does not identify a live navigable thought: "
-                    + canonical,
+                    "Local thought reference does not identify a live navigable thought",
                 )
         else:
             parts = urlsplit(destination)
@@ -115,7 +114,7 @@ def bind_note_references(document, assets, thoughts):
             ):
                 _refuse(
                     "invalid_reference",
-                    "Invalid or unsupported local image destination: " + destination,
+                    "Invalid or unsupported local image destination",
                 )
             matches = [
                 a.asset_id
@@ -128,8 +127,7 @@ def bind_note_references(document, assets, thoughts):
             if len(matches) != 1:
                 _refuse(
                     "invalid_reference",
-                    "Local image does not identify one preserved owner image: "
-                    + destination,
+                    "Local image does not identify one preserved owner image",
                 )
             canonical = matches[0]
         bound.append(

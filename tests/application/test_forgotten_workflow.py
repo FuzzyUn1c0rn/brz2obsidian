@@ -82,6 +82,85 @@ def test_excluded_link_phrase_disappears_and_unsafe_exact_copy_is_omitted(tmp_pa
         assert removed not in inspection.model_dump_json()
 
 
+@pytest.mark.parametrize("collection", ["settings.json", "brainusers.json"])
+@pytest.mark.parametrize(
+    "encoding", ["nested", "serialized", "unicode_escaped", "duplicate_keys"]
+)
+def test_nested_excluded_ownership_omits_the_associated_record_and_its_transitive_dependents(
+    tmp_path, encoding, collection
+):
+    source = graph_archive(
+        tmp_path / "source.brz",
+        {1: "Home", 2: "Private"},
+        notes={1: (b"safe prose", 4)},
+    )
+    safe_serialized = (
+        '{"SourceId":"'
+        + identity(1)
+        + '","Precise":0.123456789012345678901234567890,"SafeNull":null}'
+    )
+
+    def edit(parts):
+        forget(parts, 2)
+        owned = {"SourceId": identity(2), "Value": "INNER_EXCLUDED_CONTENT"}
+        if encoding == "serialized":
+            owned = json.dumps(owned)
+        elif encoding == "unicode_escaped":
+            escaped = "".join(f"\\u{ord(char):04x}" for char in identity(2))
+            owned = '{"SourceId":"' + escaped + '","Value":"INNER_EXCLUDED_CONTENT"}'
+        elif encoding == "duplicate_keys":
+            owned = (
+                '{"SourceId":"'
+                + identity(2)
+                + '","SourceId":"'
+                + identity(1)
+                + '","Value":"INNER_EXCLUDED_CONTENT"}'
+            )
+        for record in (
+            {
+                "Id": identity(8100),
+                "Nested": [{"Envelope": owned}],
+                "Value": "OUTER_EXCLUDED_CONTENT",
+            },
+            {
+                "Id": identity(8101),
+                "Nested": {"AttachmentId": identity(8100)},
+                "Value": "TRANSITIVE_EXCLUDED_CONTENT",
+            },
+            {
+                "Id": identity(8102),
+                "Nested": safe_serialized,
+                "Value": "safe retained string",
+            },
+        ):
+            parts[collection] += b"\n" + json.dumps(record).encode()
+
+    rewrite(source, edit)
+    original = source.read_bytes()
+    workflow = default_workflow()
+    assert workflow.inspect(source).outcome == "clean"
+    vault = tmp_path / "vault"
+    result = workflow.convert(source, vault)
+    assert result.outcome == "clean"
+    output = b"\n".join(p.read_bytes() for p in vault.rglob("*") if p.is_file())
+    for secret in (
+        identity(2),
+        identity(8100),
+        identity(8101),
+        "INNER_EXCLUDED_CONTENT",
+        "OUTER_EXCLUDED_CONTENT",
+        "TRANSITIVE_EXCLUDED_CONTENT",
+    ):
+        assert secret.encode() not in output
+    record = json.loads((vault / "migration-record.json").read_bytes())
+    settings = next(
+        e["records"] for e in record["original_evidence"] if e["key"] == collection
+    )
+    safe = next(r for r in settings if r["Id"] == identity(8102))
+    assert safe["Nested"] == safe_serialized and safe["Value"] == "safe retained string"
+    assert source.read_bytes() == original
+
+
 def test_current_public_envelopes_reserve_empty_gap_and_presentation_facts(tmp_path):
     source = graph_archive(tmp_path / "source.brz", {1: "Home"})
     result = default_workflow().inspect(source)
@@ -363,6 +442,45 @@ def test_malformed_reference_to_excluded_subject_refuses_without_echoing_its_tar
     )
 
 
+def test_malformed_authority_refusals_do_not_echo_excluded_uri_or_label_and_preserve_caller_files(
+    tmp_path, capsys
+):
+    from brz2obsidian.cli import main
+
+    compact = base64.urlsafe_b64encode(UUID(identity(2)).bytes_le).decode().rstrip("=")
+    source = graph_archive(
+        tmp_path / "source.brz",
+        {1: "Home", 2: "Private"},
+        notes={
+            1: (f"[Private label](brain://{compact}extra/Private-title)".encode(), 4)
+        },
+    )
+    rewrite(source, lambda p: forget(p, 2))
+    original = source.read_bytes()
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    (caller / "sentinel.bin").write_bytes(b"caller bytes")
+    workflow = default_workflow()
+    for result in (workflow.inspect(source), workflow.convert(source, caller)):
+        assert (
+            result.outcome == "refused" and result.issues[0].code == "invalid_reference"
+        )
+        for private in (compact, "Private-title", "Private label", identity(2)):
+            assert private not in result.model_dump_json()
+    for args in (
+        ["inspect", str(source)],
+        ["inspect", str(source), "--json"],
+        ["convert", str(source), str(caller), "--json"],
+    ):
+        assert main(args) == 1
+        output = capsys.readouterr().out
+        assert compact not in output and "Private" not in output
+    assert source.read_bytes() == original
+    assert {p.name: p.read_bytes() for p in caller.iterdir()} == {
+        "sentinel.bin": b"caller bytes"
+    }
+
+
 def test_image_wrapped_excluded_link_removes_the_whole_phrase_and_keeps_the_included_image(
     tmp_path,
 ):
@@ -402,3 +520,25 @@ def test_image_wrapped_excluded_link_removes_the_whole_phrase_and_keeps_the_incl
         if p.is_file()
     )
     assert not any(p.name.endswith(".original") for p in vault.rglob("*"))
+
+
+def test_required_collection_metadata_with_excluded_ownership_refuses_privately(
+    tmp_path,
+):
+    source = graph_archive(tmp_path / "source.brz", {1: "Home", 2: "Private"})
+
+    def edit(parts):
+        forget(parts, 2)
+        meta = json.loads(parts["meta.json"])
+        meta["Nested"] = {"SourceId": identity(2)}
+        meta["Value"] = "PRIVATE_METADATA_CONTENT"
+        parts["meta.json"] = json.dumps(meta).encode()
+
+    rewrite(source, edit)
+    original = source.read_bytes()
+    vault = tmp_path / "vault"
+    result = default_workflow().convert(source, vault)
+    assert result.outcome == "refused" and result.issues[0].code == "invalid_source"
+    assert "PRIVATE_METADATA_CONTENT" not in result.model_dump_json()
+    assert identity(2) not in result.model_dump_json()
+    assert source.read_bytes() == original and not vault.exists()

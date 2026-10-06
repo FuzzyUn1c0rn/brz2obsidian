@@ -307,7 +307,11 @@ Obsidian application version or a change in the supplied archives' format.
 
 The source adapter validates global container safety, identities, ownership,
 local paths and valid ForgottenDateTime markers before selecting included
-records. Only included items and incident-safe relationships/assignments reach
+records. Raw ownership inspection follows nested containers and serialized
+JSON without rewriting retained strings; duplicate-key ownership declarations
+all participate in transitive associated-record omission. Unsafe reference
+errors use static messages rather than echoing raw targets. Only included items
+and incident-safe relationships/assignments reach
 planning. Excluded providers contribute no membership or inherited appearance;
 a forgotten Home refuses rather than selecting a replacement. Names and
 selection use the included graph. No exclusion ledger or individual excluded

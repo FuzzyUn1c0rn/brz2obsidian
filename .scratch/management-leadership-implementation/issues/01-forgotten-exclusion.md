@@ -93,3 +93,43 @@ User Stories 15–16, 32–39, 49–50, 56–57, 60–62, 69–70; Implementatio
   absence/hierarchy and publication/native/user gates remain on the approved
   frontier. The implementation index and other ticket/Wayfinder records belong
   to the integration coordinator.
+
+- 2026-10-06 (/root/forgotten_implementer): Reopened after independent behavioral
+  and static REWORK at `524822d`: nested associated raw records and Unicode-escaped
+  serialized JSON ownership retained private sibling content/record identity;
+  malformed compact authority suffixes echoed source URI/title in refusals. Prior
+  verification evidence is retained. Repair uses the same confirmed public seams
+  and vertical TDD: three nested/serialized/escaped workflow controls first
+  leaked associated outer IDs; after recursive ownership/transitive closure they
+  pass while safe serialized strings retain exact decimal spelling. A malformed
+  authority public inspect/convert control first leaked its compact identifier;
+  static reference error messages now omit raw URI/targets. Explicit duplicate
+  ownership keys and metadata-record controls ensure all declarations participate.
+  Source bytes and existing caller sentinel inventory remain unchanged. Logs are
+  `tmp/ml-implementation/01/repair-red1.txt`, `repair-green1.txt`,
+  `repair-red2.txt`, `repair-green2.txt`; new full verification is in progress.
+  Independent re-verification remains required before integration.
+
+- 2026-10-06 (/root/forgotten_implementer): Final repair verification binds to
+  the repaired runtime including the required-metadata privacy guard: complete
+  public suite **808 passed in 111.45s**; affected forgotten/source-reader suite
+  **43 passed in 4.09s**; Ruff lint/format and pip check pass. Nested ownership
+  now removes entire associated records and transitive dependent identities;
+  source JSON strings are inspected recursively with every duplicate ownership
+  key visible, while retained strings and precise raw numbers remain unchanged.
+  Unscopable required collection metadata refuses privately instead of escaping
+  through an indexing error; excessive recursion follows the same safe source
+  refusal boundary. All source-reference refusals omit interpolated raw targets.
+
+  Direct replays of the independent nested-setting, escaped-serialized and
+  malformed-authority source ZIPs pass against fresh outputs with unchanged
+  source bytes. Prior independent reports, vaults and first-slice wheel/logs were
+  retained. Final repair 0.3.0 wheel is under ignored
+  `tmp/ml-implementation/01/repair-wheels/`, SHA-256
+  `507fc7a8bf8e072fb8251d4af2a3a758812ca02ef764292648eeda05f4ec9e46`.
+  Direct wheel imports prove runtime-only inventory, console private refusal,
+  module escaped-ownership conversion, library inspection and source-free checker
+  smoke. Logs: `repair-final-regression.txt`, `repair-final-affected.txt`,
+  `repair-replay.txt`, `repair-packaged-smoke.txt`. No new source semantics,
+  original-archive/native/user acceptance or other-ticket completion is claimed.
+  Independent re-verification and integration remain coordinator-owned.

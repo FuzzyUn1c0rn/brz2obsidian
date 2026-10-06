@@ -109,6 +109,44 @@ def scope_records(records, refuse, uuid):
         "LinkId",
         "TargetId",
     }
+
+    def decoded(value):
+        if not isinstance(value, str) or value.lstrip()[:1] not in {"{", "[", '"'}:
+            return None
+
+        def pairs(entries):
+            # Inspection must see every ownership declaration, including duplicate
+            # keys in an otherwise opaque serialized string. Never rewrite it.
+            result = {}
+            for key, entry in entries:
+                result[key] = [result[key], entry] if key in result else entry
+            return result
+
+        try:
+            return json.loads(value, parse_float=Decimal, object_pairs_hook=pairs)
+        except ValueError:
+            return None
+
+    def identifies_omitted(value):
+        if isinstance(value, str):
+            return value in omitted or identifies_omitted(decoded(value))
+        if isinstance(value, (list, tuple)):
+            return any(identifies_omitted(entry) for entry in value)
+        return False
+
+    def associated(value):
+        if isinstance(value, dict):
+            return any(
+                (field in associations and identifies_omitted(entry))
+                or associated(entry)
+                for field, entry in value.items()
+            )
+        if isinstance(value, (list, tuple)):
+            return any(associated(entry) for entry in value)
+        if isinstance(value, str):
+            return associated(decoded(value))
+        return False
+
     changed = True
     while changed:
         changed = False
@@ -116,13 +154,7 @@ def scope_records(records, refuse, uuid):
             for record in collection:
                 if record.get("Id") in omitted:
                     continue
-                if (
-                    any(
-                        type(record.get(field)) is str and record[field] in omitted
-                        for field in associations
-                    )
-                    and type(record.get("Id")) is str
-                ):
+                if associated(record) and type(record.get("Id")) is str:
                     omitted.add(record["Id"])
                     changed = True
     tokens = set(omitted)
@@ -135,7 +167,7 @@ def scope_records(records, refuse, uuid):
 
     def unsafe(value):
         if isinstance(value, str):
-            return any(token in value for token in tokens)
+            return any(token in value for token in tokens) or unsafe(decoded(value))
         if isinstance(value, dict):
             return any(unsafe(k) or unsafe(v) for k, v in value.items())
         if isinstance(value, (list, tuple)):
@@ -152,10 +184,7 @@ def scope_records(records, refuse, uuid):
         for record in collection:
             if record.get("Id") in omitted:
                 continue
-            if any(
-                type(record.get(field)) is str and record[field] in omitted
-                for field in associations
-            ):
+            if associated(record):
                 continue
             clean = {}
             for field, value in record.items():

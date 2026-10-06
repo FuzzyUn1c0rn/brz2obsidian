@@ -148,6 +148,7 @@ class BrzSourceModule:
             KeyError,
             TypeError,
             ValidationError,
+            RecursionError,
         ):
             _refuse("invalid_source", "Invalid BRZ data")
         except OSError as error:
@@ -267,6 +268,8 @@ class BrzSession:
         records, self.excluded, dropped_members, self.scope_tokens = scope_records(
             records, _refuse, _uuid
         )
+        if not records["meta.json"]:
+            _refuse("invalid_source", "Collection metadata cannot be safely scoped")
         if self.excluded:
             originals = {e.key: e.original_json for e in evidence}
             evidence = [
