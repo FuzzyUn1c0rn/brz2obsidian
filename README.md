@@ -134,7 +134,7 @@ the Windows stream encoding. This affects encoding, not the JSON schema.
 
 ## Use the vault
 
-Open the generated folder in standard Obsidian. The root `Home â€” <title>.md`
+Open the generated folder in standard Obsidian. The root `Home — <title>.md`
 is the starting note and native Home bookmark; other thought notes are under
 `Notes/`; reviewed thought types become notes under `Categories/`. Each typed
 ordinary member is materialized, including empty members, and receives linked

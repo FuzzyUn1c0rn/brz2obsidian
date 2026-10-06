@@ -7,7 +7,7 @@ Specification: [Accepted conversion specification](../spec.md)
 
 **What to build:** Deliver a documented, independently reviewed 0.3.0 converter with completed automated/source/native gates and the user's verdict on the actual converted Management & Leadership vault. Planning approval and ticket completion by an agent cannot replace that final verdict.
 
-**Blocked by:** [08 â€” Verify actual converted vaults in native Obsidian](08-native-obsidian-review.md).
+**Blocked by:** [08 — Verify actual converted vaults in native Obsidian](08-native-obsidian-review.md).
 
 Complete independent review/repairs and final automated/package proof, refresh
 any invalidated source/native evidence, then obtain the user's verdict on that
@@ -30,7 +30,7 @@ Complete public checks and built-package documented examples; independent fixed-
 
 ## Specification coverage
 
-User Stories 49â€“50, 60â€“70; Implementation Decisions 1â€“3, 21â€“25; Testing Decisions 2â€“3, 10, 14, 16â€“20.
+User Stories 49–50, 60–70; Implementation Decisions 1–3, 21–25; Testing Decisions 2–3, 10, 14, 16–20.
 
 ## Comments
 

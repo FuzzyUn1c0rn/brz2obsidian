@@ -1,7 +1,7 @@
 # Release verification candidate
 
 Date: 2026-10-06
-Status: partial â€” independent final review, actual-vault user verdict and delivery pending.
+Status: partial — independent final review, actual-vault user verdict and delivery pending.
 
 This record aggregates completed technical evidence for the 0.3.0 candidate.
 It does not declare delivery, acceptance or publication. Public guidance/package
