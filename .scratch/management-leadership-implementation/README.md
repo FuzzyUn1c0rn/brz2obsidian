@@ -1,6 +1,6 @@
 # Management & Leadership conversion implementation
 
-Status: claimed
+Status: resolved
 Assignee: /root
 Integration branch: `codex/management-leadership-v3`
 Production baseline: `9ddba911eb53e589b53d8059141462ee3a274aea`
@@ -35,20 +35,17 @@ and [workspace housekeeping](../../docs/workspace.md).
 
 ## Working the frontier
 
-**Current frontier: ticket 09 renewed actual user verdict.** The original u4
-review was rejected because notices were plain blockquotes; that history remains
-preserved. The integrated warning repair and all refreshed technical gates now
-pass at frozen runtime `f91043ab7ca8ca5eee85d4e7156a6d2114be5fd9`: 1,518 public
-tests, Ruff/pip, fresh verified wheel/examples, all twelve m7 outputs/7,029 files
-and independent raw-source audits. Strict comparison of 2,337 exact-output files
-allows only 71 changed D notes/118 warning headers and eight category notice
-relocations, plus exact documented clocks/app serialization; other content remains
-preserved. Two combined actual native samples confirm all four orange warning
-titles, triangle icons and tinted panels, separate boxes, correct placement and
-resolving links. Five technical criteria are checked; renewed user acceptance and
-aggregate delivery/PR remain pending. Fresh u5/Leadership was presented with its
-existing card in Reading view and all non-app bytes unchanged; presentation alone
-supplies no verdict. The following milestone is pre-styling history.
+**Current frontier: implementation complete.** All nine tickets are resolved.
+On **2026-10-06**, the human accepted the corrected actual u5 vault: “I checked
+the corrected vault, and it looks okay to me now.” The initial 1,552 files matched
+immutable audited m7 D; presentation preserved all non-app bytes. All technical
+and actual-user acceptance gates are complete at tested runtime
+`f91043ab7ca8ca5eee85d4e7156a6d2114be5fd9`. The [delivery record](research/delivery.md)
+links current public/source/package/native evidence and review limits. The u4
+rejection, warning-style correction, compact-reference repair and original review
+conclusions remain explicit history. PR creation is the forthcoming coordinator
+action; no package deployment/publication is claimed. The following milestone
+is pre-styling history and does not replace the final accepted record.
 
 Tickets **01–08** are resolved and integrated. Complete original-input
 preservation passed the fresh m5 twelve-output matrix and separate independent
@@ -107,6 +104,20 @@ integrated. The user requested a pull request when everything is complete; creat
 it after implementation and required acceptance, then attach it to this chat.
 
 ## Comments
+
+- 2026-10-06 (/root/native_vault_reviewer, separate merger): Integrated closing
+  metadata candidate `52201fd45b5fe6f5e1595d1e20797e86bd20d333` with
+  `git merge --ff-only` from clean root
+  `e0d64fa22b97753ba7b051ad71a94f556d96a2c0`, after exact clean worker/root,
+  ancestry exit 0, diff check and four allowed metadata files were confirmed.
+  Runtime/test/build/config bytes remain unchanged. Reviewed delivery/ticket/
+  final-review/release metadata against the explicit human corrected-u5 verdict,
+  preserving rejected-u4 history, repair chronology and technical proof pins.
+  Root privacy guards pass 116 delivered public blobs and 310 unpublished-history
+  blobs with no original record identities. Ticket 09 and this index are resolved;
+  all nine implementation tickets and actual-vault acceptance are complete.
+  PR creation remains forthcoming root action. No runtime, environment, UI,
+  gates, push/PR or worktree archive was performed during this metadata merge.
 
 - 2026-10-06 (/root/native_vault_reviewer, separate merger): Integrated
   technical metadata candidate `afb4c8f65ff7c6f1acb85c528845f5ec6532782c` by
