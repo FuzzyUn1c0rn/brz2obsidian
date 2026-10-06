@@ -31,6 +31,32 @@ User Stories 1–59, 63–65, 68–70; Implementation Decisions 1–25; Testing 
 
 ## Comments
 
+- 2026-10-06 (/root/integration_merger): Integrated partial evidence candidate
+  `aadb55521c252708e09fc9d66f5d00a77627e020` by
+  `git merge --ff-only aadb55521c252708e09fc9d66f5d00a77627e020` from clean
+  root `30ed23205d5569b1884376ffd559b5d0068f8456`; candidate clean and ancestry
+  check exit 0. Reviewed aggregate research, this ticket and testing guidance
+  against `tmp/ml-implementation/07/matrix.log`,
+  `tmp/m3/D-result.json`, `tmp/ml-implementation/07/partial-aggregate.json` and
+  `tmp/ml-implementation/07/duplicate-aggregate.json`.
+  Matrix log records nine independently accepted A/B/C outputs before D refusal;
+  actual D JSON is refused/invalid_source with null counts/receipt. Duplicate
+  aggregate confirms five included-owner physically absent groups, ten Type-15/
+  NoteType-0/state-2 declarations and independent scope refusal. Supplementary
+  checker exit is 0; complete preservation facts remain attributed execution
+  evidence from this run, with originals/562 retained-vault files unchanged.
+
+  Public aggregate facts accurately distinguish nine passed outputs from the
+  unpassed mandatory twelve-output gate and contain no original subject or
+  attachment identities/assets. Diff check initially found two Markdown
+  trailing-space errors in the new evidence file; corrected to paragraph breaks.
+  No redundant runtime tests were run for this evidence-only delta. Parent
+  remains **claimed**, every criterion unchecked. Source/global scope and oracle
+  duplicate-declaration compatibility need responsible 01/06 repairs, separately
+  reopened by coordinator, then a fresh complete matrix. No source/oracle code,
+  other ticket, original input, retained vault, native/user gate, PR or push was
+  changed or claimed here.
+
 - 2026-10-06 (/root/four_archive_implementer): Initial mandatory-original driver
   at clean root `30ed23205d5569b1884376ffd559b5d0068f8456`, selected root/src module
   `0.3.0`, exited **1** in fresh `tmp/m3`. All nine A/B/C exact/repeat/reordered

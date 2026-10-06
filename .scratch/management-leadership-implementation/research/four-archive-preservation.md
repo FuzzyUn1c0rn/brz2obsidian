@@ -1,7 +1,9 @@
 # Four-original preservation gate: initial run refused
 
-Date: 2026-10-06  
-Execution head: `30ed23205d5569b1884376ffd559b5d0068f8456`  
+Date: 2026-10-06
+
+Execution head: `30ed23205d5569b1884376ffd559b5d0068f8456`
+
 Status: incomplete; original D refused before publication
 
 The current root source module `0.3.0` passed complete independent exact,

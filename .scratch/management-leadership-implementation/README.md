@@ -46,8 +46,13 @@ forgotten thoughts throughout inspection and conversion** is resolved again
 after independently verified residual privacy guard and included-label repairs;
 entities and escaped punctuation survive reference adaptation. Bounded evidence
 does not establish arbitrary representation coverage. **07: Audit complete
-preservation across all four original archives** is claimed for the complete
-original-input matrix. Native actual-output and delivery tickets remain blocked.
+preservation across all four original archives** remains claimed with all criteria
+unchecked. Its first matrix passed nine A/B/C outputs but D refused before
+publication. It is blocked by newly proved source/global-scope and independent
+oracle duplicate-declaration compatibility repairs for included known-absent
+Type-15 TXT declarations. Coordinator will reopen the responsible 01 and 06
+slices after this evidence integration. Native actual-output and delivery
+tickets remain blocked; a fresh complete twelve-output matrix is required.
 Type gaps consume the shared source-gap capability
 from ordinary fallback. Combined safety and independent audit tooling can then
 progress independently. Complete four-original proof precedes native actual-output
@@ -83,6 +88,22 @@ integrated. The user requested a pull request when everything is complete; creat
 it after implementation and required acceptance, then attach it to this chat.
 
 ## Comments
+
+- 2026-10-06 (/root/integration_merger): Integrated **partial evidence only**
+  using `git merge --ff-only aadb55521c252708e09fc9d66f5d00a77627e020` from
+  clean root `30ed23205d5569b1884376ffd559b5d0068f8456`, after clean candidate
+  and ancestry checks. Reviewed the three-file aggregate/ticket/testing delta
+  against ignored matrix log, D refusal JSON, partial counts and duplicate scan.
+  Nine A/B/C independent audits passed; D refused with null receipt/counts.
+  Five included absent TXT member groups retain ten separate declarations;
+  production and independent scope guards both reject their duplicate spelling.
+  Eighteen supplementary source-free checks were read-only; preservation guards
+  retain four originals and 562 retained-vault files. Public evidence contains
+  aggregate facts without original subject/attachment identities or assets.
+  Corrected two Markdown trailing-space errors found by diff check; no runtime
+  tests were needed for this evidence-only integration. Ticket 07 remains claimed
+  and unchecked, blocked on coordinator-owned 01/06 compatibility repairs and a
+  fresh complete matrix. No full-preservation/native/user/release gate passed.
 
 - 2026-10-06 (/root/integration_merger): Integrated repaired ticket 06 with
   `git merge --ff-only e2d95ebc07187d53d5767879cff028f916032b13` from clean
