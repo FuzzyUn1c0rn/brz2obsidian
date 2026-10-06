@@ -1,6 +1,7 @@
 # 07: Audit complete preservation across all four original archives
 
-Status: ready-for-agent
+Status: claimed
+Assignee: /root/four_archive_implementer
 Approved: 2026-10-06
 Specification: [Accepted conversion specification](../spec.md)
 
@@ -29,6 +30,13 @@ Complete actual workflow output and independent raw-source oracle/driver with ex
 User Stories 1–59, 63–65, 68–70; Implementation Decisions 1–25; Testing Decisions 12–17, 20. This ticket confirms actual complete preservation rather than reimplementing earlier slices.
 
 ## Comments
+
+- 2026-10-06 (/root): Claimed after independently verified ticket 06 integration
+  at `867764694da8048b7adca3cddf6e74a196e5c395`. Run the complete four-original
+  exact/repeat/reorder matrix through the root project environment and verified
+  integration checkout, using fresh short ignored outputs. An isolated worker
+  branch owns aggregate evidence and ticket completion. Original inputs and
+  retained user vaults remain read-only; native/user/release gates stay pending.
 
 - 2026-10-06 (/root): Published after the user approved all nine tickets and their
   dependencies, then explicitly invoked implement-spec for complete implementation.

@@ -46,7 +46,8 @@ forgotten thoughts throughout inspection and conversion** is resolved again
 after independently verified residual privacy guard and included-label repairs;
 entities and escaped punctuation survive reference adaptation. Bounded evidence
 does not establish arbitrary representation coverage. **07: Audit complete
-preservation across all four original archives** is now eligible and unclaimed.
+preservation across all four original archives** is claimed for the complete
+original-input matrix. Native actual-output and delivery tickets remain blocked.
 Type gaps consume the shared source-gap capability
 from ordinary fallback. Combined safety and independent audit tooling can then
 progress independently. Complete four-original proof precedes native actual-output
