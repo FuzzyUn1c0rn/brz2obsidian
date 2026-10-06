@@ -139,13 +139,27 @@ Omission of the exact original backup alone does not make that destination safe.
 Authored reference labels are interpreted separately from body spans; emphasis,
 code, entities and escaped literal punctuation retain their displayed text while
 untouched CRLF/CR/LF body spans remain exact.
-The current oracle/driver group passes 243 public checks: the 115 earlier oracle
+The earlier oracle/driver baseline passed 243 public checks: the 115 earlier oracle
 controls, 116 v3 controls and twelve driver controls. Escaped opening/closing and
 balanced bracket labels retain richer record display text separately from sanitized
 wiki aliases; nested active phrases and incomplete local destinations remain closed.
 Three corruptions still pass
 the source-free convention checker after consistent rehashing; the raw-source
 oracle rejects their changed body, generated order or diagnostic facts.
+
+Repeated local member declarations receive a narrowly bounded raw-source audit
+exception only when every row has a distinct trusted identity, SourceType 2,
+Type 15, NoteType 0, a positive integer declared length, state 2, a safe TXT path,
+no icon or special-role flags and physical ZIP absence. The raw scope retains
+each included declaration and independently omits an eligible excluded-owner
+group. Existing per-declaration auditing still requires intact same-owner PDFs;
+zero-length TXT/PDF handling retains its separate reviewed rule. Public controls
+cover both row orders, unsupported group members and complete forgotten omission.
+A five-pair plus three-single fixture requires thirteen distinct warnings,
+evidence pointers and observations with no invented payload or reference credit.
+Semantic corruption controls repair actual receipt hashes and counts before
+checking collapsed declarations/warnings, paired lengths/evidence and fabricated
+bytes/reference credit against the raw source.
 
 The independent image interpreter uses standard-library Python imports and existing
 Windows WIC codecs through `ctypes`, never production image helpers or Pillow.

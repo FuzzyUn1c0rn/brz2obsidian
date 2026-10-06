@@ -103,6 +103,7 @@ def scope(raw, archive):
         excluded.add(key)
     omitted = set(excluded)
     members = set()
+    declarations = {}
     dropped = set()
     for key, row in attachments.items():
         assert row["SourceId"] in thoughts, "raw attachment owner"
@@ -116,12 +117,38 @@ def scope(raw, archive):
                 and ":" not in path
             ), "raw safe unique path"
             name = member(row)
-            assert name not in members, "raw unique payload declaration"
+            declarations.setdefault(name, []).append(row)
             members.add(name)
             if row["SourceId"] in excluded:
                 dropped.add(name)
         if row["SourceId"] in excluded:
             omitted.add(key)
+    for name, rows in declarations.items():
+        if len(rows) == 1:
+            continue
+        assert name not in archive.namelist() and all(
+            all(
+                type(row[field]) is int and row[field] == value
+                for field, value in (("SourceType", 2), ("Type", 15), ("NoteType", 0))
+            )
+            and type(row["DataLength"]) is int
+            and row["DataLength"] > 0
+            and states.get(row["Id"]) == 2
+            and PurePosixPath(row["Location"]).suffix.casefold() == ".txt"
+            and all(
+                row.get(flag, False) is False
+                for flag in (
+                    "IsIcon",
+                    "IsBrainAttachment",
+                    "IsBrainIcon",
+                    "IsWallpaper",
+                    "IsAiScriptsFile",
+                    "IsKeyboardShortcutsFile",
+                    "IsToolbarConfigFile",
+                )
+            )
+            for row in rows
+        ), "raw unique payload declaration"
     for key, row in links.items():
         endpoints = {row["ThoughtIdA"], row["ThoughtIdB"]}
         assert endpoints <= thoughts.keys(), "raw live endpoints"
