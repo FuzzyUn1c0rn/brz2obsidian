@@ -1,6 +1,6 @@
 # 01: Exclude forgotten thoughts throughout inspection and conversion
 
-Status: claimed
+Status: resolved
 Assignee: /root/txt_declaration_implementer
 Approved: 2026-10-06
 Specification: [Accepted conversion specification](../spec.md)
@@ -11,7 +11,7 @@ Specification: [Accepted conversion specification](../spec.md)
 
 ## Acceptance criteria
 
-- [ ] Default exclusion applies to every BRZ archive from a valid populated ForgottenDateTime, independently of attachment state. There is no include-forgotten option. Establish trustworthy identities/ownership before scoping; malformed scope markers and unsafe source identities/paths still refuse.
+- [x] Default exclusion applies to every BRZ archive from a valid populated ForgottenDateTime, independently of attachment state. There is no include-forgotten option. Establish trustworthy identities/ownership before scoping; malformed scope markers and unsafe source identities/paths still refuse.
 - [x] Excluded subjects contribute no assigned/reserved target, note, owned local/external asset, original copy, icon/provider effect, classification/tag membership, relationship, stub, warning subject, individual exclusion identity/list/count, associated raw record or unsafe history. Included counts describe included scope. Omitted subjects cannot affect collision names, greedy selection or ordering.
 - [x] Remove an entire authored linked phrase/embed resolving to an excluded subject, including label/target, without a plain-text reminder or deletion marker. Preserve other text, code literals, Unicode and newline spelling. Unknown nonexcluded targets retain refusal. No title/pixel matching removes unrelated included content.
 - [x] Preserve byte-exact safe originals and provably included raw evidence with original values and omission/null distinctions. Omit unsafe exact originals rather than editing and calling them exact; omit unsafe fields/records/whole unscopable history collections. Raw spans, embedded state-map keys and guide-linked evidence cannot reintroduce exclusions.
@@ -30,6 +30,59 @@ Actual synthetic ZIPs through public inspect/convert, thin text/JSON commands an
 User Stories 15–16, 32–39, 49–50, 56–57, 60–62, 69–70; Implementation Decisions 1–8, 20–21, 23, 25; Testing Decisions 1–3, 5, 7, 10, 16–17, 20. Read the accepted specification; these references identify emphasis, not permission to ignore cumulative requirements.
 
 ## Comments
+
+- 2026-10-06 (/root/txt_declaration_implementer): Implemented the reopened
+  declaration-ownership repair at runtime commit
+  `3a4b1db80fef07c1dfaf857dd114ea84beaa5c64` on `codex/ml-v3-01-txt`, based
+  on clean integration `45a3bf0abd613838177aa353ad365d8831b39d69`.
+  `git merge codex/management-leadership-v3` reports already up to date.
+  The reader passes its path/namespace/CRC-verified ZIP member names into
+  the outer source scope guard. The guard checks all rows in each local-path
+  group before filtering: only distinct, trusted, same-owner declarations
+  with integer SourceType 2 / Type 15 / NoteType 0, positive integer length,
+  state 2, TXT suffix, valid naming and no active/invalid semantic roles can
+  share a physically absent path. A present member always retains refusal.
+  Included rows still pass the established per-declaration attachment
+  normalizer, including intact same-owner PDF support; no core coupling,
+  public shape/version change or validation bypass was introduced.
+
+  Eligible excluded-owner groups are omitted privately after global ownership
+  proof. An unsupported single excluded role remains ignored under established
+  scope policy; an ineligible or physically present duplicate group refuses
+  without exposing its excluded owner/declaration identities. Zero-length
+  duplicate TXT is outside the new exception; existing single zero-TXT/PDF,
+  absent note/icon and present-resource behavior remains covered by regression.
+
+  TDD uses the already confirmed public Workflow and thin CLI seams. A valid
+  two-declaration/intact-PDF fixture first failed with the original duplicate
+  guard, then passed with separate warning/length/evidence/accounting facts.
+  Handwritten controls cover two/three identities, repeat and root/record
+  reorder, absent byte/hash/target/reference claims, original source and PDF
+  bytes, JSON/text CLI agreement, private exclusion and caller preservation.
+  Mixed three-row near misses run in both orders; present/absent duplicate
+  note, image, icon, generic-file and unsupported roles retain refusal.
+  Red/green and focused logs are ignored under `tmp/ml-txt/` in this worktree.
+
+  Focused final command, with root project interpreter and explicit worktree
+  `PYTHONPATH=<worktree>/src;<worktree>`:
+  `python -m pytest -q tests/application/test_absent_txt_declarations_workflow.py tests/application/test_zero_length_txt_workflow.py tests/application/test_verified_coverage.py tests/application/test_forgotten_workflow.py tests/sources/test_reader.py tests/test_architecture.py --basetemp=tmp/ptxt -o cache_dir=tmp/ml-txt/cache`
+  passed **306 tests in 19.74s**. Ruff `check --no-cache .`, Ruff
+  `format --check .` (**131 files**) and `pip check` pass. Complete public
+  `python -m pytest -q --basetemp=tmp/ptxtfull -o cache_dir=tmp/ml-txt/cache-full`
+  passed **1,327 tests in 235.39s**, exit 0, at the unchanged runtime commit.
+  All Python commands used
+  `C:/Users/stefa/projects/brz2obsidian/.venv/Scripts/python.exe`; the selected
+  runtime import resolves to this worktree's `src/brz2obsidian/__init__.py`.
+  `git diff --check` is clean. Independent code verification **PASS** binds to
+  clean exact runtime `3a4b1db80fef07c1dfaf857dd114ea84beaa5c64`: **127
+  handwritten controls** and **264 maintained tests**; coordinator receipt
+  is ignored root `tmp/ml-implementation/01-txt/verifier-code-report.json`.
+  The reopened ownership criterion is satisfied cumulatively; this ticket is
+  resolved with bounded public-seam proof. Integration remains coordinator-owned.
+  No original archive,
+  retained vault, independent oracle or other ticket was edited; complete
+  four-original preservation, native output review and user acceptance remain
+  pending.
 
 - 2026-10-06 (/root): Reopened the ownership-establishment criterion after the
   actual original-source matrix at `30ed232` proved a compatibility defect.
