@@ -1,6 +1,6 @@
 # 06: Extend the independent raw-source audit to the new conversion policy
 
-Status: claimed
+Status: resolved
 Assignee: /root/txt_oracle_implementer
 Approved: 2026-10-06
 Specification: [Accepted conversion specification](../spec.md)
@@ -11,7 +11,7 @@ Specification: [Accepted conversion specification](../spec.md)
 
 ## Acceptance criteria
 
-- [ ] Extend the existing standard-library-only independent oracle and preserve its import-boundary checks. Derive included identities, references, safe evidence, selections/paths, graph/assignments, supplied-body expected adaptations, absent-declaration predicates, image eligibility/associations/order and provider effects directly from raw original source facts. Production filtered snapshots/counts/dispositions/manifests are observed output, never expected preservation truth.
+- [x] Extend the existing standard-library-only independent oracle and preserve its import-boundary checks. Derive included identities, references, safe evidence, selections/paths, graph/assignments, supplied-body expected adaptations, absent-declaration predicates, image eligibility/associations/order and provider effects directly from raw original source facts. Production filtered snapshots/counts/dispositions/manifests are observed output, never expected preservation truth.
 - [x] Audit exact safe originals and all required payload hashes/lengths, every supplied-body edit, authored-reference accounting, explicit generated presentation obligations, resolving diagnostic links, raw state/path/length/outcome, complete category membership/hierarchy/native support and excluded-content absence. Do not infer recovery, emptiness or original-note bytes for absent bodies.
 - [x] Positive public synthetic controls exercise all behavior slices and earlier supported cases independently. Corruption controls falsify included-body text, unsafe/safe evidence, excluded identities/owned bytes/labels, missing/duplicate/misowned/generated-order embeds, gap predicates, fabricated originals/reference credit, neutral/provider/override effects, graph/membership/navigation and diagnostics.
 - [x] Corruption tests recompute counts and file receipts consistently before rejection, proving semantic preservation rather than only manifest mismatch. A structurally valid forged receipt or clean production convention checker cannot mask each corruption. Retain meaningful existing controls and no private archive in public tests.
@@ -29,6 +29,68 @@ Existing independent raw-source oracle/driver public callables and CLI with synt
 User Stories 16–20, 32–39, 41–49, 54–65, 68–70; Implementation Decisions 1–25 as independently audited obligations; Testing Decisions 5–10, 12–17, 20.
 
 ## Comments
+
+- 2026-10-06 (/root/txt_oracle_implementer): Completed the reopened narrow
+  independent scope repair on `codex/ml-v3-06-txt`. Verified runtime integration
+  `098fe473cd5ad44dc3ea1d6564fde958a9665ef6` was merged before final validation.
+  The independently verified clean CODE head is
+  `fc7d4ad9cf3ec8d3a6373f1af12d73b85f778bbe`; this completion entry changes
+  ticket metadata only and preserves that head's module/test bytes.
+
+  Expected facts still come from raw records, trusted identities/ownership,
+  state-map values and physical ZIP absence. Repeated groups qualify only when
+  every declaration has the reviewed positive TXT role, safe path, positive
+  integer length, state 2, string Name metadata, false Is* flags and null/empty
+  custom attachment types. Each included declaration retains its own identity,
+  evidence, declared length and warning. Eligible excluded groups are omitted
+  completely; included TXT findings still require the independently audited
+  intact same-owner PDF basis. Zero-length TXT support remains unchanged.
+
+  Public red/green scope tracers preserved three different declared lengths in
+  either order. A five-pair plus three-single actual conversion proves thirteen
+  distinct findings, six present payloads and zero authored reference credit;
+  no missing TXT gains a path, file, length or hash. Complete excluded-owner
+  conversion and six semantic corruptions retain actual publication proof and
+  recomputed valid JSON receipts, counts and every actual file hash before the
+  source-required oracle rejects collapsed declarations/warnings, paired
+  length/evidence lies or invented payload/reference credit.
+
+  Independent review rejected the earlier clean CODE candidate
+  `2803f927753c40bd8751f40a6608ec0d2efecdd0`: twenty-four included/excluded,
+  both-order Name/unknown Is*/custom-type controls did not raise, and a complete
+  consistently rehashed excluded-role counterexample was falsely accepted.
+  Its **1409 maintained passes in 246.67s** remain historical test evidence,
+  not independent acceptance. All twenty-four failures were reproduced before
+  the repair; sixteen nearby valid metadata controls now stay green. Six whole
+  source-rebound controls reject unknown Is*=True/0 but accept False with valid
+  receipt hashes and unchanged scoped preservation obligations. No speculative
+  global VideoHtml normalization was added: included role/PDF interpretation
+  remains distinct from trusted whole-owner exclusion.
+
+  All commands used `C:/Users/stefa/projects/brz2obsidian/.venv/Scripts/python.exe`
+  with `PYTHONPATH=<this checkout>/src;<this checkout>`. Selected package path
+  resolved to this checkout's `src`, version `0.3.0`; no installation or editable
+  environment retargeting occurred. Final focused command
+  `python -m pytest tests/local_acceptance/test_duplicate_txt.py -q --basetemp=tmp/ml-txt-oracle/i --tb=short`
+  passed **128 checks in 7.70s**. Final whole-project command
+  `python -m pytest -q --basetemp=tmp/ml-txt-oracle/j --tb=short`
+  passed **1455 checks in 256.22s**, including the closed stdlib/local import
+  barrier and explicit WIC capability controls. Ruff lint passed; Ruff format
+  reported **132 files already formatted**; pip reported no broken requirements;
+  diff checks passed.
+
+  Root's independent exact-clean-head replay of `fc7d4ad` passed **116 handwritten
+  checks in 10.59s** and **372 maintained checks in 124.95s**, with clean state
+  before and after. Former raw and whole-oracle false acceptances now refuse;
+  adjacent valid controls remain accepted. Eight additional VideoHtml cases
+  agree with the scoped policy. Root retains small ignored independent receipts
+  under `tmp/ml-implementation/06-txt/`; worker progress history is under
+  `tmp/ml-txt-oracle/progress.txt`. This bounded public tooling proof does not
+  certify the four private originals, the twelve-output preservation matrix,
+  native Obsidian rendering, actual user acceptance or delivery. Ticket 07 and
+  subsequent gates remain separate and incomplete. No original archive, retained
+  vault, source runtime helper, specification, parent index, other ticket, native
+  UI, PR or remote publication was changed by this oracle repair.
 
 - 2026-10-06 (/root): Reopened raw scope interpretation after the actual
   original D matrix exposed five included-owner pairs of physically absent,
