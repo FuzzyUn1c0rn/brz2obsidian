@@ -1,6 +1,6 @@
 # 09: Deliver the reviewed release after actual-vault user acceptance
 
-Status: claimed
+Status: resolved
 Assignee: /root/release_documenter
 Approved: 2026-10-06
 Specification: [Accepted conversion specification](../spec.md)
@@ -16,13 +16,13 @@ requires renewed affected checks and a revised user review.
 
 ## Acceptance criteria
 
-- [ ] Obtain and record the user's actual verdict on a clean actual converter-output Management & Leadership review vault, keeping the audited baseline separate from mutable copies. If changes are requested, repair the responsible seam and repeat affected public/source/native gates before requesting the revised verdict. Do not close delivery while this verdict is pending.
+- [x] Obtain and record the user's actual verdict on a clean actual converter-output Management & Leadership review vault, keeping the audited baseline separate from mutable copies. If changes are requested, repair the responsible seam and repeat affected public/source/native gates before requesting the revised verdict. Do not close delivery while this verdict is pending.
 - [x] Independently review the complete implementation against the accepted specification and documented standards from a fixed recorded baseline/tip. Resolve material findings, rerun affected checks, and record review scope/proof rather than relying on self-review or prototype evidence.
 - [x] Run the final complete public pytest suite, Ruff check/format check and pip check using the project environment. Run affected checks during repairs before the complete final gate; record exact commands/version/results and honest any remaining limits. No required gate is omitted because planning tickets were approved.
 - [x] Build and smoke the delivered 0.3.0 package and documented installation/library/console/module examples. Contracts/source profile/renderer/results/records agree on version 3, format remains 5 and checker remains 1 unless its actual public shape changes; schemas, arguments and outcomes match observed output. Runtime distribution excludes private/dev/prototype artifacts.
 - [x] Finish public guidance for source coverage, default exclusion, exact-safe-copy omission, present-body precedence, archive-only image fallback/layout A, unknown missing content, actionable optional source investigation, neutral type icons, category hierarchy, maintenance, checker limits, preservation/receipt claims and four-source acceptance usage.
 - [x] Retain complete independent four-archive matrix and native evidence against the delivered code. If repairs change content/paths/contracts, repeat affected proofs and any invalidated final matrix/native/package gates. Recheck original/retained-vault fingerprints; a repaired/re-exported archive stays a distinct separately accepted source.
-- [ ] Publish an aggregate delivery record with the real final user verdict, review/tooling/source/native/package results and honest source-gap limits. Keep detailed private assets/vaults/screenshots/records ignored. Mark implementation delivery complete only after every criterion passes; do not deploy, publish packages or alter retained user vaults without applicable authorization.
+- [x] Publish an aggregate delivery record with the real final user verdict, review/tooling/source/native/package results and honest source-gap limits. Keep detailed private assets/vaults/screenshots/records ignored. Mark implementation delivery complete only after every criterion passes; do not deploy, publish packages or alter retained user vaults without applicable authorization.
 
 ## Verification boundary
 
@@ -183,3 +183,19 @@ User Stories 49–50, 60–70; Implementation Decisions 1–3, 21–25; Testing 
   Commands, proof paths, privacy/sampling limits and separate review chronology
   are in the current release/final-review records. This metadata-only candidate
   does not alter runtime or declare delivery/PR/publication.
+
+- 2026-10-06 (/root/release_documenter): The human explicitly accepted the
+  corrected actual u5 vault in the current root conversation: “I checked the
+  corrected vault, and it looks okay to me now.” The fresh u5/Leadership copy
+  initially matched all 1,552 audited m7 D files at runtime
+  `f91043ab7ca8ca5eee85d4e7156a6d2114be5fd9`; its copy receipt is retained.
+  This is the actual user verdict required by this ticket, not agent acceptance.
+  The u4 changes-required verdict and repair/fresh-proof chronology remain
+  historical. All technical gates and all acceptance criteria now pass; Status
+  is resolved. The [delivery aggregate](../research/delivery.md) records completed
+  implementation/user acceptance with source-gap limits and separated reviews.
+  Root retained 6,392 exact regular repair files, 16 package proof files and 469
+  output files under worker-evidence-f91043a-exact; link aliases are metadata and
+  the failed expanded-copy attempt stays separate. PR creation is forthcoming
+  root action; no package deployment/publication or further runtime change is
+  implied. This closing candidate changes metadata only.

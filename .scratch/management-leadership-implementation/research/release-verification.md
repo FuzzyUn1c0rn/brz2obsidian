@@ -1,7 +1,32 @@
-# Release verification candidate
+# Accepted release verification
 
 Date: 2026-10-06
-Status: styling repair and refreshed technical gates passed — renewed user verdict and delivery pending.
+Status: implementation and actual-vault user acceptance complete; PR creation forthcoming.
+
+## Final actual-vault verdict
+
+On **2026-10-06**, after reviewing the corrected clean actual vault, the human
+user explicitly said: **“I checked the corrected vault, and it looks okay to me
+now.”** This accepts the separate fresh `tmp/u5/Leadership` copy presented from
+runtime `f91043ab7ca8ca5eee85d4e7156a6d2114be5fd9`. Its initial **1,552 files**
+were byte exact to audited m7 D (`tmp/ml-implementation/09/notice-style-user-copy-receipt.json`).
+This is the user's actual verdict, not an agent inference or prototype approval.
+The earlier u4 styling rejection remains historical evidence below.
+
+All ticket 09 criteria are satisfied. [Delivery aggregate](delivery.md) records
+completed implementation/user acceptance; PR creation is a forthcoming coordinator
+action, with no package publication implied by this local acceptance record.
+Missing source prose/captions/authored layout remain unknown; available images
+were displayed from the archive, not reconstructed into unavailable content.
+
+Root retained current private verification files byte exactly under
+`tmp/ml-implementation/09/worker-evidence-f91043a-exact/`: 6,392 regular
+notice-style repair files, 16 package-proof files and 469 synthetic output files.
+Directory-link aliases are recorded as metadata, not followed or counted as
+regular copied files. `retention-receipt.json` confirms the exact retention;
+the earlier failed expanded-copy attempt remains separate history. These retained
+`notice-style-repair/`, `package-proof/` and `package-outputs/` directories preserve
+the isolated execution evidence referenced below after worktree retirement.
 
 ## Actual-vault styling rejection
 
@@ -12,9 +37,9 @@ Native evidence below established other observed behaviors, but missed this
 visual requirement. Ticket 09 was reopened for a source-gap warning-callout repair,
 affected independent/native checks and refreshed final runtime/package/source
 gates. Those technical gates now pass at the styling runtime pin below; the
-original rejection remains part of the actual-vault history. The user verdict is **changes required**, not accepted; delivery and PR
-remain pending. The successful technical gates below describe the pre-styling
-runtime and are retained as history.
+original rejection remains part of the actual-vault history. That earlier user verdict was **changes required**. After the correction and
+fresh gates, the user accepted u5 as recorded above. Pre-styling technical gates
+are retained as history and remain distinct from post-styling proof.
 
 ## Warning-callout repair candidate
 
@@ -43,8 +68,8 @@ commands/logs and final candidate hashes remain under release-worktree
 This isolated candidate established generated syntax and conservation. Separate
 independent repair verification, actual affected native observations and fresh
 final public/package/source gates subsequently passed, as recorded below. The
-user's earlier verdict remains changes required pending renewed review; delivery
-remains open.
+earlier changes-required verdict is preserved; the renewed actual u5 verdict
+above closes implementation acceptance.
 Earlier technical/native records below are pre-styling history and cannot close
 those reopened requirements.
 
@@ -94,9 +119,8 @@ Earlier tmp/10 and styling repair evidence remain intact.
 
 These refreshed public/package gates alone do not establish source/native
 appearance acceptance. The separate complete m7 audit/delta and actual affected
-native samples now pass as recorded below. The renewed user verdict is still
-pending. The earlier user verdict remains changes
-required, and earlier technical results below describe pre-styling runtime.
+native samples now pass as recorded below. The actual renewed u5 verdict is recorded above. The earlier changes-required
+verdict and pre-styling technical results below remain historical.
 
 ## Post-styling source/delta and actual native gates
 
@@ -159,8 +183,9 @@ remain. Native technical PASS does not replace the renewed user's verdict.
 Independent review/repair, public/package, source/delta and affected native gates
 are now complete for runtime `f91043ab7ca8ca5eee85d4e7156a6d2114be5fd9`.
 This document-only candidate must be recorded separately from that execution pin.
-The coordinator prepares a separate clean current user review copy; the original
-u4 rejection is retained and actual renewed acceptance/delivery remain pending.
+The coordinator prepared the separate clean current u5 copy, and the human
+accepted it on 2026-10-06. The original u4 rejection is retained; this document
+records implementation acceptance, while PR creation remains forthcoming.
 
 ## Historical compact-reference repair boundary
 
@@ -426,13 +451,12 @@ optional source investigation and checker/preservation limits remain explicit.
 The untouched clean actual user review copy awaits the user's verdict; this
 package work neither opens nor mutates it or any private original/retained vault.
 
-## Remaining delivery gate
+## Delivery disposition
 
-The post-styling technical candidate has independently verified repair, fresh
-public/package/source proof, strict notice-only conservation and actual affected
-native observations at `f91043ab7ca8ca5eee85d4e7156a6d2114be5fd9`.
-The original user verdict was changes required. A renewed actual verdict on the
-current clean converter output and final aggregate delivery record remain pending.
-No agent/native/source/checker PASS supplies that verdict. Any later material
-output repair must refresh affected proof and invalidated user review. Recovered
+All implementation technical and actual-vault user gates are complete at runtime
+`f91043ab7ca8ca5eee85d4e7156a6d2114be5fd9`, with the explicit corrected-vault
+acceptance above. Ticket 09 is resolved. The final metadata commit is separate
+from this executed runtime pin. PR creation remains a forthcoming coordinator
+action; no package deployment/publication is claimed. A later material output
+change requires refreshed affected proof and renewed actual review. Recovered
 or re-exported archives remain separately fingerprinted acceptance inputs.

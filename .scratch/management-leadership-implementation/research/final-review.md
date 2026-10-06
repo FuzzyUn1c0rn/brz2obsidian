@@ -3,8 +3,9 @@
 Date: 2026-10-06
 
 These are separate review axes. Their original reports and follow-up chronology
-remain unchanged in root ignored `tmp/ml-implementation/09/`. The user's actual
-vault verdict and release delivery remain pending.
+remain unchanged in root ignored `tmp/ml-implementation/09/`. The human accepted
+the corrected actual u5 vault on 2026-10-06; [delivery](delivery.md) records the
+completed implementation/user gates. PR creation remains forthcoming.
 
 ## Standards
 
@@ -105,4 +106,7 @@ report is relabeled as a styling acceptance, and no new verdict is inferred.
 Current follow-up proof is root `tmp/ml-implementation/07/m7-independent-gate.md`,
 `tmp/ml-implementation/09/notice-style/delta/report.md` and
 `tmp/ml-implementation/09/notice-style/native/report.json` with actual retained
-pixels. The renewed user verdict and aggregate delivery closure remain pending.
+pixels. The human subsequently accepted the corrected actual u5 vault on
+2026-10-06: “I checked the corrected vault, and it looks okay to me now.”
+Implementation/user acceptance is complete; PR creation remains forthcoming.
+The earlier u4 rejection and original review limitations remain unchanged history.
