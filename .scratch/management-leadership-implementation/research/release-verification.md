@@ -1,9 +1,42 @@
 # Release verification candidate
 
 Date: 2026-10-06
-Status: partial — independent final review, actual-vault user verdict and delivery pending.
+Status: partial — repair verification, fresh technical gates, actual-vault user verdict and delivery pending.
 
-This record aggregates completed technical evidence for the 0.3.0 candidate.
+## Current repair boundary
+
+The full-implementation independent Spec review at frozen integration
+`5f971b96500a33d58ec09f4d9bd6c2d08f9a8cde` reported no actionable findings.
+Standards retained its original optional P3 observation and subsequently confirmed
+one material P2: excluded-reference removal accepted padded compact authorities
+before the normal reference binder could reject their unsupported syntax.
+These are separate review conclusions; Spec's zero does not erase the P2.
+
+The isolated repair validates the reviewed compact-reference boundary before
+identity-based removal, sharing the existing binder validation rather than
+permissively decoding another copy. Five public inspect/convert regressions cover
+one/two padding and padded query, missing-path and fragment variants. Each requires
+private refusal, no receipt/destination and unchanged synthetic source. RED was
+five failures (unexpected clean); GREEN five passes. The affected source/workflow/
+architecture selection passed 171 tests; alternate-source controls passed 37;
+selected Ruff check/format passed. Original reproduction and RED/GREEN command,
+import and file-hash evidence remain under release-worktree
+`tmp/09/reference-repair/` (`repro.json`, `red.log`, `green.log`, `affected.log`,
+`alternate.log`, `repair-proof.json`).
+
+**The remainder of this record is retained pre-repair evidence.** Its 136-file
+regression equality and wheel SHA-256/example results do not certify the repaired
+runtime. Ticket 09's full-public and package criteria are unchecked. Independent
+repair verification, fresh complete public/package gates and a fresh four-original
+matrix/re-audit are pending. Existing source/native observations remain history;
+comparison of fresh native-facing bytes determines affected native refresh.
+The untouched actual user review copy and final user verdict still require the
+coordinator's final proof sequence. No repair-stage private-input run, broader
+regression, package rebuild or user-vault mutation has been performed here.
+
+## Pre-repair candidate evidence
+
+This record aggregates completed technical evidence for the pre-repair 0.3.0 candidate.
 It does not declare delivery, acceptance or publication. Public guidance/package
 verification ran from integration ancestor
 `d057533b1025d2d68ef90ec989dfb52cd3abeb68` on `codex/ml-v3-09`.
@@ -11,7 +44,7 @@ The candidate changes guidance/evidence only: runtime, tests, dependency manifes
 and build configuration are unchanged. The final independent review must record
 its own fixed candidate tip, findings and any resulting repairs.
 
-## Public and environment gate
+## Pre-repair public and environment gate
 
 The complete public suite ran in the root project environment at
 `91706941877ad71fb9087debee791f5a6bbc9ec4`: **1,508 passed in 293.16 seconds**, exit 0.
@@ -49,7 +82,7 @@ passed, exit 0 (`pip-check-refresh.json`). The isolated verifier did not install
 retarget or mutate this environment; it selected its worktree using explicit
 `PYTHONPATH=<worktree>/src;<worktree>`.
 
-## Final wheel and documented examples
+## Pre-repair wheel and documented examples
 
 Build: root project interpreter, from the isolated checkout,
 `-m pip wheel --no-deps --no-build-isolation --wheel-dir tmp/09/wheels .`.
@@ -89,7 +122,7 @@ The JSON captures interpreter/import bindings, distribution versions, actual
 commands/outcomes and regression-input comparison. Those disposable scripts are
 verification records, not new production or reusable test interfaces.
 
-## Source and native gates retained
+## Source and native observations retained
 
 The [complete independent four-original matrix](four-archive-preservation.md)
 passed at frozen runtime `e2c5fc3f05d2daa0d0547d2bbaa2b12557a248b5`:

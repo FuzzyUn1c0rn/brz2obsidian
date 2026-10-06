@@ -68,34 +68,39 @@ class _HtmlReferences(HTMLParser):
         )
 
 
+def compact_thought_identity(destination):
+    """Validate the reviewed compact URI boundary before decoding its identity."""
+    parts = urlsplit(destination)
+    if parts.netloc.casefold() in {"api.thebrain.com", "api.bra.in"}:
+        _refuse(
+            "unsupported_feature",
+            "Cross-Brain/server-qualified thought references are unsupported",
+        )
+    compact = parts.netloc
+    if (
+        parts.scheme != "brain"
+        or not re.fullmatch(r"[A-Za-z0-9_-]{22}", compact)
+        or not parts.path.startswith("/")
+        or parts.query
+        or parts.fragment
+    ):
+        _refuse(
+            "invalid_reference",
+            "Invalid or unsupported compact thought reference",
+        )
+    raw = base64.urlsafe_b64decode(compact + "==")
+    if base64.urlsafe_b64encode(raw).decode().rstrip("=") != compact:
+        _refuse("invalid_reference", "Noncanonical compact thought identity")
+    return str(UUID(bytes_le=raw))
+
+
 def bind_note_references(document, assets, thoughts):
     """Bind parsed source destinations to canonical IDs after asset inventory."""
     bound = []
     for reference in document.references:
         destination = reference.target
         if reference.kind == "item":
-            parts = urlsplit(destination)
-            if parts.netloc.casefold() in {"api.thebrain.com", "api.bra.in"}:
-                _refuse(
-                    "unsupported_feature",
-                    "Cross-Brain/server-qualified thought references are unsupported",
-                )
-            compact = parts.netloc
-            if (
-                parts.scheme != "brain"
-                or not re.fullmatch(r"[A-Za-z0-9_-]{22}", compact)
-                or not parts.path.startswith("/")
-                or parts.query
-                or parts.fragment
-            ):
-                _refuse(
-                    "invalid_reference",
-                    "Invalid or unsupported compact thought reference",
-                )
-            raw = base64.urlsafe_b64decode(compact + "==")
-            if base64.urlsafe_b64encode(raw).decode().rstrip("=") != compact:
-                _refuse("invalid_reference", "Noncanonical compact thought identity")
-            canonical = str(UUID(bytes_le=raw))
+            canonical = compact_thought_identity(destination)
             if canonical not in thoughts or thoughts[canonical]["Kind"] == 5:
                 _refuse(
                     "invalid_reference",

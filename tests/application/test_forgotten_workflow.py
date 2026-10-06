@@ -767,6 +767,41 @@ def test_scope_and_unknown_reference_failures_are_private_and_leave_caller_files
     }
 
 
+@pytest.mark.parametrize(
+    "destination",
+    (
+        "brain://{compact}=/Private-title",
+        "brain://{compact}==/Private-title",
+        "brain://{compact}==/Private-title?query=1",
+        "brain://{compact}==",
+        "brain://{compact}==/Private-title#fragment",
+    ),
+    ids=("one-padding", "two-padding", "query", "no-path", "fragment"),
+)
+def test_padded_excluded_reference_refuses_privately_without_publication(
+    tmp_path, destination
+):
+    compact = base64.urlsafe_b64encode(UUID(identity(2)).bytes_le).decode().rstrip("=")
+    target = destination.format(compact=compact)
+    source = graph_archive(
+        tmp_path / "source.brz",
+        {1: "Home", 2: "Private"},
+        notes={1: (f"before [Private label]({target}) after".encode(), 4)},
+    )
+    rewrite(source, lambda p: forget(p, 2))
+    original = source.read_bytes()
+    vault = tmp_path / "vault"
+    workflow = default_workflow()
+    for result in (workflow.inspect(source), workflow.convert(source, vault)):
+        assert result.outcome == "refused"
+        assert result.issues[0].code == "invalid_reference"
+        assert result.receipt is None
+        for secret in (compact, target, "Private", identity(2)):
+            assert secret not in result.model_dump_json()
+    assert not vault.exists()
+    assert source.read_bytes() == original
+
+
 def test_malformed_reference_to_excluded_subject_refuses_without_echoing_its_target(
     tmp_path,
 ):

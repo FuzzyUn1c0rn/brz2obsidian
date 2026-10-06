@@ -24,7 +24,11 @@ from .findings import (
     ZERO_LENGTH_ABSENT_TXT_RULE,
 )
 from .images import validate_note_image
-from .notes import bind_note_references, trace_note_references
+from .notes import (
+    bind_note_references,
+    compact_thought_identity,
+    trace_note_references,
+)
 from .scope import contains_omitted_identity
 from .semantics import validate_semantic_fields
 from .videos import reviewed_video
@@ -362,17 +366,8 @@ def normalize_attachments(
             removals = []
             for reference in references:
                 if reference.kind == "item":
-                    from base64 import urlsafe_b64decode
-                    from uuid import UUID
-
-                    parts = urlsplit(reference.target)
-                    try:
-                        target = str(
-                            UUID(bytes_le=urlsafe_b64decode(parts.netloc + "=="))
-                        )
-                    except ValueError, TypeError:
-                        target = None
-                    if parts.scheme == "brain" and target in excluded:
+                    target = compact_thought_identity(reference.target)
+                    if target in excluded:
                         removals.append(reference)
             unsafe_original = bool(removals) or contains_omitted_identity(
                 text, scope_tokens
