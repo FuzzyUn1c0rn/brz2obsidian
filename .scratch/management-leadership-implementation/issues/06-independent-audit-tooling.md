@@ -1,6 +1,6 @@
 # 06: Extend the independent raw-source audit to the new conversion policy
 
-Status: claimed
+Status: resolved
 Assignee: /root/independent_audit_implementer
 Approved: 2026-10-06
 Specification: [Accepted conversion specification](../spec.md)
@@ -29,6 +29,45 @@ Existing independent raw-source oracle/driver public callables and CLI with synt
 User Stories 16–20, 32–39, 41–49, 54–65, 68–70; Implementation Decisions 1–25 as independently audited obligations; Testing Decisions 5–10, 12–17, 20.
 
 ## Comments
+
+- 2026-10-06 (/root/independent_audit_implementer): Completed the owned
+  compatibility repair after claim commit `484c3d4`. Integration
+  `f23a8bee142457cf64a3bba1fd5ce84293bd9dca` was already merged; merge replay
+  reported up to date. Four new public labels verify an escaped opening bracket,
+  escaped closing bracket, paired escaped brackets and balanced bracket text.
+  Before repair, three failed at the overly broad nested-phrase assertion and
+  the closing-only escape already passed. The scanner now shares balanced active
+  phrase boundaries between the complete source and included labels, recognizing
+  bracket text without accepting nested active links/images. Display text retains
+  literal brackets in the migration record; existing wiki alias sanitation remains
+  independently verified. A consistently rehashed false record replacing that
+  richer display text with its sanitized alias is rejected. Separate nested-link,
+  nested-image and incomplete-destination controls remain closed. Complete
+  forgotten-phrase removal and all six earlier formatting controls stay green.
+
+  Using the root project interpreter and explicit checkout `PYTHONPATH`,
+  `python -m pytest tests/local_acceptance/test_checker_v3.py -k 'bracket or authored_reference_labels or independently_removes' -q --basetemp=tmp/ml-independent-audit/db --tb=short`
+  passed **17 affected checks in 3.93 seconds**. The final complete command
+  `python -m pytest -q --basetemp=tmp/ml-independent-audit/r --tb=short`
+  passed **1249 checks in 231.49 seconds**, including all **243** maintained
+  oracle/driver checks (115 earlier, 116 v3 and twelve driver controls).
+  Ruff lint and format passed with **130 files formatted**, pip reported no broken
+  requirements and diff checks passed. Only the owned scanner, public controls,
+  oracle proof paragraph and this ticket's evidence changed; runtime/source
+  matrices/native/UI/PR/push remain outside this repair.
+
+  Historical `f70b023` remains an overall independent-verification **FAIL** despite
+  its 24 handwritten groups and 235 maintained passes. The two bounded bracket
+  probe failures are preserved at root under ignored `tmp/ml-implementation/06/`.
+  This repair requires an independent exact-clean-head replay before integration;
+  its implementation checks do not claim that replay or private source acceptance.
+  Implementer command logs exist only in tool output and this versioned ticket;
+  no separate decoder receipt was saved by the implementer. Selected ignored
+  synthetic proof files to preserve before archiving are
+  `tmp/audit-synth-02/out/aggregate.json` and `operations.json`, optionally one
+  actual CLI manifest (`A-result.json`) and raw public `A.brz` if not already
+  copied at root. Root's independent decoder receipt supplies full pixel/source
+  hashes. Bulk pytest trees and generated synthetic vaults need not be copied.
 
 - 2026-10-06 (/root/independent_audit_implementer): Reopened and claimed after
   independent verification of clean `f70b0237647eff6894dd1224cd5ed79abc98806f`

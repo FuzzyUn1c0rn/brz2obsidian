@@ -139,8 +139,11 @@ Omission of the exact original backup alone does not make that destination safe.
 Authored reference labels are interpreted separately from body spans; emphasis,
 code, entities and escaped literal punctuation retain their displayed text while
 untouched CRLF/CR/LF body spans remain exact.
-The current oracle/driver group passes 235 public checks: the 115 earlier oracle
-controls, 108 v3 controls and twelve driver controls. Three corruptions still pass
+The current oracle/driver group passes 243 public checks: the 115 earlier oracle
+controls, 116 v3 controls and twelve driver controls. Escaped opening/closing and
+balanced bracket labels retain richer record display text separately from sanitized
+wiki aliases; nested active phrases and incomplete local destinations remain closed.
+Three corruptions still pass
 the source-free convention checker after consistent rehashing; the raw-source
 oracle rejects their changed body, generated order or diagnostic facts.
 

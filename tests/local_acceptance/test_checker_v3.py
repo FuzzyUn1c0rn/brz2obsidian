@@ -795,6 +795,97 @@ def test_complete_body_includes_independently_interpreted_authored_reference_lab
     assert check_vault(source, vault)["references"] == 1
 
 
+@pytest.mark.parametrize(
+    "label,display,alias",
+    [
+        (r"opening \[literal", "opening [literal", "opening literal"),
+        (r"closing literal\]", "closing literal]", "closing literal"),
+        (r"escaped \[literal\]", "escaped [literal]", "escaped literal"),
+        ("outer [nested]", "outer [nested]", "outer nested"),
+    ],
+)
+def test_valid_bracket_labels_preserve_record_display_text_and_sanitized_alias(
+    tmp_path, label, display, alias
+):
+    compact = base64.urlsafe_b64encode(UUID(identity(2)).bytes_le).decode().rstrip("=")
+    body = (
+        "Untouched α\r\n[" + label + "](brain://" + compact + "/reserved)\rTail\n"
+    ).encode()
+    source = graph_archive(
+        tmp_path / "source.brz", {1: "Home", 2: "Reserved"}, notes={1: (body, 4)}
+    )
+    vault = tmp_path / "vault"
+    assert default_workflow().convert(source, vault).outcome == "clean"
+    record = load_json((vault / "migration-record.json").read_bytes())
+    home = next(t for t in record["item_targets"] if t["item_key"] == identity(1))
+    assert home["documents"][0]["references"][0]["display_text"] == display
+    assert ("[[Notes/Reserved.md|" + alias + "]]").encode() in (
+        vault / "Home — Home.md"
+    ).read_bytes()
+    assert check_vault(source, vault)["references"] == 1
+
+
+def test_sanitized_alias_cannot_replace_richer_recorded_bracket_display_text(tmp_path):
+    compact = base64.urlsafe_b64encode(UUID(identity(2)).bytes_le).decode().rstrip("=")
+    body = (r"[escaped \[literal\]](brain://" + compact + "/reserved)").encode()
+    source = graph_archive(
+        tmp_path / "source.brz", {1: "Home", 2: "Reserved"}, notes={1: (body, 4)}
+    )
+    vault = tmp_path / "vault"
+    result = default_workflow().convert(source, vault).model_dump(mode="json")
+    assert check_vault(source, vault)["references"] == 1
+    record = load_json((vault / "migration-record.json").read_bytes())
+    home = next(t for t in record["item_targets"] if t["item_key"] == identity(1))
+    home["documents"][0]["references"][0]["display_text"] = "escaped literal"
+    rewrite_record(vault, record, result)
+    with pytest.raises(AssertionError, match="reference spans and targets"):
+        check_vault(source, vault)
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        "outer [nested](https://example.invalid)",
+        "outer ![image](https://example.invalid/card)",
+        "unclosed destination",
+    ],
+)
+def test_bracket_label_compatibility_keeps_nested_active_and_malformed_phrases_closed(
+    tmp_path, label
+):
+    compact = base64.urlsafe_b64encode(UUID(identity(2)).bytes_le).decode().rstrip("=")
+    source = graph_archive(
+        tmp_path / "source.brz",
+        {1: "Home", 2: "Reserved"},
+        notes={1: (b"plain supplied body", 4)},
+    )
+    vault = tmp_path / "vault"
+    result = default_workflow().convert(source, vault).model_dump(mode="json")
+    assert check_vault(source, vault)["references"] == 0
+
+    def edit(parts):
+        parts[identity(1) + "/Notes.md"] = (
+            "[" + label + "](brain://" + compact + "/reserved)"
+        ).encode()
+        if label == "unclosed destination":
+            parts[identity(1) + "/Notes.md"] = parts[identity(1) + "/Notes.md"][:-1]
+        change_record(
+            parts, identity(2001), DataLength=len(parts[identity(1) + "/Notes.md"])
+        )
+
+    rewrite(source, edit)
+    record = load_json((vault / "migration-record.json").read_bytes())
+    record["source_identity"]["source_sha256"] = hashlib.sha256(
+        source.read_bytes()
+    ).hexdigest()
+    rewrite_record(vault, record, result)
+    with pytest.raises(
+        AssertionError,
+        match="unsupported included nested thought phrase|active local reference coverage",
+    ):
+        check_vault(source, vault)
+
+
 def forge_image_source(source, vault, record, result, image_bytes, name="card.png"):
     """Forge raw declarations, exact output bytes, observations and honest receipts."""
     with ZipFile(source) as archive:

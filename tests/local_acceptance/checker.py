@@ -1108,13 +1108,8 @@ def inline_display(value):
     return re.sub(r"\x00([0-9]+)\x00", lambda match: protected[int(match[1])], value)
 
 
-def source_references(body, owner, assets, excluded=()):
-    """Separate syntax scan for accepted inline forms in these acceptance inputs.
-
-    It does not consume converter spans or use markdown-it-py. Protected source
-    regions are masked without changing offsets. Unrecognized active local
-    syntax fails this oracle instead of silently passing its coverage claim.
-    """
+def inline_candidates(body):
+    """Find balanced active phrases, distinguishing bracket text from links."""
     protected = []
     fence = None
     offset = 0
@@ -1216,6 +1211,16 @@ def source_references(body, owner, assets, excluded=()):
             )
         )
         cursor = finish
+    return candidates, mask, scan
+
+
+def source_references(body, owner, assets, excluded=()):
+    """Separate syntax scan without converter spans or markdown-it-py.
+
+    Protected regions retain source offsets. Unrecognized active local syntax
+    fails the audit instead of silently passing its coverage claim.
+    """
+    candidates, mask, scan = inline_candidates(body)
     result = []
     for (
         begin,
@@ -1238,7 +1243,7 @@ def source_references(body, owner, assets, excluded=()):
             )
             kind = "item"
             assert not image or target in excluded, "unexpected linked thought image"
-            assert "[" not in label_text or target in excluded, (
+            assert target in excluded or not inline_candidates(label_text)[0], (
                 "unsupported included nested thought phrase"
             )
         elif image and url.startswith(".data/md-images/"):
