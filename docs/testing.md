@@ -356,6 +356,10 @@ Combine behaviors in one sample where practical and reuse completed observations
 
 Before using the UI, record the chosen cases, their independently derived paths,
 the behaviors each covers, and any special cases needing their own observation.
+Before opening an imported note, verify that its subject is included, its assigned
+target is expected to be created, and that exact file exists in the review copy.
+Check intentionally uncreated targets through their links or listings; opening a
+missing target can create a new blank note and does not verify converter output.
 Compare sampled native Base results with the expected member set for that view;
 native CSV export can provide complete results for a large sampled view. Equivalent
 items using the same behavior need no repeated visual check. Expand the relevant
