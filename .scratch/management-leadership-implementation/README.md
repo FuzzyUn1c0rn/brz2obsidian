@@ -39,10 +39,13 @@ Tickets **01: Exclude forgotten thoughts throughout inspection and conversion**,
 **02: Display owned images when an ordinary thought note is absent** and
 **04: Preserve ordinary-to-category hierarchy in both directions** are resolved
 and integrated. **03: Keep category dashboards usable through missing type
-notes and icons** is also resolved and integrated. The claimed frontier is
-**05: Prove the combined conversion and publication guarantees** and
-**06: Extend the independent raw-source audit to the new conversion policy**,
-each assigned to a separate isolated implementer worktree.
+notes and icons** is also resolved and integrated. **05: Prove the combined
+conversion and publication guarantees** is resolved with bounded synthetic
+proof. **06: Extend the independent raw-source audit to the new conversion
+policy** remains claimed in its isolated implementer worktree. A known residual
+excluded-identity association in inactive Markdown code/comments/bare URIs
+requires a separate ticket 01 privacy repair; its earlier bounded evidence does
+not establish universal privacy. Ticket 07 is not eligible.
 Type gaps consume the shared source-gap capability
 from ordinary fallback. Combined safety and independent audit tooling can then
 progress independently. Complete four-original proof precedes native actual-output
@@ -78,6 +81,19 @@ integrated. The user requested a pull request when everything is complete; creat
 it after implementation and required acceptance, then attach it to this chat.
 
 ## Comments
+
+- 2026-10-06 (/root/integration_merger): Integrated ticket 05 with
+  `git merge --ff-only 12cdd084a6ddf13d90ac14d421cafa2c135ac9e7` from clean
+  root `5d4800613cb5c2aced4b7f84f9ccbf87bcbdd85e`, ancestry confirmed.
+  Independent bounded PASS covers 18 handwritten actual-ZIP/fault groups,
+  47 focused tests and exact wheel/source bytes for 57 runtime modules.
+  Root merged v3 workflow/failure, existing publication/failure, both alternate
+  sources and read-only checker tests pass: **181 tests in 44.37s**; diff check
+  is clean. See ticket 05 for exact commands and attributed worker evidence.
+  Ticket 06 remains in progress. Coordinator will separately reopen/repair
+  ticket 01 for the known inactive-reference privacy issue; ticket 05's active
+  phrase controls do not close that gap. No full-original/native/user/release
+  completion or ticket 07 eligibility is claimed.
 
 - 2026-10-06 (/root): Claimed tickets 05 and 06 after verified type-gap
   integration at `4d515a62b2ba6552e8e7ca513615cf1b7ffa839c`. Combined workflow

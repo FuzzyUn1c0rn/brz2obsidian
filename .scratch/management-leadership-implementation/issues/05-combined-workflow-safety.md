@@ -35,6 +35,35 @@ User Stories 12–20, 31–39, 40–62, 64, 69–70; Implementation Decisions 1�
 
 ## Comments
 
+- 2026-10-06 (/root/integration_merger): Integrated verified exact clean branch
+  head `12cdd084a6ddf13d90ac14d421cafa2c135ac9e7` from `codex/ml-v3-05`
+  with `git merge --ff-only 12cdd084a6ddf13d90ac14d421cafa2c135ac9e7` on
+  clean root `5d4800613cb5c2aced4b7f84f9ccbf87bcbdd85e`; ancestry check exit 0.
+  Independent `tmp/ml-implementation/05/verification.md` records bounded PASS:
+  **18 handwritten actual-ZIP/fault groups**, **47 focused tests in 26.10s**,
+  and read-only exact wheel/source-byte verification of **57 runtime modules**.
+  It checks combined present/absent/category/hierarchy/accounting behavior,
+  reached real partial-write/read/staging faults, actual postcommit durable
+  receipts, source/caller inventories and separate checker behavior.
+
+  Merged root command:
+  `.venv/Scripts/python.exe -m pytest -q tests/application/test_integrated_v3_workflow.py tests/publication/test_v3_failure_protection.py tests/application/test_failure_protection.py tests/publication/test_failure_protection.py tests/application/test_alternate_source.py tests/application/test_alternate_v2_source.py tests/vault_check/test_check_vault.py --basetemp=tmp/ml-implementation/merger/pytest-05-12cdd084 -o cache_dir=tmp/ml-implementation/merger/pytest-cache-05-12cdd084`
+  passed **181 tests in 44.37s**, exit 0. Runtime import resolves to root src.
+  `git diff --check 5d4800613cb5c2aced4b7f84f9ccbf87bcbdd85e..12cdd084a6ddf13d90ac14d421cafa2c135ac9e7`
+  passed, exit 0. Worker complete **1075-test** suite, Ruff on 126 files, pip
+  and documented wheel-example smoke remain attributed worker evidence; no
+  redundant complete suite was run on identical fast-forwarded code. Copied
+  ignored proof destination is `tmp/ml-implementation/05/worker-evidence-12cdd084/`;
+  worktree archival remains coordinator-owned.
+
+  Known limit: excluded identities can still survive in inactive Markdown
+  code/comment/bare URI content after unsafe-original omission. This bounded
+  PASS proves active authored phrase removal and does not close that separate
+  ticket 01 privacy defect. Coordinator will reopen/repair 01 independently.
+  Ticket 06 remains claimed; ticket 07 is not eligible. Full-original scoped
+  oracle/preservation, native/user acceptance and release remain pending.
+  No other ticket claim, source/retained-vault change, PR or push was performed.
+
 - 2026-10-06 (/root/workflow_safety_implementer): Final fixed-code-head complete
   suite at `4f8f5cb4523c1d079f0ffd49fa5d7a16065ce424`, command
   `-m pytest -q --basetemp=tmp/ml-workflow-safety/final`, passed
