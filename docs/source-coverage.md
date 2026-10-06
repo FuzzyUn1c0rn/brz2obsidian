@@ -171,6 +171,8 @@ numeric BRZ recognition predicates.
 | Issue code / rule ID | Required conditions and result |
 | --- | --- |
 | `approved_source_gap` / `thebrain-format5/absent-ordinary-note-images/v1` | Unique included ordinary-owner Type 1/NoteType 4 canonical Notes.md, SourceType 2, raw state 3, absent physical owner/Notes.md bytes, nonnegative declared length, with a complete usable same-owner Type 12/NoteType 0 state-1 image basis. Keep the absent declaration without actual length/hash, Document, original backup or authored-reference credit. Display all images beneath a source-gap notice, with canonical asset-identity ordering and original copied bytes. |
+| `approved_source_gap` / `thebrain-format5/absent-type-note/v1` | Unique included definition-owner Type 1/NoteType 4 canonical Notes.md, SourceType 2, raw state 3, absent owner/Notes.md bytes and nonnegative declared length. Category text remains unknown, with a category notice/report entry and no image reconstruction, Document, actual hash/length or original backup. |
+| `approved_source_gap` / `thebrain-format5/absent-type-icon/v1` | Unique included definition-owner Type 5/NoteType 0, SourceType 2, IsIcon=true, safe owned owner/.data/Location path, raw state 3, absent bytes and nonnegative declared length. Retain the declaration, use neutral icon properties and preserve membership/provider links. Report the provider and genuinely affected included members separately; a valid explicit member icon wins. |
 | `approved_source_gap` / `thebrain-format5/absent-txt/v1` | Thought-owned Type 15, NoteType 0, `.txt` Location, positive declared length, state 2, absent owner/Location bytes, with intact archived PDF under the same owner. Retain metadata/evidence; brief filename notice only on an existing owner note. No fake file/link or note solely for this gap. |
 | `approved_source_gap` / `thebrain-format5/zero-length-absent-txt/v1` | Thought-owned Type 15, NoteType 0, safe `.txt` Location, declared length exactly zero, state 2, absent owner/Location bytes. The filename stem must equal one same-owner PDF attachment identity with ordinary Type 1/NoteType 0, state 1, present CRC-valid bytes and matching declared/actual length. Retain each declaration, exact PDF association and integrity evidence individually; apply the same existing-owner notice and no-fabrication rules. |
 | `approved_metadata_discrepancy` / `thebrain-format5/icon-length/v1` | Verified icon role, present CRC-valid payload, declared length different from actual length. Copy actual bytes and retain both lengths; report discrepancy. |
@@ -229,3 +231,31 @@ an assigned uncreated target explicitly rather than making a resolving-link
 claim. Titles and IDs provide source lookup; no native launch locator is inferred.
 A clean source-free checker confirms current references, not missing prose
 recovery or the later original-archive preservation/native acceptance gates.
+
+## Reviewed category source gaps (version 3)
+
+Missing category text remains unknown even when its declared length is zero or
+small. A category-owned note image does not reconstruct the missing type body
+or become an icon. Present recognized category text, including empty, whitespace
+and BOM-only bytes, follows the existing preservation path regardless of missing
+icons. Only the exact reviewed type-owned declarations above admit state 3;
+ordinary-icon, tag/system note/icon absence and contradictory state/payload
+evidence remain refused.
+
+A missing type icon produces a category notice and notices on included members
+that would inherit it. An explicit valid member icon prevents that member from
+being reported as losing its effective icon. Structured inspection/record entries
+identify the missing asset once, its provider_key and affected_member_keys;
+item_targets supplies their source titles, identities and destination paths.
+The report links to the actual created category/member notes and retains the
+raw state, declared length, owned path and source fingerprint. Existing TXT
+diagnostics continue to label uncreated targets honestly without creating notes.
+
+Membership and appearance_category remain linked when an included provider's
+icon is absent. Adding a valid local icon to that category later updates native
+Base defaults; static note-body snapshots remain independently editable.
+Excluded providers and members contribute no diagnostics or inherited pixels.
+Available unrelated icons and the narrow present-icon length discrepancy rule
+retain actual measured bytes and hashes. Decorative absent icons do not create
+Resources clutter or broken local links. The read-only checker accepts neutral
+properties and still reports missing actual image targets.

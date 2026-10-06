@@ -639,8 +639,8 @@ def test_renderer_refuses_aligned_but_noncanonical_fallback_owner_target(tmp_pat
         ObsidianRenderer().render(forged, metadata)
 
 
-@pytest.mark.parametrize("kind", [2, 4, 5])
-def test_absent_note_requires_an_ordinary_owner(tmp_path, kind):
+@pytest.mark.parametrize("kind", [4, 5])
+def test_absent_note_refuses_unsupported_owner_roles(tmp_path, kind):
     owner = "88888888-8888-4888-8888-888888888888"
     parts = fallback_parts(tmp_path)
     thought = json.loads(parts["thoughts.json"])

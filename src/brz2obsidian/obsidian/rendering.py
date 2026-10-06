@@ -88,24 +88,26 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         )
     checked_analysis = analyze(snapshot, plan.analysis.policy)
     expected_targets = assign_item_targets(checked_analysis, resource_owners(snapshot))
-    gap_owners = {g.owner for g in snapshot.source_gaps}
     expected_gaps, expected_presentations = source_gap_targets(
         snapshot, expected_targets, assign_asset_targets(snapshot)
     )
+    gap_subjects = {g.owner for g in snapshot.source_gaps} | {
+        key for g in expected_gaps for key in g.affected_member_keys
+    }
     if (
-        bool(snapshot.generated_presentations)
+        bool(snapshot.source_gaps)
         and plan.asset_targets != assign_asset_targets(snapshot)
         or {
             (t.item_key, t.relative_path, t.created)
             for t in plan.item_targets
-            if t.item_key in gap_owners
+            if t.item_key in gap_subjects
         }
         != {
             (t.item_key, t.relative_path, t.created)
             for t in expected_targets
-            if t.item_key in gap_owners
+            if t.item_key in gap_subjects
         }
-        or bool(gap_owners)
+        or bool(gap_subjects)
         and plan.issues != checked_analysis.issues
         or plan.source_gaps != expected_gaps
         or plan.generated_presentations != expected_presentations
@@ -207,8 +209,28 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
             if hierarchy:
                 text += hierarchy + "\n"
             text += CATEGORY_VIEWS + "\n"
+            if any(
+                g.gap.owner == item.key and g.outcome == "unknown_note"
+                for g in plan.source_gaps
+            ):
+                text += "> Source category note text is absent and remains unknown. No prose, captions or layout were recovered. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
         elif icon is not None:
             text += "![[" + asset_paths[icon] + "]]\n\n"
+        for gap in plan.source_gaps:
+            if gap.outcome != "neutral_icon":
+                continue
+            if gap.gap.owner == item.key:
+                text += "> Source category icon is absent; appearance is neutral. See [[MIGRATION REPORT.md|Migration report]] for provider evidence and optional repair steps.\n\n"
+            elif item.key in gap.affected_member_keys:
+                provider = items[gap.provider_key]
+                label = re.sub(r"[\[\]|\r\n]", " ", provider.title)
+                text += (
+                    "> The inherited icon is unavailable from [["
+                    + gap.owner_target
+                    + "|"
+                    + label
+                    + "]]; appearance is neutral. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
+                )
         if item.label:
             text += item.label + "\n\n"
         for index, key in enumerate(item.document_ids):

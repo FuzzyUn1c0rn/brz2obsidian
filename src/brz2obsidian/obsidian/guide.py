@@ -49,6 +49,14 @@ ordinary/member body-icon snapshots; those image references are separately edita
 source colours remain in migration-record.json without vault colour properties
 or the decorative Appearance display.
 
+When a source category icon is absent, its icon property is empty and inheriting
+members keep their categories and appearance_category links with neutral
+appearance. A valid explicit member icon still wins. Add a valid local image to
+the category's icon property to supply future dashboard defaults. The Migration
+report identifies the missing provider and affected included members separately.
+Missing source category text remains unknown; its notice does not reconstruct a
+body from images or declared length. Source repair and re-export are optional.
+
 Imported created/updated are source creation/overall-modification calendar dates,
 without timezone conversion. Full timestamps remain in migration-record.json.
 An ordinary manual membership edit does not automatically change updated.

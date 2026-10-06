@@ -18,6 +18,8 @@ from brz2obsidian.contracts import (
 from .findings import (
     ABSENT_NOTE_IMAGES_RULE,
     ABSENT_TXT_RULE,
+    ABSENT_TYPE_ICON_RULE,
+    ABSENT_TYPE_NOTE_RULE,
     ICON_LENGTH_RULE,
     ZERO_LENGTH_ABSENT_TXT_RULE,
 )
@@ -210,15 +212,93 @@ def normalize_attachments(
                 )
             note_owners.add(owner)
         if recognized_note and states.get(asset_id) == 3 and member not in names:
-            if note_type != 4 or location != "Notes.md" or thoughts[owner]["Kind"] != 1:
+            if (
+                note_type != 4
+                or location != "Notes.md"
+                or thoughts[owner]["Kind"] not in {1, 2}
+            ):
                 refuse(
                     "unsupported_feature",
-                    "Absent note does not match the reviewed ordinary note rule",
+                    "Absent note does not match a reviewed note rule",
                     (asset_id,),
                 )
             assets.append(Asset(**common, role="note_original", availability="absent"))
+            if thoughts[owner]["Kind"] == 2:
+                pointers = (pointer, "meta.json")
+                findings.append(
+                    SourceFinding(
+                        kind="known_absent_payload",
+                        rule_id=ABSENT_TYPE_NOTE_RULE,
+                        affected=(asset_id,),
+                        evidence=pointers,
+                        observed_json=json.dumps(
+                            {
+                                "owner": owner,
+                                "filename": location,
+                                "member": member,
+                                "source_type": 2,
+                                "type": kind,
+                                "note_type": note_type,
+                                "state": 3,
+                                "declared_length": record["DataLength"],
+                                "present": False,
+                            }
+                        ),
+                    )
+                )
+                gaps.append(
+                    SourceGap(
+                        owner=owner,
+                        asset_id=asset_id,
+                        role="definition_note",
+                        rule_id=ABSENT_TYPE_NOTE_RULE,
+                        evidence=pointers,
+                    )
+                )
+                continue
             absent_notes.append(
                 (asset_id, owner, member, record["DataLength"], pointer)
+            )
+            continue
+        if kind == 5 and states.get(asset_id) == 3 and member not in names:
+            if thoughts[owner]["Kind"] != 2:
+                refuse(
+                    "unsupported_feature",
+                    "Absent icon requires a type owner",
+                    (asset_id,),
+                )
+            pointers = (pointer, "meta.json")
+            assets.append(Asset(**common, role="icon", availability="absent"))
+            findings.append(
+                SourceFinding(
+                    kind="known_absent_payload",
+                    rule_id=ABSENT_TYPE_ICON_RULE,
+                    affected=(asset_id,),
+                    evidence=pointers,
+                    observed_json=json.dumps(
+                        {
+                            "owner": owner,
+                            "filename": location,
+                            "member": member,
+                            "source_type": 2,
+                            "type": kind,
+                            "note_type": note_type,
+                            "is_icon": True,
+                            "state": 3,
+                            "declared_length": record["DataLength"],
+                            "present": False,
+                        }
+                    ),
+                )
+            )
+            gaps.append(
+                SourceGap(
+                    owner=owner,
+                    asset_id=asset_id,
+                    role="definition_icon",
+                    rule_id=ABSENT_TYPE_ICON_RULE,
+                    evidence=pointers,
+                )
             )
             continue
         if states.get(asset_id) != 1 or member not in names:
@@ -531,6 +611,6 @@ def normalize_attachments(
         evidence,
         accounting,
         findings,
-        gaps,
+        sorted(gaps, key=lambda g: g.asset_id),
         presentations,
     )

@@ -325,9 +325,15 @@ kind, image_asset_ids, ordering)`, separate from Documents and ReferenceSpans.
 Plans and inspections reserve `SourceGapDiagnostic` (owner target/existence,
 outcome, provider and affected members, selected images) and
 `GeneratedPresentationTarget` (note path and ordered image paths). The migration
-record serializes the same two planned collections. Their initial facts are empty;
-state-3 note/icon absences and category hierarchy remain refused until their
-approved behavior slices implement them. Counts reserve source_gaps,
+record serializes the same two planned collections. Reviewed ordinary-note
+absences carry separate ordered image presentations. Definition-note absences
+carry unknown-note diagnostics without a Document or reconstructed presentation.
+Definition-icon absences retain owned declarations but yield no effective icon;
+their diagnostics identify the provider and only included members without an
+explicit icon override. The renderer verifies these joins against the canonical
+plan before producing resolving provider/member notices and report links.
+Membership and appearance_category remain available for native Base defaults.
+Counts reserve source_gaps,
 generated_presentations, planned_generated_embeds and actual_generated_embeds;
 actual counts stay unknown during inspection. These optional closed shapes do
 not assign BRZ numeric meanings to the generic core.

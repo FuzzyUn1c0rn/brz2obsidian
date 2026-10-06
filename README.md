@@ -34,8 +34,12 @@ unknown prose, captions and layout were not recovered; the Migration report
 provides evidence and optional repair steps. Physically present recognized
 Markdown always keeps its normal exact preservation path, including blank notes.
 Source-gap and generated-presentation collections record the obligations;
-generated embeds are counted separately from authored references. Type-owned
-state-3 absences await their implementation slice. Follow the [current frontier](.scratch/management-leadership-implementation/README.md).
+generated embeds are counted separately from authored references. Reviewed
+type-owned state-3 Notes.md absence remains unknown category text; missing
+type icons give categories and inheriting members neutral appearance while
+preserving membership and appearance_category links. Valid member icon overrides
+still win. The report distinguishes missing providers from affected included
+members. Follow the [current frontier](.scratch/management-leadership-implementation/README.md).
 
 ## Development environment
 
@@ -186,7 +190,8 @@ Resources. `MIGRATION REPORT.md` explains warnings and simplifications;
 relationships, edits and byte inventory. Original JSON preserves numeric
 values, raw dates and omitted-versus-null distinctions.
 
-Three exact warning rules cover positive-length absent TXT, the reviewed
+Exact warning rules cover reviewed absent ordinary notes with usable owned
+images, absent type notes/icons, positive-length absent TXT, the reviewed
 zero-length absent-TXT/PDF association, and intact icons with length discrepancies.
 See [conditions and issue codes](docs/source-coverage.md#approved-warnings).
 Other missing required content and unverified meanings stop conversion.
