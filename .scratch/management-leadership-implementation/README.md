@@ -41,11 +41,13 @@ and integrated. **03: Keep category dashboards usable through missing type
 notes and icons** is also resolved and integrated. **05: Prove the combined
 conversion and publication guarantees** is resolved with bounded synthetic
 proof. **06: Extend the independent raw-source audit to the new conversion
-policy** remains claimed in its isolated implementer worktree. A known residual
-excluded-identity association in inactive Markdown code/comments/bare URIs
-has reopened **01: Exclude forgotten thoughts throughout inspection and conversion**
-for an isolated source-side privacy repair; its earlier bounded evidence does
-not establish universal privacy. Ticket 07 is not eligible.
+policy** remains claimed in its isolated implementer worktree. The independently
+verified residual excluded-identity guard is integrated, but **01: Exclude
+forgotten thoughts throughout inspection and conversion** remains claimed for
+an isolated included-label preservation repair: entities and escaped punctuation
+must survive reference adaptation. Its third criterion remains unchecked;
+bounded guard evidence does not establish universal privacy. Ticket 07 is not
+eligible.
 Type gaps consume the shared source-gap capability
 from ordinary fallback. Combined safety and independent audit tooling can then
 progress independently. Complete four-original proof precedes native actual-output
@@ -81,6 +83,17 @@ integrated. The user requested a pull request when everything is complete; creat
 it after implementation and required acceptance, then attach it to this chat.
 
 ## Comments
+
+- 2026-10-06 (/root/integration_merger): Partially integrated residual ticket 01
+  guard by `git merge --ff-only 9d69a6509b20c0e85e966149cc5cb0bc22667593`
+  from clean root `fbab5d89de04f0672dd661c59c7f0580fde0e1b7`.
+  Independent exact-head bounded PASS covers 18 body/encoded and 2 metadata
+  groups, 103 focused tests and seven-file static review. Root forgotten/source
+  spans/both alternate-source/architecture tests pass: **117 in 14.31s**;
+  diff check is clean. Parent 01 stays claimed by the label implementer, with
+  its third criterion unchecked for included entity/escaped punctuation loss.
+  Ticket 06 remains in progress and 07 is ineligible. Full-original/native/user/
+  final-review/release gates remain pending; no other ticket was claimed here.
 
 - 2026-10-06 (/root): Reopened and claimed ticket 01's proven inactive-reference
   privacy gap after verified ticket 05 integration at `b5c9ef1`. Preserve unrelated
