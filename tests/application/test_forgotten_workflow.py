@@ -82,6 +82,351 @@ def test_excluded_link_phrase_disappears_and_unsafe_exact_copy_is_omitted(tmp_pa
         assert removed not in inspection.model_dump_json()
 
 
+def test_excluded_uri_in_inline_code_refuses_privately_without_publication(tmp_path):
+    compact = base64.urlsafe_b64encode(UUID(identity(2)).bytes_le).decode().rstrip("=")
+    body = f"Safe prose `brain://{compact}/Private-title`"
+    source = graph_archive(
+        tmp_path / "source.brz",
+        {1: "Home", 2: "Private subject"},
+        notes={1: (body.encode(), 4)},
+    )
+    rewrite(source, lambda p: forget(p, 2))
+    original = source.read_bytes()
+    destination = tmp_path / "vault"
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    (caller / "sentinel.bin").write_bytes(b"caller bytes")
+    workflow = default_workflow()
+    for result in (
+        workflow.inspect(source),
+        workflow.convert(source, destination),
+        workflow.convert(source, caller),
+    ):
+        assert result.outcome == "refused"
+        assert result.issues[0].code == "invalid_reference"
+        for private in (compact, identity(2), "Private-title", "Private subject"):
+            assert private not in result.model_dump_json()
+    assert not destination.exists()
+    assert {p.name: p.read_bytes() for p in caller.iterdir()} == {
+        "sentinel.bin": b"caller bytes"
+    }
+    assert source.read_bytes() == original
+
+
+def test_unicode_escaped_excluded_identity_in_note_refuses_privately(tmp_path):
+    escaped = "".join(f"\\u{ord(char):04x}" for char in identity(2))
+    body = '<!-- {"SourceId":"' + escaped + '","Label":"Private label"} -->'
+    source = graph_archive(
+        tmp_path / "source.brz",
+        {1: "Home", 2: "Private subject"},
+        notes={1: (body.encode(), 4)},
+    )
+    rewrite(source, lambda p: forget(p, 2))
+    original = source.read_bytes()
+    destination = tmp_path / "vault"
+    workflow = default_workflow()
+    for result in (workflow.inspect(source), workflow.convert(source, destination)):
+        assert result.outcome == "refused"
+        assert result.issues[0].code == "invalid_reference"
+        for private in (escaped, identity(2), "Private label", "Private subject"):
+            assert private not in result.model_dump_json()
+    assert not destination.exists()
+    assert source.read_bytes() == original
+
+
+@pytest.mark.parametrize("spelling", ["uppercase_uuid", "mixed_uuid", "percent_uri"])
+def test_equivalent_excluded_identity_spellings_refuse_without_rewriting_literals(
+    tmp_path, spelling
+):
+    private = int(UUID("a1b2c3d4-e5f6-4a78-9abc-def012345678"))
+    compact = "1MOyofbleEqavN7wEjRWeA"
+    target = {
+        "uppercase_uuid": "A1B2C3D4-E5F6-4A78-9ABC-DEF012345678",
+        "mixed_uuid": "a1B2c3D4-e5F6-4a78-9aBc-dEf012345678",
+        "percent_uri": "brain://%31%4D%4F%79%6F%66%62%6C%65%45%71%61%76%4E%37%77%45%6A%52%57%65%41/Private-title",
+    }[spelling]
+    source = graph_archive(
+        tmp_path / "source.brz",
+        {1: "Home", private: "Private subject"},
+        notes={1: (f"Literal `{target}`".encode(), 4)},
+    )
+    rewrite(source, lambda p: forget(p, private))
+    original = source.read_bytes()
+    destination = tmp_path / "vault"
+    workflow = default_workflow()
+    for result in (workflow.inspect(source), workflow.convert(source, destination)):
+        assert result.outcome == "refused"
+        assert result.issues[0].code == "invalid_reference"
+        for secret in (identity(private), compact, target, "Private subject"):
+            assert secret not in result.model_dump_json()
+    assert not destination.exists()
+    assert source.read_bytes() == original
+
+
+@pytest.mark.parametrize("context", ["inline", "fenced", "comment", "plain"])
+@pytest.mark.parametrize(
+    "token",
+    [
+        "a1b2c3d4-e5f6-4a78-9abc-def012345678",
+        "1MOyofbleEqavN7wEjRWeA",
+        "A1B2C3D4-E5F6-4A78-9ABC-DEF012345678",
+        "%31%4D%4F%79%6F%66%62%6C%65%45%71%61%76%4E%37%77%45%6A%52%57%65%41",
+        "%61%31%62%32%63%33%64%34%2D%65%35%66%36%2D%34%61%37%38%2D%39%61%62%63%2D%64%65%66%30%31%32%33%34%35%36%37%38",
+        r"\u0061\u0031\u0062\u0032\u0063\u0033\u0064\u0034\u002d\u0065\u0035\u0066\u0036\u002d\u0034\u0061\u0037\u0038\u002d\u0039\u0061\u0062\u0063\u002d\u0064\u0065\u0066\u0030\u0031\u0032\u0033\u0034\u0035\u0036\u0037\u0038",
+        r"\u0031\u004d\u004f\u0079\u006f\u0066\u0062\u006c\u0065\u0045\u0071\u0061\u0076\u004e\u0037\u0077\u0045\u006a\u0052\u0057\u0065\u0041",
+    ],
+    ids=[
+        "canonical",
+        "compact",
+        "uppercase",
+        "url-compact",
+        "url-uuid",
+        "unicode-uuid",
+        "unicode-compact",
+    ],
+)
+def test_active_removal_cannot_publish_residual_excluded_literals(
+    tmp_path, capsys, context, token
+):
+    from brz2obsidian.cli import main
+
+    private = int(UUID("a1b2c3d4-e5f6-4a78-9abc-def012345678"))
+    uri = f"brain://{token}/Private-title"
+    literal = {
+        "inline": f"`{uri}`",
+        "fenced": f"```text\r\n{uri}\r\n```",
+        "comment": f"<!-- {uri} -->",
+        "plain": uri,
+    }[context]
+    body = f"α\r\n[Private label](brain://1MOyofbleEqavN7wEjRWeA/Private-title)\r{literal}\nTail"
+    source = graph_archive(
+        tmp_path / "source.brz",
+        {1: "Home", private: "Private subject"},
+        notes={1: (body.encode(), 4)},
+    )
+    rewrite(source, lambda p: forget(p, private))
+    before = source.read_bytes()
+    destination = tmp_path / "vault"
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    (caller / "sentinel.bin").write_bytes(b"caller bytes")
+    workflow = default_workflow()
+    for result in (
+        workflow.inspect(source),
+        workflow.convert(source, destination),
+        workflow.convert(source, caller),
+    ):
+        assert result.outcome == "refused"
+        assert result.issues[0].code == "invalid_reference"
+        for private_text in (
+            identity(private),
+            token,
+            "1MOyofbleEqavN7wEjRWeA",
+            "Private-title",
+            "Private label",
+            "Private subject",
+        ):
+            assert private_text not in result.model_dump_json()
+    for args in (
+        ["inspect", str(source)],
+        ["inspect", str(source), "--json"],
+        ["convert", str(source), str(destination)],
+        ["convert", str(source), str(caller), "--json"],
+    ):
+        assert main(args) == 1
+        captured = capsys.readouterr()
+        output = captured.out + captured.err
+        assert token not in output and "Private" not in output
+        assert (
+            identity(private) not in output and "1MOyofbleEqavN7wEjRWeA" not in output
+        )
+    assert source.read_bytes() == before
+    assert not destination.exists()
+    assert {p.name: p.read_bytes() for p in caller.iterdir()} == {
+        "sentinel.bin": b"caller bytes"
+    }
+
+
+def test_included_literal_only_body_and_exact_original_survive_scope_guard(tmp_path):
+    private = int(UUID("a1b2c3d4-e5f6-4a78-9abc-def012345678"))
+    included = private + 1
+    body = (
+        b"Private subject is also an included title\r\n"
+        b"`brain://1MOyofbleEqavN7wEjRWeQ/included`\r"
+        b"```text\nA1B2C3D4-E5F6-4A78-9ABC-DEF012345679\r\n```\n"
+        b"<!-- brain://1MOyofbleEqavN7wEjRWeQ/included -->\r\n"
+        b"brain://1MOyofbleEqavN7wEjRWeQ/included\n"
+        b"Case-sensitive unrelated compact identity 1moyofbleeqavn7wejrwea\r\n"
+        b"Encoded included %61%31b2c3d4-e5f6-4a78-9abc-def012345679\n"
+        b'{"SourceId":"\\u00611b2c3d4-e5f6-4a78-9abc-def012345679"}\r'
+    )
+    source = graph_archive(
+        tmp_path / "source.brz",
+        {1: "Home", private: "Private subject", included: "Private subject"},
+        notes={1: (body, 4)},
+    )
+    rewrite(source, lambda p: forget(p, private))
+    before = source.read_bytes()
+    workflow = default_workflow()
+    assert workflow.inspect(source).outcome == "clean"
+    vault = tmp_path / "vault"
+    result = workflow.convert(source, vault)
+    assert result.outcome == "clean"
+    assert note_body((vault / "Home — Home.md").read_bytes()) == (
+        b"# Home\n\n"
+        + body
+        + b"\n## Categories\n\n[[Categories.md|Browse categories]]\n"
+    )
+    originals = [p.read_bytes() for p in vault.rglob("*.original")]
+    assert originals == [body]
+    assert source.read_bytes() == before
+
+
+@pytest.mark.parametrize("encoding", ["nested", "serialized", "unicode_escaped"])
+def test_uppercase_uuid_ownership_omits_entire_record_and_transitive_dependents(
+    tmp_path, encoding
+):
+    private = int(UUID("a1b2c3d4-e5f6-4a78-9abc-def012345678"))
+    source = graph_archive(
+        tmp_path / "source.brz", {1: "Home", private: "Private subject"}
+    )
+    safe = (
+        '{"ThoughtId":"'
+        + identity(1)
+        + '","Precise":0.123456789012345678901234567890,"SafeNull":null}'
+    )
+
+    def edit(parts):
+        forget(parts, private)
+        owned = {"ThoughtId": "A1B2C3D4-E5F6-4A78-9ABC-DEF012345678"}
+        if encoding == "serialized":
+            owned = json.dumps(owned)
+        elif encoding == "unicode_escaped":
+            owned = (
+                '{"ThoughtId":"'
+                + "".join(
+                    f"\\u{ord(char):04x}"
+                    for char in "A1B2C3D4-E5F6-4A78-9ABC-DEF012345678"
+                )
+                + '"}'
+            )
+        for record in (
+            {
+                "Id": identity(8100),
+                "Nested": [{"Envelope": owned}],
+                "Value": "Private sibling",
+            },
+            {
+                "Id": identity(8101),
+                "ThoughtId": identity(8100),
+                "Value": "Private dependent",
+            },
+            {"Id": identity(8102), "Nested": safe, "SafeNull": None},
+        ):
+            parts["settings.json"] += b"\n" + json.dumps(record).encode()
+
+    rewrite(source, edit)
+    before = source.read_bytes()
+    workflow = default_workflow()
+    assert workflow.inspect(source).outcome == "clean"
+    vault = tmp_path / "vault"
+    assert workflow.convert(source, vault).outcome == "clean"
+    output = b"\n".join(p.read_bytes() for p in vault.rglob("*") if p.is_file())
+    for secret in (
+        identity(private),
+        "A1B2C3D4-E5F6-4A78-9ABC-DEF012345678",
+        identity(8100),
+        identity(8101),
+        "Private sibling",
+        "Private dependent",
+    ):
+        assert secret.encode() not in output
+    record = json.loads((vault / "migration-record.json").read_bytes())
+    settings = next(
+        e["records"] for e in record["original_evidence"] if e["key"] == "settings.json"
+    )
+    retained = next(r for r in settings if r["Id"] == identity(8102))
+    assert retained == {"Id": identity(8102), "Nested": safe, "SafeNull": None}
+    assert source.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "encoded",
+    [
+        "A1B2C3D4-E5F6-4A78-9ABC-DEF012345678",
+        "brain://%31%4D%4F%79%6F%66%62%6C%65%45%71%61%76%4E%37%77%45%6A%52%57%65%41/Private-title",
+        r'{"Id":"\u00611b2c3d4-e5f6-4a78-9abc-def012345678"}',
+    ],
+    ids=["uppercase", "url-compact", "serialized-unicode"],
+)
+def test_encoded_omitted_identity_cannot_reappear_in_retained_opaque_evidence(
+    tmp_path, encoded
+):
+    private = int(UUID("a1b2c3d4-e5f6-4a78-9abc-def012345678"))
+    source = graph_archive(
+        tmp_path / "source.brz", {1: "Home", private: "Private subject"}
+    )
+
+    def edit(parts):
+        forget(parts, private)
+        parts["brainusers.json"] = json.dumps(
+            {"Id": identity(8102), "OpaquePrivate": encoded, "SafeNull": None}
+        ).encode()
+
+    rewrite(source, edit)
+    original = source.read_bytes()
+    workflow = default_workflow()
+    assert workflow.inspect(source).outcome == "clean"
+    vault = tmp_path / "vault"
+    assert workflow.convert(source, vault).outcome == "clean"
+    record = json.loads((vault / "migration-record.json").read_bytes())
+    retained = next(
+        e["records"]
+        for e in record["original_evidence"]
+        if e["key"] == "brainusers.json"
+    )
+    assert retained == [{"Id": identity(8102), "SafeNull": None}]
+    assert source.read_bytes() == original
+
+
+def test_associated_record_identity_in_included_body_refuses_privately(tmp_path):
+    source = graph_archive(
+        tmp_path / "source.brz",
+        {1: "Home", 2: "Private subject"},
+        notes={1: (b"<!-- 00000000-0000-0000-0000-000000001fa4 -->", 4)},
+    )
+
+    def edit(parts):
+        forget(parts, 2)
+        parts["settings.json"] += (
+            b"\n"
+            + json.dumps(
+                {
+                    "Id": identity(8100),
+                    "ThoughtId": identity(2),
+                    "Value": "Private sibling",
+                }
+            ).encode()
+        )
+
+    rewrite(source, edit)
+    original = source.read_bytes()
+    workflow = default_workflow()
+    vault = tmp_path / "vault"
+    for result in (workflow.inspect(source), workflow.convert(source, vault)):
+        assert (
+            result.outcome == "refused" and result.issues[0].code == "invalid_reference"
+        )
+        for private in (
+            identity(2),
+            identity(8100),
+            "Private sibling",
+            "Private subject",
+        ):
+            assert private not in result.model_dump_json()
+    assert not vault.exists() and source.read_bytes() == original
+
+
 @pytest.mark.parametrize("collection", ["settings.json", "brainusers.json"])
 @pytest.mark.parametrize(
     "encoding", ["nested", "serialized", "unicode_escaped", "duplicate_keys"]

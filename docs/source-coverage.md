@@ -29,12 +29,23 @@ with valid populated ForgottenDateTime markers before destination planning,
 independently of attachment states. Excluded subjects, owned assets, memberships,
 relationships and identifying records do not reach the vault or public output.
 Ownership closure includes nested objects/arrays and valid serialized JSON,
-including Unicode-escaped identifiers and duplicate ownership declarations.
+including canonical UUID case variants, Unicode-escaped identifiers and
+duplicate ownership declarations.
 Associated records and their transitive identities are omitted as a whole;
 provably safe serialized strings retain their exact original spelling and
 numeric precision. Reference refusal messages omit raw source targets.
 Incoming authored phrases/embeds are removed exactly; unrelated included content
-with matching titles or pixels survives. Safe exact originals and provably
+with matching titles or pixels survives. After those removals, an included body
+with a proven omitted identity or associated record identity outside the approved
+reference spans refuses with a static private error. This includes inline/fenced
+code, HTML comments and bare source URIs; arbitrary literal rewriting cannot
+preserve their unrelated bytes safely. The shared note/evidence safety check
+recognizes known canonical UUIDs with valid case variants, case-exact compact
+identities and omitted associated record IDs. It also inspects one percent-encoding
+layer followed by one serialized `\uXXXX` layer without rewriting source text.
+Repeated arbitrary decoding and title/pixel matching are not inferred; this is
+bounded identity-association coverage, not a claim to detect every possible
+representation of private content. Safe exact originals and provably
 included raw fields preserve omission/null distinctions, exact numeric values
 and date strings. Unsafe original copies are omitted explicitly; unscopable
 modificationlogs, syncpoints and tombstones collections are omitted whenever

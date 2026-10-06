@@ -311,7 +311,14 @@ local paths and valid ForgottenDateTime markers before selecting included
 records. Raw ownership inspection follows nested containers and serialized
 JSON without rewriting retained strings; duplicate-key ownership declarations
 all participate in transitive associated-record omission. Unsafe reference
-errors use static messages rather than echoing raw targets. Only included items
+errors use static messages rather than echoing raw targets. Canonical UUID case
+variants participate in that ownership closure. The source adapter removes
+approved active reference spans, then refuses an included body with a remaining
+proven omitted identity/association. The same bounded identity inspection protects
+exact-original copies and opaque evidence: canonical UUID case variants,
+case-exact compact IDs, and one percent layer followed by one Unicode-escape
+layer. It does not rewrite inactive code, comments or plain text, infer title
+matches, or add BRZ/evidence parsing to the core. Only included items
 and incident-safe relationships/assignments reach
 planning. Excluded providers contribute no membership or inherited appearance;
 a forgotten Home refuses rather than selecting a replacement. Names and

@@ -25,6 +25,7 @@ from .findings import (
 )
 from .images import validate_note_image
 from .notes import bind_note_references, trace_note_references
+from .scope import contains_omitted_identity
 from .semantics import validate_semantic_fields
 from .videos import reviewed_video
 
@@ -373,11 +374,16 @@ def normalize_attachments(
                         target = None
                     if parts.scheme == "brain" and target in excluded:
                         removals.append(reference)
-            unsafe_original = bool(removals) or any(
-                token in text for token in scope_tokens
+            unsafe_original = bool(removals) or contains_omitted_identity(
+                text, scope_tokens
             )
             for reference in reversed(removals):
                 text = text[: reference.start] + text[reference.end :]
+            if contains_omitted_identity(text, scope_tokens):
+                refuse(
+                    "invalid_reference",
+                    "Note contains an excluded association outside removable references",
+                )
             if removals:
                 references = trace_note_references(text)
             documents.append(

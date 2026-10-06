@@ -8,6 +8,26 @@ from decimal import Decimal
 from pathlib import PurePosixPath
 from uuid import UUID
 
+_UUID_TEXT = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
+
+
+def contains_omitted_identity(text, tokens):
+    """Recognize proven identity spellings without changing retained source text."""
+    if not tokens:
+        return False
+    if any(token in text for token in tokens):
+        return True
+    # One URL-encoding layer and one serialized Unicode-escape layer are enough
+    # for these reviewed representations. This is inspection, never rewriting
+    # or repeated arbitrary decoding. Compact base64 identities stay case exact.
+    decoded = re.sub(r"%([0-9a-fA-F]{2})", lambda match: chr(int(match[1], 16)), text)
+    decoded = re.sub(
+        r"\\u([0-9a-fA-F]{4})", lambda match: chr(int(match[1], 16)), decoded
+    )
+    return any(token in decoded for token in tokens) or any(
+        match[0].lower() in tokens for match in _UUID_TEXT.finditer(decoded)
+    )
+
 
 def scope_records(records, refuse, uuid):
     brain = uuid(records["meta.json"][0]["BrainId"])
@@ -129,7 +149,13 @@ def scope_records(records, refuse, uuid):
 
     def identifies_omitted(value):
         if isinstance(value, str):
-            return value in omitted or identifies_omitted(decoded(value))
+            return (
+                value in omitted
+                or (
+                    _UUID_TEXT.fullmatch(value) is not None and value.lower() in omitted
+                )
+                or identifies_omitted(decoded(value))
+            )
         if isinstance(value, (list, tuple)):
             return any(identifies_omitted(entry) for entry in value)
         return False
@@ -167,7 +193,7 @@ def scope_records(records, refuse, uuid):
 
     def unsafe(value):
         if isinstance(value, str):
-            return any(token in value for token in tokens) or unsafe(decoded(value))
+            return contains_omitted_identity(value, tokens) or unsafe(decoded(value))
         if isinstance(value, dict):
             return any(unsafe(k) or unsafe(v) for k, v in value.items())
         if isinstance(value, (list, tuple)):

@@ -22,7 +22,9 @@ Version 3 (`0.3.0`) development applies default forgotten-thought exclusion to
 every archive. Valid populated ForgottenDateTime markers exclude the subject,
 owned content, memberships, relationships and associated evidence before naming.
 Authored links/embeds to excluded subjects disappear as whole phrases; unrelated
-text and code literals remain unchanged. Exact originals containing excluded
+text and code literals remain unchanged. An included body that still contains a
+proven omitted identity outside those removable spans refuses privately, including
+code, comments and bare source URIs. Exact originals containing excluded
 references are omitted, with explicit Document original-copy metadata. Safe
 originals remain byte exact. Unscopable history is omitted. Counts describe
 included scope; there is no include-forgotten option or individual exclusion
