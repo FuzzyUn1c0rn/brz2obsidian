@@ -42,10 +42,13 @@ The prior m3/m4 failures remain retained history; verified source/oracle TXT and
 diagnostic-link repairs precede m5. Actual-output native review passed strategic
 samples in observed Obsidian 1.14.4, with independent source/CSV/ledger/checker
 evidence and retained complete automated preservation. **09: Deliver the reviewed
-release after actual-vault user acceptance** is claimed by `/root/release_documenter`. Final
-review, package/release checks and the actual-vault user verdict remain pending;
-neither automated nor agent native review supplies user acceptance or arbitrary
-representation coverage.
+release after actual-vault user acceptance** remains claimed by
+`/root/release_documenter`. Three criteria have bounded evidence: complete public
+checks, final 0.3.0 wheel/documented examples and public guidance. Independent
+cumulative review from `9ddba911eb53e589b53d8059141462ee3a274aea`, the actual-vault
+user verdict, final preserved-input guards and aggregate delivery remain pending.
+Neither automated nor agent native review supplies user acceptance or arbitrary
+representation coverage; no delivery or publication is declared.
 
 Claim an eligible ticket before implementation and record its assignee. Use an
 isolated managed worktree/branch based on this integration tip for each implementer,
@@ -77,6 +80,29 @@ integrated. The user requested a pull request when everything is complete; creat
 it after implementation and required acceptance, then attach it to this chat.
 
 ## Comments
+
+- 2026-10-06 (/root/integration_merger): Integrated **partial ticket 09** candidate
+  `7a18c6bfb02af35c51662376e41308aa167339ea` using
+  `git merge --ff-only 7a18c6bfb02af35c51662376e41308aa167339ea` from clean
+  root `d057533b1025d2d68ef90ec989dfb52cd3abeb68`, with clean exact worker and
+  ancestry exit 0. Seven public guidance/evidence files only; baseline diff check
+  and `git diff --exit-code d057533b1025d2d68ef90ec989dfb52cd3abeb68 7a18c6bfb02af35c51662376e41308aa167339ea -- src tests pyproject.toml requirements.txt`
+  pass, confirming runtime/tests/dependency/build inputs unchanged.
+
+  Reviewed public diff/UTF-8 evidence against ignored root 09
+  `partial-candidate-independent.json` bounded PASS. Initial `685746b` punctuation
+  corruption and unqualified byte-preservation wording were repaired; candidate
+  preserves actual UTF-8 and limits dependency proof to 1,741 non-bytecode files.
+  Independent receipt corroboration covers 57 exact wheel runtime modules plus
+  RECORD/metadata, 18 actual operations, three source and three truly wheel-bound
+  literal conversions, physical 36-file/two-embed receipts and 136 unchanged
+  regression inputs. Attributed full gate is 1,508 tests in 293.16s, Ruff on 133
+  files and pip PASS; first snapshot was captured during execution. Root editable
+  metadata refresh to 0.3.0 retained its separate binding/dependency/runtime proof.
+  No suite/matrix/package/checker/native/environment rerun was needed for this
+  docs-only integration. Ticket 09 remains **claimed**, only three proven criteria
+  checked; independent final review, user verdict, final source guards and delivery
+  remain open. Source/native evidence remains valid because code is unchanged.
 
 - 2026-10-06 (/root/integration_merger): Integrated independently verified native
   evidence candidate `7cb3ed2510d272a3fa269963caa3f30c389557f5` using
