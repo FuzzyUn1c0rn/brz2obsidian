@@ -75,7 +75,7 @@ def plan(analysis: Analysis) -> MigrationPlan:
             Adaptation(
                 kind="category_dashboard",
                 affected=key,
-                description="Native contextual Members and Gallery Bases immediately follow the category title, before retained source content, without a generated introductory icon image; linked membership discovery survives link-preserving renames.",
+                description="Parents/Children navigation immediately follows the category title when present; native contextual Members and Gallery Bases follow that navigation, before retained source content, without a generated introductory icon image; linked membership discovery survives link-preserving renames.",
             )
             for key in sorted(created & definitions)
         )

@@ -38,6 +38,18 @@ The parser instruments base markdown-it-py rules and maps transformed inline
 positions back to exact decoded source offsets; tokens' line maps alone are
 not treated as character spans.
 
+Category hierarchy tests use an actual complete synthetic ZIP with multiple
+ordinary parents, duplicate edges, a cycle, assigned/unassigned parents, an
+excluded endpoint and intentional uncreated targets. They verify reciprocal
+navigation, hierarchy before Members/Gallery, independent membership, exact
+source bytes, CLI agreement and repeat/reordered output. Signature near misses
+remain refusals. A source-neutral Folio control checks category Children above
+Bases and Related navigation after content without widening BRZ coverage.
+The existing independent raw-source oracle admits the exact new hierarchy
+signature and layout; an included-only control exercises its current whole-raw
+evidence boundary. Full scoped/private four-archive audits and native/user
+acceptance remain separate implementation gates.
+
 The combined v2 actual-ZIP fixture independently checks seven imported notes,
 eight byte-preserved payloads and 19 support artifacts, including exceptional
 Markdown/image references, graph/tags, category membership/icon snapshots/dates,
@@ -107,8 +119,8 @@ $output = Join-Path (Get-Location) 'tmp/audit-01'
 ```
 
 All nine accepted conversions passed independent comparisons with exit 2.
-The current fresh outputs place category Members/Gallery immediately after their
-heading, omit generated introductory category images and retain category icon
+Those v2 fresh outputs placed category Members/Gallery immediately after their
+heading, omitted generated introductory category images and retained category icon
 properties/assets plus ordinary/member body snapshots. Four independent controls
 reject reintroduced category images, Bases moved below labels, fabricated category
 snapshot adaptations and false dashboard descriptions, even after consistent
@@ -162,7 +174,7 @@ invalid arguments returned the documented exits. These local smoke results
 supplement the public suite and private preservation audit; they make no native
 rendering or user-acceptance claim.
 
-The refreshed category-presentation wheel and all eight examples also confirm
+The v2 category-presentation wheel and all eight examples also confirmed
 Bases immediately follow category headings, introductory category embeds are
 absent, category icon properties/assets remain and member snapshots are unchanged.
 All 53 wheel module bytes match their current worktree sources. The Category
@@ -222,8 +234,9 @@ not guess filenames or reuse prototype paths.
    Language 1, Refactoring Technique 16 and Tool 2. Check Members/Gallery,
    Icon-before-Note, no Appearance column, typed empty notes and preserved
    definition-owned content/resources. A/B have no imported thought types.
-   Members/Gallery must immediately follow the heading, with no generated
-   introductory category image; retained source content follows the Bases.
+   Members/Gallery must follow the heading and any Parents/Children navigation,
+   with no generated introductory category image; retained source content
+   follows the Bases.
 8. Exercise live inherited icons, the actual owned override, blank opt-out and
    invalid/nonmember provider controls on disposable copies. Membership order
    must not choose a provider. Keep source identities/dates unchanged and verify

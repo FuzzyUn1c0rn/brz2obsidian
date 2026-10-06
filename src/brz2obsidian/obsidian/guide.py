@@ -74,9 +74,11 @@ Keep notes human-readable and preserve their authored content.
 ## Browse and extend categories
 
 Open [[Categories.md]] from Home, then open the category dashboard for its Members
-table and Gallery immediately after the title. Category notes have no generated
+table and Gallery after the title and any Parents/Children navigation.
+Every direct included parent is linked; hierarchy does not create membership.
+Category notes have no generated
 introductory icon image; their icon property still supplies dashboard images.
-Retained source labels, authored text/images, resources and graph links follow
+Retained source labels, authored text/images, resources and Related links follow
 the Bases. Ordinary/member notes keep their separately editable body snapshots.
 A standalone contextual Base has no selected embedding
 category. Discovery follows linked membership, with Templates and Attachments

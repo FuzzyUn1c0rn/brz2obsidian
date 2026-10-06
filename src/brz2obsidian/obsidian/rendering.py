@@ -141,6 +141,11 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         text = property_frontmatter(plan, item) + "# " + heading + "\n\n"
         icon = icon_snapshots[item.key].effective_icon_asset_id
         if item.role == "definition":
+            hierarchy = relationship_sections(
+                plan, item.key, headings=("Parents", "Children")
+            )
+            if hierarchy:
+                text += hierarchy + "\n"
             text += CATEGORY_VIEWS + "\n"
         elif icon is not None:
             text += "![[" + asset_paths[icon] + "]]\n\n"
@@ -152,7 +157,13 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
                 text += "\n\n"
             text += render_document(documents[key], target.relative_path, plan)
         resources = resource_section(plan, item.key)
-        relationships = relationship_sections(plan, item.key)
+        relationships = relationship_sections(
+            plan,
+            item.key,
+            headings=("Related",)
+            if item.role == "definition"
+            else ("Parents", "Children", "Related"),
+        )
         if resources or relationships:
             text += append_boundary(text)
         if resources:
@@ -243,7 +254,8 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     report += "\n[[Vault guide.md|Vault guide]] explains manual full-template selection for new objects, direct membership edits on existing notes, canonical properties and future-category starters. Bundled Templates is configured for insertion-day ISO dates; update dates are maintained explicitly.\n"
     report += (
         "\nOpen [[Categories.md|Categories]] from Home, then a category dashboard "
-        "for its native Members table and Gallery immediately after the title, "
+        "for its native Members table and Gallery after the title and any "
+        "Parents/Children navigation, "
         "without a generated introductory category image. Retained source content "
         "and resources follow the Bases; category icon properties remain available "
         "for dashboard images. These contextual Bases use the "

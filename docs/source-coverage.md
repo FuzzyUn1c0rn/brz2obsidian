@@ -54,6 +54,7 @@ All reviewed links use Kind 1:
 | --- | --- | --- |
 | Hierarchy | 1 / 1 / -1, 1 or 7 | Ordinary A parent, ordinary B child |
 | Hierarchy to source tag | 1 / 1 / -1 | Ordinary A parent, tag B child |
+| Hierarchy to category | 1 / 1 / -1 | Ordinary A parent, definition B child; reciprocal Parents/Children |
 | Jump | 3 / 1 / -1, 3, 5 or 7 | Ordinary endpoints; Related |
 | Tag assignment | 1 / 5 / -1 | Tag A classifies ordinary B; native tags or hidden-membership listing |
 | Instance assignment | 1 / 2 / -1 | Definition A classifies ordinary B; linked category membership |
@@ -66,6 +67,13 @@ definition and typed-member selection, the greedy
 hierarchy cover selects parents covering the most uncovered incident edges,
 with canonical key ties. It preserves cycles/multiple parents and does not
 claim a global minimum.
+The category signature does not admit Direction 1/7, reversed definition-to-ordinary
+edges, definition-to-definition hierarchy or subtype inheritance. Category
+Parents/Children follow the title before Members/Gallery. Every direct included
+parent is linked, including intentional uncreated ordinary targets; hierarchy
+does not create membership or force an empty parent note when its category
+already covers the edge. TypeId and the exact instance link still establish
+classification independently.
 
 ## Imported metadata and icon snapshots
 
