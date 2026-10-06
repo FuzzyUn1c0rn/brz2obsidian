@@ -43,18 +43,22 @@ diagnostic-link repairs precede m5. Actual-output native review passed strategic
 samples in observed Obsidian 1.14.4, with independent source/CSV/ledger/checker
 evidence and retained complete automated preservation. **09: Deliver the reviewed
 release after actual-vault user acceptance** remains claimed by
-`/root/release_documenter`. Only the public-guidance criterion remains checked.
-Spec review at `5f971b96500a33d58ec09f4d9bd6c2d08f9a8cde` reported zero actionable
-findings. Standards initially reported zero documented-rule breaches and an
-optional P3 duplication observation; later clarification confirmed a material P2
-compact-reference validation bypass. Its isolated repair at
-`fc1685aaea691bff47fa47408d37c78b7188f94c` passed separate bounded verification
-before integration. The pre-repair full-suite/package and m5/native results remain
-historical evidence. Fresh complete public/package gates, the four-original
-matrix/re-audit and comparison of native-facing bytes are pending; equivalent
-strategic native observations can be reused only after that comparison. Final
-review closure, the actual-vault user verdict, preserved-input guards and
-aggregate delivery also remain pending.
+`/root/release_documenter`. All five technical criteria are now checked: separate
+review/repair verification, fresh complete public regression, rebuilt package and
+executed examples, public guidance, and complete source/native retention. At
+frozen repaired runtime `b4a3743ff98656934b6e7075ceaae4caf824405a`, 1,513 tests,
+Ruff on 133 files and pip passed; the fresh wheel/136-input snapshots were separately
+corroborated. The m6 twelve-output matrix and independent full raw-source re-audit
+passed with 7,029 matrix files, four originals and 562 retained files unchanged.
+Independent equivalence of all 2,337 exact-output files preserves existing native
+observations: 2,329 byte exact, eight with only individually checked run/bookmark
+clock fields changed. No material native refresh is required under strategic
+sampling. Spec's zero actionable findings remains separate from Standards' initial
+zero documented breaches/optional P3 and later confirmed P2, independently repaired
+and verified. A fresh clean actual user review copy contains 1,552 exact files.
+The actual human verdict and aggregate delivery remain pending; ticket 09 remains
+claimed. See [final review](research/final-review.md) and
+[release verification](research/release-verification.md) for pins and limits.
 Neither automated nor agent native review supplies user acceptance or arbitrary
 representation coverage; no delivery or publication is declared.
 
@@ -88,6 +92,21 @@ integrated. The user requested a pull request when everything is complete; creat
 it after implementation and required acceptance, then attach it to this chat.
 
 ## Comments
+
+- 2026-10-06 (/root/native_vault_reviewer, separate merger): Integrated
+  technical-only candidate `7ff1c734eb9a51de06372f229f354dabf6abaa75` by
+  `git merge --ff-only 7ff1c734eb9a51de06372f229f354dabf6abaa75` from clean
+  root `b4a3743ff98656934b6e7075ceaae4caf824405a`, after confirming exact clean
+  worker/root, ancestry exit 0 and candidate diff check. Three evidence/ticket
+  files only; runtime/tests/build inputs remain unchanged. Root independent
+  `technical-candidate-independent.json` corroborates fresh regression/package,
+  full m6 source audit, complete native equivalence and guarded user-copy facts;
+  `public-identity-privacy-7ff1c734.json` passes on 115 public blobs. Reviewed the
+  complete metadata delta, retaining historical proofs and separate review axes.
+  Ticket 09 stays claimed: five technical criteria checked, actual user verdict
+  and aggregate delivery unchecked. Source/native evidence applies by verified
+  byte equivalence, with existing strategic sampling/CSV limitations. No gates,
+  UI, environment or runtime edits were performed by this merger.
 
 - 2026-10-06 (/root/native_vault_reviewer, separate merger): Integrated the
   independently verified P2 repair candidate
