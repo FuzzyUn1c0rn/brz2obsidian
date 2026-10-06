@@ -30,6 +30,8 @@ from .facts import (
 from .facts import (
     member as raw_member,
 )
+from .gaps import derive_gaps, diagnostic_targets
+from .scope import dump_json, scope
 from .support import check_support_content
 
 ROOTS = (
@@ -141,7 +143,55 @@ def check_vault(source, vault):
         ), "source fingerprint"
     with ZipFile(source) as archive:
         assert archive.testzip() is None, "source CRC"
-        raw = read_source(archive)
+        archive_names = archive.namelist()
+        assert len(
+            {unicodedata.normalize("NFC", n).casefold() for n in archive_names}
+        ) == len(archive_names), "raw unique physical ZIP identities"
+        for info in archive.infolist():
+            name = info.filename.rstrip("/")
+            assert (
+                name
+                and str(PurePosixPath(name)) == name
+                and not PurePosixPath(name).is_absolute()
+                and not set(name.split("/")) & {"", ".", ".."}
+                and "\\" not in name
+                and ":" not in name
+                and not info.flag_bits & 1
+                and (info.external_attr >> 16) & 0o170000 != 0o120000
+            ), "raw safe physical ZIP member"
+        raw = scope(read_source(archive), archive)
+        derive_gaps(raw, archive)
+        bindings = {
+            a["Id"]: {
+                "asset_id": a["Id"],
+                "owner": a["SourceId"],
+                "role": "image" if a["Type"] == 12 else "other",
+                "original_name": a["Location"],
+            }
+            for a in raw["attachments.json"]
+        }
+        for a in raw["attachments.json"]:
+            if (
+                a["Type"] == 1
+                and (a["NoteType"] == 4 or a["Location"] == "Notes.md")
+                and raw_member(a) in archive.namelist()
+            ):
+                body = archive.read(raw_member(a)).decode("utf-8-sig")
+                removals = [
+                    r
+                    for r in source_references(
+                        body, a["SourceId"], bindings, raw.excluded
+                    )
+                    if r["kind"] == "item" and r["target"] in raw.excluded
+                ]
+                if removals or any(token in body for token in raw.tokens):
+                    raw.unsafe_originals.add(a["Id"])
+                for r in reversed(removals):
+                    body = body[: r["start"]] + body[r["end"] :]
+                assert not raw.unsafe(body), (
+                    "residual excluded identity in supplied body"
+                )
+                raw.documents[a["Id"]] = body
         assert (
             record["source_identity"]["source_id"] == raw["meta.json"][0]["BrainId"]
             and record["source_identity"]["format_version"] == "5"
@@ -161,13 +211,40 @@ def check_vault(source, vault):
             )
         targets = {a["asset_id"]: a for a in record["asset_targets"]}
         checked = set()
+        digest_parts = []
+        for name in ROOTS:
+            text = archive.read(name).decode("utf-8-sig")
+            digest_parts.append(
+                dump_json(raw[name])
+                if raw.excluded
+                else "["
+                + ",".join(
+                    [text]
+                    if name == "meta.json"
+                    else [
+                        line
+                        for line in re.split(r"\r\n|\r|\n", text)
+                        if line.strip(" \t")
+                    ]
+                )
+                + "]"
+            )
         for attachment in raw["attachments.json"]:
             kind = attachment["Type"]
-            if kind in {3, 8, 15}:
+            if (
+                kind in {3, 8, 15}
+                or attachment["Id"] in raw.unsafe_originals
+                or attachment["Id"] in raw.gaps
+            ):
                 continue
             prefix = ".data/" if kind == 5 else ".data/md-images/" if kind == 12 else ""
             member = attachment["SourceId"] + "/" + prefix + attachment["Location"]
+            assert attachment["Id"] in targets, "required safe payload identity"
             assigned = targets[attachment["Id"]]
+            assert (
+                assigned["relative_path"] is not None
+                and (vault / assigned["relative_path"]).is_file()
+            ), "required safe payload file"
             actual = (vault / assigned["relative_path"]).read_bytes()
             assert actual == archive.read(member), "payload bytes"
             assert assigned["actual_length"] == len(actual), "payload length"
@@ -179,23 +256,133 @@ def check_vault(source, vault):
                 "length": len(actual),
                 "sha256": hashlib.sha256(actual).hexdigest(),
             }, "payload original evidence"
+            digest_parts.append(
+                json.dumps(
+                    {
+                        "member": member,
+                        "length": len(actual),
+                        "sha256": hashlib.sha256(actual).hexdigest(),
+                    }
+                )
+            )
             checked.add(member)
+        assert (
+            record["source_identity"]["snapshot_digest"]
+            == hashlib.sha256("".join(digest_parts).encode()).hexdigest()
+        ), "raw-derived scoped digest"
         assert checked == {
-            n for n in archive.namelist() if n not in ROOTS and not n.endswith("/")
+            n
+            for n in archive.namelist()
+            if n not in ROOTS
+            and not n.endswith("/")
+            and n not in raw.dropped_members
+            and n
+            not in {
+                raw_member(a)
+                for a in raw["attachments.json"]
+                if a["Id"] in raw.unsafe_originals
+            }
         }, "payload accounting"
         asset_summary = check_assets(raw, record, archive, vault, targets)
         summary, documents, names = check_items(raw, record, archive, vault, targets)
-        references = check_documents(record, documents, names, targets)
+        created = {t["item_key"] for t in record["item_targets"] if t["created"]}
+        diagnostics, presentations = diagnostic_targets(
+            raw,
+            names,
+            created,
+            {k: expected_metadata(raw, k, targets)[2] for k in created},
+        )
+        for presentation in presentations:
+            presentation["image_paths"] = [
+                targets[k]["relative_path"]
+                for k in presentation["presentation"]["image_asset_ids"]
+            ]
+        assert record["source_gaps"] == diagnostics, (
+            "complete raw-derived source-gap diagnostics"
+        )
+        assert record["generated_presentations"] == presentations, (
+            "complete raw-derived generated presentations"
+        )
+        summary["source_gaps"] = len(raw.gaps)
+        summary["generated_embeds"] = sum(len(g["images"]) for g in raw.gaps.values())
+        summary["decoded_image_frames"] = sum(
+            len(p["frames"]) for p in raw.image_decodes.values()
+        )
+        summary["image_decoder_capabilities"] = sorted(
+            {json.dumps(p["codec"], sort_keys=True) for p in raw.image_decodes.values()}
+        )
+        references = check_documents(raw, record, documents, names, targets)
         summary.update(asset_summary)
         check_accounting(raw, record, checked, references)
         files = check_actual_files(vault, record, targets, names, raw, summary)
         check_adaptations(raw, record, documents, names, targets)
         check_counts(raw, record, summary, references, targets, files)
-        check_report(vault, raw, summary, len(checked))
+        check_report(vault, raw, record, names, targets, summary, len(checked))
     return {
         "source_items": len(raw["thoughts.json"]),
+        **{
+            label + "_items": sum(t["Kind"] == kind for t in raw["thoughts.json"])
+            for label, kind in (
+                ("ordinary", 1),
+                ("definition", 2),
+                ("tag", 4),
+                ("system", 5),
+            )
+        },
         "source_relationships": len(raw["links.json"]),
+        "ordinary_category_hierarchy": sum(
+            r["Meaning"] == 1
+            and r["Relation"] == 1
+            and next(
+                t["Kind"] for t in raw["thoughts.json"] if t["Id"] == r["ThoughtIdA"]
+            )
+            == 1
+            and next(
+                t["Kind"] for t in raw["thoughts.json"] if t["Id"] == r["ThoughtIdB"]
+            )
+            == 2
+            for r in raw["links.json"]
+        ),
         "attachment_records": len(raw["attachments.json"]),
+        "raw_local_payloads": sum(
+            a["Type"] not in {3, 8, 15} and raw_member(a) in archive.namelist()
+            for a in raw["attachments.json"]
+        ),
+        "url_attachments": sum(a["Type"] == 3 for a in raw["attachments.json"]),
+        "present_note_images": sum(a["Type"] == 12 for a in raw["attachments.json"]),
+        "present_icons": sum(
+            a["Type"] == 5 and a["Id"] not in raw.gaps for a in raw["attachments.json"]
+        ),
+        "present_generic_files": sum(
+            a["Type"] == 1 and a["Id"] not in raw.gaps and a["Id"] not in raw.documents
+            for a in raw["attachments.json"]
+        ),
+        "marked_documents": sum(
+            a["NoteType"] == 4 and a["Id"] in raw.documents
+            for a in raw["attachments.json"]
+        ),
+        "canonical_documents": sum(
+            a["NoteType"] == 0 and a["Id"] in raw.documents
+            for a in raw["attachments.json"]
+        ),
+        **{
+            "absent_" + label: sum(g["role"] == role for g in raw.gaps.values())
+            for label, role in (
+                ("ordinary_owners", "ordinary_note"),
+                ("definition_notes", "definition_note"),
+                ("icon_providers", "definition_icon"),
+            )
+        },
+        "neutral_affected_members": len(
+            {k for g in diagnostics for k in g["affected_member_keys"]}
+        ),
+        "txt_gaps": sum(a["Type"] == 15 for a in raw["attachments.json"]),
+        "present_icon_discrepancies": sum(
+            a["Type"] == 5
+            and a["Id"] not in raw.gaps
+            and a["DataLength"] != targets[a["Id"]]["actual_length"]
+            for a in raw["attachments.json"]
+        ),
         "payloads": len(checked),
         "files": files,
         "references": len(references),
@@ -388,12 +575,14 @@ def check_items(raw, record, archive, vault, assets):
     for a in raw["attachments.json"]:
         owner, kind = a["SourceId"], a["Type"]
         if a["Id"] in originals:
-            text = archive.read(owner + "/" + a["Location"]).decode("utf-8-sig")
+            text = raw.documents[a["Id"]]
             assert owner not in documents, "raw sole thought-note candidate"
             documents[owner] = (a["Id"], text)
             if text.strip():
                 content.add(owner)
-        elif kind in {3, 8} or (kind in {1, 12} and a["DataLength"] > 0):
+        elif a["Id"] not in raw.gaps and (
+            kind in {3, 8} or (kind in {1, 12} and a["DataLength"] > 0)
+        ):
             content.add(owner)
     created = (content & thoughts.keys()) | {home} | definitions | assigned_types.keys()
     initial = set(created)
@@ -581,6 +770,10 @@ def check_items(raw, record, archive, vault, assets):
             + "\n---\n\n"
         )
         expected += "# " + escaped(thoughts[key]["Name"]) + "\n\n"
+        owned_gaps = [g for g in raw.gaps.values() if g["owner"] == key]
+        presentation_images = next((g["images"] for g in owned_gaps if g["images"]), [])
+        if presentation_images:
+            expected += "> Source note text is absent. Unknown prose, captions and layout were not recovered. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
         sections = {}
         for heading in ("Parents", "Children", "Related"):
             neighbors = set()
@@ -609,12 +802,33 @@ def check_items(raw, record, archive, vault, assets):
                 if heading in sections:
                     expected += sections.pop(heading) + "\n"
             expected += "## Members\n\n![[Templates/Bases/Members.base#Members]]\n\n## Gallery\n\n![[Templates/Bases/Gallery.base#Gallery]]\n\n"
+            if any(g["role"] == "definition_note" for g in owned_gaps):
+                expected += "> Source category note text is absent and remains unknown. No prose, captions or layout were recovered. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
         elif effective:
             expected += "![[" + assets[effective]["relative_path"] + "]]\n\n"
+        for _, gap in sorted(raw.gaps.items()):
+            if gap["role"] != "definition_icon":
+                continue
+            if gap["owner"] == key:
+                expected += "> Source category icon is absent; appearance is neutral. See [[MIGRATION REPORT.md|Migration report]] for provider evidence and optional repair steps.\n\n"
+            elif provider == gap["owner"] and not icon:
+                expected += (
+                    "> The inherited icon is unavailable from "
+                    + wiki(names[provider], thoughts[provider]["Name"])
+                    + "; appearance is neutral. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
+                )
         if thoughts[key].get("Label"):
             expected += thoughts[key]["Label"] + "\n\n"
         body = documents.get(key, (None, ""))[1]
         expected += adapt_body(body, key, names[key], names, assets)
+        if presentation_images:
+            expected += (
+                "\n\n".join(
+                    "![[" + assets[i]["relative_path"] + "]]"
+                    for i in presentation_images
+                )
+                + "\n\n"
+            )
         resources = expected_resources(raw, key, body, assets)
         if resources:
             expected += "\n\n" + resources
@@ -723,12 +937,13 @@ def expected_metadata(raw, key, assets):
         if a["SourceId"] == key and a["Type"] == 5
     ]
     assert len(icons) <= 1, "unambiguous source icon"
-    icon = icons[0] if icons else None
+    declared_icon = icons[0] if icons else None
+    icon = declared_icon if declared_icon not in raw.gaps else None
     if icon:
         assert assets[icon]["relative_path"] and assets[icon]["actual_length"] > 0, (
             "present declared icon"
         )
-    declared = {"icon_asset_id": icon}
+    declared = {"icon_asset_id": declared_icon}
     for property_name, field in (
         ("foreground_color", "ForegroundColor"),
         ("background_color", "BackgroundColor"),
@@ -860,7 +1075,40 @@ def check_listings(
         ).encode(), "focused tag listing"
 
 
-def source_references(body, owner, assets):
+def inline_display(value):
+    """Independently interpret bounded inline label text, retaining literals."""
+    assert "\x00" not in value, "unsupported null in raw reference label"
+    protected = []
+
+    def keep(text):
+        protected.append(text)
+        return "\x00" + str(len(protected) - 1) + "\x00"
+
+    def code(match):
+        text = re.sub(r"\r\n?|\n", " ", match[2])
+        if text.startswith(" ") and text.endswith(" ") and text.strip():
+            text = text[1:-1]
+        return keep(text)
+
+    value = re.sub(r"(?<!`)(`+)(?!`)(.*?)\1(?!`)", code, value, flags=re.DOTALL)
+    value = re.sub(
+        r'\\([!"#$%&\'()*+,\-./:;<=>?@\[\]\\^_`{|}~])',
+        lambda match: keep(match[1]),
+        value,
+    )
+    value = re.sub(
+        r"&(?:#[0-9]+|#x[0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]+);",
+        lambda match: keep(html.unescape(match[0])),
+        value,
+    )
+    for _ in range(3):
+        value = re.sub(r"(\*{1,3})(?=\S)(.+?)(?<=\S)\1", r"\2", value)
+        value = re.sub(r"(?<!\w)(_{1,3})(?=\S)(.+?)(?<=\S)\1(?!\w)", r"\2", value)
+    value = re.sub(r"</?[A-Za-z][^<>]*>", "", value)
+    return re.sub(r"\x00([0-9]+)\x00", lambda match: protected[int(match[1])], value)
+
+
+def source_references(body, owner, assets, excluded=()):
     """Separate syntax scan for accepted inline forms in these acceptance inputs.
 
     It does not consume converter spans or use markdown-it-py. Protected source
@@ -897,13 +1145,87 @@ def source_references(body, owner, assets):
     for start, end in protected:
         mask[start:end] = " " * (end - start)
     scan = "".join(mask)
-    pattern = re.compile(
-        r'(?P<image>!)?\[(?P<label>(?:\\.|[^\\\]])*)\]\((?P<destination><[^>]+>|(?:\\.|[^\s)])+)(?:\s+["\'][^"\']*["\'])?\)'
-    )
+    # Balanced brackets recognize whole outer phrases, including an image inside
+    # a forgotten thought link. Escaped brackets never change nesting depth.
+    candidates = []
+    cursor = 0
+    while cursor < len(scan):
+        if scan[cursor : cursor + 9] == "<brain://":
+            finish = scan.find(">", cursor + 1)
+            if finish >= 0:
+                candidates.append(
+                    (
+                        cursor,
+                        finish + 1,
+                        False,
+                        scan[cursor + 1 : finish],
+                        cursor + 1,
+                        finish,
+                    )
+                )
+                cursor = finish + 1
+                continue
+        if scan[cursor] == "\\":
+            cursor += 2
+            continue
+        image = scan[cursor : cursor + 2] == "!["
+        opening = cursor + int(image)
+        if scan[opening : opening + 1] != "[":
+            cursor += 1
+            continue
+        index, depth = opening + 1, 1
+        while index < len(scan) and depth:
+            if scan[index] == "\\":
+                index += 2
+                continue
+            depth += (scan[index] == "[") - (scan[index] == "]")
+            index += 1
+        closing = index - 1
+        if depth or scan[index : index + 1] != "(":
+            cursor += 1
+            continue
+        start = index + 1
+        if scan[start : start + 1] == "<":
+            stop = scan.find(">", start + 1)
+            destination_start, destination_end = start + 1, stop
+            after = stop + 1
+        else:
+            after, nesting = start, 0
+            while after < len(scan):
+                if scan[after] == "\\":
+                    after += 2
+                    continue
+                if scan[after] == ")" and nesting == 0 or scan[after].isspace():
+                    break
+                nesting += (scan[after] == "(") - (scan[after] == ")")
+                after += 1
+            destination_start, destination_end = start, after
+        end = re.match(r'(?:\s+["\'][^"\']*["\'])?\)', scan[after:])
+        if end is None or destination_end < destination_start:
+            cursor += 1
+            continue
+        finish = after + end.end()
+        candidates.append(
+            (
+                cursor,
+                finish,
+                image,
+                body[opening + 1 : closing],
+                destination_start,
+                destination_end,
+            )
+        )
+        cursor = finish
     result = []
-    for match in pattern.finditer(scan):
-        destination = match["destination"]
-        url = destination.removeprefix("<").removesuffix(">")
+    for (
+        begin,
+        finish,
+        image,
+        label_text,
+        destination_start,
+        destination_end,
+    ) in candidates:
+        url = scan[destination_start:destination_end]
         kind, target = None, None
         if url.startswith("brain://"):
             compact = url[8:].split("/")[0]
@@ -915,8 +1237,11 @@ def source_references(body, owner, assets):
                 )
             )
             kind = "item"
-            assert not match["image"], "unexpected linked thought image"
-        elif match["image"] and url.startswith(".data/md-images/"):
+            assert not image or target in excluded, "unexpected linked thought image"
+            assert "[" not in label_text or target in excluded, (
+                "unsupported included nested thought phrase"
+            )
+        elif image and url.startswith(".data/md-images/"):
             filename = unquote(url[len(".data/md-images/") :])
             targets = [
                 a["asset_id"]
@@ -928,27 +1253,23 @@ def source_references(body, owner, assets):
             assert len(targets) == 1, "independent inline image binding"
             kind, target = "image", targets[0]
         if kind:
-            label = re.sub(
-                r'\\([!"#$%&\'()*+,\-./:;<=>?@\[\]\\^_`{|}~])', r"\1", match["label"]
-            )
+            label = inline_display(label_text)
             result.append(
                 {
-                    "start": match.start(),
-                    "end": match.end(),
+                    "start": begin,
+                    "end": finish,
                     "kind": kind,
                     "target": target,
                     "label": label,
-                    "destination_start": match.start("destination")
-                    + (1 if destination.startswith("<") else 0),
-                    "destination_end": match.end("destination")
-                    - (1 if destination.endswith(">") else 0),
+                    "destination_start": destination_start,
+                    "destination_end": destination_end,
                 }
             )
-            mask[match.start() : match.end()] = " " * (match.end() - match.start())
+            mask[begin:finish] = " " * (finish - begin)
     remainder = "".join(mask)
-    assert "brain://" not in remainder and ".data/md-images/" not in remainder, (
-        "independent scanner cannot establish all active local reference coverage"
-    )
+    assert not re.search(
+        r"(?:\]\(<?|<)brain://|!\[[^\]]*\]\(<?\.data/md-images/", remainder
+    ), "independent scanner cannot establish all active local reference coverage"
     return result
 
 
@@ -981,6 +1302,13 @@ def expected_resources(raw, owner, body, assets):
     lines = []
     for source in sorted(raw["attachments.json"], key=lambda a: a["Id"]):
         if source["SourceId"] != owner:
+            continue
+        if source["Id"] in raw.unsafe_originals:
+            continue
+        if any(source["Id"] in g["images"] for g in raw.gaps.values()):
+            assert assets[source["Id"]]["resource_link"] is None, (
+                "generated embed resource suppression"
+            )
             continue
         kind = source["Type"]
         assigned = assets[source["Id"]]
@@ -1033,7 +1361,7 @@ def expected_resources(raw, owner, body, assets):
     return "## Resources\n\n" + "\n".join(lines) + "\n" if lines else ""
 
 
-def check_documents(record, documents, names, assets):
+def check_documents(raw, record, documents, names, assets):
     emitted = [d for t in record["item_targets"] for d in t["documents"]] + [
         d for a in record["asset_targets"] for d in a["retained_documents"]
     ]
@@ -1050,8 +1378,21 @@ def check_documents(record, documents, names, assets):
             d["original_asset_id"],
             d["text_digest"],
             d["owner_target"],
-        ) == (owner, key, digest, names.get(owner)), "document identity/digest"
-        assert d["evidence"] == assets[key]["evidence"], "document source provenance"
+        ) == (
+            owner,
+            None if key in raw.unsafe_originals else key,
+            digest,
+            names.get(owner),
+        ), "document identity/digest"
+        assert d["original_copy_omitted"] == (key in raw.unsafe_originals), (
+            "exact original eligibility"
+        )
+        assert d["evidence"] == [
+            "attachments.json:"
+            + str(
+                next(i for i, a in enumerate(raw["attachments.json"]) if a["Id"] == key)
+            )
+        ], "document source provenance"
         independent = source_references(body, owner, assets)
         assert len(d["references"]) == len(independent), "all source references"
         for emitted_ref, actual in zip(d["references"], independent, strict=True):
@@ -1111,7 +1452,13 @@ def expected_asset_paths(raw):
                 owner_widths[k] += 4
                 grew = True
         assert grew, "independent distinct owner seeds"
-    present = [a for a in raw["attachments.json"] if a["Type"] not in {3, 8, 15}]
+    present = [
+        a
+        for a in raw["attachments.json"]
+        if a["Type"] not in {3, 8, 15}
+        and a["Id"] not in raw.unsafe_originals
+        and a["Id"] not in raw.gaps
+    ]
     widths = {a["Id"]: 0 for a in present}
     while True:
         result = {}
@@ -1154,12 +1501,12 @@ def expected_asset_paths(raw):
 def check_assets(raw, record, archive, vault, targets):
     identities(raw["attachments.json"], "attachment")
     assert len(targets) == len(record["asset_targets"]) and targets.keys() == {
-        a["Id"] for a in raw["attachments.json"]
+        a["Id"] for a in raw["attachments.json"] if a["Id"] not in raw.unsafe_originals
     }, "all attachment identities"
     paths = expected_asset_paths(raw)
     originals = note_ids(raw, archive)
     raw_documents = {
-        a["SourceId"]: archive.read(raw_member(a)).decode("utf-8-sig")
+        a["SourceId"]: raw.documents[a["Id"]]
         for a in raw["attachments.json"]
         if a["Id"] in originals
     }
@@ -1178,10 +1525,12 @@ def check_assets(raw, record, archive, vault, targets):
         for r in source_references(body, owner, bindings)
         if r["kind"] == "image"
     }
-    expected_warnings = {}
+    expected_warnings = dict(raw.gap_warnings)
     backups = 0
     for a in raw["attachments.json"]:
         key, kind, owner = a["Id"], a["Type"], a["SourceId"]
+        if key in raw.unsafe_originals:
+            continue
         target = targets[key]
         role = (
             "url"
@@ -1194,10 +1543,16 @@ def check_assets(raw, record, archive, vault, targets):
             if kind == 12
             else "note_original"
             if key in originals
+            or key in raw.gaps
+            and raw.gaps[key]["role"].endswith("note")
             else "file"
         )
         availability = (
-            "external" if kind in {3, 8} else "absent" if kind == 15 else "present"
+            "external"
+            if kind in {3, 8}
+            else "absent"
+            if kind == 15 or key in raw.gaps
+            else "present"
         )
         assert (
             target["owner"],
@@ -1228,7 +1583,25 @@ def check_assets(raw, record, archive, vault, targets):
             type(a["SourceType"]) is int
             and a["SourceType"] == 2
             and type(a["NoteType"]) is int
+            and type(kind) is int
+            and (kind, a["NoteType"])
+            in {(1, 4), (1, 0), (3, 0), (5, 0), (8, 0), (12, 0), (15, 0)}
         ), "raw attachment role"
+        flags = (
+            "IsIcon",
+            "IsBrainAttachment",
+            "IsBrainIcon",
+            "IsWallpaper",
+            "IsAiScriptsFile",
+            "IsKeyboardShortcutsFile",
+            "IsToolbarConfigFile",
+        )
+        assert all(type(a[f]) is bool for f in flags if f in a), (
+            "raw attachment role flags"
+        )
+        assert all(not a.get(f, False) for f in flags[1:]) and a.get(
+            "IsIcon", False
+        ) == (kind == 5), "raw reviewed attachment flags"
         assert a["SourceId"] in identities(raw["thoughts.json"], "item"), (
             "raw attachment owner"
         )
@@ -1348,6 +1721,8 @@ def check_assets(raw, record, archive, vault, targets):
                     pdf_pointer,
                     "payload:" + observed["pdf"]["member"],
                 ]
+            if key in raw.gaps:
+                evidence = raw.gaps[key]["evidence"]
             assert finding["evidence"] == evidence, "warning source evidence pointers"
         else:
             assert not target["source_findings"], "no unexplained source finding"
@@ -1370,6 +1745,7 @@ def check_assets(raw, record, archive, vault, targets):
             if role in {"file", "image"}
             and availability == "present"
             and key not in inline
+            and not any(key in g["images"] for g in raw.gaps.values())
             else None
         )
         assert target["resource_link"] == resource, (
@@ -1400,6 +1776,7 @@ def check_assets(raw, record, archive, vault, targets):
             and rule in report
             and escaped(PurePosixPath(targets[key]["original_name"]).name) in report
         ), "report source warning"
+    raw.expected_warnings = expected_warnings
     return {
         "backups": backups,
         "warnings": len(expected_warnings),
@@ -1447,7 +1824,11 @@ def check_accounting(raw, record, checked, references):
             )
             expected[pointer] = (disposition, [pointer])
     for a in raw["attachments.json"]:
-        if a["Type"] in {3, 8, 15}:
+        if (
+            a["Type"] in {3, 8, 15}
+            or a["Id"] in raw.unsafe_originals
+            or a["Id"] in raw.gaps
+        ):
             continue
         prefix = (
             ".data/"
@@ -1663,12 +2044,13 @@ def check_counts(raw, record, summary, references, targets, files):
     assigned = [r for r in raw["links.json"] if r["Meaning"] == 5]
     native = sum(r["ThoughtIdB"] in created for r in assigned)
     tags = {t["Id"] for t in raw["thoughts.json"] if t["Kind"] == 4}
-    live_references = sum(targets[key]["owner"] in created for key, _, _ in references)
+    owners = {a["Id"]: a["SourceId"] for a in raw["attachments.json"]}
+    live_references = sum(owners[key] in created for key, _, _ in references)
     expected = {
-        "source_gaps": 0,
-        "generated_presentations": 0,
-        "planned_generated_embeds": 0,
-        "actual_generated_embeds": 0,
+        "source_gaps": summary["source_gaps"],
+        "generated_presentations": sum(bool(g["images"]) for g in raw.gaps.values()),
+        "planned_generated_embeds": summary["generated_embeds"],
+        "actual_generated_embeds": summary["generated_embeds"],
         "source_items": len(raw["thoughts.json"]),
         "source_relationships": len(raw["links.json"]),
         "source_references": len(references),
@@ -1800,7 +2182,7 @@ def check_adaptations(raw, record, documents, names, assets):
                 ), "reference adaptation factual identity"
 
 
-def check_report(vault, raw, summary, payloads):
+def check_report(vault, raw, record, names, assets, summary, payloads):
     report = (vault / "MIGRATION REPORT.md").read_bytes().decode()
     assert (
         f"Created {summary['notes']} thought notes; preserved {payloads} present payloads."
@@ -1822,6 +2204,131 @@ def check_report(vault, raw, summary, payloads):
         "Declared colours remain in migration-record.json only",
     )
     assert all(value in report for value in obligations), "required report obligations"
+    absent = sorted(
+        (
+            (key, fact)
+            for key, fact in raw.expected_warnings.items()
+            if fact[0] == "known_absent_payload"
+        ),
+        key=lambda pair: (pair[1][1], pair[0]),
+    )
+    if absent:
+        assert (
+            report.count("## Source-gap evidence and optional repair checklist\n") == 1
+        ), "required source-gap checklist"
+        checklist = report.split(
+            "## Source-gap evidence and optional repair checklist\n\n", 1
+        )[1].split("\n## Source warnings\n", 1)[0]
+        assert "Unknown prose, captions and layout were not recovered." in checklist, (
+            "honest source-gap recovery limit"
+        )
+        meta = raw["meta.json"][0]
+        collection = (
+            escaped(meta.get("Name", "TheBrain collection"))
+            .replace("\r", " ")
+            .replace("\n", " ")
+        )
+        prefix = (
+            "Source fingerprint: "
+            + record["source_identity"]["source_sha256"]
+            + "; scoped digest: "
+            + record["source_identity"]["snapshot_digest"]
+            + "; collection: "
+            if raw.gaps
+            else "Collection: "
+        )
+        suffix = (
+            "."
+            if raw.gaps
+            else "; fingerprint and scoped digest are recorded in migration-record.json."
+        )
+        assert (
+            prefix + collection + " (" + meta["BrainId"] + ")" + suffix in checklist
+        ), "raw-bound checklist fingerprint/scope/collection"
+        rows = re.split(r"(?m)^- \[ \] ", checklist)[1:]
+        assert len(rows) == len(absent), "complete source-gap checklist cardinality"
+        thoughts = {t["Id"]: t for t in raw["thoughts.json"]}
+        created = {t["item_key"] for t in record["item_targets"] if t["created"]}
+        diagnostics = {
+            g["gap"]["asset_id"]: g
+            for g in diagnostic_targets(
+                raw,
+                names,
+                created,
+                {k: expected_metadata(raw, k, assets)[2] for k in created},
+            )[0]
+        }
+        for row, (key, (_, _, _, observed)) in zip(rows, absent, strict=True):
+            owner = assets[key]["owner"]
+            title = re.sub(r"[\[\]|\r\n]", " ", thoughts[owner]["Name"])
+            destination = (
+                wiki(names[owner], title)
+                if owner in created
+                else escaped(thoughts[owner]["Name"])
+                + " (uncreated target: "
+                + escaped(names[owner])
+                + ")"
+                if owner in names
+                else escaped(thoughts[owner]["Name"]) + " (no vault-note target)"
+            )
+            diagnostic = diagnostics.get(key)
+            role = diagnostic["gap"]["role"] if diagnostic else assets[key]["role"]
+            outcome = (
+                diagnostic["outcome"]
+                if diagnostic
+                else "metadata retained; bytes absent"
+            )
+            heading = (
+                destination
+                + "; thought ID "
+                + owner
+                + "; attachment "
+                + key
+                + "; role "
+                + role
+                + "; outcome "
+                + outcome
+                + ".\n"
+            )
+            assert row.startswith(heading), "raw owner/target/role/outcome diagnostic"
+            lines = row[len(heading) :].rstrip("\n").splitlines()
+            assert lines[0].startswith("  Declaration and physical absence: "), (
+                "required raw diagnostic observation"
+            )
+            decoded = re.sub(r"\\([\\`*_{}\[\]<>#])", r"\1", lines[0].split(": ", 1)[1])
+            assert semantic(load_json(decoded)) == semantic(observed), (
+                "raw state/path/length/image diagnostic observation"
+            )
+            expected_lines = []
+            if diagnostic:
+                if diagnostic["provider_key"]:
+                    members = diagnostic["affected_member_keys"]
+                    expected_lines += [
+                        "  Provider: " + destination + ".",
+                        f"  Affected included members ({len(members)}):",
+                    ]
+                    expected_lines += [
+                        "  - "
+                        + wiki(names[k], thoughts[k]["Name"])
+                        + "; thought ID "
+                        + k
+                        for k in members
+                    ]
+                expected_lines += [
+                    "  - Image "
+                    + image
+                    + ": [["
+                    + assets[image]["relative_path"]
+                    + "]]"
+                    for image in diagnostic["image_asset_ids"]
+                ]
+            assert lines[1:] == expected_lines, (
+                "complete ordered provider/member/image diagnostic links"
+            )
+    else:
+        assert "## Source-gap evidence and optional repair checklist" not in report, (
+            "no fabricated source-gap checklist"
+        )
     if any(
         a["Type"] == 1 and a["Location"].casefold().endswith(".pdf")
         for a in raw["attachments.json"]
@@ -1844,10 +2351,24 @@ def normalized_record(record):
     source-order pointers cannot be compared between reordered root streams.
     """
 
-    def normalize(value):
+    set_fields = {
+        "item_targets",
+        "asset_targets",
+        "relationships",
+        "tag_memberships",
+        "classification_assignments",
+        "source_gaps",
+        "generated_presentations",
+        "support_artifacts",
+        "reserved_support_paths",
+        "adaptations",
+        "issues",
+    }
+
+    def normalize(value, field=None):
         if isinstance(value, dict):
             return {
-                k: normalize(v)
+                k: normalize(v, k)
                 for k, v in value.items()
                 if k
                 not in {
@@ -1858,8 +2379,11 @@ def normalized_record(record):
                 }
             }
         if isinstance(value, list):
-            return sorted(
-                (normalize(v) for v in value), key=lambda v: repr(semantic(v))
+            result = [normalize(v) for v in value]
+            return (
+                sorted(result, key=lambda v: repr(semantic(v)))
+                if field in set_fields
+                else result
             )
         return value
 
@@ -1893,6 +2417,26 @@ def compare_vaults(first, second):
             aa["items"][0].pop("ctime")
             bb["items"][0].pop("ctime")
             assert aa == bb, "reproducible bookmark"
+        elif name == "MIGRATION REPORT.md":
+
+            def normalized_report(data, record_data):
+                identity = load_json(record_data)["source_identity"]
+                return data.replace(
+                    (
+                        "Source fingerprint: "
+                        + identity["source_sha256"]
+                        + "; scoped digest: "
+                        + identity["snapshot_digest"]
+                        + ";"
+                    ).encode(),
+                    b"Source fingerprint: <source>; scoped digest: <scoped>;",
+                )
+
+            assert normalized_report(
+                a[name], a["migration-record.json"]
+            ) == normalized_report(b[name], b["migration-record.json"]), (
+                "reproducible report facts"
+            )
         else:
             assert a[name] == b[name], "reproducible content/resource bytes"
 

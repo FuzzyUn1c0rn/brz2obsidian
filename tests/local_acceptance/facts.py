@@ -107,6 +107,8 @@ def note_ids(raw, archive):
         )
         assert a["SourceId"] in thoughts, "raw note owner"
         assert type(a["DataLength"]) is int and a["DataLength"] >= 0, "raw note length"
+        if a["Id"] in raw.gaps:
+            continue
         assert raw["meta.json"][0]["AttachmentFileStates"][a["Id"]] == 1, (
             "raw note state"
         )

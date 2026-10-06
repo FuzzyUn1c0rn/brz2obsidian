@@ -1,6 +1,6 @@
 # 06: Extend the independent raw-source audit to the new conversion policy
 
-Status: claimed
+Status: resolved
 Assignee: /root/independent_audit_implementer
 Approved: 2026-10-06
 Specification: [Accepted conversion specification](../spec.md)
@@ -11,14 +11,14 @@ Specification: [Accepted conversion specification](../spec.md)
 
 ## Acceptance criteria
 
-- [ ] Extend the existing standard-library-only independent oracle and preserve its import-boundary checks. Derive included identities, references, safe evidence, selections/paths, graph/assignments, supplied-body expected adaptations, absent-declaration predicates, image eligibility/associations/order and provider effects directly from raw original source facts. Production filtered snapshots/counts/dispositions/manifests are observed output, never expected preservation truth.
-- [ ] Audit exact safe originals and all required payload hashes/lengths, every supplied-body edit, authored-reference accounting, explicit generated presentation obligations, resolving diagnostic links, raw state/path/length/outcome, complete category membership/hierarchy/native support and excluded-content absence. Do not infer recovery, emptiness or original-note bytes for absent bodies.
-- [ ] Positive public synthetic controls exercise all behavior slices and earlier supported cases independently. Corruption controls falsify included-body text, unsafe/safe evidence, excluded identities/owned bytes/labels, missing/duplicate/misowned/generated-order embeds, gap predicates, fabricated originals/reference credit, neutral/provider/override effects, graph/membership/navigation and diagnostics.
-- [ ] Corruption tests recompute counts and file receipts consistently before rejection, proving semantic preservation rather than only manifest mismatch. A structurally valid forged receipt or clean production convention checker cannot mask each corruption. Retain meaningful existing controls and no private archive in public tests.
-- [ ] Extend the three-input driver to a fourth mandatory original argument while retaining previous arguments/fingerprint pins. Help, documentation and an executed synthetic example identify all four originals and a fresh short ignored output location; verify selected code import/current version. Do not hard-code 0.2.0 or treat a comparison/recovery backup as the fourth source.
-- [ ] Driver supports exact/repeat/ZIP-and-root-record reorder for each input: 12 complete outputs. Independently prove root-record multisets and physical payload equality, and reject changed/omitted/duplicated reordered records/payloads. Hash originals before/after operations and at completion; fail if final fingerprint drifts.
-- [ ] Keep source-required oracle behavior distinct from source-free check_vault, mutable UI conventions and production accounting. Real raw records/assets/audit outputs remain local and ignored; public records summarize aggregate gates and honest failures only.
-- [ ] Existing public oracle/driver tests stay green. Record reproducible tool usage and bounded synthetic/corruption proof; completing tooling does not claim the four private archives have passed.
+- [x] Extend the existing standard-library-only independent oracle and preserve its import-boundary checks. Derive included identities, references, safe evidence, selections/paths, graph/assignments, supplied-body expected adaptations, absent-declaration predicates, image eligibility/associations/order and provider effects directly from raw original source facts. Production filtered snapshots/counts/dispositions/manifests are observed output, never expected preservation truth.
+- [x] Audit exact safe originals and all required payload hashes/lengths, every supplied-body edit, authored-reference accounting, explicit generated presentation obligations, resolving diagnostic links, raw state/path/length/outcome, complete category membership/hierarchy/native support and excluded-content absence. Do not infer recovery, emptiness or original-note bytes for absent bodies.
+- [x] Positive public synthetic controls exercise all behavior slices and earlier supported cases independently. Corruption controls falsify included-body text, unsafe/safe evidence, excluded identities/owned bytes/labels, missing/duplicate/misowned/generated-order embeds, gap predicates, fabricated originals/reference credit, neutral/provider/override effects, graph/membership/navigation and diagnostics.
+- [x] Corruption tests recompute counts and file receipts consistently before rejection, proving semantic preservation rather than only manifest mismatch. A structurally valid forged receipt or clean production convention checker cannot mask each corruption. Retain meaningful existing controls and no private archive in public tests.
+- [x] Extend the three-input driver to a fourth mandatory original argument while retaining previous arguments/fingerprint pins. Help, documentation and an executed synthetic example identify all four originals and a fresh short ignored output location; verify selected code import/current version. Do not hard-code 0.2.0 or treat a comparison/recovery backup as the fourth source.
+- [x] Driver supports exact/repeat/ZIP-and-root-record reorder for each input: 12 complete outputs. Independently prove root-record multisets and physical payload equality, and reject changed/omitted/duplicated reordered records/payloads. Hash originals before/after operations and at completion; fail if final fingerprint drifts.
+- [x] Keep source-required oracle behavior distinct from source-free check_vault, mutable UI conventions and production accounting. Real raw records/assets/audit outputs remain local and ignored; public records summarize aggregate gates and honest failures only.
+- [x] Existing public oracle/driver tests stay green. Record reproducible tool usage and bounded synthetic/corruption proof; completing tooling does not claim the four private archives have passed.
 
 ## Verification boundary
 
@@ -29,6 +29,88 @@ Existing independent raw-source oracle/driver public callables and CLI with synt
 User Stories 16–20, 32–39, 41–49, 54–65, 68–70; Implementation Decisions 1–25 as independently audited obligations; Testing Decisions 5–10, 12–17, 20.
 
 ## Comments
+
+- 2026-10-06 (/root/independent_audit_implementer): Implemented the approved
+  public oracle/Workflow and four-input driver seams through red/green slices in
+  isolated `codex/ml-v3-06`, initially clean at
+  `5d4800613cb5c2aced4b7f84f9ccbf87bcbdd85e`. Merged verified integration
+  `f23a8bee142457cf64a3bba1fd5ce84293bd9dca` before final validation, preserving
+  the separately owned workflow docs and runtime repairs. No production files,
+  spec/index/other ticket records, originals or retained vaults were edited.
+
+  The expected-fact modules remain stdlib/local only, with a closed six-module
+  AST import barrier. `check_vault(source, vault)` derives scope, raw ownership,
+  safe evidence/precision, names/selections, complete body/reference edits,
+  graph/memberships, gap/image/provider facts, all payload bytes and diagnostic
+  obligations independently. Physical original record ordinals remain private;
+  public accounting pointers address retained safe tables. Excluded-first and
+  interleaved records prove that distinction. Equal included/excluded titles and
+  image bytes do not determine ownership.
+
+  Red cases established scope/evidence removal, whole active-phrase removal,
+  absent-body and type-gap interpretation, repeat/reorder comparison, missing
+  fourth-input/help behavior, invalid compressed images, native capability
+  failures, encoded residual identities and serialized association values before
+  their green implementations. Six independently authored emphasis/code/entity/
+  escaped-label controls retained their expected characters while the responsible
+  runtime owner repaired dropped `text_special` tokens. No expected preservation
+  facts were weakened to match that output.
+
+  Using `C:/Users/stefa/projects/brz2obsidian/.venv/Scripts/python.exe` and
+  `PYTHONPATH=<this checkout>/src;<this checkout>`, the final command
+  `python -m pytest tests/local_acceptance -q --basetemp=tmp/ml-independent-audit/pytest-final-local --tb=short`
+  passed **235** checks in **114.74 seconds**: 115 earlier oracle controls,
+  108 v3 controls and twelve driver controls. Semantic corruptions consistently
+  rehash actual receipts and update corresponding counts. Changed body text,
+  generated order and diagnostic facts can still produce a clean source-free
+  checker result; all three are rejected by the raw-source oracle.
+
+  The first full-project command used the unnecessarily long temporary base
+  `tmp/ml-independent-audit/pytest-final-project`: **1240 passed, one failed**
+  in **238.94 seconds**. The unchanged maximal-name template fixture exceeded
+  the existing 240-unit absolute publication guard at that path. Replaying that
+  exact test under `tmp/ml-independent-audit/q` passed in **1.31 seconds**.
+  No code or expectation was changed for this environment failure.
+
+  The final unchanged full-project command
+  `python -m pytest -q --basetemp=tmp/ml-independent-audit/f --tb=short`
+  passed **1241** checks in **232.27 seconds**. `python -m ruff check .` passed;
+  `python -m ruff format --check .` reports **130 files already formatted**;
+  `python -m pip check` reports no broken requirements; `git diff --check` passed.
+  All commands used the root project interpreter with this checkout's explicit
+  source selection. The worktree contained only intended ticket-06 changes before
+  committing this evidence.
+
+  Executed `python -m tests.local_acceptance.run --help` and the documented
+  synthetic four-input example in fresh ignored `tmp/audit-synth-02`. All twelve
+  exact/repeat/reordered outputs passed with unchanged synthetic fingerprints;
+  each has 29 files, five created notes, six exact copies, three gaps, two generated
+  embeds and two completely decoded PNG/WebP frames. CLI pins preserve A/B/C and
+  require exact original D (320594486 bytes, SHA-256
+  `2b24c1d21b4090f3b0ed3ec0227f269b8c7a4e5b6832ada0e244a1dcfc941ced`).
+  `run_acceptance(source_paths, output, pins=None)` permits explicit independent
+  synthetic pins; the CLI always uses the original pins and verifies selected
+  code/current `0.3.0`. Reorder controls reject changed/omitted/duplicated roots
+  and physical payloads; a final-drift control rejects after all twelve outputs.
+
+  `decode_image(data, name)` forces BGRA pixels for every accepted frame and
+  returns source hash, format/dimensions, codec CLSID/name/version and per-frame
+  pixel hashes/decoded lengths. Existing Windows WIC is an explicit native
+  dependency. Public PNG and Microsoft Webp codecs report version `1.0.0.0`;
+  no codec installation was performed. Strict PNG chunks/CRCs/zlib/scanlines/
+  filters/palette/Adam7 accompany native pixels. A two-frame GIF control forces
+  both frames. Header-valid compressed WebP and repaired invalid PNG controls
+  fail; missing libraries/codecs, allocation/resource limits and unsupported
+  required native operations are `AuditUnavailable`, never accepted or mislabeled
+  invalid content. APNG strict frame-stream auditing remains unavailable. Native
+  pixel production does not claim exhaustive codec conformance or Obsidian render.
+
+  This tooling proof does not claim the four original archives passed, does not
+  substitute a recovery export for D and does not complete source/native/user
+  acceptance. Those remain tickets 07–09. A public synthetic VP8L sample for
+  independent replay is available in `tmp/audit-synth-02/A.brz`, member
+  `00000000-0000-0000-0000-000000000005/.data/md-images/z-first.webp`;
+  no private sample is needed or exposed.
 
 - 2026-10-06 (/root): Claimed after independently verified tickets 03 and 04
   were integrated. Implement the independent raw-source oracle and four-input

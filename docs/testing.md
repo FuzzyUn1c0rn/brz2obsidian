@@ -112,12 +112,54 @@ The independent acceptance suite retains all 22 earlier corruption proofs,
 69 v2 corruption/interaction checks, five driver corruption controls, two
 positive v2 audit tracers and a standard-library import check. Eighteen additional
 presentation-refinement controls plus four category-layout/evidence controls
-bring the current group to 121 tests.
+formed the earlier 121-test group.
 False receipts are rehashed and recounted consistently before the oracle rejects
 incorrect assignments, materialization, icons/dates, note/reference evidence,
 TXT/PDF/video facts, Bases/templates/configuration and required support. The
 expected-fact modules import only the standard library and local oracle modules;
 production manifests/counts do not provide expected preservation facts.
+The v3 extension independently derives included scope and ownership, retained
+safe evidence with exact JSON numbers, safe-original eligibility, whole excluded
+reference-phrase removal, every supplied-body edit, absent declarations and their
+owned image basis, neutral category providers and explicit overrides. It checks
+complete note bytes, canonical generated-image order and separate reference credit,
+full category hierarchy/membership/support, raw diagnostic facts and resolving
+owner/provider/member/image links, scoped digest and exact payload bytes.
+Original record ordinals remain private audit facts. Public `thoughts.json:N`,
+`attachments.json:N` and similar pointers address the retained safe evidence
+tables; they are not physical original JSON-line ordinals. An excluded-first
+control verifies this difference without adding an excluded ledger to a vault.
+Nested/escaped/serialized ownership, safe evidence/precision, missing/duplicate/
+misowned/reordered embeds, fabricated originals/Documents/reference credit,
+provider/override effects, graph/navigation and diagnostic corruptions are rejected
+after actual file receipts are consistently rehashed and recounted. Residual proven
+excluded identities in inactive literals refuse the audit, including canonical
+UUID case, percent and Unicode spellings. Compact identities remain case sensitive.
+Omission of the exact original backup alone does not make that destination safe.
+Authored reference labels are interpreted separately from body spans; emphasis,
+code, entities and escaped literal punctuation retain their displayed text while
+untouched CRLF/CR/LF body spans remain exact.
+The current oracle/driver group passes 235 public checks: the 115 earlier oracle
+controls, 108 v3 controls and twelve driver controls. Three corruptions still pass
+the source-free convention checker after consistent rehashing; the raw-source
+oracle rejects their changed body, generated order or diagnostic facts.
+
+The independent image interpreter uses standard-library Python imports and existing
+Windows WIC codecs through `ctypes`, never production image helpers or Pillow.
+It forces full BGRA pixels for every accepted frame and reports decoder CLSID,
+name/version and completed-frame counts. PNG additionally requires independent
+chunk/CRC/order, complete zlib, exact scanline/filter and reconstructed palette
+checks, including Adam7 passes. WebP headers/container structure alone cannot pass.
+Invalid data raises an assertion; missing codecs/native libraries, platform or
+resource limits raise `AuditUnavailable` and do not certify image eligibility.
+Strict APNG frame-stream validation is currently unavailable. The host's existing
+Microsoft WebP image extension is a native dependency, with no installation step
+performed by this tooling. Public controls include valid PNG/WebP, Adam7 and all
+PNG filters, reconstructed indexed palettes and a two-frame GIF, plus header-valid
+compressed failures, repaired PNG CRCs/ZIP CRCs/lengths/hashes, scanline/filter/
+palette failures and injected native-library unavailability. Full-source and native
+Obsidian gates remain separate from this source-required oracle and source-free
+`check_vault`.
 Refinement controls reject obsolete colour fields in generated notes, templates,
 starters, Bases, property typing and guide while still rejecting falsified source
 colour evidence. The checker permits manually added colour-named properties as
@@ -128,25 +170,63 @@ and the [earlier v1 report](../.scratch/brz-to-obsidian-v1/research/real-export-
 
 ## Private full-export acceptance
 
-Choose the exact fingerprinted A/B/C archives and a fresh short ignored output
-directory. The driver refuses an existing output directory, performs nine complete
+Choose the exact fingerprinted A/B/C/D originals and a fresh short ignored output
+directory. D is the original Management & Leadership export (320,594,486 bytes,
+SHA-256 `2b24c1d21b4090f3b0ed3ec0227f269b8c7a4e5b6832ada0e244a1dcfc941ced`);
+a comparison/recovery backup cannot substitute. A/B/C fingerprint pins are retained.
+The driver refuses an existing output directory, performs twelve complete
 conversions (exact, repeat and ZIP/root-record reordered for each source), saves
 private results/operation evidence, and prints aggregate counts. It checks source
 fingerprints before/after every operation and at completion, proves reordered
 root-record multisets and physical bytes independently, and verifies the selected
-worktree import. Set PYTHONPATH even in the integration checkout.
+worktree import/current `0.3.0` version. Expected preservation comes from raw scoped
+records for each original; the old unscoped v2 A/B/C totals are historical evidence.
+D's accepted aggregate inventory gates supplement the complete raw-source audit.
+Generated image/member/diagnostic ordering remains contractual during comparison;
+only documented provenance/run/fingerprint differences are normalized.
+Set PYTHONPATH even in the integration checkout.
 
 ```powershell
 $env:PYTHONIOENCODING = 'utf-8'
-$env:PYTHONPATH = Join-Path (Get-Location) 'src'
+$env:PYTHONPATH = (Join-Path (Get-Location) 'src') + ';' + (Get-Location)
 $sourceA = 'C:\path\to\exact-A.brz'
 $sourceB = 'C:\path\to\exact-B.brz'
 $sourceC = 'C:\path\to\exact-C.brz'
+$sourceD = 'C:\path\to\Management & Leadership 2026-10-05.brz'
 $output = Join-Path (Get-Location) 'tmp/audit-01'
-.\.venv\Scripts\python.exe -m tests.local_acceptance.run --source-a $sourceA --source-b $sourceB --source-c $sourceC --output $output
+.\.venv\Scripts\python.exe -m tests.local_acceptance.run --source-a $sourceA --source-b $sourceB --source-c $sourceC --source-d $sourceD --output $output
 ```
 
-All nine accepted conversions passed independent comparisons with exit 2.
+Tooling completion does not claim these four private originals passed. The public
+synthetic example below exercises the same four-input callable with explicit
+independently computed synthetic pins, producing twelve complete outputs in a
+fresh ignored directory. The CLI always uses the accepted original pins.
+
+```powershell
+$env:PYTHONIOENCODING = 'utf-8'
+$env:PYTHONPATH = (Join-Path (Get-Location) 'src') + ';' + (Get-Location)
+.\.venv\Scripts\python.exe -m tests.local_acceptance.run --help
+@'
+from pathlib import Path
+from tests.local_acceptance.run import fingerprint, run_acceptance
+from tests.local_acceptance.test_checker_v3 import mixed_v3_archive
+
+root = Path('tmp/audit-synth-02')
+root.mkdir(parents=True, exist_ok=False)
+sources = {key: mixed_v3_archive(root / (key + '.brz')) for key in 'ABCD'}
+pins = {key: fingerprint(path) for key, path in sources.items()}
+run_acceptance(sources, root / 'out', pins)
+'@ | .\.venv\Scripts\python.exe -
+```
+
+This example and help were executed on 2026-10-06 against selected `0.3.0` code.
+All twelve complete synthetic outputs passed, each with 29 files, five created
+notes, six exact payload copies, three source gaps, two generated embeds and two
+fully decoded PNG/WebP frames. The original synthetic fingerprints remained
+unchanged. The mixed source also retains an included image whose bytes equal an
+excluded owner's image; scope follows independently derived ownership.
+
+The earlier v2 nine accepted conversions passed independent comparisons with exit 2.
 Those v2 fresh outputs placed category Members/Gallery immediately after their
 heading, omitted generated introductory category images and retained category icon
 properties/assets plus ordinary/member body snapshots. Four independent controls

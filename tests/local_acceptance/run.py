@@ -26,43 +26,35 @@ INPUTS = {
         "20b6085239b82ba7c4a6951d07a53243c3d7ddd00fcd3d6b91115cd7170c26b0",
     ),
     "C": (62008262, "7c533a30439e281b1d51d6617c9f1f3cad9c2c1d67e5a1e056f280bf37709764"),
+    "D": (
+        320594486,
+        "2b24c1d21b4090f3b0ed3ec0227f269b8c7a4e5b6832ada0e244a1dcfc941ced",
+    ),
 }
-EXPECTED = {
-    "A": {
-        "notes": 49,
-        "hierarchy_only": 5,
-        "payloads": 60,
-        "backups": 43,
-        "warnings": 2,
-        "warning_owners": 2,
-    },
-    "B": {
-        "notes": 42,
-        "hierarchy_only": 2,
-        "payloads": 50,
-        "backups": 34,
-        "warnings": 9,
-        "warning_owners": 7,
-    },
-    "C": {
-        "source_items": 372,
-        "source_relationships": 693,
-        "attachment_records": 254,
-        "payloads": 232,
-        "backups": 122,
-        "references": 84,
-        "category_notes": 7,
-        "typed_members": 195,
-        "zero_txt_gaps": 4,
-        "exceptional_notes": 1,
-        "videos": 4,
-        "image_references": 82,
-        "thought_references": 2,
-        "typed_owned_overrides": 1,
-        "typed_inherited_icons": 194,
-        "bom_documents": 121,
-        "crlf_documents": 1,
-    },
+SOURCE_D_GATES = {
+    "source_items": 570,
+    "ordinary_items": 521,
+    "definition_items": 47,
+    "tag_items": 1,
+    "system_items": 1,
+    "source_relationships": 730,
+    "ordinary_category_hierarchy": 54,
+    "typed_members": 330,
+    "attachment_records": 1557,
+    "raw_local_payloads": 1017,
+    "url_attachments": 454,
+    "marked_documents": 328,
+    "canonical_documents": 31,
+    "present_note_images": 499,
+    "present_generic_files": 106,
+    "present_icons": 53,
+    "absent_ordinary_owners": 63,
+    "generated_embeds": 63,
+    "absent_definition_notes": 2,
+    "absent_icon_providers": 8,
+    "neutral_affected_members": 45,
+    "txt_gaps": 13,
+    "present_icon_discrepancies": 7,
 }
 
 
@@ -143,9 +135,30 @@ def convert(source, destination):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source-a", type=Path, required=True)
-    parser.add_argument("--source-b", type=Path, required=True)
-    parser.add_argument("--source-c", type=Path, required=True)
+    parser.add_argument(
+        "--source-a",
+        type=Path,
+        required=True,
+        help="Exact original A: D&D, The Rise of Anzoras",
+    )
+    parser.add_argument(
+        "--source-b",
+        type=Path,
+        required=True,
+        help="Exact original B: Dungeons & Dragons",
+    )
+    parser.add_argument(
+        "--source-c",
+        type=Path,
+        required=True,
+        help="Exact original C: Software Engineering",
+    )
+    parser.add_argument(
+        "--source-d",
+        type=Path,
+        required=True,
+        help="Exact original Management & Leadership export; no recovery/re-export substitute",
+    )
     parser.add_argument(
         "--output",
         type=Path,
@@ -153,9 +166,26 @@ def main():
         help="New ignored short directory; never your normal vault",
     )
     args = parser.parse_args()
-    source_paths = {"A": args.source_a, "B": args.source_b, "C": args.source_c}
+    source_paths = {
+        "A": args.source_a,
+        "B": args.source_b,
+        "C": args.source_c,
+        "D": args.source_d,
+    }
+    run_acceptance(source_paths, args.output)
+
+
+def run_acceptance(source_paths, output, pins=None):
+    """Audit twelve complete outputs; explicit pins support synthetic examples.
+
+    The CLI always requires the accepted original pins. This callable permits
+    independently fingerprinted synthetic inputs for reusable public proof.
+    """
+    assert set(source_paths) == set("ABCD"), "four mandatory original inputs"
+    pins = INPUTS if pins is None else pins
+    assert set(pins) == set("ABCD"), "four mandatory fingerprint pins"
     for key, source in source_paths.items():
-        check_input(source, INPUTS[key])
+        check_input(source, pins[key])
     # Explicit per-process source selection also flows into the CLI subprocess.
     expected_src = Path(__file__).resolve().parents[2] / "src"
     assert os.environ.get("PYTHONPATH") and expected_src.resolve() in {
@@ -177,52 +207,56 @@ def main():
         == (expected_src / "brz2obsidian/__init__.py").resolve()
         and version == "0.3.0"
     ), "worktree converter import/version"
-    args.output.mkdir(parents=True, exist_ok=False)
+    output.mkdir(parents=True, exist_ok=False)
     summaries = {}
     operations = []
     for key, source in source_paths.items():
-        check_input(source, INPUTS[key])
-        destination = args.output / key
+        check_input(source, pins[key])
+        destination = output / key
         result = convert(source, destination)
         summaries[key] = check_vault(source, destination)
+        if key == "D" and pins[key] == INPUTS["D"]:
+            assert all(
+                summaries[key][field] == value
+                for field, value in SOURCE_D_GATES.items()
+            ), (
+                "agreed D scoped inventory gates (additional to complete raw-source proof)"
+            )
         check_run_result(result, destination, summaries[key])
-        check_input(source, INPUTS[key])
+        check_input(source, pins[key])
         operations.append(
             {
                 "source": key,
                 "variant": "exact",
-                "source_fingerprint": INPUTS[key],
+                "source_fingerprint": pins[key],
                 "summary": summaries[key],
             }
         )
         print(f"{key} exact independently accepted", flush=True)
-        assert all(
-            summaries[key][field] == value for field, value in EXPECTED[key].items()
-        ), "agreed baseline"
-        repeat = args.output / (key + "-repeat")
-        check_input(source, INPUTS[key])
+        repeat = output / (key + "-repeat")
+        check_input(source, pins[key])
         result = convert(source, repeat)
         assert check_vault(source, repeat) == summaries[key], (
             "repeat independent acceptance"
         )
         check_run_result(result, repeat, summaries[key])
         compare_vaults(destination, repeat)
-        check_input(source, INPUTS[key])
+        check_input(source, pins[key])
         operations.append(
             {
                 "source": key,
                 "variant": "repeat",
-                "source_fingerprint": INPUTS[key],
+                "source_fingerprint": pins[key],
                 "summary": summaries[key],
             }
         )
         print(f"{key} repeat independently accepted", flush=True)
-        reordered = args.output / (key + "-reordered.brz")
-        check_input(source, INPUTS[key])
+        reordered = output / (key + "-reordered.brz")
+        check_input(source, pins[key])
         reordered_archive(source, reordered)
-        check_input(source, INPUTS[key])
+        check_input(source, pins[key])
         shuffled_fingerprint = fingerprint(reordered)
-        shuffled_vault = args.output / (key + "-reordered")
+        shuffled_vault = output / (key + "-reordered")
         check_input(reordered, shuffled_fingerprint)
         result = convert(reordered, shuffled_vault)
         assert check_vault(reordered, shuffled_vault) == summaries[key], (
@@ -231,7 +265,7 @@ def main():
         check_run_result(result, shuffled_vault, summaries[key])
         compare_vaults(destination, shuffled_vault)
         check_input(reordered, shuffled_fingerprint)
-        check_input(source, INPUTS[key])
+        check_input(source, pins[key])
         check_reordering(source, reordered)
         operations.append(
             {
@@ -243,13 +277,15 @@ def main():
         )
         print(f"{key} reordered independently accepted", flush=True)
     for key, source in source_paths.items():
-        check_input(source, INPUTS[key])
-    (args.output / "operations.json").write_text(
+        check_input(source, pins[key])
+    (output / "operations.json").write_text(
         json.dumps(operations, indent=2) + "\n", encoding="utf-8"
     )
-    (args.output / "aggregate.json").write_text(
+    (output / "aggregate.json").write_text(
         json.dumps(summaries, indent=2) + "\n", encoding="utf-8"
     )
+    for key, source in source_paths.items():
+        check_input(source, pins[key])
     print(json.dumps(summaries, indent=2))
 
 
