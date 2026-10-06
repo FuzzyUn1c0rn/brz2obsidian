@@ -69,3 +69,40 @@ Original report: `spec-review.md` in the root evidence
 directory. Fresh final technical gates are recorded in
 [release verification](release-verification.md); neither review supplies the
 user verdict or declares delivery complete.
+
+## Actual-vault styling follow-up
+
+The user rejected the u4 actual vault on 2026-10-06 because generated notices
+were plain blockquotes rather than the approved warning title/icon/orange panel.
+The initial Spec zero-findings conclusion and earlier native observations missed
+this presentation requirement; neither supplies acceptance of that appearance.
+Their original reports and Standards chronology remain unchanged as history.
+
+Accepted clarification `82033efbac2631e31871e2fe7ba4813b170ba09b` specified
+four descriptive native warning callouts, ordinary title Source note unavailable,
+separate adjacent notices and hierarchy/title/notices/Bases placement. The
+isolated repair `b54e4994cb24fbfbc66e72434a8cbfe59ab0f8fd` passed independent
+review of all eight changed files and an independently handwritten actual ZIP.
+All four callout forms/placement/links, supplied authored blockquotes/callouts/
+literals/newlines, exact originals/assets and separate counts passed. Nine
+semantic corruptions with valid refreshed receipts were rejected; a fresh-process
+raw oracle passed with production imports blocked. This was independently
+verified syntax/conservation, not a native colour/icon/background observation.
+Proof: root `tmp/ml-implementation/09/notice-style/independent/report.md` and
+`b54e4994-attempt2/{independent-proof,oracle-boundary-proof}.json`.
+
+The verified repair is integrated at frozen
+`f91043ab7ca8ca5eee85d4e7156a6d2114be5fd9`. Fresh complete public/package
+proof and all twelve independently audited m7 outputs passed. The strict complete
+notice-only delta passed: 71 changed D notes/118 approved headers, all other
+content preserved under exact recorded clock/app allowances. Two combined affected
+native samples in observed Obsidian 1.14.4 independently showed all four orange
+warning titles/icons/tinted panels and correct hierarchy/notices/Bases placement,
+separate adjacent boxes and resolving report/provider links; non-app content stayed
+unchanged. These are strategic technical observations, not a renewed user verdict. No old zero-findings/native
+report is relabeled as a styling acceptance, and no new verdict is inferred.
+
+Current follow-up proof is root `tmp/ml-implementation/07/m7-independent-gate.md`,
+`tmp/ml-implementation/09/notice-style/delta/report.md` and
+`tmp/ml-implementation/09/notice-style/native/report.json` with actual retained
+pixels. The renewed user verdict and aggregate delivery closure remain pending.

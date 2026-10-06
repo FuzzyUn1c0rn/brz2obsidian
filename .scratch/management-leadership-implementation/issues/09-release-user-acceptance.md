@@ -17,11 +17,11 @@ requires renewed affected checks and a revised user review.
 ## Acceptance criteria
 
 - [ ] Obtain and record the user's actual verdict on a clean actual converter-output Management & Leadership review vault, keeping the audited baseline separate from mutable copies. If changes are requested, repair the responsible seam and repeat affected public/source/native gates before requesting the revised verdict. Do not close delivery while this verdict is pending.
-- [ ] Independently review the complete implementation against the accepted specification and documented standards from a fixed recorded baseline/tip. Resolve material findings, rerun affected checks, and record review scope/proof rather than relying on self-review or prototype evidence.
-- [ ] Run the final complete public pytest suite, Ruff check/format check and pip check using the project environment. Run affected checks during repairs before the complete final gate; record exact commands/version/results and honest any remaining limits. No required gate is omitted because planning tickets were approved.
-- [ ] Build and smoke the delivered 0.3.0 package and documented installation/library/console/module examples. Contracts/source profile/renderer/results/records agree on version 3, format remains 5 and checker remains 1 unless its actual public shape changes; schemas, arguments and outcomes match observed output. Runtime distribution excludes private/dev/prototype artifacts.
+- [x] Independently review the complete implementation against the accepted specification and documented standards from a fixed recorded baseline/tip. Resolve material findings, rerun affected checks, and record review scope/proof rather than relying on self-review or prototype evidence.
+- [x] Run the final complete public pytest suite, Ruff check/format check and pip check using the project environment. Run affected checks during repairs before the complete final gate; record exact commands/version/results and honest any remaining limits. No required gate is omitted because planning tickets were approved.
+- [x] Build and smoke the delivered 0.3.0 package and documented installation/library/console/module examples. Contracts/source profile/renderer/results/records agree on version 3, format remains 5 and checker remains 1 unless its actual public shape changes; schemas, arguments and outcomes match observed output. Runtime distribution excludes private/dev/prototype artifacts.
 - [x] Finish public guidance for source coverage, default exclusion, exact-safe-copy omission, present-body precedence, archive-only image fallback/layout A, unknown missing content, actionable optional source investigation, neutral type icons, category hierarchy, maintenance, checker limits, preservation/receipt claims and four-source acceptance usage.
-- [ ] Retain complete independent four-archive matrix and native evidence against the delivered code. If repairs change content/paths/contracts, repeat affected proofs and any invalidated final matrix/native/package gates. Recheck original/retained-vault fingerprints; a repaired/re-exported archive stays a distinct separately accepted source.
+- [x] Retain complete independent four-archive matrix and native evidence against the delivered code. If repairs change content/paths/contracts, repeat affected proofs and any invalidated final matrix/native/package gates. Recheck original/retained-vault fingerprints; a repaired/re-exported archive stays a distinct separately accepted source.
 - [ ] Publish an aggregate delivery record with the real final user verdict, review/tooling/source/native/package results and honest source-gap limits. Keep detailed private assets/vaults/screenshots/records ignored. Mark implementation delivery complete only after every criterion passes; do not deploy, publish packages or alter retained user vaults without applicable authorization.
 
 ## Verification boundary
@@ -153,3 +153,33 @@ User Stories 49–50, 60–70; Implementation Decisions 1–3, 21–25; Testing 
   six-file format check passed. Ignored RED/GREEN proof is under release-worktree
   `tmp/notice-style/`. Reopened review/public/package/source-native gates remain
   pending independent repair/native verification and refreshed final proofs.
+
+- 2026-10-06 (/root/release_documenter): Post-styling public/package proof passed
+  at frozen clean `f91043ab7ca8ca5eee85d4e7156a6d2114be5fd9`: 1,518 tests in
+  276.64 seconds; Ruff check/133-file format check and pip check; before-launch/
+  after-completion/isolated inputs identical for all 136 tracked files. Fresh
+  wheel `bfaa770d…` has 57 exact modules and 62 verified RECORD rows; actual
+  documented library/checker and wheel examples, 18 CLI routes and physical
+  receipt/read-only guards passed and were separately corroborated. Separate
+  tmp/12 post-suite proof preserves the initial before-only result. Independent
+  styling repair verification passed at b54e499 (four notice forms, exact supplied
+  content/counters, nine receipt-valid corruption controls, production-blocked
+  oracle). The complete m7 audit/delta, actual native appearance and revised user
+  verdict remain pending. No source/native/delivery acceptance is inferred here.
+
+- 2026-10-06 (/root/release_documenter): Refreshed post-styling technical gates
+  passed at frozen runtime `f91043ab7ca8ca5eee85d4e7156a6d2114be5fd9`: all
+  12 fresh m7 outputs independently audited with 7,029 unchanged files, original
+  four fingerprints and retained 562 files preserved. The strict 2,337-file delta
+  has zero changed A/B/C notes and exactly 71 D notes/118 approved warning headers,
+  eight category notice relocations, and every other content byte preserved under
+  exact clock/app allowances. Two combined actual native samples showed all four
+  orange warning title/icon/tinted-panel forms, separate boxes, approved placement
+  and working report/provider links; non-app note/asset bytes were unchanged.
+  Root separately viewed the actual ordinary/category/view pixels. Review,
+  public/package/guidance and source/native criteria are checked against this
+  runtime. The original u4 user verdict remains changes required pending renewed
+  actual-vault review; user-verdict and aggregate delivery criteria remain unchecked.
+  Commands, proof paths, privacy/sampling limits and separate review chronology
+  are in the current release/final-review records. This metadata-only candidate
+  does not alter runtime or declare delivery/PR/publication.

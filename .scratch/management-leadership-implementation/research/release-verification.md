@@ -1,7 +1,7 @@
 # Release verification candidate
 
 Date: 2026-10-06
-Status: user review failed notice styling — repair and refreshed gates pending.
+Status: styling repair and refreshed technical gates passed — renewed user verdict and delivery pending.
 
 ## Actual-vault styling rejection
 
@@ -9,9 +9,10 @@ On 2026-10-06 the user rejected the u4 review because generated source-gap
 notices lacked the approved orange warning title/icon and tinted background.
 The implementation and independent expected Markdown both used plain blockquotes.
 Native evidence below established other observed behaviors, but missed this
-visual requirement. Ticket 09 is reopened for a source-gap warning-callout repair,
+visual requirement. Ticket 09 was reopened for a source-gap warning-callout repair,
 affected independent/native checks and refreshed final runtime/package/source
-gates. The user verdict is **changes required**, not accepted; delivery and PR
+gates. Those technical gates now pass at the styling runtime pin below; the
+original rejection remains part of the actual-vault history. The user verdict is **changes required**, not accepted; delivery and PR
 remain pending. The successful technical gates below describe the pre-styling
 runtime and are retained as history.
 
@@ -39,12 +40,127 @@ seconds**; selected Ruff check and six-file format check passed. Private
 commands/logs and final candidate hashes remain under release-worktree
 `tmp/notice-style/`.
 
-This candidate establishes generated syntax and conservation, not actual native
-warning title/icon/orange tint. Independent repair verification, affected native
-strategic observations and refreshed final public/package/source gates are
-pending. The user's verdict is still changes required; delivery remains open.
+This isolated candidate established generated syntax and conservation. Separate
+independent repair verification, actual affected native observations and fresh
+final public/package/source gates subsequently passed, as recorded below. The
+user's earlier verdict remains changes required pending renewed review; delivery
+remains open.
 Earlier technical/native records below are pre-styling history and cannot close
 those reopened requirements.
+
+## Post-styling public/package proof
+
+At frozen clean integrated styling runtime
+`f91043ab7ca8ca5eee85d4e7156a6d2114be5fd9`, the fresh complete root command
+`.venv/Scripts/python.exe -m pytest -q --basetemp=tmp/r11` passed **1,518 tests
+in 276.64 seconds**, exit 0. Ruff check passed, format check reported **133 files
+already formatted**, and pip check passed. Actual command/head/timestamps,
+logs and exits are root `tmp/ml-implementation/09/notice-style-regression-command.json`,
+`notice-style-regression.log`, `notice-style-regression-exit.txt`,
+`notice-style-style-env.json`, `notice-style-{ruff-check,ruff-format,pip-check}.log`.
+
+Truly before-launch and after-completion `notice-style-runtime-{before,after}.json`
+match all **136 tracked runtime/test/build inputs** and this package checkout.
+The initial before-only package comparison remains intact; separate
+`tmp/12/post-suite-input-proof.json` verifies completed-suite equality.
+Interpreter remains root project CPython 3.14.8; explicit worktree `PYTHONPATH`
+selects the isolated source without environment installation or retargeting.
+
+The fresh build used
+`-m pip wheel --no-deps --no-build-isolation --wheel-dir tmp/12/wheels .`.
+The 0.3.0 wheel SHA-256 is
+`bfaa770d9869faccb36a30125f74add9d36c9032ed65ff899bf5b36055e781c3`.
+All **57 runtime modules** equal source bytes and all **62 RECORD rows** match
+inventory/digests/lengths; only distribution metadata accompanies runtime code.
+No private/dev/test/prototype artifacts are packaged.
+
+Three actual documented library conversions plus the checker snippet passed.
+The same three conversion literals ran in genuinely wheel-bound processes.
+Each conversion produced a verified 36-file physical receipt. **18 actual
+console/module/wheel text/JSON inspect/convert/check operations** passed with
+truthful warning exits 2/2 and clean checker exit 0, versioned schemas,
+inspection null receipt/actual counts, three gaps, one presentation and two
+generated embeds. Read-only checker inventories and synthetic-source bytes
+stayed unchanged. Package/converter 0.3.0, contracts/profile/renderer/result/record
+3, BRZ 5 and checker 1 remain separate. Declared Obsidian target metadata 1.13.7
+is not an observed native application version.
+
+Ignored isolated proof is new `tmp/12/{build.log,package-smoke.log,final-smoke.log,
+final-package-proof.json,wheel-integrity-proof.json,post-suite-input-proof.json,wheels/}`;
+synthetic outputs are `tmp/s12/`. Root independently corroborated source/wheel/
+RECORD, 136 inputs, 18 operations, three physical JSON receipts and six example
+outputs in `tmp/ml-implementation/09/notice-style-package-independent.json`.
+Earlier tmp/10 and styling repair evidence remain intact.
+
+These refreshed public/package gates alone do not establish source/native
+appearance acceptance. The separate complete m7 audit/delta and actual affected
+native samples now pass as recorded below. The renewed user verdict is still
+pending. The earlier user verdict remains changes
+required, and earlier technical results below describe pre-styling runtime.
+
+## Post-styling source/delta and actual native gates
+
+All **12 fresh m7 exact/repeat/reordered outputs** passed the independent
+raw-source oracle, actual receipt reconciliation, archive-reorder validation,
+repeat comparisons and supplemental library/CLI checkers at frozen root
+`f91043ab7ca8ca5eee85d4e7156a6d2114be5fd9`. Complete **7,029-file** inventories
+stayed unchanged before/after; all **four original fingerprints** and **562
+retained-vault files** matched their preserved baseline. Frozen runtime/oracle
+bindings were checked. Expected truth remains independently derived from raw
+sources; the production convention checker is supplementary only.
+
+The strict notice-only comparison passed over **2,337 exact-output files**
+against m6 and previous native baselines. A/B/C have zero changed notes. D has
+exactly **71 changed notes** with **118 approved warning headers**: 63 ordinary,
+45 inherited-icon, 8 category-icon and 2 category-note. Notices relocated across
+the unchanged Members/Gallery block in eight category notes. Full resulting
+note bytes match independently specified transformations/ownership/provider joins.
+All other authored bodies/quotes/callouts, image order, assets/originals,
+graph/counts, links, Bases/templates/CSS/plugins/configuration remain exact.
+Only `/run_metadata/{run_id,run_time,bookmark_time}` and bookmark `/items/0/ctime`
+were normalized outside affected notes. Recorded native app serialization and
+added defaults retain their prior compatible values. Complete m5/m6/m7 matrices,
+native copies/immutable evidence and all 136 runtime/test/build inputs survived
+read-only before/after guards.
+
+Actual authorized commands, root project interpreter, `-B`, explicit root
+`PYTHONPATH` and `PYTHONDONTWRITEBYTECODE=1`:
+
+```powershell
+.venv\Scripts\python.exe -B tmp/ml-implementation/07/verifier-audit-m7.py --stable-authorized --expected-head f91043ab7ca8ca5eee85d4e7156a6d2114be5fd9
+.venv\Scripts\python.exe -B tmp/ml-implementation/09/notice-style/delta/check_delta.py --stable-authorized --expected-head f91043ab7ca8ca5eee85d4e7156a6d2114be5fd9
+```
+
+Root ignored proof: `tmp/ml-implementation/07/m7-independent-gate.md`,
+`verifier-report-m7.json`, `verifier-matrix-inventory-m7.json`,
+`verifier-audit-m7.log`; and
+`tmp/ml-implementation/09/notice-style/delta/{report.md,commands.json,
+delta-proof.json,delta.log,delta-exit.txt,before-after-inventories.json}`.
+Actual outputs are retained separately under `tmp/m7/`.
+
+Fresh **two combined affected native samples** in observed Obsidian **1.14.4**
+showed all four orange warning titles, triangular icons and brown/orange tinted
+panels matching the approved reference. Adjacent warnings were separately boxed.
+Ordinary notices precede the intact card; category title/hierarchy precedes both
+notices, then Members/Gallery. Actual report and provider links opened their
+correct native destinations. Root separately inspected ordinary/category/view
+pixels. No source subject names or screenshots are published in this report.
+
+The disposable native copy retained all non-app note/asset bytes unchanged.
+Only recorded app/core-plugin state changed, with native appearance/workspace
+files added. Root private evidence is
+`tmp/ml-implementation/09/notice-style/native/{report.json,before.json,
+after-inventory.json,ordinary.png,category.png,category-views.png}` and associated
+frame/link observations. This is strategic affected sampling, not blanket visual
+coverage or a new matrix/CSV/media/checker gate; unaffected behaviors reuse the
+preserved earlier observations. Existing application-version/sampling limits
+remain. Native technical PASS does not replace the renewed user's verdict.
+
+Independent review/repair, public/package, source/delta and affected native gates
+are now complete for runtime `f91043ab7ca8ca5eee85d4e7156a6d2114be5fd9`.
+This document-only candidate must be recorded separately from that execution pin.
+The coordinator prepares a separate clean current user review copy; the original
+u4 rejection is retained and actual renewed acceptance/delivery remain pending.
 
 ## Historical compact-reference repair boundary
 
@@ -312,10 +428,11 @@ package work neither opens nor mutates it or any private original/retained vault
 
 ## Remaining delivery gate
 
-The technical candidate has complete independent review/repair verification,
-fresh public/package/source proof and native retention against runtime
-`b4a3743ff98656934b6e7075ceaae4caf824405a`. The user's actual verdict on the
-exact clean actual output and the final aggregate delivery record remain pending.
-No agent/native/source/checker PASS substitutes for that verdict. Any later
-material output repair must refresh affected proof and invalidated user review.
-Recovered or re-exported archives remain separately fingerprinted inputs.
+The post-styling technical candidate has independently verified repair, fresh
+public/package/source proof, strict notice-only conservation and actual affected
+native observations at `f91043ab7ca8ca5eee85d4e7156a6d2114be5fd9`.
+The original user verdict was changes required. A renewed actual verdict on the
+current clean converter output and final aggregate delivery record remain pending.
+No agent/native/source/checker PASS supplies that verdict. Any later material
+output repair must refresh affected proof and invalidated user review. Recovered
+or re-exported archives remain separately fingerprinted acceptance inputs.
