@@ -1,7 +1,7 @@
 # Release verification candidate
 
 Date: 2026-10-06
-Status: partial — repair verification, fresh technical gates, actual-vault user verdict and delivery pending.
+Status: technical gates passed — actual-vault user verdict and delivery pending.
 
 ## Current repair boundary
 
@@ -20,19 +20,135 @@ private refusal, no receipt/destination and unchanged synthetic source. RED was
 five failures (unexpected clean); GREEN five passes. The affected source/workflow/
 architecture selection passed 171 tests; alternate-source controls passed 37;
 selected Ruff check/format passed. Original reproduction and RED/GREEN command,
-import and file-hash evidence remain under release-worktree
-`tmp/09/reference-repair/` (`repro.json`, `red.log`, `green.log`, `affected.log`,
+import and file-hash evidence are retained in root
+`tmp/ml-implementation/09/worker-evidence-b4a3743/reference-repair/` (`repro.json`, `red.log`, `green.log`, `affected.log`,
 `alternate.log`, `repair-proof.json`).
 
-**The remainder of this record is retained pre-repair evidence.** Its 136-file
-regression equality and wheel SHA-256/example results do not certify the repaired
-runtime. Ticket 09's full-public and package criteria are unchecked. Independent
-repair verification, fresh complete public/package gates and a fresh four-original
-matrix/re-audit are pending. Existing source/native observations remain history;
-comparison of fresh native-facing bytes determines affected native refresh.
-The untouched actual user review copy and final user verdict still require the
-coordinator's final proof sequence. No repair-stage private-input run, broader
-regression, package rebuild or user-vault mutation has been performed here.
+## Repaired-runtime public/package gates
+
+Independent repair verification passed at
+`fc1685aaea691bff47fa47408d37c78b7188f94c`: 13 independent synthetic controls
+and 35 public inspect/convert operations. The repair was integrated into frozen
+root `b4a3743ff98656934b6e7075ceaae4caf824405a`; both review axes and their
+separate conclusions/limits are recorded in [final review](final-review.md).
+
+At that root tip, the fresh complete command
+`.venv/Scripts/python.exe -m pytest -q --basetemp=tmp/r10` passed
+**1,513 tests in 295.57 seconds**, exit 0. Ruff check passed, format check
+reported **133 files already formatted**, and pip check passed. Root proof is
+`tmp/ml-implementation/09/repaired-regression-command.json`,
+`repaired-regression.log`, `repaired-regression-exit.txt`,
+`repaired-style-env.json`, `repaired-{ruff-check,ruff-format,pip-check}.log`.
+
+The new `repaired-runtime-before.json` was captured **before launch**;
+`repaired-runtime-after.json` was captured after suite completion. All **136
+tracked runtime/test/build inputs** match each other and the isolated package
+checkout. The isolated verifier retained its initial before-only comparison and
+added `tmp/10/post-suite-input-proof.json` rather than overwriting that history.
+The selected interpreter remains root `.venv/Scripts/python.exe`, CPython 3.14.8;
+worktree imports use explicit `PYTHONPATH=<worktree>/src;<worktree>`.
+
+The fresh build at clean `b4a3743` used
+`-m pip wheel --no-deps --no-build-isolation --wheel-dir tmp/10/wheels .`.
+Its 0.3.0 wheel SHA-256 is
+`7959117dd8c76803f6c4fa3e9a53f79d690f9558e274246bae95012b9e499089`.
+All **57 runtime modules** equal source bytes; all **62 RECORD rows** match
+wheel inventory/digests/lengths. Remaining entries are distribution metadata;
+private, test, development and prototype files are absent.
+
+The actual README library example, both architecture examples and checker
+snippet passed against fresh combined synthetic v3 input. Each conversion
+published a verified 36-file receipt with complete physical byte inventory.
+The same three literal conversions ran in processes explicitly importing the
+wheel. **18 actual console/module/wheel text/JSON inspect/convert/check-vault
+operations** passed: warning exits 2/2 and pristine checker exit 0, correct
+versioned JSON, no inspection receipt/actual-generated counts, three gaps,
+one presentation and two actual generated embeds. Checker/source guards passed.
+Package/converter stays 0.3.0; contracts/profile/renderer/result/record 3,
+BRZ 5, checker 1. Declared target metadata remains 1.13.7, separate from observed
+native 1.14.4. No environment install or retargeting was performed.
+
+Fresh ignored release-worktree proof: `tmp/10/{build.log,package-smoke.log,
+final-smoke.log,final-package-proof.json,wheel-integrity-proof.json,
+post-suite-input-proof.json,wheels/}` and synthetic outputs `tmp/s10/`.
+Root retained exact copies of the current ignored proof under
+`tmp/ml-implementation/09/worker-evidence-b4a3743/`: `reference-repair/`
+(88 files), `package-proof/` (15 files) and `package-outputs/` (469 files).
+Its `retention-receipt.json` verifies every retained byte; these copies survive
+release-worktree retirement. Original isolated paths remain execution provenance.
+Root independently corroborated wheel/source/RECORD, all 136 inputs, the 18
+operations, three physical JSON receipt joins and six documented conversion
+executions in `tmp/ml-implementation/09/repaired-package-independent.json`.
+
+Ticket 09's full-public and package criteria are again satisfied for this exact
+repaired runtime. Independent final review and the fresh source/native retention
+gates described below are also satisfied. The user verdict and aggregate
+delivery remain unchecked. The isolated package verifier did not
+access private originals, audited outputs or the user review copy.
+
+## Repaired-runtime original-source and native retention gates
+
+The fresh m6 driver completed all **12 exact/repeat/reordered outputs**, and a
+separate complete raw-source/result/receipt re-audit passed, exit 0, at frozen
+clean root `b4a3743ff98656934b6e7075ceaae4caf824405a`. Reordered-source
+record/payload proofs and all repeated/reordered logical output comparisons
+passed. Every one of the **7,029 matrix files**, all **four original source
+fingerprints** and all **562 retained-vault files** remained unchanged under the
+complete before/after guards. Runtime/oracle/driver bindings and frozen input
+bytes were verified. D's 359 bodies, 63 image obligations, 47 definitions/330
+members and full supplied-content/privacy/ownership/graph obligations passed
+independent raw-source joins rather than matching aggregate totals alone.
+
+The independent verifier command, with root project interpreter, explicit
+`PYTHONPATH=<root>/src;<root>` and no bytecode, was:
+
+```powershell
+.venv\Scripts\python.exe -B tmp/ml-implementation/07/verifier-audit-m6.py --stable-authorized --expected-head b4a3743ff98656934b6e7075ceaae4caf824405a
+```
+
+Root ignored proof: `tmp/ml-implementation/07/m6-independent-gate.md`,
+`m6-matrix.log`, `m6-matrix-exit.txt`, `verifier-audit-m6.log`,
+`verifier-audit-m6-exit.txt`, `verifier-report-m6.json`,
+`verifier-matrix-inventory-m6.json`, and actual outputs under `tmp/m6/`.
+The original m5 verifier/matrix remain immutable historical evidence.
+
+Independent complete native-facing equivalence passed at the same root pin:
+all **2,337 exact-original output files** compared, **2,329 byte exact**, and
+only eight records/bookmarks differing by individually checked clock scalars.
+The exact mask is `/run_metadata/run_id`, `/run_metadata/run_time`,
+`/run_metadata/bookmark_time` in each migration record and `/items/0/ctime` in
+each bookmark. No other field, source fingerprint/evidence, body, title, link,
+provider/member join, property/date, count or artifact byte was normalized.
+All Markdown, assets/originals, Bases, templates, report/guide, CSS/plugin
+artifacts and required delivered configuration retain their actual bytes.
+
+The existing n3 native copies also match their immutable final ledgers and m6:
+shipped non-config content is exact, the record/bookmark clock mask is unchanged,
+app serialization retains equal values, core-plugin values agree and previously
+recorded native defaults/additions remain unchanged. Complete m5/m6 inventories,
+every n3 file, native ledgers and 136 runtime inputs survived the read-only gate.
+
+```powershell
+.venv\Scripts\python.exe -B tmp/ml-implementation/09/native-equivalence/check_equivalence.py --stable-authorized --expected-head b4a3743ff98656934b6e7075ceaae4caf824405a
+```
+
+This used explicit root `PYTHONPATH` and `PYTHONDONTWRITEBYTECODE=1`. Proof:
+`tmp/ml-implementation/09/native-equivalence/{report.md,equivalence-proof.json,
+equivalence.log,equivalence-exit.txt}`. Under the persisted strategic sampling
+policy, the new material visual sample list is empty. This supports reuse of
+[existing actual-output native observations](native-v3-acceptance.md), not a
+new UI session or blanket per-item visual coverage. Observed Obsidian 1.14.4,
+CLI-disabled, sampling and CSV correspondence limits remain explicit.
+
+The coordinator prepared the guarded clean actual user review copy at root
+`tmp/u4/Leadership` from fresh m6 D: all **1,552 files** were byte exact before
+any app interaction (`tmp/ml-implementation/09/final-user-copy-receipt.json`).
+Earlier `tmp/u3/Leadership` remains untouched. The actual user verdict is still
+pending. No agent, convention checker, source audit or native-equivalence
+PASS supplies that verdict or authorizes publication/delivery.
+
+The following pre-repair sections remain historical. Their earlier 136-input
+comparison and old wheel/example proof do not certify the repaired runtime.
 
 ## Pre-repair candidate evidence
 
@@ -153,10 +269,10 @@ package work neither opens nor mutates it or any private original/retained vault
 
 ## Remaining delivery gate
 
-Independent Standards/Spec review of the full implementation, resolution of any
-material findings, the user's actual verdict on the exact clean actual output,
-and the final delivery record remain pending. No agent/native/source/checker
-PASS substitutes for the user verdict. Repairs that change content, paths or
-contracts must refresh affected source/native/package/public proof and any
-invalidated user review before delivery can be marked complete. Recovered or
-re-exported archives remain separately fingerprinted acceptance inputs.
+The technical candidate has complete independent review/repair verification,
+fresh public/package/source proof and native retention against runtime
+`b4a3743ff98656934b6e7075ceaae4caf824405a`. The user's actual verdict on the
+exact clean actual output and the final aggregate delivery record remain pending.
+No agent/native/source/checker PASS substitutes for that verdict. Any later
+material output repair must refresh affected proof and invalidated user review.
+Recovered or re-exported archives remain separately fingerprinted inputs.
