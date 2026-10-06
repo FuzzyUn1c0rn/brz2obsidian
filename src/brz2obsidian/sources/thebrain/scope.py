@@ -29,7 +29,38 @@ def contains_omitted_identity(text, tokens):
     )
 
 
-def scope_records(records, refuse, uuid):
+def _positive_absent_txt_declaration(record, states):
+    """Recognize only the reviewed positive TXT role before inclusion filtering."""
+    return (
+        all(
+            type(record.get(field)) is int and record[field] == expected
+            for field, expected in (("SourceType", 2), ("Type", 15), ("NoteType", 0))
+        )
+        and type(record.get("DataLength")) is int
+        and record["DataLength"] > 0
+        and PurePosixPath(record["Location"]).suffix.casefold() == ".txt"
+        and type(states.get(record["Id"])) is int
+        and states[record["Id"]] == 2
+        and ("Name" not in record or type(record["Name"]) is str)
+        and all(
+            type(value) is bool and not value
+            for field, value in record.items()
+            if field.startswith("Is")
+        )
+        and all(
+            record.get(field) is None or record.get(field) == ""
+            for field in ("ThoughtTypeId", "LinkTypeId", "TypeId")
+        )
+    )
+
+
+def scope_records(records, physical_members, refuse, uuid):
+    """Scope records only after globally validating identities and declarations.
+
+    The caller supplies the ZIP namespace after its path, uniqueness and CRC
+    checks. Repeated absent TXT declarations claim no physical bytes; each
+    included row still passes the normalizer's complete reviewed TXT/PDF rule.
+    """
     brain = uuid(records["meta.json"][0]["BrainId"])
     identities = set()
     thoughts = {}
@@ -68,7 +99,7 @@ def scope_records(records, refuse, uuid):
     if any(record.get("Id") in identities for record in records["tombstones.json"]):
         refuse("invalid_source", "A live identity also occurs in deleted history")
     dropped_members = set()
-    claimed_members = set()
+    claimed_members = {}
     for record in records["attachments.json"]:
         owner = uuid(record.get("SourceId"))
         if owner not in thoughts:
@@ -94,9 +125,7 @@ def scope_records(records, refuse, uuid):
                 else (".data/md-images/" if record.get("Type") == 12 else "")
             )
             member = owner + "/" + prefix + location
-            if member in claimed_members:
-                refuse("invalid_source", "Multiple declarations assign one payload")
-            claimed_members.add(member)
+            claimed_members.setdefault(member, []).append(record)
             if owner in excluded:
                 dropped_members.add(member)
         if owner in excluded:
@@ -118,6 +147,17 @@ def scope_records(records, refuse, uuid):
     asset_ids = {r["Id"] for r in records["attachments.json"]}
     if any(uuid(key) not in asset_ids for key in states):
         refuse("invalid_source", "File states refer to an absent attachment")
+    for member, declarations in claimed_members.items():
+        # Check the whole group, including omitted owners, so row order or
+        # inclusion cannot hide a competing role or a real payload claim.
+        if len(declarations) > 1 and (
+            member in physical_members
+            or not all(
+                _positive_absent_txt_declaration(record, states)
+                for record in declarations
+            )
+        ):
+            refuse("invalid_source", "Multiple declarations assign one payload")
     if not excluded:
         return records, excluded, dropped_members, ()
     associations = {

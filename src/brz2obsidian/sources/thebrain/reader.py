@@ -266,7 +266,7 @@ class BrzSession:
                     )
                 )
         records, self.excluded, dropped_members, self.scope_tokens = scope_records(
-            records, _refuse, _uuid
+            records, set(names), _refuse, _uuid
         )
         if not records["meta.json"]:
             _refuse("invalid_source", "Collection metadata cannot be safely scoped")
