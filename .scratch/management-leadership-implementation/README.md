@@ -38,8 +38,8 @@ and [workspace housekeeping](../../docs/workspace.md).
 Tickets **01: Exclude forgotten thoughts throughout inspection and conversion**,
 **02: Display owned images when an ordinary thought note is absent** and
 **04: Preserve ordinary-to-category hierarchy in both directions** are resolved
-and integrated. The unclaimed frontier is **03: Keep category dashboards usable
-through missing type notes and icons**.
+and integrated. **03: Keep category dashboards usable through missing type
+notes and icons** is now claimed in its isolated worktree.
 Type gaps consume the shared source-gap capability
 from ordinary fallback. Combined safety and independent audit tooling can then
 progress independently. Complete four-original proof precedes native actual-output
@@ -75,6 +75,10 @@ integrated. The user requested a pull request when everything is complete; creat
 it after implementation and required acceptance, then attach it to this chat.
 
 ## Comments
+
+- 2026-10-06 (/root): Claimed type-note/icon gaps after ticket 02's verified
+  integration. Tickets 01/02/04 are resolved; combined workflow safety and
+  independent audit tooling remain blocked by this slice.
 
 - 2026-10-06 (/root/integration_merger): Integrated ticket 02 with
   `git merge --ff-only a6f62b9e37bb193d231cf688e630722fa4f6d06b` from clean

@@ -1,6 +1,7 @@
 # 03: Keep category dashboards usable through missing type notes and icons
 
-Status: ready-for-agent
+Status: claimed
+Assignee: /root/type_gap_implementer
 Approved: 2026-10-06
 Specification: [Accepted conversion specification](../spec.md)
 
@@ -29,6 +30,11 @@ Actual synthetic ZIPs through public inspect/convert and thin commands; observed
 User Stories 19–26, 31, 40–50, 58–62, 69–70; Implementation Decisions 13–14, 16–23, 25; Testing Decisions 1–4, 8–10, 16–17, 20.
 
 ## Comments
+
+- 2026-10-06 (/root): Claimed after independently verified image fallback and
+  category hierarchy were integrated at `8ca6874`. Build on the existing common
+  source-gap/diagnostic/accounting capability in a separate managed worktree,
+  using the already approved public seams for TDD.
 
 - 2026-10-06 (/root): Published after the user approved all nine tickets and their
   dependencies, then explicitly invoked implement-spec for complete implementation.
