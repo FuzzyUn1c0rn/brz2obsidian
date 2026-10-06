@@ -35,8 +35,7 @@ and [workspace housekeeping](../../docs/workspace.md).
 
 ## Working the frontier
 
-Tickets **01: Exclude forgotten thoughts throughout inspection and conversion**,
-**02: Display owned images when an ordinary thought note is absent** and
+Tickets **02: Display owned images when an ordinary thought note is absent** and
 **04: Preserve ordinary-to-category hierarchy in both directions** are resolved
 and integrated. **03: Keep category dashboards usable through missing type
 notes and icons** is also resolved and integrated. **05: Prove the combined
@@ -44,7 +43,8 @@ conversion and publication guarantees** is resolved with bounded synthetic
 proof. **06: Extend the independent raw-source audit to the new conversion
 policy** remains claimed in its isolated implementer worktree. A known residual
 excluded-identity association in inactive Markdown code/comments/bare URIs
-requires a separate ticket 01 privacy repair; its earlier bounded evidence does
+has reopened **01: Exclude forgotten thoughts throughout inspection and conversion**
+for an isolated source-side privacy repair; its earlier bounded evidence does
 not establish universal privacy. Ticket 07 is not eligible.
 Type gaps consume the shared source-gap capability
 from ordinary fallback. Combined safety and independent audit tooling can then
@@ -81,6 +81,13 @@ integrated. The user requested a pull request when everything is complete; creat
 it after implementation and required acceptance, then attach it to this chat.
 
 ## Comments
+
+- 2026-10-06 (/root): Reopened and claimed ticket 01's proven inactive-reference
+  privacy gap after verified ticket 05 integration at `b5c9ef1`. Preserve unrelated
+  literal text and refuse safely when a known omitted association cannot be
+  removed through the approved active-reference path. Ticket 06 also adds
+  independent forged-output corruption proof for this case. Full-source/native/
+  actual-user gates remain pending.
 
 - 2026-10-06 (/root/integration_merger): Integrated ticket 05 with
   `git merge --ff-only 12cdd084a6ddf13d90ac14d421cafa2c135ac9e7` from clean
