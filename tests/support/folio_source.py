@@ -37,11 +37,11 @@ from brz2obsidian.contracts import (
 
 FOLIO_POLICY = SourcePolicy(
     profile_id="synthetic-folio-reviewed",
-    profile_version="2",
+    profile_version="3",
     module_id="synthetic-folio",
-    module_version="2",
+    module_version="3",
     format_version="folio/1",
-    contract_version=2,
+    contract_version=3,
 )
 
 
@@ -156,13 +156,13 @@ class FolioSession:
         identity = SourceIdentity(
             source_id=data["collection"],
             module_id="synthetic-folio",
-            module_version="2",
+            module_version="3",
             format_version="folio/1",
             source_sha256=digest(raw),
             snapshot_digest="",
         )
         snapshot = SourceSnapshot(
-            contract_version=2,
+            contract_version=3,
             identity=identity,
             collection_title=data["collection"],
             entry_key=data["start"],

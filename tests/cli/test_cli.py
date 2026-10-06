@@ -20,7 +20,7 @@ def test_installed_console_and_module_emit_one_json_envelope(tmp_path):
         assert result.stderr == ""
         envelope = json.loads(result.stdout)
         assert envelope["schema"] == "brz2obsidian.result"
-        assert envelope["schema_version"] == 2
+        assert envelope["schema_version"] == 3
         assert envelope["receipt"] is None
         assert envelope["counts"]["actual_notes"] is None
     converted = subprocess.run(

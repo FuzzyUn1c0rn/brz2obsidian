@@ -32,6 +32,7 @@ def plan(analysis: Analysis) -> MigrationPlan:
     )
     counts = analysis.counts.model_copy(
         update={
+            "planned_generated_embeds": 0,
             "planned_notes": sum(target.created for target in targets),
             "planned_category_notes": len(created & definitions),
             "planned_support_files": len(supporting),

@@ -1,6 +1,6 @@
 # 01: Exclude forgotten thoughts throughout inspection and conversion
 
-Status: claimed
+Status: resolved
 Assignee: /root/forgotten_implementer
 Approved: 2026-10-06
 Specification: [Accepted conversion specification](../spec.md)
@@ -11,15 +11,15 @@ Specification: [Accepted conversion specification](../spec.md)
 
 ## Acceptance criteria
 
-- [ ] Default exclusion applies to every BRZ archive from a valid populated ForgottenDateTime, independently of attachment state. There is no include-forgotten option. Establish trustworthy identities/ownership before scoping; malformed scope markers and unsafe source identities/paths still refuse.
-- [ ] Excluded subjects contribute no assigned/reserved target, note, owned local/external asset, original copy, icon/provider effect, classification/tag membership, relationship, stub, warning subject, individual exclusion identity/list/count, associated raw record or unsafe history. Included counts describe included scope. Omitted subjects cannot affect collision names, greedy selection or ordering.
-- [ ] Remove an entire authored linked phrase/embed resolving to an excluded subject, including label/target, without a plain-text reminder or deletion marker. Preserve other text, code literals, Unicode and newline spelling. Unknown nonexcluded targets retain refusal. No title/pixel matching removes unrelated included content.
-- [ ] Preserve byte-exact safe originals and provably included raw evidence with original values and omission/null distinctions. Omit unsafe exact originals rather than editing and calling them exact; omit unsafe fields/records/whole unscopable history collections. Raw spans, embedded state-map keys and guide-linked evidence cannot reintroduce exclusions.
-- [ ] Excluded providers remove membership/appearance effects, letting included members proceed under ordinary included selection; do not create category placeholders. An excluded designated Home retains required-entry refusal, with no replacement Home. Parse/refusal/failure output must not echo excluded identities, titles or content.
-- [ ] Public inspect/convert workflow and text/JSON wrappers expose the scoped behavior and honest source measurements. Source-neutral contracts and policy, source module/profile, renderer and serialized result/record schemas advance to 3, package to 0.3.0; format stays 5. Establish the accepted common optional source-gap/generated-presentation contract and serialized shape with empty facts now, so later slices populate rather than silently redefine the closed version-3 shape. Preserve signatures/outcomes/exits, reject incompatible versions, and keep the separate checker at schema 1 unless its public shape changes. New absence features remain refused until their behavior slices land.
-- [ ] A complete handwritten synthetic conversion proves owned content removal, incoming references, exact-copy conflicts, raw evidence/history, collisions, relationships, assignments, excluded provider/Home, malformed scope markers and unknown targets. Same-title/same-pixel included controls survive. Inspect, output inventories/bytes, manifests, records, reports and failures are checked from raw fixture facts.
-- [ ] Retain inward import barriers, injected interfaces and a non-UUID alternate source on current source-neutral contracts with empty new optional facts. Update affected existing acceptance-oracle/version expectations so existing public checks remain green, without deferring known failures to a later ticket.
-- [ ] Document the default scope, safe-copy tradeoff and changed public versions alongside the behavior. Use the project environment; existing applicable regressions pass. Record bounded proof and limits without claiming full original-archive conversion.
+- [x] Default exclusion applies to every BRZ archive from a valid populated ForgottenDateTime, independently of attachment state. There is no include-forgotten option. Establish trustworthy identities/ownership before scoping; malformed scope markers and unsafe source identities/paths still refuse.
+- [x] Excluded subjects contribute no assigned/reserved target, note, owned local/external asset, original copy, icon/provider effect, classification/tag membership, relationship, stub, warning subject, individual exclusion identity/list/count, associated raw record or unsafe history. Included counts describe included scope. Omitted subjects cannot affect collision names, greedy selection or ordering.
+- [x] Remove an entire authored linked phrase/embed resolving to an excluded subject, including label/target, without a plain-text reminder or deletion marker. Preserve other text, code literals, Unicode and newline spelling. Unknown nonexcluded targets retain refusal. No title/pixel matching removes unrelated included content.
+- [x] Preserve byte-exact safe originals and provably included raw evidence with original values and omission/null distinctions. Omit unsafe exact originals rather than editing and calling them exact; omit unsafe fields/records/whole unscopable history collections. Raw spans, embedded state-map keys and guide-linked evidence cannot reintroduce exclusions.
+- [x] Excluded providers remove membership/appearance effects, letting included members proceed under ordinary included selection; do not create category placeholders. An excluded designated Home retains required-entry refusal, with no replacement Home. Parse/refusal/failure output must not echo excluded identities, titles or content.
+- [x] Public inspect/convert workflow and text/JSON wrappers expose the scoped behavior and honest source measurements. Source-neutral contracts and policy, source module/profile, renderer and serialized result/record schemas advance to 3, package to 0.3.0; format stays 5. Establish the accepted common optional source-gap/generated-presentation contract and serialized shape with empty facts now, so later slices populate rather than silently redefine the closed version-3 shape. Preserve signatures/outcomes/exits, reject incompatible versions, and keep the separate checker at schema 1 unless its public shape changes. New absence features remain refused until their behavior slices land.
+- [x] A complete handwritten synthetic conversion proves owned content removal, incoming references, exact-copy conflicts, raw evidence/history, collisions, relationships, assignments, excluded provider/Home, malformed scope markers and unknown targets. Same-title/same-pixel included controls survive. Inspect, output inventories/bytes, manifests, records, reports and failures are checked from raw fixture facts.
+- [x] Retain inward import barriers, injected interfaces and a non-UUID alternate source on current source-neutral contracts with empty new optional facts. Update affected existing acceptance-oracle/version expectations so existing public checks remain green, without deferring known failures to a later ticket.
+- [x] Document the default scope, safe-copy tradeoff and changed public versions alongside the behavior. Use the project environment; existing applicable regressions pass. Record bounded proof and limits without claiming full original-archive conversion.
 
 ## Verification boundary
 
@@ -38,3 +38,58 @@ User Stories 15–16, 32–39, 49–50, 56–57, 60–62, 69–70; Implementatio
 
 - 2026-10-06 (/root): Published after the user approved all nine tickets and their
   dependencies, then explicitly invoked implement-spec for complete implementation.
+
+- 2026-10-06 (/root/forgotten_implementer): Implemented in isolated managed
+  worktree on `codex/ml-v3-01`, based on integration claim `f017b7d`. Public seams
+  are the already-confirmed real-ZIP inspect/convert workflow and thin CLI, with
+  existing contract/source/core boundaries for incompatible versions. TDD skill
+  applied in vertical cycles: (1) forgotten scope red counted 3 items/2 edges
+  instead of 2/1; (2) incoming authored reference red refused rather than removing
+  its whole phrase; (3) current envelope red reported schema 2; (4) excluded embed
+  and date-only Home controls red refused under the wrong predicate; (5) mixed
+  fixture red leaked an excluded UUID through an opaque raw field key; (6) scoped
+  evidence red rounded `0.123456789012345678901234567890`; (7) malformed excluded
+  reference red incorrectly succeeded; (8) associated setting red retained its
+  own raw identity/content; (9) image-wrapped excluded reference red refused on
+  overlapping spans. Each defect was fixed and the respective public test went
+  green before moving on. Failure/ownership/path/unknown-target controls also
+  prove private refusals and unchanged caller/source bytes.
+
+  The 15 forgotten workflow cases cover owned Markdown/images/icons/URLs,
+  relationships, excluded category/tag providers and Home, exact-copy conflicts,
+  raw state keys/fields/associated settings/unscopable history, Unicode and mixed
+  newlines, code literals, same-title/same-pixel included controls, exact safe
+  numeric values and omission/null distinctions. Unsafe original assets are
+  omitted; their included Documents expose `original_asset_id=null` and
+  `original_copy_omitted=true`, without identifying excluded subjects. Safe
+  originals remain on the existing byte-exact copy path. No exclusion ledger,
+  individual count or include-forgotten mode was added.
+
+  Current public versions are package 0.3.0, snapshot/policy 3, source
+  module/profile 3, renderer 3, result/record 3; BRZ stays 5 and checker stays 1.
+  SourceGap, GeneratedPresentation, SourceGapDiagnostic and
+  GeneratedPresentationTarget reserve semantic role/provider/member and ordered
+  image obligations with empty initial facts. Snapshot/plan/inspection/record
+  share those shapes, with separate gap/generated-embed counts. New state-3
+  absences and category hierarchy still refuse pending their approved slices.
+  The opaque Folio adapter and existing independent oracle expectations use the
+  current contracts. Existing generic graph fixture controls now explicitly
+  carry null forgotten markers; dedicated tests verify actual exclusion.
+
+  Verification with the root project `.venv` interpreter and worktree
+  `PYTHONPATH`: complete `python -m pytest -q --basetemp=tmp/p01` passed
+  **798 tests in 112.50s**; Ruff check `--no-cache` and format check passed;
+  `pip check` passed. Built the 0.3.0 wheel with no dependency installation; its
+  inventory contains runtime package/distribution files only. Console/module
+  JSON and documented library workflows plus source-free checker smoke passed.
+  Disposable logs, wheels and smoke outputs are under ignored
+  `tmp/ml-implementation/01/` (pytest-owned files under `tmp/p01`). An existing
+  maximal-name test uses a short pytest-owned child to preserve the actual
+  240-unit publication limit inside longer managed worktree paths.
+
+  Limits: this is synthetic public-seam proof for ticket 01. No original archive
+  was converted or mutated, retained user vault changed, native application
+  acceptance claimed, or actual user verdict supplied. Complete four-archive,
+  absence/hierarchy and publication/native/user gates remain on the approved
+  frontier. The implementation index and other ticket/Wayfinder records belong
+  to the integration coordinator.

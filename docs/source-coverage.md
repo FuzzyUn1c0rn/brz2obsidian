@@ -17,10 +17,18 @@ Known root files are `meta.json`, `thoughts.json`, `links.json`,
 BOM. Meta is one object; other collections have one object per nonempty
 CR/LF-delimited line, with empty collections valid. Duplicate JSON keys,
 nonfinite values, ambiguous ZIP names, unsafe members, corrupt CRCs and invalid
-live identities/ownership/references refuse. Every original field/history record,
-omitted/null distinction, exact numeric value and raw date string remains
-in the migration record. Forgotten live thoughts stay eligible; history and
-tombstones do not resurrect deleted items.
+live identities/ownership/references refuse. Version 3 excludes live thoughts
+with valid populated ForgottenDateTime markers before destination planning,
+independently of attachment states. Excluded subjects, owned assets, memberships,
+relationships and identifying records do not reach the vault or public output.
+Incoming authored phrases/embeds are removed exactly; unrelated included content
+with matching titles or pixels survives. Safe exact originals and provably
+included raw fields preserve omission/null distinctions, exact numeric values
+and date strings. Unsafe original copies are omitted explicitly; unscopable
+modificationlogs, syncpoints and tombstones collections are omitted whenever
+scope excludes subjects. Malformed markers and untrustworthy identities,
+ownership or paths refuse without disclosing private subject details.
+A forgotten Home retains required-entry refusal.
 
 Live/deleted identity overlap and ambiguous physical assignments also refuse.
 Unicode separators inside JSON strings remain data; record splitting uses only
@@ -141,7 +149,7 @@ type hierarchies/custom link types also refuse.
 
 ## Approved warnings
 
-The fixed profile `thebrain-format5-reviewed`, version `2`, currently permits exactly:
+The fixed profile `thebrain-format5-reviewed`, version `3`, currently permits exactly:
 
 Findings must have the reviewed kind, compatible rule/profile, subject and
 evidence. Missing evidence and unknown kinds refuse; generic core contains no

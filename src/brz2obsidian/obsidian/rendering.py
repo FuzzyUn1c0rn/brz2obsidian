@@ -41,17 +41,17 @@ def _json(value):
 def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     snapshot = plan.analysis.snapshot
     if (
-        run_metadata.renderer_version != "2"
-        or snapshot.contract_version != 2
-        or plan.analysis.policy.contract_version != 2
+        run_metadata.renderer_version != "3"
+        or snapshot.contract_version != 3
+        or plan.analysis.policy.contract_version != 3
     ):
         raise MigrationRefused(
             (
                 Issue(
                     code="unsupported_format",
                     phase="rendering",
-                    message="Renderer requires version-2 contracts and renderer metadata",
-                    guidance="Use the current contract and set renderer_version to 2.",
+                    message="Renderer requires version-3 contracts and renderer metadata",
+                    guidance="Use the current contract and set renderer_version to 3.",
                 ),
             )
         )
@@ -114,12 +114,13 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     files = []
     counts = plan.counts.model_copy(
         update={
+            "actual_generated_embeds": 0,
             "actual_references": sum(
                 len(documents[key].references)
                 for target in plan.item_targets
                 if target.created
                 for key in items[target.item_key].document_ids
-            )
+            ),
         }
     )
 
@@ -236,7 +237,7 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
             }
         ),
     )
-    report = "# Migration report\n\nOpen the root Home note to begin. Original note bytes are retained under Attachments.\n\n"
+    report = "# Migration report\n\nOpen the root Home note to begin. Safe original note bytes are retained under Attachments. Forgotten thoughts are excluded by default; unsafe originals and unscopable history are omitted. Counts describe included scope.\n\n"
     report += f"Created {plan.counts.planned_notes} thought notes; preserved {plan.counts.planned_assets} present payloads.\n\n"
     report += "Unsupported feature classes are refused explicitly.\n"
     report += "\n[[Vault guide.md|Vault guide]] explains manual full-template selection for new objects, direct membership edits on existing notes, canonical properties and future-category starters. Bundled Templates is configured for insertion-day ISO dates; update dates are maintained explicitly.\n"
@@ -306,7 +307,7 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     }
     record = {
         "schema": "brz2obsidian.migration",
-        "schema_version": 2,
+        "schema_version": 3,
         "converter_version": run_metadata.converter_version,
         "renderer_version": run_metadata.renderer_version,
         "source_identity": plan.source_identity.model_dump(),
@@ -377,6 +378,10 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         ],
         "tag_memberships": tag_records(plan),
         "classification_assignments": classification_records(plan),
+        "source_gaps": [gap.model_dump() for gap in plan.source_gaps],
+        "generated_presentations": [
+            p.model_dump() for p in plan.generated_presentations
+        ],
         "support_artifacts": [a.model_dump() for a in plan.support_artifacts],
         "reserved_support_paths": list(plan.reserved_support_paths),
         "adaptations": [value.model_dump() for value in plan.adaptations],

@@ -108,6 +108,8 @@ def check_vault(source, vault):
         "relationships",
         "tag_memberships",
         "classification_assignments",
+        "source_gaps",
+        "generated_presentations",
         "support_artifacts",
         "reserved_support_paths",
         "adaptations",
@@ -122,15 +124,15 @@ def check_vault(source, vault):
     }, "migration record schema fields"
     assert (record["schema"], record["schema_version"]) == (
         "brz2obsidian.migration",
-        2,
+        3,
     ), "record schema version"
     assert (
         record["converter_version"]
         == record["run_metadata"]["converter_version"]
-        == "0.2.0"
+        == "0.3.0"
     ), "converter version"
     assert (
-        record["renderer_version"] == record["run_metadata"]["renderer_version"] == "2"
+        record["renderer_version"] == record["run_metadata"]["renderer_version"] == "3"
     ), "renderer version"
     with Path(source).open("rb") as stream:
         assert (
@@ -146,11 +148,11 @@ def check_vault(source, vault):
         ), "collection source identity"
         assert (
             record["source_identity"]["module_id"] == "thebrain-brz"
-            and record["source_identity"]["module_version"] == "2"
+            and record["source_identity"]["module_version"] == "3"
         ), "source module identity"
         assert (record["profile_id"], record["profile_version"]) == (
             "thebrain-format5-reviewed",
-            "2",
+            "3",
         ), "reviewed source profile"
         originals = {e["key"]: e for e in record["original_evidence"]}
         for name in ROOTS:
@@ -1660,6 +1662,10 @@ def check_counts(raw, record, summary, references, targets, files):
     tags = {t["Id"] for t in raw["thoughts.json"] if t["Kind"] == 4}
     live_references = sum(targets[key]["owner"] in created for key, _, _ in references)
     expected = {
+        "source_gaps": 0,
+        "generated_presentations": 0,
+        "planned_generated_embeds": 0,
+        "actual_generated_embeds": 0,
         "source_items": len(raw["thoughts.json"]),
         "source_relationships": len(raw["links.json"]),
         "source_references": len(references),
@@ -1929,6 +1935,6 @@ def check_run_result(result, vault, summary):
     }, "receipt file evidence"
     assert (
         result["operation"] == "convert"
-        and result["schema_version"] == 2
+        and result["schema_version"] == 3
         and result["outcome"] == ("warnings" if summary["warnings"] else "clean")
     ), "result envelope"

@@ -1,0 +1,404 @@
+import base64
+import json
+from decimal import Decimal
+from uuid import UUID
+from zipfile import ZipFile
+
+import pytest
+
+from brz2obsidian.application.wiring import default_workflow
+from tests.application.test_graph_workflow import graph_archive, identity
+from tests.application.test_verified_coverage import add_attachment
+from tests.support.notes import note_body
+
+
+def rewrite(source, edit):
+    with ZipFile(source) as archive:
+        parts = {n: archive.read(n) for n in archive.namelist()}
+    edit(parts)
+    with ZipFile(source, "w") as archive:
+        for name, data in parts.items():
+            archive.writestr(name, data)
+
+
+def forget(parts, *numbers):
+    records = [json.loads(line) for line in parts["thoughts.json"].splitlines()]
+    for record in records:
+        if record["Id"] in {identity(n) for n in numbers}:
+            record["ForgottenDateTime"] = "2026-10-01T12:00:00.1234567+02:00"
+    parts["thoughts.json"] = "\n".join(json.dumps(r) for r in records).encode()
+
+
+def test_forgotten_owned_content_and_relationships_leave_no_destination_trace(tmp_path):
+    source = graph_archive(
+        tmp_path / "source.brz",
+        {1: "Home", 2: "Private subject", 3: "Included"},
+        [(1, 2, 1, 1, -1), (1, 3, 1, 1, -1)],
+        notes={2: (b"secret owned prose", 4), 3: (b"included prose", 4)},
+    )
+    rewrite(source, lambda p: forget(p, 2))
+    original = source.read_bytes()
+    workflow = default_workflow()
+    inspected = workflow.inspect(source)
+    assert inspected.outcome == "clean"
+    assert inspected.counts.source_items == 2
+    assert inspected.counts.source_relationships == 1
+    vault = tmp_path / "vault"
+    result = workflow.convert(source, vault)
+    assert result.outcome == "clean"
+    output = b"\n".join(p.read_bytes() for p in vault.rglob("*") if p.is_file())
+    for secret in (b"Private subject", b"secret owned prose", identity(2).encode()):
+        assert secret not in output
+        assert secret.decode() not in inspected.model_dump_json()
+    assert b"included prose" in output
+    assert source.read_bytes() == original
+
+
+def test_excluded_link_phrase_disappears_and_unsafe_exact_copy_is_omitted(tmp_path):
+    compact = base64.urlsafe_b64encode(UUID(identity(2)).bytes_le).decode().rstrip("=")
+    body = (
+        f"α before\r\n[private **label**](brain://{compact}/private-title) after\rTail"
+    )
+    source = graph_archive(
+        tmp_path / "source.brz",
+        {1: "Home", 2: "Private"},
+        notes={1: (body.encode(), 4)},
+    )
+    rewrite(source, lambda p: forget(p, 2))
+    workflow = default_workflow()
+    inspection = workflow.inspect(source)
+    assert inspection.outcome == "clean"
+    assert inspection.counts.source_references == 0
+    vault = tmp_path / "vault"
+    result = workflow.convert(source, vault)
+    assert result.outcome == "clean"
+    assert note_body((vault / "Home — Home.md").read_bytes()).startswith(
+        "# Home\n\nα before\r\n after\rTail".encode()
+    )
+    assert not any(p.name.endswith(".original") for p in vault.rglob("*"))
+    output = b"\n".join(p.read_bytes() for p in vault.rglob("*") if p.is_file())
+    for removed in (compact, "private-title", "private **label**", identity(2)):
+        assert removed.encode() not in output
+        assert removed not in inspection.model_dump_json()
+
+
+def test_current_public_envelopes_reserve_empty_gap_and_presentation_facts(tmp_path):
+    source = graph_archive(tmp_path / "source.brz", {1: "Home"})
+    result = default_workflow().inspect(source)
+    assert result.schema_version == 3
+    assert result.converter_version == "0.3.0"
+    assert result.profile_version == result.source_identity.module_version == "3"
+    assert result.inspection.source_gaps == ()
+    assert result.inspection.generated_presentations == ()
+    vault = tmp_path / "vault"
+    converted = default_workflow().convert(source, vault)
+    assert converted.outcome == "clean"
+    record = json.loads((vault / "migration-record.json").read_bytes())
+    assert record["schema_version"] == 3 and record["renderer_version"] == "3"
+    assert record["source_gaps"] == record["generated_presentations"] == []
+
+
+def test_excluded_thought_embed_is_removed_without_rewriting_code_or_other_text(
+    tmp_path,
+):
+    compact = base64.urlsafe_b64encode(UUID(identity(2)).bytes_le).decode().rstrip("=")
+    body = f"before\r\n![private](brain://{compact}/private)\rafter\n`![literal](https://example.invalid/x)`"
+    source = graph_archive(
+        tmp_path / "source.brz",
+        {1: "Home", 2: "Private"},
+        notes={1: (body.encode(), 4)},
+    )
+    rewrite(source, lambda p: forget(p, 2))
+    vault = tmp_path / "vault"
+    result = default_workflow().convert(source, vault)
+    assert result.outcome == "clean"
+    assert note_body((vault / "Home — Home.md").read_bytes()).startswith(
+        b"# Home\n\nbefore\r\n\rafter\n`![literal](https://example.invalid/x)`"
+    )
+
+
+@pytest.mark.parametrize("marker", ["2020-01-01", "2026-10-01T12:00:00Z"])
+def test_valid_populated_scope_marker_excludes_the_designated_home_without_disclosure(
+    tmp_path, marker
+):
+    source = graph_archive(tmp_path / "source.brz", {1: "Private home"})
+
+    def edit(parts):
+        record = json.loads(parts["thoughts.json"])
+        record["ForgottenDateTime"] = marker
+        parts["thoughts.json"] = json.dumps(record).encode()
+
+    rewrite(source, edit)
+    result = default_workflow().convert(source, tmp_path / "vault")
+    assert result.outcome == "refused" and result.issues[0].code == "invalid_entry"
+    assert (
+        identity(1) not in result.model_dump_json()
+        and "Private home" not in result.model_dump_json()
+    )
+    assert not (tmp_path / "vault").exists()
+
+
+def test_included_controls_survive_provider_and_owned_asset_exclusion_with_safe_raw_evidence(
+    tmp_path,
+):
+    source = graph_archive(
+        tmp_path / "source.brz",
+        {
+            1: "Home",
+            2: "Same title",
+            3: "Same title",
+            4: "Private provider",
+            5: "Member",
+            6: "Private tag",
+        },
+        [(4, 5, 1, 2, -1), (6, 5, 1, 5, -1), (2, 3, 1, 1, -1)],
+        kinds={4: 2, 6: 4},
+        notes={
+            2: (b"private prose", 4),
+            3: (b"included prose", 4),
+            5: (b"member prose", 4),
+        },
+    )
+
+    def edit(parts):
+        forget(parts, 2, 4, 6)
+        records = [json.loads(line) for line in parts["thoughts.json"].splitlines()]
+        member = next(r for r in records if r["Id"] == identity(5))
+        member["TypeId"] = identity(4)
+        member["SafeNull"] = None
+        member["Unsafe_" + identity(2)] = "associated hidden metadata"
+        member["Nested"] = {identity(2): "associated hidden metadata"}
+        parts["thoughts.json"] = "\n".join(json.dumps(r) for r in records).encode()
+        for owner, asset, kind, name in (
+            (2, 3002, 12, "same.png"),
+            (3, 3003, 12, "same.png"),
+            (4, 3004, 5, "icon.png"),
+        ):
+            add_attachment(
+                parts,
+                identity(asset),
+                kind,
+                name,
+                b"same pixels",
+                owner=identity(owner),
+            )
+        add_attachment(
+            parts,
+            identity(3005),
+            3,
+            "https://private.invalid/resource",
+            owner=identity(2),
+            state=None,
+        )
+        parts["modificationlogs.json"] = json.dumps(
+            {"Id": identity(7000), "Content": "unscopable private prose"}
+        ).encode()
+        parts["tombstones.json"] = json.dumps(
+            {"Id": identity(7001), "SourceId": identity(2)}
+        ).encode()
+        parts["settings.json"] += (
+            b"\n"
+            + json.dumps(
+                {
+                    "Id": identity(7002),
+                    "SourceId": identity(2),
+                    "Value": "private associated settings content",
+                }
+            ).encode()
+        )
+
+    rewrite(source, edit)
+    workflow = default_workflow()
+    inspected = workflow.inspect(source)
+    assert inspected.outcome == "clean"
+    assert inspected.counts.source_items == 3
+    assert inspected.counts.source_definitions == inspected.counts.source_tags == 0
+    assert (
+        inspected.counts.classification_assignments
+        == inspected.counts.source_relationships
+        == 0
+    )
+    targets = {t.item_key: t for t in inspected.inspection.item_targets}
+    assert targets[identity(3)].relative_path == "Notes/Same title.md"
+    vault = tmp_path / "vault"
+    result = workflow.convert(source, vault)
+    assert result.outcome == "clean"
+    output = b"\n".join(p.read_bytes() for p in vault.rglob("*") if p.is_file())
+    for n in (2, 4, 6, 3002, 3004, 3005, 7000, 7001, 7002):
+        assert identity(n).encode() not in output
+    for secret in (b"private prose", b"private.invalid", b"associated hidden metadata"):
+        assert secret not in output
+    assert b"included prose" in output and b"same pixels" in output
+    assert not (vault / "Categories/Private provider.md").exists()
+    record = json.loads((vault / "migration-record.json").read_bytes())
+    raw_thoughts = next(
+        e["records"] for e in record["original_evidence"] if e["key"] == "thoughts.json"
+    )
+    retained = next(r for r in raw_thoughts if r["Id"] == identity(5))
+    assert retained["SafeNull"] is None and "MissingField" not in retained
+    assert "TypeId" not in retained
+    assert [
+        e["records"]
+        for e in record["original_evidence"]
+        if e["key"] in {"modificationlogs.json", "tombstones.json"}
+    ] == [[], []]
+
+
+def test_scoped_safe_raw_values_keep_exact_precision_omission_and_null(tmp_path):
+    source = graph_archive(tmp_path / "source.brz", {1: "Home", 2: "Private"})
+
+    def edit(parts):
+        forget(parts, 2)
+        raw = parts["thoughts.json"].decode()
+        raw = raw.replace(
+            '"Name": "Home"',
+            '"Name": "Home", "Precise": 0.123456789012345678901234567890, "SafeNull": null',
+        )
+        parts["thoughts.json"] = raw.encode()
+
+    rewrite(source, edit)
+    vault = tmp_path / "vault"
+    assert default_workflow().convert(source, vault).outcome == "clean"
+    record = json.loads(
+        (vault / "migration-record.json").read_bytes(), parse_float=Decimal
+    )
+    raw = next(
+        e["records"][0]
+        for e in record["original_evidence"]
+        if e["key"] == "thoughts.json"
+    )
+    assert raw["Precise"] == Decimal("0.123456789012345678901234567890")
+    assert raw["SafeNull"] is None and "Unspecified" not in raw
+
+
+@pytest.mark.parametrize("case", ["marker", "owner", "path", "unknown", "parse"])
+def test_scope_and_unknown_reference_failures_are_private_and_leave_caller_files_unchanged(
+    tmp_path, case, capsys
+):
+    from brz2obsidian.cli import main
+
+    source = graph_archive(
+        tmp_path / "source.brz",
+        {1: "Home", 2: "Private subject"},
+        notes={2: (b"private prose", 4)},
+    )
+
+    def edit(parts):
+        forget(parts, 2)
+        if case == "marker":
+            raw = (
+                parts["thoughts.json"]
+                .decode()
+                .replace("2026-10-01T12:00:00.1234567+02:00", "Private invalid marker")
+            )
+            parts["thoughts.json"] = raw.encode()
+        elif case in {"owner", "path"}:
+            raw = json.loads(parts["attachments.json"])
+            raw["SourceId" if case == "owner" else "Location"] = (
+                identity(99) if case == "owner" else "../Private path"
+            )
+            parts["attachments.json"] = json.dumps(raw).encode()
+        elif case == "unknown":
+            parts["links.json"] = json.dumps(
+                {
+                    "Id": identity(5000),
+                    "BrainId": "11111111-1111-4111-8111-111111111111",
+                    "ThoughtIdA": identity(1),
+                    "ThoughtIdB": identity(99),
+                    "Kind": 1,
+                    "Relation": 1,
+                    "Meaning": 1,
+                    "Direction": -1,
+                }
+            ).encode()
+        else:
+            parts["thoughts.json"] = (
+                b'{"Private parse payload": 1, "Private parse payload": 2}'
+            )
+
+    rewrite(source, edit)
+    before = source.read_bytes()
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "caller.bin").write_bytes(b"caller bytes")
+    for argv in (
+        ["inspect", str(source), "--json"],
+        ["convert", str(source), str(vault), "--json"],
+        ["inspect", str(source)],
+    ):
+        assert main(argv) == 1
+        output = capsys.readouterr().out
+        for private in (
+            identity(2),
+            "Private subject",
+            "Private invalid marker",
+            "Private path",
+            "Private parse payload",
+            "private prose",
+        ):
+            assert private not in output
+    assert source.read_bytes() == before
+    assert {p.name: p.read_bytes() for p in vault.iterdir()} == {
+        "caller.bin": b"caller bytes"
+    }
+
+
+def test_malformed_reference_to_excluded_subject_refuses_without_echoing_its_target(
+    tmp_path,
+):
+    compact = base64.urlsafe_b64encode(UUID(identity(2)).bytes_le).decode().rstrip("=")
+    source = graph_archive(
+        tmp_path / "source.brz",
+        {1: "Home", 2: "Private"},
+        notes={
+            1: (f"[Private label](brain://{compact}/Private-title?query=1)".encode(), 4)
+        },
+    )
+    rewrite(source, lambda p: forget(p, 2))
+    result = default_workflow().inspect(source)
+    assert result.outcome == "refused" and result.issues[0].code == "invalid_reference"
+    assert (
+        compact not in result.model_dump_json()
+        and "Private" not in result.model_dump_json()
+    )
+
+
+def test_image_wrapped_excluded_link_removes_the_whole_phrase_and_keeps_the_included_image(
+    tmp_path,
+):
+    compact = base64.urlsafe_b64encode(UUID(identity(2)).bytes_le).decode().rstrip("=")
+    source = graph_archive(
+        tmp_path / "source.brz",
+        {1: "Home", 2: "Private"},
+        notes={
+            1: (
+                f"before [![owned](.data/md-images/safe.png)](brain://{compact}/private) after".encode(),
+                4,
+            )
+        },
+    )
+
+    def edit(parts):
+        forget(parts, 2)
+        add_attachment(
+            parts,
+            identity(3001),
+            12,
+            "safe.png",
+            b"included image pixels",
+            owner=identity(1),
+        )
+
+    rewrite(source, edit)
+    vault = tmp_path / "vault"
+    result = default_workflow().convert(source, vault)
+    assert result.outcome == "clean"
+    assert note_body((vault / "Home — Home.md").read_bytes()).startswith(
+        b"# Home\n\nbefore  after"
+    )
+    assert any(
+        p.read_bytes() == b"included image pixels"
+        for p in vault.rglob("*")
+        if p.is_file()
+    )
+    assert not any(p.name.endswith(".original") for p in vault.rglob("*"))

@@ -192,7 +192,7 @@ class _MappedBlock(StateBlock):
         return _MappedText(value, offsets)
 
 
-def trace_note_references(text: str) -> tuple[ReferenceSpan, ...]:
+def trace_note_references(text: str, excluded=()) -> tuple[ReferenceSpan, ...]:
     """Trace parser-recognized active links into exact original text spans.
 
     Carry character provenance through normalization and block indentation;
@@ -251,6 +251,24 @@ def trace_note_references(text: str) -> tuple[ReferenceSpan, ...]:
                 if token:
                     target = token.attrGet("src" if kind == "image" else "href")
                     if target and _local(target):
+                        removed_subject = False
+                        parts = urlsplit(target)
+                        if parts.scheme == "brain" and re.fullmatch(
+                            r"[A-Za-z0-9_-]{22}", parts.netloc
+                        ):
+                            raw = base64.urlsafe_b64decode(parts.netloc + "==")
+                            removed_subject = str(UUID(bytes_le=raw)) in excluded
+                            if removed_subject and (
+                                base64.urlsafe_b64encode(raw).decode().rstrip("=")
+                                != parts.netloc
+                                or not parts.path.startswith("/")
+                                or parts.query
+                                or parts.fragment
+                            ):
+                                _refuse(
+                                    "invalid_reference",
+                                    "Invalid compact thought reference",
+                                )
                         if "label" in token.meta:
                             _refuse(
                                 "unsupported_feature",
@@ -261,7 +279,7 @@ def trace_note_references(text: str) -> tuple[ReferenceSpan, ...]:
                                 "unsupported_feature",
                                 "Source-local autolinks are unsupported",
                             )
-                        if not (
+                        if not removed_subject and not (
                             (
                                 kind == "item"
                                 and urlsplit(target).scheme.casefold() == "brain"
@@ -275,11 +293,25 @@ def trace_note_references(text: str) -> tuple[ReferenceSpan, ...]:
                                 "unsupported_feature",
                                 "Local reference form is outside reviewed inline thought/image coverage",
                             )
-                        if kind == "item" and any(t.type == "image" for t in new):
+                        if (
+                            not removed_subject
+                            and kind == "item"
+                            and any(t.type == "image" for t in new)
+                        ):
                             _refuse(
                                 "unsupported_feature",
                                 "An image-wrapped thought link is an unsupported rich-content form",
                             )
+                        if removed_subject:
+                            hits[:] = [
+                                hit
+                                for hit in hits
+                                if not (
+                                    hit[0] is state.src
+                                    and begin <= hit[1]
+                                    and hit[2] <= state.pos
+                                )
+                            ]
                         display = display_text(
                             state.src[begin + (2 if kind == "image" else 1) : label_end]
                         )
@@ -288,7 +320,7 @@ def trace_note_references(text: str) -> tuple[ReferenceSpan, ...]:
                                 state.src,
                                 begin,
                                 state.pos,
-                                kind,
+                                "item" if removed_subject else kind,
                                 target,
                                 display,
                                 destination,

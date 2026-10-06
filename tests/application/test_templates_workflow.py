@@ -205,6 +205,9 @@ def test_inspection_manifest_record_and_configuration_account_for_every_support_
 def test_category_templates_reuse_safe_targets_through_collisions_and_reordering(
     tmp_path,
 ):
+    # Leave room for the intentionally maximal names in a managed worktree.
+    tmp_path = tmp_path.parent / "tc"
+    tmp_path.mkdir()
     source = graph_archive(
         tmp_path / "collisions.brz",
         {

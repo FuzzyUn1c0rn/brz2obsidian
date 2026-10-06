@@ -28,10 +28,15 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
         )
 
     identity = snapshot.identity
-    if snapshot.contract_version != 2 or policy.contract_version != 2:
+    if snapshot.source_gaps or snapshot.generated_presentations:
+        refuse(
+            "unsupported_feature",
+            "Source-gap presentation is not supported by this implementation slice",
+        )
+    if snapshot.contract_version != 3 or policy.contract_version != 3:
         refuse(
             "unsupported_format",
-            "Only source snapshot and policy contract version 2 is supported",
+            "Only source snapshot and policy contract version 3 is supported",
         )
     if (
         identity.module_id,
@@ -75,6 +80,13 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
         ):
             refuse("invalid_reference", "Item references another owner's content")
     for document in snapshot.documents:
+        if document.original_copy_omitted:
+            if document.owner not in items or document.original_asset_id is not None:
+                refuse(
+                    "invalid_reference",
+                    "Omitted original must have a valid owner and no copied asset",
+                )
+            continue
         if document.owner not in items or document.original_asset_id not in assets:
             refuse("invalid_reference", "Document owner/original payload is invalid")
         original = assets[document.original_asset_id]
@@ -197,6 +209,8 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
             "missing_required_payload", "Absent asset lacks a reviewed source finding"
         )
     counts = Counts(
+        source_gaps=0,
+        generated_presentations=0,
         source_items=len(items),
         source_relationships=len(snapshot.relationships),
         source_references=sum(len(d.references) for d in snapshot.documents),

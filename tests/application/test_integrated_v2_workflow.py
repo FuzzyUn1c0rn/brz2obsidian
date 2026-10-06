@@ -60,12 +60,12 @@ def test_combined_v2_vault_preserves_independent_facts_and_checks_without_source
     result = default_workflow().convert(source, vault)
     assert result.outcome == "warnings", result.issues
     assert result.receipt.published and result.receipt.verified
-    assert result.schema_version == 2 and result.profile_version == "2"
-    assert result.converter_version == brz2obsidian.__version__ == "0.2.0"
+    assert result.schema_version == 3 and result.profile_version == "3"
+    assert result.converter_version == brz2obsidian.__version__ == "0.3.0"
     package = tomllib.loads(
         (Path(brz2obsidian.__file__).parents[2] / "pyproject.toml").read_text()
     )
-    assert package["project"]["version"] == "0.2.0"
+    assert package["project"]["version"] == "0.3.0"
     assert (
         RunResult.model_validate_json(result.model_dump_json(by_alias=True)) == result
     )
@@ -125,7 +125,7 @@ def test_combined_v2_vault_preserves_independent_facts_and_checks_without_source
         record["schema_version"],
         record["converter_version"],
         record["renderer_version"],
-    ) == ("brz2obsidian.migration", 2, "0.2.0", "2")
+    ) == ("brz2obsidian.migration", 3, "0.3.0", "3")
     assert {s["relative_path"] for s in record["support_artifacts"]} == SUPPORT_PATHS
     assert {a["item_key"] for a in record["classification_assignments"]} == {
         identity(3),
@@ -321,9 +321,9 @@ def test_mixed_cli_warning_publication_clean_checker_and_fresh_destination_contr
     inspected = json.loads(capsys.readouterr().out)
     assert (
         inspected["schema"] == "brz2obsidian.result"
-        and inspected["schema_version"] == 2
+        and inspected["schema_version"] == 3
     )
-    assert inspected["converter_version"] == "0.2.0" and inspected["receipt"] is None
+    assert inspected["converter_version"] == "0.3.0" and inspected["receipt"] is None
     assert inspected["counts"]["actual_files"] is None
     vault = tmp_path / "vault"
     assert main(["convert", str(source), str(vault), "--json"]) == 2

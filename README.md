@@ -2,7 +2,7 @@
 
 A local Python library and thin CLI that migrates reviewed TheBrain BRZ
 exchange-format-5 exports into a fresh standard Obsidian vault. It preserves
-Markdown, present attachment bytes, original JSON evidence, Home, hierarchy,
+included Markdown, present attachment bytes, safe original JSON evidence, Home, hierarchy,
 Related links and tags. Unsupported source meanings are refused.
 
 Version 2 (`0.2.0`) adds thought types as linked categories, native dashboards
@@ -17,6 +17,20 @@ and [delivery gates](.scratch/brz-to-obsidian-v2-implementation/README.md).
 Native review of actual outputs, independent final review and the user's
 2026-10-05 actual-vault approval complete those delivery gates. Version 2 is
 delivered and accepted.
+
+Version 3 (`0.3.0`) development applies default forgotten-thought exclusion to
+every archive. Valid populated ForgottenDateTime markers exclude the subject,
+owned content, memberships, relationships and associated evidence before naming.
+Authored links/embeds to excluded subjects disappear as whole phrases; unrelated
+text and code literals remain unchanged. Exact originals containing excluded
+references are omitted, with explicit Document original-copy metadata. Safe
+originals remain byte exact. Unscopable history is omitted. Counts describe
+included scope; there is no include-forgotten option or individual exclusion
+ledger. A forgotten Home refuses. The package, snapshot/policy, module/profile,
+renderer and migration result/record contracts now use version 3; BRZ stays 5
+and the read-only checker stays schema 1. New gap/presentation collections are
+reserved empty; reviewed state-3 absence features await their implementation
+slices. Follow the [current frontier](.scratch/management-leadership-implementation/README.md).
 
 ## Development environment
 
@@ -83,7 +97,7 @@ not fetch or open them.
 | `failed` | 1 | Operational failure |
 
 Text mode prints concise counts, issues and guidance. JSON mode writes one
-version-2 `brz2obsidian.result` envelope to stdout. Unmeasured counts are `null`,
+version-3 `brz2obsidian.result` envelope to stdout. Unmeasured counts are `null`,
 and `receipt` is `null` until actual verified publication. A later teardown
 failure can return `failed` with a retained receipt and `publication_occurred`
 issue: inspect that vault before retrying. Argument errors exit 1; help exits 0.

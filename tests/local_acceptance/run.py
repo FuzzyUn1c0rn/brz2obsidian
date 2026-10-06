@@ -175,7 +175,7 @@ def main():
     assert (
         Path(location).resolve()
         == (expected_src / "brz2obsidian/__init__.py").resolve()
-        and version == "0.2.0"
+        and version == "0.3.0"
     ), "worktree converter import/version"
     args.output.mkdir(parents=True, exist_ok=False)
     summaries = {}

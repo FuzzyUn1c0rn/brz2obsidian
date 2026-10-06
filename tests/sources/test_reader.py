@@ -77,7 +77,7 @@ def test_unimplemented_relationships_are_explicitly_refused(tmp_path):
     rewrite(source, "links.json", json.dumps({"Id": "future relationship"}).encode())
     with pytest.raises(MigrationRefused) as error, BrzSourceModule().open(source):
         pass
-    assert error.value.issues[0].code == "unsupported_feature"
+    assert error.value.issues[0].code == "invalid_source"
 
 
 def test_retained_evidence_keeps_high_precision_numbers_and_omitted_fields(tmp_path):

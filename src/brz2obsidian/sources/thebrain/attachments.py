@@ -28,7 +28,9 @@ SPECIAL_FLAGS = (
 )
 
 
-def normalize_attachments(archive, records, meta, thoughts, refuse, uuid):
+def normalize_attachments(
+    archive, records, meta, thoughts, refuse, uuid, excluded=(), scope_tokens=()
+):
     assets, documents, members, evidence, accounting, findings = [], [], {}, [], [], []
     absent_records = []
     asset_records = {}
@@ -244,19 +246,45 @@ def normalize_attachments(archive, records, meta, thoughts, refuse, uuid):
                     "Multiple thought notes have ambiguous ownership",
                     (asset_id,),
                 )
-            references = trace_note_references(text)
+            references = trace_note_references(text, excluded)
+            removals = []
+            for reference in references:
+                if reference.kind == "item":
+                    from base64 import urlsafe_b64decode
+                    from uuid import UUID
+
+                    parts = urlsplit(reference.target)
+                    try:
+                        target = str(
+                            UUID(bytes_le=urlsafe_b64decode(parts.netloc + "=="))
+                        )
+                    except ValueError, TypeError:
+                        target = None
+                    if parts.scheme == "brain" and target in excluded:
+                        removals.append(reference)
+            unsafe_original = bool(removals) or any(
+                token in text for token in scope_tokens
+            )
+            for reference in reversed(removals):
+                text = text[: reference.start] + text[reference.end :]
+            if removals:
+                references = trace_note_references(text)
             documents.append(
                 Document(
                     key=asset_id,
                     owner=owner,
                     text=text,
                     text_digest=hashlib.sha256(text.encode()).hexdigest(),
-                    original_asset_id=asset_id,
+                    original_asset_id=None if unsafe_original else asset_id,
+                    original_copy_omitted=unsafe_original,
                     references=references,
                     evidence=(pointer,),
                 )
             )
             role = "note_original"
+            if unsafe_original:
+                members[asset_id] = member
+                continue
         assets.append(
             Asset(
                 **common,
@@ -284,7 +312,7 @@ def normalize_attachments(archive, records, meta, thoughts, refuse, uuid):
                 references=(asset_id,),
             )
         )
-    if set(states) - {a.asset_id for a in assets}:
+    if set(states) - ({a.asset_id for a in assets} | {d.key for d in documents}):
         refuse("invalid_source", "File states refer to an absent attachment")
     for asset_id, owner, location, declared, pointer in absent_records:
         if declared == 0:

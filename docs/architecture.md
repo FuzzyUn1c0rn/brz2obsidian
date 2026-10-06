@@ -1,6 +1,6 @@
 # Reusable migration interfaces
 
-`contracts.py` owns version-2 strict, closed, frozen Pydantic values with
+`contracts.py` owns version-3 strict, closed, frozen Pydantic values with
 immutable nested tuples. Generic modules treat identities/keys as opaque;
 source modules supply stable hexadecimal naming seeds. Original JSON is
 independently retained as immutable text and embedded directly in the record,
@@ -14,7 +14,7 @@ Every classification relationship must correspond to exactly one assignment;
 members are distinct ordinary items and definitions are live definition items.
 The TheBrain adapter additionally joins each populated `TypeId` to exactly one
 matching exported instance relationship in both directions. These facts remain
-independent of hierarchy and source tags. The core requires contract version 2
+independent of hierarchy and source tags. The core requires contract version 3
 even when both supplied snapshot and policy claim the same older version.
 
 The shared contract includes optional immutable destination-independent facts:
@@ -178,8 +178,8 @@ from brz2obsidian.sources.thebrain import BrzSourceModule
 from brz2obsidian.sources.thebrain.profile import BRZ_POLICY
 
 metadata = RunMetadata(
-    converter_version="0.2.0",
-    renderer_version="2",
+    converter_version="0.3.0",
+    renderer_version="3",
     run_id="example-run",
     run_time="2026-10-04T00:00:00+00:00",
     obsidian_version="1.13.7",
@@ -202,7 +202,7 @@ reads time at the outer boundary; callers may inject a metadata factory.
 ## Result and migration-record schemas
 
 `RunResult.model_dump_json(by_alias=True)` exposes `schema="brz2obsidian.result"`,
-`schema_version=2`, `converter_version`, `operation`, `outcome`, `source_identity`,
+`schema_version=3`, `converter_version`, `operation`, `outcome`, `source_identity`,
 `profile_id`, `profile_version`, `counts`, `issues`, `inspection`, `receipt`.
 Unavailable fields/counts are `null`; issues is an array. Inspect returns planned
 item/tag targets, classification assignments, asset targets/inventory,
@@ -213,34 +213,37 @@ inspection neither renders nor copies files. Convert returns no inspection
 and, after commit, a receipt with actual inventory/counts. The result supports
 `RunResult.model_validate_json(...)` round-tripping.
 
-`migration-record.json` exposes `schema="brz2obsidian.migration"`, version 2,
+`migration-record.json` exposes `schema="brz2obsidian.migration"`, version 3,
 converter/renderer versions, `source_identity`, profile identity, `run_metadata`,
 `original_evidence`, `item_targets`, `asset_targets`, `relationships`,
 `tag_memberships`, `classification_assignments`, `support_artifacts`,
 `reserved_support_paths`, `adaptations`, `source_accounting`, `issues`, `counts` and
 `obsidian_configuration`. Document metadata/digests/references/owner targets
-are nested in item targets' `documents`; original bodies remain in copied
-`.md.original` files. Asset entries include normalized facts, assigned paths or
+are nested in item targets' `documents`; safe original bodies remain in copied
+`.md.original` files. A scoped Document whose original contains excluded
+references has `original_asset_id=null` and `original_copy_omitted=true`;
+its complete included authored body remains active after exact span removals,
+and no altered file is described as an exact original. Asset entries include normalized facts, assigned paths or
 external links, `source_findings`, and `retained_documents` for owners without
 ordinary targets. System relationships retain evidence without navigation.
 There is no standalone top-level documents/findings collection.
 
 Schema identities, workflow signatures, existing result fields and outcome/exit
 behavior are retained. The closed shapes have changed explicitly: consumers
-must accept version 2 rather than interpreting it as version 1. The reviewed
-TheBrain module/profile and renderer now use version `2`; BRZ format stays `5`.
-`RunMetadata.renderer_version` must be `2` when invoking the renderer directly.
+must accept version 3 rather than interpreting it as an earlier contract. The reviewed
+TheBrain module/profile and renderer now use version `3`; BRZ format stays `5`.
+`RunMetadata.renderer_version` must be `3` when invoking the renderer directly.
 The alternate Folio adapter retains the earlier empty optional facts and also
 exercises independently authored opaque category assignments, owned icons,
 calendar triplets and explicit video facts. Its source format stays `folio/1`;
 it imports only contracts and does not decode TheBrain fields.
 
-The package and default workflow identify the converter as `0.2.0`. Migration
-result/record schemas remain version 2, and the separately versioned convention
+The package and default workflow identify the converter as `0.3.0`. Migration
+result/record schemas remain version 3, and the separately versioned convention
 checker remains `brz2obsidian.vault-check` version 1. This release version does
-not imply native acceptance. The complete three-archive audit has passed;
-actual-output native review, final review and the user verdict are tracked in the
-[delivery gate](../.scratch/brz-to-obsidian-v2-implementation/issues/11-native-v2-acceptance-delivery.md).
+not imply native acceptance. The accepted v2 audit remains historical evidence. Version-3 original-archive,
+native and user acceptance remain tracked in the
+[current implementation frontier](../.scratch/management-leadership-implementation/README.md).
 
 Counts add `source_definitions`, `classification_assignments`, `typed_members`,
 `planned_category_notes` / `actual_category_notes` and
@@ -266,7 +269,7 @@ are generated support rather than imported note counts.
 The renderer enables only required native plugins, including Bases/Templates,
 configures `Templates` with ISO date insertion and canonical property types,
 and preserves Home/bookmark/link settings. `obsidian_configuration` retains the
-existing application configuration shape in migration-record schema 2.
+existing application configuration shape in migration-record schema 3.
 `obsidian_core_plugins_configuration`, `obsidian_templates_configuration` and
 `obsidian_property_types_configuration` explicitly retain the other generated
 configuration dictionaries. Their actual files remain hash/length-manifested.
@@ -279,21 +282,47 @@ memberships are edited directly because full native templates can overwrite
 shared scalar fields. `Vault guide.md` documents manual update dates, duplicate
 lookup, meaningful entity links, source/new identity and reference adaptations.
 
-Every exported JSON record/field remains in original evidence independently
-of normalized facts. Consumers needing exact numeric comparisons should use
+Provably included JSON records and safe fields remain in original evidence
+independently of normalized facts. Forgotten subjects, associated references
+and unscopable history collections are omitted. Safe retained values preserve
+exact numbers and omission/null distinctions. Consumers needing exact numeric comparisons should use
 an exact decimal JSON representation. Reproducibility compares logical decisions
 and content while handling explicit run metadata, original evidence order and
 reordered-source fingerprints separately. See [current v2 independent preservation](../.scratch/brz-to-obsidian-v2-implementation/research/colour-property-refinement.md).
 
 | Versioned component | Current value |
 | --- | --- |
-| Package / converter | `0.2.0` |
-| Migration result / record schema | `2` |
-| Snapshot / source policy contract | `2` |
-| Reviewed TheBrain module / profile | `2` |
-| Obsidian renderer | `2` |
+| Package / converter | `0.3.0` |
+| Migration result / record schema | `3` |
+| Snapshot / source policy contract | `3` |
+| Reviewed TheBrain module / profile | `3` |
+| Obsidian renderer | `3` |
 | BRZ exchange format | `5` |
 | Independent vault-check schema | `1` |
 
 These versions describe different interfaces. A package release is not an
 Obsidian application version or a change in the supplied archives' format.
+
+## Included scope and reserved version-3 facts
+
+The source adapter validates global container safety, identities, ownership,
+local paths and valid ForgottenDateTime markers before selecting included
+records. Only included items and incident-safe relationships/assignments reach
+planning. Excluded providers contribute no membership or inherited appearance;
+a forgotten Home refuses rather than selecting a replacement. Names and
+selection use the included graph. No exclusion ledger or individual excluded
+count is serialized. Safe source fingerprints and collection identity remain.
+
+Snapshot `source_gaps` holds `SourceGap(owner, asset_id, role, rule_id, evidence)`;
+roles distinguish ordinary notes, definition notes and definition icons.
+`generated_presentations` holds `GeneratedPresentation(owner, source_gap_asset_id,
+kind, image_asset_ids, ordering)`, separate from Documents and ReferenceSpans.
+Plans and inspections reserve `SourceGapDiagnostic` (owner target/existence,
+outcome, provider and affected members, selected images) and
+`GeneratedPresentationTarget` (note path and ordered image paths). The migration
+record serializes the same two planned collections. Their initial facts are empty;
+state-3 note/icon absences and category hierarchy remain refused until their
+approved behavior slices implement them. Counts reserve source_gaps,
+generated_presentations, planned_generated_embeds and actual_generated_embeds;
+actual counts stay unknown during inspection. These optional closed shapes do
+not assign BRZ numeric meanings to the generic core.

@@ -4,9 +4,9 @@ from .findings import ABSENT_TXT_RULE, ICON_LENGTH_RULE, ZERO_LENGTH_ABSENT_TXT_
 
 BRZ_POLICY = SourcePolicy(
     profile_id="thebrain-format5-reviewed",
-    profile_version="2",
+    profile_version="3",
     module_id="thebrain-brz",
-    module_version="2",
+    module_version="3",
     format_version="5",
     finding_dispositions=(
         FindingDisposition(
