@@ -35,25 +35,19 @@ and [workspace housekeeping](../../docs/workspace.md).
 
 ## Working the frontier
 
-Tickets **02: Display owned images when an ordinary thought note is absent** and
-**04: Preserve ordinary-to-category hierarchy in both directions** are resolved
-and integrated. **03: Keep category dashboards usable through missing type
-notes and icons** is also resolved and integrated. **05: Prove the combined
-conversion and publication guarantees** is resolved with bounded synthetic
-proof. **01: Exclude forgotten thoughts throughout inspection and conversion**
-is resolved after the narrow known-absent TXT declaration compatibility repair.
-**06: Extend the independent raw-source audit to the new conversion policy**
-is resolved after its independently verified oracle counterpart repair. Earlier
-privacy, label and audit controls remain retained evidence.
-Bounded evidence does not establish arbitrary representation coverage. **07: Audit complete
-preservation across all four original archives** remains claimed with all criteria
-unchecked. Its first matrix passed nine A/B/C outputs but D refused before
-publication. Both narrow source/global-scope and independent oracle compatibility
-repairs for included known-absent Type-15 TXT declarations are integrated;
-ticket 07 is eligible and remains claimed by the original-matrix implementer
-for a fresh complete matrix.
-Native actual-output and delivery
-tickets remain blocked; a fresh complete twelve-output matrix is required.
+Tickets **01**, **03**, **04**, **05** and **06** are resolved and integrated.
+The narrow source and independent audit repairs for repeated known-absent TXT
+declarations retain their earlier privacy, label and audit controls. **02** is
+reopened and claimed for shared diagnostic-link formatting: the fresh matrix
+passed nine A/B/C variants and published original D, then its source-required
+audit stopped on checklist alias whitespace after reserved title characters.
+Independent diagnosis confirms the correct source owner, target, identities,
+role and outcome; the renderer must reuse the established note-link formatter.
+The oracle remains unchanged. **07** remains claimed with all criteria unchecked
+and is blocked by that responsible renderer repair and a fresh complete matrix.
+Historical failed runs remain evidence; neither completes the twelve-output gate.
+Native actual-output and delivery tickets remain blocked. Bounded synthetic
+proof does not establish full-original or arbitrary representation coverage.
 Type gaps consume the shared source-gap capability
 from ordinary fallback. Combined safety and independent audit tooling can then
 progress independently. Complete four-original proof precedes native actual-output

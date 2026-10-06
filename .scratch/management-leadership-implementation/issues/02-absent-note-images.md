@@ -1,7 +1,7 @@
 # 02: Display owned images when an ordinary thought note is absent
 
-Status: resolved
-Assignee: /root/image_fallback_implementer
+Status: claimed
+Assignee: /root/txt_oracle_implementer
 Approved: 2026-10-06
 Specification: [Accepted conversion specification](../spec.md)
 
@@ -17,7 +17,7 @@ Specification: [Accepted conversion specification](../spec.md)
 - [x] Place the brief layout-A notice before the images, without an extra Available note images heading. Say note text is absent and unknown prose/captions/layout were not recovered; link to detailed Migration report evidence. Do not reconstruct an authored table/order.
 - [x] Present recognized Markdown always wins, including blank/zero/BOM/prose/caption/table/image-only/multiple-image content and canonical NoteType-0 cases. Compare independently authored expected bodies including Unicode, code literals, nested reference syntax and mixed CR/LF/CRLF. Preserve exact safe originals and all supplied syntax/newlines except accepted destination adaptation/scope removals. No appearance/content/length heuristic activates fallback or fixes source syntax.
 - [x] Populate the established version-3 contract with source-neutral source-gap/generated-presentation facts that consistently join the included owner, reviewed finding, absent asset and actual images through inspection, analysis, planning, rendering and record. Deliver the common verified absence-policy/diagnostic/accounting capability reused by the subsequent type-gap slice. Reject inconsistent joins. There is no fabricated Document, absent-byte hash, original payload/backup or authored-reference credit. Plan/count generated embeds separately, bound to input fingerprint, scoped digest and policy.
-- [x] Inspect exposes measured included-source facts and planned obligations without published-output counts or receipts. Completed conversion has matching structured entries, note notices and an optional repair checklist: fingerprint/collection, included thought title/ID/resolving vault target, attachment ID/role/expected owned path/raw state/declared length/physical absence/outcome, and actual ordered image IDs/paths. Use only verified source locators; no guessed launch URI, localhost address or confirmed-producer-bug claim. Conversion needs no source UI/network retrieval.
+- [ ] Inspect exposes measured included-source facts and planned obligations without published-output counts or receipts. Completed conversion has matching structured entries, note notices and an optional repair checklist: fingerprint/collection, included thought title/ID/resolving vault target, attachment ID/role/expected owned path/raw state/declared length/physical absence/outcome, and actual ordered image IDs/paths. Use only verified source locators; no guessed launch URI, localhost address or confirmed-producer-bug claim. Conversion needs no source UI/network retrieval.
 - [x] Independently failing near-miss fixtures cover every absence/basis predicate: role, NoteType, SourceType, flags, canonical path, nonnegative length, identity, ownership, unique candidate/path, CRC, declared length/hash and usable image content/dimensions. Also refuse unknown state, state-3/present bytes, state-1/absent bytes, ambiguous notes/images, unsupported absence roles, wrong-owner/unavailable/invalid image basis and ordinary absence without valid images. Keep prior narrow TXT/PDF/icon exceptions. Refused conversions preserve caller files and do not leak excluded information.
 - [x] End-to-end synthetic one-image and multiple-image cases prove visible embeds, exact asset hashes, source immutability, truthful accounting/reporting, notice order and preserved present-body controls through public workflow and thin CLI. The separate source-free checker accepts valid local embeds and detects deleted image targets without treating its result as preservation proof.
 - [x] Update public coverage/diagnostic/schema guidance for the working slice, keep applicable public regression checks green, and record bounded proof. A synthetic success does not satisfy the complete original-input audit.
@@ -31,6 +31,20 @@ Public inspect/convert with independently authored synthetic ZIP/expected bytes,
 User Stories 1–20, 24, 40–50, 58–62, 68–70; Implementation Decisions 8–12, 17–23, 25; Testing Decisions 1–6, 9–10, 17, 20.
 
 ## Comments
+
+- 2026-10-06 (/root): Reopened the shared diagnostic rendering slice after the
+  fresh original matrix at `a622058` stopped on original D's checklist alias.
+  Nine A/B/C variants passed. D was published, but its complete source-required
+  audit failed; no D repeat/reorder or complete matrix is accepted. Independent
+  raw-source diagnosis confirms the target, identities, role and outcome match.
+  The manually built checklist alias retains extra whitespace after reserved
+  title characters are replaced, unlike the established note-link formatter.
+  Repair owner and affected-member diagnostic links through that existing
+  renderer boundary with public synthetic TDD; retain the independent oracle
+  and all source/body preservation rules. Earlier bounded image/absence proof
+  remains retained. All four originals and 562 retained-vault files pass the
+  before/after/final preservation guard. Ticket 07 stays claimed and unchecked;
+  a fresh complete matrix and native/user gates remain required.
 
 - 2026-10-06 (/root/integration_merger): Integrated exact verified head
   `a6f62b9e37bb193d231cf688e630722fa4f6d06b` from `codex/ml-v3-02` by
