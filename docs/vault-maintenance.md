@@ -135,6 +135,7 @@ PDFs remain byte-preserved and open natively; vault Search does not search their
 body text. Reviewed videos preserve exact URLs beside derived embeds and retain
 service/network/offline limits. Read `MIGRATION REPORT.md` for per-record source
 gaps and [source coverage](source-coverage.md) for strict refusal boundaries.
+
 ## Native review observations
 
 Insert a full template into the active note in Editing view. The actual-output
