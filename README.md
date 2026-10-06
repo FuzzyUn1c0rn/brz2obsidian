@@ -28,9 +28,14 @@ originals remain byte exact. Unscopable history is omitted. Counts describe
 included scope; there is no include-forgotten option or individual exclusion
 ledger. A forgotten Home refuses. The package, snapshot/policy, module/profile,
 renderer and migration result/record contracts now use version 3; BRZ stays 5
-and the read-only checker stays schema 1. New gap/presentation collections are
-reserved empty; reviewed state-3 absence features await their implementation
-slices. Follow the [current frontier](.scratch/management-leadership-implementation/README.md).
+and the read-only checker stays schema 1. A narrowly reviewed state-3 absent ordinary Notes.md can now display all usable
+same-owner note images in stable asset-identity order. The notice states that
+unknown prose, captions and layout were not recovered; the Migration report
+provides evidence and optional repair steps. Physically present recognized
+Markdown always keeps its normal exact preservation path, including blank notes.
+Source-gap and generated-presentation collections record the obligations;
+generated embeds are counted separately from authored references. Type-owned
+state-3 absences await their implementation slice. Follow the [current frontier](.scratch/management-leadership-implementation/README.md).
 
 ## Development environment
 

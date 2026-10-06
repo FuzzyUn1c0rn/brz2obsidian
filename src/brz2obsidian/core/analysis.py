@@ -12,6 +12,7 @@ from brz2obsidian.contracts import (
 from .appearance import validate_appearance
 from .classifications import validate_classifications
 from .references import validate_references
+from .source_gaps import validate_source_gaps
 
 
 def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
@@ -28,11 +29,6 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
         )
 
     identity = snapshot.identity
-    if snapshot.source_gaps or snapshot.generated_presentations:
-        refuse(
-            "unsupported_feature",
-            "Source-gap presentation is not supported by this implementation slice",
-        )
     if snapshot.contract_version != 3 or policy.contract_version != 3:
         refuse(
             "unsupported_format",
@@ -208,9 +204,10 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
         refuse(
             "missing_required_payload", "Absent asset lacks a reviewed source finding"
         )
+    validate_source_gaps(snapshot, policy, refuse)
     counts = Counts(
-        source_gaps=0,
-        generated_presentations=0,
+        source_gaps=len(snapshot.source_gaps),
+        generated_presentations=len(snapshot.generated_presentations),
         source_items=len(items),
         source_relationships=len(snapshot.relationships),
         source_references=sum(len(d.references) for d in snapshot.documents),

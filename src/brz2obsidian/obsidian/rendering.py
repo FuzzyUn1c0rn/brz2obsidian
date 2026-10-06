@@ -14,12 +14,17 @@ from brz2obsidian.contracts import (
     RenderedVault,
     RunMetadata,
 )
+from brz2obsidian.core import analyze
 from brz2obsidian.core.appearance import icon_snapshots as expected_icon_snapshots
+from brz2obsidian.core.items import assign_item_targets
 from brz2obsidian.core.references import validate_references
+from brz2obsidian.core.resources import assign_asset_targets, resource_owners
+from brz2obsidian.core.source_gaps import source_gap_targets
 
 from .bases import CATEGORY_VIEWS, HOME_CATEGORIES, support_files
 from .categories import classification_records
 from .documents import render_document
+from .gaps import gap_report
 from .markdown import append_boundary
 from .properties import property_frontmatter
 from .relationships import relationship_sections, uncreated_listing
@@ -81,6 +86,56 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
                 ),
             )
         )
+    checked_analysis = analyze(snapshot, plan.analysis.policy)
+    expected_targets = assign_item_targets(checked_analysis, resource_owners(snapshot))
+    gap_owners = {g.owner for g in snapshot.source_gaps}
+    expected_gaps, expected_presentations = source_gap_targets(
+        snapshot, expected_targets, assign_asset_targets(snapshot)
+    )
+    if (
+        bool(snapshot.generated_presentations)
+        and plan.asset_targets != assign_asset_targets(snapshot)
+        or {
+            (t.item_key, t.relative_path, t.created)
+            for t in plan.item_targets
+            if t.item_key in gap_owners
+        }
+        != {
+            (t.item_key, t.relative_path, t.created)
+            for t in expected_targets
+            if t.item_key in gap_owners
+        }
+        or bool(gap_owners)
+        and plan.issues != checked_analysis.issues
+        or plan.source_gaps != expected_gaps
+        or plan.generated_presentations != expected_presentations
+        or any(
+            not next(
+                t.created
+                for t in plan.item_targets
+                if t.item_key == p.presentation.owner
+            )
+            for p in expected_presentations
+        )
+        or plan.counts.source_gaps != checked_analysis.counts.source_gaps
+        or plan.counts.generated_presentations
+        != checked_analysis.counts.generated_presentations
+        or plan.counts.planned_generated_embeds
+        != sum(len(p.image_paths) for p in expected_presentations)
+        or plan.profile_id != plan.analysis.policy.profile_id
+        or plan.profile_version != plan.analysis.policy.profile_version
+    ):
+        raise MigrationRefused(
+            (
+                Issue(
+                    code="invalid_reference",
+                    phase="rendering",
+                    message="Source-gap plan differs from verified obligations",
+                    guidance="Analyze and plan this snapshot again.",
+                ),
+            )
+        )
+    presentations = {p.presentation.owner: p for p in plan.generated_presentations}
     documents = {document.key: document for document in snapshot.documents}
     icon_snapshots = {s.item_key: s for s in plan.icon_snapshots}
     asset_paths = {t.asset_id: t.relative_path for t in plan.asset_targets}
@@ -114,7 +169,9 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     files = []
     counts = plan.counts.model_copy(
         update={
-            "actual_generated_embeds": 0,
+            "actual_generated_embeds": sum(
+                len(p.image_paths) for p in plan.generated_presentations
+            ),
             "actual_references": sum(
                 len(documents[key].references)
                 for target in plan.item_targets
@@ -139,6 +196,9 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         item = items[target.item_key]
         heading = re.sub(r"([\\`*_{}\[\]<>#])", r"\\\1", item.title)
         text = property_frontmatter(plan, item) + "# " + heading + "\n\n"
+        presentation = presentations.get(item.key)
+        if presentation:
+            text += "> Source note text is absent. Unknown prose, captions and layout were not recovered. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
         icon = icon_snapshots[item.key].effective_icon_asset_id
         if item.role == "definition":
             text += CATEGORY_VIEWS + "\n"
@@ -151,6 +211,11 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
             if index:
                 text += "\n\n"
             text += render_document(documents[key], target.relative_path, plan)
+        if presentation:
+            text += (
+                "\n\n".join("![[" + path + "]]" for path in presentation.image_paths)
+                + "\n\n"
+            )
         resources = resource_section(plan, item.key)
         relationships = relationship_sections(plan, item.key)
         if resources or relationships:
@@ -263,6 +328,7 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         report += "\nPDF files are preserved and can be opened in Obsidian. Vault Search does not search PDF body text; this conversion does not extract or index it, or reproduce TheBrain's PDF body search.\n"
     if any(a.video_presentation for a in snapshot.assets):
         report += "\nVideo playback depends on the remote service and network. Offline playback and service availability are not guaranteed. The original resource links remain available; no remote video bytes were archived or downloaded by this conversion.\n"
+    report += gap_report(plan)
     if plan.issues:
         report += "\n## Source warnings\n\n"
         for issue in plan.issues:

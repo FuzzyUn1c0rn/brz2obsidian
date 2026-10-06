@@ -1,6 +1,11 @@
 from brz2obsidian.contracts import FindingDisposition, SourcePolicy
 
-from .findings import ABSENT_TXT_RULE, ICON_LENGTH_RULE, ZERO_LENGTH_ABSENT_TXT_RULE
+from .findings import (
+    ABSENT_NOTE_IMAGES_RULE,
+    ABSENT_TXT_RULE,
+    ICON_LENGTH_RULE,
+    ZERO_LENGTH_ABSENT_TXT_RULE,
+)
 
 BRZ_POLICY = SourcePolicy(
     profile_id="thebrain-format5-reviewed",
@@ -9,6 +14,15 @@ BRZ_POLICY = SourcePolicy(
     module_version="3",
     format_version="5",
     finding_dispositions=(
+        FindingDisposition(
+            rule_id=ABSENT_NOTE_IMAGES_RULE,
+            kind="known_absent_payload",
+            disposition="warning",
+            issue_code="approved_source_gap",
+            permits_absent_payload=True,
+            message="Source note text is absent; owned note images are displayed without reconstructing prose, captions or layout.",
+            guidance="Review the Migration report evidence and optional source repair checklist.",
+        ),
         FindingDisposition(
             rule_id=ABSENT_TXT_RULE,
             kind="known_absent_payload",

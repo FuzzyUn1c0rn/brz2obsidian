@@ -67,6 +67,12 @@ def assign_asset_targets(snapshot):
         if reference.kind == "image"
     }
 
+    inline_images.update(
+        (p.owner, key)
+        for p in snapshot.generated_presentations
+        for key in p.image_asset_ids
+    )
+
     def filename(asset):
         base = bases[asset.asset_id]
         extension = PurePosixPath(base).suffix

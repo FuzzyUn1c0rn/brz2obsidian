@@ -59,6 +59,14 @@ def main(argv=None):
             print(
                 f"Local references: {result.counts.source_references}; planned conversions: {result.counts.planned_references}"
             )
+            if result.counts.planned_generated_embeds:
+                print(
+                    f"Planned generated image embeds: {result.counts.planned_generated_embeds}"
+                )
+            if result.counts.actual_generated_embeds:
+                print(
+                    f"Generated image embeds: {result.counts.actual_generated_embeds}"
+                )
             if result.counts.actual_references is not None:
                 print(f"Converted local references: {result.counts.actual_references}")
         if result.receipt:

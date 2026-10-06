@@ -162,6 +162,7 @@ numeric BRZ recognition predicates.
 
 | Issue code / rule ID | Required conditions and result |
 | --- | --- |
+| `approved_source_gap` / `thebrain-format5/absent-ordinary-note-images/v1` | Unique included ordinary-owner Type 1/NoteType 4 canonical Notes.md, SourceType 2, raw state 3, absent physical owner/Notes.md bytes, nonnegative declared length, with a complete usable same-owner Type 12/NoteType 0 state-1 image basis. Keep the absent declaration without actual length/hash, Document, original backup or authored-reference credit. Display all images beneath a source-gap notice, with canonical asset-identity ordering and original copied bytes. |
 | `approved_source_gap` / `thebrain-format5/absent-txt/v1` | Thought-owned Type 15, NoteType 0, `.txt` Location, positive declared length, state 2, absent owner/Location bytes, with intact archived PDF under the same owner. Retain metadata/evidence; brief filename notice only on an existing owner note. No fake file/link or note solely for this gap. |
 | `approved_source_gap` / `thebrain-format5/zero-length-absent-txt/v1` | Thought-owned Type 15, NoteType 0, safe `.txt` Location, declared length exactly zero, state 2, absent owner/Location bytes. The filename stem must equal one same-owner PDF attachment identity with ordinary Type 1/NoteType 0, state 1, present CRC-valid bytes and matching declared/actual length. Retain each declaration, exact PDF association and integrity evidence individually; apply the same existing-owner notice and no-fabrication rules. |
 | `approved_metadata_discrepancy` / `thebrain-format5/icon-length/v1` | Verified icon role, present CRC-valid payload, declared length different from actual length. Copy actual bytes and retain both lengths; report discrepancy. |
@@ -186,3 +187,37 @@ Name sanitation, simple graph presentation and intentional uncreated targets
 are adaptations rather than extra warnings. See [complete independent
 preservation results after the presentation refinement](../.scratch/brz-to-obsidian-v2-implementation/research/colour-property-refinement.md)
 and the [source-feature-to-vault comparison](../.scratch/brz-to-obsidian-v2-implementation/source-feature-mapping.md).
+
+## Reviewed absent-note image display (version 3)
+
+The generated fallback validates each owned note image fully. PNG, JPEG, WebP,
+GIF, BMP and AVIF content must match the supported filename kind, have positive
+dimensions, pass file verification and decode every frame. Unsupported kinds,
+corrupt or truncated content, missing required images and state/member
+contradictions refuse. This additional decoding is confined to an accepted
+absent-note candidate; present-body resource preservation is unchanged.
+
+The runtime uses Pillow 12.3.0, pinned in requirements.txt and constrained to
+12.3.x or a compatible 12.x release in pyproject.toml. Pillow documents that
+[Image.open is lazy and load reads pixel data](https://pillow.readthedocs.io/en/stable/reference/Image.html),
+while [supported file formats have format-specific behavior](https://pillow.readthedocs.io/en/stable/handbook/image-file-formats.html).
+The decoder verifies the stream, reopens it, and loads every frame. It does not
+recompress, repair or replace the archived payload.
+
+Inspection and migration record version 3 expose joined source_gaps and
+generated_presentations with the included owner, absent asset, reviewed finding,
+ordered image identities and assigned image paths. source_gaps and
+generated_presentations count source facts; planned_generated_embeds and
+actual_generated_embeds count generated display separately from source/authored
+references. Inspection leaves actual counts and receipt unknown. An absent note
+gets no measured-byte or authored-reference preservation credit.
+
+Each fallback notice links to the Migration report. Its optional repair checklist
+records the fingerprint/scoped digest and collection, thought title/ID and
+resolving owner-note link, attachment role/owned path/state/declared length and
+physical absence, outcome and ordered real image identities/paths. Existing TXT
+findings keep their distinct rules and no-note behavior; their checklist labels
+an assigned uncreated target explicitly rather than making a resolving-link
+claim. Titles and IDs provide source lookup; no native launch locator is inferred.
+A clean source-free checker confirms current references, not missing prose
+recovery or the later original-archive preservation/native acceptance gates.

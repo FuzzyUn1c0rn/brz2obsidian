@@ -401,6 +401,8 @@ class BrzSession:
             payload_evidence,
             payload_accounting,
             findings,
+            gaps,
+            presentations,
         ) = normalize_attachments(
             self.archive,
             records["attachments.json"],
@@ -469,6 +471,8 @@ class BrzSession:
             assets=tuple(assets),
             original_evidence=tuple(evidence),
             findings=tuple(findings),
+            source_gaps=tuple(gaps),
+            generated_presentations=tuple(presentations),
             accounting=SourceAccounting(entries=tuple(accounting)),
         )
 
