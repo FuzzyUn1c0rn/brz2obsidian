@@ -29,6 +29,31 @@ User Stories 27–31, 49–50, 56–57, 60–62, 69–70; Implementation Decisio
 
 ## Comments
 
+- 2026-10-06 (/root/integration_merger): Integrated exact verified branch head
+  `f42a900563be235aae85da8a047b7ae9a384948e` from `codex/ml-v3-04` using
+  `git merge --ff-only f42a900563be235aae85da8a047b7ae9a384948e` on the clean
+  root integration branch at `a29e8a088d7d288e663dd633a2bd0ca939864a87`.
+  Independent report `tmp/ml-implementation/04/verification.md` records PASS
+  for bounded static review, ten handwritten raw-ZIP public control groups and
+  63 focused tests in 6.58s at that exact clean head. It covers reciprocal
+  full scoped graph, hierarchy/classification separation, category ordering,
+  source/caller privacy, exact authored bodies/assets, repeat/reorder behavior,
+  unsupported signature refusal and read-only checker inventory preservation.
+
+  Root merged command:
+  `.venv/Scripts/python.exe -m pytest -q tests/application/test_category_hierarchy_workflow.py tests/application/test_categories_workflow.py tests/application/test_dashboards_workflow.py tests/application/test_graph_modules.py tests/application/test_graph_workflow.py tests/application/test_alternate_source.py tests/application/test_alternate_v2_source.py --basetemp=tmp/ml-implementation/merger/pytest-04-f42a900 -o cache_dir=tmp/ml-implementation/merger/pytest-cache-04-f42a900`
+  passed **113 tests in 13.34s**, exit 0. Runtime imports resolve to the root
+  checkout. `git diff --check a29e8a088d7d288e663dd633a2bd0ca939864a87..f42a900563be235aae85da8a047b7ae9a384948e`
+  passed, exit 0. Worker complete suite **828 passed in 148.34s**, Ruff and pip
+  results remain attributed worker evidence; identical fast-forwarded code did
+  not need a redundant full run. Copied worker evidence remains ignored under
+  `tmp/ml-implementation/04/worker-evidence-f42a900/`.
+
+  This resolves only the bounded hierarchy slice. Ticket 02 remains claimed;
+  source-gap/type behavior, complete scoped independent four-original audits,
+  actual native rendering, user verdict, cumulative final review and release
+  remain separate pending gates. No other ticket claim or PR was made here.
+
 - 2026-10-06 (/root/hierarchy_implementer): Resolved the bounded hierarchy slice
   in implementation commit `0e1119ca2d90965288f521cc0846de92c3349558`, based on
   integrated ticket 01 at `a29e8a088d7d288e663dd633a2bd0ca939864a87`. Merged
