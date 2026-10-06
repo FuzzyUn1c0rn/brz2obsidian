@@ -35,12 +35,18 @@ and [workspace housekeeping](../../docs/workspace.md).
 
 ## Working the frontier
 
-**Current frontier: ticket 09 styling repair.** The user rejected final review
-copy u4 because approved orange warning callouts were rendered as ordinary
-blockquotes. The isolated implementer will restore native warning titles/icons
-and tinted panels and refresh invalidated proof. User acceptance/delivery/PR
-remain pending. Use strategic affected native samples; retain equivalent prior
-observations. The following technical milestone describes pre-styling runtime.
+**Current frontier: ticket 09 warning-style repair verification.** The user
+rejected final review copy u4 because approved orange warning callouts were
+rendered as ordinary blockquotes. Independently verified repair
+`b54e4994cb24fbfbc66e72434a8cbfe59ab0f8fd` is integrated: four titled native
+warning callouts remain separate; category hierarchy precedes notices, then
+Members/Gallery. Supplied bodies/assets and accounting remain unchanged in
+bounded public proof. Actual native orange heading, warning icon and tinted
+panel pixels still require strategic affected observations on fresh output.
+Final review/public/package/source-native criteria are reopened; fresh complete
+gates and renewed actual user verdict/delivery/PR remain pending. Preserve u4
+as rejected-review history. Reuse equivalent prior observations only after
+independent output-delta proof. The following milestone is pre-styling history.
 
 Tickets **01–08** are resolved and integrated. Complete original-input
 preservation passed the fresh m5 twelve-output matrix and separate independent
@@ -50,7 +56,7 @@ diagnostic-link repairs precede m5. Actual-output native review passed strategic
 samples in observed Obsidian 1.14.4, with independent source/CSV/ledger/checker
 evidence and retained complete automated preservation. **09: Deliver the reviewed
 release after actual-vault user acceptance** remains claimed by
-`/root/release_documenter`. All five technical criteria are now checked: separate
+`/root/release_documenter`. At that pre-styling milestone, five technical criteria were checked: separate
 review/repair verification, fresh complete public regression, rebuilt package and
 executed examples, public guidance, and complete source/native retention. At
 frozen repaired runtime `b4a3743ff98656934b6e7075ceaae4caf824405a`, 1,513 tests,
@@ -99,6 +105,23 @@ integrated. The user requested a pull request when everything is complete; creat
 it after implementation and required acceptance, then attach it to this chat.
 
 ## Comments
+
+- 2026-10-06 (/root/native_vault_reviewer, separate merger): Fast-forwarded
+  independently verified styling candidate
+  `b54e4994cb24fbfbc66e72434a8cbfe59ab0f8fd` from clean root
+  `82033efbac2631e31871e2fe7ba4813b170ba09b`, after confirming exact clean
+  worker/root, ancestry exit 0 and diff check. Eight files only: bounded renderer
+  notice/layout changes, workflow/oracle regressions and truthful release metadata;
+  no source-policy/core/contracts changes. Independent root
+  `tmp/ml-implementation/09/notice-style/independent/verify-notices.log` reports
+  PASS: handwritten actual ZIP proves all four titles/separate boxes, hierarchy
+  before notices before Bases, notice-before-content placement and exact supplied
+  Markdown/assets/source/counts/links; nine consistent-receipt corruptions are
+  rejected and production-import barrier passes. This is syntax/conservation
+  proof, not native pixel or actual user acceptance. Ticket 09 stays claimed;
+  invalidated final gates and actual native style/user verdict remain pending.
+  No UI, full suite, matrix, package or environment action by this merger; u4
+  remains rejected-review history.
 
 - 2026-10-06 (/root/native_vault_reviewer, separate merger): Integrated
   technical-only candidate `7ff1c734eb9a51de06372f229f354dabf6abaa75` by
