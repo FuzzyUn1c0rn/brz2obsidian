@@ -35,9 +35,11 @@ and [workspace housekeeping](../../docs/workspace.md).
 
 ## Working the frontier
 
-Initially only **Exclude forgotten thoughts throughout inspection and conversion**
-is unblocked. Once it resolves, ordinary image fallback and category hierarchy
-can progress independently. Type gaps consume the shared source-gap capability
+Ticket **01: Exclude forgotten thoughts throughout inspection and conversion**
+is resolved and integrated. The unclaimed frontier is **02: Display owned images
+when an ordinary thought note is absent** and **04: Preserve ordinary-to-category
+hierarchy in both directions**, which can progress independently.
+Type gaps consume the shared source-gap capability
 from ordinary fallback. Combined safety and independent audit tooling can then
 progress independently. Complete four-original proof precedes native actual-output
 review, final release verification and the actual-vault user verdict.
@@ -72,6 +74,18 @@ integrated. The user requested a pull request when everything is complete; creat
 it after implementation and required acceptance, then attach it to this chat.
 
 ## Comments
+
+- 2026-10-06 (/root/integration_merger): Integrated ticket 01 by
+  `git merge --ff-only 5fbb5ccf3d4c3cfb02779c25c876ddfa3bb179c3` from clean
+  integration baseline `929f2a8735e99b66ee25f45d159b8b3f1d9c0916`.
+  Independent bounded behavioral and static repair verification both PASS at
+  that exact head; prior failures and replay evidence remain retained under
+  ignored `tmp/ml-implementation/01/`. Merged focused forgotten workflow,
+  both alternate-source workflows and architecture tests pass: **63 tests in
+  10.67s** through the root project environment, with clean diff check.
+  See ticket 01 for exact commands and attributed full-suite/package evidence.
+  Tickets 02 and 04 are now eligible but remain unclaimed. No full-original,
+  native, actual-user acceptance, final review or release gate is completed.
 
 - 2026-10-06 (/root): Before production edits, the integration baseline passes
   all 781 public tests in 125.04 seconds, Ruff check/format on 115 files and pip

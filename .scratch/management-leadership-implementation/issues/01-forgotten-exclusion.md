@@ -133,3 +133,33 @@ User Stories 15–16, 32–39, 49–50, 56–57, 60–62, 69–70; Implementatio
   `repair-replay.txt`, `repair-packaged-smoke.txt`. No new source semantics,
   original-archive/native/user acceptance or other-ticket completion is claimed.
   Independent re-verification and integration remain coordinator-owned.
+
+- 2026-10-06 (/root/integration_merger): Resolved integration gate after
+  coordinator authorization bound to exact repaired commit
+  `5fbb5ccf3d4c3cfb02779c25c876ddfa3bb179c3` on `codex/ml-v3-01`.
+  Both independent bounded verdicts PASS: behavioral report
+  `tmp/ml-implementation/01/behavioral-verification-repair.md` records all six
+  replay/control groups, unchanged source/caller inventories and 43 focused
+  tests in 5.92s; static report
+  `tmp/ml-implementation/01/static-verification-repair.md` clears R1-R3 and
+  confirms the required-metadata private refusal boundary. The unavailable
+  role-specific custom guard protocol is not claimed as executed; the invoked
+  implement-spec workflow is supported by these concrete exact-head checks.
+
+  From the clean root integration checkout at
+  `929f2a8735e99b66ee25f45d159b8b3f1d9c0916`, executed
+  `git merge --ff-only 5fbb5ccf3d4c3cfb02779c25c876ddfa3bb179c3` successfully.
+  Merged verification command:
+  `.venv/Scripts/python.exe -m pytest -q tests/application/test_forgotten_workflow.py tests/application/test_alternate_source.py tests/application/test_alternate_v2_source.py tests/test_architecture.py --basetemp=tmp/ml-implementation/merger/pytest-01-5fbb5cc -o cache_dir=tmp/ml-implementation/merger/pytest-cache-01-5fbb5cc`
+  passed **63 tests in 10.67s**, exit 0. Runtime imports resolve to the root
+  checkout. `git diff --check 929f2a8735e99b66ee25f45d159b8b3f1d9c0916..5fbb5ccf3d4c3cfb02779c25c876ddfa3bb179c3`
+  is clean. The 808-test complete suite (111.45s), Ruff/pip and repaired wheel
+  evidence above remain attributed to the implementer; the identical
+  fast-forwarded code does not require redundant full-suite execution here.
+  Copied worker evidence is retained under
+  `tmp/ml-implementation/01/worker-evidence-5fbb5cc/` before later archival.
+
+  Scope remains this synthetic, versioned public-workflow slice. Future absence,
+  hierarchy, publication/full-original preservation, native/user acceptance,
+  final cumulative review and release gates remain pending. Ticket 02 and 04
+  are eligible; their claims remain coordinator-owned.
