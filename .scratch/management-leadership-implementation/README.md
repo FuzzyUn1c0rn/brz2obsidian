@@ -41,12 +41,12 @@ and integrated. **03: Keep category dashboards usable through missing type
 notes and icons** is also resolved and integrated. **05: Prove the combined
 conversion and publication guarantees** is resolved with bounded synthetic
 proof. **06: Extend the independent raw-source audit to the new conversion
-policy** remains claimed in its isolated implementer worktree. **01: Exclude
+policy** is resolved and integrated. **01: Exclude
 forgotten thoughts throughout inspection and conversion** is resolved again
 after independently verified residual privacy guard and included-label repairs;
 entities and escaped punctuation survive reference adaptation. Bounded evidence
-does not establish arbitrary representation coverage. Ticket 07 remains blocked
-by ticket 06 and is not eligible.
+does not establish arbitrary representation coverage. **07: Audit complete
+preservation across all four original archives** is now eligible and unclaimed.
 Type gaps consume the shared source-gap capability
 from ordinary fallback. Combined safety and independent audit tooling can then
 progress independently. Complete four-original proof precedes native actual-output
@@ -82,6 +82,17 @@ integrated. The user requested a pull request when everything is complete; creat
 it after implementation and required acceptance, then attach it to this chat.
 
 ## Comments
+
+- 2026-10-06 (/root/integration_merger): Integrated repaired ticket 06 with
+  `git merge --ff-only e2d95ebc07187d53d5767879cff028f916032b13` from clean
+  root `f23a8bee142457cf64a3bba1fd5ce84293bd9dca`; clean exact worker head
+  and ancestry confirmed. Independent bounded PASS covers 24 handwritten
+  replays, five bracket-label groups and 243 maintained tests in 112.70s.
+  Historical `f70b023` FAIL evidence remains retained. Root driver/import-boundary
+  and architecture checks pass: **13 tests in 30.77s**; diff check is clean.
+  Ticket 06 records exact commands and attributed worker full-suite evidence.
+  Ticket 07 is eligible and unclaimed; no private-original matrix, native/user
+  observation or final release gate is completed by tooling integration.
 
 - 2026-10-06 (/root/integration_merger): Integrated verified label repair by
   `git merge --ff-only 4332f61eee8e9bb4b0386bf969d38189b2194c65` from clean

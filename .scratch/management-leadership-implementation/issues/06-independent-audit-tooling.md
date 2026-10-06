@@ -30,6 +30,38 @@ User Stories 16–20, 32–39, 41–49, 54–65, 68–70; Implementation Decisio
 
 ## Comments
 
+- 2026-10-06 (/root/integration_merger): Integrated verified repaired candidate
+  `e2d95ebc07187d53d5767879cff028f916032b13` from `codex/ml-v3-06` by
+  `git merge --ff-only e2d95ebc07187d53d5767879cff028f916032b13` on clean
+  root `f23a8bee142457cf64a3bba1fd5ce84293bd9dca`. Exact clean worker and
+  root status were checked; ancestry check exited 0. Ticket is resolved after
+  independent repair verification; the historical `f70b023` FAIL and its
+  untouched source/vault/probe evidence remain separate retained history.
+
+  Independent `tmp/ml-implementation/06/verification-repair.md` records bounded
+  PASS: **24 handwritten replay groups**, **five bracket-label groups** and
+  **243 maintained tests in 112.70s**. It verifies raw-derived expectations,
+  semantic lies with forged accurate receipts/counts/hashes, richer label text
+  versus alias sanitation, independent PNG/VP8L decoding/corruption, root/payload
+  reorder integrity, original/final fingerprint drift, mandatory fourth input
+  and a complete twelve-output synthetic driver exercise. No runtime production
+  changes are introduced by this tooling slice.
+
+  Merged root command:
+  `.venv/Scripts/python.exe -m pytest -q tests/local_acceptance/test_driver.py tests/test_architecture.py --basetemp=tmp/m6merge -o cache_dir=tmp/ml-implementation/merger/c06`
+  passed **13 tests in 30.77s**, exit 0, including the stdlib/local-only oracle
+  import boundary. Runtime import resolves to root src.
+  `git diff --check f23a8bee142457cf64a3bba1fd5ce84293bd9dca..e2d95ebc07187d53d5767879cff028f916032b13`
+  passed, exit 0. Worker complete **1249 tests in 231.49s**, Ruff on 130 files,
+  pip and 17 affected checks remain attributed worker evidence; complete suite
+  was not redundantly run. Bounded proof cannot certify every original image,
+  arbitrary encoding/Markdown, the four private originals, actual native rendering
+  or user acceptance. Native codec absence/APNG remains honest AuditUnavailable.
+
+  Ticket 07 is now eligible and remains unclaimed for coordinator ownership.
+  No original matrix, retained-vault mutation, native UI review, PR or push was
+  performed. Overall delivery and release remain pending tickets 07–09.
+
 - 2026-10-06 (/root/independent_audit_implementer): Completed the owned
   compatibility repair after claim commit `484c3d4`. Integration
   `f23a8bee142457cf64a3bba1fd5ce84293bd9dca` was already merged; merge replay
