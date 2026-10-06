@@ -1,0 +1,32 @@
+# 08: Verify actual converted vaults in native Obsidian
+
+Status: ready-for-agent
+Approved: 2026-10-06
+Specification: [Accepted conversion specification](../spec.md)
+
+**What to build:** Open fresh copies of independently audited converter outputs in standard Obsidian and verify the images, hierarchy, category discovery and maintenance behavior users will actually see. Preserve the audited baseline separately.
+
+**Blocked by:** [07 — Audit complete preservation across all four original archives](07-four-archive-preservation.md).
+
+## Acceptance criteria
+
+- [ ] Create fresh ignored review copies from actual audited outputs, retaining pristine source/output inventories and hashes. Record the observed Obsidian version and independently join raw subjects to assigned paths; prototype screenshot/path evidence is not final evidence.
+- [ ] Observe representative PNG/WEBP cards and workflow chart, actual layout-A notice order/repair links, and preserved supplied prose/blank/multiple-image/table bodies. Do not fix source syntax during review; the preserved pipe row's native appearance is recorded honestly. The complete audit, not GUI sampling, establishes all 359 bodies/63 affected images.
+- [ ] Verify reciprocal multiple-parent category navigation below the title before Members/Gallery, distinct membership, all 47 category discovery obligations and 330 included assigned members through native Base evaluation and independently derived inventories. Record neutral missing icon providers/affected-member behavior versus intact cards and valid explicit overrides.
+- [ ] Exercise established native category templates, rename-safe membership/discovery, dashboard-icon/provider updates, explicit/default/opt-out controls, dates and absence of generated colour properties on disposable copies. Relevant earlier-archive actual outputs retain their native conventions.
+- [ ] Run source-free read-only checker/library/CLI on pristine and intentionally edited copies and verify caller inventories/bytes are unchanged by checks. Do not substitute a clean checker for source preservation or native rendering proof.
+- [ ] Repair defects through the responsible public seam; rerun affected automated/independent source gates and affected native observations before reusing audit claims. Keep raw records/screenshots/UI mutations local and ignored; publish aggregate observations and limitations.
+- [ ] Prepare a clean actual Management & Leadership output review vault for the final user verdict. Agent review and the earlier layout choice do not supply that verdict, and this ticket does not declare release delivery.
+
+## Verification boundary
+
+Native standard Obsidian over fresh actual-output copies after independent full-input audit, plus independent source-to-path joins and before/after inventories. Computer use is authorized; no live TheBrain access is needed for conversion.
+
+## Specification coverage
+
+User Stories 3–4, 9–14, 21–31, 40–46, 58–59, 66, 69–70; Implementation Decisions 8, 12–18, 22, 24–25; Testing Decisions 15–18, 20.
+
+## Comments
+
+- 2026-10-06 (/root): Published after the user approved all nine tickets and their
+  dependencies, then explicitly invoked implement-spec for complete implementation.

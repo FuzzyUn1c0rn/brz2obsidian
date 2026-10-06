@@ -38,10 +38,14 @@ packages. Tested runtime support is native Windows / CPython 3.14.8. Package
 metadata requires Python >=3.14; other platforms and later runtimes have not
 been accepted. Native presentation uses Obsidian 1.13.7.
 
+See [workspace housekeeping](docs/workspace.md) for source exports, retained
+vaults, backups and disposable development files. Use ignored `tmp/<effort>/`
+for new runs, prototypes, screenshots and handoffs.
+
 Build a local wheel with the same environment when needed:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip wheel --no-deps --no-build-isolation --wheel-dir brz/delivery/wheels .
+.\.venv\Scripts\python.exe -m pip wheel --no-deps --no-build-isolation --wheel-dir tmp/build/wheels .
 ```
 
 Runtime dependencies are Pydantic, markdown-it-py and PyYAML. PyYAML serves the
@@ -58,7 +62,7 @@ package modules and distribution metadata, with no archives, vaults or tests.
 ```
 
 For a synthetic trial, use `tests/fixtures/minimal.brz` and a fresh short
-output path such as `brz/minimal-vault`. Console and module entry points behave
+output path such as `tmp/minimal-vault`. Console and module entry points behave
 alike. Inspect is optional read-only preflight: it reports planned targets and
 counts, with destination feasibility, payload copy verification and publication
 pending. Convert repeats preparation, streams copies into owned staging,
@@ -212,7 +216,8 @@ retains the complete audit before the colour-property refinement.
 The [v1 preservation](.scratch/brz-to-obsidian-v1/research/real-export-acceptance.md)
 and [v1 native report](.scratch/brz-to-obsidian-v1/research/native-acceptance.md)
 remain historical evidence.
-Keep private archives, generated vaults and UI evidence under ignored `brz/`.
+Keep original private archives and retained user vaults under ignored `brz/`.
+Put disposable conversion outputs and UI evidence under ignored `tmp/<effort>/`.
 Ordinary tests use synthetic inputs and need neither private archives nor GUI
 access. Public reports contain aggregate evidence only. The virtual environment,
 tool caches and build output are ignored.

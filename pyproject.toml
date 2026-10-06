@@ -17,10 +17,13 @@ brz2obsidian = "brz2obsidian.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--basetemp=tmp/pytest"
+cache_dir = "tmp/pytest-cache"
 
 [tool.ruff]
 target-version = "py314"
 extend-exclude = [".scratch"]
+cache-dir = "tmp/ruff-cache"
 
 [tool.setuptools.packages.find]
 where = ["src"]

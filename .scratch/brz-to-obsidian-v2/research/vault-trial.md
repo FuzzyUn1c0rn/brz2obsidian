@@ -6,8 +6,8 @@ The user accepted the prototype presentation and subsequently settled its mainte
 
 ## Review artifact
 
-- Private vault: [Home](../../../brz/v2-prototype/Software%20Engineering%20v2%20Prototype/Home.md).
-- Guided scenarios: [Review walkthrough](../../../brz/v2-prototype/Software%20Engineering%20v2%20Prototype/Review%20walkthrough.md).
+- Private vault: [Home](../../../tmp/legacy/brz/v2-prototype/Software%20Engineering%20v2%20Prototype/Home.md).
+- Guided scenarios: [Review walkthrough](../../../tmp/legacy/brz/v2-prototype/Software%20Engineering%20v2%20Prototype/Review%20walkthrough.md).
 - Private evidence: `brz/v2-prototype/evidence/`, including numbered native screenshots/accessibility observations and `integrity-receipt.json`.
 - Disposable construction script: `brz/v2-prototype/build_prototype.py`; read-only convention sketch: `brz/v2-prototype/check_prototype.py`. Sanitized source scripts are captured on the local throwaway branch recorded in the ticket. Generated source content and screenshots remain ignored.
 

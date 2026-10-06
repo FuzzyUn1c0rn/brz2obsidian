@@ -96,6 +96,10 @@ _Avoid_: Uncreated target; missing PDF when only a separate TXT payload is absen
 A live thought marked forgotten in TheBrain, distinct from a deleted object that is absent from the live export records.
 _Avoid_: Deleted thought
 
+**Excluded item**:
+A source item deliberately left outside a migration's scope. Exclusion concerns the destination collection and does not change the item's status in the source collection.
+_Avoid_: Deleted item when referring to a migration choice; uncreated target when no destination is intended
+
 **Vault**:
 A collection of notes and associated files opened by Obsidian as one knowledge workspace.
 _Avoid_: Brain when referring to the destination collection

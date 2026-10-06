@@ -9,6 +9,12 @@ Use the project virtual environment (tested native Windows / CPython 3.14.8):
 .\.venv\Scripts\python.exe -m pip check
 ```
 
+Run from the checkout root. Pytest uses reserved `tmp/pytest` for temporary test
+files and clears that directory before each run; its cache lives in
+`tmp/pytest-cache`. Ruff uses `tmp/ruff-cache`. For concurrent pytest runs in one
+checkout, select distinct paths with `--basetemp=tmp/pytest-<run>`.
+See [workspace housekeeping](workspace.md) for other temporary artifacts.
+
 In a separate worktree, use the integration checkout's full `.venv` interpreter
 path and set `$env:PYTHONPATH = Join-Path (Get-Location) 'src'` for that worktree.
 Do not redirect a shared editable installation while other worktrees are active.
@@ -96,7 +102,7 @@ $env:PYTHONPATH = Join-Path (Get-Location) 'src'
 $sourceA = 'C:\path\to\exact-A.brz'
 $sourceB = 'C:\path\to\exact-B.brz'
 $sourceC = 'C:\path\to\exact-C.brz'
-$output = 'C:\short\ignored\new-acceptance-run'
+$output = Join-Path (Get-Location) 'tmp/audit-01'
 .\.venv\Scripts\python.exe -m tests.local_acceptance.run --source-a $sourceA --source-b $sourceB --source-c $sourceC --output $output
 ```
 
@@ -122,8 +128,10 @@ produced 305 imported notes, including seven definitions and all 195 typed membe
 notes/backups, 84 references and four reviewed videos passed complete audit.
 Supporting files are excluded from thought-note counts. Logical repeated and
 reordered vault behavior is stable, with documented source-order/fingerprint
-and explicit run-metadata differences. Private archives, results, generated
-vaults and UI evidence remain ignored under `brz/`; public reports are aggregate.
+and explicit run-metadata differences. Private acceptance results, generated
+vaults and UI evidence belong under ignored `tmp/<effort>/`; original exports
+remain in `brz/`. Historical artifact paths are mapped in
+[workspace housekeeping](workspace.md); public reports are aggregate.
 
 ## Local package and documented examples
 
