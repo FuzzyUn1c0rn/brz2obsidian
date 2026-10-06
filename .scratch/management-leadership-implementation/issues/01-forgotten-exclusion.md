@@ -31,6 +31,38 @@ User Stories 15–16, 32–39, 49–50, 56–57, 60–62, 69–70; Implementatio
 
 ## Comments
 
+- 2026-10-06 (/root/integration_merger): Resolved reopened ticket 01 cumulatively
+  after integrating both independently verified residual guard and label repair.
+  Third criterion is checked: included entity/escaped punctuation display labels
+  survive while whole excluded phrases are removed and residual associations
+  refuse privately. Historical partial-guard/open-defect notes below retain the
+  sequence of evidence; the label defect is now repaired.
+
+  Clean root `dd286452c6304c37f12357c4b5acd5a1e0b978ca` and clean candidate
+  worker at exact `4332f61eee8e9bb4b0386bf969d38189b2194c65` were confirmed;
+  ancestry check exited 0 and
+  `git merge --ff-only 4332f61eee8e9bb4b0386bf969d38189b2194c65` succeeded.
+  Independent `tmp/ml-implementation/01-labels/verification.md` records bounded
+  PASS for **14 handwritten public control groups** and **142 focused tests in
+  16.74s**, reviewing the four-file diff. Actual bodies/originals, decoded display
+  labels and span provenance, authored image syntax, mixed newlines, whole
+  excluded-reference removal and residual guard refusals retain expected truth.
+
+  Merged root command:
+  `.venv/Scripts/python.exe -m pytest -q tests/application/test_links_workflow.py tests/sources/test_note_spans.py tests/application/test_forgotten_workflow.py tests/application/test_alternate_source.py tests/application/test_alternate_v2_source.py tests/test_architecture.py --basetemp=tmp/ml-implementation/merger/p01l -o cache_dir=tmp/ml-implementation/merger/c01l`
+  passed **142 tests in 17.40s**, exit 0. Runtime import resolves to root src.
+  `git diff --check dd286452c6304c37f12357c4b5acd5a1e0b978ca..4332f61eee8e9bb4b0386bf969d38189b2194c65`
+  passed, exit 0. Worker full **1127 tests in 168.07s**, Ruff/pip and 160 affected
+  checks remain attributed worker evidence rather than redundantly rerun here.
+  Copied ignored proof is retained at
+  `tmp/ml-implementation/01-labels/worker-evidence-4332f61/`.
+
+  This is cumulative bounded public-seam completion, without arbitrary
+  Markdown/encoding coverage or full-original preservation, native rendering,
+  actual user acceptance, package/release or overall specification completion
+  claims. Ticket 06 remains claimed; ticket 07 remains blocked. Source originals
+  and retained vaults were untouched; no PR or push performed.
+
 - 2026-10-06 (/root/label_preservation_implementer): Cumulative bounded label
   repair implemented at `5d9e8d354e2bf96c9cc18154f03c797aa0b25f53` and verified
   on merge `b4a5ef0d97b6a82c383bcf5d84feecbda5c188f7`. The installed official

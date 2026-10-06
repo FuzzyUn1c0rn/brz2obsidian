@@ -41,13 +41,12 @@ and integrated. **03: Keep category dashboards usable through missing type
 notes and icons** is also resolved and integrated. **05: Prove the combined
 conversion and publication guarantees** is resolved with bounded synthetic
 proof. **06: Extend the independent raw-source audit to the new conversion
-policy** remains claimed in its isolated implementer worktree. The independently
-verified residual excluded-identity guard is integrated, but **01: Exclude
-forgotten thoughts throughout inspection and conversion** remains claimed for
-an isolated included-label preservation repair: entities and escaped punctuation
-must survive reference adaptation. Its third criterion remains unchecked;
-bounded guard evidence does not establish universal privacy. Ticket 07 is not
-eligible.
+policy** remains claimed in its isolated implementer worktree. **01: Exclude
+forgotten thoughts throughout inspection and conversion** is resolved again
+after independently verified residual privacy guard and included-label repairs;
+entities and escaped punctuation survive reference adaptation. Bounded evidence
+does not establish arbitrary representation coverage. Ticket 07 remains blocked
+by ticket 06 and is not eligible.
 Type gaps consume the shared source-gap capability
 from ordinary fallback. Combined safety and independent audit tooling can then
 progress independently. Complete four-original proof precedes native actual-output
@@ -83,6 +82,16 @@ integrated. The user requested a pull request when everything is complete; creat
 it after implementation and required acceptance, then attach it to this chat.
 
 ## Comments
+
+- 2026-10-06 (/root/integration_merger): Integrated verified label repair by
+  `git merge --ff-only 4332f61eee8e9bb4b0386bf969d38189b2194c65` from clean
+  root `dd286452c6304c37f12357c4b5acd5a1e0b978ca`, ancestry and clean worker
+  confirmed. Independent bounded PASS covers 14 handwritten public groups and
+  142 focused tests in 16.74s, retaining the integrated residual guard. Root
+  linked spans/forgotten/both alternate-source/architecture checks pass:
+  **142 tests in 17.40s**; diff check is clean. Reopened ticket 01 is resolved
+  cumulatively and its third criterion checked. Ticket 06 remains claimed and
+  07 blocked; full four-original/native/user/review/release gates remain pending.
 
 - 2026-10-06 (/root/integration_merger): Partially integrated residual ticket 01
   guard by `git merge --ff-only 9d69a6509b20c0e85e966149cc5cb0bc22667593`
