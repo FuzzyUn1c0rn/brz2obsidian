@@ -64,10 +64,13 @@ pristine converter output and `.md.original` backups for exact pre-edit evidence
 ## Browse and rename categories
 
 Home links to `Categories.md`. A category dashboard places contextual Members
-and Gallery views from `Templates/Bases/` immediately after its title, with no
+and Gallery views from `Templates/Bases/` after its title and any Parents/Children
+navigation, with no
 generated introductory icon image. Its icon property remains available to
 overview/member tables and cards. Retained source labels, authored text/images,
-resources and graph links follow the Bases. Tables begin Icon, Note, Inheritance,
+resources and Related links follow the Bases. Every direct included hierarchy
+parent appears above Members/Gallery; hierarchy does not create membership.
+Tables begin Icon, Note, Inheritance,
 categories, created, updated; cards use the effective image. Open these views
 through the dashboard, since a standalone contextual Base has no embedding
 category. Prose links, hierarchy, source tags and provider links do not create

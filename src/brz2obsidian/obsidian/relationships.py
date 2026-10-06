@@ -8,7 +8,7 @@ def note_link(target, title):
     return "[[" + target.relative_path + "|" + " ".join(label.split()) + "]]"
 
 
-def relationship_sections(plan, key):
+def relationship_sections(plan, key, *, headings=("Parents", "Children", "Related")):
     targets = {t.item_key: t for t in plan.item_targets}
     items = {i.key: i for i in plan.analysis.snapshot.items}
     sections = {"Parents": set(), "Children": set(), "Related": set()}
@@ -25,7 +25,8 @@ def relationship_sections(plan, key):
             if key == b:
                 sections["Related"].add(a)
     text = ""
-    for heading, neighbors in sections.items():
+    for heading in headings:
+        neighbors = sections[heading]
         if neighbors:
             text += (
                 "## "

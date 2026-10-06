@@ -121,8 +121,9 @@ ordinary member is materialized, including empty members, and receives linked
 authored content/resources; members do not inherit that content. Home links to
 `Categories.md`, whose native overview discovers category dashboards under
 `Categories/` with the `categories` tag. Each dashboard embeds Members and
-Gallery Bases from `Templates/Bases/` immediately after its heading, without a
-generated introductory category image. Retained source content/resources follow
+Gallery Bases from `Templates/Bases/` after its heading and any Parents/Children
+navigation, without a generated introductory category image. Retained source
+content/resources follow
 the Bases; category icon properties/assets still supply dashboard images.
 Tables start Icon, Note, Inheritance,
 categories, created, updated. Gallery uses native image cards. The bundled Bases
@@ -132,6 +133,10 @@ Base has no embedding category. Native category renames with link updates keep
 member discovery working. Membership comes from linked `categories` properties;
 Templates/Attachments areas are excluded while legitimate Template-named members
 remain visible. Ordinary prose, hierarchy and provider links do not classify notes.
+Reviewed ordinary-parent/type-child edges show every direct included parent on
+the category and reciprocal category children on created ordinary notes. An
+otherwise empty ordinary parent can remain an intentional uncreated target;
+hierarchy does not add it to the category's Members.
 
 Edit membership directly. `appearance_category` independently chooses a category
 in the member's memberships; reordering or adding categories does not choose a

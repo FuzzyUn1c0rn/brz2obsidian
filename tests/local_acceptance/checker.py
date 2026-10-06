@@ -581,18 +581,7 @@ def check_items(raw, record, archive, vault, assets):
             + "\n---\n\n"
         )
         expected += "# " + escaped(thoughts[key]["Name"]) + "\n\n"
-        if key in definitions:
-            expected += "## Members\n\n![[Templates/Bases/Members.base#Members]]\n\n## Gallery\n\n![[Templates/Bases/Gallery.base#Gallery]]\n\n"
-        elif effective:
-            expected += "![[" + assets[effective]["relative_path"] + "]]\n\n"
-        if thoughts[key].get("Label"):
-            expected += thoughts[key]["Label"] + "\n\n"
-        body = documents.get(key, (None, ""))[1]
-        expected += adapt_body(body, key, names[key], names, assets)
-        resources = expected_resources(raw, key, body, assets)
-        if resources:
-            expected += "\n\n" + resources
-        sections = []
+        sections = {}
         for heading in ("Parents", "Children", "Related"):
             neighbors = set()
             for r in raw["links.json"]:
@@ -606,7 +595,7 @@ def check_items(raw, record, archive, vault, assets):
                 elif heading == "Related" and r["Relation"] == 3 and key in {a, b}:
                     neighbors.add(b if a == key else a)
             if neighbors:
-                sections.append(
+                sections[heading] = (
                     "## "
                     + heading
                     + "\n\n"
@@ -615,6 +604,20 @@ def check_items(raw, record, archive, vault, assets):
                         for n in sorted(neighbors)
                     )
                 )
+        if key in definitions:
+            for heading in ("Parents", "Children"):
+                if heading in sections:
+                    expected += sections.pop(heading) + "\n"
+            expected += "## Members\n\n![[Templates/Bases/Members.base#Members]]\n\n## Gallery\n\n![[Templates/Bases/Gallery.base#Gallery]]\n\n"
+        elif effective:
+            expected += "![[" + assets[effective]["relative_path"] + "]]\n\n"
+        if thoughts[key].get("Label"):
+            expected += thoughts[key]["Label"] + "\n\n"
+        body = documents.get(key, (None, ""))[1]
+        expected += adapt_body(body, key, names[key], names, assets)
+        resources = expected_resources(raw, key, body, assets)
+        if resources:
+            expected += "\n\n" + resources
         if sections:
             normalized_end = expected.replace("\r\n", "\n").replace("\r", "\n")
             expected += (
@@ -624,7 +627,7 @@ def check_items(raw, record, archive, vault, assets):
                 if normalized_end.endswith("\n")
                 else "\n\n"
             )
-            expected += "\n".join(sections)
+            expected += "\n".join(sections.values())
         if key == home:
             normalized_end = expected.replace("\r\n", "\n").replace("\r", "\n")
             expected += (
@@ -1761,7 +1764,8 @@ def check_adaptations(raw, record, documents, names, assets):
             assert all(
                 fact in actual[kind, key]
                 for fact in (
-                    "immediately follow the category title",
+                    "Parents/Children navigation immediately follows the category title when present",
+                    "Members and Gallery Bases follow that navigation",
                     "before retained source content",
                     "without a generated introductory icon image",
                     "link-preserving renames",
@@ -1808,7 +1812,7 @@ def check_report(vault, raw, summary, payloads):
         "insertion-day ISO dates",
         "update dates are maintained explicitly",
         "embedding category",
-        "Members table and Gallery immediately after the title",
+        "Members table and Gallery after the title and any Parents/Children navigation",
         "without a generated introductory category image",
         "Retained source content and resources follow the Bases",
         "ordinary/member note-body image",

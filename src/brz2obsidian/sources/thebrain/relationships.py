@@ -39,7 +39,7 @@ def decode_relationships(records, thoughts, brain_id, refuse, uuid):
             signature in {(1, 1, 1, -1), (1, 1, 1, 1), (1, 1, 1, 7)}
             and roles == (1, 1)
             or signature == (1, 1, 1, -1)
-            and roles == (1, 4)
+            and roles in {(1, 2), (1, 4)}
         ):
             kind = "hierarchy"
         elif signature in {
