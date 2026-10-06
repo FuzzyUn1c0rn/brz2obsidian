@@ -91,6 +91,11 @@ never becomes an output exclusion ledger or a keyword/pixel eraser.
 Supplied Documents, generated presentations and missing-source facts stay
 distinct. Measured inspect source facts are not publication receipts. The
 source-free checker is a read-only convention tool, not a preservation oracle.
-Complete original-input audits, native actual-output review and the actual user
+Complete original-input audits, strategically sampled native actual-output review and the actual user
 verdict are separate mandatory gates. Private source identities/assets/vaults
 remain local; public findings contain aggregate evidence and honest limits.
+
+The user's 2026-10-06 implementation steering changes visual-review breadth to
+strategic sampling, with explicit distinct-behavior/special-case coverage and
+recorded limits. Full automated preservation obligations and requirement mapping
+remain unchanged. See [the sampling policy](../../docs/testing.md#visual-sampling-policy).

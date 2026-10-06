@@ -40,7 +40,9 @@ preservation passed the fresh m5 twelve-output matrix and separate independent
 raw-source verification at frozen runtime `e2c5fc3f05d2daa0d0547d2bbaa2b12557a248b5`.
 The prior m3/m4 failures remain retained history; verified source/oracle TXT and
 diagnostic-link repairs precede m5. **08: Verify actual converted vaults in native
-Obsidian** is eligible and unclaimed. Final review, package/release checks and
+Obsidian** is claimed by `/root/native_vault_reviewer`. Native review follows the
+user's strategic visual-sampling instruction; complete automated preservation
+retains its full scope. Final review, package/release checks and
 the actual-vault user verdict remain pending; automated preservation does not
 supply native application or user acceptance, nor arbitrary representation
 coverage.
@@ -75,6 +77,14 @@ integrated. The user requested a pull request when everything is complete; creat
 it after implementation and required acceptance, then attach it to this chat.
 
 ## Comments
+
+- 2026-10-06 (/root): The user requested strategic native/visual sampling during
+  ticket 08 and made this the future repository default. Recorded the policy in
+  AGENTS/testing guidance and reconciled accepted testing decision 18, ticket 08
+  and its planning pointers. Explicitly observe distinct behaviors and special
+  cases, reuse completed evidence and record sampling limits. Full source audits
+  and the actual user verdict remain required. All 47 D category contexts and 330
+  memberships had already been observed; remaining native cases use sampling.
 
 - 2026-10-06 (/root/integration_merger): Integrated complete ticket 07 metadata
   by `git merge --ff-only c95f23e749f5cbf2bf0aebf1372817a8e3c47e26` from

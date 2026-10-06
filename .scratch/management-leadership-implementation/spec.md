@@ -479,10 +479,17 @@ output review before declaring the migration delivered.
     observed version and pristine inventories. Independently join raw subjects
     to assigned paths. Review representative original PNG/WEBP cards and workflow
     chart, notice A and repair links, supplied prose/blank/multiple-image bodies,
-    multiple-parent category navigation, all category discovery/membership
-    obligations, neutral icon providers versus intact card bodies and existing
-    native maintenance conventions. The independent audit checks every required
-    body/embed; native review verifies application rendering and Base evaluation.
+    multiple-parent category navigation, representative category discovery and
+    membership behaviors, neutral icon providers versus intact card bodies and
+    existing native maintenance conventions. Use strategic samples covering each
+    distinct behavior and special case, following the repository's
+    [visual sampling policy](../../docs/testing.md#visual-sampling-policy).
+    Independently compare the sampled native Base views with their expected
+    member sets. Record selection rationale, actual observations and sampling
+    limits; equivalent cases can rely on representative native confidence.
+    The complete independent audit still checks every required body/embed and
+    every category/member obligation; native samples verify application rendering
+    and Base evaluation.
     Recheck relevant earlier-archive actual outputs and source-free read-only edits.
     Do not treat prototype paths/screenshots as final output evidence.
 19. **Actual user acceptance.** Obtain the user's verdict on a clean actual
@@ -517,6 +524,14 @@ output review before declaring the migration delivered.
   as part of this specification session. Those follow the approved frontier.
 
 ## Further Notes
+
+On 2026-10-06, during implementation, the user explicitly changed native visual
+verification to strategic sampling and made this the default for future visual
+checks in this repository. This supersedes per-category native enumeration in
+the earlier implementation breakdown. Distinct behaviors and special cases still
+receive explicit observations; complete automated preservation and the actual
+user-verdict gate remain required. Already completed native observations remain
+valid evidence and need no repetition.
 
 The mandatory original input is `brz/Management & Leadership 2026-10-05.brz`,
 320,594,486 bytes, SHA-256

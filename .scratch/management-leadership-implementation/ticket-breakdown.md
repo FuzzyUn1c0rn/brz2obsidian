@@ -61,7 +61,7 @@ Their number space is independent of the completed Wayfinder decision tickets.
    [Acceptance criteria](issues/07-four-archive-preservation.md).
 8. **Title: Verify actual converted vaults in native Obsidian.**
    **Blocked by:** Audit complete preservation across all four original archives.
-   **What it delivers:** Native rendering/Base/navigation/maintenance observations
+   **What it delivers:** Strategic native rendering/Base/navigation/maintenance samples
    on fresh actual-output copies, with audited baselines intact and a clean
    real-output vault ready for the user's final review.
    [Acceptance criteria](issues/08-native-obsidian-review.md).
@@ -84,6 +84,10 @@ The combined workflow and independent audit-tooling tickets require both feature
 branches but do not block each other. Full private acceptance needs verified
 workflow behavior and a proved independent audit. Native checks use already
 audited actual output, followed by final user acceptance and release verification.
+The user's 2026-10-06 implementation steering makes strategic visual sampling
+the default: explicitly cover distinct behaviors and special cases, reuse existing
+observations, and retain full automated source audits. See the
+[sampling policy](../../docs/testing.md#visual-sampling-policy).
 Only direct blockers are listed; transitive prerequisites are not repeated.
 
 ## Size, prefactoring and completion rules

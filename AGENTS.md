@@ -33,3 +33,8 @@ needed. See `README.md` for bootstrap commands and dependency manifests.
 For development runs, prototypes, screenshots, agent handoffs, or cleanup,
 follow [workspace housekeeping](docs/workspace.md). Put disposable artifacts
 under Git-ignored `tmp/<effort>/` inside the current checkout.
+
+## Visual verification
+
+Default to strategic sampling for native and rendering checks. Before a visual
+review, read [the sampling policy](docs/testing.md#visual-sampling-policy).

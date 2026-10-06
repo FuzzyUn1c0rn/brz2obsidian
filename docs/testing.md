@@ -345,7 +345,34 @@ absent, category icon properties/assets remain and member snapshots are unchange
 All 53 wheel module bytes match their current worktree sources. The Category
 starter already follows this presentation and remains unchanged.
 
+## Visual sampling policy
+
+Use strategic sampling for visual and native reviews in this repository, as
+requested by the user on 2026-10-06. Select a small set of actual-output cases
+covering each distinct rendering or application behavior. Include unusual source
+syntax, media formats, missing-content and icon/provider states, hierarchy shapes,
+large contextual views, and the editing/template operations affected by the change.
+Combine behaviors in one sample where practical and reuse completed observations.
+
+Before using the UI, record the chosen cases, their independently derived paths,
+the behaviors each covers, and any special cases needing their own observation.
+Compare sampled native Base results with the expected member set for that view;
+native CSV export can provide complete results for a large sampled view. Equivalent
+items using the same behavior need no repeated visual check. Expand the relevant
+samples when a defect, uncertainty or meaningful implementation difference appears.
+
+Complete when every selected behavior and special case has actual observation
+evidence and any defects have been repaired and rechecked. Report the sample
+selection, covered behaviors and limits; extrapolated confidence in equivalent
+cases is distinct from observing each item. Complete required automated source,
+body/image, inventory and preservation audits keep their full scope. Actual user
+acceptance remains a separate gate when required by the accepted specification.
+
 ## Native review procedure
+
+Apply the sampling policy above to new reviews. The v1/v2 procedures and completed
+reports below retain their historical scope; choose representative cases from
+their behavior lists for current work.
 
 The [v2 dashboard slice](../.scratch/brz-to-obsidian-v2-implementation/issues/03-native-category-dashboards.md)
 has an earlier bounded native gate on a fresh review copy of an actual synthetic
