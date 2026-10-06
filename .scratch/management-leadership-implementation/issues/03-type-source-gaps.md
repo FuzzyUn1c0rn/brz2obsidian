@@ -31,6 +31,33 @@ User Stories 19–26, 31, 40–50, 58–62, 69–70; Implementation Decisions 13
 
 ## Comments
 
+- 2026-10-06 (/root/integration_merger): Integrated exact verified clean head
+  `68982810ea2a60ee5eec4d9f14537916815a7c7a` (runtime commit `6b82b9c`) from
+  `codex/ml-v3-03` with
+  `git merge --ff-only 68982810ea2a60ee5eec4d9f14537916815a7c7a` on clean
+  root `296b3af67a2dc9590f0a97080200723b7adf50b8`; ancestry check returned 0.
+  Independent `tmp/ml-implementation/03/verification.md` records bounded static
+  and public behavior PASS: **19 handwritten raw-ZIP control groups**, plus
+  **192 focused tests in 15.83s**. Controls prove unknown absent type text,
+  neutral appearance with valid membership/provider links and explicit override
+  precedence, exact cards/present bodies, included-only diagnostics, distinct
+  prior gap findings, predicate refusals, source/caller privacy, repeat/reorder
+  stability and read-only checker inventories.
+
+  Merged root command:
+  `.venv/Scripts/python.exe -m pytest -q tests/application/test_type_source_gaps_workflow.py tests/application/test_absent_note_images_workflow.py tests/application/test_categories_workflow.py tests/application/test_properties_workflow.py tests/application/test_category_hierarchy_workflow.py tests/application/test_alternate_source.py tests/application/test_alternate_v2_source.py --basetemp=tmp/ml-implementation/merger/pytest-03-6898281 -o cache_dir=tmp/ml-implementation/merger/pytest-cache-03-6898281`
+  passed **325 tests in 30.05s**, exit 0, with runtime import resolving to root
+  src. `git diff --check 296b3af67a2dc9590f0a97080200723b7adf50b8..68982810ea2a60ee5eec4d9f14537916815a7c7a`
+  passed, exit 0. Worker complete **1028-test** suite and Ruff/pip results remain
+  attributed evidence; identical fast-forwarded code was not redundantly tested
+  in full. Copied worker proof is retained ignored under
+  `tmp/ml-implementation/03/worker-evidence-6898281/` before future archival.
+
+  Tickets 05 and 06 are now eligible and remain unclaimed. This completes the
+  bounded type-gap slice; combined publication proof, complete scoped independent
+  four-original audits, native observations, actual user verdict, final review
+  and release remain separate pending gates. No PR or other-ticket claim made.
+
 - 2026-10-06 (/root/type_gap_implementer): Implemented the bounded type-gap slice
   on `codex/ml-v3-03`, based on verified integration
   `296b3af67a2dc9590f0a97080200723b7adf50b8`. Runtime, public fixtures and guidance

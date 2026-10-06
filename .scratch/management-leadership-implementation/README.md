@@ -39,7 +39,9 @@ Tickets **01: Exclude forgotten thoughts throughout inspection and conversion**,
 **02: Display owned images when an ordinary thought note is absent** and
 **04: Preserve ordinary-to-category hierarchy in both directions** are resolved
 and integrated. **03: Keep category dashboards usable through missing type
-notes and icons** is now claimed in its isolated worktree.
+notes and icons** is also resolved and integrated. The unclaimed frontier is
+**05: Prove the combined conversion and publication guarantees** and
+**06: Extend the independent raw-source audit to the new conversion policy**.
 Type gaps consume the shared source-gap capability
 from ordinary fallback. Combined safety and independent audit tooling can then
 progress independently. Complete four-original proof precedes native actual-output
@@ -75,6 +77,17 @@ integrated. The user requested a pull request when everything is complete; creat
 it after implementation and required acceptance, then attach it to this chat.
 
 ## Comments
+
+- 2026-10-06 (/root/integration_merger): Integrated ticket 03 with
+  `git merge --ff-only 68982810ea2a60ee5eec4d9f14537916815a7c7a` from clean
+  root `296b3af67a2dc9590f0a97080200723b7adf50b8` after confirmed ancestry.
+  Independent bounded static review, 19 handwritten raw-ZIP control groups
+  and 192 focused tests PASS at that exact head. Root merged type-gap/image/
+  category/property/hierarchy and both alternate-source checks pass:
+  **325 tests in 30.05s**; diff check is clean. Ticket 03 records exact commands
+  and attributed worker full regression evidence. Tickets 05 and 06 are eligible
+  and unclaimed; complete four-original/native/user/review/release gates remain
+  pending.
 
 - 2026-10-06 (/root): Claimed type-note/icon gaps after ticket 02's verified
   integration. Tickets 01/02/04 are resolved; combined workflow safety and
