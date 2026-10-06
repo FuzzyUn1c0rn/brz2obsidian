@@ -42,7 +42,7 @@ Root ignored proof: `tmp/ml-implementation/09/regression-runtime-{before,after}.
 The coordinator refreshed the existing root editable distribution from stale
 0.2.0 metadata to **0.3.0**, using
 `.venv/Scripts/python.exe -m pip install --no-deps --no-build-isolation -e .`.
-Its root binding, all third-party package files/versions and all 57 runtime module
+Its root binding, all third-party non-bytecode package files and versions, and all 57 runtime module
 bytes stayed unchanged. `editable-refresh-proof.json` and `editable-refresh.log`
 retain that separate environment proof. A fresh post-refresh pip check also
 passed, exit 0 (`pip-check-refresh.json`). The isolated verifier did not install,
