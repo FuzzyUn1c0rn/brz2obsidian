@@ -637,3 +637,77 @@ def test_renderer_refuses_aligned_but_noncanonical_fallback_owner_target(tmp_pat
     )
     with pytest.raises(MigrationRefused):
         ObsidianRenderer().render(forged, metadata)
+
+
+@pytest.mark.parametrize("kind", [2, 4, 5])
+def test_absent_note_requires_an_ordinary_owner(tmp_path, kind):
+    owner = "88888888-8888-4888-8888-888888888888"
+    parts = fallback_parts(tmp_path)
+    thought = json.loads(parts["thoughts.json"])
+    thought.update(Id=owner, Name="Wrong role owner", Kind=kind)
+    parts["thoughts.json"] += b"\n" + json.dumps(thought).encode()
+    change_record(parts, NOTE, SourceId=owner)
+    change_record(parts, IMAGE, SourceId=owner)
+    parts[owner + "/.data/md-images/card.png"] = parts.pop(
+        OWNER + "/.data/md-images/card.png"
+    )
+    source = write_source(tmp_path, parts)
+    result = default_workflow().convert(source, tmp_path / "vault")
+    assert result.outcome == "refused" and not (tmp_path / "vault").exists()
+
+
+def test_foreign_identical_image_is_preserved_without_supplying_fallback_embeds(
+    tmp_path,
+):
+    owner = "88888888-8888-4888-8888-888888888888"
+    parts = fallback_parts(tmp_path)
+    thought = json.loads(parts["thoughts.json"])
+    thought.update(Id=owner, Name="Entry thought")
+    parts["thoughts.json"] += b"\n" + json.dumps(thought).encode()
+    add_attachment(parts, OTHER_IMAGE, 12, "card.png", png_bytes(), owner=owner)
+    source = write_source(tmp_path, parts)
+    result = default_workflow().convert(source, tmp_path / "vault")
+    assert result.outcome == "warnings" and result.counts.actual_generated_embeds == 1
+    note = (tmp_path / "vault/Home \u2014 Entry thought.md").read_bytes().decode()
+    assert "![[Attachments/22222222/card.png]]" in note
+    assert "Attachments/88888888/card.png" not in note
+    assert (
+        tmp_path / "vault/Attachments/88888888/card.png"
+    ).read_bytes() == png_bytes()
+
+
+def test_forgotten_absent_note_and_unusable_images_do_not_enter_gap_obligations(
+    tmp_path,
+):
+    owner = "88888888-8888-4888-8888-888888888888"
+    absent = "99999999-9999-4999-8999-999999999999"
+    parts = fallback_parts(tmp_path)
+    thought = json.loads(parts["thoughts.json"])
+    thought.update(
+        Id=owner, Name="Private excluded owner", ForgottenDateTime="2026-10-05T00:00:00"
+    )
+    parts["thoughts.json"] += b"\n" + json.dumps(thought).encode()
+    add_attachment(parts, absent, 1, "Notes.md", declared=33, state=3, owner=owner)
+    change_record(parts, absent, NoteType=4)
+    add_attachment(
+        parts, OTHER_IMAGE, 12, "private.png", b"invalid excluded pixels", owner=owner
+    )
+    source = write_source(tmp_path, parts)
+    result = default_workflow().convert(source, tmp_path / "vault")
+    assert result.outcome == "warnings" and result.counts.source_gaps == 1
+    assert result.counts.actual_assets == result.counts.actual_generated_embeds == 1
+    public = result.model_dump_json()
+    for private in [
+        owner,
+        absent,
+        OTHER_IMAGE,
+        "Private excluded owner",
+        "invalid excluded pixels",
+        "private.png",
+    ]:
+        assert private not in public
+        assert all(
+            private.encode() not in p.read_bytes()
+            for p in (tmp_path / "vault").rglob("*")
+            if p.is_file()
+        )
