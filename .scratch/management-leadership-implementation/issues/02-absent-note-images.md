@@ -32,6 +32,32 @@ User Stories 1–20, 24, 40–50, 58–62, 68–70; Implementation Decisions 8�
 
 ## Comments
 
+- 2026-10-06 (/root/integration_merger): Integrated exact verified head
+  `a6f62b9e37bb193d231cf688e630722fa4f6d06b` from `codex/ml-v3-02` by
+  `git merge --ff-only a6f62b9e37bb193d231cf688e630722fa4f6d06b` from clean
+  root `e50a638d16b0137b111bffe1fc7f8f9f0875c0c9`.
+  Independent `tmp/ml-implementation/02/verification.md` records bounded PASS
+  for static review, **21 handwritten raw-ZIP control groups** and **213 focused
+  tests in 15.31s** at the exact clean head. Independent controls prove ordered
+  original-byte image embeds, notice A/diagnostics, no fabricated original or
+  authored-reference credit, present-body precedence, private exclusion,
+  complete image-frame decoding, near-miss refusals, repeat/reorder behavior,
+  source/caller inventories and read-only checker behavior.
+
+  Merged root command:
+  `.venv/Scripts/python.exe -m pytest -q tests/application/test_absent_note_images_workflow.py tests/application/test_categories_workflow.py tests/application/test_category_hierarchy_workflow.py tests/application/test_integrated_v2_workflow.py tests/application/test_alternate_source.py tests/application/test_alternate_v2_source.py --basetemp=tmp/ml-implementation/merger/pytest-02-a6f62b9 -o cache_dir=tmp/ml-implementation/merger/pytest-cache-02-a6f62b9`
+  passed **197 tests in 22.54s**, exit 0. Runtime import resolves to root src.
+  `git diff --check e50a638d16b0137b111bffe1fc7f8f9f0875c0c9..a6f62b9e37bb193d231cf688e630722fa4f6d06b`
+  passed, exit 0. Worker complete **930-test** suite and Ruff/pip/diff results
+  remain attributed worker evidence; identical fast-forwarded code was not
+  redundantly tested in full. Copied evidence is retained ignored under
+  `tmp/ml-implementation/02/worker-evidence-a6f62b9/` before future archival.
+
+  Ticket 03 is now eligible but its claim remains coordinator-owned. This
+  completes only the bounded ordinary absent-note image slice; type gaps,
+  complete independent four-original preservation, native observations, actual
+  user verdict, final review and release remain pending. No PR was created.
+
 - 2026-10-06 (/root): Claimed after ticket 01's independently verified integration
   at `b5d6238`. Implement in its own managed worktree/branch with public-seam TDD;
   coordinate shared rendering/planning changes with category hierarchy.

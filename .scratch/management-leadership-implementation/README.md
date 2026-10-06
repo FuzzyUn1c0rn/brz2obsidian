@@ -35,10 +35,11 @@ and [workspace housekeeping](../../docs/workspace.md).
 
 ## Working the frontier
 
-Tickets **01: Exclude forgotten thoughts throughout inspection and conversion**
-and **04: Preserve ordinary-to-category hierarchy in both directions** are
-resolved and integrated. **02: Display owned images when an ordinary thought
-note is absent** is claimed and in progress; ticket 03 remains blocked by 02.
+Tickets **01: Exclude forgotten thoughts throughout inspection and conversion**,
+**02: Display owned images when an ordinary thought note is absent** and
+**04: Preserve ordinary-to-category hierarchy in both directions** are resolved
+and integrated. The unclaimed frontier is **03: Keep category dashboards usable
+through missing type notes and icons**.
 Type gaps consume the shared source-gap capability
 from ordinary fallback. Combined safety and independent audit tooling can then
 progress independently. Complete four-original proof precedes native actual-output
@@ -74,6 +75,16 @@ integrated. The user requested a pull request when everything is complete; creat
 it after implementation and required acceptance, then attach it to this chat.
 
 ## Comments
+
+- 2026-10-06 (/root/integration_merger): Integrated ticket 02 with
+  `git merge --ff-only a6f62b9e37bb193d231cf688e630722fa4f6d06b` from clean
+  root `e50a638d16b0137b111bffe1fc7f8f9f0875c0c9`. Independent bounded static
+  review, 21 handwritten actual-ZIP control groups and 213 focused tests PASS
+  at that exact head. Root merged absent-note image/category/hierarchy/integrated
+  v2 and both alternate-source checks pass: **197 tests in 22.54s**; diff check
+  is clean. Ticket 02 records exact commands and attributed worker complete
+  regression evidence. Ticket 03 is eligible and remains unclaimed; complete
+  four-original/native/user/review/release gates remain pending.
 
 - 2026-10-06 (/root/integration_merger): Integrated ticket 04 by
   `git merge --ff-only f42a900563be235aae85da8a047b7ae9a384948e` from clean
