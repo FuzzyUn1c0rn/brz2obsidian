@@ -352,6 +352,11 @@ def test_oracle_conserves_mixed_scoped_source_and_repeat_reorder(tmp_path):
         "hierarchy_reversed",
         "hierarchy_membership",
         "category_views_first",
+        "notice_plain_quote",
+        "notice_wrong_title",
+        "notice_wrong_kind",
+        "notice_merged",
+        "notice_after_views",
         "diagnostic_owner",
         "diagnostic_state",
         "diagnostic_image",
@@ -580,6 +585,33 @@ def test_mixed_v3_semantic_corruption_cannot_hide_behind_consistent_receipts(
             )
             record["counts"]["classification_assignments"] += 1
             record["counts"]["typed_members"] += 1
+    elif damage.startswith("notice_"):
+        category = vault / "Categories/Concept.md"
+        if damage in {"notice_plain_quote", "notice_wrong_title", "notice_wrong_kind"}:
+            text = image_note.read_bytes()
+            marker = b"> [!warning] Source note unavailable\n"
+            assert marker in text
+            replacement = {
+                "notice_plain_quote": b"",
+                "notice_wrong_title": b"> [!warning] Available source note\n",
+                "notice_wrong_kind": b"> [!note] Source note unavailable\n",
+            }[damage]
+            image_note.write_bytes(text.replace(marker, replacement))
+        else:
+            text = category.read_bytes()
+            if damage == "notice_merged":
+                boundary = b"\n\n> [!warning] Source category icon unavailable"
+                assert boundary in text
+                text = text.replace(
+                    boundary, b"\n> [!warning] Source category icon unavailable"
+                )
+            else:
+                begin = text.index(b"> [!warning] Source category note unavailable")
+                end = text.index(b"## Members", begin)
+                notices = text[begin:end]
+                assert b"Source category icon unavailable" in notices
+                text = text[:begin] + text[end:] + notices
+            category.write_bytes(text)
     elif damage == "category_views_first":
         category = vault / "Categories/Concept.md"
         navigation = b"## Parents\n\n- [[Home \xe2\x80\x94 Home.md|Home]]\n\n"

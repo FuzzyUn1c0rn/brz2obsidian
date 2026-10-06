@@ -62,6 +62,11 @@ def test_absent_category_note_is_unknown_and_needs_no_image_basis(tmp_path):
     assert result.outcome == "warnings", result.issues
     vault = tmp_path / "vault"
     category = (vault / "Categories/Concept.md").read_text(encoding="utf-8")
+    assert (
+        "> [!warning] Source category note unavailable\n> Source category note text is absent"
+        in category
+    )
+    assert category.index("[!warning]") < category.index("Members.base#Members")
     assert "Source category note text is absent" in category
     assert "unknown" in category.lower()
     assert "[[MIGRATION REPORT.md|Migration report]]" in category
@@ -308,6 +313,16 @@ def test_absent_category_icon_is_neutral_for_provider_and_inheriting_member(tmp_
     vault = tmp_path / "vault"
     category = (vault / "Categories/Concept.md").read_text(encoding="utf-8")
     member = (vault / "Notes/Member.md").read_text(encoding="utf-8")
+    assert (
+        "> [!warning] Source category icon unavailable\n> Source category icon is absent"
+        in category
+    )
+    assert category.index("[!warning]") < category.index("Members.base#Members")
+    assert (
+        "> [!warning] Inherited icon unavailable\n> The inherited icon is unavailable from [[Categories/Concept.md|Concept]]"
+        in member
+    )
+    assert member.index("[!warning]") < member.index("Member prose.")
     assert "icon:\n" in category and "icon:\n" in member
     assert 'appearance_category: "[[Categories/Concept.md]]"' in member
     assert "Source category icon is absent" in category

@@ -135,3 +135,21 @@ User Stories 49–50, 60–70; Implementation Decisions 1–3, 21–25; Testing 
   Use strategic native samples of affected ordinary/category notice behaviors;
   do not repeat equivalent unaffected media/dashboard observations. Actual user
   verdict and delivery remain pending. No PR has been created.
+
+- 2026-10-06 (/root/release_documenter): Implemented the accepted warning-callout
+  clarification from metadata tip `82033efbac2631e31871e2fe7ba4813b170ba09b`.
+  Generated ordinary, category-note, category-icon and inherited-icon notices use
+  separate native `[!warning]` callouts with descriptive titles; the ordinary
+  title is Source note unavailable. Limitation bodies and report/provider links
+  are unchanged. Category hierarchy stays directly below the title; notices now
+  precede Members/Gallery. Supplied Markdown, original/image bytes, image order,
+  contracts and counters are unchanged. Public workflow regressions failed RED
+  for the old marker/placement and passed after the bounded renderer repair.
+  The independent oracle has separately written approved notice literals and
+  five consistent-receipt corruption cases for plain/wrong-title/wrong-kind/
+  merged/after-view notices. This proves output syntax and conservation at public
+  seams, not actual native orange/icon/background appearance or user acceptance.
+  Focused checks passed **385 tests in 99.47 seconds**; selected Ruff check and
+  six-file format check passed. Ignored RED/GREEN proof is under release-worktree
+  `tmp/notice-style/`. Reopened review/public/package/source-native gates remain
+  pending independent repair/native verification and refreshed final proofs.

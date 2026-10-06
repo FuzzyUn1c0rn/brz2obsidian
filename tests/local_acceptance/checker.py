@@ -773,7 +773,7 @@ def check_items(raw, record, archive, vault, assets):
         owned_gaps = [g for g in raw.gaps.values() if g["owner"] == key]
         presentation_images = next((g["images"] for g in owned_gaps if g["images"]), [])
         if presentation_images:
-            expected += "> Source note text is absent. Unknown prose, captions and layout were not recovered. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
+            expected += "> [!warning] Source note unavailable\n> Source note text is absent. Unknown prose, captions and layout were not recovered. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
         sections = {}
         for heading in ("Parents", "Children", "Related"):
             neighbors = set()
@@ -801,22 +801,23 @@ def check_items(raw, record, archive, vault, assets):
             for heading in ("Parents", "Children"):
                 if heading in sections:
                     expected += sections.pop(heading) + "\n"
-            expected += "## Members\n\n![[Templates/Bases/Members.base#Members]]\n\n## Gallery\n\n![[Templates/Bases/Gallery.base#Gallery]]\n\n"
             if any(g["role"] == "definition_note" for g in owned_gaps):
-                expected += "> Source category note text is absent and remains unknown. No prose, captions or layout were recovered. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
+                expected += "> [!warning] Source category note unavailable\n> Source category note text is absent and remains unknown. No prose, captions or layout were recovered. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
         elif effective:
             expected += "![[" + assets[effective]["relative_path"] + "]]\n\n"
         for _, gap in sorted(raw.gaps.items()):
             if gap["role"] != "definition_icon":
                 continue
             if gap["owner"] == key:
-                expected += "> Source category icon is absent; appearance is neutral. See [[MIGRATION REPORT.md|Migration report]] for provider evidence and optional repair steps.\n\n"
+                expected += "> [!warning] Source category icon unavailable\n> Source category icon is absent; appearance is neutral. See [[MIGRATION REPORT.md|Migration report]] for provider evidence and optional repair steps.\n\n"
             elif provider == gap["owner"] and not icon:
                 expected += (
-                    "> The inherited icon is unavailable from "
+                    "> [!warning] Inherited icon unavailable\n> The inherited icon is unavailable from "
                     + wiki(names[provider], thoughts[provider]["Name"])
                     + "; appearance is neutral. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
                 )
+        if key in definitions:
+            expected += "## Members\n\n![[Templates/Bases/Members.base#Members]]\n\n## Gallery\n\n![[Templates/Bases/Gallery.base#Gallery]]\n\n"
         if thoughts[key].get("Label"):
             expected += thoughts[key]["Label"] + "\n\n"
         body = documents.get(key, (None, ""))[1]

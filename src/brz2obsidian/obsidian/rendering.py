@@ -200,7 +200,7 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         text = property_frontmatter(plan, item) + "# " + heading + "\n\n"
         presentation = presentations.get(item.key)
         if presentation:
-            text += "> Source note text is absent. Unknown prose, captions and layout were not recovered. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
+            text += "> [!warning] Source note unavailable\n> Source note text is absent. Unknown prose, captions and layout were not recovered. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
         icon = icon_snapshots[item.key].effective_icon_asset_id
         if item.role == "definition":
             hierarchy = relationship_sections(
@@ -208,29 +208,30 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
             )
             if hierarchy:
                 text += hierarchy + "\n"
-            text += CATEGORY_VIEWS + "\n"
             if any(
                 g.gap.owner == item.key and g.outcome == "unknown_note"
                 for g in plan.source_gaps
             ):
-                text += "> Source category note text is absent and remains unknown. No prose, captions or layout were recovered. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
+                text += "> [!warning] Source category note unavailable\n> Source category note text is absent and remains unknown. No prose, captions or layout were recovered. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
         elif icon is not None:
             text += "![[" + asset_paths[icon] + "]]\n\n"
         for gap in plan.source_gaps:
             if gap.outcome != "neutral_icon":
                 continue
             if gap.gap.owner == item.key:
-                text += "> Source category icon is absent; appearance is neutral. See [[MIGRATION REPORT.md|Migration report]] for provider evidence and optional repair steps.\n\n"
+                text += "> [!warning] Source category icon unavailable\n> Source category icon is absent; appearance is neutral. See [[MIGRATION REPORT.md|Migration report]] for provider evidence and optional repair steps.\n\n"
             elif item.key in gap.affected_member_keys:
                 provider = items[gap.provider_key]
                 provider_target = next(
                     t for t in plan.item_targets if t.item_key == provider.key
                 )
                 text += (
-                    "> The inherited icon is unavailable from "
+                    "> [!warning] Inherited icon unavailable\n> The inherited icon is unavailable from "
                     + note_link(provider_target, provider.title)
                     + "; appearance is neutral. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
                 )
+        if item.role == "definition":
+            text += CATEGORY_VIEWS + "\n"
         if item.label:
             text += item.label + "\n\n"
         for index, key in enumerate(item.document_ids):

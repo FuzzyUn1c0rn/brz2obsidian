@@ -15,7 +15,38 @@ gates. The user verdict is **changes required**, not accepted; delivery and PR
 remain pending. The successful technical gates below describe the pre-styling
 runtime and are retained as history.
 
-## Current repair boundary
+## Warning-callout repair candidate
+
+The isolated styling repair starts from accepted metadata tip
+`82033efbac2631e31871e2fe7ba4813b170ba09b`. Generated source-gap notices now
+use native `[!warning]` titles: Source note unavailable, Source category note
+unavailable, Source category icon unavailable and Inherited icon unavailable.
+Existing body text, limitations and report/provider links remain unchanged.
+Adjacent notices remain separate complete callouts. Category hierarchy remains
+immediately below the title, then notices before Members/Gallery. Supplied
+Markdown/attachments, image order, source versions and migration counts are
+untouched. No CSS/theme/dependency change supplies the appearance.
+
+The approved public workflow regression was RED one, then GREEN one for the
+ordinary fallback notice; category/member/hierarchy/adjacent-callout tests were
+RED three, then GREEN three. Existing raw-source oracle checks were RED two
+against the old expected literals, then GREEN two after independently writing
+the user-approved Markdown and placement. Five semantic corruption cases reject
+plain quotes, incorrect warning titles/types, merged adjacent callouts and
+category notices moved below views, even after repairing receipt inventories.
+The complete focused workflow/oracle selection passed **385 tests in 99.47
+seconds**; selected Ruff check and six-file format check passed. Private
+commands/logs and final candidate hashes remain under release-worktree
+`tmp/notice-style/`.
+
+This candidate establishes generated syntax and conservation, not actual native
+warning title/icon/orange tint. Independent repair verification, affected native
+strategic observations and refreshed final public/package/source gates are
+pending. The user's verdict is still changes required; delivery remains open.
+Earlier technical/native records below are pre-styling history and cannot close
+those reopened requirements.
+
+## Historical compact-reference repair boundary
 
 The full-implementation independent Spec review at frozen integration
 `5f971b96500a33d58ec09f4d9bd6c2d08f9a8cde` reported no actionable findings.

@@ -80,6 +80,7 @@ def test_absent_note_displays_owned_image_with_truthful_obligations(tmp_path):
     assert result.counts.actual_generated_embeds == 1
     assert result.counts.actual_references == 0 and result.counts.actual_assets == 1
     note = (tmp_path / "vault/Home — Entry thought.md").read_text()
+    assert "> [!warning] Source note unavailable\n> Source note text is absent" in note
     assert "Source note text is absent" in note
     assert "prose, captions and layout were not recovered" in note
     assert "[[MIGRATION REPORT.md|Migration report]]" in note

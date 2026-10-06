@@ -125,6 +125,17 @@ def test_complete_mixed_v3_output_matches_independent_bytes_graph_and_counts(tmp
         properties(card.encode())["appearance_category"] == "[[Categories/Concept.md]]"
     )
     category = (vault / "Categories/Concept.md").read_text(encoding="utf-8")
+    assert category.index("## Parents") < category.index("[!warning]")
+    assert (
+        category.index("[!warning] Source category note unavailable")
+        < category.index("[!warning] Source category icon unavailable")
+        < category.index("Members.base#Members")
+    )
+    assert (
+        "optional repair steps.\n\n> [!warning] Source category icon unavailable"
+        in category
+    )
+    assert "optional repair steps.\n\n> [!warning] Inherited icon unavailable" in card
     assert category.index("## Parents") < category.index("Members.base#Members")
     assert "[[Home — Opening.md|Opening]]" in category
     assert "[[Notes/Override.md|Override]]" in category
