@@ -38,13 +38,14 @@ and [workspace housekeeping](../../docs/workspace.md).
 Tickets **01**, **03**, **04**, **05** and **06** are resolved and integrated.
 The narrow source and independent audit repairs for repeated known-absent TXT
 declarations retain their earlier privacy, label and audit controls. **02** is
-reopened and claimed for shared diagnostic-link formatting: the fresh matrix
+resolved after verified shared diagnostic-link formatting repair: the prior matrix
 passed nine A/B/C variants and published original D, then its source-required
 audit stopped on checklist alias whitespace after reserved title characters.
 Independent diagnosis confirms the correct source owner, target, identities,
 role and outcome; the renderer must reuse the established note-link formatter.
-The oracle remains unchanged. **07** remains claimed with all criteria unchecked
-and is blocked by that responsible renderer repair and a fresh complete matrix.
+The oracle remains unchanged. **07** is eligible and remains claimed by
+`/root/txt_declaration_implementer`, with all criteria unchecked, for a fresh
+complete matrix after the integrated renderer repair.
 Historical failed runs remain evidence; neither completes the twelve-output gate.
 Native actual-output and delivery tickets remain blocked. Bounded synthetic
 proof does not establish full-original or arbitrary representation coverage.
@@ -83,6 +84,16 @@ integrated. The user requested a pull request when everything is complete; creat
 it after implementation and required acceptance, then attach it to this chat.
 
 ## Comments
+
+- 2026-10-06 (/root/integration_merger): Integrated diagnostic-link repair by
+  `git merge --ff-only 30beacbdcdd6ee4c8d827db954b273f1d8958cef` from clean
+  root `43bd85ae5716b738622503969506fdace632643e`; exact clean worker/ancestry
+  confirmed. Final delta from independent CODE `a433040a87e50584447bbb62c013b9b6139cd746`
+  is only ticket 02 metadata. Bounded independent PASS covers 21 unique handwritten
+  and 291 maintained controls; root affected gap/image/type/architecture tests
+  pass **254 in 31.18s**, diff check clean. Ticket 02 is resolved; ticket 07
+  remains eligible/claimed with all criteria unchecked. Historical matrix FAIL
+  evidence is retained. Full matrix/native/user/final release gates remain open.
 
 - 2026-10-06 (/root/integration_merger): Integrated repaired reopened 06 with
   `git merge --ff-only 40669c807372c5463de279a3842d55a12f497f0e` from clean

@@ -32,6 +32,34 @@ User Stories 1–20, 24, 40–50, 58–62, 68–70; Implementation Decisions 8�
 
 ## Comments
 
+- 2026-10-06 (/root/integration_merger): Integrated exact verified final head
+  `30beacbdcdd6ee4c8d827db954b273f1d8958cef` from `codex/ml-v3-02-gap-links`
+  with `git merge --ff-only 30beacbdcdd6ee4c8d827db954b273f1d8958cef` from
+  clean root `43bd85ae5716b738622503969506fdace632643e`; clean worker and
+  ancestry exit 0 confirmed. Final delta from independently verified CODE
+  `a433040a87e50584447bbb62c013b9b6139cd746` lists only this ticket metadata;
+  verified code/test bytes are unchanged. Independent
+  `tmp/ml-implementation/07/verifier-gap-code-report-a433040.json` PASS covers
+  **21 unique handwritten controls**, **291 maintained in 34.72s** and seven
+  coherent report/notice lies rejected with accurate rehashed receipts. Source,
+  core, contracts, oracle, versions and authored-document/resource renderers
+  remain unchanged; historical failed matrix evidence is retained.
+
+  Merged root command with explicit `PYTHONPATH=<root>/src;<root>`:
+  `.venv/Scripts/python.exe -m pytest -q tests/application/test_gap_diagnostic_links_workflow.py tests/application/test_absent_note_images_workflow.py tests/application/test_type_source_gaps_workflow.py tests/test_architecture.py --basetemp=tmp/m02links -o cache_dir=tmp/ml-implementation/merger/c02links`
+  passed **254 tests in 31.18s**, exit 0.
+  `git diff --check 43bd85ae5716b738622503969506fdace632643e..30beacbdcdd6ee4c8d827db954b273f1d8958cef`
+  passed, exit 0. Worker **380 affected checks**, Ruff on 133 files and pip PASS
+  remain attributed evidence. No full suite/matrix/package/environment/UI work
+  repeated here. Only small worker `progress.txt` copied to ignored
+  `tmp/ml-implementation/02/selectedproof/progress.txt` before later archival.
+
+  Reopened diagnostic criterion is resolved with bounded proof. Ticket 07 remains
+  eligible and claimed by the original-matrix implementer, every criterion
+  unchecked. Full twelve-original-output/native/user/release gates remain open;
+  tickets 07–09 are not closed by this repair. No originals/retained-vault changes,
+  PR or push performed.
+
 - 2026-10-06 (/root/txt_oracle_implementer): Completed the reopened shared
   diagnostic formatting repair on `codex/ml-v3-02-gap-links`, based on verified
   root `43bd85ae5716b738622503969506fdace632643e`. Root remained unchanged;
