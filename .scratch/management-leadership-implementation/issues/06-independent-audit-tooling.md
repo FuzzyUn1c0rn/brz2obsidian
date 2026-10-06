@@ -1,7 +1,7 @@
 # 06: Extend the independent raw-source audit to the new conversion policy
 
-Status: resolved
-Assignee: /root/independent_audit_implementer
+Status: claimed
+Assignee: /root/txt_oracle_implementer
 Approved: 2026-10-06
 Specification: [Accepted conversion specification](../spec.md)
 
@@ -11,7 +11,7 @@ Specification: [Accepted conversion specification](../spec.md)
 
 ## Acceptance criteria
 
-- [x] Extend the existing standard-library-only independent oracle and preserve its import-boundary checks. Derive included identities, references, safe evidence, selections/paths, graph/assignments, supplied-body expected adaptations, absent-declaration predicates, image eligibility/associations/order and provider effects directly from raw original source facts. Production filtered snapshots/counts/dispositions/manifests are observed output, never expected preservation truth.
+- [ ] Extend the existing standard-library-only independent oracle and preserve its import-boundary checks. Derive included identities, references, safe evidence, selections/paths, graph/assignments, supplied-body expected adaptations, absent-declaration predicates, image eligibility/associations/order and provider effects directly from raw original source facts. Production filtered snapshots/counts/dispositions/manifests are observed output, never expected preservation truth.
 - [x] Audit exact safe originals and all required payload hashes/lengths, every supplied-body edit, authored-reference accounting, explicit generated presentation obligations, resolving diagnostic links, raw state/path/length/outcome, complete category membership/hierarchy/native support and excluded-content absence. Do not infer recovery, emptiness or original-note bytes for absent bodies.
 - [x] Positive public synthetic controls exercise all behavior slices and earlier supported cases independently. Corruption controls falsify included-body text, unsafe/safe evidence, excluded identities/owned bytes/labels, missing/duplicate/misowned/generated-order embeds, gap predicates, fabricated originals/reference credit, neutral/provider/override effects, graph/membership/navigation and diagnostics.
 - [x] Corruption tests recompute counts and file receipts consistently before rejection, proving semantic preservation rather than only manifest mismatch. A structurally valid forged receipt or clean production convention checker cannot mask each corruption. Retain meaningful existing controls and no private archive in public tests.
@@ -29,6 +29,17 @@ Existing independent raw-source oracle/driver public callables and CLI with synt
 User Stories 16–20, 32–39, 41–49, 54–65, 68–70; Implementation Decisions 1–25 as independently audited obligations; Testing Decisions 5–10, 12–17, 20.
 
 ## Comments
+
+- 2026-10-06 (/root): Reopened raw scope interpretation after the actual
+  original D matrix exposed five included-owner pairs of physically absent,
+  positive-length Type-15 TXT declarations. The independent scope guard also
+  rejects all duplicate local declaration paths, although these rows meet the
+  already reviewed TXT absence policy. Derive the narrow exception directly
+  from raw records, states and physical ZIP absence. Keep distinct declarations
+  and truthful accounting; present or unsupported duplicate claims remain
+  refusals. Do not share production interpretation helpers or use emitted
+  dispositions as expected truth. The outer-source repair proceeds separately;
+  ticket 07 stays incomplete until a fresh twelve-output original matrix passes.
 
 - 2026-10-06 (/root/integration_merger): Integrated verified repaired candidate
   `e2d95ebc07187d53d5767879cff028f916032b13` from `codex/ml-v3-06` by

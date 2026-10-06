@@ -1,7 +1,7 @@
 # 01: Exclude forgotten thoughts throughout inspection and conversion
 
-Status: resolved
-Assignee: /root/label_preservation_implementer
+Status: claimed
+Assignee: /root/txt_declaration_implementer
 Approved: 2026-10-06
 Specification: [Accepted conversion specification](../spec.md)
 
@@ -11,7 +11,7 @@ Specification: [Accepted conversion specification](../spec.md)
 
 ## Acceptance criteria
 
-- [x] Default exclusion applies to every BRZ archive from a valid populated ForgottenDateTime, independently of attachment state. There is no include-forgotten option. Establish trustworthy identities/ownership before scoping; malformed scope markers and unsafe source identities/paths still refuse.
+- [ ] Default exclusion applies to every BRZ archive from a valid populated ForgottenDateTime, independently of attachment state. There is no include-forgotten option. Establish trustworthy identities/ownership before scoping; malformed scope markers and unsafe source identities/paths still refuse.
 - [x] Excluded subjects contribute no assigned/reserved target, note, owned local/external asset, original copy, icon/provider effect, classification/tag membership, relationship, stub, warning subject, individual exclusion identity/list/count, associated raw record or unsafe history. Included counts describe included scope. Omitted subjects cannot affect collision names, greedy selection or ordering.
 - [x] Remove an entire authored linked phrase/embed resolving to an excluded subject, including label/target, without a plain-text reminder or deletion marker. Preserve other text, code literals, Unicode and newline spelling. Unknown nonexcluded targets retain refusal. No title/pixel matching removes unrelated included content.
 - [x] Preserve byte-exact safe originals and provably included raw evidence with original values and omission/null distinctions. Omit unsafe exact originals rather than editing and calling them exact; omit unsafe fields/records/whole unscopable history collections. Raw spans, embedded state-map keys and guide-linked evidence cannot reintroduce exclusions.
@@ -30,6 +30,18 @@ Actual synthetic ZIPs through public inspect/convert, thin text/JSON commands an
 User Stories 15–16, 32–39, 49–50, 56–57, 60–62, 69–70; Implementation Decisions 1–8, 20–21, 23, 25; Testing Decisions 1–3, 5, 7, 10, 16–17, 20. Read the accepted specification; these references identify emphasis, not permission to ignore cumulative requirements.
 
 ## Comments
+
+- 2026-10-06 (/root): Reopened the ownership-establishment criterion after the
+  actual original-source matrix at `30ed232` proved a compatibility defect.
+  Five pairs of included, distinct Type-15 declarations refer to five physically
+  absent TXT paths. Each matches the existing reviewed positive-length TXT
+  absence rule. The global declaration guard rejects them before that rule;
+  no present payload has ambiguous ownership. Independent raw-source
+  corroboration agrees. Repair narrowly at the outer source boundary, retaining
+  identity/path/state/ownership safeguards and per-declaration warning/evidence
+  accounting. Unsupported or present-payload duplicate claims still refuse.
+  Ticket 06 independently repairs its raw-source expectation. Ticket 07 remains
+  claimed and incomplete; a fresh full matrix follows verified integration.
 
 - 2026-10-06 (/root/integration_merger): Resolved reopened ticket 01 cumulatively
   after integrating both independently verified residual guard and label repair.

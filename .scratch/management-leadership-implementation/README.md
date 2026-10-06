@@ -40,18 +40,17 @@ Tickets **02: Display owned images when an ordinary thought note is absent** and
 and integrated. **03: Keep category dashboards usable through missing type
 notes and icons** is also resolved and integrated. **05: Prove the combined
 conversion and publication guarantees** is resolved with bounded synthetic
-proof. **06: Extend the independent raw-source audit to the new conversion
-policy** is resolved and integrated. **01: Exclude
-forgotten thoughts throughout inspection and conversion** is resolved again
-after independently verified residual privacy guard and included-label repairs;
-entities and escaped punctuation survive reference adaptation. Bounded evidence
-does not establish arbitrary representation coverage. **07: Audit complete
+proof. **01: Exclude forgotten thoughts throughout inspection and conversion**
+and **06: Extend the independent raw-source audit to the new conversion policy**
+are reopened and claimed for a narrow known-absent TXT declaration compatibility
+repair. Their earlier privacy, label and audit controls remain retained evidence.
+Bounded evidence does not establish arbitrary representation coverage. **07: Audit complete
 preservation across all four original archives** remains claimed with all criteria
 unchecked. Its first matrix passed nine A/B/C outputs but D refused before
 publication. It is blocked by newly proved source/global-scope and independent
 oracle duplicate-declaration compatibility repairs for included known-absent
-Type-15 TXT declarations. Coordinator will reopen the responsible 01 and 06
-slices after this evidence integration. Native actual-output and delivery
+Type-15 TXT declarations. The responsible 01 and 06 slices now proceed in
+separate isolated branches. Native actual-output and delivery
 tickets remain blocked; a fresh complete twelve-output matrix is required.
 Type gaps consume the shared source-gap capability
 from ordinary fallback. Combined safety and independent audit tooling can then
