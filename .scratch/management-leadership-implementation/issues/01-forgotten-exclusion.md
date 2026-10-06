@@ -1,7 +1,7 @@
 # 01: Exclude forgotten thoughts throughout inspection and conversion
 
-Status: resolved
-Assignee: /root/forgotten_reference_implementer
+Status: claimed
+Assignee: /root/label_preservation_implementer
 Approved: 2026-10-06
 Specification: [Accepted conversion specification](../spec.md)
 
@@ -30,6 +30,8 @@ Actual synthetic ZIPs through public inspect/convert, thin text/JSON commands an
 User Stories 15–16, 32–39, 49–50, 56–57, 60–62, 69–70; Implementation Decisions 1–8, 20–21, 23, 25; Testing Decisions 1–3, 5, 7, 10, 16–17, 20. Read the accepted specification; these references identify emphasis, not permission to ignore cumulative requirements.
 
 ## Comments
+
+- 2026-10-06 (/root/label_preservation_implementer): Claimed cumulative included-reference label repair on clean guard head 9d69a6509b20c0e85e966149cc5cb0bc22667593, with fbab5d89 confirmed as ancestor. Use approved actual-ZIP Workflow and public source-note boundaries to preserve entity/escaped label characters and verify exact spans, safe original bytes and accounting. Residual private refusal and whole excluded phrase removal remain required. Parent completion remains independently verified and coordinator-owned.
 
 - 2026-10-06 (/root/forgotten_reference_implementer): Bounded reopened repair
   implemented at runtime commit `cb256bdbb89f77ac8265c5d28713a19f0ac05b41`,
