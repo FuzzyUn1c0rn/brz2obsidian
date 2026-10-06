@@ -35,17 +35,17 @@ and [workspace housekeeping](../../docs/workspace.md).
 
 ## Working the frontier
 
-Tickets **01–07** are resolved and integrated. Complete original-input
+Tickets **01–08** are resolved and integrated. Complete original-input
 preservation passed the fresh m5 twelve-output matrix and separate independent
 raw-source verification at frozen runtime `e2c5fc3f05d2daa0d0547d2bbaa2b12557a248b5`.
 The prior m3/m4 failures remain retained history; verified source/oracle TXT and
-diagnostic-link repairs precede m5. **08: Verify actual converted vaults in native
-Obsidian** is claimed by `/root/native_vault_reviewer`. Native review follows the
-user's strategic visual-sampling instruction; complete automated preservation
-retains its full scope. Final review, package/release checks and
-the actual-vault user verdict remain pending; automated preservation does not
-supply native application or user acceptance, nor arbitrary representation
-coverage.
+diagnostic-link repairs precede m5. Actual-output native review passed strategic
+samples in observed Obsidian 1.14.4, with independent source/CSV/ledger/checker
+evidence and retained complete automated preservation. **09: Deliver the reviewed
+release after actual-vault user acceptance** is eligible and unclaimed. Final
+review, package/release checks and the actual-vault user verdict remain pending;
+neither automated nor agent native review supplies user acceptance or arbitrary
+representation coverage.
 
 Claim an eligible ticket before implementation and record its assignee. Use an
 isolated managed worktree/branch based on this integration tip for each implementer,
@@ -77,6 +77,28 @@ integrated. The user requested a pull request when everything is complete; creat
 it after implementation and required acceptance, then attach it to this chat.
 
 ## Comments
+
+- 2026-10-06 (/root/integration_merger): Integrated independently verified native
+  evidence candidate `7cb3ed2510d272a3fa269963caa3f30c389557f5` using
+  `git merge --ff-only 7cb3ed2510d272a3fa269963caa3f30c389557f5` from clean
+  root `6cb5f75daa0ec048d4c95e82f8d4499ad918a1fe`; clean exact worker and
+  ancestry exit 0 confirmed. Four public evidence/guidance files only;
+  `git diff --exit-code 6cb5f75daa0ec048d4c95e82f8d4499ad918a1fe 7cb3ed2510d272a3fa269963caa3f30c389557f5 -- src tests pyproject.toml requirements.txt`
+  returned 0, and baseline diff check passed. No runtime regression, matrix,
+  checker, package, environment or UI rerun was needed for this docs-only merge.
+
+  Reviewed aggregate report/ticket/guidance against root ignored
+  `tmp/ml-implementation/08/native-evidence-7cb3ed25/verify/final-candidate-independent.json`
+  bounded PASS. Independent retained-inventory/maintenance joins support native
+  review observations, source-bound handoff, actual C145 CSV and D47/330 ledger,
+  template/provider/rename cases and 45 read-only checker operations. Strategic
+  rendering samples extrapolate equivalent cases; full source/body/image audits
+  remain ticket 07 evidence. Observed app 1.14.4 differs from declared/stored
+  1.13.7; the optional Obsidian CLI stayed disabled. Sole UI reviewer observations
+  support pixel/rendering claims; helper verification did not repeat them.
+  Four originals, 562 retained files, audited outputs and clean user-copy guard
+  remain preserved. Ticket 08 is resolved; 09 eligible/unclaimed with actual user
+  verdict, cumulative review and release gates pending. No delivery declaration.
 
 - 2026-10-06 (/root): The user requested strategic native/visual sampling during
   ticket 08 and made this the future repository default. Recorded the policy in
