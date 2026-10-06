@@ -1,6 +1,7 @@
 # 04: Preserve ordinary-to-category hierarchy in both directions
 
-Status: ready-for-agent
+Status: claimed
+Assignee: /root/hierarchy_implementer
 Approved: 2026-10-06
 Specification: [Accepted conversion specification](../spec.md)
 
@@ -27,6 +28,10 @@ Public inspect/convert over actual synthetic archives, independently expected gr
 User Stories 27–31, 49–50, 56–57, 60–62, 69–70; Implementation Decisions 1–7, 15–16, 20–23, 25; Testing Decisions 1–3, 7–8, 10, 16–17, 20.
 
 ## Comments
+
+- 2026-10-06 (/root): Claimed after ticket 01's independently verified integration
+  at `b5d6238`. Implement independently of image fallback in a managed worktree/
+  branch with public-seam TDD; coordinate shared rendering/planning changes.
 
 - 2026-10-06 (/root): Published after the user approved all nine tickets and their
   dependencies, then explicitly invoked implement-spec for complete implementation.

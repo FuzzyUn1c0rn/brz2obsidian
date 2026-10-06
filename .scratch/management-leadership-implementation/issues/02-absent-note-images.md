@@ -1,6 +1,7 @@
 # 02: Display owned images when an ordinary thought note is absent
 
-Status: ready-for-agent
+Status: claimed
+Assignee: /root/image_fallback_implementer
 Approved: 2026-10-06
 Specification: [Accepted conversion specification](../spec.md)
 
@@ -30,6 +31,10 @@ Public inspect/convert with independently authored synthetic ZIP/expected bytes,
 User Stories 1–20, 24, 40–50, 58–62, 68–70; Implementation Decisions 8–12, 17–23, 25; Testing Decisions 1–6, 9–10, 17, 20.
 
 ## Comments
+
+- 2026-10-06 (/root): Claimed after ticket 01's independently verified integration
+  at `b5d6238`. Implement in its own managed worktree/branch with public-seam TDD;
+  coordinate shared rendering/planning changes with category hierarchy.
 
 - 2026-10-06 (/root): Published after the user approved all nine tickets and their
   dependencies, then explicitly invoked implement-spec for complete implementation.

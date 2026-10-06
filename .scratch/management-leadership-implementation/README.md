@@ -75,6 +75,11 @@ it after implementation and required acceptance, then attach it to this chat.
 
 ## Comments
 
+- 2026-10-06 (/root): Claimed the two eligible slices after verified ticket 01:
+  ordinary absent-note images and reciprocal category hierarchy. Each uses its
+  own managed worktree/branch based on this integration tip. Type-gap work remains
+  blocked by the image slice; complete-source/native/user gates remain pending.
+
 - 2026-10-06 (/root/integration_merger): Integrated ticket 01 by
   `git merge --ff-only 5fbb5ccf3d4c3cfb02779c25c876ddfa3bb179c3` from clean
   integration baseline `929f2a8735e99b66ee25f45d159b8b3f1d9c0916`.
