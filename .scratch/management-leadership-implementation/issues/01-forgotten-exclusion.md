@@ -1,6 +1,6 @@
 # 01: Exclude forgotten thoughts throughout inspection and conversion
 
-Status: claimed
+Status: resolved
 Assignee: /root/label_preservation_implementer
 Approved: 2026-10-06
 Specification: [Accepted conversion specification](../spec.md)
@@ -13,7 +13,7 @@ Specification: [Accepted conversion specification](../spec.md)
 
 - [x] Default exclusion applies to every BRZ archive from a valid populated ForgottenDateTime, independently of attachment state. There is no include-forgotten option. Establish trustworthy identities/ownership before scoping; malformed scope markers and unsafe source identities/paths still refuse.
 - [x] Excluded subjects contribute no assigned/reserved target, note, owned local/external asset, original copy, icon/provider effect, classification/tag membership, relationship, stub, warning subject, individual exclusion identity/list/count, associated raw record or unsafe history. Included counts describe included scope. Omitted subjects cannot affect collision names, greedy selection or ordering.
-- [ ] Remove an entire authored linked phrase/embed resolving to an excluded subject, including label/target, without a plain-text reminder or deletion marker. Preserve other text, code literals, Unicode and newline spelling. Unknown nonexcluded targets retain refusal. No title/pixel matching removes unrelated included content.
+- [x] Remove an entire authored linked phrase/embed resolving to an excluded subject, including label/target, without a plain-text reminder or deletion marker. Preserve other text, code literals, Unicode and newline spelling. Unknown nonexcluded targets retain refusal. No title/pixel matching removes unrelated included content.
 - [x] Preserve byte-exact safe originals and provably included raw evidence with original values and omission/null distinctions. Omit unsafe exact originals rather than editing and calling them exact; omit unsafe fields/records/whole unscopable history collections. Raw spans, embedded state-map keys and guide-linked evidence cannot reintroduce exclusions.
 - [x] Excluded providers remove membership/appearance effects, letting included members proceed under ordinary included selection; do not create category placeholders. An excluded designated Home retains required-entry refusal, with no replacement Home. Parse/refusal/failure output must not echo excluded identities, titles or content.
 - [x] Public inspect/convert workflow and text/JSON wrappers expose the scoped behavior and honest source measurements. Source-neutral contracts and policy, source module/profile, renderer and serialized result/record schemas advance to 3, package to 0.3.0; format stays 5. Establish the accepted common optional source-gap/generated-presentation contract and serialized shape with empty facts now, so later slices populate rather than silently redefine the closed version-3 shape. Preserve signatures/outcomes/exits, reject incompatible versions, and keep the separate checker at schema 1 unless its public shape changes. New absence features remain refused until their behavior slices land.
@@ -30,6 +30,51 @@ Actual synthetic ZIPs through public inspect/convert, thin text/JSON commands an
 User Stories 15–16, 32–39, 49–50, 56–57, 60–62, 69–70; Implementation Decisions 1–8, 20–21, 23, 25; Testing Decisions 1–3, 5, 7, 10, 16–17, 20. Read the accepted specification; these references identify emphasis, not permission to ignore cumulative requirements.
 
 ## Comments
+
+- 2026-10-06 (/root/label_preservation_implementer): Cumulative bounded label
+  repair implemented at `5d9e8d354e2bf96c9cc18154f03c797aa0b25f53` and verified
+  on merge `b4a5ef0d97b6a82c383bcf5d84feecbda5c188f7`. The installed official
+  markdown-it entity/escape rules emit decoded `text_special` content during
+  inline parsing; the label collector now retains that content alongside text
+  and inline code. No other runtime behavior or public seam changed. The
+  unchanged destination alias adaptation still safely handles pipe/bracket and
+  line-break characters, while reference records retain the actual display text.
+
+  Approved public actual-ZIP Workflow TDD first failed on `[A &amp; B]`, whose
+  destination alias lost `&`; after the one-line repair the same test passed.
+  Eleven added public cases cover named/numeric/Unicode entities, escaped
+  literal stars and safe alias punctuation, nested labels, emphasis/code/plain
+  text, mixed source CR/LF/CRLF, image alt/title destination-only adaptation,
+  exact source spans and source-target/canonical-target record joins, safe
+  byte-exact originals, reference accounting and unchanged input ZIP bytes.
+  The combined forgotten control removes the entire excluded phrase, omits its
+  unsafe original, leaves no private evidence, and preserves the included label.
+  Existing unknown-target, same-title/pixel and residual-private-refusal controls
+  also pass. Earlier guard proof belongs to `cb256bd`/`9d69a65` and its independent
+  verifier, rather than this new label repair.
+
+  All Python commands used only
+  `C:/Users/stefa/projects/brz2obsidian/.venv/Scripts/python.exe`, with
+  `PYTHONPATH=C:/Users/stefa/.codex/worktrees/ml-v3-labels/brz2obsidian/src;C:/Users/stefa/.codex/worktrees/ml-v3-labels/brz2obsidian`.
+  Red/green command: `-m pytest -q tests/application/test_links_workflow.py -k included_entity --basetemp=tmp/ml-labels/r -o cache_dir=tmp/ml-labels/cache`
+  failed once, then the same command with base `tmp/ml-labels/g` passed once.
+  Affected command: `-m pytest -q tests/application/test_links_workflow.py tests/sources/test_note_spans.py tests/application/test_forgotten_workflow.py tests/sources/test_reader.py tests/application/test_alternate_source.py tests/application/test_alternate_v2_source.py tests/test_architecture.py --basetemp=tmp/ml-labels/a -o cache_dir=tmp/ml-labels/cache`
+  passed **160 tests in 18.01s**. After merging latest integration
+  `dd286452c6304c37f12357c4b5acd5a1e0b978ca`, final command
+  `-m pytest -q --basetemp=tmp/ml-labels/p -o cache_dir=tmp/ml-labels/cache`
+  passed **1,127 tests in 168.07s**. `-m ruff check --no-cache`,
+  `-m ruff format --check` (126 files), `-m pip check` and
+  `git diff --check 9d69a65..HEAD` passed. Both guard `9d69a65` and latest
+  integration `dd28645` remain ancestors; the metadata conflict retained both
+  implementer and partial-integration histories. Logs: ignored
+  `tmp/ml-labels/{red,green,affected,full,lint,format,pip,parser-semantics}.txt`.
+
+  Local resolution checks the reopened criterion against this bounded proof and
+  the retained prior ticket evidence. Independent exact-head verification and
+  parent integration remain coordinator-owned. No original/private source,
+  retained vault, native app, PR or remote was modified. Complete original-source,
+  native and actual-user delivery gates remain pending. This evidence-only
+  completion commit requires no duplicate full-suite run.
 
 - 2026-10-06 (/root/label_preservation_implementer): Claimed cumulative included-reference label repair on clean guard head 9d69a6509b20c0e85e966149cc5cb0bc22667593, with fbab5d89 confirmed as ancestor. Use approved actual-ZIP Workflow and public source-note boundaries to preserve entity/escaped label characters and verify exact spans, safe original bytes and accounting. Residual private refusal and whole excluded phrase removal remain required. Parent completion remains independently verified and coordinator-owned.
 
