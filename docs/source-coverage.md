@@ -8,6 +8,13 @@ Those archives are acceptance cases, not a fingerprint allowlist. Another
 format-5 Brain may convert if it fits these meanings; its version alone does
 not establish support. Invalid, ambiguous, corrupt or unsupported input refuses.
 
+The version-3 profile combines default included scope, reviewed ordinary/type
+source gaps and category hierarchy with the prior resource rules. Public mixed
+actual-ZIP controls exercise those interactions and real publication failures;
+they are bounded synthetic coverage. Complete four-original preservation,
+native actual-output review and actual-user acceptance remain separate pending
+gates in the [current frontier](../.scratch/management-leadership-implementation/README.md).
+
 ## Records, Home and relationships
 
 Known root files are `meta.json`, `thoughts.json`, `links.json`,

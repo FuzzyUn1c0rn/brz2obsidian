@@ -53,10 +53,38 @@ acceptance remain separate implementation gates.
 The combined v2 actual-ZIP fixture independently checks seven imported notes,
 eight byte-preserved payloads and 19 support artifacts, including exceptional
 Markdown/image references, graph/tags, category membership/icon snapshots/dates,
-the TXT/PDF gap and timed video. Library/CLI schema 2, warning exit 2 and the
+the TXT/PDF gap and timed video. Current library/CLI schema 3, warning exit 2 and the
 source-free checker schema 1/clean exit 0 agree. Exact/repeat/reordered synthetic
 outputs retain logical records and output bytes; caller inventory/bytes remain
 unchanged by inspection/checking/refused reconversion.
+
+The combined v3 actual-ZIP fixture extends that same resource collection with
+forgotten owned content/incident hierarchy, collision naming, a physically blank
+supplied note, an absent ordinary note with two usable original PNGs, simultaneous
+type note/icon gaps, an explicit member override, two included ordinary parents
+of the category and an opaque ZIP resource. Independent literals require 11
+included items, 11 relationships, seven imported notes, 11 exact payload copies,
+18 support files, three source gaps and two generated embeds in 36 published
+files. Missing source bodies/icons add neither fake original copies nor authored
+reference credit. Expected bytes, graph/membership/provider joins, generated
+image order, scoped diagnostics, privacy, metadata and receipt inventory are
+checked at public workflow/CLI/checker boundaries. Console/module text and JSON
+routes agree. Inspection and checker calls preserve caller inventories/bytes;
+checking a deleted generated image detects the current defect despite the
+historical verified migration record.
+
+The v3 publication controls reach generated fallback/category notes, each
+original fallback image, report and record with real partial writes, missing,
+truncated or same-length corrupted staging bytes, and source mutation during
+verification. Actual owner-directory Windows junctions and rename/rmdir races
+preserve caller files. Source-stream open/partial-read/short-copy controls close
+the streams and clean owned staging. Post-commit and teardown failures retain
+the complete verified 36-file receipt and available actual counts. Conversion
+reprepares a source changed after inspection. Exact/repeat/root-record and ZIP
+reordering preserve all content, generated/affected-member ordering and logical
+facts, apart from explicit fingerprint/digest, raw evidence pointers/order,
+relationship-derived evidence order and clock/run/bookmark provenance. These
+bounded synthetic checks leave full-original, native and actual-user gates open.
 
 Focused v2 controls reach each selected template/Base/configuration/guide before
 injecting partial writes, deletion/truncation/same-length corruption or source
@@ -146,6 +174,19 @@ remain in `brz/`. Historical artifact paths are mapped in
 [workspace housekeeping](workspace.md); public reports are aggregate.
 
 ## Local package and documented examples
+
+On 2026-10-06, ticket 05 built the local `0.3.0` wheel with the project
+environment and `pip wheel --no-deps --no-build-isolation`. All 57 runtime
+package modules matched worktree source bytes; other entries were distribution
+metadata only. Metadata/entry point declare the current version, Python >=3.14
+and runtime Pydantic, markdown-it-py, PyYAML and Pillow. The unchanged actual
+README default-workflow and architecture explicit-workflow/direct-module Python
+examples ran against the complete mixed v3 archive, with caller paths substituted.
+Each produced the expected 36-file verified vault and passed the documented
+checker example. A separate subprocess imported from the wheel directly without
+installation and passed module inspect/convert/check-vault JSON operations with
+exits 2/2/0, schema 3/checker 1 and two actual generated embeds. Source bytes
+remained unchanged. Ticket 05 records the commands and bounded evidence.
 
 On 2026-10-05, the local `0.2.0` wheel built through the project environment with
 `pip wheel --no-deps --no-build-isolation`. Its metadata declares Python >=3.14,

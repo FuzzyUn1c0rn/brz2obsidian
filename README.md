@@ -71,8 +71,9 @@ Build a local wheel with the same environment when needed:
 .\.venv\Scripts\python.exe -m pip wheel --no-deps --no-build-isolation --wheel-dir tmp/build/wheels .
 ```
 
-Runtime dependencies are Pydantic, markdown-it-py and PyYAML. PyYAML serves the
-read-only checker; setuptools builds the package. The checked wheel contains
+Runtime dependencies are Pydantic, markdown-it-py, PyYAML and Pillow. PyYAML serves the
+read-only checker; Pillow validates pixels for generated image presentations;
+setuptools builds the package. The checked wheel contains
 package modules and distribution metadata, with no archives, vaults or tests.
 
 ## Inspect and convert
@@ -110,6 +111,14 @@ version-3 `brz2obsidian.result` envelope to stdout. Unmeasured counts are `null`
 and `receipt` is `null` until actual verified publication. A later teardown
 failure can return `failed` with a retained receipt and `publication_occurred`
 issue: inspect that vault before retrying. Argument errors exit 1; help exits 0.
+
+The v3 combined synthetic gate checks forgotten exclusion, supplied Markdown,
+ordered image fallback, neutral category appearance, reciprocal category hierarchy
+and existing resources together. It also injects real filesystem/stream failures
+at the new artifact paths and verifies complete durable receipts after later
+failures. This bounded public proof and the local `0.3.0` wheel/example smoke
+supplement the historical v2 delivery evidence; full four-original audits,
+native actual-output review and the user's actual-vault verdict remain pending.
 
 For scripts that capture stdout as UTF-8, set
 `$env:PYTHONIOENCODING = 'utf-8'` before running the CLI; otherwise Python uses
