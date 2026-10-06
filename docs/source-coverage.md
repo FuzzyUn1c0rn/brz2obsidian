@@ -1,6 +1,6 @@
 # Reviewed source coverage
 
-Version 2 support covers reviewed feature classes in all three accepted
+Historical version 2 support covers reviewed feature classes in all three accepted
 TheBrain 15 BRZ exchange-format-5 exports and controlled synthetic fixtures.
 All three archives use the same application version; the newer acceptance case
 exercises additional features rather than a new source-format version.
@@ -11,9 +11,9 @@ not establish support. Invalid, ambiguous, corrupt or unsupported input refuses.
 The version-3 profile combines default included scope, reviewed ordinary/type
 source gaps and category hierarchy with the prior resource rules. Public mixed
 actual-ZIP controls exercise those interactions and real publication failures;
-they are bounded synthetic coverage. Complete four-original preservation,
-native actual-output review and actual-user acceptance remain separate pending
-gates in the [current frontier](../.scratch/management-leadership-implementation/README.md).
+they are bounded synthetic coverage. Complete four-original preservation and
+native actual-output review passed; independent final review and actual-user
+acceptance remain pending gates in the [current frontier](../.scratch/management-leadership-implementation/README.md).
 
 ## Records, Home and relationships
 
@@ -126,8 +126,8 @@ Thought-owned attachments use SourceType 2:
 
 | Type / NoteType | Supported interpretation |
 | --- | --- |
-| 1 / 4 | Thought Markdown at owner/Location; active content plus exact `.md.original` backup |
-| 1 / 0 | Ordinary file, except a sole nonempty canonical `Notes.md` on an ordinary thought: active Markdown plus exact original backup. Empty decoded placeholders remain backups without content eligibility. |
+| 1 / 4 | Thought Markdown at owner/Location; active content plus a safe exact `.md.original` backup; unsafe originals are omitted |
+| 1 / 0 | Ordinary file, except a sole nonempty canonical `Notes.md` on an ordinary thought: active Markdown plus a safe exact original backup; unsafe originals are omitted. Empty decoded placeholders remain backups without content eligibility. |
 | 3 / 0 | Exact external HTTP/HTTPS URL reference; populated reviewed YouTube metadata adds independently derived native video presentation |
 | 5 / 0 | Decorative icon at owner/.data/Location; copied without Resources clutter |
 | 8 / 0 | Absolute Windows directory reference rendered as file URI |
@@ -202,7 +202,11 @@ Wrong state, ownership, role, stem, ambiguous identity or absent/corrupt PDF
 refuses rather than widening the zero-length rule. A has two icon warnings; B has
 nine positive-length absent-TXT warnings under seven owners; C has four
 zero-length absent-TXT warnings under two owners, each associated with its intact
-PDF. All nine exact/repeat/reordered conversions exit 2. Unmatched missing notes/files/images
+PDF. Those historical nine v2 exact/repeat/reordered conversions exit 2.
+The current v3 four-original matrix also exits 2 for all twelve conversions;
+original D preserves 359 supplied bodies and 63 fallback images, with 47
+definitions/330 members, 1,017 present payloads, 1,552 actual files and 93 warnings.
+See the [complete scoped matrix](../.scratch/management-leadership-implementation/research/four-archive-preservation.md). Unmatched missing notes/files/images
 refuse as missing required payload. Unknown findings/profile incompatibility and
 unsupported meanings cannot be downgraded by caller allowlists.
 
@@ -212,8 +216,8 @@ search PDF body text. This converter does not extract/index PDFs or promise
 equivalent TheBrain PDF body search.
 
 Name sanitation, simple graph presentation and intentional uncreated targets
-are adaptations rather than extra warnings. See [complete independent
-preservation results after the presentation refinement](../.scratch/brz-to-obsidian-v2-implementation/research/colour-property-refinement.md)
+are adaptations rather than extra warnings. See [complete current four-original
+preservation results](../.scratch/management-leadership-implementation/research/four-archive-preservation.md)
 and the [source-feature-to-vault comparison](../.scratch/brz-to-obsidian-v2-implementation/source-feature-mapping.md).
 
 ## Reviewed absent-note image display (version 3)
@@ -248,7 +252,7 @@ findings keep their distinct rules and no-note behavior; their checklist labels
 an assigned uncreated target explicitly rather than making a resolving-link
 claim. Titles and IDs provide source lookup; no native launch locator is inferred.
 A clean source-free checker confirms current references, not missing prose
-recovery or the later original-archive preservation/native acceptance gates.
+recovery or complete source preservation/native acceptance.
 
 ## Reviewed category source gaps (version 3)
 

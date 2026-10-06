@@ -5,7 +5,8 @@ exchange-format-5 exports into a fresh standard Obsidian vault. It preserves
 included Markdown, present attachment bytes, safe original JSON evidence, Home, hierarchy,
 Related links and tags. Unsupported source meanings are refused.
 
-Version 2 (`0.2.0`) adds thought types as linked categories, native dashboards
+The delivered version 2 (`0.2.0`) added thought types as linked categories, native
+dashboards
 and templates, source dates, editable icon inheritance, the reviewed unusual
 Markdown note, zero-length absent-TXT findings, YouTube presentation and a
 read-only vault checker. All three supplied exports use the same TheBrain
@@ -61,7 +62,9 @@ recreate it on a fresh checkout. `pyproject.toml` declares dependency families;
 `requirements.txt` pins the compatibility-checked runtime/build/development
 packages. Tested runtime support is native Windows / CPython 3.14.8. Package
 metadata requires Python >=3.14; other platforms and later runtimes have not
-been accepted. Native presentation uses Obsidian 1.13.7.
+been accepted. The renderer declares Obsidian 1.13.7 as its target metadata. Current native
+review observed Obsidian 1.14.4; that observation does not establish a new
+1.13.7 run.
 
 See [workspace housekeeping](docs/workspace.md) for source exports, retained
 vaults, backups and disposable development files. Use ignored `tmp/<effort>/`
@@ -119,8 +122,11 @@ ordered image fallback, neutral category appearance, reciprocal category hierarc
 and existing resources together. It also injects real filesystem/stream failures
 at the new artifact paths and verifies complete durable receipts after later
 failures. This bounded public proof and the local `0.3.0` wheel/example smoke
-supplement the historical v2 delivery evidence; full four-original audits,
-native actual-output review and the user's actual-vault verdict remain pending.
+supplement the historical v2 delivery evidence. All twelve four-original
+exact/repeat/reordered outputs passed complete independent preservation, and
+actual-output native review passed in Obsidian 1.14.4. The user's actual-vault
+verdict and independent final review remain pending. See the
+[release verification record](.scratch/management-leadership-implementation/research/release-verification.md).
 
 For scripts that capture stdout as UTF-8, set
 `$env:PYTHONIOENCODING = 'utf-8'` before running the CLI; otherwise Python uses
@@ -128,7 +134,7 @@ the Windows stream encoding. This affects encoding, not the JSON schema.
 
 ## Use the vault
 
-Open the generated folder in standard Obsidian. The root `Home — <title>.md`
+Open the generated folder in standard Obsidian. The root `Home â€” <title>.md`
 is the starting note and native Home bookmark; other thought notes are under
 `Notes/`; reviewed thought types become notes under `Categories/`. Each typed
 ordinary member is materialized, including empty members, and receives linked
@@ -194,7 +200,9 @@ reciprocal migration sections. Conditional `Uncreated targets.md` and
 created-note memberships are available through native tag search.
 
 `Attachments/` groups resources by owner. Thought-note backups end in
-`.md.original`; decorative icons remain preserved without Resources clutter.
+`.md.original` when supplied bodies are safe to retain exactly. Unsafe originals
+are explicitly omitted; absent bodies have no original backup. Decorative icons
+remain preserved without Resources clutter.
 Inline images stay inline; additional files/external references appear in
 Resources. `MIGRATION REPORT.md` explains warnings and simplifications;
 `migration-record.json` retains source evidence, identities, target assignments,
@@ -247,9 +255,10 @@ and runnable composition examples](docs/architecture.md).
 ## Verification and private data
 
 See [test commands and native-review procedure](docs/testing.md), [complete
-current v2 preservation](.scratch/brz-to-obsidian-v2-implementation/research/category-bases-first-refinement.md)
-and the [completed actual-vault acceptance](.scratch/brz-to-obsidian-v2-implementation/issues/11-native-v2-acceptance-delivery.md).
-The [final native review](.scratch/brz-to-obsidian-v2-implementation/research/native-v2-acceptance.md)
+current v3 four-original preservation](.scratch/management-leadership-implementation/research/four-archive-preservation.md)
+and [current native review](.scratch/management-leadership-implementation/research/native-v3-acceptance.md).
+Historical v2 evidence includes the [completed actual-vault acceptance](.scratch/brz-to-obsidian-v2-implementation/issues/11-native-v2-acceptance-delivery.md).
+The [v2 final native review](.scratch/brz-to-obsidian-v2-implementation/research/native-v2-acceptance.md)
 records complete technical checks, independent review and the user's final approval.
 The [initial v2 preservation report](.scratch/brz-to-obsidian-v2-implementation/research/three-archive-preservation.md)
 retains the complete audit before the colour-property refinement.

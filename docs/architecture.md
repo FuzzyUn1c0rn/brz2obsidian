@@ -197,7 +197,9 @@ Keep the session open through publication. Context-managed payload streams are
 revoked on closure; later session use fails. Plans/artifacts bind to source
 SHA-256 and normalized snapshot digest. Publisher checks binding/consistency
 before commit. Large assets are streamed. Pure renderer reads no clock;
-metadata determines run facts and bookmark time. Workflow's default factory
+metadata determines run facts and bookmark time. The declared `obsidian_version`
+above is the renderer target, not the observed native review application version.
+Workflow's default factory
 reads time at the outer boundary; callers may inject a metadata factory.
 
 ## Result and migration-record schemas
@@ -206,7 +208,8 @@ reads time at the outer boundary; callers may inject a metadata factory.
 `schema_version=3`, `converter_version`, `operation`, `outcome`, `source_identity`,
 `profile_id`, `profile_version`, `counts`, `issues`, `inspection`, `receipt`.
 Unavailable fields/counts are `null`; issues is an array. Inspect returns planned
-item/tag targets, classification assignments, asset targets/inventory,
+item/tag targets, classification assignments, `icon_snapshots`,
+`source_gaps`, `generated_presentations`, asset targets/inventory,
 `DocumentInspection` metadata (digests, original asset, traced references and
 evidence, without authored text), adaptations, support artifacts, reserved
 support paths and pending checks with no receipt. These are planned obligations;
@@ -217,7 +220,8 @@ and, after commit, a receipt with actual inventory/counts. The result supports
 `migration-record.json` exposes `schema="brz2obsidian.migration"`, version 3,
 converter/renderer versions, `source_identity`, profile identity, `run_metadata`,
 `original_evidence`, `item_targets`, `asset_targets`, `relationships`,
-`tag_memberships`, `classification_assignments`, `support_artifacts`,
+`tag_memberships`, `classification_assignments`, `source_gaps`,
+`generated_presentations`, `support_artifacts`,
 `reserved_support_paths`, `adaptations`, `source_accounting`, `issues`, `counts` and
 `obsidian_configuration`. Document metadata/digests/references/owner targets
 are nested in item targets' `documents`; safe original bodies remain in copied
@@ -242,13 +246,16 @@ it imports only contracts and does not decode TheBrain fields.
 The package and default workflow identify the converter as `0.3.0`. Migration
 result/record schemas remain version 3, and the separately versioned convention
 checker remains `brz2obsidian.vault-check` version 1. This release version does
-not imply native acceptance. The accepted v2 audit remains historical evidence. Version-3 original-archive,
-native and user acceptance remain tracked in the
+not imply native acceptance. The accepted v2 audit remains historical evidence.
+Version-3 four-original preservation and actual-output native review passed.
+Independent final review and the user's actual-vault verdict remain tracked in the
 [current implementation frontier](../.scratch/management-leadership-implementation/README.md).
 
 Counts add `source_definitions`, `classification_assignments`, `typed_members`,
 `planned_category_notes` / `actual_category_notes` and
-`planned_support_files` / `actual_support_files`. Imported note counts include
+`planned_support_files` / `actual_support_files`, plus `source_gaps`,
+`generated_presentations`, `planned_generated_embeds` / `actual_generated_embeds`.
+Imported note counts include
 definition and member notes; support counts are separate. Actual publication
 counts remain unavailable until the publisher verifies and commits the files.
 `SupportArtifact(relative_path, purpose)` describes each planned generated
@@ -289,7 +296,7 @@ and unscopable history collections are omitted. Safe retained values preserve
 exact numbers and omission/null distinctions. Consumers needing exact numeric comparisons should use
 an exact decimal JSON representation. Reproducibility compares logical decisions
 and content while handling explicit run metadata, original evidence order and
-reordered-source fingerprints separately. See [current v2 independent preservation](../.scratch/brz-to-obsidian-v2-implementation/research/colour-property-refinement.md).
+reordered-source fingerprints separately. See [current v3 independent preservation](../.scratch/management-leadership-implementation/research/four-archive-preservation.md).
 
 | Versioned component | Current value |
 | --- | --- |
@@ -304,7 +311,7 @@ reordered-source fingerprints separately. See [current v2 independent preservati
 These versions describe different interfaces. A package release is not an
 Obsidian application version or a change in the supplied archives' format.
 
-## Included scope and reserved version-3 facts
+## Included scope and version-3 facts
 
 The source adapter validates global container safety, identities, ownership,
 local paths and valid ForgottenDateTime markers before selecting included
@@ -329,7 +336,7 @@ Snapshot `source_gaps` holds `SourceGap(owner, asset_id, role, rule_id, evidence
 roles distinguish ordinary notes, definition notes and definition icons.
 `generated_presentations` holds `GeneratedPresentation(owner, source_gap_asset_id,
 kind, image_asset_ids, ordering)`, separate from Documents and ReferenceSpans.
-Plans and inspections reserve `SourceGapDiagnostic` (owner target/existence,
+Plans and inspections contain `SourceGapDiagnostic` (owner target/existence,
 outcome, provider and affected members, selected images) and
 `GeneratedPresentationTarget` (note path and ordered image paths). The migration
 record serializes the same two planned collections. Reviewed ordinary-note
@@ -340,7 +347,7 @@ their diagnostics identify the provider and only included members without an
 explicit icon override. The renderer verifies these joins against the canonical
 plan before producing resolving provider/member notices and report links.
 Membership and appearance_category remain available for native Base defaults.
-Counts reserve source_gaps,
+Counts include source_gaps,
 generated_presentations, planned_generated_embeds and actual_generated_embeds;
 actual counts stay unknown during inspection. These optional closed shapes do
 not assign BRZ numeric meanings to the generic core.

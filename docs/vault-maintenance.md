@@ -59,7 +59,11 @@ properties does not rewrite them; edit those references separately. Replacing a
 shared image's bytes can naturally affect all references to that file. Original
 timestamps and colour values remain in `migration-record.json` independently.
 Obsidian Properties saves can normalize CRLF to LF in the reviewed build; keep
-pristine converter output and `.md.original` backups for exact pre-edit evidence.
+pristine converter output and safe supplied-body `.md.original` backups for exact
+pre-edit evidence. Unsafe originals are explicitly omitted, and absent bodies have
+no original backup. Generated archive-only images follow a source-gap notice
+linked to the Migration report; their order is generated. That presentation
+promises no recovered prose, captions or authored layout.
 
 ## Browse and rename categories
 

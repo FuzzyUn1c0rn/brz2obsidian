@@ -210,9 +210,9 @@ verified before m5; no recovered original or weakened oracle substituted for a
 fresh matrix. See the [complete four-original result and failed history](../.scratch/management-leadership-implementation/research/four-archive-preservation.md).
 The ignored raw-source handoff joins actual note/image paths, all supplied bodies,
 D's 47 category/330 member paths and C's 7/195 control memberships for later native
-review. Native Obsidian rendering/Base evaluation, actual user acceptance and final
-review/package/release gates remain pending; this automated gate supplies none of
-those verdicts.
+review. [Actual-output native review](../.scratch/management-leadership-implementation/research/native-v3-acceptance.md)
+subsequently passed in observed Obsidian 1.14.4. Actual user acceptance and
+independent final review remain pending; this automated gate supplies neither verdict.
 
 Choose the exact fingerprinted A/B/C/D originals and a fresh short ignored output
 directory. D is the original Management & Leadership export (320,594,486 bytes,
@@ -241,7 +241,8 @@ $output = Join-Path (Get-Location) 'tmp/audit-01'
 .\.venv\Scripts\python.exe -m tests.local_acceptance.run --source-a $sourceA --source-b $sourceB --source-c $sourceC --source-d $sourceD --output $output
 ```
 
-Tooling completion does not claim these four private originals passed. The public
+The synthetic tooling example alone supplies no private-input acceptance; the
+completed four-original gate is recorded above. The public
 synthetic example below exercises the same four-input callable with explicit
 independently computed synthetic pins, producing twelve complete outputs in a
 fresh ignored directory. The CLI always uses the accepted original pins.
