@@ -28,8 +28,8 @@ def read_archive(path):
 
 
 def verify():
-    baseline = Path("brz/relationship-fixture.brz")
-    extended = Path("brz/relationship-fixture-extended.brz")
+    baseline = Path("tmp/legacy/brz/relationship-fixture.brz")
+    extended = Path("tmp/legacy/brz/relationship-fixture-extended.brz")
     _, baseline_thoughts, baseline_links = read_archive(baseline)
     _, thoughts, links = read_archive(extended)
     assert len(baseline_thoughts) == 5 and len(baseline_links) == 4
@@ -38,10 +38,17 @@ def verify():
     assert len({link["Id"] for link in links}) == len(links)
 
     expected_names = {
-        "PARENT", "CHILD", "PEER", "ARROW", "REVERSE_ARROW",
-        "ONE_WAY_FORWARD", "ONE_WAY_REVERSE",
+        "PARENT",
+        "CHILD",
+        "PEER",
+        "ARROW",
+        "REVERSE_ARROW",
+        "ONE_WAY_FORWARD",
+        "ONE_WAY_REVERSE",
     }
-    assert Counter(t["Name"] for t in thoughts if t["Kind"] == 1) == Counter(expected_names)
+    assert Counter(t["Name"] for t in thoughts if t["Kind"] == 1) == Counter(
+        expected_names
+    )
     names = {t["Id"]: t["Name"] if t["Kind"] == 1 else "SYSTEM" for t in thoughts}
     assert len([t for t in thoughts if t["Kind"] == 5]) == 1
 
@@ -56,13 +63,15 @@ def verify():
 
     by_thought_id = {thought["Id"]: thought for thought in thoughts}
     permitted_thought_changes = {
-        "SyncSentId", "ActivationDateTime", "DisplayModificationDateTime",
+        "SyncSentId",
+        "ActivationDateTime",
+        "DisplayModificationDateTime",
     }
     for original in baseline_thoughts:
         current = by_thought_id[original["Id"]]
-        assert {k: v for k, v in original.items() if k not in permitted_thought_changes} == {
-            k: v for k, v in current.items() if k not in permitted_thought_changes
-        }
+        assert {
+            k: v for k, v in original.items() if k not in permitted_thought_changes
+        } == {k: v for k, v in current.items() if k not in permitted_thought_changes}
 
     expected = {
         ("SYSTEM", "PARENT"): (1, 1, 6, -1),
@@ -77,11 +86,16 @@ def verify():
     for link in links:
         pair = names[link["ThoughtIdA"]], names[link["ThoughtIdB"]]
         assert pair not in observed
-        observed[pair] = tuple(link[k] for k in ("Kind", "Relation", "Meaning", "Direction"))
+        observed[pair] = tuple(
+            link[k] for k in ("Kind", "Relation", "Meaning", "Direction")
+        )
     assert observed == expected
 
     baseline_hash = hashlib.sha256(baseline.read_bytes()).hexdigest()
-    assert baseline_hash == "53fd9fd22249a59875d3525774e1bb27c8b66830b3d84430b4ababdf0675ae6a"
+    assert (
+        baseline_hash
+        == "53fd9fd22249a59875d3525774e1bb27c8b66830b3d84430b4ababdf0675ae6a"
+    )
     return {
         "exchange_format": 5,
         "baseline_sha256": baseline_hash,
@@ -89,8 +103,14 @@ def verify():
         "extended_sha256": hashlib.sha256(extended.read_bytes()).hexdigest(),
         "original_relationships_preserved_except_sync_bookkeeping": True,
         "relationships": [
-            {"A": a, "B": b, "Kind": kind, "Relation": relation,
-             "Meaning": meaning, "Direction": direction}
+            {
+                "A": a,
+                "B": b,
+                "Kind": kind,
+                "Relation": relation,
+                "Meaning": meaning,
+                "Direction": direction,
+            }
             for (a, b), (kind, relation, meaning, direction) in sorted(observed.items())
         ],
     }

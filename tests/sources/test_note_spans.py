@@ -64,3 +64,23 @@ def test_unsupported_active_local_syntax_is_a_typed_actionable_refusal(text):
 def test_local_examples_in_comments_code_and_escaped_literals_remain_untouched():
     text = "<!-- example brain://abc/title -->\n\n`<brain://abc/title>`\n\\[literal](brain://abc/title)\n\n    <brain://abc/title>\n\n[external](https://example.invalid/a)\n"
     assert trace_note_references(text) == ()
+
+
+@pytest.mark.parametrize(
+    "prefix,kind,target",
+    [("", "item", "brain://abc/title"), ("!", "image", ".data/md-images/x.png")],
+)
+def test_entity_and_escaped_label_characters_keep_exact_reference_spans(
+    prefix, kind, target
+):
+    phrase = f"{prefix}[**A &amp; B** [literal \\*star\\*] `&amp;`]({target})"
+    text = f"α\r\n{phrase}\rTail\n"
+    spans = trace_note_references(text)
+    assert len(spans) == 1
+    span = spans[0]
+    assert (span.kind, span.target) == (kind, target)
+    assert span.display_text == "A & B [literal *star*] &amp;"
+    assert span.expected_original == phrase
+    assert span.start == 3
+    assert span.end == 3 + len(phrase)
+    assert text[span.start : span.end] == phrase

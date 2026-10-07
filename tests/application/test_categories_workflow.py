@@ -46,7 +46,7 @@ def test_category_bases_precede_preserved_source_content_without_introductory_ic
     source = graph_archive(
         tmp_path / "dashboard.brz",
         {1: "Entry", 2: "Concept", 3: "Member", 4: "Related", 5: "Child"},
-        [(2, 3, 1, 2, -1), (3, 5, 1, 1, -1), (3, 4, 3, 1, -1)],
+        [(2, 3, 1, 2, -1), (3, 5, 1, 1, -1), (3, 4, 3, 1, -1), (1, 2, 1, 1, -1)],
         kinds={2: 2},
         labels={2: "Definition label"},
         notes={2: (authored, 4)},
@@ -81,7 +81,8 @@ def test_category_bases_precede_preserved_source_content_without_introductory_ic
     folder = "Attachments/00000000000000000000000000000002/"
     category = (vault / "Categories/Concept.md").read_bytes()
     dashboard = (
-        b"# Concept\n\n## Members\n\n![[Templates/Bases/Members.base#Members]]\n\n"
+        b"# Concept\n\n## Parents\n\n- [[Home \xe2\x80\x94 Entry.md|Entry]]\n\n"
+        b"## Members\n\n![[Templates/Bases/Members.base#Members]]\n\n"
         b"## Gallery\n\n![[Templates/Bases/Gallery.base#Gallery]]\n\n"
     )
     assert category.split(b"---\n", 2)[2].startswith(b"\n" + dashboard)
@@ -118,7 +119,7 @@ def test_inspection_and_conversion_materialize_categories_and_typed_empty_member
     workflow = default_workflow()
     inspected = workflow.inspect(source)
     assert inspected.outcome == "clean", inspected.issues
-    assert inspected.schema_version == 2 and inspected.profile_version == "2"
+    assert inspected.schema_version == 3 and inspected.profile_version == "3"
     assert inspected.receipt is None and inspected.counts.actual_notes is None
     assert inspected.counts.planned_notes == 3
     assert inspected.counts.source_definitions == 1
@@ -153,7 +154,7 @@ def test_inspection_and_conversion_materialize_categories_and_typed_empty_member
     )
     assert not (vault / "Notes/Untyped empty.md").exists()
     record = json.loads((vault / "migration-record.json").read_bytes())
-    assert record["schema_version"] == 2 and record["renderer_version"] == "2"
+    assert record["schema_version"] == 3 and record["renderer_version"] == "3"
     assert (
         record["classification_assignments"][0]["definition_target"]
         == "Categories/Concept.md"
@@ -388,7 +389,7 @@ def test_typed_cli_matches_read_only_inspection_obligations_and_verified_convers
     )
     assert main(["convert", str(source), str(tmp_path / "vault"), "--json"]) == 0
     converted = json.loads(capsys.readouterr().out)
-    assert converted["schema_version"] == 2 and converted["inspection"] is None
+    assert converted["schema_version"] == 3 and converted["inspection"] is None
     assert converted["receipt"]["verified"] and converted["counts"]["actual_notes"] == 3
     assert (
         converted["counts"]["planned_support_files"]

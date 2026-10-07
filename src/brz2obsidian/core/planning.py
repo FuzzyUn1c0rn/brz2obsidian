@@ -7,6 +7,7 @@ from brz2obsidian.contracts import Adaptation, Analysis, MigrationPlan
 from .appearance import icon_snapshots
 from .items import assign_item_targets, select_fallbacks
 from .resources import assign_asset_targets, resource_owners
+from .source_gaps import source_gap_targets
 from .support import SUPPORT_NAMESPACE, support_artifacts
 from .tags import assign_tags
 
@@ -30,8 +31,10 @@ def plan(analysis: Analysis) -> MigrationPlan:
         t.model_copy(update={"vault_tag_token": tokens.get(t.item_key)})
         for t in targets
     )
+    gaps, presentations = source_gap_targets(snapshot, targets, asset_targets)
     counts = analysis.counts.model_copy(
         update={
+            "planned_generated_embeds": sum(len(p.image_paths) for p in presentations),
             "planned_notes": sum(target.created for target in targets),
             "planned_category_notes": len(created & definitions),
             "planned_support_files": len(supporting),
@@ -67,6 +70,8 @@ def plan(analysis: Analysis) -> MigrationPlan:
         uncreated_related_pairs=related_pairs,
         support_artifacts=supporting,
         icon_snapshots=snapshots,
+        source_gaps=gaps,
+        generated_presentations=presentations,
         reserved_support_paths=tuple(
             a.relative_path for a in SUPPORT_NAMESPACE if a not in supporting
         ),
@@ -74,7 +79,7 @@ def plan(analysis: Analysis) -> MigrationPlan:
             Adaptation(
                 kind="category_dashboard",
                 affected=key,
-                description="Native contextual Members and Gallery Bases immediately follow the category title, before retained source content, without a generated introductory icon image; linked membership discovery survives link-preserving renames.",
+                description="Parents/Children navigation immediately follows the category title when present; native contextual Members and Gallery Bases follow that navigation, before retained source content, without a generated introductory icon image; linked membership discovery survives link-preserving renames.",
             )
             for key in sorted(created & definitions)
         )

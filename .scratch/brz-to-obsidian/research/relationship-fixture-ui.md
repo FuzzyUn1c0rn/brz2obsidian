@@ -16,7 +16,7 @@ The symbols above are observations, not a claim about the exported direction bit
 
 ## Local screenshot evidence
 
-- [Fixture overview](../../../brz/fixture-screenshots/fixture-overview.jpg)
-- [Explicit arrow properties](../../../brz/fixture-screenshots/explicit-arrow-properties.jpg)
+- [Fixture overview](../../../tmp/legacy/brz/fixture-screenshots/fixture-overview.jpg)
+- [Explicit arrow properties](../../../tmp/legacy/brz/fixture-screenshots/explicit-arrow-properties.jpg)
 
 Screenshots are stored under the existing ignored `brz/` directory as local evidence. These observations alone do not establish stored A/B orientation or `Direction=-1` interpretation. The subsequent [export comparison](relationship-fixture-records.md) establishes orientation and the observed default sentinel, and identifies ARROW's exported direction as 1 with no one-way bit.

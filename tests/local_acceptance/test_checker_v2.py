@@ -10,11 +10,12 @@ from brz2obsidian.application.wiring import default_workflow
 from tests.application.test_graph_workflow import identity
 from tests.local_acceptance.checker import check_vault, compare_vaults
 from tests.local_acceptance.run import reordered_archive
+from tests.local_acceptance.scope import dump_json
 from tests.support.v2_collection import mixed_archive
 
 
 def rewrite_record(vault, record, result):
-    (vault / "migration-record.json").write_text(json.dumps(record), encoding="utf-8")
+    (vault / "migration-record.json").write_text(dump_json(record), encoding="utf-8")
     result["counts"] = record["counts"] | {
         "actual_notes": record["counts"]["planned_notes"],
         "actual_assets": record["counts"]["planned_assets"],

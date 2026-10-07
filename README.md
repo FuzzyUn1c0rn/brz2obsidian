@@ -2,10 +2,11 @@
 
 A local Python library and thin CLI that migrates reviewed TheBrain BRZ
 exchange-format-5 exports into a fresh standard Obsidian vault. It preserves
-Markdown, present attachment bytes, original JSON evidence, Home, hierarchy,
+included Markdown, present attachment bytes, safe original JSON evidence, Home, hierarchy,
 Related links and tags. Unsupported source meanings are refused.
 
-Version 2 (`0.2.0`) adds thought types as linked categories, native dashboards
+The delivered version 2 (`0.2.0`) added thought types as linked categories, native
+dashboards
 and templates, source dates, editable icon inheritance, the reviewed unusual
 Markdown note, zero-length absent-TXT findings, YouTube presentation and a
 read-only vault checker. All three supplied exports use the same TheBrain
@@ -17,6 +18,31 @@ and [delivery gates](.scratch/brz-to-obsidian-v2-implementation/README.md).
 Native review of actual outputs, independent final review and the user's
 2026-10-05 actual-vault approval complete those delivery gates. Version 2 is
 delivered and accepted.
+
+Version 3 (`0.3.0`) development applies default forgotten-thought exclusion to
+every archive. Valid populated ForgottenDateTime markers exclude the subject,
+owned content, memberships, relationships and associated evidence before naming.
+Authored links/embeds to excluded subjects disappear as whole phrases; unrelated
+text and code literals remain unchanged. An included body that still contains a
+proven omitted identity outside those removable spans refuses privately, including
+code, comments and bare source URIs. Exact originals containing excluded
+references are omitted, with explicit Document original-copy metadata. Safe
+originals remain byte exact. Unscopable history is omitted. Counts describe
+included scope; there is no include-forgotten option or individual exclusion
+ledger. A forgotten Home refuses. The package, snapshot/policy, module/profile,
+renderer and migration result/record contracts now use version 3; BRZ stays 5
+and the read-only checker stays schema 1. A narrowly reviewed state-3 absent ordinary Notes.md can now display all usable
+same-owner note images in stable asset-identity order. The notice states that
+unknown prose, captions and layout were not recovered; the Migration report
+provides evidence and optional repair steps. Physically present recognized
+Markdown always keeps its normal exact preservation path, including blank notes.
+Source-gap and generated-presentation collections record the obligations;
+generated embeds are counted separately from authored references. Reviewed
+type-owned state-3 Notes.md absence remains unknown category text; missing
+type icons give categories and inheriting members neutral appearance while
+preserving membership and appearance_category links. Valid member icon overrides
+still win. The report distinguishes missing providers from affected included
+members. Follow the [current frontier](.scratch/management-leadership-implementation/README.md).
 
 ## Development environment
 
@@ -36,16 +62,23 @@ recreate it on a fresh checkout. `pyproject.toml` declares dependency families;
 `requirements.txt` pins the compatibility-checked runtime/build/development
 packages. Tested runtime support is native Windows / CPython 3.14.8. Package
 metadata requires Python >=3.14; other platforms and later runtimes have not
-been accepted. Native presentation uses Obsidian 1.13.7.
+been accepted. The renderer declares Obsidian 1.13.7 as its target metadata. Current native
+review observed Obsidian 1.14.4; that observation does not establish a new
+1.13.7 run.
+
+See [workspace housekeeping](docs/workspace.md) for source exports, retained
+vaults, backups and disposable development files. Use ignored `tmp/<effort>/`
+for new runs, prototypes, screenshots and handoffs.
 
 Build a local wheel with the same environment when needed:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip wheel --no-deps --no-build-isolation --wheel-dir brz/delivery/wheels .
+.\.venv\Scripts\python.exe -m pip wheel --no-deps --no-build-isolation --wheel-dir tmp/build/wheels .
 ```
 
-Runtime dependencies are Pydantic, markdown-it-py and PyYAML. PyYAML serves the
-read-only checker; setuptools builds the package. The checked wheel contains
+Runtime dependencies are Pydantic, markdown-it-py, PyYAML and Pillow. PyYAML serves the
+read-only checker; Pillow validates pixels for generated image presentations;
+setuptools builds the package. The checked wheel contains
 package modules and distribution metadata, with no archives, vaults or tests.
 
 ## Inspect and convert
@@ -58,7 +91,7 @@ package modules and distribution metadata, with no archives, vaults or tests.
 ```
 
 For a synthetic trial, use `tests/fixtures/minimal.brz` and a fresh short
-output path such as `brz/minimal-vault`. Console and module entry points behave
+output path such as `tmp/minimal-vault`. Console and module entry points behave
 alike. Inspect is optional read-only preflight: it reports planned targets and
 counts, with destination feasibility, payload copy verification and publication
 pending. Convert repeats preparation, streams copies into owned staging,
@@ -79,10 +112,21 @@ not fetch or open them.
 | `failed` | 1 | Operational failure |
 
 Text mode prints concise counts, issues and guidance. JSON mode writes one
-version-2 `brz2obsidian.result` envelope to stdout. Unmeasured counts are `null`,
+version-3 `brz2obsidian.result` envelope to stdout. Unmeasured counts are `null`,
 and `receipt` is `null` until actual verified publication. A later teardown
 failure can return `failed` with a retained receipt and `publication_occurred`
 issue: inspect that vault before retrying. Argument errors exit 1; help exits 0.
+
+The v3 combined synthetic gate checks forgotten exclusion, supplied Markdown,
+ordered image fallback, neutral category appearance, reciprocal category hierarchy
+and existing resources together. It also injects real filesystem/stream failures
+at the new artifact paths and verifies complete durable receipts after later
+failures. This bounded public proof and the local `0.3.0` wheel/example smoke
+supplement the historical v2 delivery evidence. All twelve four-original
+exact/repeat/reordered outputs passed complete independent preservation, and
+actual-output native review passed in Obsidian 1.14.4. The user's actual-vault
+verdict and independent final review remain pending. See the
+[release verification record](.scratch/management-leadership-implementation/research/release-verification.md).
 
 For scripts that capture stdout as UTF-8, set
 `$env:PYTHONIOENCODING = 'utf-8'` before running the CLI; otherwise Python uses
@@ -98,8 +142,9 @@ ordinary member is materialized, including empty members, and receives linked
 authored content/resources; members do not inherit that content. Home links to
 `Categories.md`, whose native overview discovers category dashboards under
 `Categories/` with the `categories` tag. Each dashboard embeds Members and
-Gallery Bases from `Templates/Bases/` immediately after its heading, without a
-generated introductory category image. Retained source content/resources follow
+Gallery Bases from `Templates/Bases/` after its heading and any Parents/Children
+navigation, without a generated introductory category image. Retained source
+content/resources follow
 the Bases; category icon properties/assets still supply dashboard images.
 Tables start Icon, Note, Inheritance,
 categories, created, updated. Gallery uses native image cards. The bundled Bases
@@ -109,6 +154,10 @@ Base has no embedding category. Native category renames with link updates keep
 member discovery working. Membership comes from linked `categories` properties;
 Templates/Attachments areas are excluded while legitimate Template-named members
 remain visible. Ordinary prose, hierarchy and provider links do not classify notes.
+Reviewed ordinary-parent/type-child edges show every direct included parent on
+the category and reciprocal category children on created ordinary notes. An
+otherwise empty ordinary parent can remain an intentional uncreated target;
+hierarchy does not add it to the category's Members.
 
 Edit membership directly. `appearance_category` independently chooses a category
 in the member's memberships; reordering or adding categories does not choose a
@@ -151,14 +200,17 @@ reciprocal migration sections. Conditional `Uncreated targets.md` and
 created-note memberships are available through native tag search.
 
 `Attachments/` groups resources by owner. Thought-note backups end in
-`.md.original`; decorative icons remain preserved without Resources clutter.
+`.md.original` when supplied bodies are safe to retain exactly. Unsafe originals
+are explicitly omitted; absent bodies have no original backup. Decorative icons
+remain preserved without Resources clutter.
 Inline images stay inline; additional files/external references appear in
 Resources. `MIGRATION REPORT.md` explains warnings and simplifications;
 `migration-record.json` retains source evidence, identities, target assignments,
 relationships, edits and byte inventory. Original JSON preserves numeric
 values, raw dates and omitted-versus-null distinctions.
 
-Three exact warning rules cover positive-length absent TXT, the reviewed
+Exact warning rules cover reviewed absent ordinary notes with usable owned
+images, absent type notes/icons, positive-length absent TXT, the reviewed
 zero-length absent-TXT/PDF association, and intact icons with length discrepancies.
 See [conditions and issue codes](docs/source-coverage.md#approved-warnings).
 Other missing required content and unverified meanings stop conversion.
@@ -203,16 +255,18 @@ and runnable composition examples](docs/architecture.md).
 ## Verification and private data
 
 See [test commands and native-review procedure](docs/testing.md), [complete
-current v2 preservation](.scratch/brz-to-obsidian-v2-implementation/research/category-bases-first-refinement.md)
-and the [completed actual-vault acceptance](.scratch/brz-to-obsidian-v2-implementation/issues/11-native-v2-acceptance-delivery.md).
-The [final native review](.scratch/brz-to-obsidian-v2-implementation/research/native-v2-acceptance.md)
+current v3 four-original preservation](.scratch/management-leadership-implementation/research/four-archive-preservation.md)
+and [current native review](.scratch/management-leadership-implementation/research/native-v3-acceptance.md).
+Historical v2 evidence includes the [completed actual-vault acceptance](.scratch/brz-to-obsidian-v2-implementation/issues/11-native-v2-acceptance-delivery.md).
+The [v2 final native review](.scratch/brz-to-obsidian-v2-implementation/research/native-v2-acceptance.md)
 records complete technical checks, independent review and the user's final approval.
 The [initial v2 preservation report](.scratch/brz-to-obsidian-v2-implementation/research/three-archive-preservation.md)
 retains the complete audit before the colour-property refinement.
 The [v1 preservation](.scratch/brz-to-obsidian-v1/research/real-export-acceptance.md)
 and [v1 native report](.scratch/brz-to-obsidian-v1/research/native-acceptance.md)
 remain historical evidence.
-Keep private archives, generated vaults and UI evidence under ignored `brz/`.
+Keep original private archives and retained user vaults under ignored `brz/`.
+Put disposable conversion outputs and UI evidence under ignored `tmp/<effort>/`.
 Ordinary tests use synthetic inputs and need neither private archives nor GUI
 access. Public reports contain aggregate evidence only. The virtual environment,
 tool caches and build output are ignored.

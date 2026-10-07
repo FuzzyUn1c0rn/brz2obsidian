@@ -1,14 +1,48 @@
 from brz2obsidian.contracts import FindingDisposition, SourcePolicy
 
-from .findings import ABSENT_TXT_RULE, ICON_LENGTH_RULE, ZERO_LENGTH_ABSENT_TXT_RULE
+from .findings import (
+    ABSENT_NOTE_IMAGES_RULE,
+    ABSENT_TXT_RULE,
+    ABSENT_TYPE_ICON_RULE,
+    ABSENT_TYPE_NOTE_RULE,
+    ICON_LENGTH_RULE,
+    ZERO_LENGTH_ABSENT_TXT_RULE,
+)
 
 BRZ_POLICY = SourcePolicy(
     profile_id="thebrain-format5-reviewed",
-    profile_version="2",
+    profile_version="3",
     module_id="thebrain-brz",
-    module_version="2",
+    module_version="3",
     format_version="5",
     finding_dispositions=(
+        FindingDisposition(
+            rule_id=ABSENT_TYPE_ICON_RULE,
+            kind="known_absent_payload",
+            disposition="warning",
+            issue_code="approved_source_gap",
+            permits_absent_payload=True,
+            message="Source category icon is absent; its provider and inheriting members have neutral appearance.",
+            guidance="Review the provider and affected included members in the Migration report; optionally restore the source icon and re-export.",
+        ),
+        FindingDisposition(
+            rule_id=ABSENT_TYPE_NOTE_RULE,
+            kind="known_absent_payload",
+            disposition="warning",
+            issue_code="approved_source_gap",
+            permits_absent_payload=True,
+            message="Source category note text is absent and remains unknown.",
+            guidance="Review the Migration report evidence and optional source repair checklist.",
+        ),
+        FindingDisposition(
+            rule_id=ABSENT_NOTE_IMAGES_RULE,
+            kind="known_absent_payload",
+            disposition="warning",
+            issue_code="approved_source_gap",
+            permits_absent_payload=True,
+            message="Source note text is absent; owned note images are displayed without reconstructing prose, captions or layout.",
+            guidance="Review the Migration report evidence and optional source repair checklist.",
+        ),
         FindingDisposition(
             rule_id=ABSENT_TXT_RULE,
             kind="known_absent_payload",

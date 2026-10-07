@@ -68,39 +68,43 @@ class _HtmlReferences(HTMLParser):
         )
 
 
+def compact_thought_identity(destination):
+    """Validate the reviewed compact URI boundary before decoding its identity."""
+    parts = urlsplit(destination)
+    if parts.netloc.casefold() in {"api.thebrain.com", "api.bra.in"}:
+        _refuse(
+            "unsupported_feature",
+            "Cross-Brain/server-qualified thought references are unsupported",
+        )
+    compact = parts.netloc
+    if (
+        parts.scheme != "brain"
+        or not re.fullmatch(r"[A-Za-z0-9_-]{22}", compact)
+        or not parts.path.startswith("/")
+        or parts.query
+        or parts.fragment
+    ):
+        _refuse(
+            "invalid_reference",
+            "Invalid or unsupported compact thought reference",
+        )
+    raw = base64.urlsafe_b64decode(compact + "==")
+    if base64.urlsafe_b64encode(raw).decode().rstrip("=") != compact:
+        _refuse("invalid_reference", "Noncanonical compact thought identity")
+    return str(UUID(bytes_le=raw))
+
+
 def bind_note_references(document, assets, thoughts):
     """Bind parsed source destinations to canonical IDs after asset inventory."""
     bound = []
     for reference in document.references:
         destination = reference.target
         if reference.kind == "item":
-            parts = urlsplit(destination)
-            if parts.netloc.casefold() in {"api.thebrain.com", "api.bra.in"}:
-                _refuse(
-                    "unsupported_feature",
-                    "Cross-Brain/server-qualified thought references are unsupported",
-                )
-            compact = parts.netloc
-            if (
-                parts.scheme != "brain"
-                or not re.fullmatch(r"[A-Za-z0-9_-]{22}", compact)
-                or not parts.path.startswith("/")
-                or parts.query
-                or parts.fragment
-            ):
-                _refuse(
-                    "invalid_reference",
-                    "Invalid or unsupported compact thought reference: " + destination,
-                )
-            raw = base64.urlsafe_b64decode(compact + "==")
-            if base64.urlsafe_b64encode(raw).decode().rstrip("=") != compact:
-                _refuse("invalid_reference", "Noncanonical compact thought identity")
-            canonical = str(UUID(bytes_le=raw))
+            canonical = compact_thought_identity(destination)
             if canonical not in thoughts or thoughts[canonical]["Kind"] == 5:
                 _refuse(
                     "invalid_reference",
-                    "Local thought reference does not identify a live navigable thought: "
-                    + canonical,
+                    "Local thought reference does not identify a live navigable thought",
                 )
         else:
             parts = urlsplit(destination)
@@ -115,7 +119,7 @@ def bind_note_references(document, assets, thoughts):
             ):
                 _refuse(
                     "invalid_reference",
-                    "Invalid or unsupported local image destination: " + destination,
+                    "Invalid or unsupported local image destination",
                 )
             matches = [
                 a.asset_id
@@ -128,8 +132,7 @@ def bind_note_references(document, assets, thoughts):
             if len(matches) != 1:
                 _refuse(
                     "invalid_reference",
-                    "Local image does not identify one preserved owner image: "
-                    + destination,
+                    "Local image does not identify one preserved owner image",
                 )
             canonical = matches[0]
         bound.append(
@@ -192,7 +195,7 @@ class _MappedBlock(StateBlock):
         return _MappedText(value, offsets)
 
 
-def trace_note_references(text: str) -> tuple[ReferenceSpan, ...]:
+def trace_note_references(text: str, excluded=()) -> tuple[ReferenceSpan, ...]:
     """Trace parser-recognized active links into exact original text spans.
 
     Carry character provenance through normalization and block indentation;
@@ -207,7 +210,7 @@ def trace_note_references(text: str) -> tuple[ReferenceSpan, ...]:
         display_parser.inline.parse(value, display_parser, {}, children)
         return "".join(
             t.content
-            if t.type in {"text", "code_inline"}
+            if t.type in {"text", "text_special", "code_inline"}
             else "\n"
             if t.type in {"softbreak", "hardbreak"}
             else ""
@@ -251,6 +254,24 @@ def trace_note_references(text: str) -> tuple[ReferenceSpan, ...]:
                 if token:
                     target = token.attrGet("src" if kind == "image" else "href")
                     if target and _local(target):
+                        removed_subject = False
+                        parts = urlsplit(target)
+                        if parts.scheme == "brain" and re.fullmatch(
+                            r"[A-Za-z0-9_-]{22}", parts.netloc
+                        ):
+                            raw = base64.urlsafe_b64decode(parts.netloc + "==")
+                            removed_subject = str(UUID(bytes_le=raw)) in excluded
+                            if removed_subject and (
+                                base64.urlsafe_b64encode(raw).decode().rstrip("=")
+                                != parts.netloc
+                                or not parts.path.startswith("/")
+                                or parts.query
+                                or parts.fragment
+                            ):
+                                _refuse(
+                                    "invalid_reference",
+                                    "Invalid compact thought reference",
+                                )
                         if "label" in token.meta:
                             _refuse(
                                 "unsupported_feature",
@@ -261,7 +282,7 @@ def trace_note_references(text: str) -> tuple[ReferenceSpan, ...]:
                                 "unsupported_feature",
                                 "Source-local autolinks are unsupported",
                             )
-                        if not (
+                        if not removed_subject and not (
                             (
                                 kind == "item"
                                 and urlsplit(target).scheme.casefold() == "brain"
@@ -275,11 +296,25 @@ def trace_note_references(text: str) -> tuple[ReferenceSpan, ...]:
                                 "unsupported_feature",
                                 "Local reference form is outside reviewed inline thought/image coverage",
                             )
-                        if kind == "item" and any(t.type == "image" for t in new):
+                        if (
+                            not removed_subject
+                            and kind == "item"
+                            and any(t.type == "image" for t in new)
+                        ):
                             _refuse(
                                 "unsupported_feature",
                                 "An image-wrapped thought link is an unsupported rich-content form",
                             )
+                        if removed_subject:
+                            hits[:] = [
+                                hit
+                                for hit in hits
+                                if not (
+                                    hit[0] is state.src
+                                    and begin <= hit[1]
+                                    and hit[2] <= state.pos
+                                )
+                            ]
                         display = display_text(
                             state.src[begin + (2 if kind == "image" else 1) : label_end]
                         )
@@ -288,7 +323,7 @@ def trace_note_references(text: str) -> tuple[ReferenceSpan, ...]:
                                 state.src,
                                 begin,
                                 state.pos,
-                                kind,
+                                "item" if removed_subject else kind,
                                 target,
                                 display,
                                 destination,

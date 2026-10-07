@@ -14,15 +14,20 @@ from brz2obsidian.contracts import (
     RenderedVault,
     RunMetadata,
 )
+from brz2obsidian.core import analyze
 from brz2obsidian.core.appearance import icon_snapshots as expected_icon_snapshots
+from brz2obsidian.core.items import assign_item_targets
 from brz2obsidian.core.references import validate_references
+from brz2obsidian.core.resources import assign_asset_targets, resource_owners
+from brz2obsidian.core.source_gaps import source_gap_targets
 
 from .bases import CATEGORY_VIEWS, HOME_CATEGORIES, support_files
 from .categories import classification_records
 from .documents import render_document
+from .gaps import gap_report
 from .markdown import append_boundary
 from .properties import property_frontmatter
-from .relationships import relationship_sections, uncreated_listing
+from .relationships import note_link, relationship_sections, uncreated_listing
 from .resources import resource_section
 from .tags import tag_listing, tag_records
 from .templates import (
@@ -41,17 +46,17 @@ def _json(value):
 def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     snapshot = plan.analysis.snapshot
     if (
-        run_metadata.renderer_version != "2"
-        or snapshot.contract_version != 2
-        or plan.analysis.policy.contract_version != 2
+        run_metadata.renderer_version != "3"
+        or snapshot.contract_version != 3
+        or plan.analysis.policy.contract_version != 3
     ):
         raise MigrationRefused(
             (
                 Issue(
                     code="unsupported_format",
                     phase="rendering",
-                    message="Renderer requires version-2 contracts and renderer metadata",
-                    guidance="Use the current contract and set renderer_version to 2.",
+                    message="Renderer requires version-3 contracts and renderer metadata",
+                    guidance="Use the current contract and set renderer_version to 3.",
                 ),
             )
         )
@@ -81,6 +86,58 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
                 ),
             )
         )
+    checked_analysis = analyze(snapshot, plan.analysis.policy)
+    expected_targets = assign_item_targets(checked_analysis, resource_owners(snapshot))
+    expected_gaps, expected_presentations = source_gap_targets(
+        snapshot, expected_targets, assign_asset_targets(snapshot)
+    )
+    gap_subjects = {g.owner for g in snapshot.source_gaps} | {
+        key for g in expected_gaps for key in g.affected_member_keys
+    }
+    if (
+        bool(snapshot.source_gaps)
+        and plan.asset_targets != assign_asset_targets(snapshot)
+        or {
+            (t.item_key, t.relative_path, t.created)
+            for t in plan.item_targets
+            if t.item_key in gap_subjects
+        }
+        != {
+            (t.item_key, t.relative_path, t.created)
+            for t in expected_targets
+            if t.item_key in gap_subjects
+        }
+        or bool(gap_subjects)
+        and plan.issues != checked_analysis.issues
+        or plan.source_gaps != expected_gaps
+        or plan.generated_presentations != expected_presentations
+        or any(
+            not next(
+                t.created
+                for t in plan.item_targets
+                if t.item_key == p.presentation.owner
+            )
+            for p in expected_presentations
+        )
+        or plan.counts.source_gaps != checked_analysis.counts.source_gaps
+        or plan.counts.generated_presentations
+        != checked_analysis.counts.generated_presentations
+        or plan.counts.planned_generated_embeds
+        != sum(len(p.image_paths) for p in expected_presentations)
+        or plan.profile_id != plan.analysis.policy.profile_id
+        or plan.profile_version != plan.analysis.policy.profile_version
+    ):
+        raise MigrationRefused(
+            (
+                Issue(
+                    code="invalid_reference",
+                    phase="rendering",
+                    message="Source-gap plan differs from verified obligations",
+                    guidance="Analyze and plan this snapshot again.",
+                ),
+            )
+        )
+    presentations = {p.presentation.owner: p for p in plan.generated_presentations}
     documents = {document.key: document for document in snapshot.documents}
     icon_snapshots = {s.item_key: s for s in plan.icon_snapshots}
     asset_paths = {t.asset_id: t.relative_path for t in plan.asset_targets}
@@ -114,12 +171,15 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     files = []
     counts = plan.counts.model_copy(
         update={
+            "actual_generated_embeds": sum(
+                len(p.image_paths) for p in plan.generated_presentations
+            ),
             "actual_references": sum(
                 len(documents[key].references)
                 for target in plan.item_targets
                 if target.created
                 for key in items[target.item_key].document_ids
-            )
+            ),
         }
     )
 
@@ -138,11 +198,40 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         item = items[target.item_key]
         heading = re.sub(r"([\\`*_{}\[\]<>#])", r"\\\1", item.title)
         text = property_frontmatter(plan, item) + "# " + heading + "\n\n"
+        presentation = presentations.get(item.key)
+        if presentation:
+            text += "> [!warning] Source note unavailable\n> Source note text is absent. Unknown prose, captions and layout were not recovered. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
         icon = icon_snapshots[item.key].effective_icon_asset_id
         if item.role == "definition":
-            text += CATEGORY_VIEWS + "\n"
+            hierarchy = relationship_sections(
+                plan, item.key, headings=("Parents", "Children")
+            )
+            if hierarchy:
+                text += hierarchy + "\n"
+            if any(
+                g.gap.owner == item.key and g.outcome == "unknown_note"
+                for g in plan.source_gaps
+            ):
+                text += "> [!warning] Source category note unavailable\n> Source category note text is absent and remains unknown. No prose, captions or layout were recovered. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
         elif icon is not None:
             text += "![[" + asset_paths[icon] + "]]\n\n"
+        for gap in plan.source_gaps:
+            if gap.outcome != "neutral_icon":
+                continue
+            if gap.gap.owner == item.key:
+                text += "> [!warning] Source category icon unavailable\n> Source category icon is absent; appearance is neutral. See [[MIGRATION REPORT.md|Migration report]] for provider evidence and optional repair steps.\n\n"
+            elif item.key in gap.affected_member_keys:
+                provider = items[gap.provider_key]
+                provider_target = next(
+                    t for t in plan.item_targets if t.item_key == provider.key
+                )
+                text += (
+                    "> [!warning] Inherited icon unavailable\n> The inherited icon is unavailable from "
+                    + note_link(provider_target, provider.title)
+                    + "; appearance is neutral. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
+                )
+        if item.role == "definition":
+            text += CATEGORY_VIEWS + "\n"
         if item.label:
             text += item.label + "\n\n"
         for index, key in enumerate(item.document_ids):
@@ -150,8 +239,19 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
             if index:
                 text += "\n\n"
             text += render_document(documents[key], target.relative_path, plan)
+        if presentation:
+            text += (
+                "\n\n".join("![[" + path + "]]" for path in presentation.image_paths)
+                + "\n\n"
+            )
         resources = resource_section(plan, item.key)
-        relationships = relationship_sections(plan, item.key)
+        relationships = relationship_sections(
+            plan,
+            item.key,
+            headings=("Related",)
+            if item.role == "definition"
+            else ("Parents", "Children", "Related"),
+        )
         if resources or relationships:
             text += append_boundary(text)
         if resources:
@@ -236,13 +336,14 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
             }
         ),
     )
-    report = "# Migration report\n\nOpen the root Home note to begin. Original note bytes are retained under Attachments.\n\n"
+    report = "# Migration report\n\nOpen the root Home note to begin. Safe original note bytes are retained under Attachments. Forgotten thoughts are excluded by default; unsafe originals and unscopable history are omitted. Counts describe included scope.\n\n"
     report += f"Created {plan.counts.planned_notes} thought notes; preserved {plan.counts.planned_assets} present payloads.\n\n"
     report += "Unsupported feature classes are refused explicitly.\n"
     report += "\n[[Vault guide.md|Vault guide]] explains manual full-template selection for new objects, direct membership edits on existing notes, canonical properties and future-category starters. Bundled Templates is configured for insertion-day ISO dates; update dates are maintained explicitly.\n"
     report += (
         "\nOpen [[Categories.md|Categories]] from Home, then a category dashboard "
-        "for its native Members table and Gallery immediately after the title, "
+        "for its native Members table and Gallery after the title and any "
+        "Parents/Children navigation, "
         "without a generated introductory category image. Retained source content "
         "and resources follow the Bases; category icon properties remain available "
         "for dashboard images. These contextual Bases use the "
@@ -262,6 +363,7 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         report += "\nPDF files are preserved and can be opened in Obsidian. Vault Search does not search PDF body text; this conversion does not extract or index it, or reproduce TheBrain's PDF body search.\n"
     if any(a.video_presentation for a in snapshot.assets):
         report += "\nVideo playback depends on the remote service and network. Offline playback and service availability are not guaranteed. The original resource links remain available; no remote video bytes were archived or downloaded by this conversion.\n"
+    report += gap_report(plan)
     if plan.issues:
         report += "\n## Source warnings\n\n"
         for issue in plan.issues:
@@ -306,7 +408,7 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     }
     record = {
         "schema": "brz2obsidian.migration",
-        "schema_version": 2,
+        "schema_version": 3,
         "converter_version": run_metadata.converter_version,
         "renderer_version": run_metadata.renderer_version,
         "source_identity": plan.source_identity.model_dump(),
@@ -377,6 +479,10 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         ],
         "tag_memberships": tag_records(plan),
         "classification_assignments": classification_records(plan),
+        "source_gaps": [gap.model_dump() for gap in plan.source_gaps],
+        "generated_presentations": [
+            p.model_dump() for p in plan.generated_presentations
+        ],
         "support_artifacts": [a.model_dump() for a in plan.support_artifacts],
         "reserved_support_paths": list(plan.reserved_support_paths),
         "adaptations": [value.model_dump() for value in plan.adaptations],

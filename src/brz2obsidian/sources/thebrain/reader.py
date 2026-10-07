@@ -29,6 +29,7 @@ from .classifications import decode_classifications
 from .decoding import ROOT_FILES, decode_records
 from .metadata import calendar_dates, declared_appearance
 from .relationships import decode_relationships
+from .scope import records_json, scope_records
 from .semantics import validate_semantic_fields
 
 
@@ -134,8 +135,8 @@ class BrzSourceModule:
             session = BrzSession(Path(source_ref))
         except MigrationRefused:
             raise
-        except NotImplementedError as error:
-            _refuse("unsupported_feature", f"Unsupported BRZ ZIP compression: {error}")
+        except NotImplementedError:
+            _refuse("unsupported_feature", "Unsupported BRZ ZIP compression")
         except (
             BadZipFile,
             DeflateError,
@@ -147,8 +148,9 @@ class BrzSourceModule:
             KeyError,
             TypeError,
             ValidationError,
-        ) as error:
-            _refuse("invalid_source", f"Invalid BRZ data: {error}")
+            RecursionError,
+        ):
+            _refuse("invalid_source", "Invalid BRZ data")
         except OSError as error:
             raise MigrationFailed(
                 (
@@ -233,8 +235,7 @@ class BrzSession:
                 ):
                     _refuse(
                         "invalid_source",
-                        f"Invalid BRZ compressed data: {error}",
-                        (info.filename,),
+                        "Invalid BRZ compressed data",
                     )
                 raise
         if not set(ROOT_FILES).issubset(names):
@@ -264,6 +265,39 @@ class BrzSession:
                         references=(pointer,),
                     )
                 )
+        records, self.excluded, dropped_members, self.scope_tokens = scope_records(
+            records, set(names), _refuse, _uuid
+        )
+        if not records["meta.json"]:
+            _refuse("invalid_source", "Collection metadata cannot be safely scoped")
+        if self.excluded:
+            originals = {e.key: e.original_json for e in evidence}
+            evidence = [
+                OriginalEvidence(
+                    key=name,
+                    kind="records",
+                    original_json=records_json(records[name], originals[name]),
+                )
+                for name in ROOT_FILES
+            ]
+            accounting = [
+                AccountingEntry(
+                    identity=f"{name}:{index}",
+                    disposition="normalized"
+                    if name
+                    in {
+                        "meta.json",
+                        "thoughts.json",
+                        "links.json",
+                        "attachments.json",
+                        "settings.json",
+                    }
+                    else "retained_only",
+                    references=(f"{name}:{index}",),
+                )
+                for name in ROOT_FILES
+                for index, _ in enumerate(records[name])
+            ]
         meta = records["meta.json"][0]
         if (
             type(meta.get("ExchangeFormatVersion")) is not int
@@ -367,6 +401,8 @@ class BrzSession:
             payload_evidence,
             payload_accounting,
             findings,
+            gaps,
+            presentations,
         ) = normalize_attachments(
             self.archive,
             records["attachments.json"],
@@ -374,13 +410,15 @@ class BrzSession:
             thoughts,
             _refuse,
             _uuid,
+            self.excluded,
+            self.scope_tokens,
         )
         evidence.extend(payload_evidence)
         accounting.extend(payload_accounting)
         resources = {
             name for name in names if name not in ROOT_FILES and not name.endswith("/")
         }
-        if resources != set(self.members.values()):
+        if resources - dropped_members != set(self.members.values()):
             _refuse(
                 "unsupported_feature",
                 "Archive contains unaccounted payloads or root files",
@@ -413,7 +451,7 @@ class BrzSession:
         identity = SourceIdentity(
             source_id=brain_id,
             module_id="thebrain-brz",
-            module_version="2",
+            module_version="3",
             format_version="5",
             source_sha256=source_hash,
             snapshot_digest=snapshot_digest,
@@ -433,6 +471,8 @@ class BrzSession:
             assets=tuple(assets),
             original_evidence=tuple(evidence),
             findings=tuple(findings),
+            source_gaps=tuple(gaps),
+            generated_presentations=tuple(presentations),
             accounting=SourceAccounting(entries=tuple(accounting)),
         )
 

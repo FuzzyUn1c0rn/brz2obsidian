@@ -55,7 +55,7 @@ The original controlled home is **PARENT**; the changed-home export designates *
 
 The human then set CHILD as Home and authorized the root agent to perform the remaining steps. The root activated PEER and verified it active, exported through File → Export → Brain Archive, and renamed the newly generated archive to `brz/controlled-home-child.brz`. After the export, clicking Home activated CHILD; the Home tooltip also read CHILD, with PARENT visibly above it. The original exports were not overwritten.
 
-The root saved a [synthetic native Home-result screenshot](</C:/Users/stefa/projects/brz2obsidian/brz/prototype-vaults-r1/ui-evidence/thebrain-changed-home.jpg>) showing central CHILD and parent PARENT. The Home tooltip was verified in the prior UI observation; the screenshot is evidence of the resulting thought/context, not a tooltip capture. The original fixture's fingerprint was also independently rechecked unchanged by the root.
+The root saved a [synthetic native Home-result screenshot](<C:/Users/stefa/projects/brz2obsidian/tmp/legacy/brz/prototype-vaults-r1/ui-evidence/thebrain-changed-home.jpg>) showing central CHILD and parent PARENT. The Home tooltip was verified in the prior UI observation; the screenshot is evidence of the resulting thought/context, not a tooltip capture. The original fixture's fingerprint was also independently rechecked unchanged by the root.
 
 | Controlled input | Bytes | SHA-256 |
 | --- | ---: | --- |

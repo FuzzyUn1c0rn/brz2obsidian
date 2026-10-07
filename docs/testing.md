@@ -9,6 +9,12 @@ Use the project virtual environment (tested native Windows / CPython 3.14.8):
 .\.venv\Scripts\python.exe -m pip check
 ```
 
+Run from the checkout root. Pytest uses reserved `tmp/pytest` for temporary test
+files and clears that directory before each run; its cache lives in
+`tmp/pytest-cache`. Ruff uses `tmp/ruff-cache`. For concurrent pytest runs in one
+checkout, select distinct paths with `--basetemp=tmp/pytest-<run>`.
+See [workspace housekeeping](workspace.md) for other temporary artifacts.
+
 In a separate worktree, use the integration checkout's full `.venv` interpreter
 path and set `$env:PYTHONPATH = Join-Path (Get-Location) 'src'` for that worktree.
 Do not redirect a shared editable installation while other worktrees are active.
@@ -32,13 +38,53 @@ The parser instruments base markdown-it-py rules and maps transformed inline
 positions back to exact decoded source offsets; tokens' line maps alone are
 not treated as character spans.
 
+Category hierarchy tests use an actual complete synthetic ZIP with multiple
+ordinary parents, duplicate edges, a cycle, assigned/unassigned parents, an
+excluded endpoint and intentional uncreated targets. They verify reciprocal
+navigation, hierarchy before Members/Gallery, independent membership, exact
+source bytes, CLI agreement and repeat/reordered output. Signature near misses
+remain refusals. A source-neutral Folio control checks category Children above
+Bases and Related navigation after content without widening BRZ coverage.
+The existing independent raw-source oracle admits the exact new hierarchy
+signature and layout; an included-only control exercises its current whole-raw
+evidence boundary. Full scoped/private four-archive audits and native/user
+acceptance remain separate implementation gates.
+
 The combined v2 actual-ZIP fixture independently checks seven imported notes,
 eight byte-preserved payloads and 19 support artifacts, including exceptional
 Markdown/image references, graph/tags, category membership/icon snapshots/dates,
-the TXT/PDF gap and timed video. Library/CLI schema 2, warning exit 2 and the
+the TXT/PDF gap and timed video. Current library/CLI schema 3, warning exit 2 and the
 source-free checker schema 1/clean exit 0 agree. Exact/repeat/reordered synthetic
 outputs retain logical records and output bytes; caller inventory/bytes remain
 unchanged by inspection/checking/refused reconversion.
+
+The combined v3 actual-ZIP fixture extends that same resource collection with
+forgotten owned content/incident hierarchy, collision naming, a physically blank
+supplied note, an absent ordinary note with two usable original PNGs, simultaneous
+type note/icon gaps, an explicit member override, two included ordinary parents
+of the category and an opaque ZIP resource. Independent literals require 11
+included items, 11 relationships, seven imported notes, 11 exact payload copies,
+18 support files, three source gaps and two generated embeds in 36 published
+files. Missing source bodies/icons add neither fake original copies nor authored
+reference credit. Expected bytes, graph/membership/provider joins, generated
+image order, scoped diagnostics, privacy, metadata and receipt inventory are
+checked at public workflow/CLI/checker boundaries. Console/module text and JSON
+routes agree. Inspection and checker calls preserve caller inventories/bytes;
+checking a deleted generated image detects the current defect despite the
+historical verified migration record.
+
+The v3 publication controls reach generated fallback/category notes, each
+original fallback image, report and record with real partial writes, missing,
+truncated or same-length corrupted staging bytes, and source mutation during
+verification. Actual owner-directory Windows junctions and rename/rmdir races
+preserve caller files. Source-stream open/partial-read/short-copy controls close
+the streams and clean owned staging. Post-commit and teardown failures retain
+the complete verified 36-file receipt and available actual counts. Conversion
+reprepares a source changed after inspection. Exact/repeat/root-record and ZIP
+reordering preserve all content, generated/affected-member ordering and logical
+facts, apart from explicit fingerprint/digest, raw evidence pointers/order,
+relationship-derived evidence order and clock/run/bookmark provenance. These
+bounded synthetic checks leave full-original, native and actual-user gates open.
 
 Focused v2 controls reach each selected template/Base/configuration/guide before
 injecting partial writes, deletion/truncation/same-length corruption or source
@@ -66,12 +112,77 @@ The independent acceptance suite retains all 22 earlier corruption proofs,
 69 v2 corruption/interaction checks, five driver corruption controls, two
 positive v2 audit tracers and a standard-library import check. Eighteen additional
 presentation-refinement controls plus four category-layout/evidence controls
-bring the current group to 121 tests.
+formed the earlier 121-test group.
 False receipts are rehashed and recounted consistently before the oracle rejects
 incorrect assignments, materialization, icons/dates, note/reference evidence,
 TXT/PDF/video facts, Bases/templates/configuration and required support. The
 expected-fact modules import only the standard library and local oracle modules;
 production manifests/counts do not provide expected preservation facts.
+The v3 extension independently derives included scope and ownership, retained
+safe evidence with exact JSON numbers, safe-original eligibility, whole excluded
+reference-phrase removal, every supplied-body edit, absent declarations and their
+owned image basis, neutral category providers and explicit overrides. It checks
+complete note bytes, canonical generated-image order and separate reference credit,
+full category hierarchy/membership/support, raw diagnostic facts and resolving
+owner/provider/member/image links, scoped digest and exact payload bytes.
+Original record ordinals remain private audit facts. Public `thoughts.json:N`,
+`attachments.json:N` and similar pointers address the retained safe evidence
+tables; they are not physical original JSON-line ordinals. An excluded-first
+control verifies this difference without adding an excluded ledger to a vault.
+Nested/escaped/serialized ownership, safe evidence/precision, missing/duplicate/
+misowned/reordered embeds, fabricated originals/Documents/reference credit,
+provider/override effects, graph/navigation and diagnostic corruptions are rejected
+after actual file receipts are consistently rehashed and recounted. Residual proven
+excluded identities in inactive literals refuse the audit, including canonical
+UUID case, percent and Unicode spellings. Compact identities remain case sensitive.
+Omission of the exact original backup alone does not make that destination safe.
+Authored reference labels are interpreted separately from body spans; emphasis,
+code, entities and escaped literal punctuation retain their displayed text while
+untouched CRLF/CR/LF body spans remain exact.
+The earlier oracle/driver baseline passed 243 public checks: the 115 earlier oracle
+controls, 116 v3 controls and twelve driver controls. Escaped opening/closing and
+balanced bracket labels retain richer record display text separately from sanitized
+wiki aliases; nested active phrases and incomplete local destinations remain closed.
+Three corruptions still pass
+the source-free convention checker after consistent rehashing; the raw-source
+oracle rejects their changed body, generated order or diagnostic facts.
+
+Repeated local member declarations receive a narrowly bounded raw-source audit
+exception only when every row has a distinct trusted identity, SourceType 2,
+Type 15, NoteType 0, a positive integer declared length, state 2, a safe TXT path,
+string Name metadata, false Is* flags, null/empty custom type metadata and
+physical ZIP absence. The raw scope retains
+each included declaration and independently omits an eligible excluded-owner
+group. Existing per-declaration auditing still requires intact same-owner PDFs;
+zero-length TXT/PDF handling retains its separate reviewed rule. Public controls
+cover both row orders, unsupported group members and complete forgotten omission.
+A five-pair plus three-single fixture requires thirteen distinct warnings,
+evidence pointers and observations with no invented payload or reference credit.
+Semantic corruption controls repair actual receipt hashes and counts before
+checking collapsed declarations/warnings, paired lengths/evidence and fabricated
+bytes/reference credit against the raw source.
+Malformed names, unknown active/nonboolean Is* flags and populated/nonstring
+custom attachment types refuse before excluded-group omission. A complete forged
+vault/receipt control rebinds the source fingerprint and repairs every actual file
+hash while confirming that an excluded invalid role still refuses; the adjacent
+false-flag control passes with the same source/receipt rebinding.
+
+The independent image interpreter uses standard-library Python imports and existing
+Windows WIC codecs through `ctypes`, never production image helpers or Pillow.
+It forces full BGRA pixels for every accepted frame and reports decoder CLSID,
+name/version and completed-frame counts. PNG additionally requires independent
+chunk/CRC/order, complete zlib, exact scanline/filter and reconstructed palette
+checks, including Adam7 passes. WebP headers/container structure alone cannot pass.
+Invalid data raises an assertion; missing codecs/native libraries, platform or
+resource limits raise `AuditUnavailable` and do not certify image eligibility.
+Strict APNG frame-stream validation is currently unavailable. The host's existing
+Microsoft WebP image extension is a native dependency, with no installation step
+performed by this tooling. Public controls include valid PNG/WebP, Adam7 and all
+PNG filters, reconstructed indexed palettes and a two-frame GIF, plus header-valid
+compressed failures, repaired PNG CRCs/ZIP CRCs/lengths/hashes, scanline/filter/
+palette failures and injected native-library unavailability. Full-source and native
+Obsidian gates remain separate from this source-required oracle and source-free
+`check_vault`.
 Refinement controls reject obsolete colour fields in generated notes, templates,
 starters, Bases, property typing and guide while still rejecting falsified source
 colour evidence. The checker permits manually added colour-named properties as
@@ -82,27 +193,87 @@ and the [earlier v1 report](../.scratch/brz-to-obsidian-v1/research/real-export-
 
 ## Private full-export acceptance
 
-Choose the exact fingerprinted A/B/C archives and a fresh short ignored output
-directory. The driver refuses an existing output directory, performs nine complete
+The complete v3 four-original gate passed on 2026-10-06 at verified clean root
+`e2c5fc3f05d2daa0d0547d2bbaa2b12557a248b5`, in fresh `tmp/m5`. All twelve
+A/B/C/D exact/repeat/reordered outputs passed the driver and a separate complete
+raw-source/result/receipt re-audit. Four reordered-source proofs and eight vault
+comparisons passed; all 7,029 matrix files stayed unchanged. Original D's 359
+supplied bodies, 63 original fallback images, 47 definitions/330 included members,
+distinct type/icon/TXT facts and full ownership/byte/graph/privacy obligations were
+checked by source identities and joins. All four originals and 562 retained-vault
+files stayed unchanged. Twelve library plus twelve CLI source-free checks were
+clean and read-only; they supplement source-bound preservation.
+
+The failed m3 source/oracle duplicate-declaration gate and m4 diagnostic-alias
+gate remain retained history. Responsible public-seam repairs were independently
+verified before m5; no recovered original or weakened oracle substituted for a
+fresh matrix. See the [complete four-original result and failed history](../.scratch/management-leadership-implementation/research/four-archive-preservation.md).
+The ignored raw-source handoff joins actual note/image paths, all supplied bodies,
+D's 47 category/330 member paths and C's 7/195 control memberships for later native
+review. [Actual-output native review](../.scratch/management-leadership-implementation/research/native-v3-acceptance.md)
+subsequently passed in observed Obsidian 1.14.4. Actual user acceptance and
+independent final review remain pending; this automated gate supplies neither verdict.
+
+Choose the exact fingerprinted A/B/C/D originals and a fresh short ignored output
+directory. D is the original Management & Leadership export (320,594,486 bytes,
+SHA-256 `2b24c1d21b4090f3b0ed3ec0227f269b8c7a4e5b6832ada0e244a1dcfc941ced`);
+a comparison/recovery backup cannot substitute. A/B/C fingerprint pins are retained.
+The driver refuses an existing output directory, performs twelve complete
 conversions (exact, repeat and ZIP/root-record reordered for each source), saves
 private results/operation evidence, and prints aggregate counts. It checks source
 fingerprints before/after every operation and at completion, proves reordered
 root-record multisets and physical bytes independently, and verifies the selected
-worktree import. Set PYTHONPATH even in the integration checkout.
+worktree import/current `0.3.0` version. Expected preservation comes from raw scoped
+records for each original; the old unscoped v2 A/B/C totals are historical evidence.
+D's accepted aggregate inventory gates supplement the complete raw-source audit.
+Generated image/member/diagnostic ordering remains contractual during comparison;
+only documented provenance/run/fingerprint differences are normalized.
+Set PYTHONPATH even in the integration checkout.
 
 ```powershell
 $env:PYTHONIOENCODING = 'utf-8'
-$env:PYTHONPATH = Join-Path (Get-Location) 'src'
+$env:PYTHONPATH = (Join-Path (Get-Location) 'src') + ';' + (Get-Location)
 $sourceA = 'C:\path\to\exact-A.brz'
 $sourceB = 'C:\path\to\exact-B.brz'
 $sourceC = 'C:\path\to\exact-C.brz'
-$output = 'C:\short\ignored\new-acceptance-run'
-.\.venv\Scripts\python.exe -m tests.local_acceptance.run --source-a $sourceA --source-b $sourceB --source-c $sourceC --output $output
+$sourceD = 'C:\path\to\Management & Leadership 2026-10-05.brz'
+$output = Join-Path (Get-Location) 'tmp/audit-01'
+.\.venv\Scripts\python.exe -m tests.local_acceptance.run --source-a $sourceA --source-b $sourceB --source-c $sourceC --source-d $sourceD --output $output
 ```
 
-All nine accepted conversions passed independent comparisons with exit 2.
-The current fresh outputs place category Members/Gallery immediately after their
-heading, omit generated introductory category images and retain category icon
+The synthetic tooling example alone supplies no private-input acceptance; the
+completed four-original gate is recorded above. The public
+synthetic example below exercises the same four-input callable with explicit
+independently computed synthetic pins, producing twelve complete outputs in a
+fresh ignored directory. The CLI always uses the accepted original pins.
+
+```powershell
+$env:PYTHONIOENCODING = 'utf-8'
+$env:PYTHONPATH = (Join-Path (Get-Location) 'src') + ';' + (Get-Location)
+.\.venv\Scripts\python.exe -m tests.local_acceptance.run --help
+@'
+from pathlib import Path
+from tests.local_acceptance.run import fingerprint, run_acceptance
+from tests.local_acceptance.test_checker_v3 import mixed_v3_archive
+
+root = Path('tmp/audit-synth-02')
+root.mkdir(parents=True, exist_ok=False)
+sources = {key: mixed_v3_archive(root / (key + '.brz')) for key in 'ABCD'}
+pins = {key: fingerprint(path) for key, path in sources.items()}
+run_acceptance(sources, root / 'out', pins)
+'@ | .\.venv\Scripts\python.exe -
+```
+
+This example and help were executed on 2026-10-06 against selected `0.3.0` code.
+All twelve complete synthetic outputs passed, each with 29 files, five created
+notes, six exact payload copies, three source gaps, two generated embeds and two
+fully decoded PNG/WebP frames. The original synthetic fingerprints remained
+unchanged. The mixed source also retains an included image whose bytes equal an
+excluded owner's image; scope follows independently derived ownership.
+
+The earlier v2 nine accepted conversions passed independent comparisons with exit 2.
+Those v2 fresh outputs placed category Members/Gallery immediately after their
+heading, omitted generated introductory category images and retained category icon
 properties/assets plus ordinary/member body snapshots. Four independent controls
 reject reintroduced category images, Bases moved below labels, fabricated category
 snapshot adaptations and false dashboard descriptions, even after consistent
@@ -122,10 +293,25 @@ produced 305 imported notes, including seven definitions and all 195 typed membe
 notes/backups, 84 references and four reviewed videos passed complete audit.
 Supporting files are excluded from thought-note counts. Logical repeated and
 reordered vault behavior is stable, with documented source-order/fingerprint
-and explicit run-metadata differences. Private archives, results, generated
-vaults and UI evidence remain ignored under `brz/`; public reports are aggregate.
+and explicit run-metadata differences. Private acceptance results, generated
+vaults and UI evidence belong under ignored `tmp/<effort>/`; original exports
+remain in `brz/`. Historical artifact paths are mapped in
+[workspace housekeeping](workspace.md); public reports are aggregate.
 
 ## Local package and documented examples
+
+On 2026-10-06, ticket 05 built the local `0.3.0` wheel with the project
+environment and `pip wheel --no-deps --no-build-isolation`. All 57 runtime
+package modules matched worktree source bytes; other entries were distribution
+metadata only. Metadata/entry point declare the current version, Python >=3.14
+and runtime Pydantic, markdown-it-py, PyYAML and Pillow. The unchanged actual
+README default-workflow and architecture explicit-workflow/direct-module Python
+examples ran against the complete mixed v3 archive, with caller paths substituted.
+Each produced the expected 36-file verified vault and passed the documented
+checker example. A separate subprocess imported from the wheel directly without
+installation and passed module inspect/convert/check-vault JSON operations with
+exits 2/2/0, schema 3/checker 1 and two actual generated embeds. Source bytes
+remained unchanged. Ticket 05 records the commands and bounded evidence.
 
 On 2026-10-05, the local `0.2.0` wheel built through the project environment with
 `pip wheel --no-deps --no-build-isolation`. Its metadata declares Python >=3.14,
@@ -154,13 +340,44 @@ invalid arguments returned the documented exits. These local smoke results
 supplement the public suite and private preservation audit; they make no native
 rendering or user-acceptance claim.
 
-The refreshed category-presentation wheel and all eight examples also confirm
+The v2 category-presentation wheel and all eight examples also confirmed
 Bases immediately follow category headings, introductory category embeds are
 absent, category icon properties/assets remain and member snapshots are unchanged.
 All 53 wheel module bytes match their current worktree sources. The Category
 starter already follows this presentation and remains unchanged.
 
+## Visual sampling policy
+
+Use strategic sampling for visual and native reviews in this repository, as
+requested by the user on 2026-10-06. Select a small set of actual-output cases
+covering each distinct rendering or application behavior. Include unusual source
+syntax, media formats, missing-content and icon/provider states, hierarchy shapes,
+large contextual views, and the editing/template operations affected by the change.
+Combine behaviors in one sample where practical and reuse completed observations.
+
+Before using the UI, record the chosen cases, their independently derived paths,
+the behaviors each covers, and any special cases needing their own observation.
+Before opening an imported note, verify that its subject is included, its assigned
+target is expected to be created, and that exact file exists in the review copy.
+Check intentionally uncreated targets through their links or listings; opening a
+missing target can create a new blank note and does not verify converter output.
+Compare sampled native Base results with the expected member set for that view;
+native CSV export can provide complete results for a large sampled view. Equivalent
+items using the same behavior need no repeated visual check. Expand the relevant
+samples when a defect, uncertainty or meaningful implementation difference appears.
+
+Complete when every selected behavior and special case has actual observation
+evidence and any defects have been repaired and rechecked. Report the sample
+selection, covered behaviors and limits; extrapolated confidence in equivalent
+cases is distinct from observing each item. Complete required automated source,
+body/image, inventory and preservation audits keep their full scope. Actual user
+acceptance remains a separate gate when required by the accepted specification.
+
 ## Native review procedure
+
+Apply the sampling policy above to new reviews. The v1/v2 procedures and completed
+reports below retain their historical scope; choose representative cases from
+their behavior lists for current work.
 
 The [v2 dashboard slice](../.scratch/brz-to-obsidian-v2-implementation/issues/03-native-category-dashboards.md)
 has an earlier bounded native gate on a fresh review copy of an actual synthetic
@@ -214,8 +431,9 @@ not guess filenames or reuse prototype paths.
    Language 1, Refactoring Technique 16 and Tool 2. Check Members/Gallery,
    Icon-before-Note, no Appearance column, typed empty notes and preserved
    definition-owned content/resources. A/B have no imported thought types.
-   Members/Gallery must immediately follow the heading, with no generated
-   introductory category image; retained source content follows the Bases.
+   Members/Gallery must follow the heading and any Parents/Children navigation,
+   with no generated introductory category image; retained source content
+   follows the Bases.
 8. Exercise live inherited icons, the actual owned override, blank opt-out and
    invalid/nonmember provider controls on disposable copies. Membership order
    must not choose a provider. Keep source identities/dates unchanged and verify
@@ -249,6 +467,13 @@ declared finished. The [v1 native report](../.scratch/brz-to-obsidian-v1/researc
 and earlier bounded synthetic/prototype trials remain historical evidence.
 
 ## Recorded versions
+
+For the Management & Leadership extension, the
+[actual-output native report](../.scratch/management-leadership-implementation/research/native-v3-acceptance.md)
+records strategic rendering/maintenance samples, the retained complete D native
+ledger, native C CSV correspondence limits and independent read-only checker
+controls. The observed app was 1.14.4, while the earlier stored target below
+remains 1.13.7. Native review does not supply the final user's actual-vault verdict.
 
 The [final actual-output native review](../.scratch/brz-to-obsidian-v2-implementation/research/native-v2-acceptance.md)
 records the completed three-vault matrix, read-only edit controls and clean user

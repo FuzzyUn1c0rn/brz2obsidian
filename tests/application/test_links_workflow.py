@@ -168,6 +168,148 @@ def test_complete_workflow_span_gate_preserves_all_nonadapted_text_and_newlines(
 
 
 @pytest.mark.parametrize(
+    "label,display,alias",
+    [
+        ("A &amp; B", "A & B", "A & B"),
+        (r"literal \*star\*", "literal *star*", "literal *star*"),
+        (
+            "**bold** *emphasis* `&amp;` plain",
+            "bold emphasis &amp; plain",
+            "bold emphasis &amp; plain",
+        ),
+        (
+            r"[nested &amp; \*star\*] **bold**",
+            "[nested & *star*] bold",
+            "nested & *star* bold",
+        ),
+        ("caf&#233; &#x2603; &quot;yes&quot;", 'café ☃ "yes"', 'café ☃ "yes"'),
+        (r"pipe \| \[x\]", "pipe | [x]", "pipe x"),
+        ("first\r\nsecond", "first\nsecond", "first second"),
+    ],
+)
+def test_included_entity_label_preserves_display_and_exact_source_record(
+    tmp_path, label, display, alias
+):
+    phrase = f"[{label}](brain://{COMPACT}/title)"
+    body = f"Before\r\n{phrase}\rAfter\n"
+    source = links_archive(tmp_path / "source.brz", body)
+    source_bytes = source.read_bytes()
+    workflow = default_workflow()
+    inspected = workflow.inspect(source)
+    vault = tmp_path / "vault"
+    result = workflow.convert(source, vault)
+    assert inspected.outcome == result.outcome == "clean"
+    assert (
+        note_body((vault / "Home — Entry thought.md").read_bytes())
+        == (
+            f"# Entry thought\n\nBefore\r\n[[Notes/Topic.v2.md|{alias}]]\rAfter\n\n"
+            "## Categories\n\n[[Categories.md|Browse categories]]\n"
+        ).encode()
+    )
+    assert (
+        vault / "Attachments/22222222/Notes.md.original"
+    ).read_bytes() == body.encode()
+    record = json.loads((vault / "migration-record.json").read_bytes())
+    home = next(t for t in record["item_targets"] if t["item_key"] == HOME)
+    reference = home["documents"][0]["references"][0]
+    assert reference["display_text"] == display
+    assert reference["target"] == TARGET
+    assert reference["source_target"] == f"brain://{COMPACT}/title"
+    assert reference["expected_original"] == phrase
+    assert body[reference["start"] : reference["end"]] == phrase
+    assert (
+        inspected.counts.source_references == inspected.counts.planned_references == 1
+    )
+    assert result.counts.actual_references == record["counts"]["actual_references"] == 1
+    assert source.read_bytes() == source_bytes
+
+
+def test_image_entity_and_escape_labels_preserve_authored_alt_and_record_display(
+    tmp_path,
+):
+    phrase = r'![A &amp; B \*star\* [nested]](.data/md-images/photo.png "Caption")'
+    body = f"α\r\n{phrase}\rTail\n"
+    source = links_archive(
+        tmp_path / "source.brz",
+        body,
+        resources=[({"Type": 12, "Location": "photo.png"}, b"image bytes")],
+    )
+    source_bytes = source.read_bytes()
+    vault = tmp_path / "vault"
+    workflow = default_workflow()
+    inspection = workflow.inspect(source)
+    result = workflow.convert(source, vault)
+    assert inspection.outcome == result.outcome == "clean"
+    assert (
+        note_body((vault / "Home — Entry thought.md").read_bytes())
+        == (
+            '# Entry thought\n\nα\r\n![A &amp; B \\*star\\* [nested]](Attachments/22222222/photo.png "Caption")\rTail\n\n'
+            "## Categories\n\n[[Categories.md|Browse categories]]\n"
+        ).encode()
+    )
+    assert (
+        vault / "Attachments/22222222/Notes.md.original"
+    ).read_bytes() == body.encode()
+    assert (vault / "Attachments/22222222/photo.png").read_bytes() == b"image bytes"
+    record = json.loads((vault / "migration-record.json").read_bytes())
+    home = next(t for t in record["item_targets"] if t["item_key"] == HOME)
+    reference = home["documents"][0]["references"][0]
+    assert reference["kind"] == "image"
+    assert reference["target"] == "aaaaaaaa-0000-4000-8000-000000000001"
+    assert reference["source_target"] == ".data/md-images/photo.png"
+    assert reference["display_text"] == "A & B *star* [nested]"
+    assert reference["expected_original"] == phrase
+    assert body[reference["start"] : reference["end"]] == phrase
+    assert (
+        inspection.counts.source_references == inspection.counts.planned_references == 1
+    )
+    assert result.counts.actual_references == record["counts"]["actual_references"] == 1
+    assert source.read_bytes() == source_bytes
+
+
+def test_included_labels_survive_whole_forgotten_phrase_removal(tmp_path):
+    private = thought("00000000-0000-0000-0000-000000000000", "Private subject")
+    private["ForgottenDateTime"] = "2026-10-01T12:00:00Z"
+    body = (
+        f"α\r\n[A &amp; B \\*star\\*](brain://{COMPACT}/title)\r"
+        "[Private &amp; \\*secret\\*](brain://AAAAAAAAAAAAAAAAAAAAAA/private) after\n"
+    )
+    source = links_archive(tmp_path / "source.brz", body, others=[private])
+    source_bytes = source.read_bytes()
+    vault = tmp_path / "vault"
+    workflow = default_workflow()
+    inspection = workflow.inspect(source)
+    result = workflow.convert(source, vault)
+    assert inspection.outcome == result.outcome == "clean"
+    assert (
+        note_body((vault / "Home — Entry thought.md").read_bytes())
+        == (
+            "# Entry thought\n\nα\r\n[[Notes/Topic.v2.md|A & B *star*]]\r after\n\n"
+            "## Categories\n\n[[Categories.md|Browse categories]]\n"
+        ).encode()
+    )
+    assert not any(p.name.endswith(".original") for p in vault.rglob("*"))
+    output = b"\n".join(p.read_bytes() for p in vault.rglob("*") if p.is_file())
+    for secret in (
+        b"Private",
+        b"secret",
+        b"AAAAAAAAAAAAAAAAAAAAAA",
+        private["Id"].encode(),
+    ):
+        assert secret not in output
+        assert secret.decode() not in inspection.model_dump_json()
+    record = json.loads((vault / "migration-record.json").read_bytes())
+    home = next(t for t in record["item_targets"] if t["item_key"] == HOME)
+    assert len(home["documents"][0]["references"]) == 1
+    assert home["documents"][0]["references"][0]["display_text"] == "A & B *star*"
+    assert (
+        inspection.counts.source_references == inspection.counts.planned_references == 1
+    )
+    assert result.counts.actual_references == record["counts"]["actual_references"] == 1
+    assert source.read_bytes() == source_bytes
+
+
+@pytest.mark.parametrize(
     "syntax,code",
     [
         ("[x](brain://invalid/title)", "invalid_reference"),

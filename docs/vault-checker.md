@@ -98,7 +98,7 @@ of source records, authored content and payload bytes.
 `VaultCheckResult`, `VaultCheckIssue` and `VaultCheckCounts` are closed, strict,
 frozen Pydantic contracts, exported alongside `check_vault`. JSON round-trips
 through `VaultCheckResult.model_validate_json(...)`. This independent schema
-does not change the version-2 migration result or its inspect/convert outcomes.
+does not change the version-3 migration result or its inspect/convert outcomes.
 
 | Field | Meaning |
 | --- | --- |

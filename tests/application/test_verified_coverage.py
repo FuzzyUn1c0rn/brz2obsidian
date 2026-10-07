@@ -89,6 +89,8 @@ def test_exact_absent_txt_publishes_warning_with_metadata_and_no_fake_payload(tm
         "relationships",
         "tag_memberships",
         "classification_assignments",
+        "source_gaps",
+        "generated_presentations",
         "support_artifacts",
         "reserved_support_paths",
         "adaptations",
@@ -621,7 +623,7 @@ def test_uninterpreted_history_keeps_nonlive_references_and_does_not_resurrect_i
         {"Id": "99999999-9999-4999-8999-999999999999"}
     ).encode()
     thought = json.loads(parts["thoughts.json"])
-    thought["ForgottenDateTime"] = "2026-10-03T10:20:30"
+    thought["ForgottenDateTime"] = None
     parts["thoughts.json"] = json.dumps(thought).encode()
     result = default_workflow().convert(
         write_source(tmp_path, parts), tmp_path / "vault"

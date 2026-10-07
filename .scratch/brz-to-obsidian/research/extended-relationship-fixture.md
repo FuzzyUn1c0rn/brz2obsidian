@@ -4,10 +4,10 @@ Observed and exported on 2026-10-03 in TheBrain 15; inspected read-only with Win
 
 ## Input and preservation checks
 
-- Final archive: [relationship-fixture-extended.brz](../../../brz/relationship-fixture-extended.brz), 6,852 bytes.
+- Final archive: [relationship-fixture-extended.brz](../../../tmp/legacy/brz/relationship-fixture-extended.brz), 6,852 bytes.
 - SHA-256: `c8b06e3da9e96c289be2ba4cb4741d3075bc390b71a2cd235605c320404e3a27`.
 - Exchange format 5; eight thoughts (seven ordinary and one system), seven relationships, no attachment payloads. ZIP CRC checks passed.
-- The original [relationship-fixture.brz](../../../brz/relationship-fixture.brz) remains byte-for-byte unchanged, with SHA-256 `53fd9fd22249a59875d3525774e1bb27c8b66830b3d84430b4ababdf0675ae6a`.
+- The original [relationship-fixture.brz](../../../tmp/legacy/brz/relationship-fixture.brz) remains byte-for-byte unchanged, with SHA-256 `53fd9fd22249a59875d3525774e1bb27c8b66830b3d84430b4ababdf0675ae6a`.
 - All four original relationship records match except for `SyncSentId` bookkeeping. Original thought IDs, names, kinds, and other content fields survive; only sync bookkeeping, activation timestamps, and CHILD's display-modification timestamp changed.
 - An intermediate arrow-only export is retained locally as `brz/relationship-fixture-arrow-only.brz`. It is not the final acceptance fixture.
 
@@ -51,13 +51,13 @@ These are observed Plex behaviors in this test Brain. They do not establish ever
 
 Screenshots and archives remain under ignored `brz/`. These links are local evidence, not published source content.
 
-- [Reverse-arrow properties](../../../brz/fixture-screenshots/reverse-arrow-properties.jpg).
-- [Reverse One Way selected in its context menu](../../../brz/fixture-screenshots/one-way-option-selected.jpg).
-- [Forward one-way properties](../../../brz/fixture-screenshots/one-way-forward-properties.jpg).
-- [Reverse one-way properties](../../../brz/fixture-screenshots/one-way-reverse-properties.jpg).
-- [Forward destination opened independently, with CHILD absent](../../../brz/fixture-screenshots/one-way-forward-independent-view.jpg).
-- [Reverse destination opened independently, with CHILD visible](../../../brz/fixture-screenshots/one-way-reverse-independent-view.jpg).
-- [CHILD opened through PARENT, with reverse one-way thought absent](../../../brz/fixture-screenshots/extended-child-independent-view.jpg).
+- [Reverse-arrow properties](../../../tmp/legacy/brz/fixture-screenshots/reverse-arrow-properties.jpg).
+- [Reverse One Way selected in its context menu](../../../tmp/legacy/brz/fixture-screenshots/one-way-option-selected.jpg).
+- [Forward one-way properties](../../../tmp/legacy/brz/fixture-screenshots/one-way-forward-properties.jpg).
+- [Reverse one-way properties](../../../tmp/legacy/brz/fixture-screenshots/one-way-reverse-properties.jpg).
+- [Forward destination opened independently, with CHILD absent](../../../tmp/legacy/brz/fixture-screenshots/one-way-forward-independent-view.jpg).
+- [Reverse destination opened independently, with CHILD visible](../../../tmp/legacy/brz/fixture-screenshots/one-way-reverse-independent-view.jpg).
+- [CHILD opened through PARENT, with reverse one-way thought absent](../../../tmp/legacy/brz/fixture-screenshots/extended-child-independent-view.jpg).
 
 ## Acceptance cases for the later specification
 

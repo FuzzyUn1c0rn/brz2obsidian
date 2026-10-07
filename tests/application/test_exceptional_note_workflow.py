@@ -115,7 +115,7 @@ def test_sole_ordinary_canonical_note_is_active_with_exact_backup_and_bound_edit
     assert record["counts"]["actual_references"] == 2
     report = (vault / "MIGRATION REPORT.md").read_text(encoding="utf-8")
     assert "Created 2 thought notes; preserved 3 present payloads." in report
-    assert "Original note bytes are retained under Attachments." in report
+    assert "Safe original note bytes are retained under Attachments." in report
     assert source.read_bytes() == source_before
 
 

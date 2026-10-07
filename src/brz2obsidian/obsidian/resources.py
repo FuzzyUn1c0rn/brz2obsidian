@@ -12,6 +12,8 @@ def resource_section(plan, owner):
         target = targets[asset.asset_id]
         if asset.owner != owner:
             continue
+        if asset.availability == "absent" and asset.role in {"note_original", "icon"}:
+            continue
         if asset.availability == "absent":
             label = PurePosixPath(asset.original_name).name
             label = (

@@ -27,3 +27,14 @@ Use the project `.venv` interpreter for Python development and tooling
 Python using `python -m venv .venv` if missing. Install runtime, build,
 and development packages only inside this environment, as they become
 needed. See `README.md` for bootstrap commands and dependency manifests.
+
+## Temporary artifacts
+
+For development runs, prototypes, screenshots, agent handoffs, or cleanup,
+follow [workspace housekeeping](docs/workspace.md). Put disposable artifacts
+under Git-ignored `tmp/<effort>/` inside the current checkout.
+
+## Visual verification
+
+Default to strategic sampling for native and rendering checks. Before a visual
+review, read [the sampling policy](docs/testing.md#visual-sampling-policy).

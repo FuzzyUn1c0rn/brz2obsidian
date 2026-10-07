@@ -49,6 +49,14 @@ ordinary/member body-icon snapshots; those image references are separately edita
 source colours remain in migration-record.json without vault colour properties
 or the decorative Appearance display.
 
+When a source category icon is absent, its icon property is empty and inheriting
+members keep their categories and appearance_category links with neutral
+appearance. A valid explicit member icon still wins. Add a valid local image to
+the category's icon property to supply future dashboard defaults. The Migration
+report identifies the missing provider and affected included members separately.
+Missing source category text remains unknown; its notice does not reconstruct a
+body from images or declared length. Source repair and re-export are optional.
+
 Imported created/updated are source creation/overall-modification calendar dates,
 without timezone conversion. Full timestamps remain in migration-record.json.
 An ordinary manual membership edit does not automatically change updated.
@@ -74,9 +82,11 @@ Keep notes human-readable and preserve their authored content.
 ## Browse and extend categories
 
 Open [[Categories.md]] from Home, then open the category dashboard for its Members
-table and Gallery immediately after the title. Category notes have no generated
+table and Gallery after the title and any Parents/Children navigation.
+Every direct included parent is linked; hierarchy does not create membership.
+Category notes have no generated
 introductory icon image; their icon property still supplies dashboard images.
-Retained source labels, authored text/images, resources and graph links follow
+Retained source labels, authored text/images, resources and Related links follow
 the Bases. Ordinary/member notes keep their separately editable body snapshots.
 A standalone contextual Base has no selected embedding
 category. Discovery follows linked membership, with Templates and Attachments

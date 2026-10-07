@@ -26,7 +26,7 @@ def relationships(raw):
             signature in {(1, 1, 1, -1), (1, 1, 1, 1), (1, 1, 1, 7)}
             and roles == (1, 1)
             or signature == (1, 1, 1, -1)
-            and roles == (1, 4)
+            and roles in {(1, 2), (1, 4)}
         ):
             kind = "hierarchy"
         elif signature in {
@@ -107,6 +107,8 @@ def note_ids(raw, archive):
         )
         assert a["SourceId"] in thoughts, "raw note owner"
         assert type(a["DataLength"]) is int and a["DataLength"] >= 0, "raw note length"
+        if a["Id"] in raw.gaps:
+            continue
         assert raw["meta.json"][0]["AttachmentFileStates"][a["Id"]] == 1, (
             "raw note state"
         )

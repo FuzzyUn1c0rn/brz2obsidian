@@ -35,7 +35,7 @@ def graph_archive(
             "Kind": kinds.get(n, 1),
             "ACType": 0,
             "Label": labels.get(n),
-            "ForgottenDateTime": "2020-01-01",
+            "ForgottenDateTime": None,
         }
         for n, title in titles.items()
     ]

@@ -1,7 +1,11 @@
-# Private archives, generated review vaults, and UI evidence
+# Private source exports and retained user vaults
 /brz/
 *.[bB][rR][zZ]
 !tests/fixtures/*.brz
+
+# Disposable development artifacts and retained private backups
+/tmp/
+/backups/
 
 # Project environment and Python caches
 /.venv/

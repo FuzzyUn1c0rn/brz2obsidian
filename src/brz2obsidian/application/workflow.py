@@ -46,7 +46,7 @@ class Workflow:
         now = datetime.now(UTC)
         return RunMetadata(
             converter_version=__version__,
-            renderer_version="2",
+            renderer_version="3",
             run_id=str(uuid4()),
             run_time=now.isoformat(),
             obsidian_version="1.13.7",
@@ -123,6 +123,8 @@ class Workflow:
                             support_artifacts=migration_plan.support_artifacts,
                             reserved_support_paths=migration_plan.reserved_support_paths,
                             icon_snapshots=migration_plan.icon_snapshots,
+                            source_gaps=migration_plan.source_gaps,
+                            generated_presentations=migration_plan.generated_presentations,
                             tag_targets=migration_plan.tag_targets,
                             tag_memberships=migration_plan.tag_memberships,
                             tag_memberships_path=migration_plan.tag_memberships_path,

@@ -6,12 +6,12 @@ Ticket: [Validate the proposed vault in Obsidian](../issues/04-vault-trial.md).
 
 ## Local artifacts
 
-- [Review Vault guide](</C:/Users/stefa/projects/brz2obsidian/brz/prototype-vaults-r1/Review Vault/START HERE.md>): a representative real-data slice from both inspected archives, with a few synthetic cases.
-- [UI Checks guide](</C:/Users/stefa/projects/brz2obsidian/brz/prototype-vaults-r1/UI Checks/START HERE.md>): synthetic native-app checks.
+- [Review Vault guide](<C:/Users/stefa/projects/brz2obsidian/tmp/legacy/brz/prototype-vaults-r1/Review Vault/START HERE.md>): a representative real-data slice from both inspected archives, with a few synthetic cases.
+- [UI Checks guide](<C:/Users/stefa/projects/brz2obsidian/tmp/legacy/brz/prototype-vaults-r1/UI Checks/START HERE.md>): synthetic native-app checks.
 - [Prototype documentation](</C:/Users/stefa/.codex/worktrees/vault-prototype/brz2obsidian/.scratch/brz-to-obsidian/prototype/README.md>): build commands, feature coverage, shortcuts, and source comparison.
-- [Synthetic inline-image screenshot](</C:/Users/stefa/projects/brz2obsidian/brz/prototype-vaults-r1/ui-evidence/native-inline-image.jpg>): captured in the native Obsidian test vault.
-- [Home Checks entry note](</C:/Users/stefa/projects/brz2obsidian/brz/prototype-vaults-r1/Home Checks/Home — Entry thought.md>): separate synthetic vault used to verify the accepted root-level Home behavior.
-- [Home graph screenshot](</C:/Users/stefa/projects/brz2obsidian/brz/prototype-vaults-r1/ui-evidence/home-native-graph.jpg>): native graph with the identifiable Home filename and linked uncreated child.
+- [Synthetic inline-image screenshot](<C:/Users/stefa/projects/brz2obsidian/tmp/legacy/brz/prototype-vaults-r1/ui-evidence/native-inline-image.jpg>): captured in the native Obsidian test vault.
+- [Home Checks entry note](<C:/Users/stefa/projects/brz2obsidian/tmp/legacy/brz/prototype-vaults-r1/Home Checks/Home — Entry thought.md>): separate synthetic vault used to verify the accepted root-level Home behavior.
+- [Home graph screenshot](<C:/Users/stefa/projects/brz2obsidian/tmp/legacy/brz/prototype-vaults-r1/ui-evidence/home-native-graph.jpg>): native graph with the identifiable Home filename and linked uncreated child.
 
 All generated private content remains under the primary repository's ignored `brz/` directory. This report uses aggregate counts and synthetic names. The throwaway code lives in the managed worktree `C:\Users\stefa\.codex\worktrees\vault-prototype\brz2obsidian` on `codex/vault-prototype`; its capture commit is linked from the prototype ticket. No existing user vault was used for testing.
 
@@ -93,4 +93,4 @@ The separate synthetic Home Checks vault tested the accepted presentation in Obs
 
 Source identity is a separate prerequisite. In the synthetic CONTROLLED_EXPORT Brain, the initial Home action returned to PARENT after navigating to CHILD. The user then set CHILD as Home. The root activated PEER, verified it active, and exported a new Brain Archive through TheBrain 15's native UI to the project `brz` folder. The generated dated export was renamed to `brz/controlled-home-child.brz`; its 6,976 bytes have SHA-256 `aa29d7aa0afb687f8b4ffdd490220c3c2e198c729681083fe5065b3bb55dfbf0`. The original fixture's fingerprint remains unchanged.
 
-After exporting, clicking Home selected CHILD; the Home tooltip read CHILD, with PARENT still visibly above it. [Synthetic TheBrain screenshot](</C:/Users/stefa/projects/brz2obsidian/brz/prototype-vaults-r1/ui-evidence/thebrain-changed-home.jpg>) captures this observation. The [research comparison](home-thought.md) passed: only numeric setting 20 changed Value, from PARENT's UUID to CHILD's, and PEER was uniquely latest activated in the export. This verifies Home designation independently of activation and parentlessness for the inspected format. Neither a particular title nor graph topology is used to guess source Home identity.
+After exporting, clicking Home selected CHILD; the Home tooltip read CHILD, with PARENT still visibly above it. [Synthetic TheBrain screenshot](<C:/Users/stefa/projects/brz2obsidian/tmp/legacy/brz/prototype-vaults-r1/ui-evidence/thebrain-changed-home.jpg>) captures this observation. The [research comparison](home-thought.md) passed: only numeric setting 20 changed Value, from PARENT's UUID to CHILD's, and PEER was uniquely latest activated in the export. This verifies Home designation independently of activation and parentlessness for the inspected format. Neither a particular title nor graph topology is used to guess source Home identity.

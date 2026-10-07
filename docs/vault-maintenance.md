@@ -59,15 +59,22 @@ properties does not rewrite them; edit those references separately. Replacing a
 shared image's bytes can naturally affect all references to that file. Original
 timestamps and colour values remain in `migration-record.json` independently.
 Obsidian Properties saves can normalize CRLF to LF in the reviewed build; keep
-pristine converter output and `.md.original` backups for exact pre-edit evidence.
+pristine converter output and safe supplied-body `.md.original` backups for exact
+pre-edit evidence. Unsafe originals are explicitly omitted, and absent bodies have
+no original backup. Generated archive-only images follow a source-gap notice
+linked to the Migration report; their order is generated. That presentation
+promises no recovered prose, captions or authored layout.
 
 ## Browse and rename categories
 
 Home links to `Categories.md`. A category dashboard places contextual Members
-and Gallery views from `Templates/Bases/` immediately after its title, with no
+and Gallery views from `Templates/Bases/` after its title and any Parents/Children
+navigation, with no
 generated introductory icon image. Its icon property remains available to
 overview/member tables and cards. Retained source labels, authored text/images,
-resources and graph links follow the Bases. Tables begin Icon, Note, Inheritance,
+resources and Related links follow the Bases. Every direct included hierarchy
+parent appears above Members/Gallery; hierarchy does not create membership.
+Tables begin Icon, Note, Inheritance,
 categories, created, updated; cards use the effective image. Open these views
 through the dashboard, since a standalone contextual Base has no embedding
 category. Prose links, hierarchy, source tags and provider links do not create
@@ -132,3 +139,15 @@ PDFs remain byte-preserved and open natively; vault Search does not search their
 body text. Reviewed videos preserve exact URLs beside derived embeds and retain
 service/network/offline limits. Read `MIGRATION REPORT.md` for per-record source
 gaps and [source coverage](source-coverage.md) for strict refusal boundaries.
+
+## Native review observations
+
+Insert a full template into the active note in Editing view. The actual-output
+review confirmed insertion-day dates and title expansion for generic, category
+and adapted future-member templates without imported identity fields. Native
+rename with link updates preserves contextual category discovery and quoted
+template variables; the existing Markdown heading is still ordinary text and
+can be edited separately. Native Properties may rewrite frontmatter quoting,
+so preserve identity/date values and independently compare body content when
+checking an intentional edit. See the
+[native review evidence](../.scratch/management-leadership-implementation/research/native-v3-acceptance.md).

@@ -127,7 +127,8 @@ class Document(Contract):
     owner: str
     text: str
     text_digest: str
-    original_asset_id: str
+    original_asset_id: str | None
+    original_copy_omitted: bool = False
     references: tuple[ReferenceSpan, ...] = ()
     evidence: tuple[str, ...] = ()
 
@@ -167,6 +168,42 @@ class SourceFinding(Contract):
     evidence: tuple[str, ...] = ()
 
 
+class SourceGap(Contract):
+    """Reviewed absence semantics; raw source scalars belong to its finding."""
+
+    owner: str
+    asset_id: str
+    role: Literal["ordinary_note", "definition_note", "definition_icon"]
+    rule_id: str
+    evidence: tuple[str, ...] = ()
+
+
+class GeneratedPresentation(Contract):
+    """Generated display obligations, never supplied authored references."""
+
+    owner: str
+    source_gap_asset_id: str
+    kind: Literal["note_images"] = "note_images"
+    image_asset_ids: tuple[str, ...]
+    ordering: Literal["canonical_asset_identity"] = "canonical_asset_identity"
+
+
+class SourceGapDiagnostic(Contract):
+    gap: SourceGap
+    owner_target: str
+    owner_created: bool
+    outcome: Literal["image_fallback", "unknown_note", "neutral_icon"]
+    provider_key: str | None = None
+    affected_member_keys: tuple[str, ...] = ()
+    image_asset_ids: tuple[str, ...] = ()
+
+
+class GeneratedPresentationTarget(Contract):
+    presentation: GeneratedPresentation
+    note_path: str
+    image_paths: tuple[str, ...]
+
+
 class AccountingEntry(Contract):
     identity: str
     disposition: Literal["normalized", "retained_only", "unresolved"]
@@ -178,7 +215,7 @@ class SourceAccounting(Contract):
 
 
 class SourceSnapshot(Contract):
-    contract_version: Literal[2] = 2
+    contract_version: Literal[3] = 3
     identity: SourceIdentity
     collection_title: str
     entry_key: str | None
@@ -189,6 +226,8 @@ class SourceSnapshot(Contract):
     assets: tuple[Asset, ...] = ()
     original_evidence: tuple[OriginalEvidence, ...] = ()
     findings: tuple[SourceFinding, ...] = ()
+    source_gaps: tuple[SourceGap, ...] = ()
+    generated_presentations: tuple[GeneratedPresentation, ...] = ()
     accounting: SourceAccounting
 
 
@@ -208,12 +247,16 @@ class SourcePolicy(Contract):
     module_id: str
     module_version: str
     format_version: str
-    contract_version: Literal[2] = 2
+    contract_version: Literal[3] = 3
     entry_required: bool = True
     finding_dispositions: tuple[FindingDisposition, ...] = ()
 
 
 class Counts(Contract):
+    source_gaps: int | None = None
+    generated_presentations: int | None = None
+    planned_generated_embeds: int | None = None
+    actual_generated_embeds: int | None = None
     source_items: int | None = None
     source_relationships: int | None = None
     source_references: int | None = None
@@ -314,6 +357,8 @@ class MigrationPlan(Contract):
     support_artifacts: tuple[SupportArtifact, ...] = ()
     reserved_support_paths: tuple[str, ...] = ()
     icon_snapshots: tuple[IconSnapshot, ...] = ()
+    source_gaps: tuple[SourceGapDiagnostic, ...] = ()
+    generated_presentations: tuple[GeneratedPresentationTarget, ...] = ()
     adaptations: tuple[Adaptation, ...] = ()
     issues: tuple[Issue, ...] = ()
     counts: Counts
@@ -373,7 +418,8 @@ class DocumentInspection(Contract):
     key: str
     owner: str
     text_digest: str
-    original_asset_id: str
+    original_asset_id: str | None
+    original_copy_omitted: bool = False
     references: tuple[ReferenceSpan, ...] = ()
     evidence: tuple[str, ...] = ()
 
@@ -388,6 +434,8 @@ class Inspection(Contract):
     support_artifacts: tuple[SupportArtifact, ...] = ()
     reserved_support_paths: tuple[str, ...] = ()
     icon_snapshots: tuple[IconSnapshot, ...] = ()
+    source_gaps: tuple[SourceGapDiagnostic, ...] = ()
+    generated_presentations: tuple[GeneratedPresentationTarget, ...] = ()
     tag_targets: tuple[TagTarget, ...] = ()
     tag_memberships: tuple[TagMembership, ...] = ()
     tag_memberships_path: str | None = None
@@ -402,7 +450,7 @@ class RunResult(Contract):
     schema_: Literal["brz2obsidian.result"] = Field(
         default="brz2obsidian.result", alias="schema"
     )
-    schema_version: Literal[2] = 2
+    schema_version: Literal[3] = 3
     converter_version: str
     operation: Literal["inspect", "convert"]
     outcome: Literal["clean", "warnings", "refused", "failed"]

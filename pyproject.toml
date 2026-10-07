@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "brz2obsidian"
-version = "0.2.0"
+version = "0.3.0"
 description = "Verified source-to-Obsidian migration"
 requires-python = ">=3.14"
-dependencies = ["pydantic>=2.13,<3", "markdown-it-py>=4.2,<4.3", "PyYAML>=6.0.3,<7"]
+dependencies = ["pydantic>=2.13,<3", "markdown-it-py>=4.2,<4.3", "PyYAML>=6.0.3,<7", "Pillow>=12.3,<13"]
 
 [project.optional-dependencies]
 dev = ["pytest>=9.1,<10", "ruff>=0.16,<0.17"]
@@ -17,10 +17,13 @@ brz2obsidian = "brz2obsidian.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--basetemp=tmp/pytest"
+cache_dir = "tmp/pytest-cache"
 
 [tool.ruff]
 target-version = "py314"
 extend-exclude = [".scratch"]
+cache-dir = "tmp/ruff-cache"
 
 [tool.setuptools.packages.find]
 where = ["src"]

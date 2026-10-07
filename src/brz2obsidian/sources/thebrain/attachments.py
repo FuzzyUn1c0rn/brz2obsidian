@@ -9,12 +9,27 @@ from brz2obsidian.contracts import (
     AccountingEntry,
     Asset,
     Document,
+    GeneratedPresentation,
     OriginalEvidence,
     SourceFinding,
+    SourceGap,
 )
 
-from .findings import ABSENT_TXT_RULE, ICON_LENGTH_RULE, ZERO_LENGTH_ABSENT_TXT_RULE
-from .notes import bind_note_references, trace_note_references
+from .findings import (
+    ABSENT_NOTE_IMAGES_RULE,
+    ABSENT_TXT_RULE,
+    ABSENT_TYPE_ICON_RULE,
+    ABSENT_TYPE_NOTE_RULE,
+    ICON_LENGTH_RULE,
+    ZERO_LENGTH_ABSENT_TXT_RULE,
+)
+from .images import validate_note_image
+from .notes import (
+    bind_note_references,
+    compact_thought_identity,
+    trace_note_references,
+)
+from .scope import contains_omitted_identity
 from .semantics import validate_semantic_fields
 from .videos import reviewed_video
 
@@ -28,15 +43,19 @@ SPECIAL_FLAGS = (
 )
 
 
-def normalize_attachments(archive, records, meta, thoughts, refuse, uuid):
+def normalize_attachments(
+    archive, records, meta, thoughts, refuse, uuid, excluded=(), scope_tokens=()
+):
     assets, documents, members, evidence, accounting, findings = [], [], {}, [], [], []
     absent_records = []
+    absent_notes, gaps, presentations = [], [], []
+    note_owners = set()
     asset_records = {}
     states = meta["AttachmentFileStates"]
     names = set(archive.namelist())
     for key, state in states.items():
         uuid(key)
-        if type(state) is not int or state not in {1, 2}:
+        if type(state) is not int or state not in {1, 2, 3}:
             refuse("invalid_source", "Invalid attachment file state", (key,))
     for index, record in enumerate(records):
         asset_id, owner = uuid(record["Id"]), uuid(record["SourceId"])
@@ -188,6 +207,105 @@ def normalize_attachments(archive, records, meta, thoughts, refuse, uuid):
                 (asset_id, owner, location, record["DataLength"], pointer)
             )
             continue
+        recognized_note = kind == 1 and (note_type == 4 or location == "Notes.md")
+        if recognized_note:
+            if owner in note_owners:
+                refuse(
+                    "invalid_source",
+                    "Multiple thought notes have ambiguous ownership",
+                    (asset_id,),
+                )
+            note_owners.add(owner)
+        if recognized_note and states.get(asset_id) == 3 and member not in names:
+            if (
+                note_type != 4
+                or location != "Notes.md"
+                or thoughts[owner]["Kind"] not in {1, 2}
+            ):
+                refuse(
+                    "unsupported_feature",
+                    "Absent note does not match a reviewed note rule",
+                    (asset_id,),
+                )
+            assets.append(Asset(**common, role="note_original", availability="absent"))
+            if thoughts[owner]["Kind"] == 2:
+                pointers = (pointer, "meta.json")
+                findings.append(
+                    SourceFinding(
+                        kind="known_absent_payload",
+                        rule_id=ABSENT_TYPE_NOTE_RULE,
+                        affected=(asset_id,),
+                        evidence=pointers,
+                        observed_json=json.dumps(
+                            {
+                                "owner": owner,
+                                "filename": location,
+                                "member": member,
+                                "source_type": 2,
+                                "type": kind,
+                                "note_type": note_type,
+                                "state": 3,
+                                "declared_length": record["DataLength"],
+                                "present": False,
+                            }
+                        ),
+                    )
+                )
+                gaps.append(
+                    SourceGap(
+                        owner=owner,
+                        asset_id=asset_id,
+                        role="definition_note",
+                        rule_id=ABSENT_TYPE_NOTE_RULE,
+                        evidence=pointers,
+                    )
+                )
+                continue
+            absent_notes.append(
+                (asset_id, owner, member, record["DataLength"], pointer)
+            )
+            continue
+        if kind == 5 and states.get(asset_id) == 3 and member not in names:
+            if thoughts[owner]["Kind"] != 2:
+                refuse(
+                    "unsupported_feature",
+                    "Absent icon requires a type owner",
+                    (asset_id,),
+                )
+            pointers = (pointer, "meta.json")
+            assets.append(Asset(**common, role="icon", availability="absent"))
+            findings.append(
+                SourceFinding(
+                    kind="known_absent_payload",
+                    rule_id=ABSENT_TYPE_ICON_RULE,
+                    affected=(asset_id,),
+                    evidence=pointers,
+                    observed_json=json.dumps(
+                        {
+                            "owner": owner,
+                            "filename": location,
+                            "member": member,
+                            "source_type": 2,
+                            "type": kind,
+                            "note_type": note_type,
+                            "is_icon": True,
+                            "state": 3,
+                            "declared_length": record["DataLength"],
+                            "present": False,
+                        }
+                    ),
+                )
+            )
+            gaps.append(
+                SourceGap(
+                    owner=owner,
+                    asset_id=asset_id,
+                    role="definition_icon",
+                    rule_id=ABSENT_TYPE_ICON_RULE,
+                    evidence=pointers,
+                )
+            )
+            continue
         if states.get(asset_id) != 1 or member not in names:
             refuse(
                 "missing_required_payload",
@@ -244,19 +362,41 @@ def normalize_attachments(archive, records, meta, thoughts, refuse, uuid):
                     "Multiple thought notes have ambiguous ownership",
                     (asset_id,),
                 )
-            references = trace_note_references(text)
+            references = trace_note_references(text, excluded)
+            removals = []
+            for reference in references:
+                if reference.kind == "item":
+                    target = compact_thought_identity(reference.target)
+                    if target in excluded:
+                        removals.append(reference)
+            unsafe_original = bool(removals) or contains_omitted_identity(
+                text, scope_tokens
+            )
+            for reference in reversed(removals):
+                text = text[: reference.start] + text[reference.end :]
+            if contains_omitted_identity(text, scope_tokens):
+                refuse(
+                    "invalid_reference",
+                    "Note contains an excluded association outside removable references",
+                )
+            if removals:
+                references = trace_note_references(text)
             documents.append(
                 Document(
                     key=asset_id,
                     owner=owner,
                     text=text,
                     text_digest=hashlib.sha256(text.encode()).hexdigest(),
-                    original_asset_id=asset_id,
+                    original_asset_id=None if unsafe_original else asset_id,
+                    original_copy_omitted=unsafe_original,
                     references=references,
                     evidence=(pointer,),
                 )
             )
             role = "note_original"
+            if unsafe_original:
+                members[asset_id] = member
+                continue
         assets.append(
             Asset(
                 **common,
@@ -284,7 +424,7 @@ def normalize_attachments(archive, records, meta, thoughts, refuse, uuid):
                 references=(asset_id,),
             )
         )
-    if set(states) - {a.asset_id for a in assets}:
+    if set(states) - ({a.asset_id for a in assets} | {d.key for d in documents}):
         refuse("invalid_source", "File states refer to an absent attachment")
     for asset_id, owner, location, declared, pointer in absent_records:
         if declared == 0:
@@ -380,6 +520,81 @@ def normalize_attachments(archive, records, meta, thoughts, refuse, uuid):
                 ),
             )
         )
+    for asset_id, owner, member, declared, pointer in sorted(absent_notes):
+        images = tuple(
+            sorted(
+                (a for a in assets if a.owner == owner and a.role == "image"),
+                key=lambda a: a.asset_id,
+            )
+        )
+        if not images:
+            refuse(
+                "missing_required_payload",
+                "Absent ordinary note lacks usable owned note images",
+                (asset_id,),
+            )
+        image_facts = []
+        for image in images:
+            with archive.open(members[image.asset_id]) as stream:
+                dimensions = validate_note_image(
+                    stream, image.original_name, refuse, image.asset_id
+                )
+            image_facts.append(
+                {
+                    "asset_id": image.asset_id,
+                    "owner": owner,
+                    "member": members[image.asset_id],
+                    "state": 1,
+                    "declared_length": asset_records[image.asset_id]["DataLength"],
+                    "actual_length": image.actual_length,
+                    "actual_sha256": image.actual_sha256,
+                    "crc_valid": True,
+                    **dimensions,
+                }
+            )
+        pointers = (pointer, "meta.json") + tuple(
+            p
+            for image in images
+            for p in (*image.evidence, "payload:" + members[image.asset_id])
+        )
+        findings.append(
+            SourceFinding(
+                kind="known_absent_payload",
+                rule_id=ABSENT_NOTE_IMAGES_RULE,
+                affected=(asset_id,),
+                evidence=pointers,
+                observed_json=json.dumps(
+                    {
+                        "owner": owner,
+                        "filename": "Notes.md",
+                        "member": member,
+                        "source_type": 2,
+                        "type": 1,
+                        "note_type": 4,
+                        "state": 3,
+                        "declared_length": declared,
+                        "present": False,
+                        "images": image_facts,
+                    }
+                ),
+            )
+        )
+        gaps.append(
+            SourceGap(
+                owner=owner,
+                asset_id=asset_id,
+                role="ordinary_note",
+                rule_id=ABSENT_NOTE_IMAGES_RULE,
+                evidence=pointers,
+            )
+        )
+        presentations.append(
+            GeneratedPresentation(
+                owner=owner,
+                source_gap_asset_id=asset_id,
+                image_asset_ids=tuple(a.asset_id for a in images),
+            )
+        )
     documents = [bind_note_references(d, assets, thoughts) for d in documents]
     accounting.extend(
         AccountingEntry(
@@ -390,4 +605,13 @@ def normalize_attachments(archive, records, meta, thoughts, refuse, uuid):
         for document in documents
         for index, reference in enumerate(document.references)
     )
-    return assets, documents, members, evidence, accounting, findings
+    return (
+        assets,
+        documents,
+        members,
+        evidence,
+        accounting,
+        findings,
+        sorted(gaps, key=lambda g: g.asset_id),
+        presentations,
+    )

@@ -6,6 +6,7 @@ iniconfig==2.3.0
 markdown-it-py==4.2.0
 mdurl==0.1.2
 packaging==26.3
+pillow==12.3.0
 pluggy==1.6.0
 pydantic==2.13.5
 pydantic_core==2.46.5
