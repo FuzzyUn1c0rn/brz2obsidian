@@ -348,6 +348,9 @@ starter already follows this presentation and remains unchanged.
 
 ## Visual sampling policy
 
+For native source diagnosis or recovery experiments, use
+[bounded native investigation](agents/native-investigation.md).
+
 Use strategic sampling for visual and native reviews in this repository, as
 requested by the user on 2026-10-06. Select a small set of actual-output cases
 covering each distinct rendering or application behavior. Include unusual source

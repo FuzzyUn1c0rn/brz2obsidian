@@ -34,7 +34,15 @@ For development runs, prototypes, screenshots, agent handoffs, or cleanup,
 follow [workspace housekeeping](docs/workspace.md). Put disposable artifacts
 under Git-ignored `tmp/<effort>/` inside the current checkout.
 
+## Native investigation
+
+Before investigating source behavior or retrieving content in a native app,
+follow [bounded native investigation](docs/agents/native-investigation.md).
+
 ## Visual verification
 
 Default to strategic sampling for native and rendering checks. Before a visual
 review, read [the sampling policy](docs/testing.md#visual-sampling-policy).
+
+When capturing, specifying, implementing or reviewing a user-approved presentation,
+follow [the presentation handoff procedure](docs/agents/accepted-presentation.md).
