@@ -1,0 +1,893 @@
+{
+  "date": "2026-10-07",
+  "repository": "FuzzyUn1c0rn/brz2obsidian",
+  "published_commit": "34c8f0b3f5399fea04daaf4490944b475a6f4da4",
+  "records": {
+    ".scratch/brz-to-obsidian/issues/01-brz-preservation-evidence.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/51",
+      "number": 51,
+      "blockers": [],
+      "source_sha256": "6b35d4bf56dd81275f6922c569ef2426c058c60f6ee7dcea0490de9fe32023a2"
+    },
+    ".scratch/brz-to-obsidian/issues/02-obsidian-representation-evidence.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/52",
+      "number": 52,
+      "blockers": [],
+      "source_sha256": "0d7e3279608b9a185e28fa17f548c5a1f846f486052f70af60c75b84a0bac012"
+    },
+    ".scratch/brz-to-obsidian/issues/03-vault-model.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/53",
+      "number": 53,
+      "blockers": [
+        ".scratch/brz-to-obsidian/issues/01-brz-preservation-evidence.md",
+        ".scratch/brz-to-obsidian/issues/02-obsidian-representation-evidence.md",
+        ".scratch/brz-to-obsidian/issues/07-relationship-fixture.md",
+        ".scratch/brz-to-obsidian/issues/08-reverse-and-one-way-evidence.md",
+        ".scratch/brz-to-obsidian/issues/09-uncreated-target-evidence.md",
+        ".scratch/brz-to-obsidian/issues/10-parent-materialization-evidence.md"
+      ],
+      "source_sha256": "cb0037657e5fd2fd936800fcd2d20409b597dc06913eb0ef4bb86a1576d3be93"
+    },
+    ".scratch/brz-to-obsidian/issues/04-vault-trial.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/54",
+      "number": 54,
+      "blockers": [
+        ".scratch/brz-to-obsidian/issues/03-vault-model.md",
+        ".scratch/brz-to-obsidian/issues/11-home-thought-evidence.md"
+      ],
+      "source_sha256": "74d763621bd5248319431186de2a9321d29febf096c0c3e48f6277a36f161523"
+    },
+    ".scratch/brz-to-obsidian/issues/05-conversion-contract.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/55",
+      "number": 55,
+      "blockers": [
+        ".scratch/brz-to-obsidian/issues/01-brz-preservation-evidence.md",
+        ".scratch/brz-to-obsidian/issues/04-vault-trial.md"
+      ],
+      "source_sha256": "dae00cfd5586351eadd9217295da95f0a4fe76026ba5913db35948c107021aca"
+    },
+    ".scratch/brz-to-obsidian/issues/06-implementation-specification.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/56",
+      "number": 56,
+      "blockers": [
+        ".scratch/brz-to-obsidian/issues/05-conversion-contract.md"
+      ],
+      "source_sha256": "47926b436d7e2063cb60048e3076ca56a956cd2c631aba094d3a57d1876804ad"
+    },
+    ".scratch/brz-to-obsidian/issues/07-relationship-fixture.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/57",
+      "number": 57,
+      "blockers": [],
+      "source_sha256": "98a240beaefd5c0802b5349da55a6d8eccca647cce4f13c198746d0a3f7054bf"
+    },
+    ".scratch/brz-to-obsidian/issues/08-reverse-and-one-way-evidence.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/58",
+      "number": 58,
+      "blockers": [],
+      "source_sha256": "612201c192f26f9941b8889061d6eed7f6004b592861083b9089514392cd0738"
+    },
+    ".scratch/brz-to-obsidian/issues/09-uncreated-target-evidence.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/59",
+      "number": 59,
+      "blockers": [],
+      "source_sha256": "eb0fd21fbbaecca130bb324bf65af32773a11341e34bbff2684e865fc5807eb3"
+    },
+    ".scratch/brz-to-obsidian/issues/10-parent-materialization-evidence.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/60",
+      "number": 60,
+      "blockers": [
+        ".scratch/brz-to-obsidian/issues/09-uncreated-target-evidence.md"
+      ],
+      "source_sha256": "b5188ae2fa6cbdc81185076a6c270253957ccfe9ac4f603c658ead7cb6d92aa6"
+    },
+    ".scratch/brz-to-obsidian/issues/11-home-thought-evidence.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/61",
+      "number": 61,
+      "blockers": [],
+      "source_sha256": "b006bdb797834c9aeaf2cae141c35c22bbfa71dc2f0fe18703e35812b1681dca"
+    },
+    ".scratch/brz-to-obsidian/map.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/7",
+      "number": 7,
+      "blockers": [],
+      "source_sha256": "b875d127c81312c539c79ebe2dea26df08e5048042255abfb4f3575799eaf3a2"
+    },
+    ".scratch/brz-to-obsidian/spec.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/12",
+      "number": 12,
+      "blockers": [],
+      "source_sha256": "a3a4e8f81e56b289a7cd50e61c4886ab4a2fbedb2223b25d31f2d3de03fe0898"
+    },
+    ".scratch/brz-to-obsidian-v1/issues/01-minimal-brain-vault.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/14",
+      "number": 14,
+      "blockers": [],
+      "source_sha256": "a8b4e8ba9d9399975fca6547e9566c963093c83d0ad9aabcfa3c09954747bfd1"
+    },
+    ".scratch/brz-to-obsidian-v1/issues/02-hierarchy-empty-targets.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/15",
+      "number": 15,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v1/issues/01-minimal-brain-vault.md"
+      ],
+      "source_sha256": "f041c8a3dad45997f7abf8cef3db4cb5dca4879ae1eb997c04c7379b37cf9f4b"
+    },
+    ".scratch/brz-to-obsidian-v1/issues/03-files-resource-references.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/16",
+      "number": 16,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v1/issues/01-minimal-brain-vault.md"
+      ],
+      "source_sha256": "4a6b888d286d647fcd30670eb2abbeb9b79338f2b6a280d04bbcb3db6b32fd80"
+    },
+    ".scratch/brz-to-obsidian-v1/issues/04-source-note-links.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/17",
+      "number": 17,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v1/issues/02-hierarchy-empty-targets.md",
+        ".scratch/brz-to-obsidian-v1/issues/03-files-resource-references.md"
+      ],
+      "source_sha256": "6d48931066932fab440f64d1d485fefc0d4e385bab2522fae2fe34572df4b0b1"
+    },
+    ".scratch/brz-to-obsidian-v1/issues/05-native-tags.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/18",
+      "number": 18,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v1/issues/02-hierarchy-empty-targets.md"
+      ],
+      "source_sha256": "67410980c3c89ff1a154d6e14e19f90b607684d0c89336d1f8bea6466106b06b"
+    },
+    ".scratch/brz-to-obsidian-v1/issues/06-verified-coverage-source-gaps.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/19",
+      "number": 19,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v1/issues/04-source-note-links.md",
+        ".scratch/brz-to-obsidian-v1/issues/05-native-tags.md"
+      ],
+      "source_sha256": "47f2fdee95ab431fc84c8cc78df57d4efaf787b11b772c7fde1d22c260f48e0c"
+    },
+    ".scratch/brz-to-obsidian-v1/issues/07-publication-failure-protection.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/20",
+      "number": 20,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v1/issues/01-minimal-brain-vault.md"
+      ],
+      "source_sha256": "d4e20c317ab02db7c8e5646a0de2daf49b5ba27645c7c8d0b4313fc3072a70fa"
+    },
+    ".scratch/brz-to-obsidian-v1/issues/08-alternate-source-reuse.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/21",
+      "number": 21,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v1/issues/06-verified-coverage-source-gaps.md",
+        ".scratch/brz-to-obsidian-v1/issues/07-publication-failure-protection.md"
+      ],
+      "source_sha256": "3d0ece3ba6d992f5cc2ff637f955ce5abcdeeb1b43bd531431835ea19535cc45"
+    },
+    ".scratch/brz-to-obsidian-v1/issues/09-real-export-preservation.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/22",
+      "number": 22,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v1/issues/06-verified-coverage-source-gaps.md",
+        ".scratch/brz-to-obsidian-v1/issues/07-publication-failure-protection.md"
+      ],
+      "source_sha256": "c4c0a4b3d60663c590998ef638b23373615156a67e7138c5556fbe3259719007"
+    },
+    ".scratch/brz-to-obsidian-v1/issues/10-obsidian-first-version-acceptance.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/23",
+      "number": 23,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v1/issues/08-alternate-source-reuse.md",
+        ".scratch/brz-to-obsidian-v1/issues/09-real-export-preservation.md"
+      ],
+      "source_sha256": "14696c52559b9d97bd89b16083e3348c700631f6b41dda2d91e726b003cbf871"
+    },
+    ".scratch/brz-to-obsidian-v1/issues/11-final-review-repairs.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/24",
+      "number": 24,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v1/issues/01-minimal-brain-vault.md",
+        ".scratch/brz-to-obsidian-v1/issues/02-hierarchy-empty-targets.md",
+        ".scratch/brz-to-obsidian-v1/issues/03-files-resource-references.md",
+        ".scratch/brz-to-obsidian-v1/issues/04-source-note-links.md",
+        ".scratch/brz-to-obsidian-v1/issues/05-native-tags.md",
+        ".scratch/brz-to-obsidian-v1/issues/06-verified-coverage-source-gaps.md",
+        ".scratch/brz-to-obsidian-v1/issues/07-publication-failure-protection.md",
+        ".scratch/brz-to-obsidian-v1/issues/08-alternate-source-reuse.md",
+        ".scratch/brz-to-obsidian-v1/issues/09-real-export-preservation.md",
+        ".scratch/brz-to-obsidian-v1/issues/10-obsidian-first-version-acceptance.md"
+      ],
+      "source_sha256": "6efcb00d07fde7c697abc181cee2f47e159ef86eb630ca1a1e2404ccdb7636af"
+    },
+    ".scratch/brz-to-obsidian-v1/README.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/4",
+      "number": 4,
+      "blockers": [],
+      "source_sha256": "419bef78c0a09f72c2edbb4d81e0fb91b1947f4885288c9371a470d5855eba92"
+    },
+    ".scratch/brz-to-obsidian-v1/spec.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/10",
+      "number": 10,
+      "blockers": [],
+      "source_sha256": "6579da99eadbefbf2dfe2c5186731a692724e627f00968a59606067a2ddfad42"
+    },
+    ".scratch/brz-to-obsidian-v2/issues/01-new-archive-evidence.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/39",
+      "number": 39,
+      "blockers": [],
+      "source_sha256": "7e3b737e3c38b2a19563d5d007bde529f68ee1a35fe97a7ca8ddcb4ee2d8af6c"
+    },
+    ".scratch/brz-to-obsidian-v2/issues/02-obsidian-type-options.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/40",
+      "number": 40,
+      "blockers": [],
+      "source_sha256": "33fa73ed08ca1e6eca5e7fdd90055331d62719ef282976f4d9fd468f8aa1a0af"
+    },
+    ".scratch/brz-to-obsidian-v2/issues/03-thought-type-representation.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/41",
+      "number": 41,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v2/issues/02-obsidian-type-options.md",
+        ".scratch/brz-to-obsidian-v2/issues/08-native-source-behavior.md",
+        ".scratch/brz-to-obsidian-v2/issues/10-kepano-reference-patterns.md"
+      ],
+      "source_sha256": "953be43351d1896fc9f50b079d4a88c44fd507c9eb5feab6d41e2bab47d5bebe"
+    },
+    ".scratch/brz-to-obsidian-v2/issues/04-version-two-coverage.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/42",
+      "number": 42,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v2/issues/08-native-source-behavior.md"
+      ],
+      "source_sha256": "50ed97ccc1bcfe76a992e0d4f0f8baa6c443d4e9b34f6d9d57f4a395c7c970c5"
+    },
+    ".scratch/brz-to-obsidian-v2/issues/05-version-two-vault-trial.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/43",
+      "number": 43,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v2/issues/03-thought-type-representation.md",
+        ".scratch/brz-to-obsidian-v2/issues/04-version-two-coverage.md",
+        ".scratch/brz-to-obsidian-v2/issues/11-vault-templates-and-maintenance.md"
+      ],
+      "source_sha256": "895642130441dc36bc84b6675e853b8892519a148e008a86e6e89c346fa0ca01"
+    },
+    ".scratch/brz-to-obsidian-v2/issues/06-version-two-specification.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/44",
+      "number": 44,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v2/issues/05-version-two-vault-trial.md",
+        ".scratch/brz-to-obsidian-v2/issues/12-native-maintenance-adaptations.md"
+      ],
+      "source_sha256": "1b3596ef652954493c69ae9b4b674546938688685c095efc8769d215f20d7355"
+    },
+    ".scratch/brz-to-obsidian-v2/issues/07-version-two-implementation-tickets.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/45",
+      "number": 45,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v2/issues/06-version-two-specification.md"
+      ],
+      "source_sha256": "725efecde7cde923bdb68d86c8435bfe5eb3d553a1016d7a6193f225718023e4"
+    },
+    ".scratch/brz-to-obsidian-v2/issues/08-native-source-behavior.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/46",
+      "number": 46,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v2/issues/01-new-archive-evidence.md",
+        ".scratch/brz-to-obsidian-v2/issues/09-attachment-text-meaning.md"
+      ],
+      "source_sha256": "65d4ccbc38b9123773cd3fabd9fdb84d15d5c84df4ddd50cb47ce74639bb6a25"
+    },
+    ".scratch/brz-to-obsidian-v2/issues/09-attachment-text-meaning.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/47",
+      "number": 47,
+      "blockers": [],
+      "source_sha256": "3beca91c4e5161b768f834f4c71441331d2075ab1095916b76544212165763bf"
+    },
+    ".scratch/brz-to-obsidian-v2/issues/10-kepano-reference-patterns.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/48",
+      "number": 48,
+      "blockers": [],
+      "source_sha256": "beb7694d8b58f39087c8688aaa6f5b4665f5be5e362c7e5c7ed96d0a06f8d39f"
+    },
+    ".scratch/brz-to-obsidian-v2/issues/11-vault-templates-and-maintenance.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/49",
+      "number": 49,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v2/issues/03-thought-type-representation.md",
+        ".scratch/brz-to-obsidian-v2/issues/10-kepano-reference-patterns.md"
+      ],
+      "source_sha256": "832677e364d5a6319b57d04c96797485b4b0dda0c3271a849abb547deda148ac"
+    },
+    ".scratch/brz-to-obsidian-v2/issues/12-native-maintenance-adaptations.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/50",
+      "number": 50,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v2/issues/05-version-two-vault-trial.md"
+      ],
+      "source_sha256": "22063d18ef35111fe27ba97c821f59396cc4c5a9c81eee036b15f293a505d63a"
+    },
+    ".scratch/brz-to-obsidian-v2/map.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/6",
+      "number": 6,
+      "blockers": [],
+      "source_sha256": "f7c6c1b71b1248bf8e22c9871350b110486f97aef5c33457b24165e4e2ff4281"
+    },
+    ".scratch/brz-to-obsidian-v2-implementation/issues/01-typed-category-conversion.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/25",
+      "number": 25,
+      "blockers": [],
+      "source_sha256": "18da3b8e1f22a8c7e72dea96ca21b29e72595d8432e2315c63a8678cab83f9df"
+    },
+    ".scratch/brz-to-obsidian-v2-implementation/issues/02-properties-dates-icon-snapshots.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/26",
+      "number": 26,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v2-implementation/issues/01-typed-category-conversion.md"
+      ],
+      "source_sha256": "3100c54257142a770ffd67d7b076f06c87ccee078f103e5716d1ad0cc6a772de"
+    },
+    ".scratch/brz-to-obsidian-v2-implementation/issues/03-native-category-dashboards.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/27",
+      "number": 27,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v2-implementation/issues/02-properties-dates-icon-snapshots.md"
+      ],
+      "source_sha256": "b444f966bfe64c06c49c7385757a61ac9681bedc1a2c4cc474582dea0f71decd"
+    },
+    ".scratch/brz-to-obsidian-v2-implementation/issues/04-native-templates-maintenance.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/28",
+      "number": 28,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v2-implementation/issues/03-native-category-dashboards.md"
+      ],
+      "source_sha256": "18007139cd34bc4e586d49f9b4273109e816b9177d2504c7caaf10d594721133"
+    },
+    ".scratch/brz-to-obsidian-v2-implementation/issues/05-exceptional-markdown-note.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/29",
+      "number": 29,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v2-implementation/issues/01-typed-category-conversion.md"
+      ],
+      "source_sha256": "5d335ef328de95277efa1588e3b4730a0dff570f7ce9ca2e0c47d281d9409e2e"
+    },
+    ".scratch/brz-to-obsidian-v2-implementation/issues/06-zero-length-txt-pdf-gaps.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/30",
+      "number": 30,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v2-implementation/issues/01-typed-category-conversion.md"
+      ],
+      "source_sha256": "3890520b29f476c8307194b6bc28c2532d09c64e78d82ea5e70d83e27d50c17c"
+    },
+    ".scratch/brz-to-obsidian-v2-implementation/issues/07-native-video-resources.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/31",
+      "number": 31,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v2-implementation/issues/01-typed-category-conversion.md"
+      ],
+      "source_sha256": "5b9755795c0ac13bb02b91866c1a49fd36c5b4e4078b56cf2e764332937de23e"
+    },
+    ".scratch/brz-to-obsidian-v2-implementation/issues/08-read-only-vault-checker.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/32",
+      "number": 32,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v2-implementation/issues/04-native-templates-maintenance.md"
+      ],
+      "source_sha256": "e0d5ee7743c7bf9e23c137c17c9f0ab8c34c9ef55a91f18e7f2f6364e697a94a"
+    },
+    ".scratch/brz-to-obsidian-v2-implementation/issues/09-integrated-v2-publication-reuse.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/33",
+      "number": 33,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v2-implementation/issues/05-exceptional-markdown-note.md",
+        ".scratch/brz-to-obsidian-v2-implementation/issues/06-zero-length-txt-pdf-gaps.md",
+        ".scratch/brz-to-obsidian-v2-implementation/issues/07-native-video-resources.md",
+        ".scratch/brz-to-obsidian-v2-implementation/issues/08-read-only-vault-checker.md"
+      ],
+      "source_sha256": "c4f6838627382d852e30f2084f06db9e17fe6eea42f253dd956ed9f15a676309"
+    },
+    ".scratch/brz-to-obsidian-v2-implementation/issues/10-three-archive-preservation.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/34",
+      "number": 34,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v2-implementation/issues/09-integrated-v2-publication-reuse.md"
+      ],
+      "source_sha256": "1c524560ac674ab06aa2504e58c5d3c5678a1d0c3950526cc08240f94dd6441b"
+    },
+    ".scratch/brz-to-obsidian-v2-implementation/issues/11-native-v2-acceptance-delivery.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/35",
+      "number": 35,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v2-implementation/issues/10-three-archive-preservation.md",
+        ".scratch/brz-to-obsidian-v2-implementation/issues/12-remove-unused-colour-properties.md",
+        ".scratch/brz-to-obsidian-v2-implementation/issues/13-final-review-repairs.md",
+        ".scratch/brz-to-obsidian-v2-implementation/issues/14-category-bases-first.md"
+      ],
+      "source_sha256": "f4c9a13d91d970084b7537bc5c8a5d1f2601f378aaa855f2c896393b8a636094"
+    },
+    ".scratch/brz-to-obsidian-v2-implementation/issues/12-remove-unused-colour-properties.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/36",
+      "number": 36,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v2-implementation/issues/10-three-archive-preservation.md"
+      ],
+      "source_sha256": "5d9dcd9ee6927399ad744ac6b4485f23402c981b740a6ce48db1f08d0f6cea96"
+    },
+    ".scratch/brz-to-obsidian-v2-implementation/issues/13-final-review-repairs.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/37",
+      "number": 37,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v2-implementation/issues/12-remove-unused-colour-properties.md"
+      ],
+      "source_sha256": "6d165cf61a03832a3845a4d56f7f31f32342714346f9e1ca334f4bcd3ee206b4"
+    },
+    ".scratch/brz-to-obsidian-v2-implementation/issues/14-category-bases-first.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/38",
+      "number": 38,
+      "blockers": [
+        ".scratch/brz-to-obsidian-v2-implementation/issues/13-final-review-repairs.md"
+      ],
+      "source_sha256": "1a05fd850dacc4907f7bf018b140024809089ec72af5e0310d8394573a2bfdc6"
+    },
+    ".scratch/brz-to-obsidian-v2-implementation/README.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/5",
+      "number": 5,
+      "blockers": [],
+      "source_sha256": "8b51fdfbfb4cd464151231b10e1427c21dffa8a2f2f195bdc1bd4cf4d97a1a12"
+    },
+    ".scratch/brz-to-obsidian-v2-implementation/spec.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/11",
+      "number": 11,
+      "blockers": [],
+      "source_sha256": "1723093082600a12c0329596f3b31e454325161c5c2ceeda67d161302036c0f9"
+    },
+    ".scratch/implement-spec-enhanced/spec.md": {
+      "number": 3,
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/3",
+      "reused": true,
+      "source_sha256": "71ebf14e854b7eb1c39ff13e681724d3c6d80f0e27489f92ce4b114b4bd0ae66"
+    },
+    ".scratch/management-leadership-implementation/issues/01-forgotten-exclusion.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/62",
+      "number": 62,
+      "blockers": [],
+      "source_sha256": "8ed08bfe9c3e1e48feeae61a8f8e578c66818b1c23c403c22fb77e90aa4ac75a"
+    },
+    ".scratch/management-leadership-implementation/issues/02-absent-note-images.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/63",
+      "number": 63,
+      "blockers": [
+        ".scratch/management-leadership-implementation/issues/01-forgotten-exclusion.md"
+      ],
+      "source_sha256": "7f08defb527d67b9947a56ab64e8535f88e36e0ffec472e3bedf821544c81af9"
+    },
+    ".scratch/management-leadership-implementation/issues/03-type-source-gaps.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/64",
+      "number": 64,
+      "blockers": [
+        ".scratch/management-leadership-implementation/issues/02-absent-note-images.md"
+      ],
+      "source_sha256": "cfc5f37e5f9335f7483af4fecb69d294f53c43e1ab1f351c0eb38dc6f00c9f32"
+    },
+    ".scratch/management-leadership-implementation/issues/04-category-hierarchy.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/65",
+      "number": 65,
+      "blockers": [
+        ".scratch/management-leadership-implementation/issues/01-forgotten-exclusion.md"
+      ],
+      "source_sha256": "9951f3d8df79d34840bd8fc0e778968bb21a07b02e02a8f0bc62011d3aaf679f"
+    },
+    ".scratch/management-leadership-implementation/issues/05-combined-workflow-safety.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/66",
+      "number": 66,
+      "blockers": [
+        ".scratch/management-leadership-implementation/issues/03-type-source-gaps.md",
+        ".scratch/management-leadership-implementation/issues/04-category-hierarchy.md"
+      ],
+      "source_sha256": "1ba6697a6d60a5f11b09052679217419ae2f0cab59373d936ff20a2eedb3d6e4"
+    },
+    ".scratch/management-leadership-implementation/issues/06-independent-audit-tooling.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/67",
+      "number": 67,
+      "blockers": [
+        ".scratch/management-leadership-implementation/issues/03-type-source-gaps.md",
+        ".scratch/management-leadership-implementation/issues/04-category-hierarchy.md"
+      ],
+      "source_sha256": "11ff2959a11dc987df27f8dfffa0a6d48628c40d431cd74f78b0c70032f58b4f"
+    },
+    ".scratch/management-leadership-implementation/issues/07-four-archive-preservation.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/68",
+      "number": 68,
+      "blockers": [
+        ".scratch/management-leadership-implementation/issues/05-combined-workflow-safety.md",
+        ".scratch/management-leadership-implementation/issues/06-independent-audit-tooling.md"
+      ],
+      "source_sha256": "7c1145d01005eed8f541a7049f8586bf2efab3a43198f59b1677cfc33498e8ad"
+    },
+    ".scratch/management-leadership-implementation/issues/08-native-obsidian-review.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/69",
+      "number": 69,
+      "blockers": [
+        ".scratch/management-leadership-implementation/issues/07-four-archive-preservation.md"
+      ],
+      "source_sha256": "f9d4fad37ecca86e3a386e13be1ff6bd7e18b5f426c941439c8adb709e578684"
+    },
+    ".scratch/management-leadership-implementation/issues/09-release-user-acceptance.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/70",
+      "number": 70,
+      "blockers": [
+        ".scratch/management-leadership-implementation/issues/08-native-obsidian-review.md"
+      ],
+      "source_sha256": "50d3af06526af736b4fcb07e94c53b4c67b29759116bb00aed2dfd653fc57ce0"
+    },
+    ".scratch/management-leadership-implementation/README.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/8",
+      "number": 8,
+      "blockers": [],
+      "source_sha256": "e5e83cf08dc22eb50070e511e787500e92fe2b42423204a394bf754fdf2db1bc"
+    },
+    ".scratch/management-leadership-implementation/spec.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/13",
+      "number": 13,
+      "blockers": [],
+      "source_sha256": "c84d22af90010da18ee6eac7cf791e4ea9d84df88bfa657f259161b6d6c6dc10"
+    },
+    ".scratch/management-leadership-wayfinding/issues/01-complete-archive-comparison.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/71",
+      "number": 71,
+      "blockers": [],
+      "source_sha256": "f8efde36520321a101de0cb23c95a11a4eb6485d27c9fd59290c8e2e99f9466f"
+    },
+    ".scratch/management-leadership-wayfinding/issues/02-state-three-evidence.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/72",
+      "number": 72,
+      "blockers": [],
+      "source_sha256": "6f1b552dfd383eea495cd214e3e98d380c91e6ccfd3f6ac21596309c8b89e977"
+    },
+    ".scratch/management-leadership-wayfinding/issues/03-native-source-observation.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/73",
+      "number": 73,
+      "blockers": [
+        ".scratch/management-leadership-wayfinding/issues/01-complete-archive-comparison.md",
+        ".scratch/management-leadership-wayfinding/issues/02-state-three-evidence.md"
+      ],
+      "source_sha256": "f153ae5fd0070b62363ba058f4c50d2c9bbb21003f96fa4a1b79dbbaf39f2395"
+    },
+    ".scratch/management-leadership-wayfinding/issues/04-conversion-policy.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/74",
+      "number": 74,
+      "blockers": [
+        ".scratch/management-leadership-wayfinding/issues/01-complete-archive-comparison.md",
+        ".scratch/management-leadership-wayfinding/issues/02-state-three-evidence.md",
+        ".scratch/management-leadership-wayfinding/issues/03-native-source-observation.md"
+      ],
+      "source_sha256": "1a2413a65c58410c2f813a29fab67dc68f76d5547c0c92b76dd2c0b9f0088bc8"
+    },
+    ".scratch/management-leadership-wayfinding/issues/05-vault-prototype.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/75",
+      "number": 75,
+      "blockers": [
+        ".scratch/management-leadership-wayfinding/issues/04-conversion-policy.md"
+      ],
+      "source_sha256": "6b4728f82c86c65ac6f22451103e6b3e0ad2c036c48a221d7695d20688122a9c"
+    },
+    ".scratch/management-leadership-wayfinding/issues/06-implementation-specification.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/76",
+      "number": 76,
+      "blockers": [
+        ".scratch/management-leadership-wayfinding/issues/05-vault-prototype.md"
+      ],
+      "source_sha256": "a9f94e2a4fad97ec960183f11051ca3f336eccfeb4c107f106991531326fc1e7"
+    },
+    ".scratch/management-leadership-wayfinding/issues/07-implementation-tickets.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/77",
+      "number": 77,
+      "blockers": [
+        ".scratch/management-leadership-wayfinding/issues/06-implementation-specification.md"
+      ],
+      "source_sha256": "6b353770ca60f219a0cefb8440e9af71e58a52f784a4f6f54eb9f321ad84ec07"
+    },
+    ".scratch/management-leadership-wayfinding/map.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/9",
+      "number": 9,
+      "blockers": [],
+      "source_sha256": "22927f0eec6d5fb12390f7f1740b96f644e57517f376f09f49c1dcb3fb663ff4"
+    }
+  },
+  "supporting_records": {
+    ".scratch/brz-to-obsidian/research/archive-inventory.json": {
+      "path": "docs/history/brz-to-obsidian/research/archive-inventory.json",
+      "source_sha256": "de465708199853ec1bd77e9dd1235c12ff67a13e669b36cc9bb51574bf5c4c2e",
+      "archived_sha256": "de465708199853ec1bd77e9dd1235c12ff67a13e669b36cc9bb51574bf5c4c2e"
+    },
+    ".scratch/brz-to-obsidian/research/brz-preservation.md": {
+      "path": "docs/history/brz-to-obsidian/research/brz-preservation.md",
+      "source_sha256": "0b24d560da238667f6035bddd92359646ff1860e86a30d54d95b77ecb9dec961",
+      "archived_sha256": "f3ee874ae50304f40f154fe8d3784f6ad3d571b1bd9333a952428ac3f31bfc60"
+    },
+    ".scratch/brz-to-obsidian/research/extended-relationship-fixture.md": {
+      "path": "docs/history/brz-to-obsidian/research/extended-relationship-fixture.md",
+      "source_sha256": "86110add80ef500ad9a79cc8c82b9a8909b2285ca6c45bbe5ecaf0e875b38f0e",
+      "archived_sha256": "0b431fd805017ae693215e24095b7e1170caf121db14bf583d015a01681b2f95"
+    },
+    ".scratch/brz-to-obsidian/research/home-thought.md": {
+      "path": "docs/history/brz-to-obsidian/research/home-thought.md",
+      "source_sha256": "b84b1f01f539dff498b55583c951349c13eaafccb0d14e6e4ec81ac059d21bec",
+      "archived_sha256": "78827dac63cb44de6dcc412d047f19d0f7007ced01c34579931fa32929641a9a"
+    },
+    ".scratch/brz-to-obsidian/research/inspect_brz.py": {
+      "path": "docs/history/brz-to-obsidian/research/inspect_brz.py",
+      "source_sha256": "048cad8aaefc7186c5249a08089d57b13bdf8706da4b7f3b49862e76e16f858c",
+      "archived_sha256": "0724722ef97ca6b48c6c9b0a3c3d50855541edc0088be719763a7c74a852ac35"
+    },
+    ".scratch/brz-to-obsidian/research/inspect_home_thought.py": {
+      "path": "docs/history/brz-to-obsidian/research/inspect_home_thought.py",
+      "source_sha256": "9ddf56cd9fbc4b781efdf00ee9dbc7ffdc3c76f4afa66120586f153a1cd49b6a",
+      "archived_sha256": "7133bb3f043ee94147b362bbc1fe1c8fc5395eb604ecf6323e2f1249f448d639"
+    },
+    ".scratch/brz-to-obsidian/research/inspect_parent_materialization.py": {
+      "path": "docs/history/brz-to-obsidian/research/inspect_parent_materialization.py",
+      "source_sha256": "2ea0042801e731b2ef13cda582ebbffa6bf7394a5654d44f05271e1b1375758c",
+      "archived_sha256": "cfbb75bd5d76b4b2f1dab5c60f2a39725f7d38a12d1234f131082c3a1ebead88"
+    },
+    ".scratch/brz-to-obsidian/research/inspect_relationship_fixture.py": {
+      "path": "docs/history/brz-to-obsidian/research/inspect_relationship_fixture.py",
+      "source_sha256": "6312957d5915463a7b9dc97b98fc3e8e52cc34005d7f15fd5b6f6d614c64c944",
+      "archived_sha256": "9b9d68a37e4e8653e92ed4bf64f0ca69b88d1ed555632b8aaf559e5a2301c2aa"
+    },
+    ".scratch/brz-to-obsidian/research/inspect_uncreated_targets.py": {
+      "path": "docs/history/brz-to-obsidian/research/inspect_uncreated_targets.py",
+      "source_sha256": "a5e709e6aa438bd5a1f5bcd8e99feb588b5721818f2dfa040dbb1d66cea12afb",
+      "archived_sha256": "b414ed4d7667d3025706b6c228cedf93a8d73697f3e5fb1c38e9d2e26f3f4cc8"
+    },
+    ".scratch/brz-to-obsidian/research/obsidian-representation.md": {
+      "path": "docs/history/brz-to-obsidian/research/obsidian-representation.md",
+      "source_sha256": "1701cbf673eabf5b839f062ccd49aee3a348f074715020fff5bc55f5499f44d7",
+      "archived_sha256": "3911e724ee0222d9d0e53a837ad81048fd8970d17281909ef2032f63af895acd"
+    },
+    ".scratch/brz-to-obsidian/research/parent-materialization.md": {
+      "path": "docs/history/brz-to-obsidian/research/parent-materialization.md",
+      "source_sha256": "7fa0843dab462b11ffee4543047a478d0546248548227781ca171730b92b6418",
+      "archived_sha256": "c0f7a1284ab0fa1565753db523fb40734fb36c2e333884945cbb1f2f58ff116a"
+    },
+    ".scratch/brz-to-obsidian/research/relationship-fixture-records.md": {
+      "path": "docs/history/brz-to-obsidian/research/relationship-fixture-records.md",
+      "source_sha256": "17b9bf029dc7eebfea429a9928a1fd40bbb5de5b0567301857a9892f7dd7f092",
+      "archived_sha256": "1685c4f98e4ee4158eb71b40eb1e9509585a64f969c96cd0b8bd2018cbcfdf0d"
+    },
+    ".scratch/brz-to-obsidian/research/relationship-fixture-ui.md": {
+      "path": "docs/history/brz-to-obsidian/research/relationship-fixture-ui.md",
+      "source_sha256": "530c5d38c5a168d1c7ffabef917e2d96bf51ac788f037ba9b47fe151cb86d5a0",
+      "archived_sha256": "16beafa3ba28361e0e7d5f91abe65c8c08f57daba8d6b2c7d66f3031f747cd08"
+    },
+    ".scratch/brz-to-obsidian/research/uncreated-targets.md": {
+      "path": "docs/history/brz-to-obsidian/research/uncreated-targets.md",
+      "source_sha256": "7d4301689161426395cfcb25406941280f71f5826f8617b73c1bc4e76ae41066",
+      "archived_sha256": "8a1c6f14e5692a4e57db93873c5d12723dc1d0e0364ae91be5f60af4df8ec7b5"
+    },
+    ".scratch/brz-to-obsidian/research/vault-trial.md": {
+      "path": "docs/history/brz-to-obsidian/research/vault-trial.md",
+      "source_sha256": "5b955dfd28b43f6d595f651fd731acf3d184d5ce6c9bc88a8d7c91bcc6b6deee",
+      "archived_sha256": "4d6cfbf1b92646a08c6c79c47a627c8568354961fdcefbe83baa1c1504aa20d5"
+    },
+    ".scratch/brz-to-obsidian-v1/research/final-review.md": {
+      "path": "docs/history/brz-to-obsidian-v1/research/final-review.md",
+      "source_sha256": "725fd1b60693777db1c69cce08456d87454b855a6cc01d6faefd47a09a079747",
+      "archived_sha256": "a15890dc2dff2d3a966412e12cf171e33cf627a97e46e613067e9975081feb22"
+    },
+    ".scratch/brz-to-obsidian-v1/research/native-acceptance.md": {
+      "path": "docs/history/brz-to-obsidian-v1/research/native-acceptance.md",
+      "source_sha256": "eb55dee18879a35d6f631b32c9c51fbf775c91ce0382d4420b9306ccda882d50",
+      "archived_sha256": "7bd7ab2e2c28ac9761ffbe866df91457285dc22f424a21422e5732b508063dc1"
+    },
+    ".scratch/brz-to-obsidian-v1/research/real-export-acceptance.md": {
+      "path": "docs/history/brz-to-obsidian-v1/research/real-export-acceptance.md",
+      "source_sha256": "b620ed07c2927633a43b400abd7839ad62887b87c4a240002a2f6d5e0a8fb1d0",
+      "archived_sha256": "5078f570e5285659d05eeb68f1df76f71ad9d2d824b9d84fb36edf4e1330ccb3"
+    },
+    ".scratch/brz-to-obsidian-v2/research/aggregate-feature-inventory.json": {
+      "path": "docs/history/brz-to-obsidian-v2/research/aggregate-feature-inventory.json",
+      "source_sha256": "39a61ea2c3cdb6ab3da40b2e224cec13270b896bf1592d98b8fa68c7714c483f",
+      "archived_sha256": "39a61ea2c3cdb6ab3da40b2e224cec13270b896bf1592d98b8fa68c7714c483f"
+    },
+    ".scratch/brz-to-obsidian-v2/research/attachment-text-evidence.md": {
+      "path": "docs/history/brz-to-obsidian-v2/research/attachment-text-evidence.md",
+      "source_sha256": "4c33a350b2d66a865bb9a61ee99b29b7b2a6369f13a8eb3e11378fe93c60b3bb",
+      "archived_sha256": "4c33a350b2d66a865bb9a61ee99b29b7b2a6369f13a8eb3e11378fe93c60b3bb"
+    },
+    ".scratch/brz-to-obsidian-v2/research/inspect_native_controls.py": {
+      "path": "docs/history/brz-to-obsidian-v2/research/inspect_native_controls.py",
+      "source_sha256": "d08b7b227cd7d1348a48f75593243ec996092616e0123868fcec2c3e8dcebfa2",
+      "archived_sha256": "202c57873abf22d9719700d917a3c7ed6da5f12620534a2efb07cd51a480b40d"
+    },
+    ".scratch/brz-to-obsidian-v2/research/inspect_v2_archives.py": {
+      "path": "docs/history/brz-to-obsidian-v2/research/inspect_v2_archives.py",
+      "source_sha256": "54e52dae6b9e166e880c1d5d921260c9a16399ec3c00bfa9af8f7cfd2c1d4052",
+      "archived_sha256": "1e9a8b8f652756d7f70ed3d775c405d0138d41fb54830f848cce5ecadb4d1188"
+    },
+    ".scratch/brz-to-obsidian-v2/research/kepano-reference-patterns.md": {
+      "path": "docs/history/brz-to-obsidian-v2/research/kepano-reference-patterns.md",
+      "source_sha256": "d4b4403e40e08dcd5e6c2ad8e0149012b740e977f01126ccd855fd8c1abbdfa9",
+      "archived_sha256": "75dc89f2d15e14241feb88719aa4c499e553d13d4655b2a17825029eb3f08fd7"
+    },
+    ".scratch/brz-to-obsidian-v2/research/kepano-template-base-mechanism.md": {
+      "path": "docs/history/brz-to-obsidian-v2/research/kepano-template-base-mechanism.md",
+      "source_sha256": "7ddce80522c1fa8b7b5073568a83a62f34c710a2372846308e52df54702c5d6d",
+      "archived_sha256": "80dd4174a59bdd8b495ad7f4a126d56a37ce261d9fdbff7168fb11a8a7505632"
+    },
+    ".scratch/brz-to-obsidian-v2/research/native-source-behavior.md": {
+      "path": "docs/history/brz-to-obsidian-v2/research/native-source-behavior.md",
+      "source_sha256": "15cb11eee115751a1dbb4d5c486e5e9b384851061ba460866709830b710caee2",
+      "archived_sha256": "15cb11eee115751a1dbb4d5c486e5e9b384851061ba460866709830b710caee2"
+    },
+    ".scratch/brz-to-obsidian-v2/research/obsidian-type-options.md": {
+      "path": "docs/history/brz-to-obsidian-v2/research/obsidian-type-options.md",
+      "source_sha256": "34b20475bf240f8dbae8aad4967e78c66534b9feeba6755453a1d037eb69e260",
+      "archived_sha256": "7a647c1fe7e2651785381b2ae78050b20ba8bc761552da924117204cd683dabd"
+    },
+    ".scratch/brz-to-obsidian-v2/research/source-differences.md": {
+      "path": "docs/history/brz-to-obsidian-v2/research/source-differences.md",
+      "source_sha256": "45b7084d77e75388df7a870a12fed1fa3d6f6106f81b9303ead8b918a399d670",
+      "archived_sha256": "39c8a80245ca27b2316403609759047fe98b61e92fc8de684653ed7a3447191a"
+    },
+    ".scratch/brz-to-obsidian-v2/research/vault-trial.md": {
+      "path": "docs/history/brz-to-obsidian-v2/research/vault-trial.md",
+      "source_sha256": "f4fb35ce7ef5399de5537e6a99ba030a26fc4d2400f331749ac481c548ff3c69",
+      "archived_sha256": "b2466a3b9b3abeb98a18f64c2b41c942d07d1b5d68587df99d6e060c09e65193"
+    },
+    ".scratch/brz-to-obsidian-v2-implementation/research/category-bases-first-refinement.md": {
+      "path": "docs/history/brz-to-obsidian-v2-implementation/research/category-bases-first-refinement.md",
+      "source_sha256": "a226dbed03b960cb3bc5f532f585c486181bfc9497b6f4b6b91dc61ea77bea58",
+      "archived_sha256": "d8f6efae029743d428e7b9bf98f92ee25f581d0eba01326e47a28fe8e4d32e1c"
+    },
+    ".scratch/brz-to-obsidian-v2-implementation/research/colour-property-refinement.md": {
+      "path": "docs/history/brz-to-obsidian-v2-implementation/research/colour-property-refinement.md",
+      "source_sha256": "22dce81757c1ba5fae38dee9625fb6b428ca0ef0ea220056f4049452f24e7ea2",
+      "archived_sha256": "1684a9d2c9e84ec29d808844974bcd5debd06472e48ba40a91461afc609b0370"
+    },
+    ".scratch/brz-to-obsidian-v2-implementation/research/native-category-dashboards.md": {
+      "path": "docs/history/brz-to-obsidian-v2-implementation/research/native-category-dashboards.md",
+      "source_sha256": "978350939b082c9d0e45b4f7839fe6d48d9bff91194ff41904c9643d6e5604db",
+      "archived_sha256": "6c9506db951eccf4b393c030c7de6931125fb08401ac62c50431bc09ca6a379b"
+    },
+    ".scratch/brz-to-obsidian-v2-implementation/research/native-v2-acceptance.md": {
+      "path": "docs/history/brz-to-obsidian-v2-implementation/research/native-v2-acceptance.md",
+      "source_sha256": "6e136260e55e01b5cc50d6a109ac74911194718e88de5bdcf080a83a47af545d",
+      "archived_sha256": "2d6d49370e7aba0fef816661493ccfaa4ab399bfa1d023638dc28d72c1d40b1c"
+    },
+    ".scratch/brz-to-obsidian-v2-implementation/research/three-archive-preservation.md": {
+      "path": "docs/history/brz-to-obsidian-v2-implementation/research/three-archive-preservation.md",
+      "source_sha256": "ac1f9485e7d72c0144fabb7789fe2eb832d46f5cbe75f7d908daaea8fe2f2415",
+      "archived_sha256": "ac1f9485e7d72c0144fabb7789fe2eb832d46f5cbe75f7d908daaea8fe2f2415"
+    },
+    ".scratch/brz-to-obsidian-v2-implementation/research/ticket-spec-validation.md": {
+      "path": "docs/history/brz-to-obsidian-v2-implementation/research/ticket-spec-validation.md",
+      "source_sha256": "ceb859575f043740909435a4fb29a8a6e6888c307c9f32747af9fe4a4e0df9cb",
+      "archived_sha256": "26af163b62982823dfeabd1a292ba02de6f477866d0c14e997376910e6e5c755"
+    },
+    ".scratch/brz-to-obsidian-v2-implementation/research/ticket04-templates-maintenance.md": {
+      "path": "docs/history/brz-to-obsidian-v2-implementation/research/ticket04-templates-maintenance.md",
+      "source_sha256": "7b507e530b13631b57ef391fa3828c2e7365ee3c91c0315303d8a2b5ef69b486",
+      "archived_sha256": "7b507e530b13631b57ef391fa3828c2e7365ee3c91c0315303d8a2b5ef69b486"
+    },
+    ".scratch/management-leadership-implementation/research/delivery.md": {
+      "path": "docs/history/management-leadership-implementation/research/delivery.md",
+      "source_sha256": "f18ab8222730a66f4a29546fb69de21e30ff056ee7444ab9acb4420a14a11d24",
+      "archived_sha256": "e175bf853b91054c2270e80f05309c8c2e41d168080b0bec9d1c2874593bea29"
+    },
+    ".scratch/management-leadership-implementation/research/final-review.md": {
+      "path": "docs/history/management-leadership-implementation/research/final-review.md",
+      "source_sha256": "5508371236b20508aee62a486211e165b372cf7e7bfff8d736108914dc02f006",
+      "archived_sha256": "5508371236b20508aee62a486211e165b372cf7e7bfff8d736108914dc02f006"
+    },
+    ".scratch/management-leadership-implementation/research/four-archive-preservation.md": {
+      "path": "docs/history/management-leadership-implementation/research/four-archive-preservation.md",
+      "source_sha256": "a3b9d14d1f403c943d89bd855d82ebdcc47fd14db4b4db3a770602f03b92cf00",
+      "archived_sha256": "dc15fea7b6197148c8c1c1c03864867bef8a567e91c41654134b79dd540615c2"
+    },
+    ".scratch/management-leadership-implementation/research/native-v3-acceptance.md": {
+      "path": "docs/history/management-leadership-implementation/research/native-v3-acceptance.md",
+      "source_sha256": "413cdd342138a0835e455ad8e00c3241f2a0663c093e70b68aeb75fdb426768f",
+      "archived_sha256": "02a32238fe01b4af5f7b60ad5f493601309a4cba972294028ef783a03c354311"
+    },
+    ".scratch/management-leadership-implementation/research/release-verification.md": {
+      "path": "docs/history/management-leadership-implementation/research/release-verification.md",
+      "source_sha256": "3868d0f61b3911bf7040dc701435c9b1c490143358a5cb34b040bd48df0393c3",
+      "archived_sha256": "3868d0f61b3911bf7040dc701435c9b1c490143358a5cb34b040bd48df0393c3"
+    },
+    ".scratch/management-leadership-wayfinding/research/aggregate-archive-differences.json": {
+      "path": "docs/history/management-leadership-wayfinding/research/aggregate-archive-differences.json",
+      "source_sha256": "904097a716d13d2abb5e53dde2c11fe4f3917c816e5b04b8b6119ca724a0b624",
+      "archived_sha256": "904097a716d13d2abb5e53dde2c11fe4f3917c816e5b04b8b6119ca724a0b624"
+    },
+    ".scratch/management-leadership-wayfinding/research/archive-coverage.md": {
+      "path": "docs/history/management-leadership-wayfinding/research/archive-coverage.md",
+      "source_sha256": "7165909f5963d7741c507f2e6846ee4c70bca42c4d6b1b400fe6496f0dd93480",
+      "archived_sha256": "86da40209761106632060311a28429e103b6cbec228b1f31d95a4444e1b86de6"
+    },
+    ".scratch/management-leadership-wayfinding/research/archive-differences.md": {
+      "path": "docs/history/management-leadership-wayfinding/research/archive-differences.md",
+      "source_sha256": "efe7043dabfe2337d81e50538e68feb0cbc1f606b5e02cd5d4fe60f2f3d3a976",
+      "archived_sha256": "53ff526ec9c755078459370e560bdf01def9c9d16abc57ca7a3f94c712e9a654"
+    },
+    ".scratch/management-leadership-wayfinding/research/automatic-image-fallback.md": {
+      "path": "docs/history/management-leadership-wayfinding/research/automatic-image-fallback.md",
+      "source_sha256": "800200803b86a3724b48bc4ecdc0338f6762ce321fc2f4064c81af691ffa4c9b",
+      "archived_sha256": "96a37a21c06b0e8a7373bd6e1f3da2307c614916290398e61a98f2504463c9c2"
+    },
+    ".scratch/management-leadership-wayfinding/research/included-source-scope.md": {
+      "path": "docs/history/management-leadership-wayfinding/research/included-source-scope.md",
+      "source_sha256": "f21687aeec1edca2e829c97c99fed8685bb0d85e88b228cdf25641f44a1f0106",
+      "archived_sha256": "5029348bdd613ea6d15100be057443e97b5763ba9f89ef4736b18dd524980988"
+    },
+    ".scratch/management-leadership-wayfinding/research/inspect_archive_differences.py": {
+      "path": "docs/history/management-leadership-wayfinding/research/inspect_archive_differences.py",
+      "source_sha256": "eaf444d1cac7eebf3e0612b9d99db7b2a46deb31e57f325453b8c4bdab95d0b6",
+      "archived_sha256": "c3faa1121940235ac0bc492819af5eada3c6bf86a0197b9cdd674d2c4f3a3456"
+    },
+    ".scratch/management-leadership-wayfinding/research/intake-history.md": {
+      "path": "docs/history/management-leadership-wayfinding/research/intake-history.md",
+      "source_sha256": "65b7a1f684508d772c51d05257a3c1299d2a32467be8bc2f798c7f30e8c84940",
+      "archived_sha256": "cf62b337c8a5d56c69cb866a8dde23b64902ef21d36163b89a8a634c8c1b1942"
+    },
+    ".scratch/management-leadership-wayfinding/research/native-source-behavior.md": {
+      "path": "docs/history/management-leadership-wayfinding/research/native-source-behavior.md",
+      "source_sha256": "6a0e993e8910063fd6597a29b5e54db84113b33f3d11cb27bfd0afc0857e934e",
+      "archived_sha256": "1a121b4f8cdbc91dd4d0d4bf2bd20cf0f534bff0e295b9829ddbbb0657fbbf2b"
+    },
+    ".scratch/management-leadership-wayfinding/research/native-source-recovery.md": {
+      "path": "docs/history/management-leadership-wayfinding/research/native-source-recovery.md",
+      "source_sha256": "65f01f2e2814c06631539537610d3271b291aaa6e13b8e98c4cf1391fb2eea4c",
+      "archived_sha256": "72d4c20f043a7c3536bb4c888973af53fffba8d15fe4e18e5a105221470f1228"
+    },
+    ".scratch/management-leadership-wayfinding/research/specification-review.md": {
+      "path": "docs/history/management-leadership-wayfinding/research/specification-review.md",
+      "source_sha256": "b124586fe6ea1633615f8ecb9dd9c7e4fcda70d98020ed9d4f81f57e5b3d9276",
+      "archived_sha256": "32724ec01f77215795e505fcf6a84f2334e0b9247858a4a886b0e8c6d3f6f313"
+    },
+    ".scratch/management-leadership-wayfinding/research/state-three-evidence.md": {
+      "path": "docs/history/management-leadership-wayfinding/research/state-three-evidence.md",
+      "source_sha256": "2c1b3a98fa47aea19c2b8e65136ac5fd57a6cc17ba55ecb7cb74f383de0eb383",
+      "archived_sha256": "cf39144354cb9be63118d49cba1747140e46c82163bc648b34499234e1920b11"
+    },
+    ".scratch/management-leadership-wayfinding/research/vault-prototype.md": {
+      "path": "docs/history/management-leadership-wayfinding/research/vault-prototype.md",
+      "source_sha256": "3d158f82c3a1c13c734bb7e2717d3757fec07f5972477d101451e99467bfceb0",
+      "archived_sha256": "e24e6e5c525a29cc715a7d389584bb0e9c7e7046861488f96ac547b54d0836f0"
+    }
+  },
+  "extra_urls": {
+    ".scratch/brz-to-obsidian/architecture-layout.md": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/7#issuecomment-6040209219",
+    ".scratch/brz-to-obsidian-v1/architecture-layout.md": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/4#issuecomment-6040209746",
+    ".scratch/brz-to-obsidian-v2-implementation/source-feature-mapping.md": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/5#issuecomment-6040210387",
+    ".scratch/brz-to-obsidian-v2-implementation/ticket-breakdown.md": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/5#issuecomment-6040211104",
+    ".scratch/management-leadership-implementation/specification-coverage.md": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/8#issuecomment-6040211805",
+    ".scratch/management-leadership-implementation/ticket-breakdown.md": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/8#issuecomment-6040212366",
+    ".scratch/brz-to-obsidian/research/archive-inventory.json": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/7#issuecomment-6040213212"
+  },
+  "planning_comments": {
+    ".scratch/brz-to-obsidian/architecture-layout.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/7#issuecomment-6040209219",
+      "source_sha256": "abfce06bed6b9ee7965ea4cd22c40600fb2ad213a9e2494c048c6aa53f677ce5"
+    },
+    ".scratch/brz-to-obsidian-v1/architecture-layout.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/4#issuecomment-6040209746",
+      "source_sha256": "9e1a26f5625fb0b65e88d360fde70c328be81f63e4a42f0dc511f703267acf16"
+    },
+    ".scratch/brz-to-obsidian-v2-implementation/source-feature-mapping.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/5#issuecomment-6040210387",
+      "source_sha256": "f0184e749981369f9592055d36df175d2c43991fb014d8a1b3e2c19e4d49eb1c"
+    },
+    ".scratch/brz-to-obsidian-v2-implementation/ticket-breakdown.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/5#issuecomment-6040211104",
+      "source_sha256": "cb9b91f4b0482a1e07c2ebe4a564cb797ff8125969d3325605c651e45f93eb72"
+    },
+    ".scratch/management-leadership-implementation/specification-coverage.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/8#issuecomment-6040211805",
+      "source_sha256": "f21434e9fdcbe976053e44ec682027dbc88fbff77f6e431ee705d0096de2c2cb"
+    },
+    ".scratch/management-leadership-implementation/ticket-breakdown.md": {
+      "url": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/8#issuecomment-6040212366",
+      "source_sha256": "e8a71071e30f4e6f05eb83734ae1d5cc535a7499249bd731233feb37b9565811"
+    }
+  },
+  "verified_dependency_edges": 89
+}

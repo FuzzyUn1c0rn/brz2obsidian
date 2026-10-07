@@ -1,7 +1,8 @@
 # Workspace housekeeping
 
-Store disposable development artifacts under `tmp/<effort>/` in the current
-checkout. This entire directory is Git-ignored. Keep the original exports,
+Store small disposable planning artifacts under `.scratch/<effort>/` and
+generated development artifacts under `tmp/<effort>/` in the current checkout.
+Both directories are Git-ignored. Keep the original exports,
 retained user vaults, backups, reusable tests and durable decisions in the
 locations below so a finished temporary effort can be deleted safely.
 
@@ -12,8 +13,10 @@ locations below so a finished temporary effort can be deleted safely.
 | `brz/` | Original private TheBrain exports and retained user vaults | Keep; not temporary |
 | `backups/` | Private preimages and restore evidence for changes to user files | Keep until the backup is explicitly retired; Git-ignored |
 | `tmp/<effort>/` | Generated test vaults, audit runs, screenshots, reference snapshots, one-off scripts and agent handoffs | Disposable after the effort finishes; Git-ignored |
+| `.scratch/<effort>/` | Draft issue bodies, exploratory notes and other small temporary artifacts | Disposable; Git-ignored |
 | `tests/` | Synthetic fixtures, reusable test helpers and the independent acceptance driver | Versioned development support |
-| `.scratch/<feature>/` | Accepted specifications, tickets, research findings and decision history | Versioned project records |
+| GitHub Issues | Specifications, Wayfinder maps, tickets, accepted decisions and durable discussion; see `docs/agents/issue-tracker.md` | Durable project records |
+| `docs/history/` | Supporting research and verification reports from completed work, plus the GitHub migration index | Versioned historical evidence |
 | `docs/`, `GLOSSARY.md`, `AGENTS.md` | Current development guidance and domain decisions | Versioned project records |
 
 The existing `brz/Software Engineering v2` vault keeps its established path.
@@ -33,10 +36,12 @@ caches and build products can be recreated.
 2. Use fresh destinations for conversions and private acceptance runs. Short
    paths preserve room for imported filenames under the converter's path limit.
 3. Promote reusable helpers into `src/`, `tests/` or a maintained tool directory.
-   Record accepted decisions and aggregate acceptance results in the project's
-   versioned documents before retiring their temporary evidence.
+   Publish specifications, Wayfinder maps, tickets and accepted decisions in
+   GitHub. Keep current architecture decisions in `docs/adr/` and maintained
+   development guidance in `docs/`. Record aggregate acceptance results before
+   retiring their temporary evidence.
 4. Keep original inputs and the only copy of user-created or edited content
-   outside `tmp/`. Retain required restore copies under `backups/`.
+   outside `tmp/` and `.scratch/`. Retain required restore copies under `backups/`.
 5. Delete a finished effort's temporary directory when its reusable support and
    required records have been retained. Keep active efforts until their work is
    complete. Tests and maintained tooling must not depend on historical runs,
@@ -50,6 +55,22 @@ distinct `--basetemp=tmp/pytest-<run>` paths. Pytest's cache is
 Managed Git worktrees use the Codex app's worktree lifecycle and their assigned
 paths. Archive them through that lifecycle, preserving needed ignored files
 first, rather than moving their checkouts into `tmp/`.
+
+## Planning records migrated on 2026-10-07
+
+Specifications, Wayfinder maps, implementation indexes and tickets moved from
+`.scratch/` to GitHub Issues. Completed work remains closed; the writer-helper
+specification remains open as issue #3. Approved layouts and breakdowns are
+comments on their feature issues. Supporting research and verification reports
+remain under `docs/history/`; its [migration index](history/README.md) maps the
+former paths to their destinations. Current documentation links use those
+destinations.
+
+`.scratch/` is now empty and Git-ignored, ready for disposable artifacts.
+Byte-preserved migration preimages are retained under
+`backups/scratch-migration-2026-10-07/`; the migration receipt in `docs/history/`
+records source hashes and verified relationships. These backups are restore
+evidence, separate from the GitHub tracking records.
 
 ## Existing artifacts moved on 2026-10-05
 

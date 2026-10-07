@@ -187,9 +187,9 @@ Refinement controls reject obsolete colour fields in generated notes, templates,
 starters, Bases, property typing and guide while still rejecting falsified source
 colour evidence. The checker permits manually added colour-named properties as
 ordinary custom extensions.
-See [current complete preservation](../.scratch/brz-to-obsidian-v2-implementation/research/colour-property-refinement.md),
-the [historical pre-refinement v2 report](../.scratch/brz-to-obsidian-v2-implementation/research/three-archive-preservation.md)
-and the [earlier v1 report](../.scratch/brz-to-obsidian-v1/research/real-export-acceptance.md).
+See [current complete preservation](history/brz-to-obsidian-v2-implementation/research/colour-property-refinement.md),
+the [historical pre-refinement v2 report](history/brz-to-obsidian-v2-implementation/research/three-archive-preservation.md)
+and the [earlier v1 report](history/brz-to-obsidian-v1/research/real-export-acceptance.md).
 
 ## Private full-export acceptance
 
@@ -207,10 +207,10 @@ clean and read-only; they supplement source-bound preservation.
 The failed m3 source/oracle duplicate-declaration gate and m4 diagnostic-alias
 gate remain retained history. Responsible public-seam repairs were independently
 verified before m5; no recovered original or weakened oracle substituted for a
-fresh matrix. See the [complete four-original result and failed history](../.scratch/management-leadership-implementation/research/four-archive-preservation.md).
+fresh matrix. See the [complete four-original result and failed history](history/management-leadership-implementation/research/four-archive-preservation.md).
 The ignored raw-source handoff joins actual note/image paths, all supplied bodies,
 D's 47 category/330 member paths and C's 7/195 control memberships for later native
-review. [Actual-output native review](../.scratch/management-leadership-implementation/research/native-v3-acceptance.md)
+review. [Actual-output native review](history/management-leadership-implementation/research/native-v3-acceptance.md)
 subsequently passed in observed Obsidian 1.14.4. Actual user acceptance and
 independent final review remain pending; this automated gate supplies neither verdict.
 
@@ -382,7 +382,7 @@ Apply the sampling policy above to new reviews. The v1/v2 procedures and complet
 reports below retain their historical scope; choose representative cases from
 their behavior lists for current work.
 
-The [v2 dashboard slice](../.scratch/brz-to-obsidian-v2-implementation/issues/03-native-category-dashboards.md)
+The [v2 dashboard slice](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/27)
 has an earlier bounded native gate on a fresh review copy of an actual synthetic
 converter output. Use valid distinct image payloads and check contextual
 membership, role/support exclusions, table/card images, provider/override edits
@@ -391,7 +391,7 @@ unchanged. Public ZIP/workflow tests check generated obligations and byte
 preservation; the native check verifies Obsidian evaluates those queries and
 images. This early check remains separate from final complete-output acceptance.
 
-The [v2 templates slice](../.scratch/brz-to-obsidian-v2-implementation/issues/04-native-templates-maintenance.md)
+The [v2 templates slice](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/28)
 adds workflow checks of actual full templates, insertion variables, configured
 native property types, future-category starters/guide, complete support records
 and manifests, and reserved-title/NFC/duplicate/long-stem reproducibility.
@@ -466,19 +466,19 @@ representative presentation review, not every note/PDF page. The user's normal
 vault is never used. Ticket 11 records actual-output native evidence, final
 two-axis review from completed v1 `f4627d9`, applicable final checks and the
 required user's actual converted-vault verdict. Until those pass, v2 is not
-declared finished. The [v1 native report](../.scratch/brz-to-obsidian-v1/research/native-acceptance.md)
+declared finished. The [v1 native report](history/brz-to-obsidian-v1/research/native-acceptance.md)
 and earlier bounded synthetic/prototype trials remain historical evidence.
 
 ## Recorded versions
 
 For the Management & Leadership extension, the
-[actual-output native report](../.scratch/management-leadership-implementation/research/native-v3-acceptance.md)
+[actual-output native report](history/management-leadership-implementation/research/native-v3-acceptance.md)
 records strategic rendering/maintenance samples, the retained complete D native
 ledger, native C CSV correspondence limits and independent read-only checker
 controls. The observed app was 1.14.4, while the earlier stored target below
 remains 1.13.7. Native review does not supply the final user's actual-vault verdict.
 
-The [final actual-output native review](../.scratch/brz-to-obsidian-v2-implementation/research/native-v2-acceptance.md)
+The [final actual-output native review](history/brz-to-obsidian-v2-implementation/research/native-v2-acceptance.md)
 records the completed three-vault matrix, read-only edit controls and clean user
 copy. The final category-presentation refinement adds five public regression
 controls; independent root verification passes 781 tests and Ruff lint/format

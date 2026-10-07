@@ -11,10 +11,10 @@ and templates, source dates, editable icon inheritance, the reviewed unusual
 Markdown note, zero-length absent-TXT findings, YouTube presentation and a
 read-only vault checker. All three supplied exports use the same TheBrain
 version and exercise different features. Nine complete exact/repeat/reordered
-conversions passed [independent preservation after the final presentation refinement](.scratch/brz-to-obsidian-v2-implementation/research/category-bases-first-refinement.md).
+conversions passed [independent preservation after the final presentation refinement](docs/history/brz-to-obsidian-v2-implementation/research/category-bases-first-refinement.md).
 See [source coverage and warnings](docs/source-coverage.md), the
-[accepted v2 specification](.scratch/brz-to-obsidian-v2-implementation/spec.md)
-and [delivery gates](.scratch/brz-to-obsidian-v2-implementation/README.md).
+[accepted v2 specification](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/11)
+and [delivery gates](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/5).
 Native review of actual outputs, independent final review and the user's
 2026-10-05 actual-vault approval complete those delivery gates. Version 2 is
 delivered and accepted.
@@ -42,7 +42,7 @@ type-owned state-3 Notes.md absence remains unknown category text; missing
 type icons give categories and inheriting members neutral appearance while
 preserving membership and appearance_category links. Valid member icon overrides
 still win. The report distinguishes missing providers from affected included
-members. Follow the [current frontier](.scratch/management-leadership-implementation/README.md).
+members. Follow the [current frontier](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/8).
 
 ## Development environment
 
@@ -126,7 +126,7 @@ supplement the historical v2 delivery evidence. All twelve four-original
 exact/repeat/reordered outputs passed complete independent preservation, and
 actual-output native review passed in Obsidian 1.14.4. The user's actual-vault
 verdict and independent final review remain pending. See the
-[release verification record](.scratch/management-leadership-implementation/research/release-verification.md).
+[release verification record](docs/history/management-leadership-implementation/research/release-verification.md).
 
 For scripts that capture stdout as UTF-8, set
 `$env:PYTHONIOENCODING = 'utf-8'` before running the CLI; otherwise Python uses
@@ -255,15 +255,15 @@ and runnable composition examples](docs/architecture.md).
 ## Verification and private data
 
 See [test commands and native-review procedure](docs/testing.md), [complete
-current v3 four-original preservation](.scratch/management-leadership-implementation/research/four-archive-preservation.md)
-and [current native review](.scratch/management-leadership-implementation/research/native-v3-acceptance.md).
-Historical v2 evidence includes the [completed actual-vault acceptance](.scratch/brz-to-obsidian-v2-implementation/issues/11-native-v2-acceptance-delivery.md).
-The [v2 final native review](.scratch/brz-to-obsidian-v2-implementation/research/native-v2-acceptance.md)
+current v3 four-original preservation](docs/history/management-leadership-implementation/research/four-archive-preservation.md)
+and [current native review](docs/history/management-leadership-implementation/research/native-v3-acceptance.md).
+Historical v2 evidence includes the [completed actual-vault acceptance](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/35).
+The [v2 final native review](docs/history/brz-to-obsidian-v2-implementation/research/native-v2-acceptance.md)
 records complete technical checks, independent review and the user's final approval.
-The [initial v2 preservation report](.scratch/brz-to-obsidian-v2-implementation/research/three-archive-preservation.md)
+The [initial v2 preservation report](docs/history/brz-to-obsidian-v2-implementation/research/three-archive-preservation.md)
 retains the complete audit before the colour-property refinement.
-The [v1 preservation](.scratch/brz-to-obsidian-v1/research/real-export-acceptance.md)
-and [v1 native report](.scratch/brz-to-obsidian-v1/research/native-acceptance.md)
+The [v1 preservation](docs/history/brz-to-obsidian-v1/research/real-export-acceptance.md)
+and [v1 native report](docs/history/brz-to-obsidian-v1/research/native-acceptance.md)
 remain historical evidence.
 Keep original private archives and retained user vaults under ignored `brz/`.
 Put disposable conversion outputs and UI evidence under ignored `tmp/<effort>/`.

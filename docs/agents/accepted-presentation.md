@@ -6,8 +6,8 @@ It applies to visible generated artifacts as well as application UI.
 
 ## 1. Capture the approved details
 
-Record the decision alongside the feature under `.scratch/<feature>/`. Use an
-`Accepted presentation` section in its specification as the canonical record.
+Record the decision in the feature's GitHub issue. Use an
+`Accepted presentation` section in its specification issue as the canonical record.
 Before a specification exists, capture it in the prototype ticket's Answer;
 when writing the specification, transfer the requirements and link the original
 verdict as provenance.
@@ -27,7 +27,7 @@ Resolve a variant choice into its distinguishing details; a label such as
 again. Clarify an uncertain detail only when it materially affects implementation.
 Prototype approval covers its recorded scope, separately from final delivery.
 
-Keep safe textual requirements and decision-rich examples in the versioned
+Keep safe textual requirements and decision-rich examples in the durable GitHub
 record so they survive temporary-evidence cleanup. Handle private screenshots,
 prototype captures and disposable output under [workspace housekeeping](../workspace.md).
 
@@ -74,7 +74,7 @@ this procedure adds no extra approval round.
 
 ## Worked example: source-gap warning panels
 
-The [accepted styling correction](../../.scratch/management-leadership-implementation/research/final-review.md#actual-vault-styling-follow-up)
+The [accepted styling correction](../history/management-leadership-implementation/research/final-review.md#actual-vault-styling-follow-up)
 records the rejected plain blockquotes, exact clarification/repair commits,
 native evidence and eventual user acceptance. These example IDs describe that
 accepted correction, rather than inferring all styling from the earlier A choice.

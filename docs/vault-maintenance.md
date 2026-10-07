@@ -125,7 +125,7 @@ The implementation follows the actual
 Its Book template initializes linked Books membership; the Out of Control note
 uses that membership; the Books category embeds Books.base, which independently
 queries members and provides multiple views. Kevin Kelly embeds the Author view
-with contextual `this`. See the [full reference trace](../.scratch/brz-to-obsidian-v2/research/kepano-template-base-mechanism.md).
+with contextual `this`. See the [full reference trace](history/brz-to-obsidian-v2/research/kepano-template-base-mechanism.md).
 
 The migration adapts that pattern with faithful source type names, complete typed
 member notes, explicit icon providers, qualified collision-safe links, folder
@@ -150,4 +150,4 @@ template variables; the existing Markdown heading is still ordinary text and
 can be edited separately. Native Properties may rewrite frontmatter quoting,
 so preserve identity/date values and independently compare body content when
 checking an intentional edit. See the
-[native review evidence](../.scratch/management-leadership-implementation/research/native-v3-acceptance.md).
+[native review evidence](history/management-leadership-implementation/research/native-v3-acceptance.md).

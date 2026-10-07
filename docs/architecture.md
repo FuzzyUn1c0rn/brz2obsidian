@@ -249,7 +249,7 @@ checker remains `brz2obsidian.vault-check` version 1. This release version does
 not imply native acceptance. The accepted v2 audit remains historical evidence.
 Version-3 four-original preservation and actual-output native review passed.
 Independent final review and the user's actual-vault verdict remain tracked in the
-[current implementation frontier](../.scratch/management-leadership-implementation/README.md).
+[current implementation frontier](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/8).
 
 Counts add `source_definitions`, `classification_assignments`, `typed_members`,
 `planned_category_notes` / `actual_category_notes` and
@@ -296,7 +296,7 @@ and unscopable history collections are omitted. Safe retained values preserve
 exact numbers and omission/null distinctions. Consumers needing exact numeric comparisons should use
 an exact decimal JSON representation. Reproducibility compares logical decisions
 and content while handling explicit run metadata, original evidence order and
-reordered-source fingerprints separately. See [current v3 independent preservation](../.scratch/management-leadership-implementation/research/four-archive-preservation.md).
+reordered-source fingerprints separately. See [current v3 independent preservation](history/management-leadership-implementation/research/four-archive-preservation.md).
 
 | Versioned component | Current value |
 | --- | --- |

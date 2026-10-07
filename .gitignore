@@ -5,6 +5,7 @@
 
 # Disposable development artifacts and retained private backups
 /tmp/
+/.scratch/
 /backups/
 
 # Project environment and Python caches

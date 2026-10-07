@@ -13,7 +13,7 @@ source gaps and category hierarchy with the prior resource rules. Public mixed
 actual-ZIP controls exercise those interactions and real publication failures;
 they are bounded synthetic coverage. Complete four-original preservation and
 native actual-output review passed; independent final review and actual-user
-acceptance remain pending gates in the [current frontier](../.scratch/management-leadership-implementation/README.md).
+acceptance remain pending gates in the [current frontier](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/8).
 
 ## Records, Home and relationships
 
@@ -168,7 +168,7 @@ remote service/network/offline dependence outside individual source-gap warnings
 an unavailable remote preview does not mean archived bytes are missing.
 
 Supported active local syntax is inline `[label](brain://<compact-id>/<suffix>)`
-and `![alt](.data/md-images/<location>)`; compact GUIDs use .NET bytes_le
+and `![alt](.data/md-images/<location)`; compact GUIDs use .NET bytes_le
 URL-safe base64. Exact spans adapt only those references, retaining other text
 and CRLF/CR/LF spelling. Code examples/literal link-like text remain unchanged.
 Source-local reference-style, autolink, HTML-link and cross-Brain forms outside
@@ -206,7 +206,7 @@ PDF. Those historical nine v2 exact/repeat/reordered conversions exit 2.
 The current v3 four-original matrix also exits 2 for all twelve conversions;
 original D preserves 359 supplied bodies and 63 fallback images, with 47
 definitions/330 members, 1,017 present payloads, 1,552 actual files and 93 warnings.
-See the [complete scoped matrix](../.scratch/management-leadership-implementation/research/four-archive-preservation.md). Unmatched missing notes/files/images
+See the [complete scoped matrix](history/management-leadership-implementation/research/four-archive-preservation.md). Unmatched missing notes/files/images
 refuse as missing required payload. Unknown findings/profile incompatibility and
 unsupported meanings cannot be downgraded by caller allowlists.
 
@@ -217,8 +217,8 @@ equivalent TheBrain PDF body search.
 
 Name sanitation, simple graph presentation and intentional uncreated targets
 are adaptations rather than extra warnings. See [complete current four-original
-preservation results](../.scratch/management-leadership-implementation/research/four-archive-preservation.md)
-and the [source-feature-to-vault comparison](../.scratch/brz-to-obsidian-v2-implementation/source-feature-mapping.md).
+preservation results](history/management-leadership-implementation/research/four-archive-preservation.md)
+and the [source-feature-to-vault comparison](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/5#issuecomment-6040210387).
 
 ## Reviewed absent-note image display (version 3)
 

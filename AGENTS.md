@@ -2,7 +2,8 @@
 
 ### Issue tracker
 
-Track issues as local Markdown files under `.scratch/<feature>/`.
+Track issues, specifications and Wayfinder maps in GitHub Issues for
+`FuzzyUn1c0rn/brz2obsidian`.
 See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
@@ -15,11 +16,6 @@ See `docs/agents/triage-labels.md`.
 Use a single-context layout with root `GLOSSARY.md` and `docs/adr/`.
 See `docs/agents/domain.md`.
 
-## First-version implementation
-
-Before implementing, read the accepted scope and ticket frontier in
-[the implementation index](.scratch/brz-to-obsidian-v1/README.md).
-
 ## Python environment
 
 Use the project `.venv` interpreter for Python development and tooling
@@ -31,8 +27,9 @@ needed. See `README.md` for bootstrap commands and dependency manifests.
 ## Temporary artifacts
 
 For development runs, prototypes, screenshots, agent handoffs, or cleanup,
-follow [workspace housekeeping](docs/workspace.md). Put disposable artifacts
-under Git-ignored `tmp/<effort>/` inside the current checkout.
+follow [workspace housekeeping](docs/workspace.md). Use Git-ignored
+`.scratch/<effort>/` for small disposable planning artifacts and `tmp/<effort>/`
+for generated development runs inside the current checkout.
 
 ## Native investigation
 

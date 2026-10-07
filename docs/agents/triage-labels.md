@@ -1,8 +1,8 @@
 # Triage Labels
 
-Use these strings in each issue's `Status:` line.
+Use these GitHub labels for the five canonical triage roles.
 
-| Role | Status | Meaning |
+| Role | GitHub label | Meaning |
 | --- | --- | --- |
 | needs-triage | needs-triage | Maintainer evaluation needed |
 | needs-info | needs-info | Waiting for more information |
@@ -10,5 +10,6 @@ Use these strings in each issue's `Status:` line.
 | ready-for-human | ready-for-human | Requires human implementation |
 | wontfix | wontfix | Will not be actioned |
 
-Implementation and wayfinding use `claimed` and `resolved` for execution state,
-as described in `issue-tracker.md`.
+Assignment represents a claim; closing an issue as completed represents
+resolution. See `issue-tracker.md` for the workflow. Migrated issue bodies retain
+historical `Status:` fields, including `claimed` and `resolved`.
