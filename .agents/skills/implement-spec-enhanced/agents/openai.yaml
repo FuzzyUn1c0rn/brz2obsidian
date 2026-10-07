@@ -1,0 +1,5 @@
+interface:
+  display_name: "Implement Spec Enhanced"
+  short_description: "Implement ticket graphs with verified structured handoffs."
+policy:
+  allow_implicit_invocation: false
