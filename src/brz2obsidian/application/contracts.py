@@ -379,6 +379,7 @@ class SessionSnapshot(Contract):
     vault: str | None = None
     result: OperationResult | None = None
     reviewed: ReviewedInspection | None = None
+    conversion_primary_action: Literal["convert", "convert_with_warnings"] | None = None
     active_request_id: str | None = None
     busy_operation: Operation | None = None
     close_pending: bool = False

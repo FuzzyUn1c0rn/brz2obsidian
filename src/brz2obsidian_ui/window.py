@@ -449,7 +449,7 @@ class MainWindow(QMainWindow):
                 proceed_with_warnings="convert_with_warnings"
                 in self.snapshot.allowed_actions
             )
-            if self.tabs.currentIndex() == 0 and self.snapshot.reviewed
+            if self.tabs.currentIndex() == 0 and self.snapshot.conversion_primary_action
             else InspectCommand()
         )
 
@@ -714,12 +714,8 @@ class MainWindow(QMainWindow):
             if mode == 2
             else "convert_this_archive"
             if mode == 1 and "convert_this_archive" in self.snapshot.allowed_actions
-            else "convert_with_warnings"
-            if mode == 0
-            and self.snapshot.reviewed
-            and self.snapshot.reviewed.outcome == "warnings"
-            else "convert"
-            if mode == 0 and self.snapshot.reviewed
+            else self.snapshot.conversion_primary_action
+            if mode == 0 and self.snapshot.conversion_primary_action
             else "inspect"
         )
         self.copy.setEnabled(
@@ -732,17 +728,13 @@ class MainWindow(QMainWindow):
         )
         self.primary.setEnabled(primary_action in self.snapshot.allowed_actions)
         self.primary.setText(
-            "Check vault"
-            if mode == 2
-            else "Convert this archive"
-            if mode == 1 and "convert_this_archive" in self.snapshot.allowed_actions
-            else "Convert with warnings"
-            if mode == 0
-            and self.snapshot.reviewed
-            and self.snapshot.reviewed.outcome == "warnings"
-            else "Convert"
-            if mode == 0 and self.snapshot.reviewed
-            else "Inspect archive"
+            {
+                "check_vault": "Check vault",
+                "convert_this_archive": "Convert this archive",
+                "convert_with_warnings": "Convert with warnings",
+                "convert": "Convert",
+                "inspect": "Inspect archive",
+            }[primary_action]
         )
         self.primary.setAccessibleName(self.primary.text())
         publication = self.snapshot.publication
@@ -797,7 +789,7 @@ class MainWindow(QMainWindow):
         self.recovery_status.setVisible(mode == 0 and bool(recovery))
         if mode != 2 and locked:
             self.choose.setEnabled(False)
-        if mode == 0 and self.snapshot.reviewed:
+        if mode == 0 and self.snapshot.conversion_primary_action:
             self.primary.setToolTip(
                 "Choose a valid destination before converting."
                 if primary_action not in self.snapshot.allowed_actions

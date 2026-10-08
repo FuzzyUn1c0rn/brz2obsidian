@@ -696,7 +696,25 @@ class ApplicationSession:
             if self._diagnostic_text:
                 actions.extend(("copy_details", "save_diagnostic_report"))
         actions.append("close")
-        self._snapshot = state.model_copy(update={"allowed_actions": tuple(actions)})
+        # Presentation intent is independent of destination readiness. The UI
+        # must not inspect the opaque review to label its disabled primary.
+        conversion_primary_action = None
+        if (
+            state.reviewed is not None
+            and state.reviewed.source == state.source
+            and not state.review_required
+        ):
+            conversion_primary_action = (
+                "convert"
+                if state.reviewed.outcome == "clean"
+                else "convert_with_warnings"
+            )
+        self._snapshot = state.model_copy(
+            update={
+                "allowed_actions": tuple(actions),
+                "conversion_primary_action": conversion_primary_action,
+            }
+        )
         return SessionUpdate(snapshot=self._snapshot, effects=effects)
 
     def _destination_edited(self, state):

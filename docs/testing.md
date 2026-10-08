@@ -73,7 +73,10 @@ termination, require fresh validation after failure, and retain actual receipt
 paths without directory inference. A synthetic native clean conversion supplements
 these controls. Standalone carry and explicit warning-action controls preserve the
 source/opaque review, reject refused/failed carry, and ensure tab changes do not
-authorize warnings. Real warning workers publish with verified receipt/exit2;
+authorize warnings. The host snapshot supplies a strict conversion primary-action
+fact independently of destination readiness; actual widget controls observe every
+review-field access to keep the returned review opaque, including after checker
+results replace inspection presentation. Real warning workers publish with verified receipt/exit2;
 missing/stale authorization and incompatible identity/profile/converter facts
 produce no publisher delegation. Same-path fresh review requires a new explicit
 authorization; malformed warning receipt facts never imply a created vault.
