@@ -2,6 +2,7 @@
 
 import argparse
 import contextlib
+import hashlib
 import json
 import os
 import sys
@@ -29,6 +30,7 @@ CANDIDATE_FIELDS = {
     "limits",
 }
 VERIFICATION_FIELDS = {"actor", "verdict", "criteria", "findings", "checks", "limits"}
+INTEGRATION_FIELDS = {"actor", "status", "previous_tip_ref", "checks", "limits"}
 
 
 class Parser(argparse.ArgumentParser):
@@ -120,6 +122,33 @@ def verification_record(data, attempt):
     )
 
 
+def integration_record(data, attempt, checkout):
+    require(
+        text(data["previous_tip_ref"]),
+        "previous_tip_ref must be a nonempty Git reference",
+    )
+    candidate = load(attempt, "candidate")
+    record = {key: value for key, value in data.items() if key != "previous_tip_ref"}
+    record.update(
+        schema_version=1,
+        kind="integration",
+        ticket=candidate["ticket"],
+        candidate_commit=candidate["candidate_commit"],
+        previous_tip=git(
+            checkout,
+            "rev-parse",
+            "--verify",
+            "--end-of-options",
+            f"{data['previous_tip_ref']}^{{commit}}",
+        ),
+        integration_commit=git(checkout, "rev-parse", "--verify", "HEAD^{commit}"),
+        verification_sha256=hashlib.sha256(
+            (attempt / "verification.json").read_bytes()
+        ).hexdigest(),
+    )
+    return record
+
+
 def publish(path, payload):
     """Link a fully flushed sibling into place; link never replaces a name."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -181,7 +210,29 @@ def main():
             "See references/handoffs.md for input examples and check/reuse structures."
         ),
     )
-    for command in (candidate, verification):
+    integration = subparsers.add_parser(
+        "integration",
+        help="publish an already-performed integration outcome",
+        description="Publish integration.json bound to this attempt's verification bytes.",
+        epilog=(
+            "Required input: actor, status (integrated or failed), previous_tip_ref, checks, "
+            "limits. Capture previous_tip_ref immediately before merging; prefer its full "
+            "commit ID over a moving branch. The helper resolves that explicit reference, "
+            "reads resulting HEAD from --checkout, and derives ticket/candidate identity "
+            "from this attempt's candidate.json. It hashes the exact verification.json "
+            "bytes using SHA-256, never a reserialization. Arrays, check outcomes, reuse "
+            "source commits/rationale and limits remain explicit agent judgments. "
+            "Helper-owned/unknown fields are refused. Evidence is absolute or relative "
+            "to the attempt. Assessed checkout must be clean. Integrated requires passing "
+            "verification/checks and both previous tip/candidate ancestors of the result. "
+            "Valid failed records retain inspected HEAD without those integration ancestry "
+            "requirements. Exit 0: published, allowed; 2: valid failed outcome published, "
+            "held; 1: invalid input/state or occupied destination, no record published. "
+            "Records are immutable. The helper does not merge, execute checks, close "
+            "tickets or infer user acceptance. See references/handoffs.md for examples."
+        ),
+    )
+    for command in (candidate, verification, integration):
         command.add_argument(
             "attempt", type=Path, help="coordinator's exact absolute attempt directory"
         )
@@ -197,16 +248,19 @@ def main():
     args = parser.parse_args()
     try:
         require(args.attempt.is_absolute(), "attempt must be an exact absolute path")
-        data = read_input(
-            args.input,
-            CANDIDATE_FIELDS if args.stage == "candidate" else VERIFICATION_FIELDS,
-        )
+        required = {
+            "candidate": CANDIDATE_FIELDS,
+            "verification": VERIFICATION_FIELDS,
+            "integration": INTEGRATION_FIELDS,
+        }
+        data = read_input(args.input, required[args.stage])
         checkout = Path(git(args.checkout.resolve(), "rev-parse", "--show-toplevel"))
-        record = (
-            candidate_record(data, checkout)
-            if args.stage == "candidate"
-            else verification_record(data, args.attempt)
-        )
+        if args.stage == "candidate":
+            record = candidate_record(data, checkout)
+        elif args.stage == "verification":
+            record = verification_record(data, args.attempt)
+        else:
+            record = integration_record(data, args.attempt, checkout)
         allowed = validate(args.attempt, args.stage, checkout, {args.stage: record})
         destination = args.attempt / f"{args.stage}.json"
         publish(
