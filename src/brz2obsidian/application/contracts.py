@@ -175,6 +175,8 @@ class ConversionResult(Result):
 
     @model_validator(mode="after")
     def consistent(self):
+        if self.reviewed is not None:
+            raise ValueError("Only usable inspection results can carry a review")
         expected = {
             "clean": "conversion_created",
             "warnings": "conversion_created_with_warnings",

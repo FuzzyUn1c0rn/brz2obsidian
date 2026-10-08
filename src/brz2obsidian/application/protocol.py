@@ -28,6 +28,11 @@ def _pairs(pairs):
     return result
 
 
+def _required_fields(value, fields):
+    if not isinstance(value, dict) or not fields.issubset(value):
+        raise ProtocolFailure("Missing required nested safe result content")
+
+
 def _decode(data, model, maximum):
     if len(data) > maximum or not data.endswith(b"\n") or data.count(b"\n") != 1:
         raise ProtocolFailure("Invalid terminal framing or size")
@@ -77,6 +82,19 @@ def _decode(data, model, maximum):
             }
             if not isinstance(result, dict) or not required.issubset(result):
                 raise ProtocolFailure("Missing minimum safe result content")
+            for collection in ("findings", "field_errors"):
+                for finding in result[collection]:
+                    _required_fields(
+                        finding, {"code", "severity", "message", "field", "path"}
+                    )
+            if result["diagnostic_omission"] is not None:
+                _required_fields(
+                    result["diagnostic_omission"], {"findings_count", "reason"}
+                )
+            if result["publication"] is not None:
+                _required_fields(
+                    result["publication"], {"state", "destination", "receipt_verified"}
+                )
         if isinstance(result, dict) and result.get("reviewed") is not None:
             review = result["reviewed"]
             if "schema" not in review or "schema_version" not in review:

@@ -346,3 +346,160 @@ def test_wire_never_invents_missing_minimum_safe_result_facts(field):
     del data["result"][field]
     with pytest.raises(ProtocolFailure):
         decode_response(json.dumps(data).encode() + b"\n", request)
+
+
+def test_only_usable_inspection_results_can_carry_a_review():
+    from pydantic import ValidationError
+
+    from brz2obsidian.application.contracts import ConversionResult, Publication
+    from brz2obsidian.application.operations import inspect
+
+    source = (Path(__file__).parents[1] / "fixtures/minimal.brz").absolute()
+    reviewed = inspect(source).reviewed
+    with pytest.raises(ValidationError, match="review"):
+        ConversionResult(
+            outcome="refused",
+            status="conversion_refused",
+            publication=Publication(state="not_published"),
+            reviewed=reviewed,
+        )
+
+
+@pytest.mark.parametrize(
+    "container,field",
+    [
+        ("findings", "field"),
+        ("findings", "path"),
+        ("field_errors", "field"),
+        ("field_errors", "path"),
+        ("diagnostic_omission", "reason"),
+        ("publication", "destination"),
+        ("publication", "receipt_verified"),
+    ],
+)
+def test_wire_requires_explicit_nested_safe_facts(container, field):
+    from brz2obsidian.application.contracts import (
+        ConversionResult,
+        ConvertArguments,
+        Finding,
+        Publication,
+        WorkerResponse,
+    )
+    from brz2obsidian.application.operations import inspect
+    from brz2obsidian.application.protocol import (
+        ProtocolFailure,
+        decode_response,
+        encode_response,
+    )
+
+    source = (Path(__file__).parents[1] / "fixtures/minimal.brz").absolute()
+    inspection = inspect(source)
+    request = WorkerRequest(
+        request_id=str(uuid4()),
+        operation="inspect",
+        arguments=InspectArguments(source=str(source)),
+    )
+    result = inspection
+    if container == "publication":
+        request = WorkerRequest(
+            request_id=str(uuid4()),
+            operation="convert_reviewed",
+            arguments=ConvertArguments(
+                source=str(source),
+                parent=str(source.parent),
+                vault_name="Fresh",
+                reviewed=inspection.reviewed,
+                proceed_with_warnings=False,
+            ),
+        )
+        result = ConversionResult(
+            outcome="refused",
+            status="conversion_refused",
+            publication=Publication(state="not_published"),
+            diagnostic_text="Safe conversion refusal.",
+        )
+    data = json.loads(
+        encode_response(
+            WorkerResponse(
+                request_id=request.request_id,
+                operation=request.operation,
+                result=result,
+            )
+        )
+    )
+    if container in ("findings", "field_errors"):
+        data["result"][container] = [
+            Finding(
+                code="source_gap", severity="warning", message="Safe source limitation."
+            ).model_dump()
+        ]
+        del data["result"][container][0][field]
+    elif container == "diagnostic_omission":
+        data["result"][container] = {"findings_count": 3}
+        data["result"]["diagnostic_text"] = "Findings omitted."
+    else:
+        del data["result"][container][field]
+    with pytest.raises(ProtocolFailure):
+        decode_response(json.dumps(data).encode() + b"\n", request)
+
+
+def test_wire_rejects_conversion_review_without_rejecting_explicit_nulls_or_optional_counts():
+    from brz2obsidian.application.contracts import (
+        ConversionResult,
+        ConvertArguments,
+        DiagnosticOmission,
+        Finding,
+        Publication,
+        WorkerResponse,
+    )
+    from brz2obsidian.application.operations import inspect
+    from brz2obsidian.application.protocol import (
+        ProtocolFailure,
+        decode_response,
+        encode_response,
+    )
+
+    source = (Path(__file__).parents[1] / "fixtures/minimal.brz").absolute()
+    inspection = inspect(source)
+    request = WorkerRequest(
+        request_id=str(uuid4()),
+        operation="convert_reviewed",
+        arguments=ConvertArguments(
+            source=str(source),
+            parent=str(source.parent),
+            vault_name="Fresh",
+            reviewed=inspection.reviewed,
+            proceed_with_warnings=False,
+        ),
+    )
+    result = ConversionResult(
+        outcome="refused",
+        status="conversion_refused",
+        publication=Publication(state="not_published"),
+        findings=(
+            Finding(code="source_gap", severity="warning", message="Safe finding."),
+        ),
+        diagnostic_omission=DiagnosticOmission(findings_count=3),
+        diagnostic_text="Three findings omitted.",
+    )
+    data = json.loads(
+        encode_response(
+            WorkerResponse(
+                request_id=request.request_id,
+                operation=request.operation,
+                result=result,
+            )
+        )
+    )
+    data["result"]["counts"] = {}
+    accepted = decode_response(json.dumps(data).encode() + b"\n", request).result
+    assert accepted.reviewed is None
+    assert accepted.publication.destination is None
+    assert accepted.publication.receipt_verified is False
+    assert accepted.findings[0].field is None
+    assert accepted.findings[0].path is None
+    assert accepted.diagnostic_omission.reason == "response_limit"
+    assert accepted.counts.planned_notes is None
+    data["result"]["reviewed"] = inspection.reviewed.model_dump(by_alias=True)
+    with pytest.raises(ProtocolFailure):
+        decode_response(json.dumps(data).encode() + b"\n", request)
