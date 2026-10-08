@@ -9,9 +9,9 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QEvent, QSettings, Qt, QTimer
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QFileDialog
 
 from brz2obsidian.application.contracts import (
     InspectCommand,
@@ -73,6 +73,73 @@ def finish(app, window):
     window.close()
     until(app, lambda: not window.isVisible())
     window.shutdown()
+
+
+def test_save_dialog_starts_in_absolute_home_independently_of_working_directory(
+    tmp_path,
+    monkeypatch,
+):
+    app = QApplication.instance() or QApplication([])
+    previous_native = app.testAttribute(Qt.ApplicationAttribute.AA_DontUseNativeDialogs)
+    previous_format = QSettings.defaultFormat()
+    previous_ini_root = Path(
+        QSettings(
+            QSettings.Format.IniFormat,
+            QSettings.Scope.UserScope,
+            "brz2obsidian-test-probe",
+            "save-dialog",
+        ).fileName()
+    ).parent.parent
+    app.setAttribute(Qt.ApplicationAttribute.AA_DontUseNativeDialogs, True)
+    QSettings.setDefaultFormat(QSettings.Format.IniFormat)
+    QSettings.setPath(
+        QSettings.Format.IniFormat,
+        QSettings.Scope.UserScope,
+        str(tmp_path / "qt-settings"),
+    )
+    unrelated = tmp_path / "Unrelated working folder café"
+    unrelated.mkdir()
+    monkeypatch.chdir(unrelated)
+    window = inspected(app, "Safe complete report\n")
+    dialog = None
+    try:
+        window.disclosure.click()
+        result, findings = window.snapshot.result, window.findings.text()
+        window.save.setFocus()
+        QTest.keyClick(window.save, Qt.Key.Key_Space)
+        dialog = window.findChild(QFileDialog)
+        assert dialog is not None and dialog.isVisible()
+        expected = Path.home()
+        assert expected.is_absolute() and expected != unrelated
+        assert Path(dialog.directory().absolutePath()) == expected
+        assert [Path(path) for path in dialog.selectedFiles()] == [
+            expected / "brz2obsidian-diagnostic-report.txt"
+        ]
+        assert dialog.acceptMode() == QFileDialog.AcceptMode.AcceptSave
+        assert dialog.defaultSuffix() == "txt"
+        QTest.keyClick(dialog, Qt.Key.Key_Escape)
+        until(app, window.save.isEnabled)
+        assert window.save.hasFocus()
+        assert window.snapshot.result is result and window.findings.text() == findings
+        assert "canceled" in window.diagnostic_feedback.text()
+        assert list(unrelated.iterdir()) == []
+    finally:
+        pending_dialog = window.findChild(QFileDialog)
+        if pending_dialog is not None:
+            if pending_dialog.isVisible():
+                pending_dialog.reject()
+            pending_dialog.deleteLater()
+            app.sendPostedEvents(pending_dialog, QEvent.Type.DeferredDelete)
+        finish(app, window)
+        QSettings.setPath(
+            QSettings.Format.IniFormat,
+            QSettings.Scope.UserScope,
+            str(previous_ini_root),
+        )
+        QSettings.setDefaultFormat(previous_format)
+        app.setAttribute(
+            Qt.ApplicationAttribute.AA_DontUseNativeDialogs, previous_native
+        )
 
 
 def test_disclosure_copy_and_save_export_complete_report_without_rendering_all_pages(

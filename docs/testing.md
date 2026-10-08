@@ -58,6 +58,10 @@ identical-result replacement, worker-exit lifetime, bounded selectable pages,
 complete/omitted Unicode copy/save round trips and nonfatal failures. Injected UI
 barriers hold preparation/export while queued input/repaint and Close are processed;
 stale save callbacks, queued exports and paged callbacks cannot use an old report.
+An offscreen, nonnative Qt dialog control verifies Save starts in the absolute
+home directory despite an unrelated working directory, retains its report
+filename and returns focus on keyboard cancellation. Its Qt settings use only
+test-owned INI files; the control does not invoke a native dialog.
 Native synthetic clipboard paste and asynchronous Save cancellation/local UTF-8
 readback supplement these controls; final independent presentation/user checks remain
 separate.

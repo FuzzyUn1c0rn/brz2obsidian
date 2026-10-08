@@ -7,7 +7,7 @@ from math import ceil
 from pathlib import Path
 from time import monotonic
 
-from PySide6.QtCore import QMimeData, Qt, QTimer, Signal
+from PySide6.QtCore import QDir, QMimeData, Qt, QTimer, Signal
 from PySide6.QtGui import QTextOption
 from PySide6.QtWidgets import (
     QApplication,
@@ -738,7 +738,7 @@ class MainWindow(QMainWindow):
         if self.dialogs is not None:
             self.dialogs.save_report(callback)
             return
-        dialog = QFileDialog(self, "Save diagnostic report")
+        dialog = QFileDialog(self, "Save diagnostic report", QDir.homePath())
         dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
         dialog.setFileMode(QFileDialog.FileMode.AnyFile)
         dialog.setNameFilter("Text reports (*.txt)")
