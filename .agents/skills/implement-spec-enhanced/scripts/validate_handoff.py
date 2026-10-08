@@ -77,9 +77,13 @@ def checks(value, bundle):
         evidence(check.get("evidence"), bundle, "check.evidence")
 
 
-def load(bundle, kind):
+def load(bundle, kind, records=None):
     path = bundle / f"{kind}.json"
-    record = json.loads(path.read_text(encoding="utf-8"))
+    record = (
+        records[kind]
+        if records is not None and kind in records
+        else json.loads(path.read_text(encoding="utf-8"))
+    )
     require(isinstance(record, dict), f"{kind} must be an object")
     require(type(record.get("schema_version")) is int, "schema_version must be integer")
     require(record["schema_version"] == 1, "unsupported schema_version")
@@ -121,8 +125,8 @@ def ancestor(checkout, earlier, later):
     git(checkout, "merge-base", "--is-ancestor", earlier, later)
 
 
-def validate(bundle, stage, checkout):
-    candidate = load(bundle, "candidate")
+def validate(bundle, stage, checkout, records=None):
+    candidate = load(bundle, "candidate", records)
     relative_path(candidate.get("spec"), "candidate.spec")
     for key in ("ticket", "spec"):
         require((checkout / candidate[key]).is_file(), f"missing {key} in checkout")
@@ -144,7 +148,7 @@ def validate(bundle, stage, checkout):
     allowed = not any(check["status"] == "failed" for check in candidate["checks"])
 
     if stage in ("verification", "integration"):
-        verification = load(bundle, "verification")
+        verification = load(bundle, "verification", records)
         same_candidate(candidate, verification)
         require(
             verification["actor"] != candidate["actor"], "verifier must be independent"
@@ -180,7 +184,7 @@ def validate(bundle, stage, checkout):
         allowed = allowed and verdict == "PASS"
 
     if stage == "integration":
-        integration = load(bundle, "integration")
+        integration = load(bundle, "integration", records)
         same_candidate(candidate, integration)
         require(
             integration.get("status") in ("integrated", "failed"),
@@ -213,6 +217,8 @@ def validate(bundle, stage, checkout):
 
 
 def main():
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "directory", type=Path, help="absolute or relative handoff directory"
