@@ -15,7 +15,7 @@ from brz2obsidian.application.contracts import SelectVault
 from brz2obsidian_ui.platform_actions import CompletionActions
 from brz2obsidian_ui.window import MainWindow
 from tests.application.test_completion_session import published_session
-from tests.gui.test_conversion_window import button, until
+from tests.gui.test_conversion_window import button, until, window_text
 
 pytestmark = pytest.mark.gui
 
@@ -250,7 +250,7 @@ def test_post_conversion_check_uses_published_folder_with_real_worker(
         assert window.snapshot.result.status == "check_issues"
         assert window.snapshot.publication.receipt_verified
         assert note.read_bytes() == original
-        text = "\n".join(label.text() for label in window.findChildren(QLabel))
+        text = window_text(window)
         assert "Check completed — issues found" in text
         assert "BODY canary" not in text
         assert requested == []

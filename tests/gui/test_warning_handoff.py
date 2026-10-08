@@ -64,7 +64,7 @@ def test_real_standalone_warning_carry_requires_explicit_warning_action(tmp_path
     import sys
     from pathlib import Path
 
-    from PySide6.QtWidgets import QCheckBox, QLabel, QTextEdit
+    from PySide6.QtWidgets import QCheckBox, QTextEdit
 
     from brz2obsidian.application.contracts import InspectCommand, SelectSource
     from brz2obsidian.application.transport import Supervisor
@@ -104,7 +104,7 @@ def test_real_standalone_warning_carry_requires_explicit_warning_action(tmp_path
         action(window, "Convert this archive").click()
         until(app, lambda: tabs.currentIndex() == 0)
         assert window.snapshot.reviewed == reviewed and window.snapshot.result == result
-        panel = window.findChild(QLabel, "findings").text()
+        panel = window.findChild(QTextEdit, "findings").toPlainText()
         assert "Inspection completed — source warnings" in panel
         assert all(finding.message in panel for finding in result.findings)
         assert window.snapshot.publication is None
@@ -123,11 +123,11 @@ def test_real_standalone_warning_carry_requires_explicit_warning_action(tmp_path
         assert window.snapshot.result.status == "conversion_created_with_warnings"
         assert window.snapshot.publication.receipt_verified
         assert any(
-            "Vault created with warnings" in label.text()
-            for label in window.findChildren(QLabel)
+            "Vault created with warnings" in text.toPlainText()
+            for text in window.findChildren(QTextEdit)
         )
         assert all(
-            finding.message in window.findChild(QLabel, "findings").text()
+            finding.message in window.findChild(QTextEdit, "findings").toPlainText()
             for finding in window.snapshot.result.findings
         )
         assert next(

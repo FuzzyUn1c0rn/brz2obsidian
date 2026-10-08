@@ -28,6 +28,22 @@ def button(window, accessible):
     )
 
 
+def window_text(window):
+    return (
+        "\n".join(
+            widget.text()
+            for widget in window.findChildren(QLabel)
+            if widget.isVisible()
+        )
+        + "\n"
+        + "\n".join(
+            widget.toPlainText()
+            for widget in window.findChildren(QTextEdit)
+            if widget.isVisible()
+        )
+    )
+
+
 def test_native_picker_path_representation_guided_real_worker_conversion(tmp_path):
     from brz2obsidian_ui.window import MainWindow
     from tests.application.test_minimal_workflow import make_archive
@@ -132,9 +148,7 @@ def test_conversion_processes_queued_gui_events_locks_inputs_and_defers_close(
         )
         until(app, lambda: bool(painted))
         assert painted == [True] and not release.is_set()
-        assert "Converting" in "\n".join(
-            label.text() for label in window.findChildren(QLabel)
-        )
+        assert "Converting" in window_text(window)
         clock[0] = 112.0
         until(
             app,
@@ -269,11 +283,7 @@ def test_conversion_outcomes_render_receipt_path_or_retained_inputs_without_infe
                 or window.snapshot.operational_status is not None
             ),
         )
-        text = "\n".join(
-            widget.text()
-            for widget in window.findChildren(QLabel)
-            if widget.isVisible()
-        )
+        text = window_text(window)
         assert title in text
         assert "conversion_created" not in text and "conversion_failed" not in text
         assert not (

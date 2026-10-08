@@ -88,9 +88,10 @@ QTextEdit#sourcePath { font-family: Consolas; font-size: 9pt; color: #63716c; bo
 QTextEdit#sourcePath:focus { background: #e8f0e8; }
 QTextEdit#recoveryGuidance { color: #63716c; border: none; background: white; padding: 0; }
 QTextEdit#recoveryGuidance:focus { background: #e8f0e8; }
-QLabel#findings { background: #f1f6f0; border-left: 3px solid #709580; padding: 12px; }
-QLabel#findings[severity='warning'] { background: #fff8e8; border-color: #bc923d; }
-QLabel#findings[severity='error'] { background: #fcf1ed; border-color: #b36a5c; }
+QTextEdit#findings { background: #f1f6f0; border: none; border-left: 3px solid #709580; padding: 12px; }
+QTextEdit#findings[severity='warning'] { background: #fff8e8; border-color: #bc923d; }
+QTextEdit#findings[severity='error'] { background: #fcf1ed; border-color: #b36a5c; }
+QTextEdit#findings:focus { border: 2px solid #315b4c; }
 QPushButton { background: #ffffff; border: 1px solid #cbd3cb; border-radius: 5px; padding: 8px 12px; }
 QPushButton:hover { background: #f0f4ef; border-color: #789283; }
 QPushButton:focus { border: 2px solid #315b4c; }
@@ -170,6 +171,7 @@ class PathText(QTextEdit):
 
     def _fit(self, *_):
         height = ceil(self.document().documentLayout().documentSize().height())
+        height += self.height() - self.viewport().height()
         if self.height() != height:
             self.setFixedHeight(height)
 
@@ -330,7 +332,9 @@ class MainWindow(QMainWindow):
         divider.setFrameShape(QFrame.Shape.HLine)
         body.addWidget(divider)
         body.addWidget(label("Findings", "sectionTitle"))
-        self.findings = label("Your inspection findings will appear here.", "findings")
+        self.findings = PathText(
+            "Your inspection findings will appear here.", "findings"
+        )
         self.findings.setAccessibleName("Inspection findings")
         body.addWidget(self.findings)
         self.recovery_status = PathText(name="recoveryGuidance")
@@ -1079,7 +1083,7 @@ class MainWindow(QMainWindow):
         self.vault_error.setVisible(bool(self.vault_error.text()))
         severity = "info"
         if self.snapshot.active_request_id:
-            self.findings.setText(
+            self.findings.setPlainText(
                 (
                     "Checking vault"
                     if self.snapshot.busy_operation == "check_vault"
@@ -1090,10 +1094,10 @@ class MainWindow(QMainWindow):
                 + "\nWaiting for the worker. The window remains available."
             )
         elif self.snapshot.feedback:
-            self.findings.setText(self.snapshot.feedback)
+            self.findings.setPlainText(self.snapshot.feedback)
             severity = "error"
         elif result is not None:
-            self.findings.setText(
+            self.findings.setPlainText(
                 TITLES.get(result.status, result.status)
                 + (
                     "\nThis read-only check covers current vault structure and conventions. It does not repair files or prove preservation of source content."
@@ -1103,7 +1107,19 @@ class MainWindow(QMainWindow):
                 + (
                     "\n"
                     + "\n".join(
-                        f.message + (f"\nReported leftover: {f.path}" if f.path else "")
+                        f.message
+                        + (
+                            "\n"
+                            + (
+                                "Affected file: "
+                                if result.operation == "check_vault"
+                                else "Reported leftover: "
+                            )
+                            + f.path
+                            if f.path
+                            and not (mode == 0 and f in self.snapshot.recovery_findings)
+                            else ""
+                        )
                         for f in result.findings[:100]
                     )
                     if result.findings
@@ -1135,7 +1151,7 @@ class MainWindow(QMainWindow):
                 else "info"
             )
         else:
-            self.findings.setText(
+            self.findings.setPlainText(
                 "Choose an existing vault folder to check its current structure and conventions. This read-only check does not repair files."
                 if mode == 2
                 else "Inspect the archive to see its planned contents. Nothing is written during inspection."

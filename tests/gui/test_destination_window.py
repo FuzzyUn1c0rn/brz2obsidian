@@ -279,8 +279,8 @@ def test_slow_validation_coalesces_edited_form_while_inspection_and_gui_continue
         until(app, lambda: "0:12 elapsed" in window.guidance.text())
         QTimer.singleShot(0, window.disclosure.click)
         until(app, lambda: window.diagnostics_expanded)
-        assert "inspection_clean" not in window.findings.text()
-        assert "ready for review" in window.findings.text()
+        assert "inspection_clean" not in window.findings.toPlainText()
+        assert "ready for review" in window.findings.toPlainText()
         name = control(window, QLineEdit, "Vault name")
         for text in ("Second", "Latest"):
             name.setText(text)

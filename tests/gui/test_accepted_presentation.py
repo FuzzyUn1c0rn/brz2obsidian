@@ -30,6 +30,7 @@ from brz2obsidian.application.contracts import (
     ApplyTransportFailure,
     ConversionResult,
     ConvertCommand,
+    Finding,
     InspectCommand,
     InspectionResult,
     Publication,
@@ -212,8 +213,10 @@ def test_diagnostic_disclosure_keyboard_selection_and_exports_follow_reading_ord
 
 
 def assert_published_contract(window, expected_title):
-    findings = named(window, QLabel, "Inspection findings")
-    assert findings.isVisible() and findings.text().startswith(expected_title + "\n")
+    findings = named(window, QWidget, "Inspection findings")
+    assert findings.isVisible() and path_text(findings).startswith(
+        expected_title + "\n"
+    )
     published = visible_label(window, "Published vault")
     path = named(window, QWidget, "Published vault path")
     assert path.isVisible() and path_text(path).strip()
@@ -272,12 +275,15 @@ def test_verified_result_replaces_editors_and_contains_optional_actions_with_anc
         assert path_text(named(window, QWidget, "Published vault path")) == str(
             destination
         )
-        findings = named(window, QLabel, "Inspection findings")
-        original = findings.text()
-        findings.setText("Publication status unknown\nWrong presentation")
+        findings = named(window, QWidget, "Inspection findings")
+        original = path_text(findings)
+        replace_text = (
+            findings.setText if isinstance(findings, QLabel) else findings.setPlainText
+        )
+        replace_text("Publication status unknown\nWrong presentation")
         with pytest.raises(AssertionError):
             assert_published_contract(window, title)
-        findings.setText(original)
+        replace_text(original)
         action = named(window, QPushButton, "Open migration report")
         action.hide()
         with pytest.raises(AssertionError):
@@ -512,10 +518,10 @@ def test_nonpublished_outcomes_have_distinct_textual_meaning_and_no_completion_a
         app.processEvents()
         findings = named(
             window,
-            QLabel,
+            QWidget,
             "Check findings" if operation == "check" else "Inspection findings",
         )
-        assert findings.isVisible() and title in findings.text()
+        assert findings.isVisible() and title in path_text(findings)
         assert not named(window, QWidget, "Published vault path").isVisible()
         for action in (
             "Open folder",
@@ -525,10 +531,10 @@ def test_nonpublished_outcomes_have_distinct_textual_meaning_and_no_completion_a
         ):
             assert not named(window, QPushButton, action).isVisible()
         if operation == "check":
-            assert "read-only" in findings.text()
+            assert "read-only" in path_text(findings)
             assert (
                 "does not repair files or prove preservation of source content"
-                in findings.text()
+                in path_text(findings)
             )
         else:
             assert named(window, QLineEdit, "Vault name").isVisible()
@@ -719,5 +725,87 @@ def test_narrow_unknown_recovery_keeps_footer_guidance_and_previous_destination_
         assert scroll.mapTo(window, scroll.rect().bottomLeft()).y() <= top(
             window, footer_hint
         )
+    finally:
+        finish(app, window)
+
+
+def test_narrow_failed_findings_and_owned_leftover_guidance_remain_readable(tmp_path):
+    # #92 UI-U02/P06: every visible findings message must fit its allocated area.
+    # A reported path may be in the panel or adjacent recovery content; it must
+    # remain exact and readable wherever displayed, without requiring duplication.
+    app = QApplication.instance() or QApplication([])
+    source = make_archive(tmp_path / "archive.brz")
+    session = ready_session(source, tmp_path)
+    effect = session.dispatch(ConvertCommand()).effects[0]
+    leftover = str(tmp_path / (".brz2obsidian-" + "Unbroken" * 6))
+    message = "Owned staging cleanup did not complete. Review the reported leftover."
+    result = ConversionResult(
+        outcome="failed",
+        status="conversion_failed",
+        publication=Publication(state="not_published"),
+        findings=(
+            Finding(
+                code="cleanup_failure",
+                severity="error",
+                message=message,
+                path=leftover,
+            ),
+        ),
+        diagnostic_text="Safe synthetic owned cleanup guidance.",
+    )
+    complete(session, effect, result, 1)
+    window = MainWindow(session=session)
+    window.resize(453, 700)
+    window.show()
+    window.submit(SelectVault(path_or_null=None))
+    try:
+        until(app, lambda: window.snapshot.result is not None)
+        app.processEvents()
+        findings = named(window, QWidget, "Inspection findings")
+        text = path_text(findings)
+        assert text.startswith("Conversion could not complete\n")
+        assert message in text
+        assert_readable_text(findings, text)
+        recovery = named(window, QWidget, "Conversion recovery guidance")
+        recovery_text = path_text(recovery)
+        assert leftover in recovery_text
+        assert_readable_text(recovery, recovery_text)
+        assert not named(window, QWidget, "Published vault path").isVisible()
+        assert named(window, QPushButton, "Retry conversion").isEnabled()
+    finally:
+        finish(app, window)
+
+
+def test_narrow_checker_identifies_a_long_reported_file_without_clipping(tmp_path):
+    # A real read-only checker file finding is not a staging-cleanup leftover.
+    app = QApplication.instance() or QApplication([])
+    vault = tmp_path / "v"
+    vault.mkdir()
+    note = vault / ("Unbroken" * 10 + ".md")
+    note.write_text("![[Missing.png]]\n", encoding="utf-8")
+    result = check_vault(vault)
+    assert result.status == "check_issues"
+    assert any(finding.path == note.name for finding in result.findings)
+    session = ApplicationSession()
+    session.dispatch(SelectVault(path_or_null=str(vault)))
+    effect = session.dispatch(SimpleCommand(command="check_vault")).effects[0]
+    complete(session, effect, result, 2)
+    window = MainWindow(session=session)
+    window.resize(453, 700)
+    window.show()
+    window.submit(SimpleCommand(command="carry_inspection_to_convert"))
+    try:
+        until(app, lambda: window.snapshot.result is not None)
+        window.findChild(QTabBar).setCurrentIndex(2)
+        app.processEvents()
+        findings = named(window, QWidget, "Check findings")
+        text = path_text(findings)
+        assert text.startswith("Check completed — issues found\n")
+        assert note.name in text and "read-only" in text
+        assert_readable_text(findings, text)
+        assert "Reported leftover" not in text
+        assert "Staging" not in text and "staging" not in text
+        retry = named(window, QPushButton, "Retry check")
+        assert retry.isVisible() and retry.isEnabled()
     finally:
         finish(app, window)

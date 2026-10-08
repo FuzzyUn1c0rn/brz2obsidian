@@ -125,7 +125,7 @@ def test_save_dialog_starts_in_absolute_home_independently_of_working_directory(
     dialog = None
     try:
         window.disclosure.click()
-        result, findings = window.snapshot.result, window.findings.text()
+        result, findings = window.snapshot.result, window.findings.toPlainText()
         window.save.setFocus()
         QTest.keyClick(window.save, Qt.Key.Key_Space)
         dialog = window.findChild(QFileDialog)
@@ -141,7 +141,10 @@ def test_save_dialog_starts_in_absolute_home_independently_of_working_directory(
         QTest.keyClick(dialog, Qt.Key.Key_Escape)
         until(app, window.save.isEnabled)
         assert window.save.hasFocus()
-        assert window.snapshot.result is result and window.findings.text() == findings
+        assert (
+            window.snapshot.result is result
+            and window.findings.toPlainText() == findings
+        )
         assert "canceled" in window.diagnostic_feedback.text()
         assert list(unrelated.iterdir()) == []
     finally:
@@ -211,7 +214,7 @@ def test_save_cancel_and_failed_copy_save_preserve_findings_and_useful_focus(tmp
     )
     try:
         window.disclosure.click()
-        result, findings = window.snapshot.result, window.findings.text()
+        result, findings = window.snapshot.result, window.findings.toPlainText()
         window.save.click()
         dialogs.callback(None)
         app.processEvents()
@@ -221,12 +224,12 @@ def test_save_cancel_and_failed_copy_save_preserve_findings_and_useful_focus(tmp
         window.copy.click()
         until(app, lambda: "could not be copied" in window.diagnostic_feedback.text())
         assert "CANARY" not in window.diagnostic_feedback.text()
-        assert window.findings.text() == findings
+        assert window.findings.toPlainText() == findings
         window.save.click()
         dialogs.callback(str(tmp_path / "absent" / "report.txt"))
         until(app, lambda: "could not be saved" in window.diagnostic_feedback.text())
         assert window.snapshot.result is result
-        assert window.findings.text() == findings
+        assert window.findings.toPlainText() == findings
         assert not list(tmp_path.iterdir())
     finally:
         finish(app, window)

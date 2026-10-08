@@ -8,7 +8,9 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QApplication, QLabel, QPlainTextEdit, QPushButton
+from PySide6.QtWidgets import QApplication, QPlainTextEdit, QPushButton
+
+from tests.gui.test_conversion_window import window_text
 
 pytestmark = pytest.mark.gui
 
@@ -173,7 +175,7 @@ def test_injected_safe_outcomes_and_async_picker_cancellation(outcome, title):
     until(app, lambda: window.snapshot.source == str(source))
     window.submit(InspectCommand())
     until(app, lambda: window.snapshot.result is not None)
-    displayed = "\n".join(widget.text() for widget in window.findChildren(QLabel))
+    displayed = window_text(window)
     assert title in displayed
     assert "Actual notes: unavailable" in displayed
     retained = window.snapshot.result

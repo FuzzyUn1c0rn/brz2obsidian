@@ -7,7 +7,9 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTabBar
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTabBar, QTextEdit
+
+from tests.gui.test_conversion_window import window_text
 
 pytestmark = pytest.mark.gui
 
@@ -48,7 +50,7 @@ def test_check_tab_async_selection_real_worker_clean_result_and_cancel_preserve_
     window.findChild(QTabBar).setCurrentIndex(2)
     assert any(
         widget.accessibleName() == "Check findings"
-        for widget in window.findChildren(QLabel)
+        for widget in window.findChildren(QTextEdit)
     )
     assert "Check an existing vault without changing it." in [
         widget.text() for widget in window.findChildren(QLabel)
@@ -59,7 +61,7 @@ def test_check_tab_async_selection_real_worker_clean_result_and_cancel_preserve_
     until(app, lambda: window.snapshot.vault == str(tmp_path))
     button(window, "Check vault").click()
     until(app, lambda: window.snapshot.result is not None)
-    text = "\n".join(widget.text() for widget in window.findChildren(QLabel))
+    text = window_text(window)
     assert "Check completed — no issues found" in text
     assert "read-only" in text
     assert "Inventory files: 1" in text
@@ -102,7 +104,7 @@ def test_real_check_outcome_titles_findings_and_unavailable_counts(
     until(app, lambda: window.snapshot.vault is not None)
     window.submit(SimpleCommand(command="check_vault"))
     until(app, lambda: window.snapshot.result is not None)
-    text = "\n".join(widget.text() for widget in window.findChildren(QLabel))
+    text = window_text(window)
     assert title in text
     assert "REFERENCE_CANARY" not in text
     assert "conversion failure" not in text.lower()
@@ -159,9 +161,7 @@ def test_blocked_check_processes_queued_gui_input_and_redraws_with_deferred_clos
     )
     until(app, lambda: bool(painted))
     assert painted == [True]
-    assert "Checking vault" in "\n".join(
-        widget.text() for widget in window.findChildren(QLabel)
-    )
+    assert "Checking vault" in window_text(window)
     assert not button(window, "Choose vault folder").isEnabled()
     assert not button(window, "Check vault").isEnabled()
     window.close()

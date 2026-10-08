@@ -113,6 +113,10 @@ Narrow recovery controls keep contextual footer guidance and every current actio
 readable, and wrap previous destinations within the scrollable sheet. Keyboard
 selection controls cover partial Unicode path/report selections as well as Select
 All; copied path and recovery text retain the original characters and paragraphs.
+Findings controls cover long unbroken checker filenames and owned cleanup paths:
+the prominent read-only panel wraps within the task sheet without nested scrolling,
+and exact leftover paths remain selectable in adjacent recovery guidance. Checker
+file findings identify the affected file without suggesting a staging leftover.
 These checks complement strategically sampled Windows scaling, contrast and
 dialog observations; they do not establish comprehensive assistive-technology
 certification or the final independent/user verdict.
