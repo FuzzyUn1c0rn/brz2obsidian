@@ -75,6 +75,27 @@ def finish(app, window):
     window.shutdown()
 
 
+def test_readonly_diagnostics_allow_partial_keyboard_selection():
+    app = QApplication.instance() or QApplication([])
+    window = inspected(app, "Safe diagnostics café 😀 tail")
+    try:
+        window.disclosure.click()
+        window.diagnostic_text.setFocus()
+        QTest.keyClick(
+            window.diagnostic_text, Qt.Key.Key_End, Qt.KeyboardModifier.ControlModifier
+        )
+        for _ in "tail":
+            QTest.keyClick(
+                window.diagnostic_text,
+                Qt.Key.Key_Left,
+                Qt.KeyboardModifier.ShiftModifier,
+            )
+        assert window.diagnostic_text.isReadOnly()
+        assert window.diagnostic_text.textCursor().selectedText() == "tail"
+    finally:
+        finish(app, window)
+
+
 def test_save_dialog_starts_in_absolute_home_independently_of_working_directory(
     tmp_path,
     monkeypatch,

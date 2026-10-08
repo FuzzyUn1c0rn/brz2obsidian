@@ -628,3 +628,96 @@ def test_source_and_independent_checker_use_one_adjacent_identity_selector(tmp_p
             )
     finally:
         finish(app, window)
+
+
+def assert_readable_text(control, expected):
+    """Public text/layout observation; permit labels or read-only documents."""
+    assert path_text(control) == expected
+    if isinstance(control, QTextEdit):
+        document = control.document()
+        assert document.size().height() <= control.viewport().height() + 1
+        block = document.begin()
+        while block.isValid():
+            layout = block.layout()
+            for index in range(layout.lineCount()):
+                assert (
+                    layout.lineAt(index).naturalTextWidth()
+                    <= control.viewport().width()
+                )
+            block = block.next()
+        control.selectAll()
+        # QTextCursor represents paragraph breaks as U+2029; observe exact
+        # outward copy text instead, without writing to the OS clipboard.
+        assert control.createMimeDataFromSelection().text() == expected
+        assert control.horizontalScrollBar().maximum() == 0
+        assert control.verticalScrollBar().maximum() == 0
+        return
+    flags = Qt.TextFlag.TextWordWrap if control.wordWrap() else 0
+    bounds = control.fontMetrics().boundingRect(
+        QRect(0, 0, control.contentsRect().width(), 10000), flags, expected
+    )
+    assert bounds.width() <= control.contentsRect().width(), (
+        "Recovery text clips horizontally",
+        bounds.width(),
+        control.contentsRect().width(),
+    )
+    assert bounds.height() <= control.contentsRect().height(), (
+        "Recovery text clips vertically",
+        bounds.height(),
+        control.contentsRect().height(),
+    )
+
+
+def test_narrow_unknown_recovery_keeps_footer_guidance_and_previous_destination_readable(
+    tmp_path,
+):
+    # #92 UI-U02/P04/P08: recovery text and contextual footer stay readable.
+    # Expectation recorded from the native453px failure before renderer inspection.
+    app = QApplication.instance() or QApplication([])
+    source = make_archive(tmp_path / "archive.brz")
+    session = ready_session(source, tmp_path)
+    effect = session.dispatch(ConvertCommand()).effects[0]
+    session.dispatch(
+        ApplyTransportFailure(
+            request_id=effect.request.request_id,
+            phase="may_have_executed",
+            code="protocol_failure",
+        )
+    )
+    window = MainWindow(session=session)
+    window.resize(453, 540)
+    window.show()
+    window.submit(SelectVault(path_or_null=None))
+    try:
+        until(app, lambda: window.snapshot.operational_status is not None)
+        app.processEvents()
+        footer_text = (
+            "Review the destination before another attempt. "
+            "Publication could not be established."
+        )
+        footer_hint = visible_label(window, footer_text)
+        assert_readable_text(footer_hint, footer_text)
+        scroll = window.findChild(QScrollArea)
+        assert not scroll.widget().isAncestorOf(footer_hint)
+        for label in ("Close", "I reviewed the destination", "Inspect archive"):
+            button = next(
+                item
+                for item in window.findChildren(QPushButton)
+                if item.isVisible() and item.text() == label
+            )
+            bounds = button.mapTo(window, button.rect().topLeft())
+            assert bounds.x() >= 0 and bounds.y() >= 0
+            assert bounds.x() + button.width() <= window.width()
+            assert bounds.y() + button.height() <= window.height()
+        recovery = named(window, QWidget, "Conversion recovery guidance")
+        text = path_text(recovery)
+        assert str(tmp_path) in text
+        assert "Acknowledgment does not establish publication." in text
+        assert_readable_text(recovery, text)
+        scroll.ensureWidgetVisible(recovery)
+        app.processEvents()
+        assert scroll.mapTo(window, scroll.rect().bottomLeft()).y() <= top(
+            window, footer_hint
+        )
+    finally:
+        finish(app, window)

@@ -109,6 +109,10 @@ text; actual document line bounds, full height and exact selection are checked
 at a narrow width. Existing completion and diagnostic controls
 also hold asynchronous actions open: focus returns to the invoked action when
 the user has left it unchanged, while later keyboard navigation takes precedence.
+Narrow recovery controls keep contextual footer guidance and every current action
+readable, and wrap previous destinations within the scrollable sheet. Keyboard
+selection controls cover partial Unicode path/report selections as well as Select
+All; copied path and recovery text retain the original characters and paragraphs.
 These checks complement strategically sampled Windows scaling, contrast and
 dialog observations; they do not establish comprehensive assistive-technology
 certification or the final independent/user verdict.

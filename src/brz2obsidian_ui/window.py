@@ -86,6 +86,8 @@ QLabel#muted, QLabel#sourcePath { color: #63716c; }
 QLabel#sourcePath { font-family: Consolas; font-size: 9pt; }
 QTextEdit#sourcePath { font-family: Consolas; font-size: 9pt; color: #63716c; border: none; background: white; padding: 0; }
 QTextEdit#sourcePath:focus { background: #e8f0e8; }
+QTextEdit#recoveryGuidance { color: #63716c; border: none; background: white; padding: 0; }
+QTextEdit#recoveryGuidance:focus { background: #e8f0e8; }
 QLabel#findings { background: #f1f6f0; border-left: 3px solid #709580; padding: 12px; }
 QLabel#findings[severity='warning'] { background: #fff8e8; border-color: #bc923d; }
 QLabel#findings[severity='error'] { background: #fcf1ed; border-color: #b36a5c; }
@@ -128,9 +130,14 @@ def label(text="", name=None):
 class PathText(QTextEdit):
     """Exact selectable path text, wrapping within the surrounding task sheet."""
 
-    def __init__(self, text=""):
-        super().__init__(objectName="sourcePath")
+    def __init__(self, text="", name="sourcePath"):
+        super().__init__(objectName=name)
+        self._text = ""
         self.setReadOnly(True)
+        self.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+            | Qt.TextInteractionFlag.TextSelectableByKeyboard
+        )
         self.setAcceptRichText(False)
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setWordWrapMode(QTextOption.WrapMode.WrapAnywhere)
@@ -144,16 +151,21 @@ class PathText(QTextEdit):
 
     def setPlainText(self, text):
         if text != self.toPlainText():
+            self._text = text
             super().setPlainText(text)
 
     def toPlainText(self):
-        # QTextEdit's convenience conversion normalizes valid filename
-        # characters such as NBSP and Unicode line/paragraph separators.
-        return self.document().toRawText()
+        # Preserve real paragraph breaks separately from valid filename
+        # characters which QTextEdit's convenience conversion normalizes.
+        return self._text
 
     def createMimeDataFromSelection(self):
         data = QMimeData()
-        data.setText(self.textCursor().selectedText())
+        cursor = self.textCursor()
+        # Qt cursor positions count UTF-16 units, including supplementary text.
+        original = self._text.encode("utf-16-le", errors="surrogatepass")
+        selected = original[2 * cursor.selectionStart() : 2 * cursor.selectionEnd()]
+        data.setText(selected.decode("utf-16-le", errors="surrogatepass"))
         return data
 
     def _fit(self, *_):
@@ -175,6 +187,20 @@ class DestinationFields(QWidget):
             if event.size().width() < 570
             else QBoxLayout.Direction.LeftToRight
         )
+        super().resizeEvent(event)
+
+
+class Footer(QWidget):
+    """Keep guidance and current actions readable when horizontal space runs out."""
+
+    def resizeEvent(self, event):
+        direction = (
+            QBoxLayout.Direction.TopToBottom
+            if event.size().width() < 650
+            else QBoxLayout.Direction.LeftToRight
+        )
+        self.layout().setDirection(direction)
+        self.actions.setDirection(direction)
         super().resizeEvent(event)
 
 
@@ -307,7 +333,7 @@ class MainWindow(QMainWindow):
         self.findings = label("Your inspection findings will appear here.", "findings")
         self.findings.setAccessibleName("Inspection findings")
         body.addWidget(self.findings)
-        self.recovery_status = label("", "muted")
+        self.recovery_status = PathText(name="recoveryGuidance")
         self.recovery_status.setAccessibleName("Conversion recovery guidance")
         body.addWidget(self.recovery_status)
         self.counts = label("", "muted")
@@ -326,6 +352,10 @@ class MainWindow(QMainWindow):
         details.setContentsMargins(0, 0, 0, 0)
         self.diagnostic_text = QPlainTextEdit()
         self.diagnostic_text.setReadOnly(True)
+        self.diagnostic_text.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+            | Qt.TextInteractionFlag.TextSelectableByKeyboard
+        )
         self.diagnostic_text.setAccessibleName("Diagnostic report page")
         self.diagnostic_text.setMinimumHeight(180)
         details.addWidget(self.diagnostic_text)
@@ -472,27 +502,32 @@ class MainWindow(QMainWindow):
         body.addStretch()
         scroll.setWidget(content)
         layout.addWidget(scroll, 1)
-        footer = QWidget(objectName="footer")
+        footer = Footer(objectName="footer")
+        footer.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Minimum)
         foot = QHBoxLayout(footer)
         foot.setContentsMargins(26, 15, 26, 15)
         self.guidance = label("Nothing is written during inspection.", "muted")
         foot.addWidget(self.guidance, 1)
+        actions = QHBoxLayout()
+        actions.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        footer.actions = actions
+        foot.addLayout(actions)
         self.activity = QProgressBar()
         self.activity.setRange(0, 0)
         self.activity.setFixedWidth(60)
         self.activity.setAccessibleName("Operation in progress")
-        foot.addWidget(self.activity)
+        actions.addWidget(self.activity)
         self.close_button = QPushButton("Close")
         self.close_button.clicked.connect(self.close)
-        foot.addWidget(self.close_button)
+        actions.addWidget(self.close_button)
         self.recovery = QPushButton("Start another conversion")
         self.recovery.setAccessibleName("Start another conversion")
         self.recovery.clicked.connect(self._recovery_action)
-        foot.addWidget(self.recovery)
+        actions.addWidget(self.recovery)
         self.primary = QPushButton("Inspect archive", objectName="primary")
         self.primary.setAccessibleName("Inspect archive")
         self.primary.clicked.connect(self._primary_action)
-        foot.addWidget(self.primary)
+        actions.addWidget(self.primary)
         layout.addWidget(footer)
         outer.addWidget(sheet)
         self.setCentralWidget(surround)
@@ -973,7 +1008,7 @@ class MainWindow(QMainWindow):
             + ("\nReported leftover: " + finding.path if finding.path else "")
             for finding in self.snapshot.recovery_findings
         )
-        self.recovery_status.setText("\n".join(recovery))
+        self.recovery_status.setPlainText("\n".join(recovery))
         self.recovery_status.setVisible(mode == 0 and bool(recovery))
         if mode != 2 and locked:
             self.choose.setEnabled(False)

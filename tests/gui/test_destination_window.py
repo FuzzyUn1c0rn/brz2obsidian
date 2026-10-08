@@ -24,7 +24,7 @@ def control(window, kind, name):
 
 
 @pytest.mark.parametrize("published", [False, True])
-@pytest.mark.parametrize("separator", ["", "\u00a0", "\u2028", "\u2029"])
+@pytest.mark.parametrize("separator", ["", "\u00a0", "\u2028", "\u2029", "😀"])
 def test_narrow_paths_wrap_unbroken_segments_and_preserve_exact_selected_text(
     tmp_path,
     published,
@@ -66,6 +66,16 @@ def test_narrow_paths_wrap_unbroken_segments_and_preserve_exact_selected_text(
             window.tabs.setCurrentIndex(1)
             window.tabs.setCurrentIndex(0)
             assert path.textCursor().selectedText() == expected
+            path.setFocus()
+            QTest.keyClick(path, Qt.Key.Key_End, Qt.KeyboardModifier.ControlModifier)
+            tail = (
+                "Archive café.brz"
+                if accessible == "Selected archive path"
+                else "Fresh vault"
+            )
+            for _ in tail:
+                QTest.keyClick(path, Qt.Key.Key_Left, Qt.KeyboardModifier.ShiftModifier)
+            assert path.createMimeDataFromSelection().text() == tail
             app.processEvents()
             document = path.document()
             assert (
