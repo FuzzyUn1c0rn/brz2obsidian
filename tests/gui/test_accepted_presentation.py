@@ -39,6 +39,7 @@ from brz2obsidian.application.contracts import (
     SimpleCommand,
 )
 from brz2obsidian.application.operations import ApplicationSession, check_vault, inspect
+from brz2obsidian_ui.platform_actions import CompletionActions
 from brz2obsidian_ui.window import MainWindow
 from tests.application.test_completion_session import published_session
 from tests.application.test_conversion_session import complete, ready_session
@@ -807,5 +808,65 @@ def test_narrow_checker_identifies_a_long_reported_file_without_clipping(tmp_pat
         assert "Staging" not in text and "staging" not in text
         retry = named(window, QPushButton, "Retry check")
         assert retry.isVisible() and retry.isEnabled()
+    finally:
+        finish(app, window)
+
+
+@pytest.mark.parametrize(
+    "action_name,is_report",
+    [
+        ("Open folder", False),
+        ("Open migration report", True),
+        ("Open in Obsidian", True),
+    ],
+)
+def test_repeated_failed_open_retains_actual_visible_and_copyable_target_path(
+    tmp_path, action_name, is_report
+):
+    # #92 UI-P09/UI-U01: repeated explicit failures retain the relevant real text,
+    # not merely a convenience getter which can disagree with the document.
+    app = QApplication.instance() or QApplication([])
+    session, destination = published_session(tmp_path)
+    destination.mkdir()
+    report = destination / "MIGRATION REPORT.md"
+    report.write_bytes(b"Owned generated report")
+    requested = []
+
+    def unavailable(target):
+        requested.append(target)
+        raise OSError("PRIVATE unavailable handler")
+
+    window = MainWindow(
+        session=session, completion_actions=CompletionActions(launch=unavailable)
+    )
+    window.show()
+    window.submit(SelectVault(path_or_null=None))
+    try:
+        until(app, lambda: window.snapshot.publication is not None)
+        result = window.snapshot.result
+        action = named(window, QPushButton, action_name)
+        relevant_path = named(window, QTextEdit, "Completion action path")
+        feedback = named(window, QLabel, "Completion action feedback")
+        expected = str(report if is_report else destination)
+        for invocation in (1, 2):
+            action.click()
+            until(
+                app,
+                lambda invocation=invocation: (
+                    len(requested) == invocation
+                    and action.isEnabled()
+                    and "could not" in feedback.text()
+                ),
+            )
+            assert relevant_path.isVisible()
+            assert relevant_path.toPlainText() == expected
+            assert relevant_path.document().toPlainText() == expected
+            relevant_path.selectAll()
+            assert relevant_path.createMimeDataFromSelection().text() == expected
+            assert "PRIVATE" not in feedback.text()
+            assert window.snapshot.result is result
+            assert window.snapshot.publication.receipt_verified
+            assert named(window, QPushButton, "Check published vault").isEnabled()
+            assert report.read_bytes() == b"Owned generated report"
     finally:
         finish(app, window)

@@ -155,6 +155,9 @@ class PathText(QTextEdit):
             self._text = text
             super().setPlainText(text)
 
+    def clear(self):
+        self.setPlainText("")
+
     def toPlainText(self):
         # Preserve real paragraph breaks separately from valid filename
         # characters which QTextEdit's convenience conversion normalizes.
