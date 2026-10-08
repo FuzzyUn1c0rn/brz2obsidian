@@ -390,6 +390,9 @@ class SessionSnapshot(Contract):
     validation_pending: bool = False
     publication: Publication | None = None
     review_required: bool = False
+    retry_operation: Literal["inspect", "convert_reviewed", "check_vault"] | None = None
+    destination_review_acknowledged: bool = False
+    recovery_findings: tuple[Finding, ...] = ()
     operational_status: (
         Literal["operation_not_started", "publication_unknown"] | None
     ) = None

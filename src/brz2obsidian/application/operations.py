@@ -343,17 +343,34 @@ class ApplicationSession:
                             else command.result.review_required or not eligible,
                             "feedback": "",
                             "operational_status": None,
+                            "retry_operation": (
+                                "inspect"
+                                if command.result.operation == "convert_reviewed"
+                                and command.result.review_required
+                                else command.result.operation
+                            )
+                            if command.result.outcome in ("refused", "failed", "issues")
+                            else None,
                         }
                     )
                     if command.result.operation == "convert_reviewed":
                         state = state.model_copy(
                             update={
-                                "publication": command.result.publication,
+                                "publication": state.publication
+                                if state.publication is not None
+                                and state.publication.state == "unknown"
+                                and not command.result.publication.receipt_verified
+                                else command.result.publication,
                                 "destination": command.result.destination,
                                 "field_errors": command.result.field_errors,
                                 "destination_validation": None,
                                 "destination_revision": None,
                                 "validation_pending": False,
+                                "recovery_findings": tuple(
+                                    finding
+                                    for finding in command.result.findings
+                                    if finding.code == "cleanup_failure"
+                                ),
                             }
                         )
                 else:
@@ -373,19 +390,65 @@ class ApplicationSession:
             # active source/review or start overlapping primary operations.
             return SessionUpdate(snapshot=state)
         elif (
+            name == "start_another_conversion"
+            and "start_another_conversion" in state.allowed_actions
+        ):
+            self._diagnostic_generation += 1
+            self._diagnostic_text = ""
+            state = state.model_copy(
+                update={
+                    "revision": state.revision + 1,
+                    "result": None,
+                    "publication": None,
+                    "reviewed": None,
+                    "review_required": True,
+                    "retry_operation": None,
+                    "destination_review_acknowledged": False,
+                    "recovery_findings": (),
+                    "vault_name": "",
+                    "destination": None,
+                    "destination_validation": None,
+                    "destination_revision": None,
+                    "validation_pending": False,
+                    "field_errors": (),
+                    "operational_status": None,
+                    "feedback": "Inspect the current archive and choose another usable destination for a new conversion.",
+                }
+            )
+        elif (
+            name == "acknowledge_destination_review"
+            and "review_destination" in state.allowed_actions
+        ):
+            state = self._destination_edited(
+                state.model_copy(
+                    update={
+                        "revision": state.revision + 1,
+                        "destination_review_acknowledged": True,
+                        "reviewed": None,
+                        "review_required": True,
+                        "feedback": "Destination review acknowledged. Publication remains unknown. Inspect the current archive and validate a usable destination before another attempt.",
+                    }
+                )
+            )
+        elif (
             state.publication is not None
-            and state.publication.state in ("published_verified", "unknown")
+            and (
+                state.publication.receipt_verified
+                or state.publication.state == "unknown"
+                and not state.destination_review_acknowledged
+            )
             and name
             in (
                 "select_source",
                 "set_destination",
                 "convert",
+                "inspect",
                 "start_another_conversion",
                 "acknowledge_destination_review",
             )
         ):
-            # Recovery acknowledgment/new-conversion UI is a later slice. No
-            # bypassed form command can discard authoritative/unknown status.
+            # Neither a bypassed form command nor a retry establishes what an
+            # unknown attempt published or discards a verified receipt.
             return SessionUpdate(snapshot=state)
         elif name == "select_source":
             from brz2obsidian.application.contracts import absolute
@@ -409,6 +472,7 @@ class ApplicationSession:
                         "result": None,
                         "reviewed": None,
                         "review_required": True,
+                        "retry_operation": None,
                         "operational_status": None,
                         "feedback": "",
                         "vault_name": Path(selected).stem,
@@ -482,6 +546,12 @@ class ApplicationSession:
                 }
             )
             effects = (RunOperation(request=request, input_revision=state.revision),)
+        elif (
+            name == "convert"
+            and "retry" in state.allowed_actions
+            and state.retry_operation == "convert_reviewed"
+        ):
+            state = self._destination_edited(state)
         elif name == "convert" and (
             "convert" in state.allowed_actions
             or command.proceed_with_warnings
@@ -503,6 +573,7 @@ class ApplicationSession:
                 update={
                     "active_request_id": request.request_id,
                     "busy_operation": "convert_reviewed",
+                    "recovery_findings": (),
                     "feedback": "",
                     "operational_status": None,
                 }
@@ -518,9 +589,7 @@ class ApplicationSession:
             "start_another_conversion",
             "acknowledge_destination_review",
         ):
-            state = state.model_copy(
-                update={"feedback": "This operation is not available in this build."}
-            )
+            return SessionUpdate(snapshot=state)
         if state.close_pending and not (
             state.active_request_id or state.validation_request_id
         ):
@@ -551,6 +620,7 @@ class ApplicationSession:
             # Applies equally to future primary operations using this contract.
             self._diagnostic_generation += 1
             self._diagnostic_text = ""
+            state = state.model_copy(update={"retry_operation": None})
         if any(effect.effect == "close_window" for effect in effects):
             self._closed = True
             self._diagnostic_generation += 1
@@ -566,8 +636,18 @@ class ApplicationSession:
                 )
         actions = []
         if not self._closed and not state.active_request_id and not state.close_pending:
+            if state.publication is not None and state.publication.receipt_verified:
+                actions.append("start_another_conversion")
+            if (
+                state.publication is not None
+                and state.publication.state == "unknown"
+                and not state.destination_review_acknowledged
+            ):
+                actions.append("review_destination")
             if state.source and (
-                state.publication is None or state.publication.state == "not_published"
+                state.publication is None
+                or state.publication.state == "not_published"
+                or state.destination_review_acknowledged
             ):
                 actions.append("inspect")
             if state.reviewed:
@@ -584,6 +664,8 @@ class ApplicationSession:
                 and (
                     state.publication is None
                     or state.publication.state == "not_published"
+                    or state.publication.state == "unknown"
+                    and state.destination_review_acknowledged
                 )
             ):
                 actions.append(
@@ -593,12 +675,24 @@ class ApplicationSession:
                 )
             if state.vault:
                 actions.append("check_vault")
-                if (
-                    state.result is not None
-                    and state.result.operation == "check_vault"
-                    and state.result.outcome in ("issues", "failed")
-                ) or (state.feedback and state.result is None):
-                    actions.append("retry")
+            if (
+                state.retry_operation is not None
+                and (
+                    state.retry_operation == "check_vault"
+                    or state.publication is None
+                    or state.publication.state == "not_published"
+                    or state.publication.state == "unknown"
+                    and state.destination_review_acknowledged
+                )
+                and not state.validation_pending
+                and not state.validation_request_id
+                and (
+                    state.retry_operation != "convert_reviewed"
+                    or state.destination_validation is None
+                    or state.destination_validation.outcome != "valid"
+                )
+            ):
+                actions.append("retry")
             if self._diagnostic_text:
                 actions.extend(("copy_details", "save_diagnostic_report"))
         actions.append("close")
@@ -721,16 +815,25 @@ class ApplicationSession:
             else True,
             "feedback": feedback,
             "operational_status": status,
+            "retry_operation": "inspect"
+            if converting and phase != "not_started"
+            else state.busy_operation,
         }
         if converting:
             updates.update(
-                publication=Publication(
+                publication=state.publication
+                if state.publication is not None
+                and state.publication.state == "unknown"
+                else Publication(
                     state="not_published" if phase == "not_started" else "unknown",
                     destination=state.destination if phase != "not_started" else None,
                 ),
                 destination_validation=None,
                 destination_revision=None,
                 validation_pending=False,
+                destination_review_acknowledged=state.destination_review_acknowledged
+                if phase == "not_started"
+                else False,
             )
         return state.model_copy(update=updates)
 

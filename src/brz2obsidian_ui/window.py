@@ -245,6 +245,9 @@ class MainWindow(QMainWindow):
         self.findings = label("Your inspection findings will appear here.", "findings")
         self.findings.setAccessibleName("Inspection findings")
         body.addWidget(self.findings)
+        self.recovery_status = label("", "muted")
+        self.recovery_status.setAccessibleName("Conversion recovery guidance")
+        body.addWidget(self.recovery_status)
         self.counts = label("", "muted")
         body.addWidget(self.counts)
         self.pending = label("", "muted")
@@ -383,6 +386,10 @@ class MainWindow(QMainWindow):
         self.close_button = QPushButton("Close")
         self.close_button.clicked.connect(self.close)
         foot.addWidget(self.close_button)
+        self.recovery = QPushButton("Start another conversion")
+        self.recovery.setAccessibleName("Start another conversion")
+        self.recovery.clicked.connect(self._recovery_action)
+        foot.addWidget(self.recovery)
         self.primary = QPushButton("Inspect archive", objectName="primary")
         self.primary.setAccessibleName("Inspect archive")
         self.primary.clicked.connect(self._primary_action)
@@ -397,10 +404,31 @@ class MainWindow(QMainWindow):
         QWidget.setTabOrder(self.parent_path, self.choose_parent_button)
         QWidget.setTabOrder(self.choose_parent_button, self.vault_name)
         QWidget.setTabOrder(self.vault_name, self.close_button)
-        QWidget.setTabOrder(self.close_button, self.primary)
+        QWidget.setTabOrder(self.close_button, self.recovery)
+        QWidget.setTabOrder(self.recovery, self.primary)
 
     def submit(self, command):
         self.runner.submit(command)
+
+    def _recovery_action(self):
+        if (
+            self.tabs.currentIndex() == 0
+            and "start_another_conversion" in self.snapshot.allowed_actions
+        ):
+            self.submit(SimpleCommand(command="start_another_conversion"))
+        elif (
+            self.tabs.currentIndex() == 0
+            and "review_destination" in self.snapshot.allowed_actions
+        ):
+            self.submit(SimpleCommand(command="acknowledge_destination_review"))
+        elif "retry" in self.snapshot.allowed_actions:
+            command = {
+                "inspect": InspectCommand(),
+                "convert_reviewed": ConvertCommand(),
+                "check_vault": SimpleCommand(command="check_vault"),
+            }.get(self.snapshot.retry_operation)
+            if command is not None:
+                self.submit(command)
 
     def _primary_action(self):
         if (
@@ -719,11 +747,54 @@ class MainWindow(QMainWindow):
         self.primary.setAccessibleName(self.primary.text())
         publication = self.snapshot.publication
         published = publication is not None and publication.receipt_verified
-        locked = publication is not None and publication.state in (
-            "published_verified",
-            "unknown",
+        locked = publication is not None and (
+            publication.receipt_verified
+            or publication.state == "unknown"
+            and not self.snapshot.destination_review_acknowledged
         )
-        self.primary.setVisible(not (mode == 0 and published))
+        retry = "retry" in self.snapshot.allowed_actions and (
+            self.snapshot.retry_operation == "check_vault"
+            and mode == 2
+            or self.snapshot.retry_operation == "inspect"
+            and mode != 2
+            or self.snapshot.retry_operation == "convert_reviewed"
+            and mode == 0
+        )
+        self.primary.setVisible(not (mode == 0 and published) and not retry)
+        self.recovery.setVisible(
+            retry
+            or mode == 0
+            and any(
+                action in self.snapshot.allowed_actions
+                for action in ("start_another_conversion", "review_destination")
+            )
+        )
+        self.recovery.setText(
+            "I reviewed the destination"
+            if mode == 0 and "review_destination" in self.snapshot.allowed_actions
+            else {
+                "inspect": "Inspect again",
+                "convert_reviewed": "Retry conversion",
+                "check_vault": "Retry check",
+            }.get(self.snapshot.retry_operation, "Retry")
+            if retry
+            else "Start another conversion"
+        )
+        self.recovery.setAccessibleName(self.recovery.text())
+        recovery = []
+        if publication is not None and publication.state == "unknown":
+            recovery.append(
+                "Publication status unknown. Previous destination: "
+                + (publication.destination or "unavailable")
+                + "\nReview that destination before acknowledging. Acknowledgment does not establish publication. Inspect the current archive and validate a usable destination before another attempt."
+            )
+        recovery.extend(
+            finding.message
+            + ("\nReported leftover: " + finding.path if finding.path else "")
+            for finding in self.snapshot.recovery_findings
+        )
+        self.recovery_status.setText("\n".join(recovery))
+        self.recovery_status.setVisible(mode == 0 and bool(recovery))
         if mode != 2 and locked:
             self.choose.setEnabled(False)
         if mode == 0 and self.snapshot.reviewed:
@@ -908,7 +979,8 @@ class MainWindow(QMainWindow):
                 if self.snapshot.publication is not None
                 and self.snapshot.publication.receipt_verified
                 else "Review the destination before another attempt. Publication could not be established."
-                if self.snapshot.operational_status == "publication_unknown"
+                if self.snapshot.publication is not None
+                and self.snapshot.publication.state == "unknown"
                 else "Inspection and preliminary validation are read-only."
             )
 

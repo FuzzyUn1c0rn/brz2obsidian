@@ -204,7 +204,10 @@ def test_conversion_terminal_uncertainty_does_not_authorize_retry_or_infer_direc
     )
     assert done.effects == () and "convert" not in done.snapshot.allowed_actions
     assert f"Destination: {tmp_path / 'Fresh vault'}" in session.diagnostics_text()
-    assert session.dispatch(ConvertCommand()).effects == ()
+    requested = session.dispatch(ConvertCommand())
+    assert [effect.request.operation for effect in requested.effects] == (
+        ["validate_destination"] if failure == "launch" else []
+    )
     assert (
         session.snapshot.source == str(source)
         and session.snapshot.vault_name == "Fresh vault"
@@ -227,15 +230,19 @@ def test_conversion_terminal_uncertainty_does_not_authorize_retry_or_infer_direc
             == previous
         )
         assert (
-            session.dispatch(
-                SimpleCommand(command="acknowledge_destination_review")
-            ).snapshot
-            == previous
-        )
-        assert (
             session.dispatch(SimpleCommand(command="start_another_conversion")).snapshot
             == previous
         )
+        acknowledged = session.dispatch(
+            SimpleCommand(command="acknowledge_destination_review")
+        )
+        assert acknowledged.snapshot.destination_review_acknowledged
+        assert acknowledged.snapshot.publication == previous.publication
+        assert acknowledged.snapshot.operational_status == "publication_unknown"
+        assert [effect.request.operation for effect in acknowledged.effects] == [
+            "validate_destination"
+        ]
+        assert "convert" not in acknowledged.snapshot.allowed_actions
 
 
 @pytest.mark.parametrize("stale_review", [False, True])
@@ -287,7 +294,16 @@ def test_trustworthy_failed_attempt_retains_inputs_and_requires_fresh_destinatio
     )
     assert done.snapshot.reviewed == (None if stale_review else reviewed)
     assert done.snapshot.destination_validation is None and done.effects == ()
-    assert session.dispatch(ConvertCommand()).effects == ()
+    requested = session.dispatch(ConvertCommand())
+    if stale_review:
+        assert requested.effects == ()
+    else:
+        validation = requested.effects[0]
+        assert validation.request.operation == "validate_destination"
+        checked = complete(
+            session, validation, validate_destination(tmp_path, "Fresh vault")
+        )
+        assert checked.effects == ()
     revalidation = session.dispatch(
         SetDestination(parent_or_null=str(tmp_path), vault_name="Corrected vault")
     )
@@ -465,7 +481,10 @@ def test_real_transport_failures_reduce_to_honest_conversion_status_without_retr
         )
         assert state.result is None and state.active_request_id is None
         assert "RAW_PRIVATE_CANARY" not in session.diagnostics_text()
-        assert session.dispatch(ConvertCommand()).effects == ()
+        requested = session.dispatch(ConvertCommand())
+        assert [effect.request.operation for effect in requested.effects] == (
+            ["validate_destination"] if behavior == "launch" else []
+        )
         assert calls == ([] if behavior == "launch" else [True])
         assert (
             source.read_bytes() == original and not (tmp_path / "Fresh vault").exists()
