@@ -133,6 +133,7 @@ class MainWindow(QMainWindow):
     prepared = Signal(object)
     diagnostic_page_ready = Signal(object)
     diagnostic_action_ready = Signal(object)
+    carry_ready = Signal(object)
 
     def __init__(
         self,
@@ -162,6 +163,7 @@ class MainWindow(QMainWindow):
         self.dialogs = dialogs
         self.diagnostic_actions = diagnostic_actions or DiagnosticActions()
         self.prepared.connect(self._present)
+        self.carry_ready.connect(self._carried)
         self.diagnostic_page_ready.connect(self._diagnostic_page)
         self.diagnostic_action_ready.connect(self._diagnostic_finished)
         if supervisor is None:
@@ -401,13 +403,37 @@ class MainWindow(QMainWindow):
         self.runner.submit(command)
 
     def _primary_action(self):
+        if (
+            self.tabs.currentIndex() == 1
+            and "convert_this_archive" in self.snapshot.allowed_actions
+        ):
+            revision = self.snapshot.revision
+            self.runner.submit_if_current(
+                SimpleCommand(command="carry_inspection_to_convert"),
+                revision,
+                on_complete=lambda update: self.carry_ready.emit((update, revision)),
+            )
+            return
         self.submit(
             SimpleCommand(command="check_vault")
             if self.tabs.currentIndex() == 2
-            else ConvertCommand()
+            else ConvertCommand(
+                proceed_with_warnings="convert_with_warnings"
+                in self.snapshot.allowed_actions
+            )
             if self.tabs.currentIndex() == 0 and self.snapshot.reviewed
             else InspectCommand()
         )
+
+    def _carried(self, completion):
+        update, revision = completion
+        if (
+            update.snapshot.revision == revision
+            and self.snapshot == update.snapshot
+            and "convert_this_archive" in update.snapshot.allowed_actions
+        ):
+            self.tabs.setCurrentIndex(0)
+            self.primary.setFocus()
 
     def choose_source(self):
         if self.tabs.currentIndex() == 2:
@@ -658,6 +684,12 @@ class MainWindow(QMainWindow):
         primary_action = (
             "check_vault"
             if mode == 2
+            else "convert_this_archive"
+            if mode == 1 and "convert_this_archive" in self.snapshot.allowed_actions
+            else "convert_with_warnings"
+            if mode == 0
+            and self.snapshot.reviewed
+            and self.snapshot.reviewed.outcome == "warnings"
             else "convert"
             if mode == 0 and self.snapshot.reviewed
             else "inspect"
@@ -674,6 +706,12 @@ class MainWindow(QMainWindow):
         self.primary.setText(
             "Check vault"
             if mode == 2
+            else "Convert this archive"
+            if mode == 1 and "convert_this_archive" in self.snapshot.allowed_actions
+            else "Convert with warnings"
+            if mode == 0
+            and self.snapshot.reviewed
+            and self.snapshot.reviewed.outcome == "warnings"
             else "Convert"
             if mode == 0 and self.snapshot.reviewed
             else "Inspect archive"
@@ -690,10 +728,10 @@ class MainWindow(QMainWindow):
             self.choose.setEnabled(False)
         if mode == 0 and self.snapshot.reviewed:
             self.primary.setToolTip(
-                "Warning authorization is not available in this build."
-                if self.snapshot.reviewed.outcome == "warnings"
-                else "Choose a valid destination before converting."
-                if "convert" not in self.snapshot.allowed_actions
+                "Choose a valid destination before converting."
+                if primary_action not in self.snapshot.allowed_actions
+                else "Convert the current reviewed archive with the warnings shown above."
+                if primary_action == "convert_with_warnings"
                 else "Convert the reviewed archive into the displayed fresh vault."
             )
         self.destination_form.setVisible(mode == 0 and not published)

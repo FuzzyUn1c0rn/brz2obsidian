@@ -508,10 +508,11 @@ class ApplicationSession:
                 }
             )
             effects = (RunOperation(request=request, input_revision=state.revision),)
-        elif name == "carry_inspection_to_convert" and state.reviewed:
-            state = state.model_copy(
-                update={"feedback": "Reviewed archive retained for Convert."}
-            )
+        elif (
+            name == "carry_inspection_to_convert"
+            and "convert_this_archive" in state.allowed_actions
+        ):
+            state = state.model_copy(update={"feedback": ""})
         elif name in (
             "convert",
             "start_another_conversion",

@@ -71,8 +71,13 @@ disk-full-equivalent failures, exact cleanup guidance and late verified receipts
 Session and injected UI controls distinguish known not-started from uncertain
 termination, require fresh validation after failure, and retain actual receipt
 paths without directory inference. A synthetic native clean conversion supplements
-these controls; warning authorization/recovery/optional actions and final acceptance
-remain later slices. Single-instance and preferences have separate controls below.
+these controls. Standalone carry and explicit warning-action controls preserve the
+source/opaque review, reject refused/failed carry, and ensure tab changes do not
+authorize warnings. Real warning workers publish with verified receipt/exit2;
+missing/stale authorization and incompatible identity/profile/converter facts
+produce no publisher delegation. Same-path fresh review requires a new explicit
+authorization; malformed warning receipt facts never imply a created vault.
+Recovery/optional actions and final acceptance remain later slices. Single-instance and preferences have separate controls below.
 
 ### Local startup and preference controls
 
