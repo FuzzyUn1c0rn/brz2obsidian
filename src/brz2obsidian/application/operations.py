@@ -21,6 +21,7 @@ from brz2obsidian.application.contracts import (
     Finding,
     InspectArguments,
     InspectionResult,
+    PersistOutputParent,
     ReviewedInspection,
     RunOperation,
     SessionCommand,
@@ -234,6 +235,17 @@ class ApplicationSession:
         with self._lock:
             return self._dispatch(command)
 
+    def dispatch_if_current(
+        self, command: SessionCommand, expected_revision: int
+    ) -> SessionUpdate:
+        """Apply an asynchronous input only while its captured revision is current."""
+        if type(expected_revision) is not int or expected_revision < 0:
+            raise ValueError("Expected revision must be a nonnegative integer")
+        with self._lock:
+            if self._snapshot.revision != expected_revision:
+                return SessionUpdate(snapshot=self._snapshot)
+            return self._dispatch(command)
+
     def _dispatch(self, command):
         state = self._snapshot
         effects = ()
@@ -343,6 +355,10 @@ class ApplicationSession:
                 state.destination_validation is not None
                 and state.destination_validation.outcome == "failed"
             ):
+                if command.parent_or_null is not None and (
+                    command.parent_or_null != state.parent
+                ):
+                    effects = (PersistOutputParent(path=command.parent_or_null),)
                 state = self._destination_edited(
                     state.model_copy(
                         update={

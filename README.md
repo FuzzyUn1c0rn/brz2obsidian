@@ -47,6 +47,18 @@ until conversion. Editing coalesces checks and discards obsolete results while
 retaining the inspection findings. The Convert action remains unavailable in
 this implementation slice. The CLI below still creates missing output parents.
 
+Launching the app again restores or draws attention to its existing window;
+it does not start another operation. If Windows prevents foreground activation,
+the taskbar/caption flashes and the existing window shows a brief message.
+Independent command-line commands remain available while the app is open.
+
+Only the last output parent folder is remembered in
+`%LOCALAPPDATA%\brz2obsidian\preferences.json`. A new launch has no selected
+archive, reviewed inspection, result/check history, diagnostic log or saved window
+geometry. An unreadable preference leaves an empty usable form with a nonfatal
+message; choose the output folder again. A failed preference save preserves the
+current operation result and does not prevent further work.
+
 This launcher uses this checkout's `.venv` and is not a standalone distribution.
 Moving the checkout or environment requires rebuilding. A missing environment
 shows setup guidance; launching never installs or downloads packages. Headless

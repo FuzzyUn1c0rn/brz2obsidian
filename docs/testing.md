@@ -22,8 +22,8 @@ Do not redirect a shared editable installation while other worktrees are active.
 ## Optional GUI checks
 
 The UI adapter lives in `src/brz2obsidian_ui`; the application operations,
-host-lifetime session and hidden worker are Qt-independent. GUI checks under
-`tests/gui` carry the `gui` marker and skip during discovery when PySide6 is
+host-lifetime session and hidden worker are Qt-independent. Qt-dependent checks
+under `tests/gui` carry the `gui` marker and skip during discovery when PySide6 is
 absent. Install the pinned `requirements-gui.txt` only for GUI development.
 
 ```powershell
@@ -56,6 +56,49 @@ picker cancellation supplement public GUI responsiveness/deferred-Close checks.
 Diagnostic export, conversion, single-instance coordination and
 preferences have separate implementation slices. Tests must not substitute
 invented business results for those operations in the first inspection slice.
+
+### Local startup and preference controls
+
+`tests/application/test_ui_preferences.py` exercises canonical persistence effects
+and the atomic public `ApplicationSession.dispatch_if_current` revision guard.
+Deterministic blocked reads/saves verify newer input still reaches the serialized
+runner, stale startup delivery cannot overwrite it, stale failure feedback is
+discarded, and saves retain their admission order. The closed session command
+vocabulary is unchanged.
+
+The Qt-independent preference, activation and startup adapter controls under
+`tests/gui` run in the headless selection. They use actual UTF-8 preference bytes,
+loopback connections and separate processes in unique pytest-owned directories.
+Only the disposable adapter crash fixture is deliberately terminated. Controls
+verify parent-only content, safe corrupt/unavailable handling, retained prior
+preferences after replacement failure, activation-only authenticated messages,
+CLI independence, foreground-denial attention and crash-stale recovery. A live
+lock owner is never replaced because its endpoint is temporarily unavailable.
+
+`tests/gui/test_local_startup.py` uses offscreen Qt with synthetic user-profile
+roots. A blocked preference read leaves a queued Qt heartbeat and newer input
+responsive before release. A separate control proves unavailable preferences
+permit a usable empty launch while ownership still prevents a second window.
+These controls inject the native foreground boundary and do not establish actual
+Windows activation or presentation.
+
+Preferences live only in `%LOCALAPPDATA%\brz2obsidian\preferences.json`.
+Transient activation registration and its OS-held byte lock are separate, under
+`%USERPROFILE%\AppData\Local\Temp\brz2obsidian`; this relies on the signed-in
+user's private profile permissions and uses no shared/system-temp or checkout
+fallback. Registration contains only a port and random authentication token;
+normal close removes it, and crash recovery replaces it only after acquiring the
+released lock. An unavailable coordination location safely refuses startup.
+No operation history is stored there and no converter/CLI lock is involved.
+
+Actual local-build acceptance must separately sample two launches, existing
+window restoration or attention, unchanged active inputs, parent-only fresh
+launch behavior, one corrupt-preference case and an idle test-owned crash/stale
+relaunch. Preserve any pre-existing preference bytes before those controls and
+retain local environment, assessed source hashes and observations in the ticket's
+ignored effort evidence. Do not terminate an active conversion or a user-owned
+process for this sample. Final presentation and the user's verdict remain their
+separate gates.
 
 ## Public tests
 
