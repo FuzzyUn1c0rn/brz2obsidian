@@ -30,23 +30,85 @@ A prerequisite becoming available or a temporary integration-check failure
 resolving can justify another attempt without a code change. Record the reason
 and previous/new attempt paths in the ticket. Allocate `attempt-002` (or the next
 unused number) beneath the same candidate commit, leaving the earlier attempt
-intact. Carry forward `candidate.json` byte for byte. Ensure its evidence still
-resolves in the new directory: retain absolute evidence paths, or copy referenced
-relative files with their original layout. Reassess evidence applicability
-before reusing it; a new attempt does not require an empty Git commit.
+intact. Select the exact source attempt explicitly and assess the clean unchanged
+candidate commit. Use the helper from the integration checkout:
+
+```powershell
+.venv\Scripts\python.exe .agents/skills/implement-spec-enhanced/scripts/write_handoff.py carry-forward $newAttempt --from $previousAttempt --checkout $candidateCheckout --input $carryInput
+```
+
+Both attempt paths must be absolute, distinct and non-nested. The helper accepts
+the coordinator's assignment; it never discovers the latest attempt, increments
+numbers, merges code or edits tickets. Keep the UTF-8 input outside the destination
+attempt. For prerequisite recovery, use:
+
+```json
+{
+  "reason": "The unavailable prerequisite is now available",
+  "carry_verification": false
+}
+```
+
+For a temporary integration failure with still-applicable independent PASS:
+
+```json
+{
+  "reason": "The integration check prerequisite has recovered",
+  "carry_verification": true,
+  "verification_reuse_rationale": "The candidate, assessed inputs and verification conditions are unchanged"
+}
+```
+
+Supply a nonempty reason and an actual JSON boolean. True requires a nonempty
+applicability rationale; false accepts no reuse rationale. Unknown, duplicate or
+helper-owned fields are errors. Choosing true is the coordinator's attestation
+of applicability; machine validation establishes structure/state, not that
+judgment. The auxiliary `carry-forward.json` receipt contains `reason`,
+`source_attempt`, `destination_attempt`, `carry_verification` and, only for
+reuse, `verification_reuse_rationale`. It uses stable JSON without timestamps
+and remains outside schema-v1 records. Keep the durable conclusion in GitHub.
+
+The helper copies `candidate.json` and any requested PASS `verification.json`
+byte for byte, preserving the original actors and context. It carries every
+check/criterion evidence reference in those records. Absolute references remain
+intact and resolvable; relative files retain their layout and bytes. Evidence
+paths are relative to the final attempt, including `..` paths accepted by the
+validator. A parent-relative path that resolves to an occupied file in the new
+layout is a collision even if its bytes match the source. Select an unused layout
+that preserves the reference; the helper leaves the reference unchanged. Rooted
+or drive-relative Windows references lacking an absolute drive/root combination
+are ambiguous and refused. Equivalent references to the same source/destination
+file are copied once. Evidence aliases of record/receipt names, planned
+file/ancestor collisions and paths into the source attempt are refused.
+
+Known collisions, missing evidence, invalid reuse and invalid Git state fail
+before copying. Existing files/directories at any destination remain unchanged;
+an occupied attempt, including an interrupted staging file, requires a new
+assignment. All requested evidence and the receipt publish before records, with
+candidate last. Each file is atomic without replacement; directory-wide rollback
+is unnecessary. Exit `0` means complete carry and an allowed transition; `2`
+means complete carry with the corresponding candidate/verification transition
+held; `1` means failure. An ordinary I/O failure reports the exact destination
+and warns that any partial attempt is not ready. The helper prints its assigned
+destination before copying, so a forced process termination still leaves an
+exact inspection pointer even though the killed process cannot print a final
+diagnostic. Preserve partial attempts and have the coordinator assign another
+unused attempt. A later invocation refuses the occupied partial directory.
 
 - **Verification was BLOCKED:** dispatch the independent verifier at the same
-  candidate commit. It checks the newly available prerequisite and any affected
+  candidate commit after carrying with `carry_verification: false`. It checks
+  the newly available prerequisite and any affected
   criteria, then publishes a fresh `verification.json` in the new attempt.
   Reuse unaffected evidence with the normal rationale. Preserve the earlier
   BLOCKED record in its original directory.
-- **Integration failed temporarily:** carry forward the passing verification
-  byte for byte, including its referenced evidence, only if it remains valid.
+- **Integration failed temporarily:** carry the passing verification using
+  `carry_verification: true` and the explicit applicability rationale.
   Otherwise, obtain fresh verification in the new attempt. The merger inspects
   the current integration state and records the actual `previous_tip` and result
   for this attempt. If the candidate is already incorporated, rerun the affected
   checks against the current result; another merge is unnecessary. Publish a new
   `integration.json` with the digest of this attempt's verification record.
+  Integration records are always fresh; the helper never carries the earlier one.
 
 Validate each transition against the checkout actually assessed. Resume from
 the explicitly selected attempt path, rather than treating an earlier failed
@@ -357,7 +419,10 @@ actual verdict, never an inferred check.
 ## Validate at transitions
 
 Run the helper with the project `.venv` interpreter from the integration checkout.
-Pass the checkout actually being assessed, which may be another worktree:
+Both CLIs emit UTF-8 diagnostics, including Unicode paths on Windows pipes.
+Decode captured output as UTF-8 so publication outcomes and exact destination
+pointers remain readable. Pass the checkout actually being assessed, which may
+be another worktree:
 
 ```powershell
 .venv\Scripts\python.exe .agents/skills/implement-spec-enhanced/scripts/validate_handoff.py $attempt --stage candidate --checkout $implementationCheckout
