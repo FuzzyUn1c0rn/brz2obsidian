@@ -130,6 +130,7 @@ class Operations:
                 ),
                 *(f"{finding.code}: {finding.message}" for finding in findings),
                 "Pending: " + ", ".join(pending),
+                "Guidance: Review the planned contents and pending checks before conversion.",
             )
         )
         return InspectionResult(
@@ -224,6 +225,8 @@ class ApplicationSession:
         self._active_revision = None
         self._validation_revision = None
         self._diagnostic_text = ""
+        self._diagnostic_generation = 0
+        self._closed = False
         self._lock = RLock()
 
     @property
@@ -236,6 +239,8 @@ class ApplicationSession:
 
     def _dispatch(self, command):
         state = self._snapshot
+        if self._closed:
+            return SessionUpdate(snapshot=state)
         effects = ()
         name = command.command
         if name == "request_close":
@@ -271,6 +276,7 @@ class ApplicationSession:
                     and command.process_status == expected_exit
                 )
                 if trusted:
+                    self._diagnostic_generation += 1
                     self._diagnostic_text = command.result.diagnostic_text
                     eligible = (
                         command.input_revision
@@ -321,6 +327,7 @@ class ApplicationSession:
                 from brz2obsidian.application.contracts import absolute
 
                 absolute(command.path_or_null)
+                self._diagnostic_generation += 1
                 self._diagnostic_text = ""
                 state = state.model_copy(
                     update={
@@ -354,6 +361,7 @@ class ApplicationSession:
                 )
         elif name == "select_vault":
             if command.path_or_null is not None and command.path_or_null != state.vault:
+                self._diagnostic_generation += 1
                 self._diagnostic_text = ""
                 state = state.model_copy(
                     update={
@@ -431,8 +439,29 @@ class ApplicationSession:
                 update={"validation_request_id": request.request_id}
             )
             effects += (RunOperation(request=request, input_revision=state.revision),)
+        if any(
+            effect.effect == "run_operation"
+            and effect.request.operation != "validate_destination"
+            for effect in effects
+        ):
+            # Applies equally to future primary operations using this contract.
+            self._diagnostic_generation += 1
+            self._diagnostic_text = ""
+        if any(effect.effect == "close_window" for effect in effects):
+            self._closed = True
+            self._diagnostic_generation += 1
+            self._diagnostic_text = ""
+            # Retain summary facts in the final update, but release its report.
+            if state.result is not None:
+                state = state.model_copy(
+                    update={
+                        "result": state.result.model_copy(
+                            update={"diagnostic_text": ""}
+                        )
+                    }
+                )
         actions = []
-        if not state.active_request_id and not state.close_pending:
+        if not self._closed and not state.active_request_id and not state.close_pending:
             if state.source:
                 actions.append("inspect")
             if state.reviewed:
@@ -515,6 +544,7 @@ class ApplicationSession:
 
     def _failure(self, state, phase, code):
         checking = state.busy_operation == "check_vault"
+        self._diagnostic_generation += 1
         status = (
             "operation_not_started"
             if phase == "not_started"
@@ -538,7 +568,23 @@ class ApplicationSession:
             if checking
             else f"Source: {state.source or 'unavailable'}"
         )
-        self._diagnostic_text = f"brz2obsidian diagnostic report\nOperation: {state.busy_operation}\n{selected}\nOutcome: operational error\nCode: {code}\n{feedback}"
+        self._diagnostic_text = "\n".join(
+            (
+                "brz2obsidian diagnostic report",
+                f"Operation: {state.busy_operation}",
+                selected,
+                *(
+                    (f"Destination: {state.destination or 'unavailable'}",)
+                    if state.busy_operation == "convert_reviewed"
+                    else ()
+                ),
+                f"Converter: {__version__}",
+                "Counts: unavailable",
+                "Outcome: operational error",
+                f"Code: {code}",
+                feedback,
+            )
+        )
         return state.model_copy(
             update={
                 "result": None,
@@ -553,6 +599,47 @@ class ApplicationSession:
         """Current safe text for an explicitly requested background export."""
         with self._lock:
             return self._diagnostic_text
+
+    @property
+    def diagnostic_generation(self) -> int:
+        """Opaque host-only identity; input revisions do not identify reports."""
+        with self._lock:
+            return self._diagnostic_generation
+
+    @staticmethod
+    def _validate_generation(expected_generation):
+        if type(expected_generation) is not int or expected_generation < 0:
+            raise ValueError("A nonnegative diagnostic generation is required")
+
+    def admit_diagnostic_report(
+        self, action: str, expected_generation: int
+    ) -> str | None:
+        """Capture only the currently permitted report for an explicit export.
+
+        This bounded admission does not encode/write text or invoke adapters.
+        The caller starts its background side effect immediately after admission.
+        """
+        self._validate_generation(expected_generation)
+        if action not in ("copy_details", "save_diagnostic_report"):
+            raise ValueError("A diagnostic export action is required")
+        with self._lock:
+            if (
+                self._closed
+                or expected_generation != self._diagnostic_generation
+                or action not in self._snapshot.allowed_actions
+            ):
+                return None
+            return self._diagnostic_text or None
+
+    def diagnostics_page_if_current(
+        self, expected_generation: int, offset: int = 0, limit: int = 100
+    ) -> DiagnosticPage | None:
+        """Prepare a bounded page only while its host report identity is current."""
+        self._validate_generation(expected_generation)
+        with self._lock:
+            if self._closed or expected_generation != self._diagnostic_generation:
+                return None
+            return self.diagnostics_page(offset, limit)
 
     def diagnostics_page(self, offset: int = 0, limit: int = 100) -> DiagnosticPage:
         """Character offsets allow oversized individual lines to be paged safely."""

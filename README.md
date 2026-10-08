@@ -12,8 +12,8 @@ is read without being modified.
 ## Optional local Windows app
 
 The local app currently supports read-only archive inspection, preliminary
-destination validation and independent vault checking. Conversion, diagnostic
-export and final native acceptance are being delivered through
+destination validation, independent vault checking and explicit safe diagnostic
+copy/save. Conversion and final native acceptance are being delivered through
 the [Windows UI implementation](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/93).
 The existing command-line converter remains available below.
 
@@ -32,6 +32,12 @@ counts, source limitations and pending checks. Diagnostic details are collapsed
 initially and remain available after the worker exits. The source is read-only.
 During inspection or vault checking the window stays responsive; Close waits for
 completion.
+
+Expand **Diagnostic details** for selectable, bounded report pages. **Copy details**
+copies the complete current safe report; **Save diagnostic report** explicitly saves
+it as local UTF-8 text. Canceling or failing an export keeps the operation result.
+Reports remain in memory only for the current result and expire when it is replaced
+or the app closes. The app creates no diagnostic history or automatic report files.
 
 Use **Check vault** to choose an existing vault folder and check its current
 structure and conventions without changing files. Clean, issues and failed

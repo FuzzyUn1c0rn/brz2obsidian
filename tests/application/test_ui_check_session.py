@@ -144,7 +144,11 @@ def test_check_operational_failures_are_honest_deliberate_and_close_is_deferred(
     assert done.snapshot.result is None
     assert "Check could not complete" in done.snapshot.feedback
     assert "Publication status unknown" not in done.snapshot.feedback
-    assert str(tmp_path) in session.diagnostics_text()
+    assert session.diagnostics_text() == ""
+    assert (
+        session.admit_diagnostic_report("copy_details", session.diagnostic_generation)
+        is None
+    )
     assert [item.effect for item in done.effects] == ["close_window"]
 
 
@@ -171,6 +175,7 @@ def test_failed_check_keeps_source_review_and_retry_requires_an_explicit_command
     assert "check_vault" in failed.snapshot.allowed_actions
     assert "retry" in failed.snapshot.allowed_actions
     assert "Operation: check_vault" in session.diagnostics_text()
+    assert str(tmp_path) in session.diagnostics_text()
     retry = session.dispatch(SimpleCommand(command="check_vault"))
     assert retry.effects[0].request.request_id != checking.request.request_id
 

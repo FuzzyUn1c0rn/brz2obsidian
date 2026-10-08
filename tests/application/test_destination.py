@@ -389,7 +389,10 @@ def test_close_waits_for_primary_and_validation_without_starting_queued_checks(
         )
     )
     assert [effect.effect for effect in done.effects] == ["close_window"]
-    assert done.snapshot.result is inspected.snapshot.result
+    assert done.snapshot.result.model_dump(
+        exclude={"diagnostic_text"}
+    ) == inspected.snapshot.result.model_dump(exclude={"diagnostic_text"})
+    assert done.snapshot.result.diagnostic_text == ""
     assert done.snapshot.destination is None
 
 

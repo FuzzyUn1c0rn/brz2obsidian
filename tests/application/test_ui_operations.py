@@ -54,8 +54,10 @@ def test_session_admission_review_invalidation_and_deferred_close(tmp_path):
     assert done.snapshot.reviewed is not None
     assert done.effects[0].effect == "close_window"
     session.dispatch(SelectSource(path_or_null=str(tmp_path / "other.brz")))
-    assert session.snapshot.reviewed is None
-    assert session.snapshot.result is None
+    # A closed launch cannot be reused; no diagnostic payload survives it.
+    assert session.snapshot.source == str(source)
+    assert session.diagnostics_text() == ""
+    assert session.snapshot.result.diagnostic_text == ""
 
 
 def test_host_retains_bounded_diagnostic_pages_after_worker_completion():
