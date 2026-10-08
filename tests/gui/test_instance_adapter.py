@@ -83,28 +83,31 @@ def test_real_second_process_activates_and_cli_is_independent(tmp_path):
 def test_crashed_owner_releases_lock_and_stale_registration_is_replaced(tmp_path):
     from brz2obsidian_ui.instance import LocalInstance
 
-    # Only this disposable adapter-control process is deliberately terminated.
+    # Crash the actual owner, not the venv's Windows redirector process.
     child = subprocess.Popen(
         [
             sys.executable,
             "-u",
             "-c",
             (
-                "from pathlib import Path; import sys, time; "
+                "from pathlib import Path; import os, sys; "
                 "from brz2obsidian_ui.instance import LocalInstance; "
                 "owner = LocalInstance(Path(sys.argv[1]), lambda: None); "
-                "print(owner.claim().status, flush=True); time.sleep(30)"
+                "print(owner.claim().status, flush=True); "
+                "sys.stdin.readline(); os._exit(0)"
             ),
             str(tmp_path),
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        stdin=subprocess.PIPE,
         text=True,
     )
     try:
         assert child.stdout.readline().strip() == "primary"
         previous = (tmp_path / "instance.json").read_bytes()
-        child.terminate()
+        child.stdin.write("crash\n")
+        child.stdin.flush()
         child.wait(timeout=5)
         fresh = LocalInstance(tmp_path, lambda: None)
         try:
@@ -114,7 +117,7 @@ def test_crashed_owner_releases_lock_and_stale_registration_is_replaced(tmp_path
             fresh.close()
     finally:
         if child.poll() is None:
-            child.terminate()
+            child.stdin.close()
             child.wait(timeout=5)
 
 

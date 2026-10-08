@@ -12,6 +12,10 @@ def inventory(root):
     }
 
 
+def run_effect(update):
+    return next(effect for effect in update.effects if effect.effect == "run_operation")
+
+
 def test_preliminary_destination_is_readonly_and_discloses_unchecked_scope(tmp_path):
     (tmp_path / "source.brz").write_bytes(b"selected source stays unchanged")
     before = inventory(tmp_path)
@@ -141,7 +145,7 @@ def test_session_coalesces_destination_revisions_and_retains_inspection(tmp_path
     source = (Path(__file__).parents[1] / "fixtures/minimal.brz").absolute()
     session = ApplicationSession()
     session.dispatch(SelectSource(path_or_null=str(source)))
-    inspection = session.dispatch(InspectCommand()).effects[0]
+    inspection = run_effect(session.dispatch(InspectCommand()))
     result = inspect(source)
     session.dispatch(
         ApplyResult(
@@ -155,7 +159,7 @@ def test_session_coalesces_destination_revisions_and_retains_inspection(tmp_path
     first = session.dispatch(
         SetDestination(parent_or_null=str(tmp_path), vault_name="First")
     )
-    pending = first.effects[0]
+    pending = run_effect(first)
     assert first.snapshot.validation_pending
     assert first.snapshot.result is result
     assert first.snapshot.reviewed is result.reviewed
@@ -182,7 +186,7 @@ def test_session_coalesces_destination_revisions_and_retains_inspection(tmp_path
     assert late.snapshot.destination is None
     assert late.snapshot.validation_pending
     assert len(late.effects) == 1
-    latest = late.effects[0]
+    latest = run_effect(late)
     assert latest.request.arguments.vault_name == "Latest"
     done = session.dispatch(
         ApplyResult(
@@ -270,7 +274,7 @@ def test_validation_failure_or_mismatched_terminal_never_replaces_primary_result
     source = (Path(__file__).parents[1] / "fixtures/minimal.brz").absolute()
     session = ApplicationSession()
     session.dispatch(SelectSource(path_or_null=str(source)))
-    inspected = session.dispatch(InspectCommand()).effects[0]
+    inspected = run_effect(session.dispatch(InspectCommand()))
     primary = inspect(source)
     session.dispatch(
         ApplyResult(
@@ -280,9 +284,11 @@ def test_validation_failure_or_mismatched_terminal_never_replaces_primary_result
             process_status=0,
         )
     )
-    validating = session.dispatch(
-        SetDestination(parent_or_null=str(tmp_path), vault_name="Vault")
-    ).effects[0]
+    validating = run_effect(
+        session.dispatch(
+            SetDestination(parent_or_null=str(tmp_path), vault_name="Vault")
+        )
+    )
     if mismatch == "transport_failure":
         command = ApplyTransportFailure(
             request_id=validating.request.request_id,
@@ -361,11 +367,13 @@ def test_close_waits_for_primary_and_validation_without_starting_queued_checks(
     source = (Path(__file__).parents[1] / "fixtures/minimal.brz").absolute()
     session = ApplicationSession()
     session.dispatch(SelectSource(path_or_null=str(source)))
-    validation = session.dispatch(
-        SetDestination(parent_or_null=str(tmp_path), vault_name="First")
-    ).effects[0]
+    validation = run_effect(
+        session.dispatch(
+            SetDestination(parent_or_null=str(tmp_path), vault_name="First")
+        )
+    )
     session.dispatch(SetDestination(parent_or_null=str(tmp_path), vault_name="Latest"))
-    primary = session.dispatch(InspectCommand()).effects[0]
+    primary = run_effect(session.dispatch(InspectCommand()))
     closing = session.dispatch(SimpleCommand(command="request_close"))
     assert closing.snapshot.close_pending
     assert closing.effects == ()
@@ -412,7 +420,7 @@ def test_source_change_invalidates_review_even_while_destination_validation_wait
     another.write_bytes(source.read_bytes())
     session = ApplicationSession()
     session.dispatch(SelectSource(path_or_null=str(source)))
-    primary = session.dispatch(InspectCommand()).effects[0]
+    primary = run_effect(session.dispatch(InspectCommand()))
     session.dispatch(
         ApplyResult(
             request_id=primary.request.request_id,
@@ -421,9 +429,9 @@ def test_source_change_invalidates_review_even_while_destination_validation_wait
             process_status=0,
         )
     )
-    checking = session.dispatch(
-        SetDestination(parent_or_null=str(tmp_path), vault_name="Old")
-    ).effects[0]
+    checking = run_effect(
+        session.dispatch(SetDestination(parent_or_null=str(tmp_path), vault_name="Old"))
+    )
     changed = session.dispatch(SelectSource(path_or_null=str(another)))
     assert changed.snapshot.reviewed is None
     assert changed.snapshot.result is None
@@ -439,5 +447,5 @@ def test_source_change_invalidates_review_even_while_destination_validation_wait
     )
     assert late.snapshot.destination is None
     assert late.snapshot.reviewed is None
-    assert late.effects[0].request.arguments.vault_name == "Another"
+    assert run_effect(late).request.arguments.vault_name == "Another"
     assert session.diagnostics_text() == ""

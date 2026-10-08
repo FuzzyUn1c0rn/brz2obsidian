@@ -1,6 +1,7 @@
 """Parent-only local preferences. Call these file operations off the Qt thread."""
 
 import json
+import ntpath
 import os
 import tempfile
 from dataclasses import dataclass
@@ -9,8 +10,28 @@ from pathlib import Path
 
 def application_data() -> Path | None:
     """Use Windows' user-local app-data area; never fall back to the checkout."""
-    location = os.environ.get("LOCALAPPDATA")
-    return Path(location) / "brz2obsidian" if location else None
+    location = _absolute_directory(os.environ.get("LOCALAPPDATA"))
+    return location / "brz2obsidian" if location is not None else None
+
+
+def _absolute_directory(value: Path | str | None) -> Path | None:
+    if value is None:
+        return None
+    try:
+        path = Path(value)
+    except TypeError, ValueError:
+        return None
+    if not path.is_absolute() or ntpath.isreserved(path):
+        return None
+    drive = path.drive
+    if len(drive) == 2 and drive[1] == ":":
+        if drive[0] not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz":
+            return None
+    elif not drive.startswith("\\\\") or ":" in drive:
+        return None
+    if any(character in '<>|?"*' or ord(character) < 32 for character in drive):
+        return None
+    return path
 
 
 @dataclass(frozen=True)
@@ -23,7 +44,7 @@ class ParentPreferences:
     """The only persistent application preference is the last output parent."""
 
     def __init__(self, directory: Path | None):
-        self.directory = directory
+        self.directory = _absolute_directory(directory)
 
     def load(self) -> PreferenceResult:
         if self.directory is None:

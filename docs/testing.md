@@ -83,6 +83,9 @@ verify parent-only content, safe corrupt/unavailable handling, retained prior
 preferences after replacement failure, activation-only authenticated messages,
 CLI independence, foreground-denial attention and crash-stale recovery. A live
 lock owner is never replaced because its endpoint is temporarily unavailable.
+Relative, drive-relative, root-relative and invalid configured preference roots
+are rejected before filesystem access; public controls prove no CWD writes from
+either `LOCALAPPDATA` or an explicit preference adapter directory.
 
 `tests/gui/test_local_startup.py` uses offscreen Qt with synthetic user-profile
 roots. A blocked preference read leaves a queued Qt heartbeat and newer input
