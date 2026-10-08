@@ -9,10 +9,12 @@ import unittest
 from copy import deepcopy
 from pathlib import Path
 
+from git_support import GitCheckout
+
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "validate_handoff.py"
 
 
-class HandoffTests(unittest.TestCase):
+class HandoffTests(GitCheckout, unittest.TestCase):
     def setUp(self):
         scratch = Path.cwd() / "tmp" / "implement-spec-enhanced-tests"
         scratch.mkdir(parents=True, exist_ok=True)
@@ -24,11 +26,7 @@ class HandoffTests(unittest.TestCase):
         self.bundle = root / "handoffs"
         self.bundle.mkdir()
         (self.bundle / "receipt.txt").write_text("Synthetic review evidence\n")
-        self.git("init", "-b", "main")
-        self.git("config", "user.name", "Handoff Test")
-        self.git("config", "user.email", "handoff-test@example.invalid")
-        self.git("config", "commit.gpgsign", "false")
-        self.git("config", "core.hooksPath", str(root / "no-hooks"))
+        self.init_git("Handoff Test", "handoff-test@example.invalid", root / "no-hooks")
         (self.checkout / "spec.md").write_text("Accepted synthetic spec\n")
         (self.checkout / "ticket.md").write_text("A1: synthetic output exists\n")
         self.base = self.commit("Accepted scope")
@@ -69,19 +67,6 @@ class HandoffTests(unittest.TestCase):
         self.write(self.candidate)
         self.write(self.verification)
 
-    def git(self, *args):
-        return subprocess.run(
-            ["git", "-C", str(self.checkout), *args],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-
-    def commit(self, message):
-        self.git("add", "--all")
-        self.git("commit", "-m", message)
-        return self.git("rev-parse", "HEAD")
-
     def write(self, record):
         path = self.bundle / f"{record['kind']}.json"
         path.write_text(json.dumps(record), encoding="utf-8")
@@ -99,6 +84,7 @@ class HandoffTests(unittest.TestCase):
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
