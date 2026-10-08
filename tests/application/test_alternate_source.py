@@ -408,6 +408,7 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
         "application/operations.py": {
             "brz2obsidian.application.contracts",
             "brz2obsidian.application.wiring",
+            "brz2obsidian.publication.filesystem",
         },
         "application/protocol.py": {"brz2obsidian.application.contracts"},
         "application/runner.py": {

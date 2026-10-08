@@ -35,6 +35,9 @@ class HostRunner:
         self._operations = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="operation-supervisor"
         )
+        self._validation = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="destination-supervisor"
+        )
 
     def submit(self, command):
         self._commands.submit(self._dispatch, command)
@@ -44,7 +47,12 @@ class HostRunner:
         self.on_update(PresentationUpdate(update, self.session.diagnostics_page()))
         for effect in update.effects:
             if effect.effect == "run_operation":
-                self._operations.submit(self._run, effect)
+                executor = (
+                    self._validation
+                    if effect.request.operation == "validate_destination"
+                    else self._operations
+                )
+                executor.submit(self._run, effect)
 
     def _run(self, effect):
         try:
@@ -79,4 +87,5 @@ class HostRunner:
         # A normal close is admitted only after the primary terminal result.
         # No GUI-thread join, timeout policy or child termination is introduced.
         self._operations.shutdown(wait=False)
+        self._validation.shutdown(wait=False)
         self._commands.shutdown(wait=False)

@@ -1,11 +1,13 @@
 """Owned staging, byte verification and fresh-destination publication."""
 
 import hashlib
+import ntpath
 import os
 import shutil
 import stat
 import tempfile
 import unicodedata
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from brz2obsidian.contracts import (
@@ -17,6 +19,95 @@ from brz2obsidian.contracts import (
     SourceSession,
     VerifiedFile,
 )
+
+
+def _windows_component(part):
+    """Shared Windows component predicate for generated paths and form names."""
+    # ntpath also covers DOS devices with extensions/superscript digits and the
+    # console device names, per the supported CPython Windows naming rules.
+    return bool(part) and not (
+        any(char in part for char in "/\\:")
+        or part.endswith((".", " "))
+        or ntpath.isreserved(part)
+    )
+
+
+@dataclass(frozen=True)
+class DestinationError:
+    code: str
+    field: str
+    message: str
+
+
+@dataclass(frozen=True)
+class DestinationPreflight:
+    destination: Path | None
+    errors: tuple[DestinationError, ...]
+    checked: tuple[str, ...]
+    failed: bool = False
+
+
+def preflight_destination(parent: Path, vault_name: str) -> DestinationPreflight:
+    """Read-only preliminary form check; does not reserve or promise writes.
+
+    Existing-parent policy belongs only to this entry point. Publication keeps
+    its established ability to create missing parents and validates final paths.
+    """
+    errors = []
+    checked = ["vault_name_component", "parent_directory"]
+    if not _windows_component(vault_name) or not vault_name.strip():
+        errors.append(
+            DestinationError(
+                "invalid_vault_name",
+                "vault_name",
+                "Enter one nonblank Windows folder name without reserved names, separators or a trailing dot or space.",
+            )
+        )
+    if not parent.is_absolute():
+        errors.append(
+            DestinationError(
+                "invalid_parent",
+                "parent",
+                "Choose an existing absolute parent folder.",
+            )
+        )
+    destination = parent / vault_name if not errors else None
+    field = "parent"
+    try:
+        _safe_ancestors(parent)
+        if not parent.is_dir():
+            errors.append(
+                DestinationError(
+                    "parent_unavailable",
+                    "parent",
+                    "Choose an existing parent folder.",
+                )
+            )
+        if destination is not None:
+            field = "destination"
+            _fresh(destination)
+            checked.extend(("reparse_ancestry", "destination_absent_or_empty"))
+    except MigrationRefused as error:
+        code = error.issues[0].code
+        errors.append(
+            DestinationError(
+                code,
+                field,
+                "Choose an absent or empty destination folder. Existing contents are never removed."
+                if code == "destination_not_empty"
+                else "Choose a parent and destination without symbolic links or reparse points.",
+            )
+        )
+    except OSError:
+        errors.append(
+            DestinationError(
+                "destination_read_failure",
+                field,
+                "The destination could not be checked. Check folder access and choose it again.",
+            )
+        )
+        return DestinationPreflight(destination, tuple(errors), tuple(checked), True)
+    return DestinationPreflight(destination, tuple(errors), tuple(checked))
 
 
 def _issue(code, message, leftover=None):
@@ -123,20 +214,7 @@ def publish(
                 or "\\" in path
                 or ":" in path
                 or parts.as_posix() != path
-                or any(
-                    part.endswith((".", " "))
-                    or any(ord(char) < 32 or char in '<>"|?*' for char in part)
-                    or part.split(".")[0].upper()
-                    in {
-                        "CON",
-                        "PRN",
-                        "AUX",
-                        "NUL",
-                        *(f"COM{i}" for i in range(1, 10)),
-                        *(f"LPT{i}" for i in range(1, 10)),
-                    }
-                    for part in parts.parts
-                )
+                or any(not _windows_component(part) for part in parts.parts)
                 or any(
                     "/".join(
                         unicodedata.normalize("NFC", part).casefold()

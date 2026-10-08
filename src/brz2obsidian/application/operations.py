@@ -14,6 +14,7 @@ from brz2obsidian.application.contracts import (
     CheckResult,
     CloseWindow,
     ConversionResult,
+    DestinationArguments,
     DestinationValidation,
     DiagnosticPage,
     Finding,
@@ -28,6 +29,7 @@ from brz2obsidian.application.contracts import (
 )
 from brz2obsidian.application.wiring import default_workflow
 from brz2obsidian.contracts import Counts
+from brz2obsidian.publication.filesystem import preflight_destination
 
 # Deliberately static messages: backend Issue.message/evidence can contain authored
 # text, filenames or exception strings. Never project them across this boundary.
@@ -143,7 +145,47 @@ def inspect(source: Path) -> InspectionResult:
 
 
 def validate_destination(parent: Path, vault_name: str) -> DestinationValidation:
-    raise NotImplementedError("Destination validation is not available in this build")
+    preliminary = preflight_destination(parent, vault_name)
+    outcome = (
+        "failed" if preliminary.failed else "invalid" if preliminary.errors else "valid"
+    )
+    errors = tuple(
+        Finding(
+            code=error.code, severity="error", message=error.message, field=error.field
+        )
+        for error in preliminary.errors
+    )
+    destination = (
+        str(preliminary.destination) if preliminary.destination is not None else None
+    )
+    pending = (
+        "generated_paths",
+        "generated_collisions",
+        "manifest_feasibility",
+        "absolute_path_limit",
+        "write_success",
+    )
+    text = "\n".join(
+        (
+            "brz2obsidian diagnostic report",
+            "Operation: validate_destination",
+            f"Parent: {parent}",
+            f"Destination: {destination or 'unavailable'}",
+            f"Outcome: {outcome}",
+            *(f"{error.code}: {error.message}" for error in errors),
+            "Preliminary check only. No reservation or writeability promise.",
+            "Generated paths, collisions, manifest and final 240 UTF-16-unit absolute-path limit remain pending. Writes are checked during publication.",
+        )
+    )
+    return DestinationValidation(
+        outcome=outcome,
+        status="destination_" + outcome,
+        destination=destination,
+        field_errors=errors,
+        checked=preliminary.checked,
+        pending=pending,
+        diagnostic_text=text,
+    )
 
 
 def convert_reviewed(
@@ -170,6 +212,7 @@ class ApplicationSession:
     def __init__(self):
         self._snapshot = SessionSnapshot()
         self._active_revision = None
+        self._validation_revision = None
         self._diagnostic_text = ""
         self._lock = RLock()
 
@@ -186,7 +229,7 @@ class ApplicationSession:
         effects = ()
         name = command.command
         if name == "request_close":
-            if state.active_request_id:
+            if state.active_request_id or state.validation_request_id:
                 state = state.model_copy(
                     update={
                         "close_pending": True,
@@ -195,6 +238,11 @@ class ApplicationSession:
                 )
             else:
                 effects = (CloseWindow(),)
+        elif (
+            isinstance(command, (ApplyResult, ApplyTransportFailure))
+            and command.request_id == state.validation_request_id
+        ):
+            state = self._validation_terminal(state, command)
         elif isinstance(command, (ApplyResult, ApplyTransportFailure)):
             if command.request_id != state.active_request_id:
                 return SessionUpdate(snapshot=state)
@@ -246,9 +294,9 @@ class ApplicationSession:
                 update={"active_request_id": None, "busy_operation": None}
             )
             self._active_revision = None
-            if state.close_pending:
+            if state.close_pending and not state.validation_request_id:
                 effects = (CloseWindow(),)
-        elif state.active_request_id:
+        elif state.active_request_id or state.close_pending:
             # UI disabling is only presentation; bypassed calls cannot mutate the
             # active source/review or start overlapping primary operations.
             return SessionUpdate(snapshot=state)
@@ -273,15 +321,24 @@ class ApplicationSession:
                         "vault_name": Path(command.path_or_null).stem,
                     }
                 )
+                state = self._destination_edited(state)
         elif name == "set_destination":
-            state = state.model_copy(
-                update={
-                    "parent": command.parent_or_null,
-                    "vault_name": command.vault_name,
-                    "destination": None,
-                    "revision": state.revision + 1,
-                }
-            )
+            if (command.parent_or_null, command.vault_name) != (
+                state.parent,
+                state.vault_name,
+            ) or (
+                state.destination_validation is not None
+                and state.destination_validation.outcome == "failed"
+            ):
+                state = self._destination_edited(
+                    state.model_copy(
+                        update={
+                            "parent": command.parent_or_null,
+                            "vault_name": command.vault_name,
+                            "revision": state.revision + 1,
+                        }
+                    )
+                )
         elif name == "select_vault":
             if command.path_or_null is not None:
                 state = state.model_copy(
@@ -320,8 +377,30 @@ class ApplicationSession:
             state = state.model_copy(
                 update={"feedback": "This operation is not available in this build."}
             )
+        if state.close_pending and not (
+            state.active_request_id or state.validation_request_id
+        ):
+            effects = (CloseWindow(),)
+            state = state.model_copy(update={"close_pending": False})
+        elif (
+            state.validation_pending
+            and not state.validation_request_id
+            and not state.close_pending
+        ):
+            request = WorkerRequest(
+                request_id=str(uuid4()),
+                operation="validate_destination",
+                arguments=DestinationArguments(
+                    parent=state.parent, vault_name=state.vault_name
+                ),
+            )
+            self._validation_revision = state.revision
+            state = state.model_copy(
+                update={"validation_request_id": request.request_id}
+            )
+            effects += (RunOperation(request=request, input_revision=state.revision),)
         actions = []
-        if not state.active_request_id:
+        if not state.active_request_id and not state.close_pending:
             if state.source:
                 actions.append("inspect")
             if state.reviewed:
@@ -331,6 +410,68 @@ class ApplicationSession:
         actions.append("close")
         self._snapshot = state.model_copy(update={"allowed_actions": tuple(actions)})
         return SessionUpdate(snapshot=self._snapshot, effects=effects)
+
+    def _destination_edited(self, state):
+        return state.model_copy(
+            update={
+                "destination": None,
+                "destination_validation": None,
+                "destination_revision": None,
+                "validation_pending": state.parent is not None,
+                "field_errors": ()
+                if state.parent is not None
+                else (
+                    Finding(
+                        code="parent_required",
+                        severity="error",
+                        message="Choose an output parent folder.",
+                        field="parent",
+                    ),
+                ),
+            }
+        )
+
+    def _validation_terminal(self, state, command):
+        current = (
+            isinstance(command, ApplyResult)
+            and command.input_revision == self._validation_revision == state.revision
+        )
+        trusted = (
+            isinstance(command, ApplyResult)
+            and isinstance(command.result, DestinationValidation)
+            and command.process_status
+            == (0 if command.result.outcome == "valid" else 1)
+        )
+        if self._validation_revision == state.revision:
+            result = (
+                command.result
+                if current and trusted
+                else DestinationValidation(
+                    outcome="failed",
+                    status="destination_failed",
+                    field_errors=(
+                        Finding(
+                            code="destination_validation_failure",
+                            severity="error",
+                            field="destination",
+                            message="The destination check did not complete reliably. Edit or choose the destination again when ready.",
+                        ),
+                    ),
+                    pending=("destination_feasibility", "write_success"),
+                    diagnostic_text="Destination validation did not return a trustworthy result. No write or reservation was performed by this preliminary check.",
+                )
+            )
+            state = state.model_copy(
+                update={
+                    "destination_validation": result,
+                    "destination_revision": state.revision,
+                    "destination": result.destination,
+                    "field_errors": result.field_errors,
+                    "validation_pending": False,
+                }
+            )
+        self._validation_revision = None
+        return state.model_copy(update={"validation_request_id": None})
 
     def _failure(self, state, phase, code):
         status = (

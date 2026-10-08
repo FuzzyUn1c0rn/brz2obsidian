@@ -158,6 +158,10 @@ class DestinationValidation(Result):
             or self.publication
         ):
             raise ValueError("Inconsistent destination validation")
+        if self.outcome == "valid" and (self.destination is None or self.field_errors):
+            raise ValueError(
+                "Valid destination requires a constructed path without field errors"
+            )
         return self
 
 
@@ -299,6 +303,11 @@ class SetDestination(Contract):
     parent_or_null: str | None
     vault_name: str
 
+    @field_validator("parent_or_null")
+    @classmethod
+    def absolute_parent(cls, value):
+        return absolute(value) if value is not None else None
+
 
 class SelectVault(Contract):
     command: Literal["select_vault"] = "select_vault"
@@ -368,6 +377,10 @@ class SessionSnapshot(Contract):
     close_pending: bool = False
     field_errors: tuple[Finding, ...] = ()
     destination: str | None = None
+    destination_validation: DestinationValidation | None = None
+    destination_revision: int | None = None
+    validation_request_id: str | None = None
+    validation_pending: bool = False
     publication: Publication | None = None
     review_required: bool = False
     operational_status: (

@@ -11,8 +11,8 @@ is read without being modified.
 
 ## Optional local Windows app
 
-The local app currently supports read-only archive inspection. Convert, Check
-vault, diagnostic export and final native acceptance are being delivered through
+The local app currently supports read-only archive inspection and preliminary
+destination validation. Conversion, Check vault, diagnostic export and final native acceptance are being delivered through
 the [Windows UI implementation](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/93).
 The existing command-line converter remains available below.
 
@@ -30,6 +30,15 @@ select **Inspect archive**. Inspection shows planned counts, unavailable actual
 counts, source limitations and pending checks. Diagnostic details are collapsed
 initially and remain available after the worker exits. The source is read-only.
 During inspection the window stays responsive; Close waits for completion.
+
+In **Convert**, choose an existing output parent folder and edit the suggested
+archive-stem vault name. The backend shows the complete destination and adjacent
+errors. Validation is read-only and accepts only an absent or empty target;
+it does not reserve the folder or guarantee writes. Generated paths, collisions,
+manifest feasibility and the final 240 UTF-16-unit path limit remain pending
+until conversion. Editing coalesces checks and discards obsolete results while
+retaining the inspection findings. The Convert action remains unavailable in
+this implementation slice. The CLI below still creates missing output parents.
 
 This launcher uses this checkout's `.venv` and is not a standalone distribution.
 Moving the checkout or environment requires rebuilding. A missing environment
