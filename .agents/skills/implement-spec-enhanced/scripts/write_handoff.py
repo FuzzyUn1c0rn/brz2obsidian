@@ -8,7 +8,15 @@ import sys
 import tempfile
 from pathlib import Path, PureWindowsPath
 
-from validate_handoff import InvalidHandoff, git, relative_path, require, text, validate
+from validate_handoff import (
+    InvalidHandoff,
+    git,
+    load,
+    relative_path,
+    require,
+    text,
+    validate,
+)
 
 CANDIDATE_FIELDS = {
     "actor",
@@ -20,6 +28,7 @@ CANDIDATE_FIELDS = {
     "checks",
     "limits",
 }
+VERIFICATION_FIELDS = {"actor", "verdict", "criteria", "findings", "checks", "limits"}
 
 
 class Parser(argparse.ArgumentParser):
@@ -97,6 +106,20 @@ def candidate_record(data, checkout):
     return record
 
 
+def verification_record(data, attempt):
+    require(isinstance(data["criteria"], list), "criteria must be an array")
+    for index, criterion in enumerate(data["criteria"]):
+        fields(criterion, {"id", "status", "evidence"}, f"criteria[{index}]")
+    candidate = load(attempt, "candidate")
+    return dict(
+        data,
+        schema_version=1,
+        kind="verification",
+        ticket=candidate["ticket"],
+        candidate_commit=candidate["candidate_commit"],
+    )
+
+
 def publish(path, payload):
     """Link a fully flushed sibling into place; link never replaces a name."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -137,24 +160,53 @@ def main():
             "See references/handoffs.md for field structures and evidence rules."
         ),
     )
-    candidate.add_argument(
-        "attempt", type=Path, help="coordinator's exact absolute attempt directory"
+    verification = subparsers.add_parser(
+        "verification",
+        help="publish an independent verification verdict",
+        description="Publish verification.json from explicit independent judgments.",
+        epilog=(
+            "Required input: actor, verdict (PASS, REWORK, BLOCKED), criteria, findings, "
+            "checks, limits. Each criterion has exactly id, status, evidence; cover every "
+            "candidate criterion once. Arrays and judgments stay explicit, including "
+            "empty findings/checks/limits. The actor must be independent of the candidate "
+            "implementer. Ticket/candidate identity comes from this exact attempt's "
+            "candidate.json; schema/kind and other helper-owned/unknown fields are errors. "
+            "Evidence is absolute or relative to the attempt. Assess the clean candidate "
+            "commit using --checkout, even when running elsewhere. Exit 0: PASS published, "
+            "transition allowed; 2: valid REWORK/BLOCKED published, transition held; "
+            "1: invalid input/state or occupied destination, no record published. "
+            "Checks never supply an omitted verdict or actual user acceptance. "
+            "Machine validation checks structure/state; the verifier judges evidence, "
+            "omitted requirements and reuse applicability. Existing records stay immutable. "
+            "See references/handoffs.md for input examples and check/reuse structures."
+        ),
     )
-    candidate.add_argument(
-        "--checkout", type=Path, required=True, help="assessed Git checkout"
-    )
-    candidate.add_argument(
-        "--input",
-        type=Path,
-        required=True,
-        help="UTF-8 JSON input, preserved unchanged",
-    )
+    for command in (candidate, verification):
+        command.add_argument(
+            "attempt", type=Path, help="coordinator's exact absolute attempt directory"
+        )
+        command.add_argument(
+            "--checkout", type=Path, required=True, help="assessed Git checkout"
+        )
+        command.add_argument(
+            "--input",
+            type=Path,
+            required=True,
+            help="UTF-8 JSON input, preserved unchanged",
+        )
     args = parser.parse_args()
     try:
         require(args.attempt.is_absolute(), "attempt must be an exact absolute path")
-        data = read_input(args.input, CANDIDATE_FIELDS)
+        data = read_input(
+            args.input,
+            CANDIDATE_FIELDS if args.stage == "candidate" else VERIFICATION_FIELDS,
+        )
         checkout = Path(git(args.checkout.resolve(), "rev-parse", "--show-toplevel"))
-        record = candidate_record(data, checkout)
+        record = (
+            candidate_record(data, checkout)
+            if args.stage == "candidate"
+            else verification_record(data, args.attempt)
+        )
         allowed = validate(args.attempt, args.stage, checkout, {args.stage: record})
         destination = args.attempt / f"{args.stage}.json"
         publish(
