@@ -400,6 +400,25 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
             "brz2obsidian.vault_check",
         },
     }
+    # The accepted UI application facade adds explicit outer composition through
+    # existing wiring. Keep these additions file-specific: reusable Workflow and
+    # package initializers must not gain an outward route to operations/transport.
+    application_additions = {
+        "application/contracts.py": set(),
+        "application/operations.py": {
+            "brz2obsidian.application.contracts",
+            "brz2obsidian.application.wiring",
+        },
+        "application/protocol.py": {"brz2obsidian.application.contracts"},
+        "application/runner.py": {
+            "brz2obsidian.application.contracts",
+            "brz2obsidian.application.operations",
+        },
+        "application/transport.py": {
+            "brz2obsidian.application.contracts",
+            "brz2obsidian.application.protocol",
+        },
+    }
     for area, permitted in allowed.items():
         files = (
             [root / "contracts.py"]
@@ -409,6 +428,9 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
         for file in files:
             if file.name == "wiring.py":
                 continue  # The outer composition explicitly selects implementations.
+            file_permitted = permitted | application_additions.get(
+                file.relative_to(root).as_posix(), set()
+            )
             relative = file.relative_to(root).with_suffix("")
             module = "brz2obsidian." + ".".join(relative.parts)
             package = (
@@ -434,7 +456,7 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
                     if imported.startswith("brz2obsidian"):
                         assert any(
                             imported == prefix or imported.startswith(prefix + ".")
-                            for prefix in permitted
+                            for prefix in file_permitted
                             if prefix != "brz2obsidian"
                         ) or imported in {"brz2obsidian", "brz2obsidian.__version__"}, (
                             file,

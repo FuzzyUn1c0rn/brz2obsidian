@@ -9,6 +9,36 @@ This is a **one-time conversion into a new vault**. It does not merge into an
 existing vault or keep TheBrain and Obsidian synchronized. Your source archive
 is read without being modified.
 
+## Optional local Windows app
+
+The local app currently supports read-only archive inspection. Convert, Check
+vault, diagnostic export and final native acceptance are being delivered through
+the [Windows UI implementation](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/93).
+The existing command-line converter remains available below.
+
+From the checkout root, install the optional GUI dependencies and build its
+checkout-bound launcher:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-gui.txt
+.\.venv\Scripts\python.exe -m pip install --no-build-isolation --no-deps -e '.[dev,gui]'
+.\.venv\Scripts\python.exe tools\build_ui.py
+```
+
+Double-click **build/ui/Start brz2obsidian.cmd**, choose a BRZ archive, then
+select **Inspect archive**. Inspection shows planned counts, unavailable actual
+counts, source limitations and pending checks. Diagnostic details are collapsed
+initially and remain available after the worker exits. The source is read-only.
+During inspection the window stays responsive; Close waits for completion.
+
+This launcher uses this checkout's `.venv` and is not a standalone distribution.
+Moving the checkout or environment requires rebuilding. A missing environment
+shows setup guidance; launching never installs or downloads packages. Headless
+installation does not require `requirements-gui.txt`. The tested GUI runtime is
+64-bit CPython 3.14.8, PySide6/Qt 6.12.0 on Windows. In an isolated worktree, the
+helper accepts `--python C:\absolute\project\.venv\Scripts\python.exe` while
+continuing to resolve code from that worktree.
+
 ## Before you start
 
 This guide uses **Windows PowerShell**. You will need:

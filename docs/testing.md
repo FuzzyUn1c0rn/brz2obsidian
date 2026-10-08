@@ -19,6 +19,34 @@ In a separate worktree, use the integration checkout's full `.venv` interpreter
 path and set `$env:PYTHONPATH = Join-Path (Get-Location) 'src'` for that worktree.
 Do not redirect a shared editable installation while other worktrees are active.
 
+## Optional GUI checks
+
+The UI adapter lives in `src/brz2obsidian_ui`; the application operations,
+host-lifetime session and hidden worker are Qt-independent. GUI checks under
+`tests/gui` carry the `gui` marker and skip during discovery when PySide6 is
+absent. Install the pinned `requirements-gui.txt` only for GUI development.
+
+```powershell
+$env:QT_QPA_PLATFORM = 'offscreen'
+.\.venv\Scripts\python.exe -m pytest -m gui -q --basetemp=tmp/pytest-gui
+.\.venv\Scripts\python.exe -m pytest -m 'not gui' -q --basetemp=tmp/pytest-headless
+```
+
+The injected public UI seam accepts session commands and presents immutable
+snapshots. Deterministic barriers hold inspection and diagnostic preparation
+while queued GUI input is processed, before releasing work. Real hidden-worker
+checks cover correlation, UTF-8 framing, separate concurrent pipe draining,
+bounded output, launch/crash failures and safe diagnostic omission. Static and
+import-blocked checks keep backend/CLI use independent of Qt. Launcher checks
+exercise Unicode/spaced source roots, an unrelated CWD and readable setup errors.
+These controls do not establish final native appearance, platform-dialog behavior
+or actual user acceptance. Use the generated local launcher for strategically
+sampled Windows observations and retain requirement IDs/evidence in the ticket.
+
+Diagnostic export, conversion, checking, single-instance coordination and
+preferences have separate implementation slices. Tests must not substitute
+invented business results for those operations in the first inspection slice.
+
 ## Public tests
 
 Ordinary tests require neither private inputs nor GUI access. Shareable synthetic
