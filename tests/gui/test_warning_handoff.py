@@ -224,3 +224,78 @@ def test_injected_inspection_outcome_carry_tabs_and_source_invalidation(
         window.close()
         until(app, lambda: not window.isVisible())
         window.shutdown()
+
+
+@pytest.mark.parametrize("outcome", ["clean", "warnings"])
+def test_actual_gui_keeps_every_review_field_opaque_before_destination_and_after_checker(
+    tmp_path, monkeypatch, outcome
+):
+    import sys
+
+    from PySide6.QtWidgets import QTabBar
+
+    from brz2obsidian.application.contracts import (
+        InspectCommand,
+        ReviewedInspection,
+        SelectSource,
+        SelectVault,
+        SimpleCommand,
+    )
+    from brz2obsidian.application.operations import ApplicationSession, inspect
+    from brz2obsidian_ui.window import MainWindow
+    from tests.application.test_minimal_workflow import make_archive
+    from tests.application.test_warning_handoff import finish, operation
+    from tests.support.v3_collection import mixed_v3_archive
+
+    source = (
+        mixed_v3_archive(tmp_path / "Warning.brz")
+        if outcome == "warnings"
+        else make_archive(tmp_path / "Clean.brz")
+    )
+    session = ApplicationSession()
+    session.dispatch(SelectSource(path_or_null=str(source)))
+    finish(session, operation(session.dispatch(InspectCommand())), inspect(source))
+    fields = frozenset(ReviewedInspection.model_fields)
+    accesses = []
+    original = ReviewedInspection.__getattribute__
+
+    def observe(review, field):
+        caller = sys._getframe(1).f_code.co_filename.replace("\\", "/")
+        if field in fields and "/brz2obsidian_ui/" in caller:
+            accesses.append((field, caller))
+        return original(review, field)
+
+    monkeypatch.setattr(ReviewedInspection, "__getattribute__", observe)
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow(session=session)
+    window.show()
+    tabs = window.findChild(QTabBar)
+    try:
+        window.submit(SimpleCommand(command="carry_inspection_to_convert"))
+        until(app, lambda: window.snapshot.reviewed is not None)
+        name = "Convert with warnings" if outcome == "warnings" else "Convert"
+        assert not action(window, name).isEnabled()
+        tabs.setCurrentIndex(1)
+        action(window, "Convert this archive").click()
+        until(app, lambda: tabs.currentIndex() == 0)
+        folder = tmp_path / "Read-only check"
+        folder.mkdir()
+        window.submit(SelectVault(path_or_null=str(folder)))
+        until(app, lambda: window.snapshot.vault is not None)
+        tabs.setCurrentIndex(2)
+        action(window, "Check vault").click()
+        until(
+            app,
+            lambda: (
+                window.snapshot.result is not None
+                and window.snapshot.result.operation == "check_vault"
+            ),
+        )
+        tabs.setCurrentIndex(0)
+        assert not action(window, name).isEnabled()
+        assert window.snapshot.reviewed is not None
+        assert not accesses
+    finally:
+        window.close()
+        until(app, lambda: not window.isVisible())
+        window.shutdown()

@@ -323,3 +323,46 @@ def test_real_warning_worker_rejects_absent_or_stale_authorization_without_targe
     assert {
         p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*") if p.is_dir()
     } == directories
+
+
+@pytest.mark.parametrize("outcome", ["clean", "warnings"])
+def test_backend_supplies_conversion_primary_fact_without_destination_and_after_checker(
+    tmp_path, outcome
+):
+    from brz2obsidian.application.contracts import CheckResult, SelectVault
+
+    source = (
+        mixed_v3_archive(tmp_path / "Warning.brz")
+        if outcome == "warnings"
+        else make_archive(tmp_path / "Clean.brz")
+    )
+    session = ApplicationSession()
+    session.dispatch(SelectSource(path_or_null=str(source)))
+    finish(session, operation(session.dispatch(InspectCommand())), inspect(source))
+    expected = "convert_with_warnings" if outcome == "warnings" else "convert"
+    assert session.snapshot.conversion_primary_action == expected
+    assert expected not in session.snapshot.allowed_actions
+    assert session.snapshot.destination_validation is None
+    reviewed = session.snapshot.reviewed
+    session.dispatch(SelectVault(path_or_null=str(tmp_path)))
+    pending = operation(session.dispatch(SimpleCommand(command="check_vault")))
+    finish(session, pending, CheckResult(outcome="clean", status="check_clean"))
+    assert session.snapshot.result.operation == "check_vault"
+    assert session.snapshot.reviewed == reviewed
+    assert session.snapshot.conversion_primary_action == expected
+    assert expected not in session.snapshot.allowed_actions
+    session.dispatch(SelectSource(path_or_null=str(tmp_path / "Different.brz")))
+    assert session.snapshot.reviewed is None
+    assert session.snapshot.conversion_primary_action is None
+
+
+@pytest.mark.parametrize(
+    "invalid", [False, 0, "warnings", "inspect", "conversion_created"]
+)
+def test_conversion_primary_fact_is_a_closed_strict_backend_enum(invalid):
+    from pydantic import ValidationError
+
+    from brz2obsidian.application.contracts import SessionSnapshot
+
+    with pytest.raises(ValidationError):
+        SessionSnapshot(conversion_primary_action=invalid)
