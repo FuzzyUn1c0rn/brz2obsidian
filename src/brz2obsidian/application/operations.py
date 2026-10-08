@@ -3,6 +3,7 @@
 The Qt adapter consumes these facts; it does not interpret Workflow trees.
 """
 
+from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
 from uuid import uuid4
@@ -26,9 +27,11 @@ from brz2obsidian.application.contracts import (
     Publication,
     ReviewedInspection,
     RunOperation,
+    SelectVault,
     SessionCommand,
     SessionSnapshot,
     SessionUpdate,
+    SimpleCommand,
     WorkerRequest,
 )
 from brz2obsidian.application.conversion import convert
@@ -237,6 +240,14 @@ def convert_reviewed(
 
 def check_vault(vault: Path) -> CheckResult:
     return Operations().check_vault(vault)
+
+
+@dataclass(frozen=True)
+class CompletionTarget:
+    """A current host-admitted target, never a worker request or filesystem proof."""
+
+    action: str
+    path: str
 
 
 class ApplicationSession:
@@ -513,7 +524,11 @@ class ApplicationSession:
                         "feedback": "",
                     }
                 )
-        elif name == "check_vault" and "check_vault" in state.allowed_actions:
+        elif (
+            name == "check_vault"
+            and "check_vault" in state.allowed_actions
+            and state.vault is not None
+        ):
             request = WorkerRequest(
                 request_id=str(uuid4()),
                 operation="check_vault",
@@ -673,7 +688,13 @@ class ApplicationSession:
                     if state.reviewed.outcome == "clean"
                     else "convert_with_warnings"
                 )
-            if state.vault:
+            if state.publication is not None and state.publication.receipt_verified:
+                actions.extend(
+                    ("open_folder", "open_migration_report", "open_in_obsidian")
+                )
+            if state.vault or (
+                state.publication is not None and state.publication.receipt_verified
+            ):
                 actions.append("check_vault")
             if (
                 state.retry_operation is not None
@@ -713,6 +734,8 @@ class ApplicationSession:
             update={
                 "allowed_actions": tuple(actions),
                 "conversion_primary_action": conversion_primary_action,
+                "can_check_selected_vault": state.vault is not None
+                and "check_vault" in actions,
             }
         )
         return SessionUpdate(snapshot=self._snapshot, effects=effects)
@@ -859,6 +882,56 @@ class ApplicationSession:
         """Current safe text for an explicitly requested background export."""
         with self._lock:
             return self._diagnostic_text
+
+    def admit_completion_action(
+        self, action: str, expected_generation: int
+    ) -> CompletionTarget | None:
+        """Derive an optional-open target from current verified host facts only."""
+        if action not in ("open_folder", "open_migration_report", "open_in_obsidian"):
+            raise ValueError("Unknown completion action")
+        self._completion_generation(expected_generation)
+        with self._lock:
+            destination = self._current_published_destination(expected_generation)
+            if destination is None or action not in self._snapshot.allowed_actions:
+                return None
+            path = (
+                destination
+                if action == "open_folder"
+                else destination / "MIGRATION REPORT.md"
+            )
+            return CompletionTarget(action, str(path))
+
+    def check_published_vault(self, expected_generation: int) -> SessionUpdate:
+        """Atomically select the current published vault and admit an explicit check."""
+        self._completion_generation(expected_generation)
+        with self._lock:
+            destination = self._current_published_destination(expected_generation)
+            if (
+                destination is None
+                or "check_vault" not in self._snapshot.allowed_actions
+            ):
+                return SessionUpdate(snapshot=self._snapshot)
+            self._dispatch(SelectVault(path_or_null=str(destination)))
+            return self._dispatch(SimpleCommand(command="check_vault"))
+
+    @staticmethod
+    def _completion_generation(generation):
+        if type(generation) is not int or generation < 0:
+            raise ValueError("Expected generation must be a nonnegative integer")
+
+    def _current_published_destination(self, generation):
+        state = self._snapshot
+        publication = state.publication
+        if (
+            self._closed
+            or generation != self._diagnostic_generation
+            or state.active_request_id
+            or state.close_pending
+            or publication is None
+            or not publication.receipt_verified
+        ):
+            return None
+        return Path(publication.destination)
 
     @property
     def diagnostic_generation(self) -> int:

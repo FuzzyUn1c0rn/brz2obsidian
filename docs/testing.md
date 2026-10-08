@@ -80,7 +80,18 @@ results replace inspection presentation. Real warning workers publish with verif
 missing/stale authorization and incompatible identity/profile/converter facts
 produce no publisher delegation. Same-path fresh review requires a new explicit
 authorization; malformed warning receipt facts never imply a created vault.
-Recovery/optional actions and final acceptance remain later slices. Single-instance and preferences have separate controls below.
+Completion controls exercise current verified-receipt admission, stale/closed/busy
+intents and atomic selection of the published folder for explicit checking. The
+independent selector remains disabled without its own visible selection. Outer
+adapter controls verify Unicode/spaced path encoding, existing fixed-report-only
+Obsidian requests, missing targets and safe native failures without file changes.
+A deliberately blocked filesystem check re-admits immediately before dispatch;
+the runner never holds the session lock across platform work. Injected UI controls
+retain clean/warning/late-error results on open failures, process Qt events during
+blocked dispatch and run the actual checker worker against the published target.
+Normal conversion completion and deferred Close start no open/check action.
+Final independent/native user acceptance remains separate. Single-instance and
+preferences have separate controls below.
 
 ### Local startup and preference controls
 

@@ -13,8 +13,8 @@ is read without being modified.
 
 The local app currently supports read-only archive inspection, preliminary
 destination validation, reviewed clean/warning conversion, independent vault checking
-and explicit safe diagnostic copy/save. Further recovery/completion flows and final
-native acceptance are being delivered through
+and explicit safe diagnostic copy/save, recovery and optional published-vault actions.
+Final native acceptance is being delivered through
 the [Windows UI implementation](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/93).
 The existing command-line converter remains available below.
 
@@ -62,9 +62,17 @@ review requires fresh inspection and authorization. Conversion rechecks the sour
 publication safeguards. A verified result shows actual counts and its published
 path in place of the destination form. Refusal, failure and uncertain worker
 termination have distinct messages; never treat a visible folder as success.
-A verified warning publication is **Vault created with warnings**. Recovery and
-optional completion actions are later slices.
+A verified warning publication is **Vault created with warnings**.
 The CLI below still creates missing output parents.
+
+After verified publication, explicitly choose **Open folder**, **Open migration
+report**, **Open in Obsidian** or **Check vault** in the result area. These actions
+also remain available when publication succeeded before a later error. Checking
+automatically selects that published folder and remains read-only; no open or
+check starts automatically. An open failure keeps the result and shows a copyable
+path. Obsidian receives an encoded request for the existing **MIGRATION REPORT.md**;
+dispatch does not confirm it opened. If Obsidian does not yet know the vault,
+choose **Open folder as vault** there using the published folder path.
 
 Launching the app again restores or draws attention to its existing window;
 it does not start another operation. If Windows prevents foreground activation,

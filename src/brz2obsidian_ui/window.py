@@ -37,7 +37,7 @@ from brz2obsidian.application.contracts import (
 )
 from brz2obsidian.application.runner import HostRunner
 from brz2obsidian.application.transport import Supervisor
-from brz2obsidian_ui.platform_actions import DiagnosticActions
+from brz2obsidian_ui.platform_actions import CompletionActions, DiagnosticActions
 
 EXPLANATIONS = (
     "Convert a BRZ archive into a new Obsidian vault.",
@@ -133,6 +133,7 @@ class MainWindow(QMainWindow):
     prepared = Signal(object)
     diagnostic_page_ready = Signal(object)
     diagnostic_action_ready = Signal(object)
+    completion_action_ready = Signal(object)
     carry_ready = Signal(object)
 
     def __init__(
@@ -143,6 +144,7 @@ class MainWindow(QMainWindow):
         dialogs=None,
         session=None,
         diagnostic_actions=None,
+        completion_actions=None,
     ):
         super().__init__()
         self.setWindowTitle("brz2obsidian")
@@ -159,13 +161,16 @@ class MainWindow(QMainWindow):
         self._save_dialog = None
         self._diagnostic_generation = 0
         self._diagnostic_busy = False
+        self._completion_busy = False
         self._pending_form = None
         self.dialogs = dialogs
         self.diagnostic_actions = diagnostic_actions or DiagnosticActions()
+        self.completion_actions = completion_actions or CompletionActions()
         self.prepared.connect(self._present)
         self.carry_ready.connect(self._carried)
         self.diagnostic_page_ready.connect(self._diagnostic_page)
         self.diagnostic_action_ready.connect(self._diagnostic_finished)
+        self.completion_action_ready.connect(self._completion_finished)
         if supervisor is None:
             supervisor = Supervisor(
                 Path(interpreter or sys.executable),
@@ -177,6 +182,7 @@ class MainWindow(QMainWindow):
             self.diagnostic_page_ready.emit,
             session=session,
             on_diagnostic_feedback=self.diagnostic_action_ready.emit,
+            on_completion_feedback=self.completion_action_ready.emit,
         )
         self._build()
         self.setStyleSheet(STYLE)
@@ -369,6 +375,43 @@ class MainWindow(QMainWindow):
                 "muted",
             )
         )
+        self.completion_buttons = DestinationFields()
+        buttons = QBoxLayout(QBoxLayout.Direction.LeftToRight, self.completion_buttons)
+        buttons.setContentsMargins(0, 0, 0, 0)
+        buttons.setSpacing(7)
+        self.completion_buttons.setStyleSheet(
+            "QPushButton { font-size: 9pt; padding: 6px 8px; }"
+        )
+        self.open_buttons = {}
+        for action, text in (
+            ("open_folder", "Open folder"),
+            ("open_migration_report", "Open migration report"),
+            ("open_in_obsidian", "Open in Obsidian"),
+        ):
+            button = QPushButton(text)
+            button.setAccessibleName(text)
+            button.clicked.connect(
+                lambda _checked=False, action=action: self._open_completion(action)
+            )
+            self.open_buttons[action] = button
+            buttons.addWidget(button)
+        self.published_check = QPushButton("Check vault")
+        self.published_check.setAccessibleName("Check published vault")
+        self.published_check.clicked.connect(self._check_published)
+        buttons.addWidget(self.published_check)
+        published.addWidget(self.completion_buttons)
+        published.addWidget(
+            label(
+                "Open in Obsidian requests the existing migration report. If the vault is not known to Obsidian, choose Open folder as vault there using the published path.",
+                "muted",
+            )
+        )
+        self.completion_feedback = label("", "muted")
+        self.completion_feedback.setAccessibleName("Completion action feedback")
+        self.completion_path = label("", "sourcePath")
+        self.completion_path.setAccessibleName("Completion action path")
+        published.addWidget(self.completion_feedback)
+        published.addWidget(self.completion_path)
         body.addWidget(self.published_panel)
         body.addStretch()
         scroll.setWidget(content)
@@ -409,6 +452,36 @@ class MainWindow(QMainWindow):
 
     def submit(self, command):
         self.runner.submit(command)
+
+    def _open_completion(self, action):
+        if self._completion_busy:
+            return
+        self._completion_busy = True
+        self.completion_feedback.setText("Requesting open action…")
+        self.completion_path.clear()
+        perform = {
+            "open_folder": self.completion_actions.open_folder,
+            "open_migration_report": self.completion_actions.open_report,
+            "open_in_obsidian": self.completion_actions.open_in_obsidian,
+        }[action]
+        self.runner.request_completion_action(
+            action,
+            self._diagnostic_generation,
+            lambda target, admit: perform(target.path, admit=admit),
+        )
+        self._render()
+
+    def _check_published(self):
+        self.runner.request_published_check(self._diagnostic_generation)
+        self.tabs.setCurrentIndex(2)
+
+    def _completion_finished(self, feedback):
+        if feedback.generation != self._diagnostic_generation:
+            return
+        self._completion_busy = False
+        self.completion_feedback.setText(feedback.message)
+        self.completion_path.setText(feedback.path or "")
+        self._render()
 
     def _recovery_action(self):
         if (
@@ -636,6 +709,9 @@ class MainWindow(QMainWindow):
         if self._diagnostic_generation != prepared.diagnostic_generation:
             self._diagnostic_generation = prepared.diagnostic_generation
             self._diagnostic_busy = False
+            self._completion_busy = False
+            self.completion_feedback.clear()
+            self.completion_path.clear()
             self.diagnostic_feedback.clear()
             self.disclosure.setChecked(False)
             self._show_page(prepared.diagnostics)
@@ -726,7 +802,11 @@ class MainWindow(QMainWindow):
             "save_diagnostic_report" in self.snapshot.allowed_actions
             and not self._diagnostic_busy
         )
-        self.primary.setEnabled(primary_action in self.snapshot.allowed_actions)
+        self.primary.setEnabled(
+            self.snapshot.can_check_selected_vault
+            if mode == 2
+            else primary_action in self.snapshot.allowed_actions
+        )
         self.primary.setText(
             {
                 "check_vault": "Check vault",
@@ -739,6 +819,13 @@ class MainWindow(QMainWindow):
         self.primary.setAccessibleName(self.primary.text())
         publication = self.snapshot.publication
         published = publication is not None and publication.receipt_verified
+        for action, button in self.open_buttons.items():
+            button.setEnabled(
+                action in self.snapshot.allowed_actions and not self._completion_busy
+            )
+        self.published_check.setEnabled("check_vault" in self.snapshot.allowed_actions)
+        self.completion_feedback.setVisible(bool(self.completion_feedback.text()))
+        self.completion_path.setVisible(bool(self.completion_path.text()))
         locked = publication is not None and (
             publication.receipt_verified
             or publication.state == "unknown"

@@ -399,6 +399,7 @@ class SessionSnapshot(Contract):
     ) = None
     feedback: str = ""
     allowed_actions: tuple[Action, ...] = ("close",)
+    can_check_selected_vault: bool = False
 
 
 class RunOperation(Contract):

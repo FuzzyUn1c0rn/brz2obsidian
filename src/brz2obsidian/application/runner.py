@@ -37,6 +37,14 @@ class DiagnosticFeedback:
 
 
 @dataclass(frozen=True)
+class CompletionFeedback:
+    generation: int
+    message: str
+    succeeded: bool = False
+    path: str | None = None
+
+
+@dataclass(frozen=True)
 class PreferenceFeedback:
     text: str
     input_revision: int
@@ -59,6 +67,7 @@ class HostRunner:
         on_diagnostic_feedback=None,
         preferences=None,
         on_feedback=None,
+        on_completion_feedback=None,
     ):
         self.session = session if session is not None else ApplicationSession()
         self.supervisor, self.on_update, self.on_page = supervisor, on_update, on_page
@@ -66,6 +75,7 @@ class HostRunner:
         self.on_feedback = on_feedback or (lambda feedback: None)
         self._stopped = Event()
         self.on_diagnostic_feedback = on_diagnostic_feedback or (lambda feedback: None)
+        self.on_completion_feedback = on_completion_feedback or (lambda feedback: None)
         self._commands = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="application-session"
         )
@@ -80,6 +90,9 @@ class HostRunner:
         )
         self._exports = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="diagnostic-export"
+        )
+        self._completion = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="completion-action"
         )
 
     def submit(self, command):
@@ -197,6 +210,48 @@ class HostRunner:
         )
         self._exports.submit(self._prepare_page, offset, generation)
 
+    def request_published_check(self, expected_generation):
+        self._commands.submit(self._check_published, expected_generation)
+
+    def _check_published(self, generation):
+        self._deliver(self.session.check_published_vault(generation))
+
+    def request_completion_action(self, action, expected_generation, perform):
+        """Queue intent only; platform work receives re-admission after its stat."""
+        self._completion.submit(
+            self._complete_action, action, expected_generation, perform
+        )
+
+    def _complete_action(self, action, generation, perform):
+        target = self.session.admit_completion_action(action, generation)
+        if target is None or self._stopped.is_set():
+            self.on_completion_feedback(
+                CompletionFeedback(
+                    generation,
+                    "The published result changed. Use the current result and try again.",
+                )
+            )
+            return
+
+        def readmit():
+            return (
+                not self._stopped.is_set()
+                and self.session.admit_completion_action(action, generation) == target
+            )
+
+        try:
+            outcome = perform(target, readmit)
+            feedback = CompletionFeedback(
+                generation, outcome.message, outcome.succeeded, target.path
+            )
+        except Exception:  # noqa: BLE001 -- local platform failures retain the operation result.
+            feedback = CompletionFeedback(
+                generation,
+                "The open action could not complete. Your operation result is retained.",
+                path=target.path,
+            )
+        self.on_completion_feedback(feedback)
+
     def _prepare_page(self, offset, generation):
         page = self.session.diagnostics_page_if_current(generation, offset)
         if page is not None:
@@ -236,4 +291,5 @@ class HostRunner:
         self._validation.shutdown(wait=False)
         self._preferences.shutdown(wait=False)
         self._exports.shutdown(wait=False, cancel_futures=True)
+        self._completion.shutdown(wait=False, cancel_futures=True)
         self._commands.shutdown(wait=False)

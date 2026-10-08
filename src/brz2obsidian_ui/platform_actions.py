@@ -1,4 +1,4 @@
-"""Outer diagnostic exports; invoke on an adapter thread, never the Qt thread."""
+"""Outer local actions; invoke on an adapter thread, never the Qt thread."""
 
 import ctypes
 import os
@@ -6,12 +6,92 @@ from ctypes import wintypes
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from urllib.parse import quote
 
 
 @dataclass(frozen=True)
 class ActionOutcome:
     succeeded: bool
     message: str
+
+
+@dataclass(frozen=True)
+class CompletionOutcome:
+    succeeded: bool
+    message: str
+    path: str | None
+
+
+class CompletionActions:
+    """Open backend-admitted absolute targets without inspecting their content."""
+
+    def __init__(self, launch=None):
+        self._launch = launch or open_windows_target
+
+    def open_folder(self, destination: Path | str, *, admit=None) -> CompletionOutcome:
+        return self._open(destination, folder=True, admit=admit)
+
+    def open_report(self, report: Path | str, *, admit=None) -> CompletionOutcome:
+        return self._open(report, admit=admit)
+
+    def open_in_obsidian(self, report: Path | str, *, admit=None) -> CompletionOutcome:
+        report = Path(report)
+        path = str(report) if report.is_absolute() else None
+        guidance = "If needed, choose Open folder as vault in Obsidian using the published folder path."
+        try:
+            if path is None or not report.is_file():
+                return CompletionOutcome(
+                    False, "The migration report is unavailable.", path
+                )
+            if admit is not None and not admit():
+                return CompletionOutcome(
+                    False,
+                    "The published result changed. Use the current result and try again.",
+                    path,
+                )
+            self._launch("obsidian://open?path=" + quote(path, safe=""))
+            return CompletionOutcome(
+                True,
+                "Opening in Obsidian was requested. This does not confirm the vault opened. "
+                + guidance,
+                path,
+            )
+        except Exception:  # noqa: BLE001 -- unavailable URI handlers are nonfatal.
+            return CompletionOutcome(
+                False,
+                "Obsidian could not be opened. Its URI handler may be unavailable. "
+                + guidance,
+                path,
+            )
+
+    def _open(
+        self, target: Path | str, *, folder: bool = False, admit=None
+    ) -> CompletionOutcome:
+        target = Path(target)
+        path = str(target) if target.is_absolute() else None
+        name = "published folder" if folder else "migration report"
+        try:
+            if path is None or not (target.is_dir() if folder else target.is_file()):
+                return CompletionOutcome(False, f"The {name} is unavailable.", path)
+            if admit is not None and not admit():
+                return CompletionOutcome(
+                    False,
+                    "The published result changed. Use the current result and try again.",
+                    path,
+                )
+            self._launch(path)
+            return CompletionOutcome(True, f"Opening the {name} was requested.", path)
+        except Exception:  # noqa: BLE001 -- native open failures are local feedback.
+            return CompletionOutcome(
+                False,
+                f"The {name} could not be opened. You can use the path below.",
+                path,
+            )
+
+
+def open_windows_target(target: str) -> None:
+    """Request the registered Windows open action without a shell command."""
+    os.startfile(target, "open")
 
 
 class DiagnosticActions:
