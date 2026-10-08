@@ -53,7 +53,16 @@ checker-only aggregate counts, safe diagnostics, deliberate retries and unchange
 file/directory inventories and bytes. Native synthetic clean/issues selection and
 picker cancellation supplement public GUI responsiveness/deferred-Close checks.
 
-Diagnostic export, conversion, single-instance coordination and
+Diagnostic controls exercise public generation/action admission, same-revision and
+identical-result replacement, worker-exit lifetime, bounded selectable pages,
+complete/omitted Unicode copy/save round trips and nonfatal failures. Injected UI
+barriers hold preparation/export while queued input/repaint and Close are processed;
+stale save callbacks, queued exports and paged callbacks cannot use an old report.
+Native synthetic clipboard paste and asynchronous Save cancellation/local UTF-8
+readback supplement these controls; final independent presentation/user checks remain
+separate.
+
+Conversion, single-instance coordination and
 preferences have separate implementation slices. Tests must not substitute
 invented business results for those operations in the first inspection slice.
 

@@ -2,6 +2,7 @@
 
 import os
 import sys
+from functools import partial
 from pathlib import Path
 from time import monotonic
 
@@ -35,6 +36,7 @@ from brz2obsidian.application.contracts import (
 )
 from brz2obsidian.application.runner import HostRunner
 from brz2obsidian.application.transport import Supervisor
+from brz2obsidian_ui.platform_actions import DiagnosticActions
 
 EXPLANATIONS = (
     "Convert a BRZ archive into a new Obsidian vault.",
@@ -124,6 +126,7 @@ class MainWindow(QMainWindow):
 
     prepared = Signal(object)
     diagnostic_page_ready = Signal(object)
+    diagnostic_action_ready = Signal(object)
 
     def __init__(
         self,
@@ -132,6 +135,7 @@ class MainWindow(QMainWindow):
         source_root=None,
         dialogs=None,
         session=None,
+        diagnostic_actions=None,
     ):
         super().__init__()
         self.setWindowTitle("brz2obsidian")
@@ -145,10 +149,15 @@ class MainWindow(QMainWindow):
         self._result_identity = None
         self._next_offset = None
         self._dialog = None
+        self._save_dialog = None
+        self._diagnostic_generation = 0
+        self._diagnostic_busy = False
         self._pending_form = None
         self.dialogs = dialogs
+        self.diagnostic_actions = diagnostic_actions or DiagnosticActions()
         self.prepared.connect(self._present)
-        self.diagnostic_page_ready.connect(self._show_page)
+        self.diagnostic_page_ready.connect(self._diagnostic_page)
+        self.diagnostic_action_ready.connect(self._diagnostic_finished)
         if supervisor is None:
             supervisor = Supervisor(
                 Path(interpreter or sys.executable),
@@ -159,6 +168,7 @@ class MainWindow(QMainWindow):
             self.prepared.emit,
             self.diagnostic_page_ready.emit,
             session=session,
+            on_diagnostic_feedback=self.diagnostic_action_ready.emit,
         )
         self._build()
         self.setStyleSheet(STYLE)
@@ -248,19 +258,25 @@ class MainWindow(QMainWindow):
         details.addWidget(self.diagnostic_text)
         self.next_page = QPushButton("Next diagnostic page")
         self.next_page.clicked.connect(
-            lambda: self.runner.request_diagnostic_page(self._next_offset or 0)
+            lambda: self.runner.request_diagnostic_page(
+                self._next_offset or 0, self._diagnostic_generation
+            )
         )
         details.addWidget(self.next_page)
         actions = QHBoxLayout()
         self.copy = QPushButton("Copy details")
         self.save = QPushButton("Save diagnostic report")
+        self.copy.clicked.connect(self.copy_details)
+        self.save.clicked.connect(self.save_diagnostic_report)
         for button in (self.copy, self.save):
             button.setEnabled(False)
-            button.setToolTip("Diagnostic export is not available in this build.")
             button.setAccessibleName(button.text())
             actions.addWidget(button)
         actions.addStretch()
         details.addLayout(actions)
+        self.diagnostic_feedback = label("", "muted")
+        self.diagnostic_feedback.setAccessibleName("Diagnostic action feedback")
+        details.addWidget(self.diagnostic_feedback)
         body.addWidget(self.diagnostic_container)
         self.diagnostic_container.hide()
         self.destination_form = QWidget()
@@ -465,9 +481,85 @@ class MainWindow(QMainWindow):
         )
         self.diagnostic_container.setVisible(expanded)
 
+    def copy_details(self):
+        self._diagnostic_busy = True
+        self.diagnostic_feedback.setText("Copying diagnostic details…")
+        # Obtain only a native integer on the Qt thread; the adapter accesses no Qt object.
+        perform = partial(
+            self.diagnostic_actions.copy_report, owner_window=int(self.winId())
+        )
+        self.runner.request_diagnostic_export(
+            "copy_details", self._diagnostic_generation, perform
+        )
+        self._render()
+
+    def save_diagnostic_report(self):
+        generation = self._diagnostic_generation
+        self._diagnostic_busy = True
+        self._render()
+        callback = partial(self.diagnostic_save_selected, generation)
+        if self.dialogs is not None:
+            self.dialogs.save_report(callback)
+            return
+        dialog = QFileDialog(self, "Save diagnostic report")
+        dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
+        dialog.setFileMode(QFileDialog.FileMode.AnyFile)
+        dialog.setNameFilter("Text reports (*.txt)")
+        dialog.setDefaultSuffix("txt")
+        dialog.selectFile("brz2obsidian-diagnostic-report.txt")
+        dialog.fileSelected.connect(callback)
+        dialog.finished.connect(partial(self._save_picker_finished, generation, dialog))
+        self._save_dialog = dialog
+        dialog.open()
+
+    def diagnostic_save_selected(self, generation, path_or_null):
+        """Dialog retains only host report identity, never its old safe payload."""
+        if generation != self._diagnostic_generation:
+            return
+        self._diagnostic_busy = False
+        if path_or_null:
+            self._diagnostic_busy = True
+            self.diagnostic_feedback.setText("Saving diagnostic report…")
+            perform = partial(
+                self.diagnostic_actions.save_report, destination=str(path_or_null)
+            )
+            self.runner.request_diagnostic_export(
+                "save_diagnostic_report", generation, perform
+            )
+        elif generation == self._diagnostic_generation:
+            self.diagnostic_feedback.setText("Diagnostic report save canceled.")
+        self._render()
+        self.save.setFocus()
+
+    def _save_picker_finished(self, generation, dialog, accepted):
+        if not accepted:
+            self.diagnostic_save_selected(generation, None)
+        dialog.deleteLater()
+        if self._save_dialog is dialog:
+            self._save_dialog = None
+        if generation == self._diagnostic_generation:
+            self.save.setFocus()
+
+    def _diagnostic_finished(self, feedback):
+        if feedback.generation != self._diagnostic_generation:
+            return
+        self._diagnostic_busy = False
+        self.diagnostic_feedback.setText(feedback.message)
+        self._render()
+
+    def _diagnostic_page(self, prepared):
+        if prepared.generation == self._diagnostic_generation:
+            self._show_page(prepared.page)
+
     def _present(self, prepared):
         previous = self.snapshot
         self.snapshot = prepared.update.snapshot
+        if self._diagnostic_generation != prepared.diagnostic_generation:
+            self._diagnostic_generation = prepared.diagnostic_generation
+            self._diagnostic_busy = False
+            self.diagnostic_feedback.clear()
+            self.disclosure.setChecked(False)
+            self._show_page(prepared.diagnostics)
         if self.snapshot.source != previous.source or self._pending_form == (
             self.snapshot.parent,
             self.snapshot.vault_name,
@@ -495,6 +587,8 @@ class MainWindow(QMainWindow):
             self._show_page(prepared.diagnostics)
         self._render()
         if any(effect.effect == "close_window" for effect in prepared.update.effects):
+            if self._save_dialog is not None:
+                self._save_dialog.reject()
             self._may_close = True
             self.close()
 
@@ -538,6 +632,14 @@ class MainWindow(QMainWindow):
         )
         self.primary.setEnabled(
             ("check_vault" if mode == 2 else "inspect") in self.snapshot.allowed_actions
+        )
+        self.copy.setEnabled(
+            "copy_details" in self.snapshot.allowed_actions
+            and not self._diagnostic_busy
+        )
+        self.save.setEnabled(
+            "save_diagnostic_report" in self.snapshot.allowed_actions
+            and not self._diagnostic_busy
         )
         self.primary.setText(
             "Check vault"

@@ -20,6 +20,20 @@ _UNGUARDED = object()
 class PresentationUpdate:
     update: SessionUpdate
     diagnostics: DiagnosticPage
+    diagnostic_generation: int = 0
+
+
+@dataclass(frozen=True)
+class DiagnosticPresentation:
+    generation: int
+    page: DiagnosticPage
+
+
+@dataclass(frozen=True)
+class DiagnosticFeedback:
+    generation: int
+    message: str
+    succeeded: bool = False
 
 
 @dataclass(frozen=True)
@@ -42,6 +56,7 @@ class HostRunner:
         on_update,
         on_page,
         session=None,
+        on_diagnostic_feedback=None,
         preferences=None,
         on_feedback=None,
     ):
@@ -50,6 +65,7 @@ class HostRunner:
         self.preferences = preferences
         self.on_feedback = on_feedback or (lambda feedback: None)
         self._stopped = Event()
+        self.on_diagnostic_feedback = on_diagnostic_feedback or (lambda feedback: None)
         self._commands = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="application-session"
         )
@@ -61,6 +77,9 @@ class HostRunner:
         )
         self._preferences = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="output-parent-preference"
+        )
+        self._exports = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="diagnostic-export"
         )
 
     def submit(self, command):
@@ -80,7 +99,13 @@ class HostRunner:
             on_complete(update)
 
     def _deliver(self, update):
-        self.on_update(PresentationUpdate(update, self.session.diagnostics_page()))
+        self.on_update(
+            PresentationUpdate(
+                update,
+                self.session.diagnostics_page(),
+                self.session.diagnostic_generation,
+            )
+        )
         for effect in update.effects:
             if effect.effect == "run_operation":
                 executor = (
@@ -164,10 +189,44 @@ class HostRunner:
             )
         self.submit(command)
 
-    def request_diagnostic_page(self, offset=0):
-        self._commands.submit(
-            lambda: self.on_page(self.session.diagnostics_page(offset))
+    def request_diagnostic_page(self, offset=0, expected_generation=None):
+        generation = (
+            self.session.diagnostic_generation
+            if expected_generation is None
+            else expected_generation
         )
+        self._exports.submit(self._prepare_page, offset, generation)
+
+    def _prepare_page(self, offset, generation):
+        page = self.session.diagnostics_page_if_current(generation, offset)
+        if page is not None:
+            self.on_page(DiagnosticPresentation(generation, page))
+
+    def request_diagnostic_export(self, action, expected_generation, perform):
+        """Queue intent only; no old result/report is retained before admission."""
+        self._exports.submit(self._export, action, expected_generation, perform)
+
+    def _export(self, action, generation, perform):
+        text = self.session.admit_diagnostic_report(action, generation)
+        if text is None:
+            self.on_diagnostic_feedback(
+                DiagnosticFeedback(
+                    generation,
+                    "The diagnostic report changed. Use the current report and try again.",
+                )
+            )
+            return
+        try:
+            outcome = perform(text)
+            feedback = DiagnosticFeedback(
+                generation, outcome.message, outcome.succeeded
+            )
+        except Exception:  # noqa: BLE001 -- outer platform action failures are nonfatal.
+            feedback = DiagnosticFeedback(
+                generation,
+                "The diagnostic action could not complete. Your operation result is retained.",
+            )
+        self.on_diagnostic_feedback(feedback)
 
     def shutdown(self):
         # A normal close is admitted only after the primary terminal result.
@@ -176,4 +235,5 @@ class HostRunner:
         self._operations.shutdown(wait=False)
         self._validation.shutdown(wait=False)
         self._preferences.shutdown(wait=False)
+        self._exports.shutdown(wait=False, cancel_futures=True)
         self._commands.shutdown(wait=False)
