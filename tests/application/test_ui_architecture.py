@@ -21,7 +21,7 @@ def test_backend_and_worker_have_no_gui_import_routes():
             ), file
 
 
-def test_public_operations_and_cli_remain_usable_with_gui_imports_blocked():
+def test_public_operations_and_cli_remain_usable_with_gui_imports_blocked(tmp_path):
     source = (Path(__file__).parents[1] / "fixtures/minimal.brz").absolute()
     program = """
 import importlib.abc, sys
@@ -31,16 +31,21 @@ class BlockGUI(importlib.abc.MetaPathFinder):
             raise ImportError('GUI imports are blocked')
 sys.meta_path.insert(0, BlockGUI())
 from pathlib import Path
-from brz2obsidian.application.operations import inspect, ApplicationSession
+from brz2obsidian.application.operations import inspect, convert_reviewed, ApplicationSession
 from brz2obsidian.application.transport import Supervisor
 from brz2obsidian.cli import main
-assert inspect(Path(sys.argv[1])).status == 'inspection_clean'
+reviewed = inspect(Path(sys.argv[1]))
+assert reviewed.status == 'inspection_clean'
+converted = convert_reviewed(Path(sys.argv[1]), Path(sys.argv[2]), 'Headless vault', reviewed.reviewed)
+assert converted.status == 'conversion_created'
+assert converted.publication.receipt_verified
+assert converted.counts.actual_notes == 1
 assert ApplicationSession().snapshot.source is None
 sys.argv = ['brz2obsidian', 'inspect', sys.argv[1]]
 assert main() == 0
 """
     result = subprocess.run(
-        [sys.executable, "-c", program, str(source)],
+        [sys.executable, "-c", program, str(source), str(tmp_path)],
         capture_output=True,
         text=True,
         encoding="utf-8",

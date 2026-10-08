@@ -12,8 +12,9 @@ is read without being modified.
 ## Optional local Windows app
 
 The local app currently supports read-only archive inspection, preliminary
-destination validation, independent vault checking and explicit safe diagnostic
-copy/save. Conversion and final native acceptance are being delivered through
+destination validation, clean reviewed conversion, independent vault checking
+and explicit safe diagnostic copy/save. Further warning/recovery flows and final
+native acceptance are being delivered through
 the [Windows UI implementation](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/93).
 The existing command-line converter remains available below.
 
@@ -30,7 +31,7 @@ Double-click **build/ui/Start brz2obsidian.cmd**, choose a BRZ archive, then
 select **Inspect archive**. Inspection shows planned counts, unavailable actual
 counts, source limitations and pending checks. Diagnostic details are collapsed
 initially and remain available after the worker exits. The source is read-only.
-During inspection or vault checking the window stays responsive; Close waits for
+During inspection, conversion or vault checking the window stays responsive; Close waits for
 completion.
 
 Expand **Diagnostic details** for selectable, bounded report pages. **Copy details**
@@ -50,8 +51,13 @@ errors. Validation is read-only and accepts only an absent or empty target;
 it does not reserve the folder or guarantee writes. Generated paths, collisions,
 manifest feasibility and the final 240 UTF-16-unit path limit remain pending
 until conversion. Editing coalesces checks and discards obsolete results while
-retaining the inspection findings. The Convert action remains unavailable in
-this implementation slice. The CLI below still creates missing output parents.
+retaining the inspection findings. After a clean inspection and valid destination,
+select **Convert** explicitly. Conversion rechecks the source review and all final
+publication safeguards. A verified result shows actual counts and its published
+path in place of the destination form. Refusal, failure and uncertain worker
+termination have distinct messages; never treat a visible folder as success.
+Warning authorization, recovery and optional completion actions are later slices.
+The CLI below still creates missing output parents.
 
 Launching the app again restores or draws attention to its existing window;
 it does not start another operation. If Windows prevents foreground activation,

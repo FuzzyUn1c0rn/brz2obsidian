@@ -161,6 +161,7 @@ def test_session_coalesces_destination_revisions_and_retains_inspection(tmp_path
     )
     pending = run_effect(first)
     assert first.snapshot.validation_pending
+    assert "convert" not in first.snapshot.allowed_actions
     assert first.snapshot.result is result
     assert first.snapshot.reviewed is result.reviewed
     assert (
@@ -185,6 +186,7 @@ def test_session_coalesces_destination_revisions_and_retains_inspection(tmp_path
     )
     assert late.snapshot.destination is None
     assert late.snapshot.validation_pending
+    assert "convert" not in late.snapshot.allowed_actions
     assert len(late.effects) == 1
     latest = run_effect(late)
     assert latest.request.arguments.vault_name == "Latest"
@@ -201,7 +203,7 @@ def test_session_coalesces_destination_revisions_and_retains_inspection(tmp_path
     assert done.snapshot.result is result
     assert done.snapshot.reviewed is result.reviewed
     assert session.diagnostics_text() == report
-    assert "convert" not in done.snapshot.allowed_actions  # Added by ticket96.
+    assert "convert" in done.snapshot.allowed_actions
 
 
 def test_readonly_preflight_reports_io_failure_without_raw_exception(

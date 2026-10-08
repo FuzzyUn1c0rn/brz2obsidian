@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from brz2obsidian.application.contracts import (
+    ConvertCommand,
     InspectCommand,
     SelectSource,
     SelectVault,
@@ -51,6 +52,11 @@ TITLES = {
     "check_clean": "Check completed — no issues found",
     "check_issues": "Check completed — issues found",
     "check_failed": "Check could not complete",
+    "conversion_created": "Vault created",
+    "conversion_created_with_warnings": "Vault created with warnings",
+    "conversion_refused": "Conversion could not proceed",
+    "conversion_failed": "Conversion could not complete",
+    "conversion_created_with_error": "Vault created; a follow-up error occurred",
 }
 CHECK_LABELS = {
     "destination_feasibility": "destination and generated-path feasibility",
@@ -342,6 +348,23 @@ class MainWindow(QMainWindow):
         self.validation_status.setAccessibleName("Destination validation status")
         destination.addWidget(self.validation_status)
         body.addWidget(self.destination_form)
+        self.published_panel = QWidget()
+        published = QVBoxLayout(self.published_panel)
+        published.setContentsMargins(0, 0, 0, 0)
+        divider = QFrame()
+        divider.setFrameShape(QFrame.Shape.HLine)
+        published.addWidget(divider)
+        published.addWidget(label("Published vault", "sectionTitle"))
+        self.published_path = label("", "sourcePath")
+        self.published_path.setAccessibleName("Published vault path")
+        published.addWidget(self.published_path)
+        published.addWidget(
+            label(
+                "Publication was verified. No vault check or external application is started automatically.",
+                "muted",
+            )
+        )
+        body.addWidget(self.published_panel)
         body.addStretch()
         scroll.setWidget(content)
         layout.addWidget(scroll, 1)
@@ -381,6 +404,8 @@ class MainWindow(QMainWindow):
         self.submit(
             SimpleCommand(command="check_vault")
             if self.tabs.currentIndex() == 2
+            else ConvertCommand()
+            if self.tabs.currentIndex() == 0 and self.snapshot.reviewed
             else InspectCommand()
         )
 
@@ -630,8 +655,12 @@ class MainWindow(QMainWindow):
         self.activity.setVisible(
             bool(self.snapshot.active_request_id or self.snapshot.validation_request_id)
         )
-        self.primary.setEnabled(
-            ("check_vault" if mode == 2 else "inspect") in self.snapshot.allowed_actions
+        primary_action = (
+            "check_vault"
+            if mode == 2
+            else "convert"
+            if mode == 0 and self.snapshot.reviewed
+            else "inspect"
         )
         self.copy.setEnabled(
             "copy_details" in self.snapshot.allowed_actions
@@ -641,6 +670,7 @@ class MainWindow(QMainWindow):
             "save_diagnostic_report" in self.snapshot.allowed_actions
             and not self._diagnostic_busy
         )
+        self.primary.setEnabled(primary_action in self.snapshot.allowed_actions)
         self.primary.setText(
             "Check vault"
             if mode == 2
@@ -649,15 +679,35 @@ class MainWindow(QMainWindow):
             else "Inspect archive"
         )
         self.primary.setAccessibleName(self.primary.text())
+        publication = self.snapshot.publication
+        published = publication is not None and publication.receipt_verified
+        locked = publication is not None and publication.state in (
+            "published_verified",
+            "unknown",
+        )
+        self.primary.setVisible(not (mode == 0 and published))
+        if mode != 2 and locked:
+            self.choose.setEnabled(False)
         if mode == 0 and self.snapshot.reviewed:
-            self.primary.setEnabled(False)
-            self.primary.setToolTip("Conversion is not available in this build.")
-        self.destination_form.setVisible(mode == 0)
+            self.primary.setToolTip(
+                "Warning authorization is not available in this build."
+                if self.snapshot.reviewed.outcome == "warnings"
+                else "Choose a valid destination before converting."
+                if "convert" not in self.snapshot.allowed_actions
+                else "Convert the reviewed archive into the displayed fresh vault."
+            )
+        self.destination_form.setVisible(mode == 0 and not published)
+        self.published_panel.setVisible(mode == 0 and published)
+        self.published_path.setText(publication.destination if published else "")
         self.choose_parent_button.setEnabled(
-            not self.snapshot.active_request_id and not self.snapshot.close_pending
+            not self.snapshot.active_request_id
+            and not self.snapshot.close_pending
+            and not locked
         )
         self.vault_name.setEnabled(
-            not self.snapshot.active_request_id and not self.snapshot.close_pending
+            not self.snapshot.active_request_id
+            and not self.snapshot.close_pending
+            and not locked
         )
         if self._pending_form is None:
             self.vault_name.setText(self.snapshot.vault_name)
@@ -684,12 +734,14 @@ class MainWindow(QMainWindow):
         self.validation_status.setText(
             "Checking destination…"
             if validating
-            else "Preliminary check passed. No folder is reserved. Generated paths, collisions, manifest and final 240 UTF-16-unit paths remain pending; write success is checked during publication. Conversion is not available in this build."
+            else "Preliminary check passed. No folder is reserved. Generated paths, collisions, manifest and final 240 UTF-16-unit paths remain pending; write success is checked during publication."
             if validation and validation.outcome == "valid"
             else "Destination check could not complete. Correct the fields or choose again when ready."
             if validation and validation.outcome == "failed"
             else "Correct the destination fields before conversion."
             if validation
+            else "Review the destination and validate a corrected choice before another conversion."
+            if publication is not None
             else "Choose an output parent folder."
         )
         result = self.snapshot.result
@@ -707,6 +759,8 @@ class MainWindow(QMainWindow):
                 (
                     "Checking vault"
                     if self.snapshot.busy_operation == "check_vault"
+                    else "Converting archive"
+                    if self.snapshot.busy_operation == "convert_reviewed"
                     else "Inspecting archive"
                 )
                 + "\nWaiting for the worker. The window remains available."
@@ -723,10 +777,19 @@ class MainWindow(QMainWindow):
                     else ""
                 )
                 + (
-                    "\n" + "\n".join(f.message for f in result.findings[:100])
+                    "\n"
+                    + "\n".join(
+                        f.message + (f"\nReported leftover: {f.path}" if f.path else "")
+                        for f in result.findings[:100]
+                    )
                     if result.findings
                     else ""
                     if result.operation == "check_vault"
+                    else "\nVerified publication. The generated vault has not been checked."
+                    if result.operation == "convert_reviewed"
+                    and result.publication.receipt_verified
+                    else "\nReview the failure guidance and destination before another attempt."
+                    if result.operation == "convert_reviewed"
                     else "\nReview the planned contents and pending checks below."
                 )
                 + (
@@ -797,12 +860,17 @@ class MainWindow(QMainWindow):
             )
             self.guidance.setText(
                 ("Close requested. " if self.snapshot.close_pending else "")
-                + f"{'Checking vault' if self.snapshot.busy_operation == 'check_vault' else 'Inspecting archive' if self.snapshot.active_request_id else 'Validating destination'} · {seconds // 60}:{seconds % 60:02d} elapsed"
+                + f"{'Checking vault' if self.snapshot.busy_operation == 'check_vault' else 'Converting archive' if self.snapshot.busy_operation == 'convert_reviewed' else 'Inspecting archive' if self.snapshot.active_request_id else 'Validating destination'} · {seconds // 60}:{seconds % 60:02d} elapsed"
             )
         else:
             self.guidance.setText(
                 "Checking does not change the selected vault."
                 if self.tabs.currentIndex() == 2
+                else "Verified vault created. Review the published path and any reported follow-up error."
+                if self.snapshot.publication is not None
+                and self.snapshot.publication.receipt_verified
+                else "Review the destination before another attempt. Publication could not be established."
+                if self.snapshot.operational_status == "publication_unknown"
                 else "Inspection and preliminary validation are read-only."
             )
 

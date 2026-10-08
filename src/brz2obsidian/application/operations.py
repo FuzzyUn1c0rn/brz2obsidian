@@ -15,6 +15,7 @@ from brz2obsidian.application.contracts import (
     CheckResult,
     CloseWindow,
     ConversionResult,
+    ConvertArguments,
     DestinationArguments,
     DestinationValidation,
     DiagnosticPage,
@@ -22,6 +23,7 @@ from brz2obsidian.application.contracts import (
     InspectArguments,
     InspectionResult,
     PersistOutputParent,
+    Publication,
     ReviewedInspection,
     RunOperation,
     SessionCommand,
@@ -29,6 +31,7 @@ from brz2obsidian.application.contracts import (
     SessionUpdate,
     WorkerRequest,
 )
+from brz2obsidian.application.conversion import convert
 from brz2obsidian.contracts import Counts
 from brz2obsidian.publication.filesystem import preflight_destination
 
@@ -57,6 +60,26 @@ class Operations:
     def __init__(self, workflow=None, *, checker=None):
         self.workflow = workflow
         self.checker = checker
+
+    def convert_reviewed(
+        self,
+        source: Path,
+        parent: Path,
+        vault_name: str,
+        reviewed: ReviewedInspection,
+        proceed_with_warnings: bool = False,
+    ) -> ConversionResult:
+        if self.workflow is None:
+            from brz2obsidian.application.wiring import default_workflow
+
+            self.workflow = default_workflow()
+        return convert(
+            self.workflow,
+            source.absolute(),
+            validate_destination(parent, vault_name),
+            reviewed,
+            proceed_with_warnings,
+        )
 
     def inspect(self, source: Path) -> InspectionResult:
         if self.workflow is None:
@@ -207,7 +230,9 @@ def convert_reviewed(
     reviewed: ReviewedInspection,
     proceed_with_warnings: bool = False,
 ) -> ConversionResult:
-    raise NotImplementedError("Reviewed conversion is not available in this build")
+    return Operations().convert_reviewed(
+        source, parent, vault_name, reviewed, proceed_with_warnings
+    )
 
 
 def check_vault(vault: Path) -> CheckResult:
@@ -302,7 +327,12 @@ class ApplicationSession:
                         and command.result.reviewed.source == state.source
                         else None
                     )
-                    if command.result.operation == "check_vault":
+                    if command.result.operation == "check_vault" or (
+                        command.result.operation == "convert_reviewed"
+                        and eligible
+                        and not command.result.review_required
+                        and command.result.publication.state == "not_published"
+                    ):
                         reviewed = state.reviewed
                     state = state.model_copy(
                         update={
@@ -315,6 +345,17 @@ class ApplicationSession:
                             "operational_status": None,
                         }
                     )
+                    if command.result.operation == "convert_reviewed":
+                        state = state.model_copy(
+                            update={
+                                "publication": command.result.publication,
+                                "destination": command.result.destination,
+                                "field_errors": command.result.field_errors,
+                                "destination_validation": None,
+                                "destination_revision": None,
+                                "validation_pending": False,
+                            }
+                        )
                 else:
                     state = self._failure(
                         state, "may_have_executed", "protocol_failure"
@@ -331,26 +372,46 @@ class ApplicationSession:
             # UI disabling is only presentation; bypassed calls cannot mutate the
             # active source/review or start overlapping primary operations.
             return SessionUpdate(snapshot=state)
+        elif (
+            state.publication is not None
+            and state.publication.state in ("published_verified", "unknown")
+            and name
+            in (
+                "select_source",
+                "set_destination",
+                "convert",
+                "start_another_conversion",
+                "acknowledge_destination_review",
+            )
+        ):
+            # Recovery acknowledgment/new-conversion UI is a later slice. No
+            # bypassed form command can discard authoritative/unknown status.
+            return SessionUpdate(snapshot=state)
         elif name == "select_source":
-            if (
-                command.path_or_null is not None
-                and command.path_or_null != state.source
-            ):
-                from brz2obsidian.application.contracts import absolute
+            from brz2obsidian.application.contracts import absolute
 
-                absolute(command.path_or_null)
+            selected = command.path_or_null
+            if selected is not None:
+                absolute(selected)
+                # Native Qt paths use forward slashes on Windows. Keep the
+                # same lexical absolute representation used by the worker;
+                # never resolve/read the archive to establish association.
+                selected = str(Path(selected).absolute())
+            if selected is not None and (
+                state.source is None or Path(selected) != Path(state.source)
+            ):
                 self._diagnostic_generation += 1
                 self._diagnostic_text = ""
                 state = state.model_copy(
                     update={
-                        "source": command.path_or_null,
+                        "source": selected,
                         "revision": state.revision + 1,
                         "result": None,
                         "reviewed": None,
                         "review_required": True,
                         "operational_status": None,
                         "feedback": "",
-                        "vault_name": Path(command.path_or_null).stem,
+                        "vault_name": Path(selected).stem,
                     }
                 )
                 state = self._destination_edited(state)
@@ -421,6 +482,32 @@ class ApplicationSession:
                 }
             )
             effects = (RunOperation(request=request, input_revision=state.revision),)
+        elif name == "convert" and (
+            "convert" in state.allowed_actions
+            or command.proceed_with_warnings
+            and "convert_with_warnings" in state.allowed_actions
+        ):
+            request = WorkerRequest(
+                request_id=str(uuid4()),
+                operation="convert_reviewed",
+                arguments=ConvertArguments(
+                    source=state.source,
+                    parent=state.parent,
+                    vault_name=state.vault_name,
+                    reviewed=state.reviewed,
+                    proceed_with_warnings=command.proceed_with_warnings,
+                ),
+            )
+            self._active_revision = state.revision
+            state = state.model_copy(
+                update={
+                    "active_request_id": request.request_id,
+                    "busy_operation": "convert_reviewed",
+                    "feedback": "",
+                    "operational_status": None,
+                }
+            )
+            effects = (RunOperation(request=request, input_revision=state.revision),)
         elif name == "carry_inspection_to_convert" and state.reviewed:
             state = state.model_copy(
                 update={"feedback": "Reviewed archive retained for Convert."}
@@ -478,10 +565,31 @@ class ApplicationSession:
                 )
         actions = []
         if not self._closed and not state.active_request_id and not state.close_pending:
-            if state.source:
+            if state.source and (
+                state.publication is None or state.publication.state == "not_published"
+            ):
                 actions.append("inspect")
             if state.reviewed:
                 actions.append("convert_this_archive")
+            if (
+                state.reviewed is not None
+                and state.reviewed.source == state.source
+                and not state.review_required
+                and state.destination_validation is not None
+                and state.destination_validation.outcome == "valid"
+                and state.destination == state.destination_validation.destination
+                and not state.validation_pending
+                and not state.validation_request_id
+                and (
+                    state.publication is None
+                    or state.publication.state == "not_published"
+                )
+            ):
+                actions.append(
+                    "convert"
+                    if state.reviewed.outcome == "clean"
+                    else "convert_with_warnings"
+                )
             if state.vault:
                 actions.append("check_vault")
                 if (
@@ -561,6 +669,7 @@ class ApplicationSession:
     def _failure(self, state, phase, code):
         checking = state.busy_operation == "check_vault"
         self._diagnostic_generation += 1
+        converting = state.busy_operation == "convert_reviewed"
         status = (
             "operation_not_started"
             if phase == "not_started"
@@ -601,15 +710,28 @@ class ApplicationSession:
                 feedback,
             )
         )
-        return state.model_copy(
-            update={
-                "result": None,
-                "reviewed": state.reviewed if checking else None,
-                "review_required": state.review_required if checking else True,
-                "feedback": feedback,
-                "operational_status": status,
-            }
-        )
+        updates = {
+            "result": None,
+            "reviewed": state.reviewed
+            if checking or converting and phase == "not_started"
+            else None,
+            "review_required": state.review_required
+            if checking or converting and phase == "not_started"
+            else True,
+            "feedback": feedback,
+            "operational_status": status,
+        }
+        if converting:
+            updates.update(
+                publication=Publication(
+                    state="not_published" if phase == "not_started" else "unknown",
+                    destination=state.destination if phase != "not_started" else None,
+                ),
+                destination_validation=None,
+                destination_revision=None,
+                validation_pending=False,
+            )
+        return state.model_copy(update=updates)
 
     def diagnostics_text(self) -> str:
         """Current safe text for an explicitly requested background export."""

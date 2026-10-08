@@ -409,9 +409,11 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
             "brz2obsidian.application.contracts",
             "brz2obsidian.vault_check",
         },
+        "application/conversion.py": {"brz2obsidian.application.contracts"},
         "application/operations.py": {
             "brz2obsidian.application.checking",
             "brz2obsidian.application.contracts",
+            "brz2obsidian.application.conversion",
             "brz2obsidian.application.wiring",
             "brz2obsidian.publication.filesystem",
         },

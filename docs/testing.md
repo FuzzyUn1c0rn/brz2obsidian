@@ -33,7 +33,7 @@ $env:QT_QPA_PLATFORM = 'offscreen'
 ```
 
 The injected public UI seam accepts session commands and presents immutable
-snapshots. Deterministic barriers hold inspection, vault checking, destination
+snapshots. Deterministic barriers hold inspection, conversion, vault checking, destination
 validation and diagnostic preparation while queued GUI input is processed,
 before releasing work. Real hidden-worker
 checks cover correlation, UTF-8 framing, separate concurrent pipe draining,
@@ -62,9 +62,17 @@ Native synthetic clipboard paste and asynchronous Save cancellation/local UTF-8
 readback supplement these controls; final independent presentation/user checks remain
 separate.
 
-Conversion, single-instance coordination and
-preferences have separate implementation slices. Tests must not substitute
-invented business results for those operations in the first inspection slice.
+Reviewed conversion controls exercise actual public Workflow/Publisher and hidden
+worker boundaries. They compare all source identity and converter/profile facts
+at the rendered publisher boundary, preserve custom adapters/metadata, and verify
+zero publisher calls and unchanged inventories for stale reviews. Real controls
+cover destination races, source mutation, path/manifest limits, permission and
+disk-full-equivalent failures, exact cleanup guidance and late verified receipts.
+Session and injected UI controls distinguish known not-started from uncertain
+termination, require fresh validation after failure, and retain actual receipt
+paths without directory inference. A synthetic native clean conversion supplements
+these controls; warning authorization/recovery/optional actions and final acceptance
+remain later slices. Single-instance and preferences have separate controls below.
 
 ### Local startup and preference controls
 
