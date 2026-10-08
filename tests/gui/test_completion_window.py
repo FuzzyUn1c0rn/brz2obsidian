@@ -7,7 +7,8 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel
 
 from brz2obsidian.application.contracts import SelectVault
@@ -149,6 +150,58 @@ def test_slow_os_dispatch_keeps_qt_events_and_disclosure_responsive(tmp_path):
                 "requested" in named_label(window, "Completion action feedback").text()
             ),
         )
+    finally:
+        release.set()
+        finish(app, window)
+
+
+@pytest.mark.parametrize("move_focus", ["unchanged", "disclosure", "away_and_back"])
+def test_open_completion_returns_keyboard_focus_unless_user_moves_it(
+    tmp_path, move_focus
+):
+    app = QApplication.instance() or QApplication([])
+    session, destination = published_session(tmp_path)
+    destination.mkdir()
+    entered, release = Event(), Event()
+
+    def blocked(target):
+        entered.set()
+        assert release.wait(10)
+
+    window = MainWindow(
+        session=session, completion_actions=CompletionActions(launch=blocked)
+    )
+    window.show()
+    window.submit(SelectVault(path_or_null=None))
+    try:
+        until(app, lambda: window.snapshot.publication is not None)
+        origin = button(window, "Open folder")
+        origin.setFocus()
+        app.processEvents()
+        assert app.focusWidget() is origin
+        QTest.keyClick(origin, Qt.Key.Key_Space)
+        until(app, entered.is_set)
+        if move_focus != "unchanged":
+            automatic_focus = app.focusWidget()
+            disclosure = button(window, "Diagnostic details")
+            disclosure.setFocus()
+            QTest.keyClick(disclosure, Qt.Key.Key_Space)
+            app.processEvents()
+            expected = disclosure
+            if move_focus == "away_and_back":
+                automatic_focus.setFocus()
+                expected = automatic_focus
+        else:
+            expected = origin
+        release.set()
+        until(
+            app,
+            lambda: (
+                "requested" in named_label(window, "Completion action feedback").text()
+            ),
+        )
+        assert app.focusWidget() is expected
+        assert window.snapshot.publication.receipt_verified
     finally:
         release.set()
         finish(app, window)

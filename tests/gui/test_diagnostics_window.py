@@ -9,7 +9,8 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from brz2obsidian.application.contracts import (
@@ -140,6 +141,61 @@ def test_save_cancel_and_failed_copy_save_preserve_findings_and_useful_focus(tmp
         assert window.findings.text() == findings
         assert not list(tmp_path.iterdir())
     finally:
+        finish(app, window)
+
+
+@pytest.mark.parametrize("move_focus", [False, True])
+@pytest.mark.parametrize("action", ["copy", "save"])
+def test_background_export_returns_keyboard_focus_without_overriding_user_navigation(
+    tmp_path,
+    move_focus,
+    action,
+):
+    app = QApplication.instance() or QApplication([])
+    entered, release = Event(), Event()
+
+    def blocked_clipboard(text, owner):
+        entered.set()
+        assert release.wait(10)
+
+    class SlowActions(DiagnosticActions):
+        def save_report(self, text, destination):
+            entered.set()
+            assert release.wait(10)
+            return super().save_report(text, destination)
+
+    dialogs = SaveDialog()
+
+    window = inspected(
+        app,
+        "Safe complete report\n",
+        dialogs=dialogs,
+        diagnostic_actions=SlowActions(clipboard=blocked_clipboard),
+    )
+    try:
+        window.disclosure.click()
+        origin = window.copy if action == "copy" else window.save
+        origin.setFocus()
+        app.processEvents()
+        QTest.keyClick(origin, Qt.Key.Key_Space)
+        if action == "save":
+            dialogs.callback(str(tmp_path / "report.txt"))
+        until(app, entered.is_set)
+        if move_focus:
+            window.disclosure.setFocus()
+            app.processEvents()
+        expected = window.disclosure if move_focus else origin
+        release.set()
+        until(
+            app,
+            lambda: (
+                ("copied" if action == "copy" else "saved")
+                in window.diagnostic_feedback.text()
+            ),
+        )
+        assert app.focusWidget() is expected
+    finally:
+        release.set()
         finish(app, window)
 
 

@@ -93,6 +93,19 @@ Normal conversion completion and deferred Close start no open/check action.
 Final independent/native user acceptance remains separate. Single-instance and
 preferences have separate controls below.
 
+Independent accepted-presentation controls in
+`tests/gui/test_accepted_presentation.py` derive task order, outcome wording,
+publication replacement and action placement from canonical specification #92
+and its exact C reference. Actual Qt keyboard events exercise forward/reverse
+control order, selectable diagnostic text, narrow reflow and scrolling. Deliberate
+wrong-title, hidden-action and swapped-tab controls prove the presentation
+assertions reject incorrect output. Existing completion and diagnostic controls
+also hold asynchronous actions open: focus returns to the invoked action when
+the user has left it unchanged, while later keyboard navigation takes precedence.
+These checks complement strategically sampled Windows scaling, contrast and
+dialog observations; they do not establish comprehensive assistive-technology
+certification or the final independent/user verdict.
+
 ### Local startup and preference controls
 
 `tests/application/test_ui_preferences.py` exercises canonical persistence effects

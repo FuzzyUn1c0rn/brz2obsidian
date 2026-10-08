@@ -8,6 +8,7 @@ from time import monotonic
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
+    QApplication,
     QBoxLayout,
     QFileDialog,
     QFrame,
@@ -90,12 +91,16 @@ QPushButton:disabled { color: #8a938d; background: #f1f3ef; }
 QPushButton#primary { background: #315b4c; color: white; font-weight: 600; }
 QPushButton#primary:disabled { background: #aebbb2; }
 QPushButton#diagnosticDisclosure { border: none; text-align: left; color: #486453; padding-left: 0; }
+QPushButton#diagnosticDisclosure:focus { border: 2px solid #315b4c; }
 QPlainTextEdit { background: #f4f6f2; border: 1px solid #e0e5de; font-family: Consolas; font-size: 9pt; }
+QPlainTextEdit:focus { border: 2px solid #315b4c; }
+QLabel:focus { background: #e8f0e8; }
 QLineEdit { background: white; border: 1px solid #cbd3cb; border-radius: 4px; padding: 8px; }
 QLineEdit:focus { border: 2px solid #315b4c; }
 QLabel#fieldError { color: #984b3e; }
 QTabBar::tab { padding: 12px 13px; border-bottom: 3px solid transparent; color: #68776e; }
 QTabBar, QTabBar::tab { background: #f8faf7; }
+QTabBar:focus { border: 1px solid #315b4c; }
 QTabBar::tab:selected { border-bottom: 3px solid #315b4c; color: #254b3d; }
 QScrollArea { border: none; background: white; }
 """
@@ -161,7 +166,12 @@ class MainWindow(QMainWindow):
         self._save_dialog = None
         self._diagnostic_generation = 0
         self._diagnostic_busy = False
+        self._diagnostic_focus = None
         self._completion_busy = False
+        self._completion_focus = None
+        self._focus_revision = 0
+        self._focus_tracking = True
+        QApplication.instance().focusChanged.connect(self._focus_changed)
         self._pending_form = None
         self.dialogs = dialogs
         self.diagnostic_actions = diagnostic_actions or DiagnosticActions()
@@ -443,19 +453,30 @@ class MainWindow(QMainWindow):
         QWidget.setTabOrder(self.choose, self.disclosure)
         QWidget.setTabOrder(self.disclosure, self.diagnostic_text)
         QWidget.setTabOrder(self.diagnostic_text, self.next_page)
-        QWidget.setTabOrder(self.next_page, self.parent_path)
+        QWidget.setTabOrder(self.next_page, self.copy)
+        QWidget.setTabOrder(self.copy, self.save)
+        QWidget.setTabOrder(self.save, self.parent_path)
         QWidget.setTabOrder(self.parent_path, self.choose_parent_button)
         QWidget.setTabOrder(self.choose_parent_button, self.vault_name)
-        QWidget.setTabOrder(self.vault_name, self.close_button)
+        preceding = self.vault_name
+        for button in (*self.open_buttons.values(), self.published_check):
+            QWidget.setTabOrder(preceding, button)
+            preceding = button
+        QWidget.setTabOrder(preceding, self.close_button)
         QWidget.setTabOrder(self.close_button, self.recovery)
         QWidget.setTabOrder(self.recovery, self.primary)
 
     def submit(self, command):
         self.runner.submit(command)
 
+    def _focus_changed(self, previous, current):
+        self._focus_revision += 1
+
     def _open_completion(self, action):
         if self._completion_busy:
             return
+        origin = self.open_buttons[action]
+        return_focus = origin.hasFocus()
         self._completion_busy = True
         self.completion_feedback.setText("Requesting open action…")
         self.completion_path.clear()
@@ -470,6 +491,11 @@ class MainWindow(QMainWindow):
             lambda target, admit: perform(target.path, admit=admit),
         )
         self._render()
+        # Disabling the origin lets Qt advance focus. Restore it only if the
+        # user leaves that automatic focus unchanged while dispatch is pending.
+        self._completion_focus = (
+            (origin, self._focus_revision) if return_focus else None
+        )
 
     def _check_published(self):
         self.runner.request_published_check(self._diagnostic_generation)
@@ -479,9 +505,18 @@ class MainWindow(QMainWindow):
         if feedback.generation != self._diagnostic_generation:
             return
         self._completion_busy = False
+        return_focus = self._completion_focus
+        self._completion_focus = None
         self.completion_feedback.setText(feedback.message)
         self.completion_path.setText(feedback.path or "")
         self._render()
+        if (
+            return_focus is not None
+            and return_focus[1] == self._focus_revision
+            and return_focus[0].isVisible()
+            and return_focus[0].isEnabled()
+        ):
+            return_focus[0].setFocus()
 
     def _recovery_action(self):
         if (
@@ -634,6 +669,7 @@ class MainWindow(QMainWindow):
         self.diagnostic_container.setVisible(expanded)
 
     def copy_details(self):
+        return_focus = self.copy.hasFocus()
         self._diagnostic_busy = True
         self.diagnostic_feedback.setText("Copying diagnostic details…")
         # Obtain only a native integer on the Qt thread; the adapter accesses no Qt object.
@@ -644,6 +680,9 @@ class MainWindow(QMainWindow):
             "copy_details", self._diagnostic_generation, perform
         )
         self._render()
+        self._diagnostic_focus = (
+            (self.copy, self._focus_revision) if return_focus else None
+        )
 
     def save_diagnostic_report(self):
         generation = self._diagnostic_generation
@@ -682,6 +721,9 @@ class MainWindow(QMainWindow):
             self.diagnostic_feedback.setText("Diagnostic report save canceled.")
         self._render()
         self.save.setFocus()
+        self._diagnostic_focus = (
+            (self.save, self._focus_revision) if path_or_null else None
+        )
 
     def _save_picker_finished(self, generation, dialog, accepted):
         if not accepted:
@@ -691,13 +733,24 @@ class MainWindow(QMainWindow):
             self._save_dialog = None
         if generation == self._diagnostic_generation:
             self.save.setFocus()
+            if self._diagnostic_busy:
+                self._diagnostic_focus = (self.save, self._focus_revision)
 
     def _diagnostic_finished(self, feedback):
         if feedback.generation != self._diagnostic_generation:
             return
         self._diagnostic_busy = False
+        return_focus = self._diagnostic_focus
+        self._diagnostic_focus = None
         self.diagnostic_feedback.setText(feedback.message)
         self._render()
+        if (
+            return_focus is not None
+            and return_focus[1] == self._focus_revision
+            and return_focus[0].isVisible()
+            and return_focus[0].isEnabled()
+        ):
+            return_focus[0].setFocus()
 
     def _diagnostic_page(self, prepared):
         if prepared.generation == self._diagnostic_generation:
@@ -709,7 +762,9 @@ class MainWindow(QMainWindow):
         if self._diagnostic_generation != prepared.diagnostic_generation:
             self._diagnostic_generation = prepared.diagnostic_generation
             self._diagnostic_busy = False
+            self._diagnostic_focus = None
             self._completion_busy = False
+            self._completion_focus = None
             self.completion_feedback.clear()
             self.completion_path.clear()
             self.diagnostic_feedback.clear()
@@ -1072,4 +1127,7 @@ class MainWindow(QMainWindow):
 
     def shutdown(self):
         self._timer.stop()
+        if self._focus_tracking:
+            QApplication.instance().focusChanged.disconnect(self._focus_changed)
+            self._focus_tracking = False
         self.runner.shutdown()
