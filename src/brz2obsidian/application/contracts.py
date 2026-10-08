@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import Field, TypeAdapter, field_validator, model_validator
 
 from brz2obsidian.contracts import Contract, Counts, SourceIdentity
+from brz2obsidian.vault_check.contracts import VaultCheckCounts
 
 Operation = Literal[
     "inspect", "validate_destination", "convert_reviewed", "check_vault"
@@ -200,6 +201,7 @@ class ConversionResult(Result):
 
 
 class CheckResult(Result):
+    counts: VaultCheckCounts = VaultCheckCounts()
     operation: Literal["check_vault"] = "check_vault"
     outcome: Literal["clean", "issues", "failed"]
     status: Literal["check_clean", "check_issues", "check_failed"]
@@ -312,6 +314,11 @@ class SetDestination(Contract):
 class SelectVault(Contract):
     command: Literal["select_vault"] = "select_vault"
     path_or_null: str | None
+
+    @field_validator("path_or_null")
+    @classmethod
+    def absolute_vault(cls, value):
+        return absolute(value) if value is not None else None
 
 
 class InspectCommand(Contract):

@@ -11,8 +11,9 @@ is read without being modified.
 
 ## Optional local Windows app
 
-The local app currently supports read-only archive inspection and preliminary
-destination validation. Conversion, Check vault, diagnostic export and final native acceptance are being delivered through
+The local app currently supports read-only archive inspection, preliminary
+destination validation and independent vault checking. Conversion, diagnostic
+export and final native acceptance are being delivered through
 the [Windows UI implementation](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/93).
 The existing command-line converter remains available below.
 
@@ -29,7 +30,13 @@ Double-click **build/ui/Start brz2obsidian.cmd**, choose a BRZ archive, then
 select **Inspect archive**. Inspection shows planned counts, unavailable actual
 counts, source limitations and pending checks. Diagnostic details are collapsed
 initially and remain available after the worker exits. The source is read-only.
-During inspection the window stays responsive; Close waits for completion.
+During inspection or vault checking the window stays responsive; Close waits for
+completion.
+
+Use **Check vault** to choose an existing vault folder and check its current
+structure and conventions without changing files. Clean, issues and failed
+checks have distinct outcomes; checker issues are not conversion warnings or
+failures. The check does not repair files or prove preservation of source content.
 
 In **Convert**, choose an existing output parent folder and edit the suggested
 archive-stem vault name. The backend shows the complete destination and adjacent

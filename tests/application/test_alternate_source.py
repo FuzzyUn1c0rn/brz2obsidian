@@ -404,8 +404,13 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
     # existing wiring. Keep these additions file-specific: reusable Workflow and
     # package initializers must not gain an outward route to operations/transport.
     application_additions = {
-        "application/contracts.py": set(),
+        "application/contracts.py": {"brz2obsidian.vault_check.contracts"},
+        "application/checking.py": {
+            "brz2obsidian.application.contracts",
+            "brz2obsidian.vault_check",
+        },
         "application/operations.py": {
+            "brz2obsidian.application.checking",
             "brz2obsidian.application.contracts",
             "brz2obsidian.application.wiring",
             "brz2obsidian.publication.filesystem",

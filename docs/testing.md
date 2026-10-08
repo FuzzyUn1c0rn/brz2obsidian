@@ -33,8 +33,9 @@ $env:QT_QPA_PLATFORM = 'offscreen'
 ```
 
 The injected public UI seam accepts session commands and presents immutable
-snapshots. Deterministic barriers hold inspection, destination validation and diagnostic preparation
-while queued GUI input is processed, before releasing work. Real hidden-worker
+snapshots. Deterministic barriers hold inspection, vault checking, destination
+validation and diagnostic preparation while queued GUI input is processed,
+before releasing work. Real hidden-worker
 checks cover correlation, UTF-8 framing, separate concurrent pipe draining,
 bounded output, launch/crash failures and safe diagnostic omission. Static and
 import-blocked checks keep backend/CLI use independent of Qt. Launcher checks
@@ -47,7 +48,12 @@ These controls do not establish final native appearance, platform-dialog behavio
 or actual user acceptance. Use the generated local launcher for strategically
 sampled Windows observations and retain requirement IDs/evidence in the ticket.
 
-Diagnostic export, conversion, checking, single-instance coordination and
+Checker controls exercise actual clean/issues/failed hidden workers, strict
+checker-only aggregate counts, safe diagnostics, deliberate retries and unchanged
+file/directory inventories and bytes. Native synthetic clean/issues selection and
+picker cancellation supplement public GUI responsiveness/deferred-Close checks.
+
+Diagnostic export, conversion, single-instance coordination and
 preferences have separate implementation slices. Tests must not substitute
 invented business results for those operations in the first inspection slice.
 

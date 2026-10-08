@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 from brz2obsidian.application.contracts import (
     InspectCommand,
     SelectSource,
+    SelectVault,
     SessionSnapshot,
     SetDestination,
     SimpleCommand,
@@ -45,6 +46,9 @@ TITLES = {
     "inspection_warnings": "Inspection completed — source warnings",
     "inspection_refused": "Archive cannot be used",
     "inspection_failed": "Inspection could not complete",
+    "check_clean": "Check completed — no issues found",
+    "check_issues": "Check completed — issues found",
+    "check_failed": "Check could not complete",
 }
 CHECK_LABELS = {
     "destination_feasibility": "destination and generated-path feasibility",
@@ -213,6 +217,9 @@ class MainWindow(QMainWindow):
         self.choose.clicked.connect(self.choose_source)
         source_row.addWidget(self.choose)
         body.addLayout(source_row)
+        self.vault_error = label("", "fieldError")
+        self.vault_error.setAccessibleName("Vault folder error")
+        body.addWidget(self.vault_error)
         divider = QFrame()
         divider.setFrameShape(QFrame.Shape.HLine)
         body.addWidget(divider)
@@ -337,7 +344,7 @@ class MainWindow(QMainWindow):
         foot.addWidget(self.close_button)
         self.primary = QPushButton("Inspect archive", objectName="primary")
         self.primary.setAccessibleName("Inspect archive")
-        self.primary.clicked.connect(lambda: self.submit(InspectCommand()))
+        self.primary.clicked.connect(self._primary_action)
         foot.addWidget(self.primary)
         layout.addWidget(footer)
         outer.addWidget(sheet)
@@ -354,7 +361,17 @@ class MainWindow(QMainWindow):
     def submit(self, command):
         self.runner.submit(command)
 
+    def _primary_action(self):
+        self.submit(
+            SimpleCommand(command="check_vault")
+            if self.tabs.currentIndex() == 2
+            else InspectCommand()
+        )
+
     def choose_source(self):
+        if self.tabs.currentIndex() == 2:
+            self.choose_vault()
+            return
         if self.dialogs is not None:
             self.dialogs.choose_source(self.source_selected)
             return
@@ -374,6 +391,26 @@ class MainWindow(QMainWindow):
         dialog.finished.connect(self._picker_finished)
         self._dialog = dialog
         dialog.open()
+
+    def choose_vault(self):
+        if self.dialogs is not None:
+            self.dialogs.choose_vault(self.vault_selected)
+            return
+        dialog = QFileDialog(self, "Choose vault folder")
+        initial_directory = self.snapshot.vault or os.environ.get("USERPROFILE")
+        if initial_directory:
+            dialog.setDirectory(initial_directory)
+        dialog.setFileMode(QFileDialog.FileMode.Directory)
+        dialog.setOption(QFileDialog.Option.ShowDirsOnly, True)
+        dialog.fileSelected.connect(self.vault_selected)
+        dialog.finished.connect(self._picker_finished)
+        self._dialog = dialog
+        dialog.open()
+
+    def vault_selected(self, path_or_null):
+        """Asynchronous native folder callback; cancellation retains the result."""
+        if path_or_null:
+            self.submit(SelectVault(path_or_null=str(path_or_null)))
 
     def source_selected(self, path_or_null):
         """Asynchronous picker callback; cancellation preserves current state."""
@@ -468,26 +505,46 @@ class MainWindow(QMainWindow):
 
     def _render(self, *_):
         mode = self.tabs.currentIndex()
+        self.findings.setAccessibleName(
+            "Check findings" if mode == 2 else "Inspection findings"
+        )
         self.heading.setText(self.tabs.tabText(mode))
         self.explanation.setText(EXPLANATIONS[mode])
         self.source_heading.setText("Vault to check" if mode == 2 else "Source archive")
+        selected = self.snapshot.vault if mode == 2 else self.snapshot.source
         self.source_name.setText(
-            Path(self.snapshot.source).name
-            if self.snapshot.source
+            Path(selected).name
+            if selected
+            else "Choose a vault folder"
+            if mode == 2
             else "Choose a BRZ archive"
         )
-        self.source_path.setText(self.snapshot.source or "No archive selected")
-        self.choose.setText("Change…" if self.snapshot.source else "Choose…")
-        self.choose.setEnabled(not self.snapshot.active_request_id and mode != 2)
+        self.source_path.setText(
+            selected or ("No vault selected" if mode == 2 else "No archive selected")
+        )
+        self.source_path.setAccessibleName(
+            "Selected vault path" if mode == 2 else "Selected archive path"
+        )
+        self.choose.setText("Change…" if selected else "Choose…")
+        self.choose.setAccessibleName(
+            "Choose vault folder" if mode == 2 else "Choose source archive"
+        )
+        self.choose.setEnabled(
+            not self.snapshot.active_request_id and not self.snapshot.close_pending
+        )
         self.tabs.setEnabled(not self.snapshot.active_request_id)
         self.activity.setVisible(
             bool(self.snapshot.active_request_id or self.snapshot.validation_request_id)
         )
         self.primary.setEnabled(
-            "inspect" in self.snapshot.allowed_actions and mode != 2
+            ("check_vault" if mode == 2 else "inspect") in self.snapshot.allowed_actions
         )
         self.primary.setText(
-            "Convert" if mode == 0 and self.snapshot.reviewed else "Inspect archive"
+            "Check vault"
+            if mode == 2
+            else "Convert"
+            if mode == 0 and self.snapshot.reviewed
+            else "Inspect archive"
         )
         self.primary.setAccessibleName(self.primary.text())
         if mode == 0 and self.snapshot.reviewed:
@@ -534,10 +591,23 @@ class MainWindow(QMainWindow):
             else "Choose an output parent folder."
         )
         result = self.snapshot.result
+        self.vault_error.setText(
+            "\n".join(
+                error.message for error in result.field_errors if error.field == "vault"
+            )
+            if mode == 2 and result is not None and result.operation == "check_vault"
+            else ""
+        )
+        self.vault_error.setVisible(bool(self.vault_error.text()))
         severity = "info"
         if self.snapshot.active_request_id:
             self.findings.setText(
-                "Inspecting archive\nWaiting for the worker. The window remains available."
+                (
+                    "Checking vault"
+                    if self.snapshot.busy_operation == "check_vault"
+                    else "Inspecting archive"
+                )
+                + "\nWaiting for the worker. The window remains available."
             )
         elif self.snapshot.feedback:
             self.findings.setText(self.snapshot.feedback)
@@ -546,8 +616,15 @@ class MainWindow(QMainWindow):
             self.findings.setText(
                 TITLES.get(result.status, result.status)
                 + (
+                    "\nThis read-only check covers current vault structure and conventions. It does not repair files or prove preservation of source content."
+                    if result.operation == "check_vault"
+                    else ""
+                )
+                + (
                     "\n" + "\n".join(f.message for f in result.findings[:100])
                     if result.findings
+                    else ""
+                    if result.operation == "check_vault"
                     else "\nReview the planned contents and pending checks below."
                 )
                 + (
@@ -563,14 +640,14 @@ class MainWindow(QMainWindow):
             )
             severity = (
                 "warning"
-                if result.outcome == "warnings"
+                if result.outcome in ("warnings", "issues")
                 else "error"
                 if result.outcome in ("refused", "failed")
                 else "info"
             )
         else:
             self.findings.setText(
-                "Checking is not available in this build."
+                "Choose an existing vault folder to check its current structure and conventions. This read-only check does not repair files."
                 if mode == 2
                 else "Inspect the archive to see its planned contents. Nothing is written during inspection."
             )
@@ -578,7 +655,20 @@ class MainWindow(QMainWindow):
         self.findings.style().unpolish(self.findings)
         self.findings.style().polish(self.findings)
         self.counts.setText(
-            "\n".join(
+            "    ".join(
+                f"{title}: {getattr(result.counts, name) if getattr(result.counts, name) is not None else 'unavailable'}"
+                for name, title in (
+                    ("inventory_files", "Inventory files"),
+                    ("markdown_files", "Markdown files"),
+                    ("base_files", "Base files"),
+                    ("read_markdown_files", "Markdown files read"),
+                    ("read_base_files", "Base files read"),
+                    ("category_notes", "Category notes"),
+                    ("imported_notes", "Imported notes"),
+                )
+            )
+            if result and result.operation == "check_vault"
+            else "\n".join(
                 (
                     f"Planned notes: {result.counts.planned_notes if result.counts.planned_notes is not None else 'unavailable'}    Planned resources: {result.counts.planned_assets if result.counts.planned_assets is not None else 'unavailable'}",
                     f"Planned categories: {result.counts.planned_category_notes if result.counts.planned_category_notes is not None else 'unavailable'}    Actual notes: {result.counts.actual_notes if result.counts.actual_notes is not None else 'unavailable'}",
@@ -593,7 +683,7 @@ class MainWindow(QMainWindow):
                 CHECK_LABELS.get(check, "additional backend check")
                 for check in result.pending
             )
-            if result
+            if result and result.pending
             else ""
         )
         self._elapsed()
@@ -605,11 +695,13 @@ class MainWindow(QMainWindow):
             )
             self.guidance.setText(
                 ("Close requested. " if self.snapshot.close_pending else "")
-                + f"{'Inspecting archive' if self.snapshot.active_request_id else 'Validating destination'} · {seconds // 60}:{seconds % 60:02d} elapsed"
+                + f"{'Checking vault' if self.snapshot.busy_operation == 'check_vault' else 'Inspecting archive' if self.snapshot.active_request_id else 'Validating destination'} · {seconds // 60}:{seconds % 60:02d} elapsed"
             )
         else:
             self.guidance.setText(
-                "Inspection and preliminary validation are read-only."
+                "Checking does not change the selected vault."
+                if self.tabs.currentIndex() == 2
+                else "Inspection and preliminary validation are read-only."
             )
 
     def closeEvent(self, event):

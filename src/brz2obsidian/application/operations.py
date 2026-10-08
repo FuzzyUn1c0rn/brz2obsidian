@@ -11,6 +11,7 @@ from brz2obsidian import __version__
 from brz2obsidian.application.contracts import (
     ApplyResult,
     ApplyTransportFailure,
+    CheckArguments,
     CheckResult,
     CloseWindow,
     ConversionResult,
@@ -27,7 +28,6 @@ from brz2obsidian.application.contracts import (
     SessionUpdate,
     WorkerRequest,
 )
-from brz2obsidian.application.wiring import default_workflow
 from brz2obsidian.contracts import Counts
 from brz2obsidian.publication.filesystem import preflight_destination
 
@@ -54,9 +54,13 @@ class Operations:
     """Explicitly injected Workflow composition for headless callers."""
 
     def __init__(self, workflow=None):
-        self.workflow = workflow if workflow is not None else default_workflow()
+        self.workflow = workflow
 
     def inspect(self, source: Path) -> InspectionResult:
+        if self.workflow is None:
+            from brz2obsidian.application.wiring import default_workflow
+
+            self.workflow = default_workflow()
         source = source.absolute()
         raw = self.workflow.inspect(source)
         usable = (
@@ -139,6 +143,11 @@ class Operations:
             diagnostic_text=text,
         )
 
+    def check_vault(self, vault: Path) -> CheckResult:
+        from brz2obsidian.application.checking import check_vault as check_current_vault
+
+        return check_current_vault(vault)
+
 
 def inspect(source: Path) -> InspectionResult:
     return Operations().inspect(source)
@@ -199,7 +208,7 @@ def convert_reviewed(
 
 
 def check_vault(vault: Path) -> CheckResult:
-    raise NotImplementedError("Vault checking is not available in this build")
+    return Operations().check_vault(vault)
 
 
 class ApplicationSession:
@@ -274,12 +283,15 @@ class ApplicationSession:
                         and command.result.reviewed.source == state.source
                         else None
                     )
+                    if command.result.operation == "check_vault":
+                        reviewed = state.reviewed
                     state = state.model_copy(
                         update={
                             "result": command.result,
                             "reviewed": reviewed,
-                            "review_required": command.result.review_required
-                            or not eligible,
+                            "review_required": state.review_required
+                            if command.result.operation == "check_vault"
+                            else command.result.review_required or not eligible,
                             "feedback": "",
                             "operational_status": None,
                         }
@@ -340,13 +352,33 @@ class ApplicationSession:
                     )
                 )
         elif name == "select_vault":
-            if command.path_or_null is not None:
+            if command.path_or_null is not None and command.path_or_null != state.vault:
+                self._diagnostic_text = ""
                 state = state.model_copy(
                     update={
                         "vault": command.path_or_null,
                         "revision": state.revision + 1,
+                        "result": None,
+                        "operational_status": None,
+                        "feedback": "",
                     }
                 )
+        elif name == "check_vault" and "check_vault" in state.allowed_actions:
+            request = WorkerRequest(
+                request_id=str(uuid4()),
+                operation="check_vault",
+                arguments=CheckArguments(vault=state.vault),
+            )
+            self._active_revision = state.revision
+            state = state.model_copy(
+                update={
+                    "active_request_id": request.request_id,
+                    "busy_operation": "check_vault",
+                    "feedback": "",
+                    "operational_status": None,
+                }
+            )
+            effects = (RunOperation(request=request, input_revision=state.revision),)
         elif name == "inspect" and "inspect" in state.allowed_actions:
             request = WorkerRequest(
                 request_id=str(uuid4()),
@@ -370,7 +402,6 @@ class ApplicationSession:
             )
         elif name in (
             "convert",
-            "check_vault",
             "start_another_conversion",
             "acknowledge_destination_review",
         ):
@@ -405,6 +436,14 @@ class ApplicationSession:
                 actions.append("inspect")
             if state.reviewed:
                 actions.append("convert_this_archive")
+            if state.vault:
+                actions.append("check_vault")
+                if (
+                    state.result is not None
+                    and state.result.operation == "check_vault"
+                    and state.result.outcome in ("issues", "failed")
+                ) or (state.feedback and state.result is None):
+                    actions.append("retry")
             if self._diagnostic_text:
                 actions.extend(("copy_details", "save_diagnostic_report"))
         actions.append("close")
@@ -474,6 +513,7 @@ class ApplicationSession:
         return state.model_copy(update={"validation_request_id": None})
 
     def _failure(self, state, phase, code):
+        checking = state.busy_operation == "check_vault"
         status = (
             "operation_not_started"
             if phase == "not_started"
@@ -482,18 +522,27 @@ class ApplicationSession:
             else None
         )
         feedback = (
-            "The operation could not start. Check the local Python environment."
+            "Check could not complete. The operation could not start. Check the local Python environment."
+            if checking and phase == "not_started"
+            else "Check could not complete. The worker did not return a trustworthy result. Check vault access and try again when ready."
+            if checking
+            else "The operation could not start. Check the local Python environment."
             if phase == "not_started"
             else "Publication status unknown. Review the destination before another attempt."
             if state.busy_operation == "convert_reviewed"
             else "The operation did not return a trustworthy result. Check the source and try again when ready."
         )
-        self._diagnostic_text = f"brz2obsidian diagnostic report\nOperation: {state.busy_operation}\nSource: {state.source or 'unavailable'}\nOutcome: operational error\nCode: {code}\n{feedback}"
+        selected = (
+            f"Vault: {state.vault or 'unavailable'}"
+            if checking
+            else f"Source: {state.source or 'unavailable'}"
+        )
+        self._diagnostic_text = f"brz2obsidian diagnostic report\nOperation: {state.busy_operation}\n{selected}\nOutcome: operational error\nCode: {code}\n{feedback}"
         return state.model_copy(
             update={
                 "result": None,
-                "reviewed": None,
-                "review_required": True,
+                "reviewed": state.reviewed if checking else None,
+                "review_required": state.review_required if checking else True,
                 "feedback": feedback,
                 "operational_status": status,
             }
