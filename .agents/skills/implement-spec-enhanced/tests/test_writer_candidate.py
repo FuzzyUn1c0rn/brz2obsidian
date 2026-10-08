@@ -10,12 +10,14 @@ import unittest
 from copy import deepcopy
 from pathlib import Path
 
+from git_support import GitCheckout
+
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 WRITER = SCRIPTS / "write_handoff.py"
 VALIDATOR = SCRIPTS / "validate_handoff.py"
 
 
-class CandidateWriterTests(unittest.TestCase):
+class CandidateWriterTests(GitCheckout, unittest.TestCase):
     def setUp(self):
         scratch = Path.cwd() / "tmp" / "writer-candidate-tests"
         scratch.mkdir(parents=True, exist_ok=True)
@@ -28,11 +30,7 @@ class CandidateWriterTests(unittest.TestCase):
         self.attempt = self.root / "attempt-001"
         self.attempt.mkdir()
         self.input_path = self.root / "input.json"
-        self.git("init", "-b", "main")
-        self.git("config", "user.name", "Writer Test")
-        self.git("config", "user.email", "writer@example.invalid")
-        self.git("config", "commit.gpgsign", "false")
-        self.git("config", "core.hooksPath", str(self.root / "no-hooks"))
+        self.init_git("Writer Test", "writer@example.invalid", self.root / "no-hooks")
         (self.checkout / "ticket.md").write_text("A1: produces output\n")
         (self.checkout / "spec.md").write_text("Accepted synthetic spec\n")
         self.base = self.commit("Scope")
@@ -58,19 +56,6 @@ class CandidateWriterTests(unittest.TestCase):
             "limits": [],
         }
 
-    def git(self, *args):
-        return subprocess.run(
-            ["git", "-C", str(self.checkout), *args],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-
-    def commit(self, message):
-        self.git("add", "--all")
-        self.git("commit", "-m", message)
-        return self.git("rev-parse", "HEAD")
-
     def command(self):
         return [
             sys.executable,
@@ -91,6 +76,7 @@ class CandidateWriterTests(unittest.TestCase):
             cwd=self.run_cwd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
@@ -110,6 +96,7 @@ class CandidateWriterTests(unittest.TestCase):
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
@@ -201,7 +188,11 @@ class CandidateWriterTests(unittest.TestCase):
         payload = json.dumps(self.data)[:-1] + ', "actor": "replacement"}'
         self.input_path.write_text(payload, encoding="utf-8")
         result = subprocess.run(
-            self.command(), capture_output=True, text=True, check=False
+            self.command(),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
         )
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("duplicate", result.stderr)
@@ -303,6 +294,7 @@ class CandidateWriterTests(unittest.TestCase):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                encoding="utf-8",
             )
             for _ in range(2)
         ]
@@ -347,6 +339,7 @@ class CandidateWriterTests(unittest.TestCase):
             env=self.filesystem_environment("fail"),
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
@@ -365,6 +358,7 @@ class CandidateWriterTests(unittest.TestCase):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            encoding="utf-8",
         )
         try:
             deadline = time.monotonic() + 15
@@ -401,6 +395,7 @@ class CandidateWriterTests(unittest.TestCase):
             env=dict(os.environ, PYTHONPATH=str(boundary)),
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -412,6 +407,7 @@ class CandidateWriterTests(unittest.TestCase):
             [sys.executable, str(WRITER), "candidate", "--help"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -432,7 +428,11 @@ class CandidateWriterTests(unittest.TestCase):
 
     def test_invalid_cli_arguments_are_errors_not_published_held_outcomes(self):
         result = subprocess.run(
-            self.command()[:-2], capture_output=True, text=True, check=False
+            self.command()[:-2],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
         )
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("--input", result.stderr)
@@ -443,7 +443,11 @@ class CandidateWriterTests(unittest.TestCase):
             with self.subTest(payload=payload):
                 self.input_path.write_bytes(payload)
                 result = subprocess.run(
-                    self.command(), capture_output=True, text=True, check=False
+                    self.command(),
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    check=False,
                 )
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
                 self.assertIn(str(self.input_path), result.stderr)

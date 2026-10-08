@@ -11,12 +11,14 @@ import unittest
 from copy import deepcopy
 from pathlib import Path
 
+from git_support import GitCheckout
+
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 WRITER = SCRIPTS / "write_handoff.py"
 VALIDATOR = SCRIPTS / "validate_handoff.py"
 
 
-class CarryWriterTests(unittest.TestCase):
+class CarryWriterTests(GitCheckout, unittest.TestCase):
     def setUp(self):
         scratch = Path.cwd() / "tmp" / "writer-carry-tests"
         scratch.mkdir(parents=True, exist_ok=True)
@@ -30,11 +32,7 @@ class CarryWriterTests(unittest.TestCase):
         self.attempt = self.root / "attempt-002"
         self.input_path = self.root / "carry-input.json"
         self.boundary_index = 0
-        self.git("init", "-b", "main")
-        self.git("config", "user.name", "Carry Test")
-        self.git("config", "user.email", "carry@example.invalid")
-        self.git("config", "commit.gpgsign", "false")
-        self.git("config", "core.hooksPath", str(self.root / "no-hooks"))
+        self.init_git("Carry Test", "carry@example.invalid", self.root / "no-hooks")
         (self.checkout / "ticket.md").write_text("A1: produces output\n")
         (self.checkout / "spec.md").write_text("Accepted synthetic spec\n")
         self.base = self.commit("Scope")
@@ -76,19 +74,6 @@ class CarryWriterTests(unittest.TestCase):
             "exit_code": 0,
             "evidence": [evidence],
         }
-
-    def git(self, *args):
-        return subprocess.run(
-            ["git", "-C", str(self.checkout), *args],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-
-    def commit(self, message):
-        self.git("add", "--all")
-        self.git("commit", "-m", message)
-        return self.git("rev-parse", "HEAD")
 
     def invoke(self, command, **kwargs):
         kwargs.setdefault("env", getattr(self, "child_env", None))

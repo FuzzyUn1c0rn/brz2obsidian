@@ -8,12 +8,14 @@ import unittest
 from copy import deepcopy
 from pathlib import Path
 
+from git_support import GitCheckout
+
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 WRITER = SCRIPTS / "write_handoff.py"
 VALIDATOR = SCRIPTS / "validate_handoff.py"
 
 
-class VerificationWriterTests(unittest.TestCase):
+class VerificationWriterTests(GitCheckout, unittest.TestCase):
     def setUp(self):
         scratch = Path.cwd() / "tmp" / "writer-verification-tests"
         scratch.mkdir(parents=True, exist_ok=True)
@@ -26,11 +28,9 @@ class VerificationWriterTests(unittest.TestCase):
         self.attempt = self.root / "attempt-001"
         self.attempt.mkdir()
         self.input_path = self.root / "verification-input.json"
-        self.git("init", "-b", "main")
-        self.git("config", "user.name", "Verification Test")
-        self.git("config", "user.email", "verifier@example.invalid")
-        self.git("config", "commit.gpgsign", "false")
-        self.git("config", "core.hooksPath", str(self.root / "no-hooks"))
+        self.init_git(
+            "Verification Test", "verifier@example.invalid", self.root / "no-hooks"
+        )
         (self.checkout / "ticket.md").write_text("A1: produces output\n")
         (self.checkout / "spec.md").write_text("Accepted synthetic spec\n")
         self.base = self.commit("Scope")
@@ -75,6 +75,7 @@ class VerificationWriterTests(unittest.TestCase):
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -88,19 +89,6 @@ class VerificationWriterTests(unittest.TestCase):
             "checks": [],
             "limits": ["Synthetic CLI evidence only"],
         }
-
-    def git(self, *args):
-        return subprocess.run(
-            ["git", "-C", str(self.checkout), *args],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-
-    def commit(self, message):
-        self.git("add", "--all")
-        self.git("commit", "-m", message)
-        return self.git("rev-parse", "HEAD")
 
     def command(self):
         return [
@@ -127,6 +115,7 @@ class VerificationWriterTests(unittest.TestCase):
             cwd=self.run_cwd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
@@ -150,6 +139,7 @@ class VerificationWriterTests(unittest.TestCase):
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
@@ -458,6 +448,7 @@ class VerificationWriterTests(unittest.TestCase):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                encoding="utf-8",
             )
             for _ in range(2)
         ]
@@ -478,6 +469,7 @@ class VerificationWriterTests(unittest.TestCase):
             [sys.executable, str(WRITER), "verification", "--help"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)

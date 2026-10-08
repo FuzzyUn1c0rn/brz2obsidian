@@ -9,12 +9,14 @@ import unittest
 from copy import deepcopy
 from pathlib import Path
 
+from git_support import GitCheckout
+
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 WRITER = SCRIPTS / "write_handoff.py"
 VALIDATOR = SCRIPTS / "validate_handoff.py"
 
 
-class IntegrationWriterTests(unittest.TestCase):
+class IntegrationWriterTests(GitCheckout, unittest.TestCase):
     def setUp(self):
         scratch = Path.cwd() / "tmp" / "writer-integration-tests"
         scratch.mkdir(parents=True, exist_ok=True)
@@ -27,11 +29,9 @@ class IntegrationWriterTests(unittest.TestCase):
         self.attempt = self.root / "attempt-001"
         self.attempt.mkdir()
         self.input_path = self.root / "integration-input.json"
-        self.git("init", "-b", "main")
-        self.git("config", "user.name", "Integration Test")
-        self.git("config", "user.email", "merger@example.invalid")
-        self.git("config", "commit.gpgsign", "false")
-        self.git("config", "core.hooksPath", str(self.root / "no-hooks"))
+        self.init_git(
+            "Integration Test", "merger@example.invalid", self.root / "no-hooks"
+        )
         (self.checkout / "ticket.md").write_text("A1: produces output\n")
         (self.checkout / "spec.md").write_text("Accepted synthetic spec\n")
         self.base = self.commit("Scope")
@@ -76,19 +76,6 @@ class IntegrationWriterTests(unittest.TestCase):
             "limits": ["Synthetic CLI evidence only"],
         }
 
-    def git(self, *args):
-        return subprocess.run(
-            ["git", "-C", str(self.checkout), *args],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-
-    def commit(self, message):
-        self.git("add", "--all")
-        self.git("commit", "-m", message)
-        return self.git("rev-parse", "HEAD")
-
     def command(self, stage="integration", input_path=None):
         return [
             sys.executable,
@@ -103,7 +90,12 @@ class IntegrationWriterTests(unittest.TestCase):
 
     def invoke(self, command):
         return subprocess.run(
-            command, cwd=self.run_cwd, capture_output=True, text=True, check=False
+            command,
+            cwd=self.run_cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
         )
 
     def publish_stage(self, stage, data, expected=0):
@@ -457,6 +449,7 @@ class IntegrationWriterTests(unittest.TestCase):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                encoding="utf-8",
             )
             for _ in range(2)
         ]
