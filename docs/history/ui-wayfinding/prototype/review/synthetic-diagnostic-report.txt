@@ -1,0 +1,10 @@
+SYNTHETIC DIAGNOSTIC REPORT — prototype C
+Operation: check
+Outcome: checker-issues
+Application: prototype (no runtime version available)
+Vault: C:\Vaults\Garden
+Read-only checker; no changes made.
+Publication: not established
+Issues: one unresolved note reference; one missing local image. No repairs attempted.
+Illustrative counts only: 42 planned notes, 18 resources, 3 categories.
+No note bodies or archive payloads are included.
