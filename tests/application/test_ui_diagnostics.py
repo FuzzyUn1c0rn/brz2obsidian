@@ -248,3 +248,35 @@ def test_safe_inspection_report_includes_plain_language_guidance():
     )
     assert "Counts are planned; actual publication counts are unavailable." in report
     assert "actual_notes: unavailable" in report
+
+
+def test_expired_omitted_report_keeps_final_summary_contract_valid():
+    from brz2obsidian.application.contracts import DiagnosticOmission, SimpleCommand
+
+    session = ApplicationSession()
+    session.dispatch(SelectSource(path_or_null=str(SOURCE)))
+    effect = session.dispatch(InspectCommand()).effects[0]
+    result = inspect(SOURCE).model_copy(
+        update={
+            "diagnostic_text": "17 findings omitted (response_limit).",
+            "diagnostic_omission": DiagnosticOmission(findings_count=17),
+        }
+    )
+    session.dispatch(
+        ApplyResult(
+            request_id=effect.request.request_id,
+            input_revision=effect.input_revision,
+            result=result,
+            process_status=0,
+        )
+    )
+    session.dispatch(SimpleCommand(command="request_close"))
+
+    expired = session.snapshot.result
+    validated = type(expired).model_validate_json(
+        expired.model_dump_json(by_alias=True)
+    )
+    assert validated.status == "inspection_clean"
+    assert validated.counts == result.counts
+    assert validated.diagnostic_text == ""
+    assert validated.diagnostic_omission is None

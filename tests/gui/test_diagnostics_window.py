@@ -163,8 +163,9 @@ def test_pending_save_callback_rejects_replaced_result_at_same_input_revision(tm
         )
         assert window.snapshot.revision == revision
         destination = tmp_path / "stale.txt"
+        feedback = window.diagnostic_feedback.text()
         old_callback(str(destination))
-        assert "changed" in window.diagnostic_feedback.text()
+        assert window.diagnostic_feedback.text() == feedback
         assert not destination.exists()
         assert window.save.isEnabled()
     finally:
@@ -336,6 +337,65 @@ def test_queued_unadmitted_export_does_not_retain_replaced_report(tmp_path):
         assert not destination.exists()
         assert "changed" not in window.diagnostic_feedback.text()
         assert window.snapshot.result.diagnostic_text == "Replacement report\n"
+    finally:
+        release.set()
+        finish(app, window)
+
+
+def test_old_save_callback_preserves_current_export_progress_disabled_actions_and_focus(
+    tmp_path,
+):
+    app = QApplication.instance() or QApplication([])
+    entered, release, finished = Event(), Event(), Event()
+
+    def blocked_clipboard(text, owner):
+        entered.set()
+        assert release.wait(10)
+        finished.set()
+
+    dialogs = SaveDialog()
+    supervisor = PreparedSupervisor("Old safe report\n")
+    window = inspected(
+        app,
+        supervisor.text,
+        dialogs=dialogs,
+        supervisor=supervisor,
+        diagnostic_actions=DiagnosticActions(clipboard=blocked_clipboard),
+    )
+    try:
+        window.disclosure.click()
+        window.save.click()
+        old_callback = dialogs.callback
+        old_result = window.snapshot.result
+        revision = window.snapshot.revision
+        supervisor.text = "Current safe report\n"
+        window.submit(InspectCommand())
+        until(
+            app,
+            lambda: (
+                window.snapshot.result is not old_result
+                and window.snapshot.active_request_id is None
+            ),
+        )
+        assert window.snapshot.revision == revision
+        window.disclosure.click()
+        window.copy.click()
+        until(app, entered.is_set)
+        progress = window.diagnostic_feedback.text()
+        window.disclosure.setFocus()
+        focus = window.focusWidget()
+        destination = tmp_path / "old-dialog.txt"
+
+        old_callback(str(destination))
+
+        assert window.diagnostic_feedback.text() == progress
+        assert not window.copy.isEnabled()
+        assert not window.save.isEnabled()
+        assert window.focusWidget() is focus
+        assert not destination.exists()
+        release.set()
+        until(app, finished.is_set)
+        until(app, lambda: "copied" in window.diagnostic_feedback.text())
     finally:
         release.set()
         finish(app, window)

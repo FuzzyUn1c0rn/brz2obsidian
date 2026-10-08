@@ -508,20 +508,15 @@ class MainWindow(QMainWindow):
         dialog.setDefaultSuffix("txt")
         dialog.selectFile("brz2obsidian-diagnostic-report.txt")
         dialog.fileSelected.connect(callback)
-        dialog.finished.connect(partial(self._save_picker_finished, generation))
+        dialog.finished.connect(partial(self._save_picker_finished, generation, dialog))
         self._save_dialog = dialog
         dialog.open()
 
     def diagnostic_save_selected(self, generation, path_or_null):
         """Dialog retains only host report identity, never its old safe payload."""
-        self._diagnostic_busy = False
         if generation != self._diagnostic_generation:
-            self.diagnostic_feedback.setText(
-                "The diagnostic report changed. Use the current report and try again."
-            )
-            self._render()
-            self.save.setFocus()
             return
+        self._diagnostic_busy = False
         if path_or_null:
             self._diagnostic_busy = True
             self.diagnostic_feedback.setText("Saving diagnostic report…")
@@ -536,13 +531,14 @@ class MainWindow(QMainWindow):
         self._render()
         self.save.setFocus()
 
-    def _save_picker_finished(self, generation, accepted):
+    def _save_picker_finished(self, generation, dialog, accepted):
         if not accepted:
             self.diagnostic_save_selected(generation, None)
-        if self._save_dialog is not None:
-            self._save_dialog.deleteLater()
+        dialog.deleteLater()
+        if self._save_dialog is dialog:
             self._save_dialog = None
-        self.save.setFocus()
+        if generation == self._diagnostic_generation:
+            self.save.setFocus()
 
     def _diagnostic_finished(self, feedback):
         if feedback.generation != self._diagnostic_generation:

@@ -456,7 +456,7 @@ class ApplicationSession:
                 state = state.model_copy(
                     update={
                         "result": state.result.model_copy(
-                            update={"diagnostic_text": ""}
+                            update={"diagnostic_text": "", "diagnostic_omission": None}
                         )
                     }
                 )
