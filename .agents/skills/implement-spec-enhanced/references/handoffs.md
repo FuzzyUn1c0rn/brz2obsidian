@@ -17,19 +17,61 @@ completion results stay in existing tickets.
 | `verification.json` | Independent verifier | Merger |
 | `integration.json` | Merger | Coordinator |
 
+Use `scripts/write_handoff.py` for every record publication and carry-forward;
+the stage examples below are the required route. Agents supply judgments; the
+writer derives bookkeeping and validates before immutable publication. It manages
+no drafts, check execution, merges, ticket edits, worktrees, or user acceptance.
+Run the independently executable read-only standalone validator at each
+transition even after successful writer validation.
+
 Publish each record once, after its evidence is ready, then leave it immutable.
-Keep work-in-progress notes elsewhere in the effort directory. A changed
-candidate starts at `attempt-001` beneath its new commit. An unchanged candidate
+Keep work-in-progress notes and UTF-8 stage inputs elsewhere in the effort
+directory, outside published record names. A changed candidate starts at
+`attempt-001` beneath its new commit. An unchanged candidate
 can have further attempts as described below; keep previous records for
 diagnosis. The coordinator claims/closes tickets so concurrent workers do not
 edit the same bookkeeping files.
+
+### Dispatch and commit handshake
+
+Initial implementer dispatch supplies ownership, integration branch, assessed
+checkout, and a reserved candidate-input path. At integration synchronization,
+capture the full incorporated tip as `base_ref`; then finish checks and commit.
+The implementer reports the commit and clean checkout before publication. Only
+then can the coordinator assign the exact unused commit-derived attempt path.
+The coordinator returns that absolute attempt, assessed checkout, input path,
+and candidate command; the implementer places evidence at the final resolved
+locations, writes its input, publishes, and runs standalone candidate validation.
+Before this allocation, evidence can be prepared elsewhere under the effort.
+
+Verifier and merger dispatches each supply the same exact assigned attempt,
+their actual assessed checkout, their own stage-input path, and stage command.
+Include absolute interpreter/script paths when the receiving agent may run in
+another checkout; for example, resolve them once in the integration checkout:
+
+```powershell
+$python = (Resolve-Path .venv/Scripts/python.exe).Path
+$writer = (Resolve-Path .agents/skills/implement-spec-enhanced/scripts/write_handoff.py).Path
+$validator = (Resolve-Path .agents/skills/implement-spec-enhanced/scripts/validate_handoff.py).Path
+# $attempt, $assessedCheckout, and $stageInput are coordinator-supplied absolute paths.
+& $python $writer candidate $attempt --checkout $assessedCheckout --input $stageInput
+& $python $validator $attempt --stage candidate --checkout $assessedCheckout
+```
+
+The following stage examples use checkout-relative script paths for readability;
+dispatch the resolved equivalents. Workers use the assigned path rather than
+discovering a latest attempt or allocating a number. Report the exact published
+path and both writer/validator outcomes. Exit `0` permits advancement, `2` holds
+the transition with complete published records, and `1` refuses or fails the
+operation; carry-forward has the partial-attempt recovery rules below.
 
 ## Retry an unchanged candidate
 
 A prerequisite becoming available or a temporary integration-check failure
 resolving can justify another attempt without a code change. Record the reason
-and previous/new attempt paths in the ticket. Allocate `attempt-002` (or the next
-unused number) beneath the same candidate commit, leaving the earlier attempt
+and previous/new attempt paths in the ticket. The coordinator allocates
+`attempt-002` (or the next unused number) beneath the same candidate commit,
+leaving the earlier attempt
 intact. Select the exact source attempt explicitly and assess the clean unchanged
 candidate commit. Use the helper from the integration checkout:
 
@@ -94,6 +136,8 @@ destination before copying, so a forced process termination still leaves an
 exact inspection pointer even though the killed process cannot print a final
 diagnostic. Preserve partial attempts and have the coordinator assign another
 unused attempt. A later invocation refuses the occupied partial directory.
+Candidate presence alone does not prove a completed carry: all requested records,
+evidence, and the receipt must be present and the selected transition validated.
 
 - **Verification was BLOCKED:** dispatch the independent verifier at the same
   candidate commit after carrying with `carry_verification: false`. It checks
@@ -109,6 +153,10 @@ unused attempt. A later invocation refuses the occupied partial directory.
   checks against the current result; another merge is unnecessary. Publish a new
   `integration.json` with the digest of this attempt's verification record.
   Integration records are always fresh; the helper never carries the earlier one.
+  Carry uses the clean candidate checkout even when integration has moved ahead;
+  retain the current integration result and assess it for fresh integration.
+  Capture its full HEAD as `previous_tip_ref` immediately before this retry's
+  integration operation, including when no additional merge is needed.
 
 Validate each transition against the checkout actually assessed. Resume from
 the explicitly selected attempt path, rather than treating an earlier failed
@@ -418,7 +466,9 @@ actual verdict, never an inferred check.
 
 ## Validate at transitions
 
-Run the helper with the project `.venv` interpreter from the integration checkout.
+Run the standalone `validate_handoff.py` with the project `.venv` interpreter
+from the integration checkout after publication. Writer validation is additional;
+it does not replace this explicit read-only CLI.
 Both CLIs emit UTF-8 diagnostics, including Unicode paths on Windows pipes.
 Decode captured output as UTF-8 so publication outcomes and exact destination
 pointers remain readable. Pass the checkout actually being assessed, which may
@@ -432,8 +482,8 @@ be another worktree:
 
 `$attempt` is the absolute attempt directory. Candidate and verification stages
 require a clean checkout at the candidate commit; integration requires a clean
-checkout at the result. The helper reads records and Git state; it performs no
-merge, test execution, or ticket edits. Exit `0` allows the transition, `1` means
+checkout at the result. The standalone validator reads records and Git state;
+it performs no merge, test execution, or ticket edits. Exit `0` allows the transition, `1` means
 invalid records or Git state, and `2` means valid records with a failing,
 unavailable, or rework verdict that cannot advance. Candidate-stage unavailable
 checks may proceed to a verifier, who must resolve them before `PASS`.
@@ -453,3 +503,39 @@ root; they create isolated Git repositories under `tmp/implement-spec-enhanced-t
 ```powershell
 .venv\Scripts\python.exe -m unittest discover -s .agents/skills/implement-spec-enhanced/tests -v
 ```
+
+### Synthetic workflow rehearsal
+
+For a documentation/CLI agreement check, create disposable real Git repositories
+under `tmp/<effort>/`: a candidate checkout, a verifier checkout at the candidate
+commit, and an integration checkout. Track synthetic `ticket.md`, `spec.md`, and
+`output.txt`; use local test identity with hooks/signing disabled. Run the writer
+and standalone validator from outside the candidate/verifier checkout with
+absolute script, attempt, checkout, and input paths. Keep inputs outside attempts.
+Use the stage inputs above with actual synthetic observations; the driver owns
+check execution and merges, while the writer only publishes those observations.
+
+| Operation | Writer exit | Standalone stage/exit |
+| --- | --- | --- |
+| Publish candidate after capturing base, checking and committing | 0 | candidate / 0 |
+| Publish unavailable-prerequisite BLOCKED verification | 2 | verification / 2 |
+| Recover prerequisite; carry candidate to assigned next attempt with false | 0 | candidate / 0; verification / 1 until fresh verdict |
+| Publish fresh independent-role PASS observations | 0 | verification / 0 |
+| Capture pre-merge tip; merge once; publish temporary failed integration | 2 | integration / 2 |
+| Carry candidate/PASS to another assigned attempt with explicit true/rationale | 0 | verification / 0 |
+| Recover check; inspect already-incorporated result; publish fresh integration | 0 | integration / 0 |
+| Repeat publication or carry into an occupied destination | 1 | earlier valid records remain unchanged |
+
+Save exact argv, working directories, stdout/stderr, exits, observations and input
+bytes. Compare all earlier record/evidence bytes before and after carries/refusals;
+compare carried candidate/PASS bytes, nested relative layout, unchanged absolute
+references, and auxiliary receipts. Assert the final digest equals the exact new
+attempt's verification bytes and the already-incorporated retry changes neither
+HEAD nor commit count. Record the full historical base/pre-merge IDs and prove
+both CLIs preserve assessed HEAD and clean state.
+
+This rehearsal checks CLI/file/Git behavior. Focused CLI tests additionally cover
+invalid inputs, concurrency, interruption and partial-attempt recovery. Record
+material limits explicitly: synthetic roles do not demonstrate live multi-agent
+execution, independent evidence judgment, native/user acceptance, remote PRs,
+or managed-worktree lifecycle behavior.
