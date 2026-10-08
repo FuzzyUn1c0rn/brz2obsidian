@@ -19,13 +19,32 @@ def test_launcher_uses_unicode_spaced_source_and_explicit_interpreter_from_unrel
     root = tmp_path / "Été checkout with spaces"
     module = root / "src/brz2obsidian_ui/__main__.py"
     module.parent.mkdir(parents=True)
+    module.with_name("__init__.py").write_text("", encoding="utf-8")
     module.write_text(
-        "import json,sys\nfrom pathlib import Path\nPath(__file__).with_name('started.json').write_text(json.dumps(sys.argv), encoding='utf-8')\n",
+        "import json,sys,brz2obsidian_ui\nfrom pathlib import Path\n"
+        "Path(__file__).with_name('started.json').write_text(json.dumps("
+        "{'argv': sys.argv, 'module': __file__, 'package': brz2obsidian_ui.__file__, "
+        "'interpreter': sys.executable}), encoding='utf-8')\n",
         encoding="utf-8",
     )
     launcher = build(root, Path(sys.executable))
     elsewhere = tmp_path / "unrelated directory"
     elsewhere.mkdir()
+    # The installed regular GUI package must not win over the copied source.
+    resolution = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import importlib.util,json; print(json.dumps(importlib.util.find_spec('brz2obsidian_ui').origin))",
+        ],
+        cwd=elsewhere,
+        env={**os.environ, "PYTHONPATH": str(root / "src")},
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    )
+    assert Path(json.loads(resolution.stdout)) == module.with_name("__init__.py")
     launched = subprocess.run(
         ["cmd.exe", "/d", "/c", str(launcher)],
         cwd=elsewhere,
@@ -40,8 +59,11 @@ def test_launcher_uses_unicode_spaced_source_and_explicit_interpreter_from_unrel
     while not receipt.exists() and time.monotonic() < deadline:
         time.sleep(0.02)
     assert receipt.is_file(), launched.stdout
-    argv = json.loads(receipt.read_text(encoding="utf-8"))
-    assert argv[1:] == [
+    started = json.loads(receipt.read_text(encoding="utf-8"))
+    assert Path(started["module"]) == module
+    assert Path(started["package"]) == module.with_name("__init__.py")
+    assert Path(started["interpreter"]) == Path(sys.executable).with_name("pythonw.exe")
+    assert started["argv"][1:] == [
         "--python",
         str(Path(sys.executable).resolve()),
         "--source-root",
