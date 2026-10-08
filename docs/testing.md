@@ -99,7 +99,10 @@ publication replacement and action placement from canonical specification #92
 and its exact C reference. Actual Qt keyboard events exercise forward/reverse
 control order, selectable diagnostic text, narrow reflow and scrolling. Deliberate
 wrong-title, hidden-action and swapped-tab controls prove the presentation
-assertions reject incorrect output. Existing completion and diagnostic controls
+assertions reject incorrect output. Read-only path displays wrap arbitrary
+unbroken Windows segments without inserting break characters into the selected
+text; actual document line bounds, full height and exact selection are checked
+at a narrow width. Existing completion and diagnostic controls
 also hold asynchronous actions open: focus returns to the invoked action when
 the user has left it unchanged, while later keyboard navigation takes precedence.
 These checks complement strategically sampled Windows scaling, contrast and

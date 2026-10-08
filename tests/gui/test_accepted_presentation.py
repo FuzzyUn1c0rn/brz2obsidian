@@ -11,16 +11,19 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QRect, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication,
+    QFrame,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QTabBar,
+    QTextEdit,
+    QWidget,
 )
 
 from brz2obsidian.application.contracts import (
@@ -72,6 +75,48 @@ def named(window, kind, accessible):
     ]
     assert len(matches) == 1, f"Expected one named {accessible!r} control"
     return matches[0]
+
+
+def path_text(control):
+    if isinstance(control, QLabel):
+        return control.text()
+    assert isinstance(control, QTextEdit) and control.isReadOnly()
+    return control.toPlainText()
+
+
+def assert_path_fits(control, expected):
+    assert path_text(control) == expected
+    if isinstance(control, QLabel):
+        assert (
+            control.textInteractionFlags()
+            & Qt.TextInteractionFlag.TextSelectableByKeyboard
+        )
+        flags = Qt.TextFlag.TextWordWrap if control.wordWrap() else 0
+        bounds = control.fontMetrics().boundingRect(
+            QRect(0, 0, control.contentsRect().width(), 10000), flags, expected
+        )
+        assert bounds.width() <= control.contentsRect().width(), (
+            "An unbroken path segment clips horizontally"
+        )
+        assert bounds.height() <= control.contentsRect().height(), (
+            "Wrapped path lines clip vertically"
+        )
+    else:
+        document = control.document()
+        assert document.size().height() <= control.viewport().height() + 1
+        block = document.begin()
+        while block.isValid():
+            layout = block.layout()
+            for index in range(layout.lineCount()):
+                assert (
+                    layout.lineAt(index).naturalTextWidth()
+                    <= control.viewport().width()
+                )
+            block = block.next()
+        control.selectAll()
+        assert control.textCursor().selectedText() == expected
+        assert control.horizontalScrollBar().maximum() == 0
+        assert control.verticalScrollBar().maximum() == 0
 
 
 def assert_operation_header(window):
@@ -170,9 +215,9 @@ def assert_published_contract(window, expected_title):
     findings = named(window, QLabel, "Inspection findings")
     assert findings.isVisible() and findings.text().startswith(expected_title + "\n")
     published = visible_label(window, "Published vault")
-    path = named(window, QLabel, "Published vault path")
-    assert path.isVisible() and path.text().strip()
-    assert path.textInteractionFlags() & Qt.TextInteractionFlag.TextSelectableByKeyboard
+    path = named(window, QWidget, "Published vault path")
+    assert path.isVisible() and path_text(path).strip()
+    assert_path_fits(path, path_text(path))
     assert top(window, visible_label(window, "Source archive")) < top(window, findings)
     assert top(window, findings) < top(window, published) < top(window, path)
     assert not named(window, QLineEdit, "Vault name").isVisible()
@@ -224,7 +269,9 @@ def test_verified_result_replaces_editors_and_contains_optional_actions_with_anc
         until(app, lambda: window.snapshot.publication is not None)
         app.processEvents()
         assert_published_contract(window, title)
-        assert named(window, QLabel, "Published vault path").text() == str(destination)
+        assert path_text(named(window, QWidget, "Published vault path")) == str(
+            destination
+        )
         findings = named(window, QLabel, "Inspection findings")
         original = findings.text()
         findings.setText("Publication status unknown\nWrong presentation")
@@ -322,13 +369,9 @@ def test_narrow_long_path_and_adjacent_name_error_scroll_without_covering_footer
         until(app, lambda: window.snapshot.result is not None)
         parent = named(window, QLineEdit, "Output parent folder")
         name = named(window, QLineEdit, "Vault name")
-        source_path = named(window, QLabel, "Selected archive path")
-        complete_path = named(window, QLabel, "Complete destination path")
-        assert source_path.text() == str(source) and source_path.wordWrap()
-        assert (
-            source_path.textInteractionFlags()
-            & Qt.TextInteractionFlag.TextSelectableByKeyboard
-        )
+        source_path = named(window, QWidget, "Selected archive path")
+        complete_path = named(window, QWidget, "Complete destination path")
+        assert path_text(source_path) == str(source)
         assert abs(top(window, parent) - top(window, name)) <= 4
         assert (
             parent.mapTo(window, parent.rect().topLeft()).x()
@@ -336,6 +379,7 @@ def test_narrow_long_path_and_adjacent_name_error_scroll_without_covering_footer
         )
         window.resize(460, 540)
         app.processEvents()
+        assert_path_fits(source_path, str(source))
         assert top(window, parent) < top(window, name) < top(window, complete_path)
         name.setFocus()
         QTest.keyClick(name, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
@@ -472,7 +516,7 @@ def test_nonpublished_outcomes_have_distinct_textual_meaning_and_no_completion_a
             "Check findings" if operation == "check" else "Inspection findings",
         )
         assert findings.isVisible() and title in findings.text()
-        assert not named(window, QLabel, "Published vault path").isVisible()
+        assert not named(window, QWidget, "Published vault path").isVisible()
         for action in (
             "Open folder",
             "Open migration report",
@@ -497,5 +541,90 @@ def test_nonpublished_outcomes_have_distinct_textual_meaning_and_no_completion_a
                 assert "Actual notes: 0" not in text
             else:
                 assert "Actual notes: unavailable" in text
+    finally:
+        finish(app, window)
+
+
+def test_unbroken_source_path_remains_fully_readable_and_exact_when_narrow(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    folder = tmp_path / ("Unbroken" * 12)
+    folder.mkdir()
+    source = make_archive(folder / "Exact_café_source.brz")
+    window = MainWindow(session=ready_session(source, tmp_path))
+    window.show()
+    window.submit(SelectVault(path_or_null=None))
+    try:
+        until(app, lambda: window.snapshot.result is not None)
+        window.resize(460, 540)
+        app.processEvents()
+        path = named(window, QWidget, "Selected archive path")
+        assert_path_fits(path, str(source))
+    finally:
+        finish(app, window)
+
+
+def test_source_and_independent_checker_use_one_adjacent_identity_selector(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    source = make_archive(tmp_path / "Selected archive.brz")
+    vault = tmp_path / "Selected vault"
+    vault.mkdir()
+    window = MainWindow(session=ready_session(source, tmp_path))
+    window.show()
+    window.submit(SelectVault(path_or_null=str(vault)))
+    try:
+        until(app, lambda: window.snapshot.vault == str(vault))
+        tabs = window.findChild(QTabBar)
+        for mode, title, name, path_name, action_name, expected in (
+            (
+                0,
+                "Source archive",
+                source.name,
+                "Selected archive path",
+                "Choose source archive",
+                str(source),
+            ),
+            (
+                2,
+                "Vault to check",
+                vault.name,
+                "Selected vault path",
+                "Choose vault folder",
+                str(vault),
+            ),
+        ):
+            tabs.setCurrentIndex(mode)
+            app.processEvents()
+            heading = visible_label(window, title)
+            identity = visible_label(window, name)
+            path = named(window, QWidget, path_name)
+            choose = named(window, QPushButton, action_name)
+            assert path_text(path) == expected
+            assert choose.text() == "Change…" and choose.isEnabled()
+            assert top(window, heading) < top(window, identity) < top(window, path)
+            assert (
+                path.mapTo(window, path.rect().topRight()).x()
+                < choose.mapTo(window, choose.rect().topLeft()).x()
+            )
+            icons = [
+                label
+                for label in window.findChildren(QLabel)
+                if label.isVisible() and label.pixmap() and not label.pixmap().isNull()
+            ]
+            assert len(icons) == 1
+            assert (
+                icons[0].mapTo(window, icons[0].rect().topRight()).x()
+                < identity.mapTo(window, identity.rect().topLeft()).x()
+            )
+            dividers = [
+                frame
+                for frame in window.findChildren(QFrame)
+                if frame.isVisible() and frame.frameShape() == QFrame.Shape.HLine
+            ]
+            assert any(
+                top(window, path)
+                < top(window, divider)
+                < top(window, visible_label(window, "Findings"))
+                for divider in dividers
+            )
     finally:
         finish(app, window)

@@ -3,10 +3,12 @@
 import os
 import sys
 from functools import partial
+from math import ceil
 from pathlib import Path
 from time import monotonic
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QMimeData, Qt, QTimer, Signal
+from PySide6.QtGui import QTextOption
 from PySide6.QtWidgets import (
     QApplication,
     QBoxLayout,
@@ -23,6 +25,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QStyle,
     QTabBar,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -81,6 +84,8 @@ QLabel#heading { font-size: 19pt; font-weight: 600; }
 QLabel#sectionTitle { font-weight: 600; }
 QLabel#muted, QLabel#sourcePath { color: #63716c; }
 QLabel#sourcePath { font-family: Consolas; font-size: 9pt; }
+QTextEdit#sourcePath { font-family: Consolas; font-size: 9pt; color: #63716c; border: none; background: white; padding: 0; }
+QTextEdit#sourcePath:focus { background: #e8f0e8; }
 QLabel#findings { background: #f1f6f0; border-left: 3px solid #709580; padding: 12px; }
 QLabel#findings[severity='warning'] { background: #fff8e8; border-color: #bc923d; }
 QLabel#findings[severity='error'] { background: #fcf1ed; border-color: #b36a5c; }
@@ -118,6 +123,47 @@ def label(text="", name=None):
     if name:
         widget.setObjectName(name)
     return widget
+
+
+class PathText(QTextEdit):
+    """Exact selectable path text, wrapping within the surrounding task sheet."""
+
+    def __init__(self, text=""):
+        super().__init__(objectName="sourcePath")
+        self.setReadOnly(True)
+        self.setAcceptRichText(False)
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setWordWrapMode(QTextOption.WrapMode.WrapAnywhere)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.document().setDocumentMargin(0)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.document().documentLayout().documentSizeChanged.connect(self._fit)
+        self.setPlainText(text)
+        self._fit()
+
+    def setPlainText(self, text):
+        if text != self.toPlainText():
+            super().setPlainText(text)
+
+    def toPlainText(self):
+        # QTextEdit's convenience conversion normalizes valid filename
+        # characters such as NBSP and Unicode line/paragraph separators.
+        return self.document().toRawText()
+
+    def createMimeDataFromSelection(self):
+        data = QMimeData()
+        data.setText(self.textCursor().selectedText())
+        return data
+
+    def _fit(self, *_):
+        height = ceil(self.document().documentLayout().documentSize().height())
+        if self.height() != height:
+            self.setFixedHeight(height)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._fit()
 
 
 class DestinationFields(QWidget):
@@ -241,7 +287,7 @@ class MainWindow(QMainWindow):
         source_row.addWidget(source_icon)
         source_text = QVBoxLayout()
         self.source_name = label("Choose a BRZ archive")
-        self.source_path = label("No archive selected", "sourcePath")
+        self.source_path = PathText("No archive selected")
         self.source_path.setAccessibleName("Selected archive path")
         source_text.addWidget(self.source_name)
         source_text.addWidget(self.source_path)
@@ -359,7 +405,7 @@ class MainWindow(QMainWindow):
         fields.addWidget(name_column, 2)
         destination.addWidget(self.destination_fields)
         destination.addWidget(label("Complete destination path", "muted"))
-        self.destination_path = label("Complete path unavailable", "sourcePath")
+        self.destination_path = PathText("Complete path unavailable")
         self.destination_path.setAccessibleName("Complete destination path")
         destination.addWidget(self.destination_path)
         self.destination_error = label("", "fieldError")
@@ -376,7 +422,7 @@ class MainWindow(QMainWindow):
         divider.setFrameShape(QFrame.Shape.HLine)
         published.addWidget(divider)
         published.addWidget(label("Published vault", "sectionTitle"))
-        self.published_path = label("", "sourcePath")
+        self.published_path = PathText()
         self.published_path.setAccessibleName("Published vault path")
         published.addWidget(self.published_path)
         published.addWidget(
@@ -418,7 +464,7 @@ class MainWindow(QMainWindow):
         )
         self.completion_feedback = label("", "muted")
         self.completion_feedback.setAccessibleName("Completion action feedback")
-        self.completion_path = label("", "sourcePath")
+        self.completion_path = PathText()
         self.completion_path.setAccessibleName("Completion action path")
         published.addWidget(self.completion_feedback)
         published.addWidget(self.completion_path)
@@ -508,7 +554,7 @@ class MainWindow(QMainWindow):
         return_focus = self._completion_focus
         self._completion_focus = None
         self.completion_feedback.setText(feedback.message)
-        self.completion_path.setText(feedback.path or "")
+        self.completion_path.setPlainText(feedback.path or "")
         self._render()
         if (
             return_focus is not None
@@ -823,7 +869,7 @@ class MainWindow(QMainWindow):
             if mode == 2
             else "Choose a BRZ archive"
         )
-        self.source_path.setText(
+        self.source_path.setPlainText(
             selected or ("No vault selected" if mode == 2 else "No archive selected")
         )
         self.source_path.setAccessibleName(
@@ -880,7 +926,7 @@ class MainWindow(QMainWindow):
             )
         self.published_check.setEnabled("check_vault" in self.snapshot.allowed_actions)
         self.completion_feedback.setVisible(bool(self.completion_feedback.text()))
-        self.completion_path.setVisible(bool(self.completion_path.text()))
+        self.completion_path.setVisible(bool(self.completion_path.toPlainText()))
         locked = publication is not None and (
             publication.receipt_verified
             or publication.state == "unknown"
@@ -941,7 +987,7 @@ class MainWindow(QMainWindow):
             )
         self.destination_form.setVisible(mode == 0 and not published)
         self.published_panel.setVisible(mode == 0 and published)
-        self.published_path.setText(publication.destination if published else "")
+        self.published_path.setPlainText(publication.destination if published else "")
         self.choose_parent_button.setEnabled(
             not self.snapshot.active_request_id
             and not self.snapshot.close_pending
@@ -966,7 +1012,7 @@ class MainWindow(QMainWindow):
             )
             widget.setVisible(bool(widget.text()))
         validating = self._pending_form is not None or self.snapshot.validation_pending
-        self.destination_path.setText(
+        self.destination_path.setPlainText(
             self.snapshot.destination
             if self.snapshot.destination and not validating
             else "Complete path unavailable"

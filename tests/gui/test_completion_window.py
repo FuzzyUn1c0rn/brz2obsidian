@@ -9,7 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtWidgets import QApplication, QLabel, QTextEdit
 
 from brz2obsidian.application.contracts import SelectVault
 from brz2obsidian_ui.platform_actions import CompletionActions
@@ -30,6 +30,14 @@ def named_label(window, accessible):
     return next(
         widget
         for widget in window.findChildren(QLabel)
+        if widget.accessibleName() == accessible
+    )
+
+
+def path_text(window, accessible):
+    return next(
+        widget.toPlainText()
+        for widget in window.findChildren(QTextEdit)
         if widget.accessibleName() == accessible
     )
 
@@ -65,7 +73,7 @@ def test_published_result_shows_four_explicit_actions_and_retains_result_on_open
             "Check published vault",
         ):
             assert button(window, name).isVisible() and button(window, name).isEnabled()
-        assert named_label(window, "Published vault path").text() == str(destination)
+        assert path_text(window, "Published vault path") == str(destination)
         button(window, "Open in Obsidian").click()
         feedback = named_label(window, "Completion action feedback")
         until(app, lambda: "could not be opened" in feedback.text())
@@ -73,7 +81,7 @@ def test_published_result_shows_four_explicit_actions_and_retains_result_on_open
         assert "Open folder as vault" in feedback.text()
         assert window.snapshot.result is previous
         assert window.snapshot.publication.receipt_verified
-        assert named_label(window, "Completion action path").text() == str(report)
+        assert path_text(window, "Completion action path") == str(report)
         assert requested[0][0].startswith("obsidian://open?path=")
         assert requested[0][1] != get_ident()
         assert button(window, "Open folder").isEnabled()
@@ -106,7 +114,7 @@ def test_missing_report_feedback_leaves_folder_and_check_actions_available(tmp_p
         )
         assert window.snapshot.result is previous
         assert requested == []
-        assert named_label(window, "Completion action path").text() == str(
+        assert path_text(window, "Completion action path") == str(
             destination / "MIGRATION REPORT.md"
         )
         assert button(window, "Open folder").isEnabled()
@@ -265,7 +273,7 @@ def test_empty_independent_selector_does_not_check_published_vault_implicitly(tm
         until(app, lambda: window.snapshot.publication is not None)
         window.tabs.setCurrentIndex(2)
         assert not button(window, "Check vault").isEnabled()
-        assert named_label(window, "Selected vault path").text() == "No vault selected"
+        assert path_text(window, "Selected vault path") == "No vault selected"
         previous = window.snapshot
         window.submit(SimpleCommand(command="check_vault"))
         until(app, lambda: window.snapshot is not previous)
@@ -275,7 +283,7 @@ def test_empty_independent_selector_does_not_check_published_vault_implicitly(tm
         assert requested == []
         window.tabs.setCurrentIndex(0)
         assert button(window, "Check published vault").isEnabled()
-        assert named_label(window, "Published vault path").text() == str(destination)
+        assert path_text(window, "Published vault path") == str(destination)
     finally:
         finish(app, window)
 

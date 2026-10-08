@@ -7,7 +7,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton
+from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton, QTextEdit
 
 pytestmark = pytest.mark.gui
 
@@ -67,8 +67,8 @@ def test_native_picker_path_representation_guided_real_worker_conversion(tmp_pat
         assert window.snapshot.destination == str(path)
         assert (path / "migration-record.json").is_file()
         assert any(
-            widget.isVisible() and widget.text() == str(path)
-            for widget in window.findChildren(QLabel)
+            widget.isVisible() and widget.toPlainText() == str(path)
+            for widget in window.findChildren(QTextEdit)
         )
         assert source.read_bytes() == original
     finally:
@@ -288,10 +288,10 @@ def test_conversion_outcomes_render_receipt_path_or_retained_inputs_without_infe
         if published:
             path_view = next(
                 label
-                for label in window.findChildren(QLabel)
+                for label in window.findChildren(QTextEdit)
                 if label.accessibleName() == "Published vault path"
             )
-            assert path_view.isVisible() and path_view.text() == path
+            assert path_view.isVisible() and path_view.toPlainText() == path
         else:
             assert name.text() == "Fresh vault"
             assert "Actual notes: unavailable" in text or outcome in (

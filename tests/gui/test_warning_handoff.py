@@ -64,7 +64,7 @@ def test_real_standalone_warning_carry_requires_explicit_warning_action(tmp_path
     import sys
     from pathlib import Path
 
-    from PySide6.QtWidgets import QCheckBox, QLabel
+    from PySide6.QtWidgets import QCheckBox, QLabel, QTextEdit
 
     from brz2obsidian.application.contracts import InspectCommand, SelectSource
     from brz2obsidian.application.transport import Supervisor
@@ -132,9 +132,9 @@ def test_real_standalone_warning_carry_requires_explicit_warning_action(tmp_path
         )
         assert next(
             label
-            for label in window.findChildren(QLabel)
+            for label in window.findChildren(QTextEdit)
             if label.accessibleName() == "Published vault path"
-        ).text() == str(parent / "Warning archive")
+        ).toPlainText() == str(parent / "Warning archive")
         assert source.read_bytes() == original
     finally:
         window.close()

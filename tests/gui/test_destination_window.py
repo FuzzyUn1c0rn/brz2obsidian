@@ -6,8 +6,9 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
-from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton, QTextEdit
 
 from tests.gui.test_inspection_window import until
 
@@ -20,6 +21,67 @@ def control(window, kind, name):
         for widget in window.findChildren(kind)
         if widget.accessibleName() == name
     )
+
+
+@pytest.mark.parametrize("published", [False, True])
+@pytest.mark.parametrize("separator", ["", "\u00a0", "\u2028", "\u2029"])
+def test_narrow_paths_wrap_unbroken_segments_and_preserve_exact_selected_text(
+    tmp_path,
+    published,
+    separator,
+):
+    from brz2obsidian.application.contracts import SelectVault
+    from brz2obsidian_ui.window import MainWindow
+    from tests.application.test_completion_session import published_session
+    from tests.application.test_conversion_session import ready_session
+    from tests.application.test_minimal_workflow import make_archive
+
+    app = QApplication.instance() or QApplication([])
+    parent = tmp_path / ("UnbrokenWindowsPathSegment" * 2 + separator + "UnbrokenEnd")
+    parent.mkdir()
+    source = make_archive(parent / "Archive café.brz")
+    if published:
+        session, destination = published_session(parent)
+        paths = {"Published vault path": str(destination)}
+    else:
+        session = ready_session(source, parent)
+        paths = {
+            "Selected archive path": str(source),
+            "Complete destination path": str(parent / "Fresh vault"),
+        }
+    window = MainWindow(session=session)
+    window.resize(453, 852)
+    window.show()
+    window.submit(SelectVault(path_or_null=None))
+    try:
+        until(app, lambda: window.snapshot.result is not None)
+        for accessible, expected in paths.items():
+            path = control(window, QTextEdit, accessible)
+            assert path.isVisible() and path.isReadOnly()
+            assert path.toPlainText() == expected
+            path.setFocus()
+            QTest.keyClick(path, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+            assert path.textCursor().selectedText() == expected
+            assert path.createMimeDataFromSelection().text() == expected
+            window.tabs.setCurrentIndex(1)
+            window.tabs.setCurrentIndex(0)
+            assert path.textCursor().selectedText() == expected
+            app.processEvents()
+            document = path.document()
+            assert (
+                document.documentLayout().documentSize().height()
+                <= path.viewport().height()
+            )
+            layout = document.firstBlock().layout()
+            assert layout.lineCount() > 1
+            assert all(
+                layout.lineAt(index).naturalTextWidth() <= path.viewport().width()
+                for index in range(layout.lineCount())
+            )
+    finally:
+        window.close()
+        until(app, lambda: not window.isVisible())
+        window.shutdown()
 
 
 def test_destination_form_presents_backend_path_errors_order_and_picker_cancel(
@@ -82,7 +144,7 @@ def test_destination_form_presents_backend_path_errors_order_and_picker_cancel(
     retained = window.snapshot.result
     control(window, QPushButton, "Choose output parent folder").click()
     until(app, lambda: window.snapshot.destination == str(tmp_path / "minimal"))
-    assert control(window, QLabel, "Complete destination path").text() == str(
+    assert control(window, QTextEdit, "Complete destination path").toPlainText() == str(
         tmp_path / "minimal"
     )
     sections = [
@@ -115,7 +177,9 @@ def test_destination_form_presents_backend_path_errors_order_and_picker_cancel(
         <= 4
     )
     assert (
-        not control(window, QLabel, "Complete destination path").text().endswith("CON")
+        not control(window, QTextEdit, "Complete destination path")
+        .toPlainText()
+        .endswith("CON")
     )
     assert window.snapshot.result is retained
     assert not window.primary.isEnabled()

@@ -10,7 +10,14 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 from PySide6.QtCore import QTimer
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton, QTabBar
+from PySide6.QtWidgets import (
+    QApplication,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QTabBar,
+    QTextEdit,
+)
 
 from brz2obsidian.application.contracts import (
     ApplyTransportFailure,
@@ -52,8 +59,16 @@ def button(window, accessible):
 
 
 def text(window):
-    return "\n".join(
-        label.text() for label in window.findChildren(QLabel) if label.isVisible()
+    return (
+        "\n".join(
+            label.text() for label in window.findChildren(QLabel) if label.isVisible()
+        )
+        + "\n"
+        + "\n".join(
+            path.toPlainText()
+            for path in window.findChildren(QTextEdit)
+            if path.isVisible()
+        )
     )
 
 
