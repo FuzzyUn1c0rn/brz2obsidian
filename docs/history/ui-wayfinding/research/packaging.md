@@ -1,0 +1,70 @@
+# Standalone Windows packaging research
+
+Date: 2026-10-08. Question: [GitHub issue #87](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/87). Research only; no package was installed, executable built, or clean-machine test performed.
+
+## Recommendation and confidence
+
+Use **PyInstaller onedir as the first packaging proof**, with ordinary CPython 3.14 x64 and the converter's pinned dependencies. This is the lowest-complexity documented candidate, not an accepted production distribution or UI-stack decision. Current official docs identify PyInstaller 6.22.3; its changelog records Python 3.14 support from 6.15.0. Windows builds must be produced on Windows. A bundled app can run without a separately installed Python interpreter. [Manual](https://pyinstaller.org/en/stable/index.html), [3.14 support](https://pyinstaller.org/en/stable/CHANGES.html#id99).
+
+For a Python UI, package the UI and call the existing workflow in a worker. For a non-Python UI, first prove a bundled console-capable converter helper launched hidden with redirected pipes. Both keep conversion in the current Python implementation. No evidence here establishes final download size, startup time, supported Windows editions, antivirus acceptance, ARM64 compatibility, or compatibility of a complete UI dependency graph.
+
+## Repository facts
+
+The examined source is commit `3db658d9d508ab696cade6d95c17c4ff8ea15f5c`. Package version is 0.3.0, Python requirement is >=3.14, and runtime dependencies are Pydantic, markdown-it-py, PyYAML and Pillow. The lock lists CPython 3.14.8 Windows with Pydantic 2.13.5/pydantic-core 2.46.5, markdown-it-py 4.2.0, PyYAML 6.0.3 and Pillow 12.3.0. [Manifest](https://github.com/FuzzyUn1c0rn/brz2obsidian/blob/3db658d9d508ab696cade6d95c17c4ff8ea15f5c/pyproject.toml), [resolved dependencies](https://github.com/FuzzyUn1c0rn/brz2obsidian/blob/3db658d9d508ab696cade6d95c17c4ff8ea15f5c/requirements.txt).
+
+`default_workflow().inspect(source)` and `.convert(source, destination)` and `check_vault(vault)` are synchronous structured-result interfaces. The CLI offers those same three operations and final JSON. There is no intermediate progress or cooperative cancellation interface. Migration exit 2 means warnings; checker exit 2 means issues. A receipt can report successful publication followed by a later failure. Interpret the JSON outcome, receipt and exit status together. [CLI](https://github.com/FuzzyUn1c0rn/brz2obsidian/blob/3db658d9d508ab696cade6d95c17c4ff8ea15f5c/src/brz2obsidian/cli.py), [workflow](https://github.com/FuzzyUn1c0rn/brz2obsidian/blob/3db658d9d508ab696cade6d95c17c4ff8ea15f5c/src/brz2obsidian/application/workflow.py).
+
+## Credible approaches
+
+| Approach | Build requirements and documented capabilities | Decision implication |
+| --- | --- | --- |
+| PyInstaller | Windows Python/build environment; collects interpreter, modules and dependencies; onedir and onefile; Windows binary bootloader available through normal installation. Python 3.14 explicitly supported. | Recommended baseline. Freeze the exact tool/hook versions after proving them. Dynamic imports, plugins, data and native binaries still need inspection. [Installation](https://pyinstaller.org/en/stable/installation.html), [operation](https://pyinstaller.org/en/stable/operating-mode.html). |
+| Nuitka standalone | Current manual lists CPython through 3.14; requires a C11 compiler. MSVC 2022+ is supported. MinGW for Python >=3.13 requires an experimental option; Zig is limited to Windows x64. Standalone/onefile produce distributions independent of installed Python; default accelerated mode does not. | Credible alternative if the baseline fails or measured constraints justify compilation. Use conservative MSVC build tooling. Do not infer performance gains or smaller binaries. [Manual](https://nuitka.net/user-documentation/user-manual.html). |
+| CPython embeddable distribution | Minimal isolated Windows ZIP, intended as part of another app; vendor third-party packages; normal pip dependency management is unsupported; Tcl/Tk is absent. Can launch bundled Python or embed its DLL. | Possible, but shifts path isolation, dependency collection and launcher maintenance to this project. Unsuitable as an effortless Tk bundle. [Python Windows guide](https://docs.python.org/3.14/using/windows.html#the-embeddable-package). |
+
+CPython 3.14's documented Windows baseline is Windows 10 and newer, regardless of a packager's wider advertised OS range. Pin the actual supported OS and architecture only after validating the complete app. Start x64; ARM64 needs its own matching interpreter, wheels, packaging and clean-host proof. [CPython platform support](https://docs.python.org/3.14/using/windows.html#supported-windows-versions).
+
+## Native dependencies and collection
+
+Pydantic depends on Rust-written pydantic-core; this is a native extension, not pure Python. Pillow 12 documents Python 3.14 support and Windows wheels for x86/x64/ARM64, including most image-library support. PyYAML 6.0.3 publishes a CPython 3.14 Windows x64 wheel. Wheel availability is not proof that freezing succeeds. [Pydantic installation](https://pydantic.dev/docs/validation/latest/get-started/install/), [Pillow Python matrix](https://pillow.readthedocs.io/en/stable/installation/python-support.html), [Pillow Windows wheels](https://pillow.readthedocs.io/en/stable/installation/basic-installation.html#windows), [PyYAML release files](https://pypi.org/project/PyYAML/6.0.3/#files).
+
+Read-only inspection of the existing project `.venv` using `importlib.metadata` found `_pydantic_core.cp314-win_amd64.pyd`, `yaml/_yaml.cp314-win_amd64.pyd`, and multiple Pillow `.pyd` modules. It also found license files in each dependency's installed metadata. This confirms native binaries in this environment; it is not a frozen-runtime test. The source imports Pillow for source-image validation and YAML for checking. Preserve relevant image plugins and native libraries; exercise actual conversion and checker code, rather than accepting successful imports as proof. [Image validation](https://github.com/FuzzyUn1c0rn/brz2obsidian/blob/3db658d9d508ab696cade6d95c17c4ff8ea15f5c/src/brz2obsidian/sources/thebrain/images.py).
+
+Use build-time wheels matching Python ABI/architecture. A Rust or image-library compiler need not be an end-user requirement when the matching binary dependencies are bundled. Inspect DLL dependencies and account for any required Visual C++ runtime; bundling Python alone does not establish that every native prerequisite is satisfied. Microsoft requires redistributable architecture and version to match application needs. [Visual C++ redistributables](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170).
+
+## Integration and launch contract
+
+A Python UI can directly consume typed results without CLI serialization, but must keep synchronous work off the UI thread and marshal completion/errors back to the UI. A worker thread offers no safe forced cancellation contract. A separate helper process isolates operation crashes and works with Electron/Tauri or other non-Python hosts. This is an architectural inference from the repository interfaces above, not a stack recommendation.
+
+For a JSON helper, package an explicit entry script which exits with `main()`'s return code. Pass argument arrays with no shell, absolute selected paths and an absolute bundled executable path; do not search PATH for Python. Capture stdout and stderr separately, drain both asynchronously, wait for process completion and validate the final JSON schema. Treat launch errors, crashes and missing/malformed JSON separately from converter outcomes. Use an explicit UTF-8 pipe contract. These are proposed integration requirements; Python documents pipes, return codes, shell behavior and Windows `CREATE_NO_WINDOW`. [Subprocess API](https://docs.python.org/3.14/library/subprocess.html).
+
+Do **not** build a stdout-JSON helper with PyInstaller `--windowed/--noconsole`: its standard streams become `None`. Build a console-capable helper and suppress its window at process creation while retaining redirected pipes. A windowed Python UI may instead call APIs directly and use explicit logging. Frozen `sys.executable` points to the bundle, not a general Python interpreter; multiprocessing needs frozen-process handling and an entry guard. [PyInstaller pitfalls](https://pyinstaller.org/en/stable/common-issues-and-pitfalls.html), [runtime paths](https://pyinstaller.org/en/stable/runtime-information.html).
+
+No current public interface supports meaningful percent progress or graceful cancellation. Show indeterminate activity and prevent concurrent operations. Killing a conversion process is not graceful cancellation and can leave staging; do not promise cleanup. Do not store user vaults beside the executable or in extraction directories. Resolve packaged assets from bundle-aware paths and write logs/preferences to a writable user location. [Publisher behavior](https://github.com/FuzzyUn1c0rn/brz2obsidian/blob/3db658d9d508ab696cade6d95c17c4ff8ea15f5c/src/brz2obsidian/publication/filesystem.py).
+
+## Distribution, offline prerequisites and maintenance
+
+- **Portable folder ZIP:** extract the complete folder and launch its executable. Good first proof and easy binary inspection; users must retain accompanying files.
+- **One executable:** convenient transfer, but PyInstaller extracts dependencies into temporary storage, increasing startup work; killed processes may leave extraction files. Prove onedir first. Onefile is not an installer or automatic updater. [Bundle behavior](https://pyinstaller.org/en/stable/operating-mode.html).
+- **Installer:** can provide shortcuts, uninstall and bundled prerequisites around the same working folder. It adds upgrade, install-location and privilege behavior to test. Prefer per-user installation unless an actual requirement needs elevation. This is a design recommendation, not an implemented installer.
+
+If the UI uses WebView2, provision its runtime explicitly. The tiny Evergreen bootstrapper downloads prerequisites and cannot guarantee offline first launch. Microsoft's full Evergreen Standalone Installer works offline; Fixed Version can ship with the app but adds over 250 MB and makes runtime updates the app's responsibility. A fixed runtime is also subject to deployment restrictions. Test the selected route with the runtime absent; do not rely on developer-machine installation. [WebView2 distribution](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution).
+
+Retain notices for Python, every shipped dependency and transitive native libraries, plus the chosen UI framework. Local metadata identifies MIT for Pydantic/pydantic-core/PyYAML and MIT-CMU for Pillow; markdown-it-py includes both its own LICENSE and LICENSE.markdown-it. Review actual distributed wheel notices, including Pillow's bundled libraries, rather than trusting a short package classifier. PyInstaller's license exception permits distributing bundles under the application's chosen license subject to dependencies; Nuitka publishes Apache licensing plus third-party notices. These facts do not resolve the license obligations of an as-yet unchosen UI framework. [PyInstaller license](https://pyinstaller.org/en/stable/license.html), [Nuitka license and notices](https://github.com/Nuitka/Nuitka/blob/develop/LICENSE.txt).
+
+Release signing and updates are separate work. Sign and verify final executables/installer artifacts using an organizational certificate and timestamp policy; Microsoft's SignTool supports signing, timestamping and verification. No claim here guarantees reputation or absence of security prompts. For v1, manual replacement with a complete versioned package is sufficient unless a different update requirement is accepted. Keep the UI/helper versions paired; no runtime pip/download setup is needed. [SignTool](https://learn.microsoft.com/en-us/windows/win32/seccrypto/signtool).
+
+## Smallest deferred proof and clean-Windows acceptance
+
+The next experiment should build one PyInstaller onedir converter helper from the project `.venv`, pinned CPython 3.14 x64 and pinned runtime/packager/hook versions. Use a small synthetic archive that exercises Markdown, YAML checking and the image formats actually supported by the converter. Run inspect, convert to a fresh destination, then check-vault through a minimal hidden-process harness. This experiment does not require implementing the full UI or comparing every packager.
+
+Before asserting launchability without Python/Git/terminal, record:
+
+1. A fresh supported Windows VM/user without Python, Git, development tools or project checkout; disconnect networking before provisioning/launch. Record OS build, architecture and runtime inventory.
+2. Launch from Explorer and exercise real file/folder selection once the chosen UI is present. Test a path with spaces/non-ASCII characters and an unrelated working directory; no console should flash and UI must stay responsive.
+3. Clean and warning outcomes, invalid archive, nonempty/unwritable destination, checker findings and crash/malformed-response presentation. Verify correct exit-2 treatment and final receipt handling.
+4. Native image decoding, JSON encoding, YAML checking and output parity against the existing acceptance boundaries; include a representative retained source only under the documented private-data rules.
+5. Missing runtime detection/provisioning for any WebView2 or VC prerequisite; no dependency downloads during normal offline use. Test standard-user permissions and repeat runs.
+6. Record artifact hashes, exact dependency/build versions, collected native libraries/notices and actual size/startup measurements. Test installer/uninstaller/update preservation and signing on the final chosen distribution, if applicable.
+
+Until that proof succeeds, compatibility remains documented upstream capability plus local dependency inspection. No executable or UI has been validated by this research. Framework selection remains with the parent Wayfinder decision.
