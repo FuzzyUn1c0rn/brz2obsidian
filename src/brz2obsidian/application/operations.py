@@ -51,10 +51,11 @@ SAFE_ISSUES = {
 
 
 class Operations:
-    """Explicitly injected Workflow composition for headless callers."""
+    """Explicitly injected migration and checker composition for headless callers."""
 
-    def __init__(self, workflow=None):
+    def __init__(self, workflow=None, *, checker=None):
         self.workflow = workflow
+        self.checker = checker
 
     def inspect(self, source: Path) -> InspectionResult:
         if self.workflow is None:
@@ -146,7 +147,7 @@ class Operations:
     def check_vault(self, vault: Path) -> CheckResult:
         from brz2obsidian.application.checking import check_vault as check_current_vault
 
-        return check_current_vault(vault)
+        return check_current_vault(vault, checker=self.checker)
 
 
 def inspect(source: Path) -> InspectionResult:

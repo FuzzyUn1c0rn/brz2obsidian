@@ -44,6 +44,89 @@ def test_public_check_returns_safe_clean_result_without_changing_vault(tmp_path)
     assert inventory(tmp_path) == before
 
 
+def test_explicit_checker_composition_executes_supplied_backend_and_projects_safely(
+    tmp_path,
+):
+    from brz2obsidian.application.operations import Operations
+    from brz2obsidian.vault_check.contracts import (
+        VaultCheckCounts,
+        VaultCheckIdentity,
+        VaultCheckIssue,
+        VaultCheckResult,
+    )
+
+    vault = tmp_path / "injected vault"
+
+    def supplied_checker(path):
+        assert path == vault.absolute()
+        return VaultCheckResult(
+            outcome="issues",
+            vault=VaultCheckIdentity(location=str(path), name=path.name),
+            counts=VaultCheckCounts(
+                inventory_files=2, markdown_files=2, read_markdown_files=2
+            ),
+            issues=(
+                VaultCheckIssue(
+                    code="missing_image",
+                    artifact="Manual.md",
+                    reference="REFERENCE_FRAGMENT_CANARY",
+                    message="NOTE_BODY_CANARY",
+                    guidance="RAW_GUIDANCE_CANARY",
+                    candidates=("RAW_CANDIDATE_CANARY",),
+                ),
+            ),
+        )
+
+    result = Operations(checker=supplied_checker).check_vault(vault)
+
+    assert result.status == "check_issues"
+    assert result.counts.inventory_files == result.counts.read_markdown_files == 2
+    assert result.counts.base_files is None
+    assert result.findings[0].code == "missing_image"
+    assert result.findings[0].path == "Manual.md"
+    assert "Review the image link" in result.findings[0].message
+    assert "CANARY" not in result.model_dump_json()
+    assert str(vault) in result.diagnostic_text
+    assert not vault.exists()
+
+
+@pytest.mark.parametrize("outcome", ["clean", "failed"])
+def test_injected_checker_retains_its_typed_outcome_and_unavailable_totals(
+    tmp_path, outcome
+):
+    from brz2obsidian.application.operations import Operations
+    from brz2obsidian.vault_check.contracts import (
+        VaultCheckCounts,
+        VaultCheckIdentity,
+        VaultCheckIssue,
+        VaultCheckResult,
+    )
+
+    def supplied_checker(path):
+        return VaultCheckResult(
+            outcome=outcome,
+            vault=VaultCheckIdentity(location=str(path), name=path.name),
+            counts=VaultCheckCounts(),
+            issues=()
+            if outcome == "clean"
+            else (
+                VaultCheckIssue(
+                    code="read_failure",
+                    message="RAW_MESSAGE_CANARY",
+                    guidance="RAW_GUIDANCE_CANARY",
+                ),
+            ),
+        )
+
+    result = Operations(checker=supplied_checker).check_vault(tmp_path)
+
+    assert result.status == "check_" + outcome
+    assert result.counts.inventory_files is None
+    assert result.counts.read_markdown_files == 0
+    assert bool(result.field_errors) == (outcome == "failed")
+    assert "CANARY" not in result.model_dump_json()
+
+
 @pytest.mark.parametrize(
     "state, expected_exit", [("clean", 0), ("issues", 2), ("failed", 1)]
 )
@@ -93,8 +176,12 @@ class BlockUnrelated(importlib.abc.MetaPathFinder):
             raise ImportError('Unrelated imports are blocked')
 sys.meta_path.insert(0, BlockUnrelated())
 from pathlib import Path
-from brz2obsidian.application.operations import check_vault
+from brz2obsidian.application.operations import Operations, check_vault
 assert check_vault(Path(sys.argv[1])).status == 'check_clean'
+from brz2obsidian.vault_check.contracts import VaultCheckCounts, VaultCheckIdentity, VaultCheckResult
+def supplied_checker(path):
+    return VaultCheckResult(outcome='clean', vault=VaultCheckIdentity(location=str(path), name=path.name), counts=VaultCheckCounts(inventory_files=17))
+assert Operations(checker=supplied_checker).check_vault(Path(sys.argv[1])).counts.inventory_files == 17
 """
     result = subprocess.run(
         [sys.executable, "-c", program, str(tmp_path)],

@@ -1,10 +1,12 @@
 """Source-independent checker facts projected for local application clients."""
 
+from collections.abc import Callable
 from pathlib import Path
 
 from brz2obsidian import __version__
 from brz2obsidian.application.contracts import CheckResult, Finding
 from brz2obsidian.vault_check import check_vault as check_current_vault
+from brz2obsidian.vault_check.contracts import VaultCheckResult
 
 # Raw messages, references and candidate lists can contain authored content.
 # Only known codes, static guidance and the affected artifact path are admitted.
@@ -23,9 +25,11 @@ SAFE_FINDINGS = {
 }
 
 
-def check_vault(vault: Path) -> CheckResult:
+def check_vault(
+    vault: Path, *, checker: Callable[[Path], VaultCheckResult] | None = None
+) -> CheckResult:
     root = vault.absolute()
-    raw = check_current_vault(root)
+    raw = (checker if checker is not None else check_current_vault)(root)
     findings = tuple(
         Finding(
             code=issue.code,
