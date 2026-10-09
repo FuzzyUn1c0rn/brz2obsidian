@@ -202,11 +202,11 @@ def check_vault(source, vault):
         ), "collection source identity"
         assert (
             record["source_identity"]["module_id"] == "thebrain-brz"
-            and record["source_identity"]["module_version"] == "6"
+            and record["source_identity"]["module_version"] == "7"
         ), "source module identity"
         assert (record["profile_id"], record["profile_version"]) == (
             "thebrain-format5-reviewed",
-            "6",
+            "7",
         ), "reviewed source profile"
         originals = {e["key"]: e for e in record["original_evidence"]}
         for name in ROOTS:

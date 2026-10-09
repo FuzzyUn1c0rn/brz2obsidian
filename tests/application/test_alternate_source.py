@@ -186,7 +186,10 @@ def test_alternate_external_file_materializes_owner_without_payload_access(tmp_p
     )
 
 
-def test_previous_shared_contract_and_brz_profile_refuse_explicitly(tmp_path):
+@pytest.mark.parametrize("brz_version", ["3", "6", "8"])
+def test_previous_shared_contract_and_unreviewed_brz_profile_refuse_explicitly(
+    tmp_path, brz_version
+):
     brz, folio = paired_sources(tmp_path)
     for source, module, policy in (
         (
@@ -198,7 +201,7 @@ def test_previous_shared_contract_and_brz_profile_refuse_explicitly(tmp_path):
             brz,
             BrzSourceModule(),
             BRZ_POLICY.model_copy(
-                update={"module_version": "3", "profile_version": "3"}
+                update={"module_version": brz_version, "profile_version": brz_version}
             ),
         ),
     ):

@@ -255,7 +255,10 @@ The ordinary image renderer composes assigned destination edits and report
 notices. Explicit metadata/result/reference consumers reject old/future contracts.
 The closed contract has changed explicitly: consumers
 must accept version 6 rather than interpreting it as an earlier contract. The reviewed
-TheBrain module/profile and renderer now use version `6`; BRZ format stays `5`.
+TheBrain module/profile now use version `7` for the two bounded additional
+relationship signatures; the renderer and source-neutral shapes remain version `6`.
+BRZ format stays `5`. Source admission changes do not invent new canonical graph
+meanings or couple the core to TheBrain direction flags.
 `RunMetadata.renderer_version` must be `6` when invoking the renderer directly.
 The alternate Folio adapter retains the earlier empty optional facts and also
 exercises independently authored opaque category assignments, owned icons,

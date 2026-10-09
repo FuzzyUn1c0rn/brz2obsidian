@@ -22,7 +22,21 @@ def relationships(raw):
         signature = tuple(r[f] for f in ("Kind", "Relation", "Meaning", "Direction"))
         assert all(type(v) is int for v in signature), "raw relationship integers"
         roles = thoughts[a]["Kind"], thoughts[b]["Kind"]
-        if (
+        assert all(type(role) is int for role in roles), "raw endpoint role integers"
+        assert all(
+            r.get(field) is None or type(r[field]) is str and not r[field]
+            for field in ("ThoughtTypeId", "LinkTypeId", "TypeId")
+        ), "raw default relationship type"
+        assert all(
+            value is False for field, value in r.items() if field.startswith("Is")
+        ), "raw reviewed relationship flags"
+        if signature == (1, 1, 1, 3) and roles == (1, 1):
+            # Child Relation1 fixes parent A/child B; backward arrow is separate.
+            kind = "hierarchy"
+        elif signature == (1, 3, 1, -1) and roles == (1, 2):
+            # Normal jump contributes connectivity, never instance membership.
+            kind = "related"
+        elif (
             signature in {(1, 1, 1, -1), (1, 1, 1, 1), (1, 1, 1, 7)}
             and roles == (1, 1)
             or signature == (1, 1, 1, -1)

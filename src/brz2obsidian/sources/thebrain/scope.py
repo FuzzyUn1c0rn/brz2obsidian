@@ -8,6 +8,8 @@ from decimal import Decimal
 from pathlib import PurePosixPath
 from uuid import UUID
 
+from .relationships import relationship_problem
+
 _UUID_TEXT = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
 
 
@@ -105,31 +107,83 @@ def scope_records(records, physical_members, refuse, uuid):
         except ValueError:
             return None
 
-    def identifies_omitted(value):
+    def identifies_omitted(value, subjects=None):
+        subjects = omitted if subjects is None else subjects
         if isinstance(value, str):
             return (
-                value in omitted
+                value in subjects
                 or (
-                    _UUID_TEXT.fullmatch(value) is not None and value.lower() in omitted
+                    _UUID_TEXT.fullmatch(value) is not None
+                    and value.lower() in subjects
                 )
-                or identifies_omitted(decoded(value))
+                or identifies_omitted(decoded(value), subjects)
             )
         if isinstance(value, (list, tuple)):
-            return any(identifies_omitted(entry) for entry in value)
+            return any(identifies_omitted(entry, subjects) for entry in value)
         return False
 
-    def associated(value):
+    def associated(value, subjects=None):
+        subjects = omitted if subjects is None else subjects
         if isinstance(value, dict):
             return any(
-                (field in associations and identifies_omitted(entry))
-                or associated(entry)
+                (field in associations and identifies_omitted(entry, subjects))
+                or associated(entry, subjects)
                 for field, entry in value.items()
             )
         if isinstance(value, (list, tuple)):
-            return any(associated(entry) for entry in value)
+            return any(associated(entry, subjects) for entry in value)
         if isinstance(value, str):
-            return associated(decoded(value))
+            return associated(decoded(value), subjects)
         return False
+
+    # Provisional omission is used only to suppress diagnostics before global
+    # validation. The validated inclusion/omission algorithm below is unchanged.
+    diagnostic_omitted = set(omitted)
+    while True:
+        previous = set(diagnostic_omitted)
+        for collection in records.values():
+            for record in collection:
+                if (
+                    associated(record, diagnostic_omitted)
+                    and type(record.get("Id")) is str
+                ):
+                    diagnostic_omitted.add(record["Id"])
+        if diagnostic_omitted == previous:
+            break
+
+    diagnostic_tokens = set(diagnostic_omitted)
+    for key in diagnostic_omitted:
+        try:
+            canonical = UUID(key)
+        except ValueError:
+            continue
+        diagnostic_tokens.add(
+            base64.urlsafe_b64encode(canonical.bytes_le).decode().rstrip("=")
+        )
+
+    def diagnostic_unsafe(value):
+        if isinstance(value, str):
+            return contains_omitted_identity(
+                value, diagnostic_tokens
+            ) or diagnostic_unsafe(decoded(value))
+        if isinstance(value, dict):
+            return any(
+                diagnostic_unsafe(k) or diagnostic_unsafe(v) for k, v in value.items()
+            )
+        if isinstance(value, (list, tuple)):
+            return any(diagnostic_unsafe(v) for v in value)
+        return False
+
+    def relation_problem(record, index, code, message):
+        relationship_problem(
+            record,
+            index,
+            refuse,
+            uuid,
+            code,
+            message,
+            private=diagnostic_unsafe(record) or associated(record, diagnostic_omitted),
+        )
 
     def extend_omitted():
         if not omitted:
@@ -180,6 +234,10 @@ def scope_records(records, physical_members, refuse, uuid):
             except ValueError, TypeError, AttributeError:
                 if name == "attachments.json":
                     attachment_problem(record, index, "Invalid attachment identity")
+                if name == "links.json":
+                    relation_problem(
+                        record, index, "invalid_source", "Invalid relationship identity"
+                    )
                 raise
             if key in identities or record.get("BrainId") != brain:
                 if name == "attachments.json":
@@ -187,6 +245,13 @@ def scope_records(records, physical_members, refuse, uuid):
                         record,
                         index,
                         "Invalid attachment identity or collection ownership",
+                    )
+                if name == "links.json":
+                    relation_problem(
+                        record,
+                        index,
+                        "invalid_source",
+                        "Invalid relationship identity or collection ownership",
                     )
                 refuse(
                     "invalid_source", "Invalid live identity or collection ownership"
@@ -253,10 +318,23 @@ def scope_records(records, physical_members, refuse, uuid):
                 dropped_members.add(member)
         if owner in excluded:
             omitted.add(record["Id"])
-    for record in records["links.json"]:
-        a, b = uuid(record.get("ThoughtIdA")), uuid(record.get("ThoughtIdB"))
+    for index, record in enumerate(records["links.json"]):
+        try:
+            a, b = uuid(record.get("ThoughtIdA")), uuid(record.get("ThoughtIdB"))
+        except ValueError, TypeError, AttributeError:
+            relation_problem(
+                record,
+                index,
+                "invalid_source",
+                "Invalid relationship endpoint identity",
+            )
         if a not in thoughts or b not in thoughts:
-            refuse("invalid_reference", "Relationship has a nonlive endpoint")
+            relation_problem(
+                record,
+                index,
+                "invalid_reference",
+                "Relationship has a nonlive endpoint",
+            )
         if a in excluded or b in excluded:
             omitted.add(record["Id"])
     for record in thoughts.values():

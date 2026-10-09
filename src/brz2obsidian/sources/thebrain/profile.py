@@ -11,9 +11,9 @@ from .findings import (
 
 BRZ_POLICY = SourcePolicy(
     profile_id="thebrain-format5-reviewed",
-    profile_version="6",
+    profile_version="7",
     module_id="thebrain-brz",
-    module_version="6",
+    module_version="7",
     format_version="5",
     finding_dispositions=(
         FindingDisposition(

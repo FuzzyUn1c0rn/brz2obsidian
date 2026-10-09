@@ -17,8 +17,8 @@ acceptance remain pending gates in the [current frontier](https://github.com/Fuz
 
 ## External file references (version 4)
 
-Version 4 introduced external file support. The current version-6 module/profile and snapshot/policy contracts retain it, with
-matching renderer and migration result/record versions. Thought-owned
+Version 4 introduced external file support. The current version-7 module/profile
+retains it through version-6 snapshot/policy, renderer and result/record contracts. Thought-owned
 `SourceType=2`, `Type=2`, `NoteType=0` records with coherent identities, integer
 nonnegative lengths and ordinary boolean flags represent external files.
 Reviewed locations are safe absolute drive-qualified Windows file paths; UNC,
@@ -171,10 +171,11 @@ All reviewed links use Kind 1:
 
 | Meaning | Relation / Meaning / Direction | Endpoints / representation |
 | --- | --- | --- |
-| Hierarchy | 1 / 1 / -1, 1 or 7 | Ordinary A parent, ordinary B child |
+| Hierarchy | 1 / 1 / -1, 1, 3 or 7 | Ordinary A parent, ordinary B child |
 | Hierarchy to source tag | 1 / 1 / -1 | Ordinary A parent, tag B child |
 | Hierarchy to category | 1 / 1 / -1 | Ordinary A parent, definition B child; reciprocal Parents/Children |
 | Jump | 3 / 1 / -1, 3, 5 or 7 | Ordinary endpoints; Related |
+| Normal jump to category | 3 / 1 / -1 | Ordinary A to definition B; reciprocal Related where created, no membership |
 | Tag assignment | 1 / 5 / -1 | Tag A classifies ordinary B; native tags or hidden-membership listing |
 | Instance assignment | 1 / 2 / -1 | Definition A classifies ordinary B; linked category membership |
 | System connection | 1 / 6 / -1 | System A to ordinary/definition/tag B; retained only |
@@ -186,13 +187,47 @@ definition and typed-member selection, the greedy
 hierarchy cover selects parents covering the most uncovered incident edges,
 with canonical key ties. It preserves cycles/multiple parents and does not
 claim a global minimum.
-The category signature does not admit Direction 1/7, reversed definition-to-ordinary
+The category hierarchy signature does not admit Direction 1/3/7, reversed definition-to-ordinary
 edges, definition-to-definition hierarchy or subtype inheritance. Category
 Parents/Children follow the title before Members/Gallery. Every direct included
 parent is linked, including intentional uncreated ordinary targets; hierarchy
 does not create membership or force an empty parent note when its category
 already covers the edge. TypeId and the exact instance link still establish
 classification independently.
+
+### Bounded relationship admission (module/profile version 7)
+
+Only two additional complete signatures are admitted: ordinary/ordinary
+`(Kind,Relation,Meaning,Direction)=(1,1,1,3)` and ordinary A/definition B
+`(1,3,1,-1)`. Child Relation1 fixes A as parent and B as child even when the
+Direction3 arrow points backward. Normal Meaning1/Jump Relation3 contributes
+Related connectivity only; matching instance Meaning2 and TypeId still establish
+membership independently. Related does not force creation of an empty ordinary
+endpoint. Existing category navigation stays after authored content and resources.
+
+The [TheBrain staff enum reference](https://forums.thebrain.com/post/in-links-json-what-are-these-fields-10616870)
+separates relation, meaning and directional bits. Controlled source research in
+[relationship fixtures](history/brz-to-obsidian/research/relationship-fixture-records.md)
+and [reverse-arrow fixtures](history/brz-to-obsidian/research/extended-relationship-fixture.md)
+establishes parent/child independently of arrows. These are documented/source
+facts and a bounded inference; no fresh native observation is claimed.
+
+Identity, collection, live endpoints, scalar types, custom types, unsupported
+roles/order/directions and classification correspondence remain strict. Included
+relationship refusals identify canonical relationship/endpoints, raw pointer and
+signature with relationship-specific guidance. Provisional raw omission suppresses
+pre-validation diagnostic disclosure; it never authorizes inclusion or bypasses
+global identity/ownership validation. Forgotten associations remain private.
+
+The reviewed TheBrain module/profile is version7 because admitted source meanings
+changed. Source-neutral snapshot/policy/result/renderer/record remain version6;
+their fields and hierarchy/related meanings did not change. Alternative sources
+retain their own versions. Actual-ZIP Workflow/CLI exact-navigation controls and
+an independent raw oracle cover both shapes and rehashed semantic corruptions.
+An unchanged-original inspection and eight-record raw/snapshot comparison are
+progress evidence only. Complete five-input/fifteen-output preservation remains
+[#123](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/123); native comparison
+and the user's presentation verdict remain #124 under #78.
 
 ## Imported metadata and icon snapshots
 
@@ -281,7 +316,7 @@ type hierarchies/custom link types also refuse.
 
 ## Approved warnings
 
-The fixed profile `thebrain-format5-reviewed`, version `3`, currently permits exactly:
+The fixed profile `thebrain-format5-reviewed`, now version `7`, retains the reviewed version-3 gap rules below:
 
 Findings must have the reviewed kind, compatible rule/profile, subject and
 evidence. Missing evidence and unknown kinds refuse; generic core contains no
