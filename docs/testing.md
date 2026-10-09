@@ -526,6 +526,33 @@ syntax, media formats, missing-content and icon/provider states, hierarchy shape
 large contextual views, and the editing/template operations affected by the change.
 Combine behaviors in one sample where practical and reuse completed observations.
 
+For application UI, apply the requirements in the
+[presentation procedure](agents/accepted-presentation.md#3-verify-actual-presentation-independently)
+with this sampling method:
+
+1. Inventory each control type, distinct style/rendering context and relevant
+   state in the UI under review. Include controls initially hidden by overflow,
+   scrolling, expansion or application state. Group equivalent instances; select
+   representative controls for every distinct group, combining cases where
+   practical. Sample enabled/disabled, focus, hover and expanded states where
+   relevant; record any relevant states that remain unobserved. A distinct styling path
+   or rendering context needs its own sample, not an exhaustive instance/state
+   matrix.
+2. Record each group's applicable reference and planned appearance/interaction
+   observations before using the app. In the actual application, compare the
+   representative controls with that reference and exercise their interactions.
+   Reveal initially hidden controls in the relevant context. For scrollbars,
+   explicitly observe track and thumb visibility against their surroundings and
+   verify that dragging the actual thumb moves the content; also exercise wheel
+   and keyboard access where applicable. A scroll-reachability test or offscreen
+   drawing alone does not establish these appearance and pointer observations.
+3. Record the observed states, evidence and satisfied/failed/unverified status
+   for each group and affected requirement in the review record. Reuse applicable
+   evidence for equivalent instances, identifying what it covers; missing or
+   inapplicable evidence leaves required coverage unverified. Expand samples
+   around defects, uncertainty or meaningful differences, then repair and recheck
+   affected failures before completing the review.
+
 Before using the UI, record the chosen cases, their independently derived paths,
 the behaviors each covers, and any special cases needing their own observation.
 Before opening an imported note, verify that its subject is included, its assigned
@@ -537,9 +564,9 @@ native CSV export can provide complete results for a large sampled view. Equival
 items using the same behavior need no repeated visual check. Expand the relevant
 samples when a defect, uncertainty or meaningful implementation difference appears.
 
-Complete when every selected behavior and special case has actual observation
-evidence and any defects have been repaired and rechecked. Report the sample
-selection, covered behaviors and limits; extrapolated confidence in equivalent
+Complete when every required control group, selected behavior and special case
+has applicable actual observation evidence and any defects have been repaired
+and rechecked. Report the sample selection, covered behaviors and limits; extrapolated confidence in equivalent
 cases is distinct from observing each item. Complete required automated source,
 body/image, inventory and preservation audits keep their full scope. Actual user
 acceptance remains a separate gate when required by the accepted specification.
