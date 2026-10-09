@@ -552,9 +552,17 @@ the user's actual running-app verdict remains separate.
 The UI-P11 scrollbar correction uses Qt's platform style instead of a custom
 scrollbar theme. Background paint is scoped to plain containers rather than all
 QWidget subclasses; inherited typography and targeted sheet/control colors remain
-in place. Existing public GUI controls exercise scroll reachability, exact wrapped
+in place. Because C is explicitly light, MainWindow requests Qt's application-local
+Light color scheme before constructing controls. This retains the platform style
+and does not change Windows theme preferences. A Windows11 dark-scheme thumb can
+otherwise paint white against the light sheet; a widget palette alone does not
+select that native thumb color. See [QStyleHints](https://doc.qt.io/qt-6/qstylehints.html#colorScheme-prop).
+Existing public GUI controls exercise scroll reachability, exact wrapped
 paths, narrow/short reflow, keyboard/focus and the anchored footer. Offscreen
 style comparisons diagnose platform delegation, not actual Windows appearance.
+Offscreen QPA may ignore color-scheme requests; an unchanged Unknown scheme cannot
+prove actual Windows contrast. Public QStyle drawing can isolate the scheme cause,
+but cannot establish pointer usability in the maintained product.
 Independently sample the actual task-sheet and diagnostic scrollbars at 100%,
 including wheel, thumb drag and keyboard access; previous scrollbar observations
 cannot establish this changed appearance. No CSS-mirroring or screenshot-pixel

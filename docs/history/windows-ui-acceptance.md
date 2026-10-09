@@ -222,7 +222,8 @@ scope and dates. They are not new scrollbar appearance evidence. The owner
 reported the boxed/stippled scrollbar in the actual review app; #107/UI-P11
 requires platform scrollbar appearance while preserving C's sheet and behavior.
 
-The cause is the broad QWidget background rule, which also matches QScrollBar
+The first candidate `d1f15e13ca16dc103329b17055fbaf1bb2890566` corrected the broad
+QWidget background rule, which also matches QScrollBar
 subclasses. A bounded offscreen comparison using the available Windows11 style
 shows that overriding background changes platform scrollbar drawing. The minimal
 repair keeps inherited font/color declarations but moves white background to the
@@ -249,3 +250,37 @@ for UI-P11 and affected UI-P01/P07/P08/U01/U02. Offscreen output and older nativ
 samples do not satisfy that changed appearance gate. The assigned independent
 reviewer will supply current evidence in the #107 handoff. Serialized integration
 and the owner's repaired actual-app #106/UI-V10 verdict remain separate.
+
+### Independent REWORK and app-local Light repair
+
+The independent d1f review subsequently found imperceptible task-sheet and
+diagnostic thumbs at actual 443×583 against C's light sheet. Outer wheel,
+diagnostic keyboard/selection and anchored footer worked. The attempted gutter
+drag did not establish a discernible thumb hit or movement. The immutable first
+candidate/REWORK and its build/test receipts are retained; no precise input-handler
+or OS cause was inferred from that observation.
+
+The minimal additional repair requests the application's Light color scheme at
+public MainWindow construction before building its light controls, retaining the
+default Windows platform style. [QStyleHints](https://doc.qt.io/qt-6/qstylehints.html#colorScheme-prop)
+documents that this applies only to the application, not system preferences.
+Exact Qt6.12 Windows11 source uses a white dark-scheme thumb and a black light-scheme
+thumb, independent of the widget palette. One bounded nonvisible public drawing
+comparison observed effective Dark with white-on-white output; Light produced
+gray idle/hover thumbs while style identity stayed QWindows11Style. A first
+disposable enum typo stopped before drawing and is retained with the corrected
+comparison. No user window, input, settings, scale or source operation was involved.
+
+A temporary public-construction request/ordering diagnostic was RED before the
+repair and GREEN afterward. Offscreen QPA does not honor this scheme request and
+retained Unknown, so this is not a permanent Qt-call test or native contrast proof.
+The new affected GUI cohort passed **138 tests in 53.21s**, once with offscreen
+factor1 and the safe public-result failure observer. Ruff lint/format (243 files),
+dependency checks, maintained launcher and wheel build passed. All72 wheel modules
+match source; only window.py differs from the first #107 wheel. The new wheel
+SHA256 is `14b5221b9f10ae44c5d050c45d4fe1d91a3238ee102bf322db7eb069576928a6`.
+Exact fresh build/module receipts bind the repaired candidate;
+the full1945 cohort remains historical and scoped to unchanged backend semantics.
+Independent actual maintained-launcher Windows100 wheel/thumb/keyboard and
+short/narrow appearance are still **UNVERIFIED** before the new candidate review.
+This causal repair does not supply UI-P11 PASS or the separate #106 user verdict.

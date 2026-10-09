@@ -2,8 +2,9 @@
 
 This record preserves the independent #105 review and subsequent owner
 corrections. The latest required verification is **100% only**, without a system
-scale change. The new #107/UI-P11 scrollbar repair has passing affected automated
-checks but awaits independent actual100% appearance/interaction evidence. Earlier
+scale change. The first #107/UI-P11 candidate received REWORK because its native
+thumb was imperceptible against the light sheet. The subsequent app-local Light
+repair awaits independent actual100% appearance/interaction evidence. Earlier
 100%/125% reuse and unavailable 125%/uncertain 150% samples retain their historical
 facts; they do not prove the changed scrollbar appearance. The user's repaired
 actual-running-app #106/UI-V10 verdict remains separate.
@@ -15,26 +16,49 @@ supersedes the former 100%/125% verification requirement. Preserve narrow/short
 scrolling, paths/findings, stacking, focus/keyboard and unobstructed footer at 100%.
 No other scale is tested or diagnosed by this repair.
 
-The two-line stylesheet repair removes the background override from QWidget's
+The first candidate `d1f15e13ca16dc103329b17055fbaf1bb2890566` received independent
+REWORK: at actual 443×583, task-sheet and diagnostic thumbs were imperceptible.
+Wheel, diagnostic keyboard/selection and the anchored footer worked, but the
+attempted gutter drag did not establish a thumb hit or movement. No drag-handler,
+OS or capture cause was inferred. Its 138-test receipt and wheel remain historical;
+they did not establish UI-P11 appearance.
+
+The retained two-line stylesheet repair removes the background override from QWidget's
 inherited typography rule and applies it to plain `.QWidget` containers instead.
 Qt type selectors also match subclasses, so the old rule customized QScrollBar
 painting. In one bounded offscreen Windows11-style comparison the scoped version
 keeps container/panel colors while the standalone scrollbar matches the unstyled
 platform control. [Qt's stylesheet rules](https://doc.qt.io/qt-6/stylesheet-syntax.html)
 and [style delegation](https://doc.qt.io/qt-6/stylesheet.html) explain this boundary.
-No application style is forced, scrollbar theme duplicated, operation policy
-changed or new CSS/pixel-oracle test added.
+The additional repair requests Qt's application-local Light scheme at public
+MainWindow construction, before light controls are built. Qt6.12 Windows11 paints
+the thumb from its scheme table, independent of the widget palette. One nonvisible
+public QStyle/QImage comparison started in Dark: idle/hover thumb drawing on white
+had no nonwhite pixels. A Light request changed the effective scheme and drew gray
+thumbs (50 idle / 288 hover pixels) with the same default QWindows11Style. These
+are causal drawing observations, not pixel acceptance criteria. The first probe
+stopped before drawing on a disposable enum typo; its failure is retained alongside
+the corrected comparison. [Qt's exact Windows11 source](https://raw.githubusercontent.com/qt/qtbase/v6.12.0/src/plugins/styles/modernwindows/qwindows11style.cpp)
+and [QStyleHints](https://doc.qt.io/qt-6/qstylehints.html#colorScheme-prop) support
+this app-only request. No Windows preferences or application style is forced,
+scrollbar theme duplicated, operation policy changed or permanent CSS/Qt-call test added.
 
-Current affected checks: 138 tests under tests/gui passed once in 41.06s; Ruff
-lint/format (243 files), dependencies, maintained launcher and rebuilt wheel passed.
-Exact new source/wheel/runtime bindings accompany the #107 candidate. The previous
+A disposable public-construction ordering probe was RED on d1f and GREEN after
+the request, preserving the default style. Offscreen QPA remained Unknown, so that
+probe establishes request ordering only, not contrast or actual native usability.
+
+Fresh affected evidence: **138 tests under tests/gui passed once in 53.21s**;
+Ruff lint/format (243 files), dependencies, maintained launcher and wheel passed.
+All72 new-wheel Python modules match source; only window.py differs from the d1f
+wheel. Its SHA256 is `14b5221b9f10ae44c5d050c45d4fe1d91a3238ee102bf322db7eb069576928a6`.
+Exact module/runtime bindings accompany the repaired #107 candidate. The previous
 1945/115-GUI cohort is historical; it was not rerun against this style change.
 Prior Standards/Spec findings remain applicable to unchanged code; the new
 presentation delta receives its own independent #107 review.
 
 | Current requirement | Preparation disposition |
 | --- | --- |
-| UI-P11 | UNVERIFIED actual appearance: causal style correction and offscreen delegation shown; independent task-sheet/diagnostic scrollbar sample at 100% pending. |
+| UI-P11 | First d1f native candidate FAILED/REWORK. New app-local Light repair has causal public drawing support; independent task-sheet/diagnostic visibility and thumb interaction at 100% remain UNVERIFIED. |
 | UI-P01/UI-P07/UI-P08/UI-U01/UI-U02 | Affected wrapping/scroll/focus/footer public controls pass; independent actual 100% wheel/thumb/keyboard and short/narrow recheck pending. |
 | #107 handoff/integration | Candidate preparation only; independent verification and serialized integration remain separate. |
 | UI-V10/#106 | No final user acceptance supplied by the technical repair. |

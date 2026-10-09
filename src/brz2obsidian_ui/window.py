@@ -229,6 +229,8 @@ class MainWindow(QMainWindow):
         diagnostic_actions=None,
         completion_actions=None,
     ):
+        # C is a light sheet; keep native controls in the same app-local scheme.
+        QApplication.styleHints().setColorScheme(Qt.ColorScheme.Light)
         super().__init__()
         self.setWindowTitle("brz2obsidian")
         self.resize(780, 820)
