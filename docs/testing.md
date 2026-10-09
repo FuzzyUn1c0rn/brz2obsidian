@@ -584,6 +584,17 @@ State-map keys and identity ownership are checked globally. Scalar state values
 are checked only after independently deriving direct and transitive forgotten
 omission; malformed excluded values cannot block an audit or appear in its output.
 Malformed included values and unknown state keys still refuse.
+Complete note expectations also independently derive generated framing from the
+accumulated expected prefix, including a source label before the first document.
+An open top-level comment or fence gets its exact safety closer only when later
+authored/generated material is appended. Closed blocks, natural quote/list exits,
+indented code and ordinary non-Home EOF notes require no invented closure.
+Resources, relationships and Home navigation are audited at their composition
+boundaries. Guard bytes do not alter original/scoped/adapted document digests,
+spans, payload originals, reference credit, literal adaptations or gap counts.
+`test_generated_boundaries.py` checks full actual-ZIP/CLI note bytes and rejects
+missing, wrong, duplicated or moved guards after repairing all manifest hashes
+and counts; the old oracle's accepted missing-guard corruptions remain RED evidence.
 HTML element boundaries use the [WHATWG element index](https://html.spec.whatwg.org/multipage/indices.html#elements-3)
 and [obsolete features](https://html.spec.whatwg.org/multipage/obsolete.html#non-conforming-features),
 reviewed 2026-10-09, independently of production metadata. Protected matching-looking end tokens never pair with active

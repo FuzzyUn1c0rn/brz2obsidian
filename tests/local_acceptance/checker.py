@@ -33,7 +33,7 @@ from .facts import (
 from .gaps import derive_gaps, diagnostic_targets
 from .scope import dump_json, scope
 from .support import check_support_content
-from .text import inline_candidates, literal_edits
+from .text import generated_boundary, inline_candidates, literal_edits
 
 ROOTS = (
     "meta.json",
@@ -897,6 +897,8 @@ def check_items(raw, record, archive, vault, assets):
         if thoughts[key].get("Label"):
             expected += thoughts[key]["Label"] + "\n\n"
         body = documents.get(key, (None, ""))[1]
+        if key in documents:
+            expected += generated_boundary(expected)
         expected += adapt_body(body, key, names[key], names, assets)
         if presentation_images:
             expected += (
@@ -907,6 +909,8 @@ def check_items(raw, record, archive, vault, assets):
                 + "\n\n"
             )
         resources = expected_resources(raw, key, body, assets)
+        if resources or sections:
+            expected += generated_boundary(expected)
         if resources:
             expected += "\n\n" + resources
         if sections:
@@ -920,6 +924,7 @@ def check_items(raw, record, archive, vault, assets):
             )
             expected += "\n".join(sections.values())
         if key == home:
+            expected += generated_boundary(expected)
             normalized_end = expected.replace("\r\n", "\n").replace("\r", "\n")
             expected += (
                 ""

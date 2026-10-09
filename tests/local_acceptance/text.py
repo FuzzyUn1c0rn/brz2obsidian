@@ -196,17 +196,36 @@ def _inline_regions(body):
     region = None
     regions = []
     previous_quotes = 0
+    list_indent = 0
     for match in re.finditer(r"[^\r\n]*(?:\r\n|\r|\n|$)", body):
         line = match[0]
         if not line:
             continue
-        content, quotes, listing = _line_view(line)
+        container_content, quotes, listing = _line_view(line)
+        if quotes != previous_quotes:
+            list_indent = 0
+        if listing:
+            list_indent = listing
+        elif (
+            list_indent
+            and container_content.strip()
+            and len(container_content) - len(container_content.lstrip(" "))
+            < list_indent
+        ):
+            list_indent = 0
+        content = container_content
+        if list_indent and not listing:
+            content = content[
+                min(list_indent, len(content) - len(content.lstrip(" "))) :
+            ]
         marker = re.match(r" {0,3}(`{3,}|~{3,})(.*)", content)
         protected = False
-        if fence and not _inside_container(content, quotes, listing, fence[1:]):
+        if fence and not _inside_container(
+            container_content, quotes, listing, fence[1:]
+        ):
             fence = None
         if comment is not None:
-            if not _inside_container(content, quotes, listing, comment):
+            if not _inside_container(container_content, quotes, listing, comment):
                 comment = None
             else:
                 protected = True
@@ -226,10 +245,10 @@ def _inline_regions(body):
         elif re.match(r" {0,3}<!--", content):
             protected = True
             if "-->" not in content:
-                comment = (quotes, listing)
+                comment = (quotes, list_indent)
         elif marker and not (marker[1][0] == "`" and "`" in marker[2]):
             protected = True
-            fence = (marker[1], quotes, listing)
+            fence = (marker[1], quotes, list_indent)
         elif (
             content.startswith(("    ", "\t"))
             and (not paragraph or listing)
@@ -263,12 +282,28 @@ def _inline_regions(body):
         previous_quotes = quotes
     if region is not None:
         regions.append((region, len(body)))
-    return regions, mask
+    return regions, mask, (fence, comment)
+
+
+def generated_boundary(prefix):
+    """Derive generated guard bytes from the accumulated expected raw prefix.
+
+    Appended material starts at top level after a blank-line separation. An
+    open top-level code/comment block still owns that material; quote/list
+    containers naturally end. Guards frame following material only and never
+    belong to authored document coordinates, digests or adaptation counts.
+    """
+    _, _, (fence, comment) = _inline_regions(prefix)
+    if fence and fence[1:] == (0, 0):
+        return "\n\n" + fence[0] + "\n"
+    if comment == (0, 0):
+        return "\n\n-->\n"
+    return ""
 
 
 def active_mask(body, *, autolinks=True):
     """Lexically protect constructs in source order with exact raw coordinates."""
-    regions, mask = _inline_regions(body)
+    regions, mask, _ = _inline_regions(body)
     for start, finish in regions:
         cursor = start
         while cursor < finish:
