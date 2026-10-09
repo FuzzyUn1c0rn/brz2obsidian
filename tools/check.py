@@ -829,6 +829,11 @@ def validate(args):
                 for selector in required["selectors"]:
                     if not any(
                         node == selector
+                        or (
+                            "::" in selector
+                            and "[" not in selector.split("::", 1)[1]
+                            and node.startswith(selector + "[")
+                        )
                         or selector == "."
                         or node.startswith(
                             (selector.rstrip("/") + "/", selector + "::")
