@@ -570,6 +570,20 @@ The oracle uses raw records and archived note/payload bytes as authority. Its
 standard-library activity scanner masks fenced/indented/inline code, comments,
 escapes, autolinks and balanced reference destinations/titles while retaining
 active labels. Unsupported active HTML and source-local autolinks fail closed.
+Protection is lexical rather than successive global regex masking: leaf blocks
+are resolved first, then a matched inline code span or comment owns its contents
+in source order. Comment blocks protect their closing line or continue to the
+end of their container; unterminated inline openers do not acquire that rule.
+Backtick matching stays within an inline region and cannot cross blank lines,
+fences, container exits, headings or thematic breaks. Only CR/LF delimit source
+lines; raw Unicode coordinates and authored bytes remain unchanged. These
+boundaries follow the [CommonMark block grammar](https://spec.commonmark.org/0.31.2/#html-blocks)
+and [inline precedence](https://spec.commonmark.org/0.31.2/#code-spans), with actual
+ZIP/CLI byte, span and rehashed-corruption controls in `test_activity_boundaries.py`.
+State-map keys and identity ownership are checked globally. Scalar state values
+are checked only after independently deriving direct and transitive forgotten
+omission; malformed excluded values cannot block an audit or appear in its output.
+Malformed included values and unknown state keys still refuse.
 HTML element boundaries use the [WHATWG element index](https://html.spec.whatwg.org/multipage/indices.html#elements-3)
 and [obsolete features](https://html.spec.whatwg.org/multipage/obsolete.html#non-conforming-features),
 reviewed 2026-10-09, independently of production metadata. Protected matching-looking end tokens never pair with active

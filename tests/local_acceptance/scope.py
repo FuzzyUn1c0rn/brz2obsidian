@@ -86,9 +86,6 @@ def scope(raw, archive):
     assert type(states) is dict and states.keys() <= attachments.keys(), (
         "raw state-map ownership"
     )
-    assert all(type(v) is int and v in {1, 2, 3} for v in states.values()), (
-        "raw file-state scalars"
-    )
     for key, row in thoughts.items():
         if row.get("TypeId"):
             assert row["TypeId"] in thoughts, "raw live provider"
@@ -192,6 +189,14 @@ def scope(raw, archive):
             if not more:
                 break
             omitted |= more
+    # State keys/identity ownership were checked globally above. Value semantics
+    # belong to retained declarations after independently derived transitive
+    # omission; excluded private content must not become an audit obligation.
+    assert all(
+        type(value) is int and value in {1, 2, 3}
+        for key, value in states.items()
+        if key not in omitted
+    ), "raw file-state scalars"
     tokens = set(omitted)
     canonical_tokens = set()
     for key in omitted:
