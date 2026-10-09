@@ -226,6 +226,7 @@ def test_public_validation_refuses_damaged_stale_or_insufficient_evidence(
 def test_unchanged_dirty_snapshot_binds_later_commit_and_explicit_equivalent_reuse(
     checkout, tmp_path
 ):
+    (checkout / "new.txt").write_text("new relevant contents\n")
     (checkout / "tests" / "test_selected.py").write_text(
         "def test_precommit():\n    assert True\n"
     )
@@ -301,6 +302,141 @@ def test_unchanged_dirty_snapshot_binds_later_commit_and_explicit_equivalent_reu
     )
     assert reused.returncode == 0, reused.stdout + reused.stderr
     assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("change", ["text_deletion", "binary_deletion", "rename"])
+def test_tested_file_removal_or_rename_binds_commit_but_restore_is_stale(
+    checkout, change
+):
+    optional = checkout / "optional.txt"
+    original_contents = (
+        b"\x00original binary\r\n\xff"
+        if change == "binary_deletion"
+        else b"original optional contents\n"
+    )
+    optional.write_bytes(original_contents)
+    subprocess.run(["git", "-C", str(checkout), "add", "."], check=True)
+    commit = [
+        "git",
+        "-C",
+        str(checkout),
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=t@example.invalid",
+        "commit",
+        "-am",
+    ]
+    subprocess.run([*commit, "optional file"], check=True, capture_output=True)
+    if change == "rename":
+        optional.rename(checkout / "renamed.txt")
+    else:
+        optional.unlink()
+    result, path, receipt = run(
+        checkout, "--check", "pytest", "--test", "tests/test_selected.py"
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    original = path.read_bytes()
+    subprocess.run(["git", "-C", str(checkout), "add", "."], check=True)
+    subprocess.run(
+        [*commit, "tested removal or rename"], check=True, capture_output=True
+    )
+    ref = subprocess.check_output(
+        ["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True
+    ).strip()
+    expected = requirements(
+        checkout,
+        [pytest_requirement("focused", ["tests/test_selected.py"])],
+        receipt["environment"],
+    )
+    argv = [
+        "validate",
+        "--receipt",
+        path,
+        "--checkout",
+        checkout,
+        "--requirements",
+        expected,
+    ]
+    accepted = command(*argv, "--ref", ref)
+    assert accepted.returncode == 0, accepted.stdout + accepted.stderr
+    accepted_disk = command(*argv)
+    assert accepted_disk.returncode == 0, accepted_disk.stdout + accepted_disk.stderr
+    optional.write_bytes(original_contents)
+    refused = command(*argv)
+    assert refused.returncode == 2, refused.stdout + refused.stderr
+    assert path.read_bytes() == original
+
+
+def test_commit_of_staged_bytes_different_from_tested_disk_is_refused(checkout):
+    selected = checkout / "tests" / "test_selected.py"
+    tested = selected.read_bytes()
+    result, path, receipt = run(
+        checkout, "--check", "pytest", "--test", "tests/test_selected.py"
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    selected.write_text("def test_unexecuted():\n    assert False\n")
+    subprocess.run(["git", "-C", str(checkout), "add", "."], check=True)
+    selected.write_bytes(tested)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(checkout),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=t@example.invalid",
+            "commit",
+            "-m",
+            "unexecuted staged bytes",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    ref = subprocess.check_output(
+        ["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True
+    ).strip()
+    expected = requirements(
+        checkout,
+        [pytest_requirement("focused", ["tests/test_selected.py"])],
+        receipt["environment"],
+    )
+    refused = command(
+        "validate",
+        "--receipt",
+        path,
+        "--checkout",
+        checkout,
+        "--requirements",
+        expected,
+        "--ref",
+        ref,
+    )
+    assert refused.returncode == 2, refused.stdout + refused.stderr
+
+
+def test_tracked_file_deleted_during_execution_invalidates_remaining_checks(checkout):
+    optional = checkout / "optional.txt"
+    optional.write_text("original optional contents\n")
+    subprocess.run(["git", "-C", str(checkout), "add", "."], check=True)
+    (checkout / "tests" / "test_selected.py").write_text(
+        "from pathlib import Path\n"
+        "def test_delete():\n"
+        "    Path('optional.txt').unlink()\n"
+    )
+    result, _, receipt = run(
+        checkout,
+        "--check",
+        "pytest",
+        "--check",
+        "lint",
+        "--test",
+        "tests/test_selected.py",
+    )
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert [row["status"] for row in receipt["checks"]] == ["passed", "not_run"]
+    assert receipt["aggregate"] == "error"
 
 
 def test_full_default_suite_does_not_satisfy_undiscovered_external_test(checkout):

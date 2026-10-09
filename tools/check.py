@@ -73,12 +73,10 @@ def snapshot(root):
     files = [
         {
             "path": name,
-            "git_blob": normalized.get(name),
-            "disk_sha256": digest((root / name).read_bytes())
-            if name in normalized
-            else None,
+            "git_blob": normalized[name],
+            "disk_sha256": digest((root / name).read_bytes()),
         }
-        for name in paths
+        for name in existing
     ]
     identity = digest(
         encoded([{"path": row["path"], "git_blob": row["git_blob"]} for row in files])
