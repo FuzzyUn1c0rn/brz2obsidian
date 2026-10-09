@@ -81,6 +81,42 @@ scope, requirements and receipt destination/contract. Completion reports name
 receipt paths and outcomes. Independent fresh verification runs its own runner
 invocation and receipt in its assessed checkout.
 
+### Stable-candidate checkpoint
+
+Before completion checks, plan focused development/audit controls and required
+completion coverage from the ticket. The coordinator/reviewer records the
+environment, selectors/expressions, full/focused scope and freshness independently
+of the implementer's results. Complete relevant focused controls through the
+accepted public testing seams and resolve known findings before launching
+expensive full completion suites. In the handoff dispatch handshake, these are
+the development checks finished before committing; expensive completion suites
+follow the commit, before reporting the checked candidate. Focused receipts may
+precede the commit under the content-binding rules below.
+
+The checkpoint is complete when those focused controls pass, known findings are
+resolved, integration synchronization is finished, and the candidate source is
+committed in a clean checkout. Record the full candidate commit ID. Run required
+completion checks against that stable source through the runner, retaining and
+validating receipts bound to that commit. Keep source unchanged during execution
+and until publication; the runner's snapshots detect changes during a run.
+Focused success cannot replace coordinator-assigned full base/GUI or other
+required coverage. Tickets requiring only focused coverage retain that scope;
+independent verification still uses its own assessed checkout and fresh execution.
+
+A repair during or after completion checks returns to this checkpoint: resolve
+the finding, complete affected focused controls, commit a new stable candidate,
+then obtain qualifying completion evidence and independent verification for it.
+Preserve earlier receipts with their original source and outcomes. A changed
+source snapshot cannot qualify a run as passing; a completed receipt for an
+earlier source remains evidence for that source. Evaluate existing evidence
+against the new candidate and requirements using the binding and reuse rules
+below and the handoff contract. Retain applicable unchanged evidence with explicit
+provenance and rationale where reuse is allowed; rerun affected checks and every
+check requiring fresh execution. This checkpoint reduces avoidable replacement
+full runs; later discoveries still require repair and a new candidate.
+
+### Requirements format and receipt validation
+
 The public runner validator accepts a separately supplied schema-1 requirements
 JSON file. For example, focused base pytest plus lint:
 
