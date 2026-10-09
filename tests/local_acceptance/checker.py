@@ -126,7 +126,7 @@ def check_vault(source, vault):
     }, "migration record schema fields"
     assert (record["schema"], record["schema_version"]) == (
         "brz2obsidian.migration",
-        3,
+        4,
     ), "record schema version"
     assert (
         record["converter_version"]
@@ -134,7 +134,7 @@ def check_vault(source, vault):
         == "0.3.0"
     ), "converter version"
     assert (
-        record["renderer_version"] == record["run_metadata"]["renderer_version"] == "3"
+        record["renderer_version"] == record["run_metadata"]["renderer_version"] == "4"
     ), "renderer version"
     with Path(source).open("rb") as stream:
         assert (
@@ -198,11 +198,11 @@ def check_vault(source, vault):
         ), "collection source identity"
         assert (
             record["source_identity"]["module_id"] == "thebrain-brz"
-            and record["source_identity"]["module_version"] == "3"
+            and record["source_identity"]["module_version"] == "4"
         ), "source module identity"
         assert (record["profile_id"], record["profile_version"]) == (
             "thebrain-format5-reviewed",
-            "3",
+            "4",
         ), "reviewed source profile"
         originals = {e["key"]: e for e in record["original_evidence"]}
         for name in ROOTS:
@@ -2489,6 +2489,6 @@ def check_run_result(result, vault, summary):
     }, "receipt file evidence"
     assert (
         result["operation"] == "convert"
-        and result["schema_version"] == 3
+        and result["schema_version"] == 4
         and result["outcome"] == ("warnings" if summary["warnings"] else "clean")
     ), "result envelope"

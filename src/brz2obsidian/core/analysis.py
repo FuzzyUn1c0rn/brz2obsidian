@@ -29,10 +29,10 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
         )
 
     identity = snapshot.identity
-    if snapshot.contract_version != 3 or policy.contract_version != 3:
+    if snapshot.contract_version != 4 or policy.contract_version != 4:
         refuse(
             "unsupported_format",
-            "Only source snapshot and policy contract version 3 is supported",
+            "Only source snapshot and policy contract version 4 is supported",
         )
     if (
         identity.module_id,
@@ -103,7 +103,7 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
         ):
             refuse("invalid_source", "Present asset lacks actual byte inventory")
         if asset.availability == "external" and (
-            asset.role not in {"url", "directory"} or not asset.external_uri
+            asset.role not in {"file", "url", "directory"} or not asset.external_uri
         ):
             refuse(
                 "invalid_reference",

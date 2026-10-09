@@ -15,6 +15,7 @@ from brz2obsidian.contracts import (
     SourceGap,
 )
 
+from .external_files import external_file_uri
 from .findings import (
     ABSENT_NOTE_IMAGES_RULE,
     ABSENT_TXT_RULE,
@@ -43,6 +44,23 @@ SPECIAL_FLAGS = (
 )
 
 
+def _attachment_refusal(source_refuse, owner, asset_id, pointer, external):
+    def refuse(code, message, affected=()):
+        source_refuse(
+            code,
+            message,
+            tuple(dict.fromkeys((owner, asset_id, *affected))),
+            evidence=(pointer, "meta.json"),
+            guidance=(
+                "Review this attachment's external-file role, original location and local payload declarations; external targets are not accessed."
+                if external
+                else "Review this attachment's declared role and owned archive payload."
+            ),
+        )
+
+    return refuse
+
+
 def normalize_attachments(
     archive, records, meta, thoughts, refuse, uuid, excluded=(), scope_tokens=()
 ):
@@ -51,6 +69,7 @@ def normalize_attachments(
     absent_notes, gaps, presentations = [], [], []
     note_owners = set()
     asset_records = {}
+    source_refuse = refuse
     states = meta["AttachmentFileStates"]
     names = set(archive.namelist())
     for key, state in states.items():
@@ -59,6 +78,11 @@ def normalize_attachments(
             refuse("invalid_source", "Invalid attachment file state", (key,))
     for index, record in enumerate(records):
         asset_id, owner = uuid(record["Id"]), uuid(record["SourceId"])
+        pointer = f"attachments.json:{index}"
+
+        refuse = _attachment_refusal(
+            source_refuse, owner, asset_id, pointer, record.get("Type") == 2
+        )
         validate_semantic_fields(record, refuse, ("IsIcon",) + SPECIAL_FLAGS)
         if (
             any(a.asset_id == asset_id for a in assets)
@@ -96,6 +120,7 @@ def normalize_attachments(
             )
         kind, note_type = record["Type"], record["NoteType"]
         if record["SourceType"] != 2 or (kind, note_type) not in {
+            (2, 0),
             (1, 4),
             (1, 0),
             (3, 0),
@@ -122,7 +147,6 @@ def normalize_attachments(
             or ("Name" in record and type(record["Name"]) is not str)
         ):
             refuse("invalid_source", "Attachment location/name is invalid", (asset_id,))
-        pointer = f"attachments.json:{index}"
         asset_records[asset_id] = record
         common = {
             "asset_id": asset_id,
@@ -133,7 +157,7 @@ def normalize_attachments(
             "evidence": (pointer,),
         }
         video = reviewed_video(record, refuse)
-        if kind in {3, 8}:
+        if kind in {2, 3, 8}:
             if asset_id in states:
                 refuse(
                     "invalid_source",
@@ -151,6 +175,11 @@ def normalize_attachments(
                         "External URL scheme is unsupported",
                         (asset_id,),
                     )
+            elif kind == 2:
+                uri = external_file_uri(location, refuse)
+                common["display_name"] = (
+                    record.get("Name") or PureWindowsPath(location).name
+                )
             else:
                 directory = PureWindowsPath(location)
                 if not directory.is_absolute():
@@ -169,7 +198,7 @@ def normalize_attachments(
             assets.append(
                 Asset(
                     **common,
-                    role="url" if kind == 3 else "directory",
+                    role={2: "file", 3: "url", 8: "directory"}[kind],
                     availability="external",
                     external_uri=uri,
                     video_presentation=video,
@@ -424,8 +453,20 @@ def normalize_attachments(
                 references=(asset_id,),
             )
         )
+    refuse = source_refuse
+    for asset in assets:
+        if asset.role == "file" and asset.availability == "external":
+            local_member = asset.owner + "/" + PureWindowsPath(asset.original_name).name
+            if local_member in names and local_member not in members.values():
+                refuse(
+                    "invalid_source",
+                    "External file has an unassigned local payload claim",
+                    (asset.owner, asset.asset_id),
+                    evidence=asset.evidence + ("payload:" + local_member,),
+                    guidance="Review the external-file role and conflicting archive payload declaration; declare an internal attachment separately when it owns these bytes.",
+                )
     if set(states) - ({a.asset_id for a in assets} | {d.key for d in documents}):
-        refuse("invalid_source", "File states refer to an absent attachment")
+        source_refuse("invalid_source", "File states refer to an absent attachment")
     for asset_id, owner, location, declared, pointer in absent_records:
         if declared == 0:
             stem = PurePosixPath(location).stem

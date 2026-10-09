@@ -64,10 +64,50 @@ def scope_records(records, physical_members, refuse, uuid):
     brain = uuid(records["meta.json"][0]["BrainId"])
     identities = set()
     thoughts = {}
+    private_ids = {
+        r.get("Id")
+        for r in records["thoughts.json"]
+        if r.get("ForgottenDateTime") and type(r.get("Id")) is str
+    }
+
+    def attachment_problem(record, index, message):
+        # Ownership is not yet fully trusted. Never expose a record that names
+        # a forgotten subject; only canonical identifiers enter diagnostics.
+        if contains_omitted_identity(json.dumps(record), private_ids):
+            refuse("invalid_source", message)
+        subjects = []
+        for field in ("SourceId", "Id"):
+            try:
+                subjects.append(uuid(record.get(field)))
+            except ValueError, TypeError, AttributeError:
+                pass
+        refuse(
+            "invalid_source",
+            message,
+            tuple(dict.fromkeys(subjects)),
+            evidence=(f"attachments.json:{index}",),
+            guidance=(
+                "Review the external-file attachment identity and ownership in the source records; external targets are not accessed."
+                if record.get("Type") == 2
+                else "Review the attachment identity and ownership in the source records."
+            ),
+        )
+
     for name in ("thoughts.json", "links.json", "attachments.json"):
-        for record in records[name]:
-            key = uuid(record.get("Id"))
+        for index, record in enumerate(records[name]):
+            try:
+                key = uuid(record.get("Id"))
+            except ValueError, TypeError, AttributeError:
+                if name == "attachments.json":
+                    attachment_problem(record, index, "Invalid attachment identity")
+                raise
             if key in identities or record.get("BrainId") != brain:
+                if name == "attachments.json":
+                    attachment_problem(
+                        record,
+                        index,
+                        "Invalid attachment identity or collection ownership",
+                    )
                 refuse(
                     "invalid_source", "Invalid live identity or collection ownership"
                 )
@@ -100,14 +140,17 @@ def scope_records(records, physical_members, refuse, uuid):
         refuse("invalid_source", "A live identity also occurs in deleted history")
     dropped_members = set()
     claimed_members = {}
-    for record in records["attachments.json"]:
-        owner = uuid(record.get("SourceId"))
+    for index, record in enumerate(records["attachments.json"]):
+        try:
+            owner = uuid(record.get("SourceId"))
+        except ValueError, TypeError, AttributeError:
+            attachment_problem(record, index, "Invalid attachment ownership")
         if owner not in thoughts:
-            refuse("invalid_source", "Invalid attachment ownership")
+            attachment_problem(record, index, "Invalid attachment ownership")
         location = record.get("Location")
         if type(location) is not str or not location:
-            refuse("invalid_source", "Invalid attachment location")
-        if record.get("Type") not in {3, 8}:
+            attachment_problem(record, index, "Invalid attachment location")
+        if record.get("Type") not in {2, 3, 8}:
             path = PurePosixPath(location)
             if (
                 path.is_absolute()

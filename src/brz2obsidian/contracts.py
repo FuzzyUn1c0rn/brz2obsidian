@@ -215,7 +215,7 @@ class SourceAccounting(Contract):
 
 
 class SourceSnapshot(Contract):
-    contract_version: Literal[3] = 3
+    contract_version: Literal[4] = 4
     identity: SourceIdentity
     collection_title: str
     entry_key: str | None
@@ -247,7 +247,7 @@ class SourcePolicy(Contract):
     module_id: str
     module_version: str
     format_version: str
-    contract_version: Literal[3] = 3
+    contract_version: Literal[4] = 4
     entry_required: bool = True
     finding_dispositions: tuple[FindingDisposition, ...] = ()
 
@@ -450,7 +450,7 @@ class RunResult(Contract):
     schema_: Literal["brz2obsidian.result"] = Field(
         default="brz2obsidian.result", alias="schema"
     )
-    schema_version: Literal[3] = 3
+    schema_version: Literal[4] = 4
     converter_version: str
     operation: Literal["inspect", "convert"]
     outcome: Literal["clean", "warnings", "refused", "failed"]

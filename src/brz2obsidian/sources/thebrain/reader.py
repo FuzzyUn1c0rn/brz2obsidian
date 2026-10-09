@@ -33,7 +33,7 @@ from .scope import records_json, scope_records
 from .semantics import validate_semantic_fields
 
 
-def _refuse(code, message, affected=()):
+def _refuse(code, message, affected=(), *, evidence=(), guidance=None):
     raise MigrationRefused(
         (
             Issue(
@@ -41,7 +41,13 @@ def _refuse(code, message, affected=()):
                 phase="source",
                 message=message,
                 affected=affected,
-                guidance="Investigate the source, set a valid Home in TheBrain, and re-export.",
+                evidence=evidence,
+                guidance=guidance
+                or (
+                    "Set a valid Home in TheBrain and re-export."
+                    if code == "invalid_entry"
+                    else "Review the affected source records and archive evidence before retrying."
+                ),
             ),
         )
     )
@@ -451,7 +457,7 @@ class BrzSession:
         identity = SourceIdentity(
             source_id=brain_id,
             module_id="thebrain-brz",
-            module_version="3",
+            module_version="4",
             format_version="5",
             source_sha256=source_hash,
             snapshot_digest=snapshot_digest,

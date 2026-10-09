@@ -15,6 +15,32 @@ they are bounded synthetic coverage. Complete four-original preservation and
 native actual-output review passed; independent final review and actual-user
 acceptance remain pending gates in the [current frontier](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/8).
 
+## External file references (version 4)
+
+The current module/profile and snapshot/policy contracts use version 4, with
+matching renderer and migration result/record versions. Thought-owned
+`SourceType=2`, `Type=2`, `NoteType=0` records with coherent identities, integer
+nonnegative lengths and ordinary boolean flags represent external files.
+Reviewed locations are safe absolute drive-qualified Windows file paths; UNC,
+relative, drive-relative, device paths, traversal, alternate streams and unsafe
+Windows filename shapes remain refusals. Extensions do not change this role.
+
+Each identity receives an encoded file URI and a distinct ordinary Resources
+entry, preserving original location and metadata in scoped evidence. An external
+file alone makes an included owner content-bearing. Historical lengths do not
+assert accessibility: inspect/convert never check, open, execute, fetch, copy or
+relocate external targets. External files contribute no copied payloads, missing
+payload gaps or authored-reference counts. Conflicting local file states and
+unassigned same-owner archive payload claims refuse; a separately declared
+same-named internal file keeps its own identity and intact bytes.
+
+Public actual-ZIP Workflow and thin CLI controls establish this bounded support.
+The complete Red vs Blue archive, raw-source audit, native comparison and final
+user presentation verdict remain separate gates under issue #78. Attachment
+refusals identify included owners/attachments and evidence with role-specific
+advice; Home guidance is reserved for invalid-entry failures. Forgotten owners
+and excluded associations remain omitted before role interpretation.
+
 ## Records, Home and relationships
 
 Known root files are `meta.json`, `thoughts.json`, `links.json`,

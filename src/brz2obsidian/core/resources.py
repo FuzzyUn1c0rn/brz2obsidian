@@ -11,7 +11,10 @@ def resource_owners(snapshot):
     return {
         asset.owner
         for asset in snapshot.assets
-        if (asset.availability == "external" and asset.role in {"url", "directory"})
+        if (
+            asset.availability == "external"
+            and asset.role in {"file", "url", "directory"}
+        )
         or (
             asset.availability == "present"
             and asset.role in {"file", "image"}

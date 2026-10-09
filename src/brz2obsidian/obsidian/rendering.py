@@ -46,17 +46,17 @@ def _json(value):
 def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     snapshot = plan.analysis.snapshot
     if (
-        run_metadata.renderer_version != "3"
-        or snapshot.contract_version != 3
-        or plan.analysis.policy.contract_version != 3
+        run_metadata.renderer_version != "4"
+        or snapshot.contract_version != 4
+        or plan.analysis.policy.contract_version != 4
     ):
         raise MigrationRefused(
             (
                 Issue(
                     code="unsupported_format",
                     phase="rendering",
-                    message="Renderer requires version-3 contracts and renderer metadata",
-                    guidance="Use the current contract and set renderer_version to 3.",
+                    message="Renderer requires version-4 contracts and renderer metadata",
+                    guidance="Use the current contract and set renderer_version to 4.",
                 ),
             )
         )
@@ -338,6 +338,11 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     )
     report = "# Migration report\n\nOpen the root Home note to begin. Safe original note bytes are retained under Attachments. Forgotten thoughts are excluded by default; unsafe originals and unscopable history are omitted. Counts describe included scope.\n\n"
     report += f"Created {plan.counts.planned_notes} thought notes; preserved {plan.counts.planned_assets} present payloads.\n\n"
+    external_files = sum(
+        a.role == "file" and a.availability == "external" for a in snapshot.assets
+    )
+    if external_files:
+        report += f"Retained {external_files} external file references as ordinary Resources links. Their original locations remain in migration-record.json. External targets were not checked, opened or copied; historical lengths do not establish accessibility.\n\n"
     report += "Unsupported feature classes are refused explicitly.\n"
     report += "\n[[Vault guide.md|Vault guide]] explains manual full-template selection for new objects, direct membership edits on existing notes, canonical properties and future-category starters. Bundled Templates is configured for insertion-day ISO dates; update dates are maintained explicitly.\n"
     report += (
@@ -408,7 +413,7 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     }
     record = {
         "schema": "brz2obsidian.migration",
-        "schema_version": 3,
+        "schema_version": 4,
         "converter_version": run_metadata.converter_version,
         "renderer_version": run_metadata.renderer_version,
         "source_identity": plan.source_identity.model_dump(),

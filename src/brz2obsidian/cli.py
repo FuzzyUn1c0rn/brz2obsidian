@@ -75,6 +75,10 @@ def main(argv=None):
             print("Pending: " + ", ".join(result.inspection.pending_checks))
         for issue in result.issues:
             print(f"{issue.code}: {issue.message} {issue.guidance}")
+            if issue.affected:
+                print("Affected: " + ", ".join(issue.affected))
+            if issue.evidence:
+                print("Evidence: " + ", ".join(issue.evidence))
             if issue.leftover_path:
                 print(f"Owned staging left at: {issue.leftover_path}")
     return {"clean": 0, "warnings": 2, "refused": 1, "failed": 1}[result.outcome]
