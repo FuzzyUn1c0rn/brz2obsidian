@@ -235,7 +235,7 @@ def test_opaque_classification_and_owned_icons_refuse_inconsistent_facts(
     assert list(tmp_path.glob(".brz2obsidian-*")) == []
 
 
-@pytest.mark.parametrize("version", [1, 2, 4])
+@pytest.mark.parametrize("version", [1, 2, 3, 5])
 @pytest.mark.parametrize("contract", ["snapshot", "policy"])
 def test_opaque_current_contract_rejects_other_versions_at_constructor_and_public_core(
     tmp_path, version, contract

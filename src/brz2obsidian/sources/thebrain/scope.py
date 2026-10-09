@@ -70,6 +70,86 @@ def scope_records(records, physical_members, refuse, uuid):
         if r.get("ForgottenDateTime") and type(r.get("Id")) is str
     }
 
+    omitted = set(private_ids)
+    for record in records["links.json"]:
+        if (
+            record.get("ThoughtIdA") in private_ids
+            or record.get("ThoughtIdB") in private_ids
+        ) and type(record.get("Id")) is str:
+            omitted.add(record["Id"])
+
+    associations = {
+        "SourceId",
+        "ThoughtId",
+        "AttachmentId",
+        "ObjectId",
+        "ItemId",
+        "LinkId",
+        "TargetId",
+    }
+
+    def decoded(value):
+        if not isinstance(value, str) or value.lstrip()[:1] not in {"{", "[", '"'}:
+            return None
+
+        def pairs(entries):
+            # Inspection must see every ownership declaration, including duplicate
+            # keys in an otherwise opaque serialized string. Never rewrite it.
+            result = {}
+            for key, entry in entries:
+                result[key] = [result[key], entry] if key in result else entry
+            return result
+
+        try:
+            return json.loads(value, parse_float=Decimal, object_pairs_hook=pairs)
+        except ValueError:
+            return None
+
+    def identifies_omitted(value):
+        if isinstance(value, str):
+            return (
+                value in omitted
+                or (
+                    _UUID_TEXT.fullmatch(value) is not None and value.lower() in omitted
+                )
+                or identifies_omitted(decoded(value))
+            )
+        if isinstance(value, (list, tuple)):
+            return any(identifies_omitted(entry) for entry in value)
+        return False
+
+    def associated(value):
+        if isinstance(value, dict):
+            return any(
+                (field in associations and identifies_omitted(entry))
+                or associated(entry)
+                for field, entry in value.items()
+            )
+        if isinstance(value, (list, tuple)):
+            return any(associated(entry) for entry in value)
+        if isinstance(value, str):
+            return associated(decoded(value))
+        return False
+
+    def extend_omitted():
+        if not omitted:
+            return
+        changed = True
+        while changed:
+            changed = False
+            for collection in records.values():
+                for record in collection:
+                    if record.get("Id") in omitted:
+                        continue
+                    if associated(record) and type(record.get("Id")) is str:
+                        omitted.add(record["Id"])
+                        changed = True
+
+    # This conservative closure controls disclosure only; all identities,
+    # ownership and forgotten markers must still pass validation below.
+    extend_omitted()
+    private_ids = omitted
+
     def attachment_problem(record, index, message):
         # Ownership is not yet fully trusted. Never expose a record that names
         # a forgotten subject; only canonical identifiers enter diagnostics.
@@ -203,69 +283,7 @@ def scope_records(records, physical_members, refuse, uuid):
             refuse("invalid_source", "Multiple declarations assign one payload")
     if not excluded:
         return records, excluded, dropped_members, ()
-    associations = {
-        "SourceId",
-        "ThoughtId",
-        "AttachmentId",
-        "ObjectId",
-        "ItemId",
-        "LinkId",
-        "TargetId",
-    }
-
-    def decoded(value):
-        if not isinstance(value, str) or value.lstrip()[:1] not in {"{", "[", '"'}:
-            return None
-
-        def pairs(entries):
-            # Inspection must see every ownership declaration, including duplicate
-            # keys in an otherwise opaque serialized string. Never rewrite it.
-            result = {}
-            for key, entry in entries:
-                result[key] = [result[key], entry] if key in result else entry
-            return result
-
-        try:
-            return json.loads(value, parse_float=Decimal, object_pairs_hook=pairs)
-        except ValueError:
-            return None
-
-    def identifies_omitted(value):
-        if isinstance(value, str):
-            return (
-                value in omitted
-                or (
-                    _UUID_TEXT.fullmatch(value) is not None and value.lower() in omitted
-                )
-                or identifies_omitted(decoded(value))
-            )
-        if isinstance(value, (list, tuple)):
-            return any(identifies_omitted(entry) for entry in value)
-        return False
-
-    def associated(value):
-        if isinstance(value, dict):
-            return any(
-                (field in associations and identifies_omitted(entry))
-                or associated(entry)
-                for field, entry in value.items()
-            )
-        if isinstance(value, (list, tuple)):
-            return any(associated(entry) for entry in value)
-        if isinstance(value, str):
-            return associated(decoded(value))
-        return False
-
-    changed = True
-    while changed:
-        changed = False
-        for collection in records.values():
-            for record in collection:
-                if record.get("Id") in omitted:
-                    continue
-                if associated(record) and type(record.get("Id")) is str:
-                    omitted.add(record["Id"])
-                    changed = True
+    extend_omitted()
     tokens = set(omitted)
     for key in omitted:
         try:

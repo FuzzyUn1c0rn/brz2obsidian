@@ -435,3 +435,150 @@ def test_cli_refusal_identifies_external_attachment_without_home_advice(
             )
             assert actual == json.loads(expected.model_dump_json(by_alias=True))
     assert not (tmp_path / "vault").exists()
+
+
+def association(identity, form):
+    if form == "direct":
+        return {"AttachmentId": identity}
+    if form == "nested":
+        return {"Metadata": {"Rows": [{"AttachmentId": identity.upper()}]}}
+    if form == "serialized":
+        return {"Metadata": json.dumps({"ObjectId": identity})}
+    return {
+        "Metadata": '{"AttachmentId":"public","AttachmentId":'
+        + json.dumps(identity)
+        + "}"
+    }
+
+
+@pytest.mark.parametrize(
+    "form", ["direct", "nested", "serialized", "duplicate_serialized"]
+)
+@pytest.mark.parametrize("reverse", [False, True])
+def test_invalid_transitive_excluded_attachment_refuses_privately_in_workflow_and_cli(
+    tmp_path, capsys, form, reverse
+):
+    private_ids = [f"aaaaaaaa-0000-4000-8000-{n:012x}" for n in (1, 2, 3)]
+    forgotten = thought(OWNER, "Private owner")
+    forgotten["ForgottenDateTime"] = "2026-10-01T12:00:00Z"
+    source = resource_archive(
+        tmp_path / "source.brz",
+        [
+            (
+                {"SourceId": OWNER, "Type": 2, "Location": r"C:\private\original.pdf"},
+                None,
+            ),
+            (
+                {
+                    "Type": 2,
+                    "Location": r"C:\private\association.pdf",
+                    **association(private_ids[0], form),
+                },
+                None,
+            ),
+            (
+                {
+                    "Type": 2,
+                    "Location": r"C:\private\transitive.pdf",
+                    "BrainId": "cccccccc-0000-4000-8000-000000000001",
+                    **association(private_ids[1], form),
+                },
+                None,
+            ),
+        ],
+        thoughts=[forgotten],
+        reverse=reverse,
+    )
+    original = source.read_bytes()
+    operation = default_workflow()
+    for result in (
+        operation.inspect(source),
+        operation.convert(source, tmp_path / "vault"),
+    ):
+        assert result.outcome == "refused" and result.issues[0].code == "invalid_source"
+        assert result.issues[0].affected == result.issues[0].evidence == ()
+        for private_id in [OWNER, *private_ids]:
+            assert private_id not in result.model_dump_json()
+    for json_output in (False, True):
+        for args in (
+            ["inspect", str(source)],
+            ["convert", str(source), str(tmp_path / "vault")],
+        ):
+            assert main([*args, *(["--json"] if json_output else [])]) == 1
+            captured = capsys.readouterr()
+            assert captured.err == "" and "attachments.json:" not in captured.out
+            assert all(
+                private_id not in captured.out for private_id in [OWNER, *private_ids]
+            )
+    assert source.read_bytes() == original and not (tmp_path / "vault").exists()
+
+    def correct_collection(parts):
+        rows = [json.loads(line) for line in parts["attachments.json"].splitlines()]
+        for row in rows:
+            if row["Id"] == private_ids[2]:
+                row["BrainId"] = "11111111-1111-4111-8111-111111111111"
+        parts["attachments.json"] = "\n".join(json.dumps(row) for row in rows).encode()
+        meta = json.loads(parts["meta.json"])
+        meta["AttachmentFileStates"].update(
+            zip(private_ids, (0, {"bad": 1}, False), strict=True)
+        )
+        parts["meta.json"] = json.dumps(meta).encode()
+
+    rewrite(source, correct_collection)
+    assert operation.inspect(source).outcome == "clean"
+    assert operation.convert(source, tmp_path / "valid-vault").outcome == "clean"
+    output = b"\n".join(
+        p.read_bytes() for p in (tmp_path / "valid-vault").rglob("*") if p.is_file()
+    )
+    assert all(
+        private_id.encode() not in output for private_id in [OWNER, *private_ids]
+    )
+
+
+@pytest.mark.parametrize("state", [0, -1, 4, True, None, "1", []])
+def test_malformed_external_state_refuses_with_context_in_workflow_and_cli(
+    tmp_path, capsys, state
+):
+    source = resource_archive(
+        tmp_path / "source.brz",
+        [({"Type": 2, "Location": r"C:\unavailable\manual.pdf"}, None)],
+    )
+    asset_id = "aaaaaaaa-0000-4000-8000-000000000001"
+
+    def malformed_state(parts):
+        meta = json.loads(parts["meta.json"])
+        meta["AttachmentFileStates"][asset_id] = state
+        parts["meta.json"] = json.dumps(meta).encode()
+
+    rewrite(source, malformed_state)
+    original = source.read_bytes()
+    operation = default_workflow()
+    for result in (
+        operation.inspect(source),
+        operation.convert(source, tmp_path / "vault"),
+    ):
+        assert result.outcome == "refused" and result.issues[0].code == "invalid_source"
+        issue = result.issues[0]
+        assert set(issue.affected) == {HOME, asset_id}
+        assert set(issue.evidence) == {"attachments.json:1", "meta.json"}
+        assert "external-file" in issue.guidance and "Home" not in issue.guidance
+    for json_output in (False, True):
+        for args in (
+            ["inspect", str(source)],
+            ["convert", str(source), str(tmp_path / "vault")],
+        ):
+            assert main([*args, *(["--json"] if json_output else [])]) == 1
+            captured = capsys.readouterr()
+            assert captured.err == ""
+            assert all(
+                part in captured.out
+                for part in (
+                    HOME,
+                    asset_id,
+                    "attachments.json:1",
+                    "meta.json",
+                    "external-file",
+                )
+            )
+            assert "Home" not in captured.out
+    assert source.read_bytes() == original and not (tmp_path / "vault").exists()

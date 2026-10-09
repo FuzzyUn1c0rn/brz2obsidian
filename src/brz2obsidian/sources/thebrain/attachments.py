@@ -72,9 +72,22 @@ def normalize_attachments(
     source_refuse = refuse
     states = meta["AttachmentFileStates"]
     names = set(archive.namelist())
+    state_owners = {
+        record["Id"]: (index, record) for index, record in enumerate(records)
+    }
     for key, state in states.items():
         uuid(key)
         if type(state) is not int or state not in {1, 2, 3}:
+            if key in state_owners:
+                index, record = state_owners[key]
+                contextual_refuse = _attachment_refusal(
+                    source_refuse,
+                    record["SourceId"],
+                    key,
+                    f"attachments.json:{index}",
+                    record.get("Type") == 2,
+                )
+                contextual_refuse("invalid_source", "Invalid attachment file state")
             refuse("invalid_source", "Invalid attachment file state", (key,))
     for index, record in enumerate(records):
         asset_id, owner = uuid(record["Id"]), uuid(record["SourceId"])
