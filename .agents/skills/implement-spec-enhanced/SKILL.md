@@ -52,9 +52,11 @@ Native investigation and approved presentation follow the repository guidance.
 2. The implementer builds the ticket through its accepted public testing seams,
    consulting `tdd` for behavioral changes. Synchronize with the current
    integration tip and capture its full ID as `base_ref` at synchronization,
-   before the final candidate checks. Run required checks through the repository
-   runner and retain its receipts. Commit the completed changes and report
-   the commit and clean checkout to the
+   before the final candidate checks. Follow the
+   [stable-candidate checkpoint](../../../docs/testing.md#stable-candidate-checkpoint):
+   finish focused controls and known findings, commit stable source, then run
+   required completion checks through the repository runner and retain receipts
+   bound to that commit. Report the checked commit and clean checkout to the
    coordinator before publication. The coordinator then assigns the exact unused
    absolute attempt for that ticket/commit and returns it with the assessed
    checkout, candidate-input path, and candidate publication command. The initial
