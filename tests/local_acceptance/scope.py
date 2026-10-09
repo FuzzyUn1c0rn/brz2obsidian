@@ -107,7 +107,7 @@ def scope(raw, archive):
     dropped = set()
     for key, row in attachments.items():
         assert row["SourceId"] in thoughts, "raw attachment owner"
-        if row["Type"] not in {3, 8}:
+        if row["Type"] not in {2, 3, 8}:
             path = row["Location"]
             assert (
                 str(PurePosixPath(path)) == path
@@ -248,6 +248,8 @@ def scope(raw, archive):
     result.unsafe = unsafe
     result.dropped_members = dropped
     result.documents = {}
+    result.scoped_documents = {}
+    result.text_edits = {}
     result.unsafe_originals = set()
     assert {
         n for n in archive.namelist() if n not in raw and not n.endswith("/")

@@ -412,7 +412,7 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     report += gap_report(plan)
     if plan.counts.image_presentation_normalizations:
         report += "\n> [!warning] Image sizing normalized\n> Original image sizing declarations use ordinary responsive inline Markdown presentation; exact percentage sizing is not reproduced. Review placement and readability in each affected note, and adjust manually if desired. Images retain their original bytes and aspect ratio.\n\n"
-        for document in snapshot.documents:
+        for document in sorted(snapshot.documents, key=lambda d: d.key):
             target = next(t for t in plan.item_targets if t.item_key == document.owner)
             for reference in document.references:
                 normalization = reference.presentation_normalization

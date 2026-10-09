@@ -30,7 +30,19 @@ INPUTS = {
         320594486,
         "2b24c1d21b4090f3b0ed3ec0227f269b8c7a4e5b6832ada0e244a1dcfc941ced",
     ),
+    "E": (
+        219504950,
+        "bc55f68c9ab3febaa770bfc7a9a90621bcd82107d876664371e1ff8558b4cf68",
+    ),
 }
+SOURCE_E_RAW_GATES = {"thoughts.json": 756, "links.json": 963, "attachments.json": 1364}
+SOURCE_E_GATES = {
+    "external_files": 17,
+    "literal_owners": 5,
+    "image_presentation_normalizations": 2,
+    "sized_image_owners": 2,
+}
+
 SOURCE_D_GATES = {
     "source_items": 570,
     "ordinary_items": 521,
@@ -65,6 +77,19 @@ def fingerprint(source):
 
 def check_input(source, expected):
     assert fingerprint(source) == expected, "accepted source changed"
+
+
+def inventory_before_inclusion(source):
+    """Count complete raw streams without consulting converter inclusion facts."""
+    with ZipFile(source) as archive:
+        raw = read_source(archive)
+        return {name: len(raw[name]) for name in ROOTS}
+
+
+def check_source_e_raw_inventory(inventory):
+    assert all(
+        inventory[name] == count for name, count in SOURCE_E_RAW_GATES.items()
+    ), "exact E complete raw inventory before inclusion"
 
 
 def check_reordering(source, reordered):
@@ -103,7 +128,41 @@ def reordered_archive(source, destination):
     check_reordering(source, destination)
 
 
+def inspect(source):
+    env = dict(os.environ, PYTHONIOENCODING="utf-8")
+    result = subprocess.run(
+        [sys.executable, "-m", "brz2obsidian", "inspect", str(source), "--json"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    assert result.returncode in {0, 2} and not result.stderr, "accepted inspect exit"
+    response = json.loads(result.stdout)
+    assert (
+        response["operation"] == "inspect"
+        and response["outcome"] in {"clean", "warnings"}
+        and response["receipt"] is None
+        and response["schema_version"] == 6
+    ), "inspect envelope/no publication receipt"
+    return response
+
+
+def check_inspection(inspected, converted):
+    assert (
+        inspected["outcome"] == converted["outcome"]
+        and inspected["issues"] == converted["issues"]
+        and inspected["source_identity"] == converted["source_identity"]
+    ), "fresh inspection/conversion identity and diagnostic parity"
+    for key, value in inspected["counts"].items():
+        if not key.startswith("actual_"):
+            assert converted["counts"][key] == value, (
+                "inspect/convert analyzed count parity"
+            )
+
+
 def convert(source, destination):
+    inspected = inspect(source)
     environment = os.environ.copy()
     environment["PYTHONIOENCODING"] = "utf-8"
     completed = subprocess.run(
@@ -130,6 +189,7 @@ def convert(source, destination):
         and result["receipt"]["verified"]
     ), "CLI outcome/receipt"
     assert not completed.stderr, "CLI stderr"
+    check_inspection(inspected, result)
     return result
 
 
@@ -160,6 +220,12 @@ def main():
         help="Exact original Management & Leadership export; no recovery/re-export substitute",
     )
     parser.add_argument(
+        "--source-e",
+        type=Path,
+        required=True,
+        help="Exact original Red vs Blue export; no re-export substitute",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         required=True,
@@ -171,21 +237,26 @@ def main():
         "B": args.source_b,
         "C": args.source_c,
         "D": args.source_d,
+        "E": args.source_e,
     }
     run_acceptance(source_paths, args.output)
 
 
 def run_acceptance(source_paths, output, pins=None):
-    """Audit twelve complete outputs; explicit pins support synthetic examples.
+    """Audit fifteen complete outputs; explicit pins support synthetic examples.
 
     The CLI always requires the accepted original pins. This callable permits
     independently fingerprinted synthetic inputs for reusable public proof.
     """
-    assert set(source_paths) == set("ABCD"), "four mandatory original inputs"
+    assert set(source_paths) == set("ABCDE"), "five mandatory original inputs"
     pins = INPUTS if pins is None else pins
-    assert set(pins) == set("ABCD"), "four mandatory fingerprint pins"
+    assert set(pins) == set("ABCDE"), "five mandatory fingerprint pins"
+    inventories = {}
     for key, source in source_paths.items():
         check_input(source, pins[key])
+        inventories[key] = inventory_before_inclusion(source)
+        if key == "E" and pins[key] == INPUTS["E"]:
+            check_source_e_raw_inventory(inventories[key])
     # Explicit per-process source selection also flows into the CLI subprocess.
     expected_src = Path(__file__).resolve().parents[2] / "src"
     assert os.environ.get("PYTHONPATH") and expected_src.resolve() in {
@@ -222,11 +293,17 @@ def run_acceptance(source_paths, output, pins=None):
             ), (
                 "agreed D scoped inventory gates (additional to complete raw-source proof)"
             )
+        if key == "E" and pins[key] == INPUTS["E"]:
+            assert all(
+                summaries[key][field] == value
+                for field, value in SOURCE_E_GATES.items()
+            ), "agreed E independent scoped adaptations and distinct owners"
         check_run_result(result, destination, summaries[key])
         check_input(source, pins[key])
         operations.append(
             {
                 "source": key,
+                "raw_inventory_before_inclusion": inventories[key],
                 "variant": "exact",
                 "source_fingerprint": pins[key],
                 "summary": summaries[key],
@@ -245,6 +322,7 @@ def run_acceptance(source_paths, output, pins=None):
         operations.append(
             {
                 "source": key,
+                "raw_inventory_before_inclusion": inventories[key],
                 "variant": "repeat",
                 "source_fingerprint": pins[key],
                 "summary": summaries[key],
@@ -270,6 +348,7 @@ def run_acceptance(source_paths, output, pins=None):
         operations.append(
             {
                 "source": key,
+                "raw_inventory_before_inclusion": inventories[key],
                 "variant": "reordered",
                 "source_fingerprint": shuffled_fingerprint,
                 "summary": summaries[key],

@@ -33,6 +33,7 @@ from .facts import (
 from .gaps import derive_gaps, diagnostic_targets
 from .scope import dump_json, scope
 from .support import check_support_content
+from .text import inline_candidates, literal_edits
 
 ROOTS = (
     "meta.json",
@@ -191,6 +192,9 @@ def check_vault(source, vault):
                 assert not raw.unsafe(body), (
                     "residual excluded identity in supplied body"
                 )
+                raw.scoped_documents[a["Id"]] = body
+                body, edits = literal_edits(body)
+                raw.text_edits[a["Id"]] = edits
                 raw.documents[a["Id"]] = body
         assert (
             record["source_identity"]["source_id"] == raw["meta.json"][0]["BrainId"]
@@ -232,7 +236,7 @@ def check_vault(source, vault):
         for attachment in raw["attachments.json"]:
             kind = attachment["Type"]
             if (
-                kind in {3, 8, 15}
+                kind in {2, 3, 8, 15}
                 or attachment["Id"] in raw.unsafe_originals
                 or attachment["Id"] in raw.gaps
             ):
@@ -313,6 +317,78 @@ def check_vault(source, vault):
         )
         references = check_documents(raw, record, documents, names, targets)
         summary.update(asset_summary)
+        display_issues = [
+            i for i in record["issues"] if i["code"] == "image_presentation_normalized"
+        ]
+        sized = [
+            (key, i, ref)
+            for key, i, ref in references
+            if ref["presentation_normalization"]
+        ]
+        assert len(display_issues) == len(sized), "exact sizing warning cardinality"
+        display_by_ref = {issue["affected"][-1]: issue for issue in display_issues}
+        assert len(display_by_ref) == len(sized), (
+            "unique sizing warning reference identities"
+        )
+        report = (vault / "MIGRATION REPORT.md").read_text(encoding="utf-8")
+        for key, i, ref in sized:
+            owner = next(
+                a["SourceId"] for a in raw["attachments.json"] if a["Id"] == key
+            )
+            issue = display_by_ref[f"reference:{key}:{i}"]
+            pointer = "attachments.json:" + str(
+                next(i for i, a in enumerate(raw["attachments.json"]) if a["Id"] == key)
+            )
+            assert issue["affected"] == [
+                owner,
+                key,
+                ref["target"],
+                f"reference:{key}:{i}",
+            ], "complete sizing affected identities"
+            assert (
+                issue["evidence"] == [pointer]
+                and issue["severity"] == "warning"
+                and issue["phase"] == "analysis"
+                and issue["rule_id"] is None
+            ), "sizing evidence/disposition distinct from source gap"
+            declaration = ref["presentation_normalization"]["declaration"]
+            assert (
+                declaration in issue["message"]
+                and "responsive" in issue["message"]
+                and issue["guidance"]
+            ), "actionable original sizing notice"
+            assert (
+                names[owner] in report
+                and declaration in report
+                and "[!warning] Image sizing normalized" in report
+                and "responsive" in report
+            ), "affected linked note and honest responsive notice"
+        summary["source_warning_owners"] = summary["warning_owners"]
+        summary["warning_owners"] = len(
+            {targets[k]["owner"] for k in raw.expected_warnings}
+            | {
+                next(a["SourceId"] for a in raw["attachments.json"] if a["Id"] == key)
+                for key, _, _ in sized
+            }
+        )
+        summary["warnings"] += len(sized)
+        summary["text_adaptations"] = sum(map(len, raw.text_edits.values()))
+        summary["literal_owners"] = len(
+            {
+                a["SourceId"]
+                for a in raw["attachments.json"]
+                if raw.text_edits.get(a["Id"])
+            }
+        )
+        summary["image_presentation_normalizations"] = len(sized)
+        summary["sized_image_owners"] = len(
+            {
+                a["SourceId"]
+                for a in raw["attachments.json"]
+                if any(key == a["Id"] for key, _, _ in sized)
+            }
+        )
+        summary["external_files"] = sum(a["Type"] == 2 for a in raw["attachments.json"])
         check_accounting(raw, record, checked, references)
         files = check_actual_files(vault, record, targets, names, raw, summary)
         check_adaptations(raw, record, documents, names, targets)
@@ -345,7 +421,7 @@ def check_vault(source, vault):
         ),
         "attachment_records": len(raw["attachments.json"]),
         "raw_local_payloads": sum(
-            a["Type"] not in {3, 8, 15} and raw_member(a) in archive.namelist()
+            a["Type"] not in {2, 3, 8, 15} and raw_member(a) in archive.namelist()
             for a in raw["attachments.json"]
         ),
         "url_attachments": sum(a["Type"] == 3 for a in raw["attachments.json"]),
@@ -581,7 +657,7 @@ def check_items(raw, record, archive, vault, assets):
             if text.strip():
                 content.add(owner)
         elif a["Id"] not in raw.gaps and (
-            kind in {3, 8} or (kind in {1, 12} and a["DataLength"] > 0)
+            kind in {2, 3, 8} or (kind in {1, 12} and a["DataLength"] > 0)
         ):
             content.add(owner)
     created = (content & thoughts.keys()) | {home} | definitions | assigned_types.keys()
@@ -1094,7 +1170,7 @@ def inline_display(value):
     value = re.sub(r"(?<!`)(`+)(?!`)(.*?)\1(?!`)", code, value, flags=re.DOTALL)
     value = re.sub(
         r'\\([!"#$%&\'()*+,\-./:;<=>?@\[\]\\^_`{|}~])',
-        lambda match: keep(match[1]),
+        lambda match: keep(match[0] if match[1] == "<" else match[1]),
         value,
     )
     value = re.sub(
@@ -1109,119 +1185,13 @@ def inline_display(value):
     return re.sub(r"\x00([0-9]+)\x00", lambda match: protected[int(match[1])], value)
 
 
-def inline_candidates(body):
-    """Find balanced active phrases, distinguishing bracket text from links."""
-    protected = []
-    fence = None
-    offset = 0
-    paragraph = False
-    for line in body.splitlines(keepends=True):
-        marker = re.match(r" {0,3}(`{3,}|~{3,})", line)
-        if fence or marker:
-            protected.append((offset, offset + len(line)))
-            if (
-                fence
-                and marker
-                and marker[1][0] == fence[0]
-                and len(marker[1]) >= len(fence)
-            ):
-                fence = None
-            elif not fence:
-                fence = marker[1]
-        elif line.startswith(("    ", "\t")) and not paragraph:
-            protected.append((offset, offset + len(line)))
-        else:
-            paragraph = bool(line.strip())
-        offset += len(line)
-    protected.extend(
-        (m.start(), m.end())
-        for m in re.finditer(r"<!--.*?-->|(`+)(?!`)(.*?)\1(?!`)", body, re.DOTALL)
-    )
-    mask = list(body)
-    for start, end in protected:
-        mask[start:end] = " " * (end - start)
-    scan = "".join(mask)
-    # Balanced brackets recognize whole outer phrases, including an image inside
-    # a forgotten thought link. Escaped brackets never change nesting depth.
-    candidates = []
-    cursor = 0
-    while cursor < len(scan):
-        if scan[cursor : cursor + 9] == "<brain://":
-            finish = scan.find(">", cursor + 1)
-            if finish >= 0:
-                candidates.append(
-                    (
-                        cursor,
-                        finish + 1,
-                        False,
-                        scan[cursor + 1 : finish],
-                        cursor + 1,
-                        finish,
-                    )
-                )
-                cursor = finish + 1
-                continue
-        if scan[cursor] == "\\":
-            cursor += 2
-            continue
-        image = scan[cursor : cursor + 2] == "!["
-        opening = cursor + int(image)
-        if scan[opening : opening + 1] != "[":
-            cursor += 1
-            continue
-        index, depth = opening + 1, 1
-        while index < len(scan) and depth:
-            if scan[index] == "\\":
-                index += 2
-                continue
-            depth += (scan[index] == "[") - (scan[index] == "]")
-            index += 1
-        closing = index - 1
-        if depth or scan[index : index + 1] != "(":
-            cursor += 1
-            continue
-        start = index + 1
-        if scan[start : start + 1] == "<":
-            stop = scan.find(">", start + 1)
-            destination_start, destination_end = start + 1, stop
-            after = stop + 1
-        else:
-            after, nesting = start, 0
-            while after < len(scan):
-                if scan[after] == "\\":
-                    after += 2
-                    continue
-                if scan[after] == ")" and nesting == 0 or scan[after].isspace():
-                    break
-                nesting += (scan[after] == "(") - (scan[after] == ")")
-                after += 1
-            destination_start, destination_end = start, after
-        end = re.match(r'(?:\s+["\'][^"\']*["\'])?\)', scan[after:])
-        if end is None or destination_end < destination_start:
-            cursor += 1
-            continue
-        finish = after + end.end()
-        candidates.append(
-            (
-                cursor,
-                finish,
-                image,
-                body[opening + 1 : closing],
-                destination_start,
-                destination_end,
-            )
-        )
-        cursor = finish
-    return candidates, mask, scan
-
-
 def source_references(body, owner, assets, excluded=()):
     """Separate syntax scan without converter spans or markdown-it-py.
 
     Protected regions retain source offsets. Unrecognized active local syntax
     fails the audit instead of silently passing its coverage claim.
     """
-    candidates, mask, scan = inline_candidates(body)
+    candidates, mask, _scan = inline_candidates(body)
     result = []
     for (
         begin,
@@ -1231,7 +1201,7 @@ def source_references(body, owner, assets, excluded=()):
         destination_start,
         destination_end,
     ) in candidates:
-        url = scan[destination_start:destination_end]
+        url = body[destination_start:destination_end]
         kind, target = None, None
         if url.startswith("brain://"):
             compact = url[8:].split("/")[0]
@@ -1248,7 +1218,21 @@ def source_references(body, owner, assets, excluded=()):
                 "unsupported included nested thought phrase"
             )
         elif image and url.startswith(".data/md-images/"):
-            filename = unquote(url[len(".data/md-images/") :])
+            path, separator, fragment = url.partition("#")
+            assert "?" not in url, "independent image query refusal"
+            assert not separator or re.fullmatch(
+                r"\$width=([1-9]|[1-9][0-9]|100)p\$", fragment
+            ), "independent complete image sizing grammar"
+            encoded = path[len(".data/md-images/") :]
+            assert not re.search(r"%(?![0-9a-fA-F]{2})|%(?:2[fF]|5[cC])", encoded), (
+                "independent unambiguous path encoding"
+            )
+            filename = unquote(encoded, errors="strict")
+            assert (
+                not re.search(r"%[0-9a-fA-F]{2}", filename)
+                and "\\" not in filename
+                and not set(filename.split("/")) & {"", ".", ".."}
+            ), "independent once-decoded safe image path"
             targets = [
                 a["asset_id"]
                 for a in assets.values()
@@ -1259,6 +1243,17 @@ def source_references(body, owner, assets, excluded=()):
             assert len(targets) == 1, "independent inline image binding"
             kind, target = "image", targets[0]
         if kind:
+            normalization = None
+            if kind == "image" and "#" in url:
+                start = destination_start + url.index("#")
+                normalization = {
+                    "declaration": body[start:destination_end],
+                    "start": start,
+                    "end": destination_end,
+                    "document_digest": hashlib.sha256(body.encode()).hexdigest(),
+                    "basis": "document.text/unicode_codepoints",
+                    "presentation": "responsive",
+                }
             label = inline_display(label_text)
             result.append(
                 {
@@ -1269,6 +1264,7 @@ def source_references(body, owner, assets, excluded=()):
                     "label": label,
                     "destination_start": destination_start,
                     "destination_end": destination_end,
+                    "presentation_normalization": normalization,
                 }
             )
             mask[begin:finish] = " " * (finish - begin)
@@ -1330,7 +1326,7 @@ def expected_resources(raw, owner, body, assets):
                 + " (metadata retained; bytes absent from the source)."
             )
         elif (
-            kind in {3, 8}
+            kind in {2, 3, 8}
             or kind == 12
             and source["Id"] not in inline
             or kind == 1
@@ -1339,7 +1335,7 @@ def expected_resources(raw, owner, body, assets):
         ):
             label = source.get("Name") or PurePosixPath(source["Location"]).name
             label = re.sub(r"[\[\]|\r\n]", " ", label).strip() or "Resource"
-            if kind in {3, 8}:
+            if kind in {2, 3, 8}:
                 uri = (
                     source["Location"] if kind == 3 else windows_uri(source["Location"])
                 )
@@ -1379,6 +1375,9 @@ def check_documents(raw, record, documents, names, assets):
     for owner, (key, body) in documents.items():
         d = by_id[key]
         digest = hashlib.sha256(body.encode()).hexdigest()
+        assert d["text_adaptations"] == raw.text_edits[key], (
+            "raw-derived exact literal spans and bases"
+        )
         assert (
             d["owner"],
             d["original_asset_id"],
@@ -1426,6 +1425,10 @@ def check_documents(raw, record, documents, names, assets):
             assert emitted_ref["source_target"] == source_target, (
                 "reference original destination"
             )
+            assert (
+                emitted_ref["presentation_normalization"]
+                == actual["presentation_normalization"]
+            ), "raw-derived exact image normalization declaration/span"
             if actual["kind"] == "image":
                 assert (
                     emitted_ref["destination_start"],
@@ -1461,7 +1464,7 @@ def expected_asset_paths(raw):
     present = [
         a
         for a in raw["attachments.json"]
-        if a["Type"] not in {3, 8, 15}
+        if a["Type"] not in {2, 3, 8, 15}
         and a["Id"] not in raw.unsafe_originals
         and a["Id"] not in raw.gaps
     ]
@@ -1555,7 +1558,7 @@ def check_assets(raw, record, archive, vault, targets):
         )
         availability = (
             "external"
-            if kind in {3, 8}
+            if kind in {2, 3, 8}
             else "absent"
             if kind == 15 or key in raw.gaps
             else "present"
@@ -1591,7 +1594,7 @@ def check_assets(raw, record, archive, vault, targets):
             and type(a["NoteType"]) is int
             and type(kind) is int
             and (kind, a["NoteType"])
-            in {(1, 4), (1, 0), (3, 0), (5, 0), (8, 0), (12, 0), (15, 0)}
+            in {(1, 4), (1, 0), (2, 0), (3, 0), (5, 0), (8, 0), (12, 0), (15, 0)}
         ), "raw attachment role"
         flags = (
             "IsIcon",
@@ -1732,13 +1735,22 @@ def check_assets(raw, record, archive, vault, targets):
             assert finding["evidence"] == evidence, "warning source evidence pointers"
         else:
             assert not target["source_findings"], "no unexplained source finding"
-        if kind not in {3, 8}:
+        if kind not in {2, 3, 8}:
             assert target["external_uri"] is None, "local asset no external URI"
         elif kind == 3:
             assert target["external_uri"] == a["Location"], (
                 "exact original external URL"
             )
-        if kind in {3, 8}:
+        if kind == 2:
+            assert (
+                re.match(r"^[A-Za-z]:[\\/]", a["Location"])
+                and "\\\\" not in a["Location"][2:]
+                and not any(
+                    part in {".", ".."}
+                    for part in re.split(r"[\\/]", a["Location"][3:])
+                )
+            ), "independent reviewed drive-qualified external file"
+        if kind in {2, 3, 8}:
             assert key not in raw["meta.json"][0]["AttachmentFileStates"], (
                 "external reference no file state"
             )
@@ -1746,7 +1758,7 @@ def check_assets(raw, record, archive, vault, targets):
             a["Location"]
             if kind == 3
             else windows_uri(a["Location"])
-            if kind == 8
+            if kind in {2, 8}
             else paths[key]
             if role in {"file", "image"}
             and availability == "present"
@@ -1757,9 +1769,20 @@ def check_assets(raw, record, archive, vault, targets):
         assert target["resource_link"] == resource, (
             "all raw-derived resource destinations/suppression"
         )
-    issues = {i["affected"][0]: i for i in record["issues"]}
+    issues = {
+        i["affected"][0]: i
+        for i in record["issues"]
+        if i["code"] != "image_presentation_normalized"
+    }
     assert (
-        len(issues) == len(record["issues"])
+        len(issues)
+        == len(
+            [
+                i
+                for i in record["issues"]
+                if i["code"] != "image_presentation_normalized"
+            ]
+        )
         and issues.keys() == expected_warnings.keys()
     ), "exact warning items"
     report = (vault / "MIGRATION REPORT.md").read_bytes().decode()
@@ -1831,7 +1854,7 @@ def check_accounting(raw, record, checked, references):
             expected[pointer] = (disposition, [pointer])
     for a in raw["attachments.json"]:
         if (
-            a["Type"] in {3, 8, 15}
+            a["Type"] in {2, 3, 8, 15}
             or a["Id"] in raw.unsafe_originals
             or a["Id"] in raw.gaps
         ):
@@ -2060,8 +2083,10 @@ def check_counts(raw, record, summary, references, targets, files):
         "source_items": len(raw["thoughts.json"]),
         "source_relationships": len(raw["links.json"]),
         "source_references": len(references),
-        "text_adaptations": 0,
-        "image_presentation_normalizations": 0,
+        "text_adaptations": sum(map(len, raw.text_edits.values())),
+        "image_presentation_normalizations": sum(
+            bool(r["presentation_normalization"]) for _, _, r in references
+        ),
         "present_assets": summary["payloads"]
         if "payloads" in summary
         else sum(a["availability"] == "present" for a in targets.values()),
@@ -2118,6 +2143,15 @@ def check_adaptations(raw, record, documents, names, assets):
         if kind in {"hierarchy", "related"}
     }
     for owner, (key, body) in documents.items():
+        expected |= {
+            ("literal_text", f"text:{key}:{i}")
+            for i, _ in enumerate(raw.text_edits[key])
+        }
+        expected |= {
+            ("image_presentation", f"reference:{key}:{i}")
+            for i, ref in enumerate(source_references(body, owner, assets))
+            if ref["presentation_normalization"]
+        }
         if owner in created:
             expected |= {
                 (ref["kind"] + "_reference", f"reference:{key}:{i}")
@@ -2148,6 +2182,45 @@ def check_adaptations(raw, record, documents, names, assets):
     assert len(actual) == len(record["adaptations"]) and set(actual) == expected, (
         "complete adaptation obligations"
     )
+    for owner, (key, body) in documents.items():
+        for index, reference in enumerate(source_references(body, owner, assets)):
+            if reference["presentation_normalization"]:
+                adaptation = next(
+                    a
+                    for a in record["adaptations"]
+                    if (a["kind"], a["affected"])
+                    == ("image_presentation", f"reference:{key}:{index}")
+                )
+                pointer = "attachments.json:" + str(
+                    next(
+                        i
+                        for i, a in enumerate(raw["attachments.json"])
+                        if a["Id"] == key
+                    )
+                )
+                assert (
+                    adaptation["owner"] == owner
+                    and adaptation["document_key"] == key
+                    and adaptation["evidence"] == [pointer]
+                    and adaptation["text_edit"] is None
+                    and reference["presentation_normalization"]["declaration"]
+                    in adaptation["description"]
+                ), "image presentation complete contextual adaptation evidence"
+        pointer = "attachments.json:" + str(
+            next(i for i, a in enumerate(raw["attachments.json"]) if a["Id"] == key)
+        )
+        for index, edit in enumerate(raw.text_edits[key]):
+            adaptation = next(
+                a
+                for a in record["adaptations"]
+                if (a["kind"], a["affected"]) == ("literal_text", f"text:{key}:{index}")
+            )
+            assert (
+                adaptation["text_edit"] == edit
+                and adaptation["owner"] == owner
+                and adaptation["document_key"] == key
+                and adaptation["evidence"] == [pointer]
+            ), "literal adaptation complete contextual evidence"
     assert all(type(d) is str and d for d in actual.values()), "adaptation descriptions"
     for kind, key in expected:
         if kind == "category_dashboard":
@@ -2196,6 +2269,22 @@ def check_report(vault, raw, record, names, assets, summary, payloads):
         f"Created {summary['notes']} thought notes; preserved {payloads} present payloads."
         in report
     ), "independent report counts"
+    literal_count = sum(map(len, raw.text_edits.values()))
+    assert (
+        f"Escaped {literal_count} literal prose tokens for Markdown display." in report
+    ) == bool(literal_count), "honest literal report count"
+    for a in raw["attachments.json"]:
+        if raw.text_edits.get(a["Id"]):
+            assert names[a["SourceId"]] in report, "linked affected literal owner"
+    external_count = sum(a["Type"] == 2 for a in raw["attachments.json"])
+    assert (
+        f"Retained {external_count} external file references as ordinary Resources links."
+        in report
+    ) == bool(external_count), "honest external file report count"
+    if external_count:
+        assert "External targets were not checked, opened or copied" in report, (
+            "truthful external accessibility limitation"
+        )
     obligations = (
         "Unsupported feature classes are refused",
         "[[Vault guide.md|Vault guide]]",
@@ -2224,9 +2313,13 @@ def check_report(vault, raw, record, names, assets, summary, payloads):
         assert (
             report.count("## Source-gap evidence and optional repair checklist\n") == 1
         ), "required source-gap checklist"
-        checklist = report.split(
-            "## Source-gap evidence and optional repair checklist\n\n", 1
-        )[1].split("\n## Source warnings\n", 1)[0]
+        checklist = (
+            report.split("## Source-gap evidence and optional repair checklist\n\n", 1)[
+                1
+            ]
+            .split("\n## Source warnings\n", 1)[0]
+            .split("\n> [!warning] Image sizing normalized", 1)[0]
+        )
         assert "Unknown prose, captions and layout were not recovered." in checklist, (
             "honest source-gap recovery limit"
         )
