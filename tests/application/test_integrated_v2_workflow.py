@@ -125,7 +125,7 @@ def test_combined_v2_vault_preserves_independent_facts_and_checks_without_source
         record["schema_version"],
         record["converter_version"],
         record["renderer_version"],
-    ) == ("brz2obsidian.migration", 3, "0.3.0", "3")
+    ) == ("brz2obsidian.migration", 6, "0.3.0", "6")
     assert {s["relative_path"] for s in record["support_artifacts"]} == SUPPORT_PATHS
     assert {a["item_key"] for a in record["classification_assignments"]} == {
         identity(3),
