@@ -210,7 +210,8 @@ needed conclusions and pointers before retiring the ignored effort artifacts.
 
 ## Hosted Windows checks
 
-`.github/workflows/checks.yml` exposes the stable `Windows checks (base)` status.
+`.github/workflows/checks.yml` exposes the stable `Windows checks (base)` and
+`Windows checks (gui)` statuses.
 It runs on ordinary pull requests targeting `main` when opened, updated
 (`synchronize`) or reopened, on pushes to `main`, and on manual dispatch. Draft
 requests and changes limited to documentation or workflow files receive the same
@@ -220,11 +221,19 @@ and needs no project secrets.
 Each job starts with a fresh checkout on GitHub's `windows-2025` image and 64-bit
 CPython 3.14. It creates its own project `.venv`, installs the pinned runtime,
 build and development dependencies from `requirements.txt`, then installs the
-editable project with its declared development extra and no build isolation.
-It confirms `PySide6` is absent and invokes the maintained runner once with the
-full base selection: pytest, Ruff lint, Ruff format validation and dependency
-consistency. Qt-dependent skips are expected; the full discoverable synthetic
-suite still executes the Qt-independent tests. No test selector narrows the run.
+editable project with its declared extras and no build isolation. The base job
+installs the development extra, confirms `PySide6` is absent and runs the full
+discoverable suite; Qt-dependent skips are expected. The GUI job also installs
+the pinned `requirements-gui.txt` manifest and development/GUI extras, then
+imports QtCore and QtWidgets and logs their actual versions. The maintained
+runner probes a usable QApplication and supplies offscreen Qt before testing.
+Each job invokes the runner once with its complete pytest, Ruff lint, Ruff format
+validation and dependency selection. GUI uses `--require-gui`, so entirely
+skipped GUI tests cannot qualify as success. No selector or GUI-only marker
+narrows either run: Qt-independent tests and Windows launcher/startup controls
+remain included with actual GUI tests. The matrix disables fail-fast; each
+variant has its own VM, fresh installation, result and artifact even when its
+peer fails.
 
 The independent Windows acceptance decoder uses WIC, which requires Microsoft's
 [WebP Image Extension](https://learn.microsoft.com/en-us/windows/win32/wic/native-wic-codecs)
@@ -240,7 +249,7 @@ passed with extension version `1.2.31.0`; each job logs its actual WinGet and
 extension versions and fails if native provisioning cannot complete. The local
 Python bootstrap below assumes a usable Windows WebP codec is already available.
 
-Equivalent local bootstrap and execution from a fresh checkout:
+Equivalent local base bootstrap and execution from a fresh checkout:
 
 ```powershell
 python -m venv .venv
@@ -257,14 +266,35 @@ $checkExit = $LASTEXITCODE
 exit $checkExit
 ```
 
+Use another fresh checkout and project environment for equivalent GUI coverage:
+
+```powershell
+python -m venv .venv
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$checkout = (Get-Location).Path
+$python = Join-Path $checkout '.venv\Scripts\python.exe'
+$runner = Join-Path $checkout 'tools\check.py'
+& $python -m pip install -r requirements.txt -r requirements-gui.txt
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $python -m pip install --no-build-isolation -e '.[dev,gui]'
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $python $runner run --checkout $checkout --python $python --environment gui --require-gui
+$checkExit = $LASTEXITCODE
+exit $checkExit
+```
+
 Installation failures stop check execution. PowerShell captures each native
 failure before later commands can replace it; the runner's aggregate nonzero
 result fails the job. Logs identify the event, checked revision, runner image,
 interpreter and environment variant. Tool output is streamed by the runner; a
 post-run summary reads exact command arguments, outcomes and pytest counts from
-its receipt while preserving the aggregate exit. The `windows-checks-base-<run>-<attempt>`
-artifact retains the entire original `tmp/checks/` directory, including receipts,
-counts and byte/readable logs, even when check execution fails or is interrupted.
+its receipt while preserving the aggregate exit. Each
+`windows-checks-<variant>-<run>-<attempt>` artifact retains original direct
+`tmp/checks/<runner-run-id>/*.json`, `*.bin` and `*.log` files, including completed
+receipts, interrupted partial receipts, pytest counts and byte/readable logs.
+The runner-run-ID hierarchy and evidence bytes remain intact for public receipt
+validation; nested fixture outputs and pytest/Ruff caches are excluded. Upload
+runs even when check execution fails or is interrupted.
 An earlier native provisioning, setup or installation failure may leave no
 receipt; the summary reports that absence, and provisioning/installation logs
 remain the evidence of that failure. Fully canceled jobs may end before GitHub
@@ -275,9 +305,11 @@ They need no private BRZ archive, retained vault, desktop session, Obsidian or
 TheBrain installation. A green status establishes automated synthetic coverage;
 private preservation audits, actual Windows appearance, installed Obsidian
 interactions and user acceptance retain their separate verification boundaries.
-The base status does not establish Qt-dependent GUI execution. Hosted acceptance
-uses actual GitHub job results and downloadable receipts validated against
-independently declared requirements, rather than assertions about workflow text.
+The base status does not establish Qt-dependent GUI execution. Offscreen GUI
+coverage does not establish actual Windows appearance or pointer usability.
+Hosted acceptance uses both actual GitHub job results and downloadable receipts
+validated against independently declared requirements, rather than assertions
+about workflow text.
 
 ## Optional GUI checks
 

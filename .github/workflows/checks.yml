@@ -12,9 +12,15 @@ permissions:
   contents: read
 
 jobs:
-  base:
-    name: Windows checks (base)
+  checks:
+    name: Windows checks (${{ matrix.environment }})
     runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [base, gui]
+    env:
+      CHECK_ENVIRONMENT: ${{ matrix.environment }}
     defaults:
       run:
         shell: pwsh
@@ -67,32 +73,49 @@ jobs:
           python-version: '3.14'
           architecture: x64
 
-      - name: Install base environment
+      - name: Install ${{ matrix.environment }} environment
         run: |
           python -m venv .venv
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $python = Join-Path $env:GITHUB_WORKSPACE '.venv\Scripts\python.exe'
-          & $python -m pip install -r requirements.txt
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & $python -m pip install --no-build-isolation -e '.[dev]'
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($env:CHECK_ENVIRONMENT -eq 'gui') {
+            & $python -m pip install -r requirements.txt -r requirements-gui.txt
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            & $python -m pip install --no-build-isolation -e '.[dev,gui]'
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } else {
+            & $python -m pip install -r requirements.txt
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            & $python -m pip install --no-build-isolation -e '.[dev]'
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
 
-      - name: Identify base environment and confirm Qt absence
+      - name: Identify ${{ matrix.environment }} environment and confirm Qt availability
         run: |
           Write-Output "Event: $env:GITHUB_EVENT_NAME; workflow revision: $env:GITHUB_SHA"
-          Write-Output "Runner: $env:RUNNER_OS / $env:RUNNER_ARCH; image: $env:ImageOS / $env:ImageVersion; variant: base"
+          Write-Output "Runner: $env:RUNNER_OS / $env:RUNNER_ARCH; image: $env:ImageOS / $env:ImageVersion; variant: $env:CHECK_ENVIRONMENT"
           git rev-parse HEAD
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $python = Join-Path $env:GITHUB_WORKSPACE '.venv\Scripts\python.exe'
-          & $python -c "import importlib.util, platform, sys; print('Interpreter:', sys.executable); print('Python:', sys.version); print('Platform:', platform.platform(), platform.machine()); qt = importlib.util.find_spec('PySide6'); print('PySide6:', qt); sys.exit(0 if qt is None else 1)"
+          & $python -c "import platform, sys; print('Interpreter:', sys.executable); print('Python:', sys.version); print('Platform:', platform.platform(), platform.machine())"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($env:CHECK_ENVIRONMENT -eq 'gui') {
+            & $python -c "import PySide6; from PySide6 import QtCore, QtWidgets; print('PySide6:', PySide6.__version__); print('Qt:', QtCore.qVersion()); print('QtWidgets:', QtWidgets.__file__)"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } else {
+            & $python -c "import importlib.util, sys; qt = importlib.util.find_spec('PySide6'); print('PySide6:', qt); sys.exit(0 if qt is None else 1)"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
 
-      - name: Run full base checks
+      - name: Run full ${{ matrix.environment }} checks
         run: |
           $checkout = $env:GITHUB_WORKSPACE
           $python = Join-Path $checkout '.venv\Scripts\python.exe'
           $runner = Join-Path $checkout 'tools\check.py'
-          & $python $runner run --checkout $checkout --python $python --environment base
+          $runnerArguments = @('run', '--checkout', $checkout, '--python', $python, '--environment', $env:CHECK_ENVIRONMENT)
+          if ($env:CHECK_ENVIRONMENT -eq 'gui') { $runnerArguments += '--require-gui' }
+          Write-Output 'The maintained runner supplies offscreen Qt and probes a usable QApplication before testing.'
+          & $python $runner @runnerArguments
           $checkExit = $LASTEXITCODE
           $receipts = @(Get-ChildItem -Path 'tmp/checks/*/receipt.json' -ErrorAction SilentlyContinue)
           foreach ($receiptFile in $receipts) {
@@ -116,7 +139,7 @@ jobs:
           if ($receipts.Count -eq 0) {
             $message = 'No runner receipt was produced. Inspect the native provisioning, setup/installation and check-step logs; this does not establish passing checks.'
           } else {
-            $message = 'Runner evidence is retained in the Windows base checks artifact, including original logs and pytest counts.'
+            $message = "Runner evidence is retained in the Windows $env:CHECK_ENVIRONMENT checks artifact, including original logs and pytest counts."
             $receipts | ForEach-Object { Write-Output "RECEIPT: $($_.FullName)" }
           }
           Write-Output $message
@@ -126,7 +149,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7.0.2
         with:
-          name: windows-checks-base-${{ github.run_id }}-${{ github.run_attempt }}
-          path: tmp/checks/
+          name: windows-checks-${{ matrix.environment }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            tmp/checks/*/*.json
+            tmp/checks/*/*.bin
+            tmp/checks/*/*.log
           include-hidden-files: true
           if-no-files-found: warn
