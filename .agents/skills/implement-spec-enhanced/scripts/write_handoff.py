@@ -182,6 +182,37 @@ def publish(path, payload):
                 temporary.unlink(missing_ok=True)
 
 
+def direct_evidence_references(record, *, inspecting=False):
+    for check in record["checks"]:
+        for reference in check["evidence"]:
+            yield reference, None
+    for check in record["checks"]:
+        for field, kind in (("receipt", "runner"), ("source_record", "historical")):
+            reference = check.get(field)
+            # Early diagnosis sees any textual alias; validated copying only
+            # includes the extra reference supported by that check's kind.
+            selected = (
+                text(reference)
+                if inspecting
+                else check.get("kind") == kind and reference
+            )
+            if selected:
+                yield reference, field
+    if record["kind"] == "verification":
+        criteria = record.get("criteria") if inspecting else record["criteria"]
+        if inspecting and not isinstance(criteria, list):
+            return
+        for criterion in criteria:
+            if inspecting and (
+                not isinstance(criterion, dict)
+                or not isinstance(criterion.get("evidence"), list)
+            ):
+                continue
+            for reference in criterion["evidence"]:
+                if not inspecting or text(reference):
+                    yield reference, None
+
+
 def carry_forward(attempt, source, checkout, data, expected, candidate_expected=None):
     require(source.is_absolute(), "--from must be an exact absolute path")
     require(text(data["reason"]), "reason must be nonempty")
@@ -228,29 +259,10 @@ def carry_forward(attempt, source, checkout, data, expected, candidate_expected=
     source_receipt = (source / CARRY_RECEIPT).resolve()
     for kind, record in records.items():
         load(source, kind, records)
-        references = [
-            reference for check in record["checks"] for reference in check["evidence"]
-        ]
-        references.extend(
-            check[field]
-            for check in record["checks"]
-            for field in ("receipt", "source_record")
-            if text(check.get(field))
-        )
-        criteria = record.get("criteria")
-        if kind == "verification" and isinstance(criteria, list):
-            references.extend(
-                reference
-                for criterion in criteria
-                if isinstance(criterion, dict)
-                and isinstance(criterion.get("evidence"), list)
-                for reference in criterion["evidence"]
-                if text(reference)
-            )
         require(
             not any(
                 (source / reference).resolve() == source_receipt
-                for reference in references
+                for reference, _ in direct_evidence_references(record, inspecting=True)
             ),
             "evidence/carry receipt collision",
         )
@@ -287,34 +299,24 @@ def carry_forward(attempt, source, checkout, data, expected, candidate_expected=
         )
     copies = {}
     for record in records.values():
-        references = [
-            reference for check in record["checks"] for reference in check["evidence"]
-        ]
-        for check in record["checks"]:
-            if check.get("kind") == "runner" and check.get("receipt"):
-                references.append(check["receipt"])
-                receipt_path = source / check["receipt"]
-                if not Path(check["receipt"]).is_absolute():
+        references = []
+        for reference, field in direct_evidence_references(record):
+            references.append(reference)
+            if field == "receipt":
+                receipt_path = source / reference
+                if not Path(reference).is_absolute():
                     for row in read_json(receipt_path).get("checks", []):
                         references.extend(
-                            str(Path(check["receipt"]).parent / item["path"])
+                            str(Path(reference).parent / item["path"])
                             for item in row.get("evidence", [])
                         )
-            if check.get("kind") == "historical" and check.get("source_record"):
-                references.append(check["source_record"])
-                if not Path(check["source_record"]).is_absolute():
-                    original = read_json(source / check["source_record"])
-                    for historical_check in original.get("checks", []):
-                        references.extend(
-                            str(Path(check["source_record"]).parent / item)
-                            for item in historical_check.get("evidence", [])
-                        )
-        if record["kind"] == "verification":
-            references += [
-                reference
-                for criterion in record["criteria"]
-                for reference in criterion["evidence"]
-            ]
+            if field == "source_record" and not Path(reference).is_absolute():
+                original = read_json(source / reference)
+                for historical_check in original.get("checks", []):
+                    references.extend(
+                        str(Path(reference).parent / item)
+                        for item in historical_check.get("evidence", [])
+                    )
         for reference in references:
             reference_path = Path(reference)
             if not reference_path.is_absolute():
