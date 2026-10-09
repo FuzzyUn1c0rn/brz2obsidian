@@ -90,13 +90,6 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
-      - name: Deliberate BASE installation failure control
-        if: matrix.environment == 'base'
-        run: |
-          $python = Join-Path $env:GITHUB_WORKSPACE '.venv\Scripts\python.exe'
-          & $python -m pip install --no-index Pillow==999999.0.0
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
       - name: Identify ${{ matrix.environment }} environment and confirm Qt availability
         run: |
           Write-Output "Event: $env:GITHUB_EVENT_NAME; workflow revision: $env:GITHUB_SHA"
