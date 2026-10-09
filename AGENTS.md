@@ -41,5 +41,6 @@ follow [bounded native investigation](docs/agents/native-investigation.md).
 Default to strategic sampling for native and rendering checks. Before a visual
 review, read [the sampling policy](docs/testing.md#visual-sampling-policy).
 
-When capturing, specifying, implementing or reviewing a user-approved presentation,
-follow [the presentation handoff procedure](docs/agents/accepted-presentation.md).
+For all application UI implementation and review, and when capturing, specifying,
+implementing or reviewing a user-approved presentation, follow
+[the presentation procedure](docs/agents/accepted-presentation.md).

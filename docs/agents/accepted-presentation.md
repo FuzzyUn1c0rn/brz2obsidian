@@ -1,8 +1,9 @@
 # Accepted presentation handoff
 
-Use this procedure when a user approves a prototype or presentation example,
-or when specifying, implementing or reviewing changes to that presentation.
-It applies to visible generated artifacts as well as application UI.
+Use this procedure for all application UI implementation and review, including
+work without a newly approved prototype. Steps 1–2 capture and carry approved
+presentation examples; step 3 applies to every application UI change. Approved
+presentation requirements also apply to visible generated artifacts.
 
 ## 1. Capture the approved details
 
@@ -56,19 +57,35 @@ leaves appearance requirements open.
 Assign final presentation verification to a reviewer who neither implemented
 the changed presentation nor authored the native acceptance report being assessed.
 Include the canonical requirements and exact reference in the review handoff.
+For application UI without an approved reference, identify the documented style
+or current application style used for comparison, with its version/commit and
+app/theme context. Choose the reference appropriate to each control's role.
 
-Compare actual converter/application output with that reference, following
-[strategic visual sampling](../testing.md#visual-sampling-policy). Combine cases
-covering distinct behaviors; reuse earlier observations when the relevant output
-and rendering context remain applicable. Markup tests verify structure; native
-observation verifies the approved appearance, including titles, icons and panels.
+Application UI review requires both visual consistency and usability across
+control types, distinct styles/rendering contexts and relevant states in scope,
+including controls initially hidden by overflow, scrolling, expansion or
+application state. Consistency covers palette, typography, spacing, borders,
+focus indicators and platform treatment. Different roles may intentionally
+differ; native/platform controls must fit the surrounding style and remain usable.
 
-Record the candidate commit, selected output, covered requirement IDs, automated
-results, native evidence and any limits in the ticket/review record. For each ID,
-report satisfied, failed or unverified. Repair and recheck affected failures;
-refresh evidence when a relevant implementation or accepted requirement changes.
+Compare actual converter/application output with the applicable reference,
+following [strategic visual sampling](../testing.md#visual-sampling-policy).
+For UI, inventory and observe representative control groups and their relevant
+interactions, rather than every identical instance or state combination. Reuse
+earlier observations only when the output and rendering context remain applicable;
+changed or distinct contexts need their own observation. Markup tests verify
+structure; native observation verifies appearance, including titles, icons and
+panels, and actual control usability.
 
-Complete presentation verification only when every affected ID is satisfied.
+Record the candidate commit, selected output, covered requirement IDs/control
+groups, applicable reference, automated results, native evidence and any limits
+in the ticket/review record. For each ID and required group, report satisfied,
+failed or unverified; missing evidence remains unverified. Repair and recheck
+affected failures; refresh evidence when a relevant implementation or reference
+requirement changes.
+
+Complete presentation verification only when every affected ID and required
+control group is satisfied.
 Keep any specification-required final user verdict as its separate delivery gate;
 this procedure adds no extra approval round.
 
