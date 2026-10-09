@@ -1,9 +1,12 @@
 # Windows UI independent review candidate
 
-The required diagnostic Save repair is independently verified. The review remains
-**held** because actual application readability at 150% is **UNVERIFIED** under
-UI-U02. This report supports a review candidate, not a final review PASS, ticket
-closure, integration decision or the user's actual-running-app verdict in #106.
+The required diagnostic Save repair is independently verified. Under the owner's
+current **100%/125% only** requirement, the independent native reviewer supports
+UI-P01–P10, UI-U01 and amended UI-U02 through explicit scoped reuse. The stopped
+fresh 125% attempt remains unavailable, and former 150% uncertainty remains
+historical. This report supports formal review of the candidate; it does not
+supply the final handoff PASS, ticket closure, integration decision or the user's
+actual-running-app verdict in #106.
 
 ## Scope and independent roles
 
@@ -23,6 +26,14 @@ and reassessed the preceding entire-delta findings. Incorporated base 08d was
 captured before the repair's final checks. This subsequent report-only change
 preserves that reviewed runtime; its exact final commit and byte bindings belong
 to the candidate handoff.
+
+The owner's [2026-10-09 correction](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/92#issuecomment-6076372221)
+now requires representative **100% and 125% only**, with normal/restoration 100%.
+This supersedes the earlier 150% prerequisite and previously removed 200% case;
+it does not turn any old uncertainty or BLOCKED record into a passing observation.
+The original `57df9cfe0501f43cbb85ff4232a1f1f3aad9a36e` attempt remains immutable.
+Only this review, the acceptance follow-up and testing guidance change now;
+production, tests, dependency/build manifests and reviewed artifacts do not.
 
 The final presentation reviewer `/root/ui_verifier` neither implemented the
 changed presentation nor authored the assessed implementation report
@@ -100,15 +111,60 @@ stay within the planned 18-input/eight-minute bound. This proves affected UI-W11
 and P07; it does not claim native Save-dialog/global clipboard success or ACL
 replacement denial from injected callbacks.
 
-Actual 150% small Qt text remained fragmented in settled captures, including one
-distinct maintained-launcher Inspect and same-state screenshot-only control at
+Historically, actual 150% small Qt text remained fragmented in settled captures,
+including one distinct maintained-launcher Inspect and same-state screenshot-only control at
 first-display original detail. Native chooser text was substantially clear.
 Neither product painting failure nor a capture/Qt/driver/font cause is established.
 Root requested one concrete human readability observation on the actual app and
 paused inputs for a bounded interval; no answer arrived. Silence is not evidence.
 The reviewer restored observed 100% and normally closed the owned app/Settings.
 Nineteen maintained-control input/launch attempts over about 5m42 remained within
-20/eight-minute limits. The user removed 200%; it is neither tested nor pending.
+20/eight-minute limits. These observations and the original BLOCKED handoff are
+preserved; the owner has since superseded that requirement, without a painting
+cause or a claim that removed scales passed.
+
+### Current 100%/125% applicability
+
+The separate independent `native-review-125-applicability.md` assesses runtime
+`57df9cfe0501f43cbb85ff4232a1f1f3aad9a36e`, byte-identical to d237. Reviewer
+`/root/ui_verifier` read the full root-authored native103 ledger and applicable
+actual 125% state records, runtime/source bindings and raw geometry/selected text.
+Those earlier observations remain attributed to root; they do not become a new
+actual 125% run by the reviewer. The reviewer supplies its own current 100%/narrow/C
+comparison and affected d237 Save observation, then independently judges reuse.
+
+Actual 125% sources are `1b16155c11fbf7cfb14c026922befe47fecd2d8d` for normal
+782×851/narrow 453×851 findings/recovery/cleanup paths, verified late-error/form
+replacement/four actions, corrected not-started, actual refusal/checker and held
+real runner/elapsed/repaint/deferred Close; and
+`12cf70e4af2d12af8348130faffd8a3aca31acdd` for repeated explicit Open-folder
+failure with exact wrapped/selected receipt path after the PathText.clear repair.
+The earlier inconclusive not-started fixture and clipped findings are not reused
+as successful final samples. Prior actual 125% context/unknown/partial diagnostic
+selection retain their original versions and limits. Runtime versions and
+preservation inventories remain attached to those original receipts.
+
+Independent binding output exits 0: ten frozen modules from each 125% receipt match
+their original Git blobs, 62 retained 1b files and 21 retained 12cf files remain
+unchanged, and 28 raw receipts are indexed. The earlier metadata list-shape helper
+error is retained; correcting that evidence-only annotation did not rerun native
+or conversion work. Current STYLE, label, PathText, DestinationFields and Footer
+are equivalent to sampled 12cf implementations. Fonts, wrapping/height/selection,
+resize/narrow reflow, surfaces and anchored layout are unchanged. The only three
+runtime deltas add diagnostic Save context and a new instance of the same PathText
+in the existing scrollable body. Fresh current 100%/narrow Save covers that new
+location/lifetime; earlier actual 125% paths/findings/footer cover its unchanged
+scale-sensitive renderer. This is an explicit applicability inference, not a
+state×scale pixel matrix, and byte matching alone is not visual evidence.
+
+The attempted fresh 125% sample instead exposed only a loading Settings splash.
+No scale control, 125% selection or converter launch occurred. Four input/launch
+attempts over 165.9 seconds ended with normal Settings Close and the exact seven-
+window baseline; source/runtime/launcher/preferences were preserved. No scale
+changed, so no 125%→100% restoration is claimed and the unavailable controls supply
+no new visible 100% readback. User-normal 100% and the last observed 100% restoration
+retain their scope. The unavailable attempt remains a distinct preserved record;
+it contains no contradictory 125% converter observation and is not marked passed.
 
 | ID | Independent disposition and limit |
 | --- | --- |
@@ -121,9 +177,9 @@ Nineteen maintained-control input/launch attempts over about 5m42 remained withi
 | UI-P07 | SATISFIED affected scope: own d237 failed-Save guidance/exact selected target, new Copy/cancel clearing and retained result; unaffected export controls scoped. |
 | UI-P08 | SATISFIED: contextual footer, actual busy elapsed/repaint and deferred Close without Cancel. |
 | UI-P09 | SATISFIED: verified exact path/four explicit actions and preserved receipt/bytes on repeated unavailable-open; no successful editor/Obsidian inference. |
-| UI-P10 | SATISFIED with U02 readability limit: light palette, typography, dividers, modest borders and green direction; no exact pixel promise. |
+| UI-P10 | SATISFIED: own current C/light-palette comparison and applicable actual 125% output through identical style/fonts; no exact pixel promise. |
 | UI-U01 | SATISFIED basic strategic scope: labels, textual meaning, visible focus, report/path selection; no exhaustive assistive-technology certification. |
-| UI-U02 | UNVERIFIED required prerequisite: actual 100%/narrow readability/stacking/scroll/footer pass; actual 150% small-text readability uncertain and human observation pending. |
+| UI-U02 | SATISFIED in amended strategic scope: own current 100%/narrow observations plus independently assessed actual 125% normal/narrow/path/findings/stacking/scroll/footer reuse; no fresh 125% control readback or all-state matrix claimed. |
 
 ## All five ticket criteria
 
@@ -131,14 +187,15 @@ Nineteen maintained-control input/launch attempts over about 5m42 remained withi
 | --- | --- |
 | 105-AC1 | SATISFIED: reviewer separation, actual runtime/reference/report identities and bounded strategic procedure recorded. |
 | 105-AC2 | SATISFIED: independent full-delta Standards/Spec review and repair refresh; required P2 fixed; zero documented breaches and two nonblocking P3 maintenance judgments. |
-| 105-AC3 | UNVERIFIED: representative own observations cover P01–P10/U01, but required actual 150% U02 readability remains unavailable pending human observation. |
-| 105-AC4 | HELD: findings, repairs, automated evidence, all per-ID judgments and affected104 refresh are recorded; required U02 cannot yet be independently resolved. |
-| 105-AC5 | HELD: no final review PASS or closure until required checks are satisfied; #106/UI-V10 and packaging remain separate. |
+| 105-AC3 | SUPPORTED: independent own current 100%/narrow/C comparison and explicit actual 125% reuse cover P01–P10/U01/amended U02; fresh unavailable attempt retains its original result. |
+| 105-AC4 | SUPPORTED: all findings, repair/recheck, current per-ID judgments, automated evidence, source bindings and affected104 refresh are recorded; old BLOCKED/uncertainty records preserved. |
+| 105-AC5 | READY FOR FORMAL DECISION: required current checks have supported evidence, subject to fresh structured verification. No closure/integration is claimed here; #106/UI-V10 and packaging remain separate. |
 
 ## Evidence bindings and limits
 
 Separate original/repair Standards and Spec records, original native review and
-`native-review-d237-save.md`/`native-review-d237-final.md` are retained under ignored
+`native-review-d237-save.md`/`native-review-d237-final.md` and current
+`native-review-125.md`/`native-review-125-applicability.md` are retained under ignored
 `tmp/windows-ui-93/review105`; candidate evidence includes their exact hashes and
 the raw check/native preservation receipts. Pixels remain in Sky tool history;
 stored JSON contains accessibility/geometry metadata, not saved screenshots.
@@ -147,7 +204,8 @@ The report-only candidate's runtime/source/wheel bindings accompany its handoff.
 Only runner path context, platform failed-save outcome and window path
 presentation changed from 08d; seven other frozen runtime modules are unchanged.
 Prior observations apply only to unaffected behavior, with fresh own d237 Save
-and maintained 150% controls for changed/current boundaries. No claim that all
+and historically maintained 150% controls for changed boundaries. Current 100%/125%
+applicability and 28 original receipt bindings are separate. No claim that all
 historical raw hashes match is made. Source/prepared inventories, caller bytes,
 owned leftovers, original preference absence, seven baseline windows and current
 runtime/launcher identity were independently checked. Observer/helper corrections
@@ -157,5 +215,6 @@ Historical #98/#103 safe WinError5 publication failures remain failed/cause unkn
 successful checks/samples do not diagnose or fix them. No AV/ACL/handle attribution,
 production workaround or new private-source preservation audit is asserted.
 Current normal/restoration 100% is observed; no unrelated apps/preferences/security
-settings were changed. Required 150% human observation remains pending, and the
-user's actual-running-app #106 verdict is wholly unclaimed.
+settings were changed. No further 150% observation is required under the
+owner's correction; removed scales are not passed or diagnosed. The user's
+actual-running-app #106 verdict remains wholly unclaimed.

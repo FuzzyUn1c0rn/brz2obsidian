@@ -182,3 +182,33 @@ removed 200% case is not tested or pending. This open prerequisite holds the fin
 independent review; automated passes do not resolve it. The separate
 [review candidate report](windows-ui-review.md) records all P/U statuses and
 required held criteria without claiming review PASS, closure or #106 acceptance.
+
+### Owner correction and independent 100%/125% reuse
+
+The owner's [current scope decision](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/92#issuecomment-6076372221)
+requires 100% and 125% only, with normal/restoration 100%. Earlier 150% uncertainty
+and the original BLOCKED attempt remain historical; that prerequisite was
+superseded, rather than its observations becoming successful. Existing 1931/102-GUI
+and 1945/115-GUI cohorts and their exact reviewed runtimes above are unchanged.
+
+The independent native reviewer now supports amended UI-U02 and all P01–P10/U01
+through explicit assessed reuse. Root's actual 125% observations at
+`1b16155c11fbf7cfb14c026922befe47fecd2d8d` and
+`12cf70e4af2d12af8348130faffd8a3aca31acdd` cover normal/narrow paths/findings,
+stacking/scroll/footer, outcomes, repeated path feedback and real busy/deferred
+Close. Those original actors and versions remain attributed; they are not a
+fresh reviewer-run 125% sample. Current styles, fonts, PathText, DestinationFields
+and Footer match those sampled versions; the new diagnostic target uses the same
+renderer within the existing scrollable body. The reviewer's own affected
+current 100%/narrow Save observation covers the new placement/lifetime. Raw binding
+receipts and manual applicability judgment distinguish unchanged mechanisms from
+the three modified feedback modules; byte matching alone does not prove pixels.
+
+The one fresh 125% attempt remained UNVERIFIED because Settings exposed only a
+loading splash. No scale change or converter launch occurred; normal Settings
+Close retained all seven baseline windows and unchanged source/runtime/preferences.
+Its unavailable result is preserved separately and not renamed as a passing run.
+Current review support comes from applicable actual 125% reuse plus independent
+current 100%/narrow observations. The [review report](windows-ui-review.md) records
+all current statuses and limits, subject to fresh formal verification; no review
+closure, integration or user's #106 verdict is supplied by this append.

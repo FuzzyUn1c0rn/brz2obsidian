@@ -539,6 +539,16 @@ cases is distinct from observing each item. Complete required automated source,
 body/image, inventory and preservation audits keep their full scope. Actual user
 acceptance remains a separate gate when required by the accepted specification.
 
+For the first local Windows UI, the owner's
+[current scaling decision](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/92#issuecomment-6076372221)
+requires **100% and 125% only**, with **100%** as the normal/restoration baseline.
+Keep narrow-window, long-path/findings, stacking, scrolling, keyboard and usable
+footer checks. Do not sample other scales. Earlier 150% uncertainty and BLOCKED
+records retain their historical facts; the requirement was superseded, rather
+than those observations becoming passing evidence. Independent applicable
+100%/125% observations are required before review PASS, and the user's actual
+running-app verdict remains separate.
+
 ## Native review procedure
 
 Apply the sampling policy above to new reviews. The v1/v2 procedures and completed
