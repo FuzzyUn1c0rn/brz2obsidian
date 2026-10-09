@@ -126,4 +126,3 @@ For explicit historical check reuse in a new v2 record, use `kind: "historical"`
 index. Retain the ordinary evidence fields. Validation reads the original v1
 check and evidence and verifies its source commit and successful outcome.
 This preserves provenance; it cannot satisfy a fresh-execution requirement.
-
