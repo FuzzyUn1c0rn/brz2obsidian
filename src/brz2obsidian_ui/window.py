@@ -74,7 +74,8 @@ CHECK_LABELS = {
     "write_success": "write success during publication",
 }
 STYLE = """
-QWidget { font-family: 'Segoe UI'; font-size: 10pt; color: #26302e; background: #ffffff; }
+QWidget { font-family: 'Segoe UI'; font-size: 10pt; color: #26302e; }
+.QWidget { background: #ffffff; }
 QMainWindow { background: #e9ece9; }
 QWidget#surround { background: #e9ece9; }
 QFrame#sheet { background: #ffffff; border: 1px solid #cbd4cc; border-radius: 8px; }

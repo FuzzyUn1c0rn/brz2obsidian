@@ -212,3 +212,40 @@ Current review support comes from applicable actual 125% reuse plus independent
 current 100%/narrow observations. The [review report](windows-ui-review.md) records
 all current statuses and limits, subject to fresh formal verification; no review
 closure, integration or user's #106 verdict is supplied by this append.
+
+## Scrollbar correction and latest 100%-only scope
+
+The owner's [latest scope decision](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/92#issuecomment-6077040155)
+requires verification at **100% only**, without changing system scaling. Earlier
+100%/125% applicability and other-scale observations above retain their original
+scope and dates. They are not new scrollbar appearance evidence. The owner
+reported the boxed/stippled scrollbar in the actual review app; #107/UI-P11
+requires platform scrollbar appearance while preserving C's sheet and behavior.
+
+The cause is the broad QWidget background rule, which also matches QScrollBar
+subclasses. A bounded offscreen comparison using the available Windows11 style
+shows that overriding background changes platform scrollbar drawing. The minimal
+repair keeps inherited font/color declarations but moves white background to the
+plain-container `.QWidget` selector. Targeted header, sheet, footer, findings and
+diagnostic colors are unchanged; no whole-application style is forced and no
+WinUI scrollbar is imitated. In that controlled comparison, the corrected
+standalone scrollbar matches the unstyled Windows11 control. This establishes
+the style interaction, not actual native appearance or overlay/animation parity.
+
+One affected run of **138 tests under tests/gui passed in 41.06 seconds**, using
+offscreen Qt with factor 1 and the safe public-result failure observer. Existing
+controls verify scrolling, wrapping/reflow, exact path selection, focus and footer
+reachability; no CSS/pixel-oracle test was added. Ruff lint, format (243 files),
+dependency checks, maintained launcher and a fresh wheel build passed. The old
+1945-test/115-GUI cohort remains historical, not a new execution against this
+style change. The old wheel binding is superseded for the changed window module;
+all 72 fresh-wheel Python modules match current source. Only window.py differs
+from the previous wheel; the new wheel SHA256 is
+`46025bb80ed686072373fdd34c9b12cc4d16c15be759773bbf15d93b5c68b0ff`.
+
+At implementation preparation, independent actual 100% task-sheet/diagnostic
+appearance, wheel/thumb/keyboard and short/narrow interaction remain **UNVERIFIED**
+for UI-P11 and affected UI-P01/P07/P08/U01/U02. Offscreen output and older native
+samples do not satisfy that changed appearance gate. The assigned independent
+reviewer will supply current evidence in the #107 handoff. Serialized integration
+and the owner's repaired actual-app #106/UI-V10 verdict remain separate.

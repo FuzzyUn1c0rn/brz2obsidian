@@ -1,12 +1,47 @@
 # Windows UI independent review candidate
 
-The required diagnostic Save repair is independently verified. Under the owner's
-current **100%/125% only** requirement, the independent native reviewer supports
-UI-P01–P10, UI-U01 and amended UI-U02 through explicit scoped reuse. The stopped
-fresh 125% attempt remains unavailable, and former 150% uncertainty remains
-historical. This report supports formal review of the candidate; it does not
-supply the final handoff PASS, ticket closure, integration decision or the user's
-actual-running-app verdict in #106.
+This record preserves the independent #105 review and subsequent owner
+corrections. The latest required verification is **100% only**, without a system
+scale change. The new #107/UI-P11 scrollbar repair has passing affected automated
+checks but awaits independent actual100% appearance/interaction evidence. Earlier
+100%/125% reuse and unavailable 125%/uncertain 150% samples retain their historical
+facts; they do not prove the changed scrollbar appearance. The user's repaired
+actual-running-app #106/UI-V10 verdict remains separate.
+
+## Current scrollbar repair checkpoint
+
+The owner's [latest decision](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/92#issuecomment-6077040155)
+supersedes the former 100%/125% verification requirement. Preserve narrow/short
+scrolling, paths/findings, stacking, focus/keyboard and unobstructed footer at 100%.
+No other scale is tested or diagnosed by this repair.
+
+The two-line stylesheet repair removes the background override from QWidget's
+inherited typography rule and applies it to plain `.QWidget` containers instead.
+Qt type selectors also match subclasses, so the old rule customized QScrollBar
+painting. In one bounded offscreen Windows11-style comparison the scoped version
+keeps container/panel colors while the standalone scrollbar matches the unstyled
+platform control. [Qt's stylesheet rules](https://doc.qt.io/qt-6/stylesheet-syntax.html)
+and [style delegation](https://doc.qt.io/qt-6/stylesheet.html) explain this boundary.
+No application style is forced, scrollbar theme duplicated, operation policy
+changed or new CSS/pixel-oracle test added.
+
+Current affected checks: 138 tests under tests/gui passed once in 41.06s; Ruff
+lint/format (243 files), dependencies, maintained launcher and rebuilt wheel passed.
+Exact new source/wheel/runtime bindings accompany the #107 candidate. The previous
+1945/115-GUI cohort is historical; it was not rerun against this style change.
+Prior Standards/Spec findings remain applicable to unchanged code; the new
+presentation delta receives its own independent #107 review.
+
+| Current requirement | Preparation disposition |
+| --- | --- |
+| UI-P11 | UNVERIFIED actual appearance: causal style correction and offscreen delegation shown; independent task-sheet/diagnostic scrollbar sample at 100% pending. |
+| UI-P01/UI-P07/UI-P08/UI-U01/UI-U02 | Affected wrapping/scroll/focus/footer public controls pass; independent actual 100% wheel/thumb/keyboard and short/narrow recheck pending. |
+| #107 handoff/integration | Candidate preparation only; independent verification and serialized integration remain separate. |
+| UI-V10/#106 | No final user acceptance supplied by the technical repair. |
+
+The sections below retain #105's exact actors, candidates, reference, source axes
+and the then-current 100%/125% applicability judgment. Prior 125% and 150% observations
+are historical; no new other-scale PASS, regression or cause is claimed.
 
 ## Scope and independent roles
 
@@ -123,7 +158,7 @@ Nineteen maintained-control input/launch attempts over about 5m42 remained withi
 preserved; the owner has since superseded that requirement, without a painting
 cause or a claim that removed scales passed.
 
-### Current 100%/125% applicability
+### Historical #105 100%/125% applicability
 
 The separate independent `native-review-125-applicability.md` assesses runtime
 `57df9cfe0501f43cbb85ff4232a1f1f3aad9a36e`, byte-identical to d237. Reviewer
@@ -166,7 +201,7 @@ no new visible 100% readback. User-normal 100% and the last observed 100% restor
 retain their scope. The unavailable attempt remains a distinct preserved record;
 it contains no contradictory 125% converter observation and is not marked passed.
 
-| ID | Independent disposition and limit |
+| ID | Recorded #105 disposition and limit before the scrollbar correction |
 | --- | --- |
 | UI-P01 | SATISFIED: task sheet, body scroll, narrow layout and retained shell/footer; affected d237 path freshly observed. |
 | UI-P02 | SATISFIED: headings, explanations, ordered tabs and context; small text retains U02 limit. |
@@ -181,7 +216,7 @@ it contains no contradictory 125% converter observation and is not marked passed
 | UI-U01 | SATISFIED basic strategic scope: labels, textual meaning, visible focus, report/path selection; no exhaustive assistive-technology certification. |
 | UI-U02 | SATISFIED in amended strategic scope: own current 100%/narrow observations plus independently assessed actual 125% normal/narrow/path/findings/stacking/scroll/footer reuse; no fresh 125% control readback or all-state matrix claimed. |
 
-## All five ticket criteria
+## Recorded #105 ticket criteria
 
 | Criterion | Current assessment |
 | --- | --- |

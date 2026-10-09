@@ -540,14 +540,25 @@ body/image, inventory and preservation audits keep their full scope. Actual user
 acceptance remains a separate gate when required by the accepted specification.
 
 For the first local Windows UI, the owner's
-[current scaling decision](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/92#issuecomment-6076372221)
-requires **100% and 125% only**, with **100%** as the normal/restoration baseline.
+[current scaling decision](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/92#issuecomment-6077040155)
+requires **100% only**, with the normal **100%** display setting left unchanged.
 Keep narrow-window, long-path/findings, stacking, scrolling, keyboard and usable
-footer checks. Do not sample other scales. Earlier 150% uncertainty and BLOCKED
-records retain their historical facts; the requirement was superseded, rather
-than those observations becoming passing evidence. Independent applicable
-100%/125% observations are required before review PASS, and the user's actual
-running-app verdict remains separate.
+footer checks. Do not change system scaling or sample other scales. Earlier
+100%/125% reuse, 150% uncertainty and BLOCKED records retain their historical
+scope; owner corrections do not turn old uncertainty into passing observations.
+Independent applicable 100% observations are required before review PASS, and
+the user's actual running-app verdict remains separate.
+
+The UI-P11 scrollbar correction uses Qt's platform style instead of a custom
+scrollbar theme. Background paint is scoped to plain containers rather than all
+QWidget subclasses; inherited typography and targeted sheet/control colors remain
+in place. Existing public GUI controls exercise scroll reachability, exact wrapped
+paths, narrow/short reflow, keyboard/focus and the anchored footer. Offscreen
+style comparisons diagnose platform delegation, not actual Windows appearance.
+Independently sample the actual task-sheet and diagnostic scrollbars at 100%,
+including wheel, thumb drag and keyboard access; previous scrollbar observations
+cannot establish this changed appearance. No CSS-mirroring or screenshot-pixel
+oracle is needed as a permanent test.
 
 ## Native review procedure
 
