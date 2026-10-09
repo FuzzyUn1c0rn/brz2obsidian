@@ -102,8 +102,13 @@ authorization; malformed warning receipt facts never imply a created vault.
 Completion controls exercise current verified-receipt admission, stale/closed/busy
 intents and atomic selection of the published folder for explicit checking. The
 independent selector remains disabled without its own visible selection. Outer
-adapter controls verify Unicode/spaced path encoding, existing fixed-report-only
-Obsidian requests, missing targets and safe native failures without file changes.
+adapter controls verify Unicode/spaced paths, path-free Obsidian vault-manager
+requests, missing targets and safe native failures without file changes. Obsidian
+feedback uses the admitted report's folder even when an adapter returns an
+untrusted path or raises; report admission remains unchanged. Public Qt clicks
+observe first-open guidance and exact copyable folder feedback for successful
+dispatch and handler failure. Independent actual Windows verification separately
+confirms that the installed URI handler opens the vault manager.
 A deliberately blocked filesystem check re-admits immediately before dispatch;
 the runner never holds the session lock across platform work. Injected UI controls
 retain clean/warning/late-error results on open failures, process Qt events during

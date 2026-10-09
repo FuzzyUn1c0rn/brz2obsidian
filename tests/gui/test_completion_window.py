@@ -81,8 +81,8 @@ def test_published_result_shows_four_explicit_actions_and_retains_result_on_open
         assert "Open folder as vault" in feedback.text()
         assert window.snapshot.result is previous
         assert window.snapshot.publication.receipt_verified
-        assert path_text(window, "Completion action path") == str(report)
-        assert requested[0][0].startswith("obsidian://open?path=")
+        assert path_text(window, "Completion action path") == str(destination)
+        assert requested[0][0] == "obsidian://choose-vault"
         assert requested[0][1] != get_ident()
         assert button(window, "Open folder").isEnabled()
         assert button(window, "Check published vault").isEnabled()
@@ -91,7 +91,54 @@ def test_published_result_shows_four_explicit_actions_and_retains_result_on_open
         finish(app, window)
 
 
-def test_missing_report_feedback_leaves_folder_and_check_actions_available(tmp_path):
+def test_obsidian_vault_manager_request_keeps_published_folder_copyable(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    session, destination = published_session(tmp_path)
+    destination.mkdir()
+    report = destination / "MIGRATION REPORT.md"
+    report.write_bytes(b"generated report")
+    requested = []
+    window = MainWindow(
+        session=session, completion_actions=CompletionActions(launch=requested.append)
+    )
+    window.show()
+    window.submit(SelectVault(path_or_null=None))
+    try:
+        until(app, lambda: window.snapshot.publication is not None)
+        previous = window.snapshot.result
+        guidance = window_text(window)
+        assert "Open in Obsidian requests Obsidian's vault manager." in guidance
+        assert "choose Open folder as vault" in guidance
+        assert "select the published vault folder" in guidance
+        assert requested == []
+        button(window, "Open in Obsidian").click()
+        feedback = named_label(window, "Completion action feedback")
+        until(app, lambda: "vault manager was requested" in feedback.text())
+        assert requested == ["obsidian://choose-vault"]
+        assert "does not confirm the vault opened" in feedback.text()
+        assert "Open folder as vault" in feedback.text()
+        folder = next(
+            control
+            for control in window.findChildren(QTextEdit)
+            if control.accessibleName() == "Completion action path"
+        )
+        assert folder.isVisible() and folder.isReadOnly()
+        folder.selectAll()
+        assert folder.createMimeDataFromSelection().text() == str(destination)
+        assert window.snapshot.result is previous
+        assert window.snapshot.publication.receipt_verified
+        assert button(window, "Open folder").isEnabled()
+        assert button(window, "Open migration report").isEnabled()
+        assert button(window, "Check published vault").isEnabled()
+        assert report.read_bytes() == b"generated report"
+    finally:
+        finish(app, window)
+
+
+@pytest.mark.parametrize("action", ["Open migration report", "Open in Obsidian"])
+def test_missing_report_feedback_leaves_folder_and_check_actions_available(
+    tmp_path, action
+):
     app = QApplication.instance() or QApplication([])
     session, destination = published_session(tmp_path)
     destination.mkdir()
@@ -104,7 +151,7 @@ def test_missing_report_feedback_leaves_folder_and_check_actions_available(tmp_p
     try:
         until(app, lambda: window.snapshot.publication is not None)
         previous = window.snapshot.result
-        button(window, "Open migration report").click()
+        button(window, action).click()
         until(
             app,
             lambda: (
@@ -115,7 +162,9 @@ def test_missing_report_feedback_leaves_folder_and_check_actions_available(tmp_p
         assert window.snapshot.result is previous
         assert requested == []
         assert path_text(window, "Completion action path") == str(
-            destination / "MIGRATION REPORT.md"
+            destination
+            if action == "Open in Obsidian"
+            else destination / "MIGRATION REPORT.md"
         )
         assert button(window, "Open folder").isEnabled()
         assert button(window, "Check published vault").isEnabled()

@@ -284,3 +284,42 @@ the full1945 cohort remains historical and scoped to unchanged backend semantics
 Independent actual maintained-launcher Windows100 wheel/thumb/keyboard and
 short/narrow appearance are still **UNVERIFIED** before the new candidate review.
 This causal repair does not supply UI-P11 PASS or the separate #106 user verdict.
+
+## Owner-approved Obsidian first-open correction — 2026-10-09
+
+After inspection and conversion, the owner observed Obsidian's own "Vault not
+found" error. The earlier report-opening URI required a vault already registered
+with Obsidian. The owner selected opening the vault manager instead; the accepted
+[spec amendment](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/92#issuecomment-6079666752)
+and [repair #108](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/108) supersede
+that first-open behavior without changing conversion or publication policy.
+
+Explicit **Open in Obsidian** now requests only `obsidian://choose-vault` through
+the installed Windows handler. Guidance tells the user to choose **Open folder as
+vault** and select the published vault folder. Successful dispatch and handler
+failure retain that exact selectable folder path, without claiming the vault
+opened. The existing backend-admitted report target, report-presence check,
+re-admission before dispatch, worker thread and stale-result rules remain intact.
+Runner feedback derives the folder from the authoritative admitted report, never
+an adapter-supplied path, including contained exceptions. Folder, report and check
+actions retain their behavior; conversion still launches nothing automatically.
+No private Obsidian registry, note-writing URI or registration workaround is used.
+
+Meaningful public regressions were RED on the old URI, on real GUI clicks with
+clean/warning/late-error publications returning the report path, and on runner
+feedback with a forged adapter path or exception. The first corrected GUI run
+exposed the existing runner's authoritative report-path replacement; that failure
+is retained alongside the added runner controls. The corrected runner/GUI slice
+passed six tests. One final affected adapter/session/runner/architecture/completion
+and accepted-presentation cohort passed **74 tests in 9.56s**, with offscreen Qt
+factor1 and a safe public-result failure observer. Ruff lint, format (243 files),
+dependency checks and the maintained source-bound launcher build passed. The
+previous full1945/138-GUI runs and wheels remain historical; no new full suite or
+wheel was executed for this small correction.
+
+Independent installed-handler and actual Windows 100% guidance/copyable-folder
+verification remain **UNVERIFIED** at candidate preparation. Offscreen checks do
+not establish that native gate. The owner's existing tool and Obsidian windows,
+conversion result and preferences were not touched by implementation; source
+changes apply to a future launch, not the already-running review app. Serialized
+integration and the separate #106/UI-V10 overall verdict remain pending.

@@ -70,9 +70,10 @@ report**, **Open in Obsidian** or **Check vault** in the result area. These acti
 also remain available when publication succeeded before a later error. Checking
 automatically selects that published folder and remains read-only; no open or
 check starts automatically. An open failure keeps the result and shows a copyable
-path. Obsidian receives an encoded request for the existing **MIGRATION REPORT.md**;
-dispatch does not confirm it opened. If Obsidian does not yet know the vault,
-choose **Open folder as vault** there using the published folder path.
+path. **Open in Obsidian** requests Obsidian's vault manager. There, choose
+**Open folder as vault** and select the exact published vault folder shown in
+the app. The request does not confirm that the vault opened; you complete folder
+selection in Obsidian. **Open migration report** remains a separate action.
 
 Launching the app again restores or draws attention to its existing window;
 it does not start another operation. If Windows prevents foreground activation,

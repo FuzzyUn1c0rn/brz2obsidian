@@ -2,6 +2,7 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from pathlib import Path
 from threading import Event
 
 from brz2obsidian.application.contracts import (
@@ -240,16 +241,21 @@ class HostRunner:
                 and self.session.admit_completion_action(action, generation) == target
             )
 
+        feedback_path = (
+            str(Path(target.path).parent)
+            if target.action == "open_in_obsidian"
+            else target.path
+        )
         try:
             outcome = perform(target, readmit)
             feedback = CompletionFeedback(
-                generation, outcome.message, outcome.succeeded, target.path
+                generation, outcome.message, outcome.succeeded, feedback_path
             )
         except Exception:  # noqa: BLE001 -- local platform failures retain the operation result.
             feedback = CompletionFeedback(
                 generation,
                 "The open action could not complete. Your operation result is retained.",
-                path=target.path,
+                path=feedback_path,
             )
         self.on_completion_feedback(feedback)
 

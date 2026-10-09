@@ -6,7 +6,6 @@ from ctypes import wintypes
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from urllib.parse import quote
 
 
 @dataclass(frozen=True)
@@ -37,8 +36,8 @@ class CompletionActions:
 
     def open_in_obsidian(self, report: Path | str, *, admit=None) -> CompletionOutcome:
         report = Path(report)
-        path = str(report) if report.is_absolute() else None
-        guidance = "If needed, choose Open folder as vault in Obsidian using the published folder path."
+        path = str(report.parent) if report.is_absolute() else None
+        guidance = "Choose Open folder as vault in Obsidian and select the published vault folder using the path below."
         try:
             if path is None or not report.is_file():
                 return CompletionOutcome(
@@ -50,10 +49,10 @@ class CompletionActions:
                     "The published result changed. Use the current result and try again.",
                     path,
                 )
-            self._launch("obsidian://open?path=" + quote(path, safe=""))
+            self._launch("obsidian://choose-vault")
             return CompletionOutcome(
                 True,
-                "Opening in Obsidian was requested. This does not confirm the vault opened. "
+                "Opening Obsidian's vault manager was requested. This does not confirm the vault opened. "
                 + guidance,
                 path,
             )

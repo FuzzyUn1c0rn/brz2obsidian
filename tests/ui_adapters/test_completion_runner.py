@@ -57,6 +57,49 @@ def test_completion_runner_uses_background_current_target_and_safe_feedback_path
         runner.shutdown()
 
 
+@pytest.mark.parametrize("failure", [False, True])
+def test_obsidian_feedback_uses_admitted_folder_despite_untrusted_adapter_path(
+    tmp_path, failure
+):
+    session, destination = published_session(tmp_path)
+    feedback, received = [], []
+    finished = Event()
+
+    def perform(target, admit):
+        received.append((target.path, admit(), get_ident()))
+        if failure:
+            raise OSError("PRIVATE native error")
+        return CompletionOutcome(True, "Vault manager requested.", "untrusted path")
+
+    def completed(value):
+        feedback.append(value)
+        finished.set()
+
+    runner = HostRunner(
+        SimpleNamespace(),
+        lambda update: None,
+        lambda page: None,
+        session=session,
+        on_completion_feedback=completed,
+    )
+    previous = session.snapshot.result
+    try:
+        runner.request_completion_action(
+            "open_in_obsidian", session.diagnostic_generation, perform
+        )
+        assert finished.wait(5)
+        path, admitted, thread = received[0]
+        assert path == str(destination / "MIGRATION REPORT.md")
+        assert admitted and thread != get_ident()
+        assert feedback[0].path == str(destination)
+        assert feedback[0].succeeded is not failure
+        assert "PRIVATE" not in feedback[0].message
+        assert session.snapshot.result is previous
+        assert session.snapshot.publication.receipt_verified
+    finally:
+        runner.shutdown()
+
+
 def test_runner_rejects_stale_permission_after_blocked_filesystem_check(
     tmp_path, monkeypatch
 ):

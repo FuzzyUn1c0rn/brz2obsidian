@@ -501,7 +501,7 @@ class MainWindow(QMainWindow):
         published.addWidget(self.completion_buttons)
         published.addWidget(
             label(
-                "Open in Obsidian requests the existing migration report. If the vault is not known to Obsidian, choose Open folder as vault there using the published path.",
+                "Open in Obsidian requests Obsidian's vault manager. In Obsidian, choose Open folder as vault and select the published vault folder using the path above.",
                 "muted",
             )
         )

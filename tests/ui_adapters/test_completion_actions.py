@@ -1,7 +1,5 @@
 """Completion adapters at the filesystem and OS dispatch boundaries."""
 
-from urllib.parse import unquote, urlsplit
-
 import pytest
 
 CompletionActions = pytest.importorskip(
@@ -29,10 +27,10 @@ def test_explicit_folder_and_report_opens_dispatch_existing_absolute_paths(tmp_p
     assert list(vault.iterdir()) == [report]
 
 
-def test_obsidian_requests_only_encoded_existing_report_and_explains_first_use(
+def test_obsidian_requests_vault_manager_without_private_path_and_explains_first_use(
     tmp_path,
 ):
-    vault = tmp_path / "Vault café 雪 #%"
+    vault = tmp_path / "Vault café 雪 #% & Leadership"
     vault.mkdir()
     report = vault / "MIGRATION REPORT.md"
     report.write_text("existing generated report", encoding="utf-8")
@@ -41,20 +39,12 @@ def test_obsidian_requests_only_encoded_existing_report_and_explains_first_use(
     outcome = CompletionActions(launch=received.append).open_in_obsidian(report)
 
     assert outcome.succeeded
-    assert len(received) == 1
-    uri = received[0]
-    assert uri.startswith("obsidian://open?path=")
-    assert "%20" in uri and "%23" in uri and "%25" in uri
-    assert "%C3%A9" in uri and "%E9%9B%AA" in uri
-    assert "\\" not in uri and " " not in uri
-    parts = urlsplit(uri)
-    assert parts.scheme == "obsidian" and parts.netloc == "open"
-    assert parts.fragment == "" and parts.query.count("=") == 1
-    assert unquote(parts.query.removeprefix("path=")) == str(report)
-    assert outcome.path == str(report)
+    assert received == ["obsidian://choose-vault"]
+    assert outcome.path == str(vault)
     assert "requested" in outcome.message
     assert "does not confirm" in outcome.message
     assert "Open folder as vault" in outcome.message
+    assert "published vault folder" in outcome.message
     assert report.read_text(encoding="utf-8") == "existing generated report"
     assert list(vault.iterdir()) == [report]
 
@@ -68,7 +58,9 @@ def test_missing_target_does_not_dispatch_and_returns_copyable_path(tmp_path, me
 
     assert not outcome.succeeded
     assert "unavailable" in outcome.message
-    assert outcome.path == str(missing)
+    assert outcome.path == str(
+        missing.parent if method == "open_in_obsidian" else missing
+    )
     assert received == []
     assert list(tmp_path.iterdir()) == []
 
@@ -102,11 +94,12 @@ def test_failed_native_dispatch_is_safe_and_keeps_target_available(tmp_path, met
     assert not outcome.succeeded
     assert "could not be opened" in outcome.message
     assert "PRIVATE" not in outcome.message
-    assert outcome.path == str(target)
+    assert outcome.path == str(vault if method == "open_in_obsidian" else target)
     assert len(received) == 1
     if method == "open_in_obsidian":
         assert "URI handler may be unavailable" in outcome.message
         assert "Open folder as vault" in outcome.message
+        assert "published vault folder" in outcome.message
     assert report.read_bytes() == b"generated report"
     assert list(vault.iterdir()) == [report]
 

@@ -817,7 +817,7 @@ def test_narrow_checker_identifies_a_long_reported_file_without_clipping(tmp_pat
     [
         ("Open folder", False),
         ("Open migration report", True),
-        ("Open in Obsidian", True),
+        ("Open in Obsidian", False),
     ],
 )
 def test_repeated_failed_open_retains_actual_visible_and_copyable_target_path(
