@@ -6,6 +6,7 @@ in the selected virtual environment, without changing installations or sources.
 
 import argparse
 import hashlib
+import io
 import json
 import os
 import subprocess
@@ -59,7 +60,7 @@ def snapshot(root):
     # Git performs the same clean/eol normalization used when committing. This
     # does not touch the index. Quoted stdin paths preserve Unicode and spaces.
     names = "".join(
-        json.dumps(str(root / name), ensure_ascii=False) + "\n" for name in existing
+        json.dumps(name, ensure_ascii=False) + "\n" for name in existing
     ).encode("utf-8")
     oids = (
         git(root, "hash-object", "--stdin-paths", input=names)
@@ -101,6 +102,67 @@ def snapshot_ref(root, ref):
             if kind != "blob":
                 raise Invalid("Source tree contains unsupported non-file entries")
             files.append({"path": name, "git_blob": blob})
+    # A historical blob may predate today's normalization policy. Read Git
+    # objects in one batch, then apply the reference tree's effective filters
+    # where conversion can matter. Never rewrite the index or fixture bytes.
+    blobs = list(dict.fromkeys(item["git_blob"] for item in files))
+    stream = io.BytesIO(
+        git(
+            root, "cat-file", "--batch", input=("\n".join(blobs) + "\n").encode("ascii")
+        )
+    )
+    contents = {}
+    for blob in blobs:
+        header = stream.readline().decode("ascii").split()
+        if len(header) != 3 or header[0] != blob or header[1] != "blob":
+            raise Invalid("Cannot read complete reference source blobs")
+        contents[blob] = stream.read(int(header[2]))
+        if stream.read(1) != b"\n":
+            raise Invalid("Truncated reference source blob")
+    attributes = (
+        git(
+            root,
+            "--attr-source=" + ref,
+            "check-attr",
+            "-z",
+            "--stdin",
+            "filter",
+            "ident",
+            "working-tree-encoding",
+            input=("\0".join(item["path"] for item in files) + "\0").encode("utf-8"),
+        )
+        .decode("utf-8")
+        .split("\0")[:-1]
+    )
+    filtered = set()
+    for index in range(0, len(attributes), 3):
+        filename, _attribute, value = attributes[index : index + 3]
+        if value not in ("unspecified", "unset"):
+            filtered.add(filename)
+    for item in files:
+        raw = contents[item["git_blob"]]
+        if b"\r\n" in raw or item["path"] in filtered:
+            if item["path"] in filtered:
+                raw = git(
+                    root,
+                    "--attr-source=" + ref,
+                    "cat-file",
+                    "--filters",
+                    "--path=" + item["path"],
+                    item["git_blob"],
+                )
+            item["git_blob"] = (
+                git(
+                    root,
+                    "--attr-source=" + ref,
+                    "hash-object",
+                    "--path=" + item["path"],
+                    "--stdin",
+                    input=raw,
+                )
+                .decode("ascii")
+                .strip()
+            )
     return {
         "identity": digest(encoded(sorted(files, key=lambda item: item["path"]))),
         "files": files,
@@ -431,6 +493,7 @@ def run(args):
         ):
             raise Invalid("Invoked runner differs from assessed checkout runner")
         info, mode = probe(python, root, env, checks, args.environment)
+        info["git_version"] = git(root, "--version").decode("utf-8").strip()
         receipt["interpreter"] = info
         receipt["environment"] = mode
         if args.require_gui and mode != "gui":

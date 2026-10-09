@@ -129,7 +129,16 @@ passing evidence.
 
 A pre-commit receipt can bind to a later clean commit only when the relevant
 Git-normalized tested contents remain identical. Validation preserves original
-revision and dirty-state facts. For equivalent contents in another checkout,
+revision and dirty-state facts.
+
+Git reads checkout-relative paths so scoped `.gitattributes` rules apply,
+including the authored CRLF fixture's `-text` exception. Reference binding cleans
+historical blobs under the reference tree's effective attributes/filters rather
+than assuming every stored blob was already normalized. This uses Git's
+[`--attr-source`](https://git-scm.com/docs/git/2.43.0#Documentation/git.txt---attr-sourcelttree-ishgt)
+support (Git 2.43 or later); receipts record the Git version.
+
+For equivalent contents in another checkout,
 provide `--reuse-reason` with explicit original context and applicability; this is
 reused evidence, not an independent fresh run. `validate --ref FULL_COMMIT` binds
 the receipt to that Git tree instead of the checkout's current files; stage

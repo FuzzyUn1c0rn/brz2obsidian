@@ -790,3 +790,85 @@ def test_full_receipt_does_not_infer_execution_for_unmatched_expression(
         expected,
     )
     assert refused.returncode == 2
+
+
+@pytest.mark.parametrize("changed_policy", [False, True])
+def test_scoped_git_attributes_preserve_commit_binding_and_fixture_bytes(
+    checkout, changed_policy
+):
+    note = checkout / "tests" / "notes.md"
+    note.write_bytes(b"authored first line\r\nauthored second line\r\n")
+    (checkout / ".gitattributes").write_text(
+        "* text=auto eol=lf\ntests/notes.md -text\n"
+    )
+    subprocess.run(
+        ["git", "-C", str(checkout), "add", "."], check=True, capture_output=True
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(checkout),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=t@example.invalid",
+            "commit",
+            "-m",
+            "preserved authored CRLF",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    if changed_policy:
+        (checkout / ".gitattributes").write_text("* text=auto eol=lf\n")
+        subprocess.run(
+            ["git", "-C", str(checkout), "add", ".gitattributes"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(checkout),
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=t@example.invalid",
+                "commit",
+                "-m",
+                "policy changes without blob renormalization",
+            ],
+            check=True,
+            capture_output=True,
+        )
+    commit = subprocess.run(
+        ["git", "-C", str(checkout), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    before = note.read_bytes()
+    result, path, receipt = run(
+        checkout, "--check", "pytest", "--test", "tests/test_selected.py"
+    )
+    assert result.returncode == 0
+    expected = requirements(
+        checkout,
+        [pytest_requirement("focused", ["tests/test_selected.py"])],
+        receipt["environment"],
+    )
+    accepted = command(
+        "validate",
+        "--receipt",
+        path,
+        "--checkout",
+        checkout,
+        "--requirements",
+        expected,
+        "--ref",
+        commit,
+    )
+    assert accepted.returncode == 0, accepted.stdout + accepted.stderr
+    assert note.read_bytes() == before
