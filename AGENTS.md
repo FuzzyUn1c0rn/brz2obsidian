@@ -24,6 +24,13 @@ Python using `python -m venv .venv` if missing. Install runtime, build,
 and development packages only inside this environment, as they become
 needed. See `README.md` for bootstrap commands and dependency manifests.
 
+## Automated checks
+
+Every repository agent must run pytest, Ruff lint/format checks and dependency
+checks through `tools/check.py`; before running or accepting them, read
+[the runner and receipt contract](docs/testing.md#automated-check-runner).
+This requirement takes effect when the runner and adoption changes integrate together.
+
 ## Temporary artifacts
 
 For development runs, prototypes, screenshots, agent handoffs, or cleanup,

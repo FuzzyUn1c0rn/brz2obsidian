@@ -55,7 +55,22 @@ Each smell reads *what it is* → *how to fix*; match it against the diff:
 - **Middle Man**: a class or function that mostly just delegates onward. → cut it, call the real target direct.
 - **Refused Bequest**: a subclass or implementer that ignores or overrides most of what it inherits. → drop the inheritance, use composition.
 
-### 4. Spawn both sub-agents in parallel
+### 4. Check execution evidence and spawn both sub-agents
+
+Before accepting automated-check claims, record required environment, check IDs,
+test scope and freshness from the ticket and candidate; validate submitted receipts
+against those independent requirements using
+[the testing contract](../../../docs/testing.md#automated-check-runner).
+Reviewers still judge coverage adequacy. Report missing/invalid evidence as a finding.
+For independent fresh verification, run the runner in the assessed checkout and
+retain your own receipt; reused evidence retains its source and applicability reason.
+
+Give each review sub-agent absolute checkout, interpreter and runner pointers,
+required scope, requirements and receipt destinations/contract. Any covered check
+it executes uses the runner; its report includes receipt paths and outcomes.
+Keep manual/native evidence and user acceptance gates distinct.
+
+Spawn both axes in parallel.
 
 **Standards sub-agent prompt** should include:
 

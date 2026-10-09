@@ -8,7 +8,9 @@ Implement the work described by the user in the spec or tickets.
 
 Call the Skill tool with "tdd" where possible, at pre-agreed seams.
 
-Run typechecking regularly, single test files regularly, and the full test suite once at the end.
+Run focused checks during development and the final checks required by the ticket
+through [the repository runner](../../../docs/testing.md#automated-check-runner).
+Record expected scope before final validation; report the receipt path and outcome.
 
 Once done, call the Skill tool with "code-review" to review the work.
 

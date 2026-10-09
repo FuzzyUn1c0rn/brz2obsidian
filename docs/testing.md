@@ -1,23 +1,155 @@
 # Testing and acceptance
 
-Use the project virtual environment (tested native Windows / CPython 3.14.8):
+## Automated check runner
+
+Every repository agent uses `tools/check.py` for pytest, Ruff lint, Ruff format
+checking and dependency consistency (`pip check`). This includes implementers,
+reviewers, verifiers, coordinators, exploratory and delegated agents. The rule
+starts when the runner and adoption changes integrate together; before then,
+existing commands remain usable. Guidance, review, handoff validation and CI
+consumption enforce this contract; it does not intercept arbitrary shell commands
+or modify external/global agent configuration.
+
+Use an absolute assessed checkout and project `.venv` interpreter. A worktree may
+reuse another checkout's interpreter read-only; package installation remains a
+separate serialized bootstrap step. Invoke a runner with identical content to
+the assessed checkout's `tools/check.py`. The runner checks tools/environment and
+binds imports to the selected checkout's source without redirecting an editable
+installation or changing the caller's environment. See `README.md` for environment
+bootstrap and [workspace housekeeping](workspace.md) for disposable artifacts.
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q
-.\.venv\Scripts\python.exe -m ruff check --no-cache .
-.\.venv\Scripts\python.exe -m ruff format --check .
-.\.venv\Scripts\python.exe -m pip check
+$checkout = (Get-Location).Path
+$python = Join-Path $checkout '.venv\Scripts\python.exe'
+$runner = Join-Path $checkout 'tools\check.py'
+# Full existing check set; GUI environment includes the full Windows launcher coverage.
+& $python $runner run --checkout $checkout --python $python --environment gui
+# One focused public regression file.
+& $python $runner run --checkout $checkout --python $python --environment gui --check pytest --test tests/application/test_ui_preferences.py
+# Only lint and format checks.
+& $python $runner run --checkout $checkout --python $python --environment base --check lint --check format
+& $python $runner run --help
+& $python $runner validate --help
 ```
 
-Run from the checkout root. Pytest uses reserved `tmp/pytest` for temporary test
-files and clears that directory before each run; its cache lives in
-`tmp/pytest-cache`. Ruff uses `tmp/ruff-cache`. For concurrent pytest runs in one
-checkout, select distinct paths with `--basetemp=tmp/pytest-<run>`.
-See [workspace housekeeping](workspace.md) for other temporary artifacts.
+`run` defaults to all four stable check IDs: `pytest`, `lint`, `format`,
+`dependency`. Repeat `--check` to select checks and `--test` for repository-relative
+test files/directories or pytest node IDs. `-k` and `-m` apply keyword and marker
+expressions. With no test selector or expression, pytest selects the full suite;
+a selection/expression is focused coverage. Invalid and zero-test selections
+cannot qualify as successful execution. The runner offers maintained check
+selections, not arbitrary command passthrough, repair or retries.
 
-In a separate worktree, use the integration checkout's full `.venv` interpreter
-path and set `$env:PYTHONPATH = Join-Path (Get-Location) 'src'` for that worktree.
-Do not redirect a shared editable installation while other worktrees are active.
+Use `--environment base` with a Qt-absent environment to establish base coverage,
+`gui` with the pinned GUI dependencies installed to establish GUI coverage, or
+`auto` for development convenience. Completion requirements name `base` or `gui`
+explicitly; auto records its resolved mode. `--require-gui` requires actual GUI
+test execution. Merely collecting or skipping GUI tests does not establish that
+coverage. Full GUI coverage includes the existing Windows launcher controls.
+
+Each invocation exclusively allocates `tmp/checks/<8-hex>/` in the assessed
+checkout, containing `receipt.json`, per-check logs and isolated pytest temporary
+and pytest/Ruff cache locations. Logs/receipts stay outside pytest-owned paths.
+Use the printed `RECEIPT:` absolute path; preserve failed and interrupted runs as
+separate evidence. The runner streams stdout/stderr and retains original bytes
+and readable UTF-8 logs. Normal tool failures retain their original diagnostics
+and permit later requested independent checks to run once; setup errors,
+interruption and changed source leave unrun checks explicit.
+
+| Run exit | Meaning |
+| --- | --- |
+| `0` | Every requested check completed successfully |
+| `1` | One or more tools completed with a normal failure |
+| `2` | Setup/execution error or source changed during execution |
+| `3` | Incomplete/interrupted execution |
+
+### Requirements and completion evidence
+
+The coordinator/reviewer decides appropriate checks from the ticket and workflow
+stage before accepting completion. Record environment, check IDs, full/focused
+pytest scope, selectors/expressions and required GUI execution independently of
+the submitted results. A full suite is not required for every task; a required
+check cannot disappear because a submission omits it or presents a manual entry.
+Delegation supplies absolute checkout, interpreter and runner pointers, selected
+scope, requirements and receipt destination/contract. Completion reports name
+receipt paths and outcomes. Independent fresh verification runs its own runner
+invocation and receipt in its assessed checkout.
+
+The public runner validator accepts a separately supplied schema-1 requirements
+JSON file. For example, focused base pytest plus lint:
+
+```json
+{
+  "schema_version": 1,
+  "environment": "base",
+  "checks": [
+    {
+      "id": "pytest",
+      "scope": "focused",
+      "selectors": ["tests/application/test_ui_preferences.py"],
+      "keyword": null,
+      "marker": null,
+      "require_gui": false
+    },
+    {"id": "lint"}
+  ]
+}
+```
+
+```powershell
+& $python $runner validate --receipt 'C:\checkout\tmp\checks\1234abcd\receipt.json' --checkout $checkout --requirements 'C:\checkout\tmp\effort\required-checks.json'
+```
+
+Validation exits `0` only for passing evidence meeting the supplied requirements;
+`2` means rejection. It checks schema, selection, environment, completed results,
+source binding and referenced evidence digests. Missing, truncated, altered, stale,
+wrong-checkout and insufficient-scope evidence fail. Validate before accepting
+check claims in reviews, issue completion or qualifying handoff transitions. A
+text log or manually written passed value is insufficient. Honest failures remain
+failed evidence; a later successful run cannot erase the earlier result.
+`validate --allow-failed` permits read-only integrity inspection of an honestly
+executed failed receipt for a held/failed verdict. Its acceptance is not passing
+completion evidence; ordinary completion validation omits this option.
+
+Receipts preserve unique run identity, checkout, original Git revision/dirty state,
+source identity, runner identity, interpreter/tool versions, resolved environment,
+argument arrays/CWD, selectors, timestamps, check/aggregate results, executed and
+skipped test counts, and evidence digests. The before/after snapshot covers tracked
+and nonignored new repository files, including source, tests, tools/configuration
+and current guidance. Ignored private data, environments and generated output are
+excluded. Git-normalized content identifies the candidate while separate disk
+SHA facts describe the bytes executed; a source change during execution prevents
+passing evidence.
+
+A pre-commit receipt can bind to a later clean commit only when the relevant
+Git-normalized tested contents remain identical. Validation preserves original
+revision and dirty-state facts. For equivalent contents in another checkout,
+provide `--reuse-reason` with explicit original context and applicability; this is
+reused evidence, not an independent fresh run. Reviewers judge whether declared
+coverage fits the ticket. Receipts establish execution and integrity facts, not
+security attestation against deliberate forgery.
+
+The [enhanced handoff contract](../.agents/skills/implement-spec-enhanced/references/handoffs.md)
+is authoritative for structured per-stage requirements, publication commands,
+current versus historical schema, reuse and transition validation. Its separately
+authored requirements bind the stage/ticket/candidate and assessed result; they
+must accompany candidate, verification and integration publication and standalone
+validation. Historical records remain byte-preserved and readable as historical
+evidence. New transitions use the current contract. An explicit historical reuse
+retains its source and rationale and cannot satisfy a fresh execution requirement.
+Manual/native observations retain their separate acceptance boundaries.
+
+### Bootstrap and runner-failure investigation
+
+Direct covered-tool execution is permitted only when bootstrapping the runner or
+investigating a concrete runner failure that prevents it from supplying necessary
+evidence. Record why the runner cannot be used, the exact command, interpreter,
+checkout and result. Label this bootstrap/diagnostic evidence; it cannot qualify as
+normal completion verification. After repair, run qualifying final checks through
+the runner and validate receipts. Package installation, build tooling, native
+observations and separately specified private acceptance drivers retain their own
+documented routes. Runner receipt/log directories are immutable evidence; retain
+needed conclusions and pointers before retiring the ignored effort artifacts.
 
 ## Optional GUI checks
 
@@ -26,11 +158,16 @@ host-lifetime session and hidden worker are Qt-independent. Qt-dependent checks
 under `tests/gui` carry the `gui` marker and skip during discovery when PySide6 is
 absent. Install the pinned `requirements-gui.txt` only for GUI development.
 
+The runner sets the offscreen platform for GUI checks. With the absolute paths
+from the runner examples above:
+
 ```powershell
-$env:QT_QPA_PLATFORM = 'offscreen'
-.\.venv\Scripts\python.exe -m pytest -m gui -q --basetemp=tmp/pytest-gui
-.\.venv\Scripts\python.exe -m pytest -m 'not gui' -q --basetemp=tmp/pytest-headless
+& $python $runner run --checkout $checkout --python $python --environment gui --check pytest -m gui --require-gui
+& $python $runner run --checkout $checkout --python $python --environment base --check pytest -m 'not gui'
 ```
+
+The marker selections above are focused; use a full GUI run when full GUI and
+Windows launcher coverage are required.
 
 The injected public UI seam accepts session commands and presents immutable
 snapshots. Deterministic barriers hold inspection, conversion, vault checking, destination

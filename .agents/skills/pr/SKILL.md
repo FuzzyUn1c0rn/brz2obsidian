@@ -161,7 +161,11 @@ Concrete evidence that the change works. Show a before and after.
 
 Screenshots are S-tier - when the environment is set up for it and the change is visual.
 
-Execution-based evidence is A-tier. Test results, console output. Show the exact test that now fails and passes, using pseudocode.
+Execution-based evidence is A-tier. For covered automated checks, use validated
+[runner receipts](../../../docs/testing.md#automated-check-runner): state the assessed
+candidate, required scope, receipt paths and outcomes. Retain both RED and GREEN
+receipts for a regression. Show the exact behavioral test using pseudocode; console
+output alone cannot establish passing completion.
 
 ### Merge Danger
 

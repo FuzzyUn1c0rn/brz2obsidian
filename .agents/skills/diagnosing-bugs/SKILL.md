@@ -15,6 +15,12 @@ This skill has you show commands, outputs and captured artifacts. **Redact every
 
 If the redacted output is not enough to diagnose the bug, say so and ask the user.
 
+For pytest, lint, format or dependency probes, use
+[the repository runner](../../../docs/testing.md#automated-check-runner), including
+RED reproduction. Retain failed receipts. For completion, validate a final passing
+receipt against the required regression scope and report its path/outcome.
+Other reproduction and native-observation routes retain their existing boundaries.
+
 ## Phase 1: Build a feedback loop
 
 **This is the skill.** Everything else is mechanical. If you have a **tight** pass/fail signal for the bug (one that goes red on _this_ bug), you will find the cause; bisection, hypothesis-testing, and instrumentation all just consume it. If you don't have one, no amount of staring at code will save you.
