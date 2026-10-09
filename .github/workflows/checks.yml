@@ -14,7 +14,7 @@ permissions:
 jobs:
   base:
     name: Windows checks (base diagnostic)
-    runs-on: windows-2025
+    runs-on: windows-2022
     defaults:
       run:
         shell: pwsh
