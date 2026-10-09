@@ -6,8 +6,7 @@ Use a directory for each attempt at a ticket candidate under the shared
 integration checkout:
 `tmp/<effort>/handoffs/<ticket>/<candidate-commit>/attempt-001/`.
 The coordinator assigns the next unused attempt number for that ticket/commit.
-The absolute directory path identifies the attempt; the JSON format stays at
-schema version 1. Pass that exact path to every agent, including agents in other
+The absolute directory path identifies the attempt; new records use schema version 2. Pass that exact path to every agent, including agents in other
 worktrees. Temporary records and logs stay here; accepted decisions and
 completion results stay in existing tickets.
 
@@ -54,8 +53,8 @@ $python = (Resolve-Path .venv/Scripts/python.exe).Path
 $writer = (Resolve-Path .agents/skills/implement-spec-enhanced/scripts/write_handoff.py).Path
 $validator = (Resolve-Path .agents/skills/implement-spec-enhanced/scripts/validate_handoff.py).Path
 # $attempt, $assessedCheckout, and $stageInput are coordinator-supplied absolute paths.
-& $python $writer candidate $attempt --checkout $assessedCheckout --input $stageInput
-& $python $validator $attempt --stage candidate --checkout $assessedCheckout
+& $python $writer candidate $attempt --checkout $assessedCheckout --input $stageInput --requirements $stageRequirements
+& $python $validator $attempt --stage candidate --checkout $assessedCheckout --requirements $stageRequirements
 ```
 
 The following stage examples use checkout-relative script paths for readability;
@@ -76,7 +75,7 @@ intact. Select the exact source attempt explicitly and assess the clean unchange
 candidate commit. Use the helper from the integration checkout:
 
 ```powershell
-.venv\Scripts\python.exe .agents/skills/implement-spec-enhanced/scripts/write_handoff.py carry-forward $newAttempt --from $previousAttempt --checkout $candidateCheckout --input $carryInput
+.venv\Scripts\python.exe .agents/skills/implement-spec-enhanced/scripts/write_handoff.py carry-forward $newAttempt --from $previousAttempt --checkout $candidateCheckout --input $carryInput --requirements $retryRequirements
 ```
 
 Both attempt paths must be absolute, distinct and non-nested. The helper accepts
@@ -108,7 +107,7 @@ of applicability; machine validation establishes structure/state, not that
 judgment. The auxiliary `carry-forward.json` receipt contains `reason`,
 `source_attempt`, `destination_attempt`, `carry_verification` and, only for
 reuse, `verification_reuse_rationale`. It uses stable JSON without timestamps
-and remains outside schema-v1 records. Keep the durable conclusion in GitHub.
+and remains outside the immutable records. Keep the durable conclusion in GitHub.
 
 The helper copies `candidate.json` and any requested PASS `verification.json`
 byte for byte, preserving the original actors and context. It carries every
@@ -163,11 +162,112 @@ the explicitly selected attempt path, rather than treating an earlier failed
 record as approval. A substantive repair still requires a new candidate commit
 and verification. A required user verdict still comes from the user.
 
+## Independent automated-check requirements
+
+Before completion checks, the coordinator or reviewer supplies a separate UTF-8
+JSON requirements file for each stage. Pass its absolute path through
+`--requirements` to both publication and standalone validation. Keep this input
+outside published records; its selection comes from ticket scope and stage
+judgment, independently of submitted outcomes. The writer stores the declaration
+and its canonical SHA-256 in the v2 record. Standalone validation compares the
+current stage to the independently supplied declaration. Earlier stages retain
+their published declarations and original execution context.
+
+```json
+{
+  "schema_version": 1,
+  "ticket": "docs/history/ticket.md",
+  "stage": "candidate",
+  "candidate_commit": "0123456789abcdef0123456789abcdef01234567",
+  "assessed_commit": "0123456789abcdef0123456789abcdef01234567",
+  "environment": "gui",
+  "checks": [
+    {
+      "id": "pytest",
+      "fresh": true,
+      "scope": "focused",
+      "selectors": ["tests/test_public_contract.py"],
+      "keyword": null,
+      "marker": null,
+      "require_gui": false
+    },
+    {"id": "lint", "fresh": false}
+  ]
+}
+```
+
+The stage is `candidate`, `verification`, or `integration`. Both commit IDs are
+full IDs: `candidate_commit` identifies the candidate; `assessed_commit` is the
+candidate at implementation/verification, and the inspected result at
+integration. Supported check IDs are `pytest`, `lint`, `format`, and `dependency`.
+Each requirement has an explicit `fresh` boolean. A check may override the stage
+`environment` with `base` or `gui`; this allows the same check ID once in each
+environment. Optional `requirement_key` strings distinguish multiple scopes of
+the same check in one environment: for example `full-suite` and `handoff-tests`
+for full pytest and additional focused pytest outside configured testpaths.
+Each matching submitted result carries the same key. Duplicate
+check/environment/key requirements are refused. A pytest
+requirement includes every scope field shown; `full` has empty selectors and
+null expressions. A full receipt may cover focused selectors only when it
+actually executed their tests. Unknown fields, IDs and versions are errors.
+Manual-only scope uses an explicit empty requirements `checks` array.
+
+A covered automated outcome uses `kind: "runner"`, its `check_id`, optional
+environment override, and an absolute or attempt-relative `receipt` path in
+addition to the ordinary check fields. A successful claim requires an intact
+completed passing runner receipt; the validator invokes the runner's public
+validation CLI for selection, environment, logs and exact Git content binding.
+The claimed exit/status must match the receipt. Fresh results originate from
+the stage's actual `assessed_checkout`; an independent verifier supplies its
+own invocation and receipt. Use `status: "reused"`, null `exit_code`, original
+`source_commit` (the receipt's original run revision, including pre-commit dirty
+execution) and nonempty applicability `reason` to reuse a receipt. Reuse
+cannot satisfy `fresh: true`. For full runner commands and bootstrap/failure
+exceptions, follow [the authoritative testing reference](../../../../docs/testing.md).
+
+Manual/native observations use `kind: "manual"`; they retain their evidence
+and acceptance rules and cannot satisfy a required runner check. Missing entries,
+plain text logs, and an empty submitted result list cannot erase expected checks.
+Failed executed receipts may support honest `failed` entries and held outcomes;
+unavailable attempts retain reason/evidence and hold PASS/integration. Neither
+qualifies completion. Receipt validation performs no new checks.
+
+## Historical records and retries
+
+Published schema-v1 files remain immutable and readable through the standalone
+validator's explicit `--historical` mode. That mode validates historical
+structure/state and reports historical evidence, without approving a new
+transition. It cannot be combined with `--requirements`. New writers publish
+v2, and current transitions reject v1 records. Historical v1 candidates cannot
+be carried directly into a new transition.
+
+For explicit historical check reuse in a new v2 record, use `kind: "historical"`,
+`check_id`, `status: "reused"`, null `exit_code`, `source_commit`, applicability
+`reason`, and the original `source_record` path and zero-based `source_check`
+index. Retain the ordinary evidence fields. Validation reads the original v1
+check and evidence and verifies its source commit and successful outcome.
+This preserves provenance; it cannot satisfy a fresh-execution requirement.
+
+Carry-forward preserves original v2 candidate/PASS bytes and runner provenance.
+Its `--requirements` file supplies the current candidate or verification stage
+requirements, according to `carry_verification`. When carrying PASS, supply
+`--candidate-requirements` with a separate current candidate declaration to
+relax original fresh demands into justified reuse. Omitting it retains the
+source candidate's effective declaration. The auxiliary carry receipt
+stores the current declarations; carried executions require `fresh: false`.
+When carrying PASS, candidate requirements retain their published declaration
+and must also permit reuse. Relative runner receipts and their digest-referenced
+logs retain their layout; absolute receipts keep their original context.
+Fresh requirements require new publication with newly executed evidence rather
+than a byte-preserving carry. Every integration outcome remains fresh.
+
 ## Record format
 
-All records are UTF-8 JSON objects with `schema_version: 1`, `kind`
+New records are UTF-8 JSON objects with `schema_version: 2`, `kind`
 (`candidate`, `verification`, or `integration`), `actor` (agent/session ID),
 `ticket` (repository-relative path), `candidate_commit` (full Git object ID),
+`assessed_checkout` (derived absolute stage checkout), `check_requirements` and
+`check_requirements_sha256` (derived from independent input),
 `checks`, and `limits` (array of material-limit strings; empty when none).
 Use identical ticket and candidate identities throughout an attempt.
 
@@ -192,7 +292,7 @@ Prepare evidence in the coordinator's exact absolute attempt directory, then
 publish from one UTF-8 JSON input outside the published record names:
 
 ```powershell
-.venv\Scripts\python.exe .agents/skills/implement-spec-enhanced/scripts/write_handoff.py candidate $attempt --checkout $implementationCheckout --input $candidateInput
+.venv\Scripts\python.exe .agents/skills/implement-spec-enhanced/scripts/write_handoff.py candidate $attempt --checkout $implementationCheckout --input $candidateInput --requirements $candidateRequirements
 ```
 
 The helper can run from the integration checkout while assessing another
@@ -215,9 +315,12 @@ commit ID in this illustrative input:
   "criteria": ["A1"],
   "checks": [
     {
+      "kind": "runner",
+      "check_id": "pytest",
+      "receipt": "C:/absolute/checkout/tmp/checks/run-id/receipt.json",
       "name": "Public acceptance tests",
       "status": "passed",
-      "method": "From the assessed checkout: .venv\\Scripts\\python.exe -m pytest tests/test_public_contract.py",
+      "method": "From the assessed checkout: .venv\\Scripts\\python.exe tools/check.py run --check pytest --test tests/test_public_contract.py",
       "exit_code": 0,
       "evidence": ["logs/public-tests.txt"]
     }
@@ -239,7 +342,7 @@ Evidence paths are absolute or relative to the final attempt directory, includin
 when the input is elsewhere. Check structures and reuse requirements follow
 [Checks and evidence reuse](#checks-and-evidence-reuse). Publication validates
 the prospective record with the standalone validator's candidate-stage rules
-against this evidence and the assessed clean checkout before creating a record.
+against this evidence, independent stage requirements, and the assessed clean checkout before creating a record.
 
 Exit `0` reports a complete published record and an allowed transition. Exit `2`
 also publishes a complete record, but holds the transition because a candidate
@@ -281,7 +384,7 @@ The independent verifier prepares its observations and publishes from one
 UTF-8 JSON input outside the published record names:
 
 ```powershell
-.venv\Scripts\python.exe .agents/skills/implement-spec-enhanced/scripts/write_handoff.py verification $attempt --checkout $verificationCheckout --input $verificationInput
+.venv\Scripts\python.exe .agents/skills/implement-spec-enhanced/scripts/write_handoff.py verification $attempt --checkout $verificationCheckout --input $verificationInput --requirements $verificationRequirements
 ```
 
 Pass the coordinator's exact absolute attempt path and the clean checkout at
@@ -300,9 +403,12 @@ fields; replace the example observations with the verifier's actual judgments:
   "findings": [],
   "checks": [
     {
+      "kind": "runner",
+      "check_id": "pytest",
+      "receipt": "C:/absolute/verifier/tmp/checks/run-id/receipt.json",
       "name": "Independent public acceptance tests",
       "status": "passed",
-      "method": "From the assessed checkout: .venv\\Scripts\\python.exe -m pytest tests/test_public_contract.py",
+      "method": "From the assessed checkout: .venv\\Scripts\\python.exe tools/check.py run --check pytest --test tests/test_public_contract.py",
       "exit_code": 0,
       "evidence": ["logs/independent-tests.txt"]
     }
@@ -369,7 +475,7 @@ capture timing. The writer records an already-performed integration; it performs
 no merge or check execution.
 
 ```powershell
-.venv\Scripts\python.exe .agents/skills/implement-spec-enhanced/scripts/write_handoff.py integration $attempt --checkout $integrationCheckout --input $integrationInput
+.venv\Scripts\python.exe .agents/skills/implement-spec-enhanced/scripts/write_handoff.py integration $attempt --checkout $integrationCheckout --input $integrationInput --requirements $integrationRequirements
 ```
 
 Use the coordinator's exact absolute attempt path. The input has exactly these
@@ -382,9 +488,12 @@ fields; substitute the captured commit ID and actual merger observations:
   "previous_tip_ref": "0123456789abcdef0123456789abcdef01234567",
   "checks": [
     {
+      "kind": "runner",
+      "check_id": "pytest",
+      "receipt": "C:/absolute/integration/tmp/checks/run-id/receipt.json",
       "name": "Integration acceptance tests",
       "status": "passed",
-      "method": "From the assessed checkout: .venv\\Scripts\\python.exe -m pytest tests/test_public_contract.py",
+      "method": "From the assessed checkout: .venv\\Scripts\\python.exe tools/check.py run --check pytest --test tests/test_public_contract.py",
       "exit_code": 0,
       "evidence": ["logs/integration-tests.txt"]
     }
@@ -439,16 +548,20 @@ Each check has `name`, `status` (`passed`, `failed`, `unavailable`, or `reused`)
 (nonempty array of file paths). Paths are absolute or relative to the handoff
 directory. Store output or a concise observation receipt; preserve failures.
 For unavailable checks the evidence records the attempted procedure and reason.
-An empty checks array is allowed when criterion evidence alone is sufficient;
-the verifier still assesses all required checks from the ticket and repo docs.
+An empty checks array is allowed only when the independently supplied stage
+requirements also contain no covered checks. The reviewer selects requirements
+from the ticket and repository testing guidance before accepting results.
 
 For example, a command check can be recorded as:
 
 ```json
 {
-  "name": "Public acceptance tests",
+  "kind": "runner",
+      "check_id": "pytest",
+      "receipt": "C:/absolute/checkout/tmp/checks/run-id/receipt.json",
+      "name": "Public acceptance tests",
   "status": "passed",
-  "method": "From the candidate checkout: .venv\\Scripts\\python.exe -m pytest tests/test_public_contract.py",
+  "method": "From the candidate checkout: .venv\\Scripts\\python.exe tools/check.py run --check pytest --test tests/test_public_contract.py",
   "exit_code": 0,
   "evidence": ["logs/public-tests.txt"]
 }
@@ -475,9 +588,9 @@ pointers remain readable. Pass the checkout actually being assessed, which may
 be another worktree:
 
 ```powershell
-.venv\Scripts\python.exe .agents/skills/implement-spec-enhanced/scripts/validate_handoff.py $attempt --stage candidate --checkout $implementationCheckout
-.venv\Scripts\python.exe .agents/skills/implement-spec-enhanced/scripts/validate_handoff.py $attempt --stage verification --checkout $verificationCheckout
-.venv\Scripts\python.exe .agents/skills/implement-spec-enhanced/scripts/validate_handoff.py $attempt --stage integration --checkout $integrationCheckout
+.venv\Scripts\python.exe .agents/skills/implement-spec-enhanced/scripts/validate_handoff.py $attempt --stage candidate --checkout $implementationCheckout --requirements $candidateRequirements
+.venv\Scripts\python.exe .agents/skills/implement-spec-enhanced/scripts/validate_handoff.py $attempt --stage verification --checkout $verificationCheckout --requirements $verificationRequirements
+.venv\Scripts\python.exe .agents/skills/implement-spec-enhanced/scripts/validate_handoff.py $attempt --stage integration --checkout $integrationCheckout --requirements $integrationRequirements
 ```
 
 `$attempt` is the absolute attempt directory. Candidate and verification stages
@@ -489,9 +602,11 @@ unavailable, or rework verdict that cannot advance. Candidate-stage unavailable
 checks may proceed to a verifier, who must resolve them before `PASS`.
 
 Validation covers format, evidence-file existence, actor separation, commit
-identity/ancestry, criterion coverage within the records, and the verdict digest.
-It cannot judge evidence quality, discover omitted spec requirements, or prove
-that commands were run. The independent review supplies those judgments.
+identity/ancestry, criterion coverage within the records, the verdict digest, and
+runner receipt execution facts, scope, result, content binding and evidence
+integrity. Reviewers still select appropriate coverage and judge manual evidence
+and applicability. Receipts are execution evidence, not a security attestation
+against deliberate forgery.
 
 Use ordinary completion messages such as `candidate ready: <path> (<commit>)`,
 `verification: <path> REWORK`, or `integration: <path> integrated`. Records carry
@@ -501,7 +616,7 @@ When changing the helper, run its self-contained CLI tests from the workspace
 root; they create isolated Git repositories under `tmp/implement-spec-enhanced-tests/`:
 
 ```powershell
-.venv\Scripts\python.exe -m unittest discover -s .agents/skills/implement-spec-enhanced/tests -v
+.venv\Scripts\python.exe tools/check.py run --check pytest --test .agents/skills/implement-spec-enhanced/tests
 ```
 
 ### Synthetic workflow rehearsal

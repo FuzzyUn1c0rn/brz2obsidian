@@ -50,6 +50,7 @@ class VerificationWriterTests(GitCheckout, unittest.TestCase):
                     "criteria": ["A1"],
                     "checks": [
                         {
+                            "kind": "manual",
                             "name": "Candidate check",
                             "status": "passed",
                             "method": "Inspect output in assessed checkout",
@@ -70,6 +71,7 @@ class VerificationWriterTests(GitCheckout, unittest.TestCase):
                 str(self.attempt),
                 "--checkout",
                 str(self.checkout),
+                *self.requirement_args("candidate"),
                 "--input",
                 str(candidate_input),
             ],
@@ -98,6 +100,7 @@ class VerificationWriterTests(GitCheckout, unittest.TestCase):
             str(self.attempt),
             "--checkout",
             str(self.checkout),
+            *self.requirement_args("verification"),
             "--input",
             str(self.input_path),
         ]
@@ -136,6 +139,7 @@ class VerificationWriterTests(GitCheckout, unittest.TestCase):
                 "verification",
                 "--checkout",
                 str(self.checkout),
+                *self.requirement_args("verification"),
             ],
             capture_output=True,
             text=True,
@@ -151,7 +155,8 @@ class VerificationWriterTests(GitCheckout, unittest.TestCase):
         self.assertEqual(
             json.loads((self.attempt / "verification.json").read_bytes()),
             {
-                "schema_version": 1,
+                "schema_version": 2,
+                **self.requirement_fields("verification"),
                 "kind": "verification",
                 "actor": "independent-verifier",
                 "ticket": "ticket.md",
@@ -178,6 +183,7 @@ class VerificationWriterTests(GitCheckout, unittest.TestCase):
         self.data["criteria"][0]["status"] = "failed"
         self.data["checks"] = [
             {
+                "kind": "manual",
                 "name": "Output check",
                 "status": "failed",
                 "exit_code": 1,
@@ -200,6 +206,7 @@ class VerificationWriterTests(GitCheckout, unittest.TestCase):
         self.data["findings"] = ["A1: required actual user verdict is unavailable"]
         self.data["checks"] = [
             {
+                "kind": "manual",
                 "name": "User acceptance",
                 "status": "unavailable",
                 "exit_code": None,
@@ -270,6 +277,7 @@ class VerificationWriterTests(GitCheckout, unittest.TestCase):
         invalid["criteria"] = ["A1"]
         cases.append((invalid, "criteria[0]"))
         check = {
+            "kind": "manual",
             "name": "Public check",
             "status": "passed",
             "method": "Inspect output",
@@ -304,6 +312,7 @@ class VerificationWriterTests(GitCheckout, unittest.TestCase):
             invalid = deepcopy(valid)
             invalid["checks"] = [
                 {
+                    "kind": "manual",
                     "name": "Required check",
                     "status": status,
                     "exit_code": code,
@@ -332,6 +341,7 @@ class VerificationWriterTests(GitCheckout, unittest.TestCase):
 
     def test_reuse_rationale_and_source_commit_stay_explicit(self):
         check = {
+            "kind": "manual",
             "name": "Native observation",
             "status": "reused",
             "exit_code": None,
@@ -359,6 +369,7 @@ class VerificationWriterTests(GitCheckout, unittest.TestCase):
         (self.attempt / "review.txt").write_text("Independent evidence\n")
         self.data["checks"] = [
             {
+                "kind": "manual",
                 "name": "Public check",
                 "status": "passed",
                 "method": "Inspect",
@@ -432,7 +443,7 @@ class VerificationWriterTests(GitCheckout, unittest.TestCase):
         record = json.loads(original)
         record["candidate_commit"] = self.base
         candidate.write_text(json.dumps(record), encoding="utf-8")
-        self.assertIn("HEAD", self.run_writer(1).stderr)
+        self.assertIn("candidate_commit", self.run_writer(1).stderr)
 
     def test_competing_verifiers_publish_one_complete_record(self):
         self.input_path.write_text(json.dumps(self.data), encoding="utf-8")
