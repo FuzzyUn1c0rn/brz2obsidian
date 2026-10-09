@@ -161,3 +161,24 @@ remains scoped to its recorded behavior; the new runtime must receive an affecte
 native failed-Save/path and independent review refresh. The final #105 report
 must identify the actual reviewed candidate. No repaired candidate's native
 observation, independent pass or user's verdict is inferred from the earlier run.
+
+### Independent affected native recheck at d237
+
+The independent presentation reviewer subsequently observed the repaired runtime
+`d2378ebc72ff50e9fa91220ea4a55ae3ad7aeb69` at 100% and 454px narrow. A real Save
+to an absent synthetic parent retained readable feedback, the exact long Unicode
+target and the current result/actions. Native Ctrl+A selected the full target;
+new Copy cleared it and the next explicit Save cancellation left it absent.
+Public dialog/clipboard callbacks were injected; native Save-dialog or global
+clipboard success is not inferred. Source/prepared bytes, missing target,
+preferences absence and seven baseline windows were independently preserved.
+
+The affected UI-W11/P07 repair is satisfied in this scope. A distinct maintained-
+launcher sample at actual 150%, including a settled screenshot-only control,
+still left small-text readability UNVERIFIED under UI-U02. No human readability
+answer arrived during the bounded pause; no product/capture cause is established.
+Observed 100% was restored and the owned app/Settings normally closed. The user's
+removed 200% case is not tested or pending. This open prerequisite holds the final
+independent review; automated passes do not resolve it. The separate
+[review candidate report](windows-ui-review.md) records all P/U statuses and
+required held criteria without claiming review PASS, closure or #106 acceptance.
