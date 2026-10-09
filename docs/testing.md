@@ -48,6 +48,16 @@ These controls do not establish final native appearance, platform-dialog behavio
 or actual user acceptance. Use the generated local launcher for strategically
 sampled Windows observations and retain requirement IDs/evidence in the ticket.
 
+`tests/gui/test_transport_parsing_window.py` holds the public response decoder
+after an actual hidden Inspect worker has exited and its pipes have drained.
+Queued heartbeat/disclosure input, repaint, stable busy inputs, primary gating
+and deferred Close must complete before the decoder is released. The original
+decoder then validates the real response and correlation; the window receives
+the actual clean inspection result and the source bytes/inventory stay unchanged.
+The bounded wait is a test guard, not an operation timeout or worker-kill policy.
+The [Windows UI acceptance record](history/windows-ui-acceptance.md) summarizes
+the integrated automated/native checks and their retained evidence limits.
+
 Checker controls exercise actual clean/issues/failed hidden workers, strict
 checker-only aggregate counts, safe diagnostics, deliberate retries and unchanged
 file/directory inventories and bytes. Native synthetic clean/issues selection and
