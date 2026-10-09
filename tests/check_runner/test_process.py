@@ -167,6 +167,99 @@ def test_parameterized_parent_selector_has_valid_execution_evidence(checkout, pa
     assert accepted.returncode == 0, accepted.stdout + accepted.stderr
 
 
+def test_individual_parameter_selection_cannot_cover_another_variant(checkout):
+    (checkout / "tests" / "test_selected.py").write_text(
+        "import pytest\n"
+        "@pytest.mark.parametrize('value', ['alpha', 'beta'])\n"
+        "def test_selected(value):\n"
+        "    assert value in ('alpha', 'beta')\n"
+    )
+    result, path, receipt = run(
+        checkout,
+        "--check",
+        "pytest",
+        "--test",
+        "tests/test_selected.py::test_selected[alpha]",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert receipt["checks"][0]["counts"]["passed"] == 1
+    for variant, status in (("alpha", 0), ("beta", 2)):
+        expected = requirements(
+            checkout,
+            [
+                pytest_requirement(
+                    "focused", [f"tests/test_selected.py::test_selected[{variant}]"]
+                )
+            ],
+            receipt["environment"],
+        )
+        validated = command(
+            "validate",
+            "--receipt",
+            path,
+            "--checkout",
+            checkout,
+            "--requirements",
+            expected,
+        )
+        assert validated.returncode == status, validated.stdout + validated.stderr
+
+
+def test_full_receipt_parameter_coverage_rejects_skipped_and_near_name_nodes(checkout):
+    (checkout / "tests" / "test_selected.py").write_text(
+        "import pytest\n"
+        "@pytest.mark.parametrize('value', ['alpha', 'beta'])\n"
+        "def test_selected(value):\n"
+        "    if value == 'beta':\n"
+        "        pytest.skip('unavailable variant')\n"
+        "    assert value == 'alpha'\n"
+        "@pytest.mark.parametrize('value', ['alpha'])\n"
+        "def test_selected_extra(value):\n"
+        "    assert value == 'alpha'\n"
+        "class TestSelected:\n"
+        "    @pytest.mark.parametrize('value', ['alpha', 'beta'])\n"
+        "    def test_selected(self, value):\n"
+        "        if value == 'beta':\n"
+        "            pytest.skip('unavailable variant')\n"
+        "        assert value == 'alpha'\n"
+        "@pytest.mark.gui\n"
+        "def test_actual_gui():\n"
+        "    pytest.importorskip('PySide6')\n"
+        "    from PySide6.QtCore import qVersion\n"
+        "    assert qVersion()\n"
+    )
+    result, path, receipt = run(checkout, "--check", "pytest")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert receipt["checks"][0]["counts"]["passed"] == 4
+    for required, status in (
+        ("test_selected", 0),
+        ("test_selected[alpha]", 0),
+        ("test_selected[beta]", 2),
+        ("test_selected[gamma]", 2),
+        ("test_selected[alp", 2),
+        ("test_select", 2),
+        ("TestSelected::test_selected", 0),
+        ("TestSelected::test_selected[alpha]", 0),
+        ("TestSelected::test_selected[beta]", 2),
+        ("TestSelected::test_select", 2),
+    ):
+        expected = requirements(
+            checkout,
+            [pytest_requirement("focused", [f"tests/test_selected.py::{required}"])],
+            receipt["environment"],
+        )
+        validated = command(
+            "validate",
+            "--receipt",
+            path,
+            "--checkout",
+            checkout,
+            "--requirements",
+            expected,
+        )
+        assert validated.returncode == status, validated.stdout + validated.stderr
+
+
 @pytest.mark.parametrize(
     "defect,check,diagnostic",
     [
