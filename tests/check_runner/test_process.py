@@ -230,7 +230,10 @@ def test_full_receipt_parameter_coverage_rejects_skipped_and_near_name_nodes(che
     )
     result, path, receipt = run(checkout, "--check", "pytest")
     assert result.returncode == 0, result.stdout + result.stderr
-    assert receipt["checks"][0]["counts"]["passed"] == 4
+    counts = receipt["checks"][0]["counts"]
+    expected_gui = int(receipt["environment"] == "gui")
+    assert counts["passed"] == 3 + expected_gui
+    assert counts["gui_executed"] == expected_gui
     for required, status in (
         ("test_selected", 0),
         ("test_selected[alpha]", 0),
