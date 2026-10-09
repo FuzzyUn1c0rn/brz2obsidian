@@ -88,7 +88,10 @@ completion coverage from the ticket. The coordinator/reviewer records the
 environment, selectors/expressions, full/focused scope and freshness independently
 of the implementer's results. Complete relevant focused controls through the
 accepted public testing seams and resolve known findings before launching
-expensive full completion suites.
+expensive full completion suites. In the handoff dispatch handshake, these are
+the development checks finished before committing; expensive completion suites
+follow the commit, before reporting the checked candidate. Focused receipts may
+precede the commit under the content-binding rules below.
 
 The checkpoint is complete when those focused controls pass, known findings are
 resolved, integration synchronization is finished, and the candidate source is
