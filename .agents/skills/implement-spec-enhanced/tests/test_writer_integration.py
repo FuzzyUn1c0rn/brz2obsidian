@@ -84,6 +84,7 @@ class IntegrationWriterTests(GitCheckout, unittest.TestCase):
             str(self.attempt),
             "--checkout",
             str(self.checkout),
+            *self.requirement_args(stage),
             "--input",
             str(input_path or self.input_path),
         ]
@@ -132,6 +133,7 @@ class IntegrationWriterTests(GitCheckout, unittest.TestCase):
                 "integration",
                 "--checkout",
                 str(self.checkout),
+                *self.requirement_args("integration"),
             ]
         )
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
@@ -145,7 +147,8 @@ class IntegrationWriterTests(GitCheckout, unittest.TestCase):
         self.assertEqual(
             record,
             {
-                "schema_version": 1,
+                "schema_version": 2,
+                **self.requirement_fields("integration"),
                 "kind": "integration",
                 "actor": "merger",
                 "ticket": "ticket.md",
@@ -208,6 +211,7 @@ class IntegrationWriterTests(GitCheckout, unittest.TestCase):
             status="failed",
             checks=[
                 {
+                    "kind": "manual",
                     "name": "Integration check",
                     "status": "failed",
                     "method": "Inspect candidate availability in assessed checkout",
@@ -251,6 +255,7 @@ class IntegrationWriterTests(GitCheckout, unittest.TestCase):
         candidate = json.loads(candidate_path.read_bytes())
         candidate["checks"] = [
             {
+                "kind": "manual",
                 "name": "Candidate check",
                 "status": "failed",
                 "method": "Inspect output",
@@ -301,6 +306,7 @@ class IntegrationWriterTests(GitCheckout, unittest.TestCase):
     def test_checks_retain_explicit_reuse_source_reason_and_relative_evidence(self):
         self.data["checks"] = [
             {
+                "kind": "manual",
                 "name": "Reusable observation",
                 "status": "reused",
                 "method": "Review earlier receipt against resulting checkout",
@@ -332,6 +338,7 @@ class IntegrationWriterTests(GitCheckout, unittest.TestCase):
             with self.subTest(status=status):
                 self.data["checks"] = [
                     {
+                        "kind": "manual",
                         "name": "Required integration check",
                         "status": status,
                         "method": "Inspect assessed result",

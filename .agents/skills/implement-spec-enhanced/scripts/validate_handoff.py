@@ -86,7 +86,7 @@ def load(bundle, kind, records=None):
     )
     require(isinstance(record, dict), f"{kind} must be an object")
     require(type(record.get("schema_version")) is int, "schema_version must be integer")
-    require(record["schema_version"] == 1, "unsupported schema_version")
+    require(record["schema_version"] in (1, 2), "unsupported schema_version")
     require(record.get("kind") == kind, f"expected kind {kind}")
     require(text(record.get("actor")), f"{kind}.actor is required")
     relative_path(record.get("ticket"), f"{kind}.ticket")
@@ -125,7 +125,16 @@ def ancestor(checkout, earlier, later):
     git(checkout, "merge-base", "--is-ancestor", earlier, later)
 
 
-def validate(bundle, stage, checkout, records=None):
+def validate(
+    bundle,
+    stage,
+    checkout,
+    records=None,
+    expected=None,
+    *,
+    historical=False,
+    prior_context=False,
+):
     candidate = load(bundle, "candidate", records)
     relative_path(candidate.get("spec"), "candidate.spec")
     for key in ("ticket", "spec"):
@@ -213,6 +222,73 @@ def validate(bundle, stage, checkout, records=None):
         not git(checkout, "status", "--porcelain", "--untracked-files=normal"),
         "checkout must be clean",
     )
+    assessed = [candidate]
+    if stage in ("verification", "integration"):
+        assessed.append(verification)
+    if stage == "integration":
+        assessed.append(integration)
+    if historical:
+        require(
+            all(record["schema_version"] == 1 for record in assessed),
+            "--historical reads v1 records only",
+        )
+    else:
+        from receipt_requirements import read_json, validate_record
+
+        require(
+            expected is not None, "new transitions require independent --requirements"
+        )
+        carry = None
+        if (bundle / "carry-forward.json").is_file():
+            require(
+                not any(
+                    (bundle / reference).resolve()
+                    == (bundle / "carry-forward.json").resolve()
+                    for record in assessed
+                    for check in record["checks"]
+                    for reference in check["evidence"]
+                ),
+                "evidence/carry receipt collision",
+            )
+            carry = read_json(bundle / "carry-forward.json")
+            require(
+                isinstance(carry, dict)
+                and carry.get("destination_attempt") == str(bundle)
+                and text(carry.get("reason")),
+                "invalid carry-forward context",
+            )
+        for record in assessed:
+            require(
+                record["schema_version"] == 2,
+                "historical v1 records require --historical; new transitions use v2",
+            )
+            carried = carry is not None and (
+                record["kind"] == "candidate"
+                or (
+                    record["kind"] == "verification"
+                    and carry.get("carry_verification") is True
+                )
+            )
+            stage_expected = expected if record["kind"] == stage else None
+            if carried:
+                stage_expected = carry.get("check_requirements", {}).get(record["kind"])
+                require(
+                    stage_expected is not None,
+                    "carry requires current independent stage requirements",
+                )
+                if record["kind"] == stage:
+                    require(
+                        stage_expected == expected,
+                        "carry independent requirements mismatch",
+                    )
+            validate_record(
+                record,
+                bundle,
+                checkout,
+                stage_expected,
+                carried=carried,
+                prior_stage=record["kind"] != stage or prior_context,
+            )
     return allowed
 
 
@@ -229,14 +305,33 @@ def main():
     parser.add_argument(
         "--checkout", type=Path, required=True, help="checkout being assessed"
     )
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument(
+        "--requirements", type=Path, help="independent v2 stage requirements JSON"
+    )
+    mode.add_argument(
+        "--historical",
+        action="store_true",
+        help="read historical v1 evidence without permitting a new transition",
+    )
     args = parser.parse_args()
     try:
+        from receipt_requirements import read_json
+
+        expected = read_json(args.requirements) if args.requirements else None
         allowed = validate(
-            args.directory.resolve(), args.stage, args.checkout.resolve()
+            args.directory.resolve(),
+            args.stage,
+            args.checkout.resolve(),
+            expected=expected,
+            historical=args.historical,
         )
     except (InvalidHandoff, OSError, ValueError) as error:
         print(f"Invalid handoff: {error}", file=sys.stderr)
         return 1
+    if args.historical:
+        print("Historical evidence valid; this is not approval for a new transition")
+        return 0 if allowed else 2
     print(
         "Transition allowed"
         if allowed

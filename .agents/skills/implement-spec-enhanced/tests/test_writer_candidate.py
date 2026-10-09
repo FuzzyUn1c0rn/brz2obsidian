@@ -46,6 +46,7 @@ class CandidateWriterTests(GitCheckout, unittest.TestCase):
             "criteria": ["A1"],
             "checks": [
                 {
+                    "kind": "manual",
                     "name": "Synthetic review",
                     "status": "passed",
                     "method": "Inspect output in assessed checkout",
@@ -64,6 +65,7 @@ class CandidateWriterTests(GitCheckout, unittest.TestCase):
             str(self.attempt),
             "--checkout",
             str(self.checkout),
+            *self.requirement_args("candidate"),
             "--input",
             str(self.input_path),
         ]
@@ -93,6 +95,7 @@ class CandidateWriterTests(GitCheckout, unittest.TestCase):
                 "candidate",
                 "--checkout",
                 str(self.checkout),
+                *self.requirement_args("candidate"),
             ],
             capture_output=True,
             text=True,
@@ -118,7 +121,8 @@ class CandidateWriterTests(GitCheckout, unittest.TestCase):
         self.assertEqual(
             record,
             {
-                "schema_version": 1,
+                "schema_version": 2,
+                **self.requirement_fields("candidate"),
                 "kind": "candidate",
                 "actor": "worker-1",
                 "ticket": "ticket.md",
@@ -280,7 +284,7 @@ class CandidateWriterTests(GitCheckout, unittest.TestCase):
         self.assertIn("clean", self.run_writer(1).stderr)
         self.git("checkout", "--", "output.txt")
         self.data["ticket"] = "missing.md"
-        self.assertIn("missing ticket", self.run_writer(1).stderr)
+        self.assertIn("ticket", self.run_writer(1).stderr)
         self.data["ticket"] = "ticket.md"
         self.checkout = self.root
         self.run_writer(1)

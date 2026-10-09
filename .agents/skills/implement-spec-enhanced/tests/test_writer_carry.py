@@ -68,6 +68,7 @@ class CarryWriterTests(GitCheckout, unittest.TestCase):
 
     def check(self, evidence):
         return {
+            "kind": "manual",
             "name": "Synthetic observation",
             "status": "passed",
             "method": "Inspect synthetic output",
@@ -98,6 +99,7 @@ class CarryWriterTests(GitCheckout, unittest.TestCase):
                 str(attempt),
                 "--checkout",
                 str(self.checkout),
+                *self.requirement_args(stage),
                 "--input",
                 str(path),
             ]
@@ -115,6 +117,9 @@ class CarryWriterTests(GitCheckout, unittest.TestCase):
             str(self.source),
             "--checkout",
             str(self.checkout),
+            *self.requirement_args(
+                "verification" if self.data.get("carry_verification") else "candidate"
+            ),
             "--input",
             str(self.input_path),
         ]
@@ -144,6 +149,7 @@ class CarryWriterTests(GitCheckout, unittest.TestCase):
                 stage,
                 "--checkout",
                 str(self.checkout),
+                *self.requirement_args(stage),
             ]
         )
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
@@ -178,6 +184,9 @@ class CarryWriterTests(GitCheckout, unittest.TestCase):
                 "carry_verification": False,
                 "source_attempt": str(self.source),
                 "destination_attempt": str(self.attempt),
+                "check_requirements": {
+                    "candidate": self.fixture_requirements("candidate")
+                },
             },
         )
         self.validate("candidate")
@@ -250,6 +259,10 @@ class CarryWriterTests(GitCheckout, unittest.TestCase):
                 self.data,
                 source_attempt=str(self.source),
                 destination_attempt=str(self.attempt),
+                check_requirements={
+                    "candidate": self.fixture_requirements("candidate"),
+                    "verification": self.fixture_requirements("verification"),
+                },
             ),
         )
         self.validate("verification")
@@ -817,6 +830,7 @@ class CarryWriterTests(GitCheckout, unittest.TestCase):
                 "candidate",
                 "--checkout",
                 str(self.checkout),
+                *self.requirement_args("candidate"),
             ]
         )
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)

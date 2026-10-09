@@ -76,6 +76,7 @@ class HandoffTests(GitCheckout, unittest.TestCase):
             [
                 sys.executable,
                 str(SCRIPT),
+                "--historical",
                 str(self.bundle),
                 "--stage",
                 stage,
