@@ -290,7 +290,20 @@ def scope_records(records, physical_members, refuse, uuid):
                 r
                 for r in records["attachments.json"]
                 if r["SourceId"] == owner
-                and (r in declarations or r.get("Location") == "Notes.md")
+                and (
+                    r in declarations
+                    or (
+                        type(r.get("SourceType")) is int
+                        and r["SourceType"] == 2
+                        and type(r.get("Type")) is int
+                        and r["Type"] == 1
+                        and type(r.get("NoteType")) is int
+                        and (
+                            r["NoteType"] == 4
+                            or (r["NoteType"] == 0 and r.get("Location") == "Notes.md")
+                        )
+                    )
+                )
                 and not contains_omitted_identity(json.dumps(r), private_ids)
             ]
             refuse(

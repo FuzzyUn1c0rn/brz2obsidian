@@ -62,6 +62,124 @@ def test_sized_images_bind_intact_payloads_and_only_replace_destinations(
 
 
 @pytest.mark.parametrize(
+    "fields",
+    [
+        {"SourceType": 1},
+        {"SourceType": True},
+        {"Type": True},
+        {"Type": 12},
+        {"NoteType": True},
+        {"NoteType": 4.0},
+        {"NoteType": "4"},
+    ],
+)
+def test_duplicate_diagnostic_does_not_infer_documents_from_invalid_role_scalars(
+    tmp_path, fields
+):
+    from tests.application.test_forgotten_workflow import rewrite
+    from tests.application.test_resources_workflow import HOME
+
+    source = literal_archive(
+        tmp_path / "source.brz",
+        b"authored bytes",
+        resources=[
+            ({"Type": 12, "Location": "a.png"}, images()[0]),
+            ({"Type": 12, "Location": "a.png"}, images()[1]),
+        ],
+    )
+
+    def malformed(parts):
+        rows = [json.loads(line) for line in parts["attachments.json"].splitlines()]
+        rows[0].update(Location="Authored.md", **fields)
+        parts[HOME + "/Authored.md"] = parts.pop(HOME + "/Notes.md")
+        parts["attachments.json"] = "\n".join(json.dumps(r) for r in rows).encode()
+
+    rewrite(source, malformed)
+    result = default_workflow().inspect(source)
+    assert result.outcome == "refused"
+    assert "33333333-3333-4333-8333-333333333333" not in result.issues[0].affected
+    assert "attachments.json:0" not in result.issues[0].evidence
+
+
+def test_cli_marked_note_duplicate_diagnostic_exposes_document_and_evidence(
+    tmp_path, capsys
+):
+    from brz2obsidian.cli import main
+    from tests.application.test_forgotten_workflow import rewrite
+    from tests.application.test_resources_workflow import HOME
+
+    source = literal_archive(
+        tmp_path / "source.brz",
+        b"![one](.data/md-images/a.png#$width=75p$)",
+        resources=[
+            ({"Type": 12, "Location": "a.png"}, images()[0]),
+            ({"Type": 12, "Location": "a.png"}, images()[1]),
+        ],
+    )
+
+    def marked(parts):
+        rows = [json.loads(line) for line in parts["attachments.json"].splitlines()]
+        rows[0]["Location"] = "Authored.md"
+        parts[HOME + "/Authored.md"] = parts.pop(HOME + "/Notes.md")
+        parts["attachments.json"] = "\n".join(json.dumps(r) for r in rows).encode()
+
+    rewrite(source, marked)
+    assert main(["inspect", str(source)]) == 1
+    output = capsys.readouterr().out
+    assert (
+        "33333333-3333-4333-8333-333333333333" in output
+        and "attachments.json:0" in output
+    )
+    assert main(["convert", str(source), str(tmp_path / "vault"), "--json"]) == 1
+    issue = json.loads(capsys.readouterr().out)["issues"][0]
+    assert "33333333-3333-4333-8333-333333333333" in issue["affected"]
+    assert "attachments.json:0" in issue["evidence"]
+    assert not (tmp_path / "vault").exists()
+
+
+def test_private_duplicate_group_still_refuses_without_marked_document_disclosure(
+    tmp_path,
+):
+    from tests.application.test_forgotten_workflow import forget, rewrite
+    from tests.application.test_graph_workflow import graph_archive, identity
+    from tests.application.test_verified_coverage import add_attachment
+
+    source = graph_archive(
+        tmp_path / "source.brz",
+        {1: "Home", 2: "Private"},
+        notes={2: (b"private authored bytes", 4)},
+    )
+
+    def duplicate(parts):
+        forget(parts, 2)
+        rows = [json.loads(line) for line in parts["attachments.json"].splitlines()]
+        rows[0]["Location"] = "Authored.md"
+        parts[identity(2) + "/Authored.md"] = parts.pop(identity(2) + "/Notes.md")
+        parts["attachments.json"] = "\n".join(json.dumps(r) for r in rows).encode()
+        add_attachment(parts, identity(91), 12, "a.png", images()[0], owner=identity(2))
+        add_attachment(parts, identity(92), 12, "a.png", images()[1], owner=identity(2))
+
+    rewrite(source, duplicate)
+    before = source.read_bytes()
+    operation = default_workflow()
+    for result in (
+        operation.inspect(source),
+        operation.convert(source, tmp_path / "vault"),
+    ):
+        assert result.outcome == "refused"
+        assert result.issues[0].affected == result.issues[0].evidence == ()
+        for private in (
+            identity(2),
+            identity(91),
+            identity(92),
+            "Authored.md",
+            "Private",
+        ):
+            assert private not in result.model_dump_json()
+    assert not (tmp_path / "vault").exists() and source.read_bytes() == before
+
+
+@pytest.mark.parametrize(
     "destination,location",
     [
         ("a.png?", "a.png"),
@@ -436,3 +554,81 @@ def test_repeated_sizing_references_have_distinct_obligations_without_extra_copy
     result = operation.convert(source, tmp_path / "vault")
     assert result.outcome == "warnings" and result.counts.actual_assets == 2
     assert result.counts.actual_references == 2 and result.counts.source_gaps == 0
+
+
+@pytest.mark.parametrize("document_case", ["marked", "absent", "competing"])
+@pytest.mark.parametrize("duplicate", [False, True])
+def test_duplicate_image_diagnostics_include_all_reviewed_document_declarations(
+    tmp_path, capsys, document_case, duplicate
+):
+    from brz2obsidian.cli import main
+    from tests.application.test_forgotten_workflow import rewrite
+    from tests.application.test_resources_workflow import HOME
+
+    resources = [({"Type": 12, "Location": "a.png"}, images()[0])]
+    if duplicate:
+        resources.append(({"Type": 12, "Location": "a.png"}, images()[1]))
+    body = b"![one](.data/md-images/a.png#$width=75p$)"
+    source = literal_archive(tmp_path / "source.brz", body, resources=resources)
+    competing = "bbbbbbbb-0000-4000-8000-000000000001"
+
+    def document(parts):
+        rows = [json.loads(line) for line in parts["attachments.json"].splitlines()]
+        meta = json.loads(parts["meta.json"])
+        if document_case != "absent":
+            rows[0]["Location"] = "Authored.md"
+            parts[HOME + "/Authored.md"] = parts.pop(HOME + "/Notes.md")
+        else:
+            parts.pop(HOME + "/Notes.md")
+            meta["AttachmentFileStates"][rows[0]["Id"]] = 3
+        if document_case == "competing":
+            rows.append(rows[0] | {"Id": competing, "Location": "Second.md"})
+            parts[HOME + "/Second.md"] = body
+            meta["AttachmentFileStates"][competing] = 1
+        parts["attachments.json"] = "\n".join(json.dumps(r) for r in rows).encode()
+        parts["meta.json"] = json.dumps(meta).encode()
+
+    rewrite(source, document)
+    original = source.read_bytes()
+    operation = default_workflow()
+    inspected = operation.inspect(source)
+    converted = operation.convert(source, tmp_path / "vault")
+    if duplicate:
+        for result in (inspected, converted):
+            assert result.outcome == "refused"
+            issue = result.issues[0]
+            assert issue.code == "invalid_source"
+            assert HOME in issue.affected
+            assert "33333333-3333-4333-8333-333333333333" in issue.affected
+            assert {
+                "attachments.json:0",
+                "attachments.json:1",
+                "attachments.json:2",
+            } <= set(issue.evidence)
+            if document_case == "competing":
+                assert (
+                    competing in issue.affected
+                    and "attachments.json:3" in issue.evidence
+                )
+        assert not (tmp_path / "vault").exists()
+        assert main(["inspect", str(source)]) == 1
+        output = capsys.readouterr().out
+        assert (
+            "33333333-3333-4333-8333-333333333333" in output
+            and "attachments.json:0" in output
+        )
+        assert "Home" not in inspected.issues[0].guidance
+        assert (
+            main(["convert", str(source), str(tmp_path / "cli-vault"), "--json"]) == 1
+        )
+        assert (
+            json.loads(capsys.readouterr().out)["issues"]
+            == json.loads(inspected.model_dump_json())["issues"]
+        )
+        assert not (tmp_path / "cli-vault").exists()
+    elif document_case == "competing":
+        assert inspected.outcome == converted.outcome == "refused"
+        assert not (tmp_path / "vault").exists()
+    else:
+        assert inspected.outcome == converted.outcome == "warnings"
+    assert source.read_bytes() == original
