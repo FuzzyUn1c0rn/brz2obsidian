@@ -12,9 +12,11 @@ original skill remains available.
 
 ## Prepare
 
-Read the accepted spec, implementation index, and issue-tracker instructions.
-Select only tickets whose blockers are resolved. Reuse a suitable integration
-branch or create one, recording its starting commit for the final review.
+Read the accepted spec and implementation index. Complete
+[frontier discovery](../../../docs/agents/issue-tracker.md#discover-the-implementation-frontier)
+and record eligible selected leaves, an established leaf result, or the scope of
+explicit user-authorized combined work before claim/dispatch. Reuse a suitable
+integration branch or create one, recording its starting commit for the final review.
 
 Read [the handoff contract](references/handoffs.md) before dispatch; it is the
 authoritative publication, input, evidence, and transition reference. Use its
