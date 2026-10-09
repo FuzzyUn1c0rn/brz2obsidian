@@ -17,7 +17,7 @@ acceptance remain pending gates in the [current frontier](https://github.com/Fuz
 
 ## External file references (version 4)
 
-Version 4 introduced external file support. The current version-5 module/profile and snapshot/policy contracts retain it, with
+Version 4 introduced external file support. The current version-6 module/profile and snapshot/policy contracts retain it, with
 matching renderer and migration result/record versions. Thought-owned
 `SourceType=2`, `Type=2`, `NoteType=0` records with coherent identities, integer
 nonnegative lengths and ordinary boolean flags represent external files.
@@ -75,6 +75,46 @@ The independent Folio adapter adopts contract 5 with explicit arbitrary edits;
 its format and module/profile version remain unchanged. Literal edits create no
 authored-reference, payload-copy or source-gap credit. Synthetic coverage does
 not establish the later private-archive/native acceptance gates under #78.
+
+## Sized inline images (version 6)
+
+Parser-active local image destinations can carry exactly `#$width=Np$`, with a
+canonical decimal integer N from 1 through 100. Only that complete raw fragment
+is recognized, including the evidenced 75/90 widths. Entities, escapes or encoded
+near misses cannot acquire support through parser normalization. Empty or
+nonempty queries, unknown/empty/repeated/mixed fragments, leading zeros, signs,
+fractional values and out-of-range widths refuse. Binding still requires exactly
+one present same-owner image with intact payload inventory.
+
+Paths decode percent encoding once, strictly as UTF-8. Malformed percent/UTF-8,
+encoded separators, traversal/backslashes and residual encoded octets refuse as
+ambiguous. Once-encoded spaces, Unicode and URI-significant `#` remain supported;
+`%25` can represent a literal percent when the decoded name does not itself look
+like an encoded octet. Safe vault assignment follows the existing filename policy
+and collision handling, independently of the exact original source name. No
+external targets are probed.
+
+The adapter supplies a source-neutral `ImagePresentationNormalization` on the
+reference: exact declaration, scoped adapted-document codepoint bounds, digest,
+explicit basis and ordinary `responsive` presentation. Literal text adaptations
+and excluded-reference removals retain their separately named coordinate bases.
+Generic validation binds every fact to exact document text and its present owned
+image; planning adds one honest presentation adaptation and an actionable
+`image_presentation_normalized` warning per declaration. The renderer replaces
+only the assigned image destination and recognized fragment, preserving authored
+alt/title/order and exact source image bytes. It adds no HTML, CSS, plugin, pixel
+width, resizing or recompression. Eligible original note bytes remain exact.
+
+The warning/report links included affected notes, retains exact declarations and
+explains ordinary responsive inline Markdown presentation without exact percentage
+fidelity. It is distinct from source gaps and generated fallback images.
+`Counts.image_presentation_normalizations` counts declared presentation facts;
+authored reference and copied payload counts still describe real obligations.
+Snapshot/policy, result/record, renderer and TheBrain module/profile versions all
+move to 6 because reference fields and admitted meaning change. Folio adopts
+contract 6 while retaining module/profile 3 and independently declared facts.
+Original private archive preservation, full raw-source oracle and native
+placement/readability remain later #78 acceptance gates.
 
 ## Records, Home and relationships
 

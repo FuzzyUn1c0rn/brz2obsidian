@@ -77,6 +77,21 @@ def plan(analysis: Analysis) -> MigrationPlan:
         ),
         adaptations=tuple(
             Adaptation(
+                kind="image_presentation",
+                affected=f"reference:{document.key}:{index}",
+                document_key=document.key,
+                owner=document.owner,
+                evidence=document.evidence,
+                description="Original declaration "
+                + reference.presentation_normalization.declaration
+                + " normalized to ordinary responsive inline Markdown presentation; exact percentage sizing is not reproduced.",
+            )
+            for document in sorted(snapshot.documents, key=lambda d: d.key)
+            for index, reference in enumerate(document.references)
+            if reference.presentation_normalization
+        )
+        + tuple(
+            Adaptation(
                 kind="literal_text",
                 affected=f"text:{document.key}:{index}",
                 document_key=document.key,

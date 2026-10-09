@@ -46,7 +46,7 @@ class Workflow:
         now = datetime.now(UTC)
         return RunMetadata(
             converter_version=__version__,
-            renderer_version="5",
+            renderer_version="6",
             run_id=str(uuid4()),
             run_time=now.isoformat(),
             obsidian_version="1.13.7",

@@ -11,7 +11,7 @@ from brz2obsidian.contracts import (
 
 from .appearance import validate_appearance
 from .classifications import validate_classifications
-from .references import validate_references
+from .references import image_presentation_issues, validate_references
 from .source_gaps import validate_source_gaps
 from .text import validate_text_adaptations
 
@@ -30,10 +30,10 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
         )
 
     identity = snapshot.identity
-    if snapshot.contract_version != 5 or policy.contract_version != 5:
+    if snapshot.contract_version != 6 or policy.contract_version != 6:
         refuse(
             "unsupported_format",
-            "Only source snapshot and policy contract version 5 is supported",
+            "Only source snapshot and policy contract version 6 is supported",
         )
     if (
         identity.module_id,
@@ -155,7 +155,7 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
             "unsupported_feature",
             "A reviewed profile cannot downgrade required refusal codes to warnings",
         )
-    issues = []
+    issues = list(image_presentation_issues(snapshot))
     known_evidence = {e.identity for e in entries} | {
         e.key for e in snapshot.original_evidence
     }
@@ -208,6 +208,11 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
         )
     validate_source_gaps(snapshot, policy, refuse)
     counts = Counts(
+        image_presentation_normalizations=sum(
+            bool(r.presentation_normalization)
+            for d in snapshot.documents
+            for r in d.references
+        ),
         text_adaptations=sum(len(d.text_adaptations) for d in snapshot.documents),
         source_gaps=len(snapshot.source_gaps),
         generated_presentations=len(snapshot.generated_presentations),

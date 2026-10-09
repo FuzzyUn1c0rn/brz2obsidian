@@ -53,6 +53,10 @@ def main(argv=None):
     else:
         print(f"{result.operation}: {result.outcome}")
         if result.counts:
+            if result.counts.image_presentation_normalizations:
+                print(
+                    f"Image presentation normalizations: {result.counts.image_presentation_normalizations}"
+                )
             if result.counts.text_adaptations:
                 print(f"Literal text adaptations: {result.counts.text_adaptations}")
             print(

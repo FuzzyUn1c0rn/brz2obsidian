@@ -126,7 +126,7 @@ def check_vault(source, vault):
     }, "migration record schema fields"
     assert (record["schema"], record["schema_version"]) == (
         "brz2obsidian.migration",
-        5,
+        6,
     ), "record schema version"
     assert (
         record["converter_version"]
@@ -134,7 +134,7 @@ def check_vault(source, vault):
         == "0.3.0"
     ), "converter version"
     assert (
-        record["renderer_version"] == record["run_metadata"]["renderer_version"] == "5"
+        record["renderer_version"] == record["run_metadata"]["renderer_version"] == "6"
     ), "renderer version"
     with Path(source).open("rb") as stream:
         assert (
@@ -198,11 +198,11 @@ def check_vault(source, vault):
         ), "collection source identity"
         assert (
             record["source_identity"]["module_id"] == "thebrain-brz"
-            and record["source_identity"]["module_version"] == "5"
+            and record["source_identity"]["module_version"] == "6"
         ), "source module identity"
         assert (record["profile_id"], record["profile_version"]) == (
             "thebrain-format5-reviewed",
-            "5",
+            "6",
         ), "reviewed source profile"
         originals = {e["key"]: e for e in record["original_evidence"]}
         for name in ROOTS:
@@ -2061,6 +2061,7 @@ def check_counts(raw, record, summary, references, targets, files):
         "source_relationships": len(raw["links.json"]),
         "source_references": len(references),
         "text_adaptations": 0,
+        "image_presentation_normalizations": 0,
         "present_assets": summary["payloads"]
         if "payloads" in summary
         else sum(a["availability"] == "present" for a in targets.values()),
@@ -2490,6 +2491,6 @@ def check_run_result(result, vault, summary):
     }, "receipt file evidence"
     assert (
         result["operation"] == "convert"
-        and result["schema_version"] == 5
+        and result["schema_version"] == 6
         and result["outcome"] == ("warnings" if summary["warnings"] else "clean")
     ), "result envelope"

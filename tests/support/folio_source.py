@@ -42,7 +42,7 @@ FOLIO_POLICY = SourcePolicy(
     module_id="synthetic-folio",
     module_version="3",
     format_version="folio/1",
-    contract_version=5,
+    contract_version=6,
 )
 
 
@@ -166,7 +166,7 @@ class FolioSession:
             snapshot_digest="",
         )
         snapshot = SourceSnapshot(
-            contract_version=5,
+            contract_version=6,
             identity=identity,
             collection_title=data["collection"],
             entry_key=data["start"],

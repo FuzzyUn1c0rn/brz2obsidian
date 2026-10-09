@@ -47,6 +47,19 @@ class MigrationFailed(MigrationError):
     pass
 
 
+class ImagePresentationNormalization(Contract):
+    """Exact scoped declaration replaced by ordinary responsive presentation."""
+
+    declaration: str
+    start: int
+    end: int
+    document_digest: str
+    basis: Literal["document.text/unicode_codepoints"] = (
+        "document.text/unicode_codepoints"
+    )
+    presentation: Literal["responsive"] = "responsive"
+
+
 class ReferenceSpan(Contract):
     start: int
     end: int
@@ -58,6 +71,7 @@ class ReferenceSpan(Contract):
     source_target: str | None = None
     destination_start: int | None = None
     destination_end: int | None = None
+    presentation_normalization: ImagePresentationNormalization | None = None
 
 
 class DeclaredAppearance(Contract):
@@ -234,7 +248,7 @@ class SourceAccounting(Contract):
 
 
 class SourceSnapshot(Contract):
-    contract_version: Literal[5] = 5
+    contract_version: Literal[6] = 6
     identity: SourceIdentity
     collection_title: str
     entry_key: str | None
@@ -266,12 +280,13 @@ class SourcePolicy(Contract):
     module_id: str
     module_version: str
     format_version: str
-    contract_version: Literal[5] = 5
+    contract_version: Literal[6] = 6
     entry_required: bool = True
     finding_dispositions: tuple[FindingDisposition, ...] = ()
 
 
 class Counts(Contract):
+    image_presentation_normalizations: int | None = None
     text_adaptations: int | None = None
     source_gaps: int | None = None
     generated_presentations: int | None = None
@@ -475,7 +490,7 @@ class RunResult(Contract):
     schema_: Literal["brz2obsidian.result"] = Field(
         default="brz2obsidian.result", alias="schema"
     )
-    schema_version: Literal[5] = 5
+    schema_version: Literal[6] = 6
     converter_version: str
     operation: Literal["inspect", "convert"]
     outcome: Literal["clean", "warnings", "refused", "failed"]

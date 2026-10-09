@@ -331,7 +331,7 @@ def test_bom_and_transformed_block_coordinates_preserve_original_bytes(
         assert edit.source_digest == sha256(original.encode()).hexdigest()
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 4, 6])
+@pytest.mark.parametrize("version", [1, 2, 3, 4, 5, 7])
 def test_result_consumers_reject_old_and_future_closed_versions(tmp_path, version):
     from pydantic import ValidationError
 

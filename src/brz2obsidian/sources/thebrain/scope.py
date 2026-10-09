@@ -280,7 +280,30 @@ def scope_records(records, physical_members, refuse, uuid):
                 for record in declarations
             )
         ):
-            refuse("invalid_source", "Multiple declarations assign one payload")
+            if any(
+                contains_omitted_identity(json.dumps(r), private_ids)
+                for r in declarations
+            ):
+                refuse("invalid_source", "Multiple declarations assign one payload")
+            owner = declarations[0]["SourceId"]
+            related = [
+                r
+                for r in records["attachments.json"]
+                if r["SourceId"] == owner
+                and (r in declarations or r.get("Location") == "Notes.md")
+                and not contains_omitted_identity(json.dumps(r), private_ids)
+            ]
+            refuse(
+                "invalid_source",
+                "Multiple declarations assign one payload",
+                (owner, *(r["Id"] for r in related)),
+                evidence=tuple(
+                    f"attachments.json:{i}"
+                    for i, r in enumerate(records["attachments.json"])
+                    if r in related
+                ),
+                guidance="Review the affected note references and attachment declarations; each archived image payload must have one unambiguous identity.",
+            )
     if not excluded:
         return records, excluded, dropped_members, ()
     extend_omitted()

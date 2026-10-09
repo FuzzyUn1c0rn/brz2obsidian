@@ -320,7 +320,7 @@ def test_renderer_rejects_forged_generated_image_destination(
     )
     metadata = RunMetadata(
         converter_version="0.3.0",
-        renderer_version="5",
+        renderer_version="6",
         run_id="test",
         run_time="2026-10-06T00:00:00Z",
         obsidian_version="1.12.4",
@@ -340,7 +340,7 @@ def test_renderer_refuses_forged_source_gap_counts(tmp_path, field):
     )
     metadata = RunMetadata(
         converter_version="0.3.0",
-        renderer_version="5",
+        renderer_version="6",
         run_id="test",
         run_time="2026-10-06T00:00:00Z",
         obsidian_version="1.12.4",
@@ -630,7 +630,7 @@ def test_renderer_refuses_aligned_but_noncanonical_fallback_owner_target(tmp_pat
     )
     metadata = RunMetadata(
         converter_version="0.3.0",
-        renderer_version="5",
+        renderer_version="6",
         run_id="test",
         run_time="2026-10-06T00:00:00Z",
         obsidian_version="1.12.4",
