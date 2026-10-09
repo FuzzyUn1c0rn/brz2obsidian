@@ -36,7 +36,13 @@ $runner = Join-Path $checkout 'tools\check.py'
 `dependency`. Repeat `--check` to select checks and `--test` for repository-relative
 test files/directories or pytest node IDs. `-k` and `-m` apply keyword and marker
 expressions. With no test selector or expression, pytest selects the full suite;
-a selection/expression is focused coverage. Invalid and zero-test selections
+a selection/expression is focused coverage. The configured full suite discovers
+`tests/`; handoff regressions under `.agents/skills/implement-spec-enhanced/tests/`
+need their own focused selection. A full receipt covers a focused selector only
+when its captured executed node IDs establish that selector actually ran.
+Keyword/marker expression requirements need the same executed expression;
+a full receipt does not infer whether an expression would select any tests.
+Invalid and zero-test selections
 cannot qualify as successful execution. The runner offers maintained check
 selections, not arbitrary command passthrough, repair or retries.
 
@@ -125,7 +131,13 @@ A pre-commit receipt can bind to a later clean commit only when the relevant
 Git-normalized tested contents remain identical. Validation preserves original
 revision and dirty-state facts. For equivalent contents in another checkout,
 provide `--reuse-reason` with explicit original context and applicability; this is
-reused evidence, not an independent fresh run. Reviewers judge whether declared
+reused evidence, not an independent fresh run. `validate --ref FULL_COMMIT` binds
+the receipt to that Git tree instead of the checkout's current files; stage
+requirements select the candidate/result commit independently. Disk changes
+during execution invalidate a receipt even if Git normalizes their line endings.
+The runner removes inherited `PYTEST_ADDOPTS` and `PYTEST_PLUGINS` from children
+so caller options cannot silently narrow the declared selection.
+Reviewers judge whether declared
 coverage fits the ticket. Receipts establish execution and integrity facts, not
 security attestation against deliberate forgery.
 

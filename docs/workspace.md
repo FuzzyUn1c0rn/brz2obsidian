@@ -47,10 +47,11 @@ caches and build products can be recreated.
    complete. Tests and maintained tooling must not depend on historical runs,
    temporary handoffs or sibling folders.
 
-Pytest reserves `tmp/pytest` for generated test files and clears it on each run.
-Use it only for pytest-owned files. Concurrent runs in the same checkout need
-distinct `--basetemp=tmp/pytest-<run>` paths. Pytest's cache is
-`tmp/pytest-cache`; Ruff's cache is `tmp/ruff-cache`.
+The [automated check runner](testing.md#automated-check-runner) allocates exclusive
+`tmp/checks/<run>/` directories with independent pytest basetemps and pytest/Ruff
+caches. Logs and receipts stay outside pytest-owned paths. Legacy configured
+`tmp/pytest`, `tmp/pytest-cache` and `tmp/ruff-cache` locations remain relevant
+only for the documented bootstrap or runner-failure investigation exceptions.
 
 Managed Git worktrees use the Codex app's worktree lifecycle and their assigned
 paths. Archive them through that lifecycle, preserving needed ignored files
