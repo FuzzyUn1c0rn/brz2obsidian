@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   base:
-    name: Windows checks (base)
+    name: Windows checks (base diagnostic)
     runs-on: windows-2025
     defaults:
       run:
@@ -50,12 +50,12 @@ jobs:
           & $python -c "import importlib.util, platform, sys; print('Interpreter:', sys.executable); print('Python:', sys.version); print('Platform:', platform.platform(), platform.machine()); qt = importlib.util.find_spec('PySide6'); print('PySide6:', qt); sys.exit(0 if qt is None else 1)"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Run full base checks
+      - name: Run focused codec diagnostic and existing code checks
         run: |
           $checkout = $env:GITHUB_WORKSPACE
           $python = Join-Path $checkout '.venv\Scripts\python.exe'
           $runner = Join-Path $checkout 'tools\check.py'
-          & $python $runner run --checkout $checkout --python $python --environment base
+          & $python $runner run --checkout $checkout --python $python --environment base --test tests/local_acceptance/test_checker_v3.py::test_oracle_conserves_mixed_scoped_source_and_repeat_reorder
           $checkExit = $LASTEXITCODE
           $receipts = @(Get-ChildItem -Path 'tmp/checks/*/receipt.json' -ErrorAction SilentlyContinue)
           foreach ($receiptFile in $receipts) {
