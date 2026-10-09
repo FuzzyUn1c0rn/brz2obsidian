@@ -32,12 +32,22 @@ def relationship_problem(record, index, refuse, uuid, code, message, *, private=
     )
 
 
-def decode_relationships(records, thoughts, brain_id, refuse, uuid):
+def decode_relationships(
+    records, thoughts, brain_id, refuse, uuid, *, private_record=None
+):
     result, keys = [], set()
     for index, record in enumerate(records):
 
         def problem(code, message, affected=(), *, record=record, index=index):
-            relationship_problem(record, index, refuse, uuid, code, message)
+            relationship_problem(
+                record,
+                index,
+                refuse,
+                uuid,
+                code,
+                message,
+                private=private_record(record) if private_record is not None else False,
+            )
 
         validate_semantic_fields(record, problem)
         fields = ("Kind", "Relation", "Meaning", "Direction")

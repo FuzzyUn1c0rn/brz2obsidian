@@ -20,6 +20,22 @@ def edit_rows(source, name, edit):
     rewrite(source, name, "\n".join(map(json.dumps, rows)).encode())
 
 
+def nested_diagnostic_token(identity_text, layers):
+    """Author nested escapes; later layers encode only escape introducers."""
+    token = identity_text
+    for index, layer in enumerate(layers):
+        if index == 0:
+            token = "".join(
+                (f"%{ord(char):02X}" if layer == "P" else rf"\u{ord(char):04x}")
+                for char in token
+            )
+        elif layer == "P":
+            token = token.replace("%", "%25").replace("\\", "%5C")
+        else:
+            token = token.replace("\\", r"\u005c").replace("%", r"\u0025")
+    return token
+
+
 @pytest.mark.parametrize(
     "token",
     [
@@ -28,6 +44,15 @@ def edit_rows(source, name, edit):
         "1MOyofbleEqavN7wEjRWeA",
         "%31%4D%4F%79%6F%66%62%6C%65%45%71%61%76%4E%37%77%45%6A%52%57%65%41",
         r"\u0031\u004d\u004f\u0079\u006f\u0066\u0062\u006c\u0065\u0045\u0071\u0061\u0076\u004e\u0037\u0077\u0045\u006a\u0052\u0057\u0065\u0041",
+    ]
+    + [
+        pytest.param(nested_diagnostic_token(raw, layers), id=f"{spelling}-{layers}")
+        for spelling, raw in (
+            ("canonical", "a1b2c3d4-e5f6-4a78-9abc-def012345678"),
+            ("uppercase", "A1B2C3D4-E5F6-4A78-9ABC-DEF012345678"),
+            ("compact", "1MOyofbleEqavN7wEjRWeA"),
+        )
+        for layers in ("PU", "UP", "UPU", "PUPU", "UP" * 6, "PU" * 24)
     ],
 )
 def test_relationship_pre_scope_signature_diagnostic_never_echoes_excluded_spellings(
@@ -55,16 +80,129 @@ def test_relationship_pre_scope_signature_diagnostic_never_echoes_excluded_spell
         default_workflow().convert(source, tmp_path / "vault"),
     ):
         assert result.outcome == "refused"
+        assert result.issues[0].code == "invalid_source"
         assert result.issues[0].affected == result.issues[0].evidence == ()
         for secret in (token, identity(private), "1MOyofbleEqavN7wEjRWeA"):
             assert secret not in result.model_dump_json()
-    for flags in ([], ["--json"]):
-        assert main(["inspect", str(source), *flags]) == 1
-        output = capsys.readouterr().out
-        for secret in (token, identity(private), "1MOyofbleEqavN7wEjRWeA"):
-            assert secret not in output
+    for command in ("inspect", "convert"):
+        for flags in ([], ["--json"]):
+            args = [command, str(source)]
+            if command == "convert":
+                args.append(str(tmp_path / "cli-vault"))
+            assert main([*args, *flags]) == 1
+            output = capsys.readouterr().out
+            for secret in (token, identity(private), "1MOyofbleEqavN7wEjRWeA"):
+                assert secret not in output
+            if flags:
+                issue = json.loads(output)["issues"][0]
+                assert issue["code"] == "invalid_source"
+                assert issue["affected"] == issue["evidence"] == []
     assert source.read_bytes() == before
     assert not (tmp_path / "vault").exists()
+    assert not (tmp_path / "cli-vault").exists()
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        nested_diagnostic_token("a1b2c3d4-e5f6-4a78-9abc-def012345678", "PU"),
+        nested_diagnostic_token("1MOyofbleEqavN7wEjRWeA", "UPU"),
+        nested_diagnostic_token("1MOyofbleEqavN7wEjRWeA", "PU" * 24),
+    ],
+)
+def test_relationship_semantic_refusal_does_not_echo_nested_excluded_identity(
+    tmp_path, capsys, token
+):
+    private = int(UUID("a1b2c3d4-e5f6-4a78-9abc-def012345678"))
+    source = graph_archive(
+        tmp_path / "source.brz",
+        {1: "Entry", 2: "Child", private: "Private"},
+        [(1, 2, 1, 1, 3)],
+    )
+    edit_rows(
+        source,
+        "thoughts.json",
+        lambda rows: rows[2].update(ForgottenDateTime="2020-01-01"),
+    )
+    edit_rows(source, "links.json", lambda rows: rows[0].update(Direction=token))
+    before = source.read_bytes()
+    for result in (
+        default_workflow().inspect(source),
+        default_workflow().convert(source, tmp_path / "vault"),
+    ):
+        assert result.outcome == "refused"
+        issue = result.issues[0]
+        assert issue.code == "unsupported_feature"
+        assert issue.affected == issue.evidence == ()
+        assert token not in result.model_dump_json()
+    for command in ("inspect", "convert"):
+        args = [command, str(source)]
+        if command == "convert":
+            args.append(str(tmp_path / "cli-vault"))
+        assert main([*args, "--json"]) == 1
+        issue = json.loads(capsys.readouterr().out)["issues"][0]
+        assert issue["code"] == "unsupported_feature"
+        assert issue["affected"] == issue["evidence"] == []
+    assert source.read_bytes() == before
+    assert not (tmp_path / "vault").exists()
+    assert not (tmp_path / "cli-vault").exists()
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "invalid direction without a private identity",
+        "invalid % escape and \\unsafe text",
+        nested_diagnostic_token("invalid direction", "PU"),
+        nested_diagnostic_token("invalid direction", "UPU"),
+        nested_diagnostic_token("invalid direction", "PUPUPUPU"),
+    ],
+)
+def test_safe_invalid_relationship_signature_retains_included_context(
+    tmp_path, capsys, token
+):
+    source = graph_archive(
+        tmp_path / "source.brz",
+        {1: "Entry", 2: "Child", 3: "Private"},
+        [(1, 2, 1, 1, 3)],
+    )
+    edit_rows(
+        source,
+        "thoughts.json",
+        lambda rows: rows[2].update(ForgottenDateTime="2020-01-01"),
+    )
+    edit_rows(
+        source,
+        "links.json",
+        lambda rows: rows[0].update(Direction=token, BrainId=identity(900)),
+    )
+    before = source.read_bytes()
+    for result in (
+        default_workflow().inspect(source),
+        default_workflow().convert(source, tmp_path / "vault"),
+    ):
+        assert result.outcome == "refused"
+        issue = result.issues[0]
+        assert issue.code == "invalid_source"
+        assert set(issue.affected) == {identity(1000), identity(1), identity(2)}
+        assert "links.json:0" in issue.evidence
+        assert any(json.dumps(token) in evidence for evidence in issue.evidence)
+        assert "relationship" in issue.guidance.lower()
+        assert "Home" not in issue.guidance
+        assert identity(3) not in result.model_dump_json()
+    for command in ("inspect", "convert"):
+        args = [command, str(source)]
+        if command == "convert":
+            args.append(str(tmp_path / "cli-vault"))
+        assert main([*args, "--json"]) == 1
+        issue = json.loads(capsys.readouterr().out)["issues"][0]
+        assert issue["code"] == "invalid_source"
+        assert set(issue["affected"]) == {identity(1000), identity(1), identity(2)}
+        assert "links.json:0" in issue["evidence"]
+        assert any(json.dumps(token) in evidence for evidence in issue["evidence"])
+    assert source.read_bytes() == before
+    assert not (tmp_path / "vault").exists()
+    assert not (tmp_path / "cli-vault").exists()
 
 
 def test_category_jump_keeps_empty_ordinary_endpoint_uncreated(tmp_path):

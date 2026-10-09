@@ -13,22 +13,32 @@ from .relationships import relationship_problem
 _UUID_TEXT = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
 
 
-def contains_omitted_identity(text, tokens):
+def contains_omitted_identity(text, tokens, *, diagnostic=False):
     """Recognize proven identity spellings without changing retained source text."""
     if not tokens:
         return False
     if any(token in text for token in tokens):
         return True
-    # One URL-encoding layer and one serialized Unicode-escape layer are enough
-    # for these reviewed representations. This is inspection, never rewriting
-    # or repeated arbitrary decoding. Compact base64 identities stay case exact.
-    decoded = re.sub(r"%([0-9a-fA-F]{2})", lambda match: chr(int(match[1], 16)), text)
-    decoded = re.sub(
-        r"\\u([0-9a-fA-F]{4})", lambda match: chr(int(match[1], 16)), decoded
-    )
-    return any(token in decoded for token in tokens) or any(
-        match[0].lower() in tokens for match in _UUID_TEXT.finditer(decoded)
-    )
+    # Retained-source screening keeps its reviewed single pass. Diagnostics can
+    # reveal an arbitrary invalid scalar, so inspect mixed nested escapes for at
+    # most eight shrinking rounds, then suppress unresolved escaped context.
+    # Neither path rewrites source text or authorizes inclusion/validity.
+    decoded = text
+    for _ in range(8 if diagnostic else 1):
+        previous = decoded
+        decoded = re.sub(
+            r"%([0-9a-fA-F]{2})", lambda match: chr(int(match[1], 16)), decoded
+        )
+        decoded = re.sub(
+            r"\\u([0-9a-fA-F]{4})", lambda match: chr(int(match[1], 16)), decoded
+        )
+        if any(token in decoded for token in tokens) or any(
+            match[0].lower() in tokens for match in _UUID_TEXT.finditer(decoded)
+        ):
+            return True
+        if decoded == previous:
+            return False
+    return diagnostic and bool(re.search(r"%[0-9a-fA-F]{2}|\\u[0-9a-fA-F]{4}", decoded))
 
 
 def _positive_absent_txt_declaration(record, states):
@@ -164,7 +174,7 @@ def scope_records(records, physical_members, refuse, uuid):
     def diagnostic_unsafe(value):
         if isinstance(value, str):
             return contains_omitted_identity(
-                value, diagnostic_tokens
+                value, diagnostic_tokens, diagnostic=True
             ) or diagnostic_unsafe(decoded(value))
         if isinstance(value, dict):
             return any(

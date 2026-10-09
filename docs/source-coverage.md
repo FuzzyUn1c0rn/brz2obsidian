@@ -144,6 +144,13 @@ preserve their unrelated bytes safely. The shared note/evidence safety check
 recognizes known canonical UUIDs with valid case variants, case-exact compact
 identities and omitted associated record IDs. It also inspects one percent-encoding
 layer followed by one serialized `\uXXXX` layer without rewriting source text.
+Relationship diagnostic screening additionally inspects mixed
+percent/Unicode nesting for at most eight shrinking rounds. If decodable escapes
+remain at that budget, context is conservatively suppressed. This bounds work
+without echoing unresolved private-bearing invalid scalars; ownership/scalar
+refusals, trusted inclusion and retained-source screening remain unchanged.
+This screening applies before ownership validation and to later semantic refusal
+evidence using the validated excluded identities.
 Repeated arbitrary decoding and title/pixel matching are not inferred; this is
 bounded identity-association coverage, not a claim to detect every possible
 representation of private content. Safe exact originals and provably

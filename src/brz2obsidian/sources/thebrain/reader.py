@@ -29,7 +29,7 @@ from .classifications import decode_classifications
 from .decoding import ROOT_FILES, decode_records
 from .metadata import calendar_dates, declared_appearance
 from .relationships import decode_relationships
-from .scope import records_json, scope_records
+from .scope import contains_omitted_identity, records_json, scope_records
 from .semantics import validate_semantic_fields
 
 
@@ -462,8 +462,30 @@ class BrzSession:
             source_sha256=source_hash,
             snapshot_digest=snapshot_digest,
         )
+
+        def relationship_private(value):
+            # Validated scope supplies identity authority; malformed raw scalars
+            # still refuse, without disclosing nested excluded spellings.
+            if isinstance(value, str):
+                return contains_omitted_identity(
+                    value, self.scope_tokens, diagnostic=True
+                )
+            if isinstance(value, dict):
+                return any(
+                    relationship_private(key) or relationship_private(entry)
+                    for key, entry in value.items()
+                )
+            if isinstance(value, (list, tuple)):
+                return any(relationship_private(entry) for entry in value)
+            return False
+
         relationships = decode_relationships(
-            records["links.json"], thoughts, brain_id, _refuse, _uuid
+            records["links.json"],
+            thoughts,
+            brain_id,
+            _refuse,
+            _uuid,
+            private_record=relationship_private,
         )
         assignments = decode_classifications(thoughts, relationships, _refuse, _uuid)
         return SourceSnapshot(
