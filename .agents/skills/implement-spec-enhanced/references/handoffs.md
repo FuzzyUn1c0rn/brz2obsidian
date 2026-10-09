@@ -1,5 +1,27 @@
 # Structured handoffs
 
+Read this common contract once before dispatch or consuming a stage. Then read
+only the references required by the current role or transition. The linked
+references are authoritative; examples for unrelated stages stay out of the
+current reading path.
+
+## Stage reading paths
+
+Every publisher and transition reviewer reads
+[requirements/evidence](handoff-evidence.md) and
+[transition validation](handoff-validation.md), including the independently
+supplied requirements. Add the reference for the current operation:
+
+| Role or operation | Required stage reference |
+| --- | --- |
+| Coordinator assigning work, inputs or attempts | [Dispatch and commit handshake](handoff-dispatch.md) |
+| Implementer publishing a completed candidate | [Candidate](handoff-candidate.md) |
+| Independent verifier assessing a candidate and publishing its verdict | [Verification](handoff-verification.md) |
+| Merger publishing the inspected integration outcome | [Integration](handoff-integration.md) |
+| Coordinator recovering an unchanged candidate | [Retry/carry-forward](handoff-retry.md); then the reference for any fresh stage |
+| Reader inspecting v1 evidence | [Historical records](handoff-evidence.md#historical-records-and-retries) |
+| Maintainer rehearsing documentation/CLI agreement | [Synthetic workflow rehearsal](handoff-rehearsal.md) |
+
 ## Location and ownership
 
 Use a directory for each attempt at a ticket candidate under the shared
@@ -17,7 +39,7 @@ completion results stay in existing tickets.
 | `integration.json` | Merger | Coordinator |
 
 Use `scripts/write_handoff.py` for every record publication and carry-forward;
-the stage examples below are the required route. Agents supply judgments; the
+the linked stage examples are the required route. Agents supply judgments; the
 writer derives bookkeeping and validates before immutable publication. It manages
 no drafts, check execution, merges, ticket edits, worktrees, or user acceptance.
 Run the independently executable read-only standalone validator at each
@@ -27,239 +49,28 @@ Publish each record once, after its evidence is ready, then leave it immutable.
 Keep work-in-progress notes and UTF-8 stage inputs elsewhere in the effort
 directory, outside published record names. A changed candidate starts at
 `attempt-001` beneath its new commit. An unchanged candidate
-can have further attempts as described below; keep previous records for
+can have further attempts in [retry/carry-forward](handoff-retry.md); keep previous records for
 diagnosis. The coordinator claims/closes tickets so concurrent workers do not
 edit the same bookkeeping files.
 
 ### Dispatch and commit handshake
 
-Initial implementer dispatch supplies ownership, integration branch, assessed
-checkout, and a reserved candidate-input path. At integration synchronization,
-capture the full incorporated tip as `base_ref`; then finish checks and commit.
-The implementer reports the commit and clean checkout before publication. Only
-then can the coordinator assign the exact unused commit-derived attempt path.
-The coordinator returns that absolute attempt, assessed checkout, input path,
-and candidate command; the implementer places evidence at the final resolved
-locations, writes its input, publishes, and runs standalone candidate validation.
-Before this allocation, evidence can be prepared elsewhere under the effort.
-
-Verifier and merger dispatches each supply the same exact assigned attempt,
-their actual assessed checkout, their own stage-input path, and stage command.
-Include absolute interpreter/script paths when the receiving agent may run in
-another checkout; for example, resolve them once in the integration checkout:
-
-```powershell
-$python = (Resolve-Path .venv/Scripts/python.exe).Path
-$writer = (Resolve-Path .agents/skills/implement-spec-enhanced/scripts/write_handoff.py).Path
-$validator = (Resolve-Path .agents/skills/implement-spec-enhanced/scripts/validate_handoff.py).Path
-# $attempt, $assessedCheckout, and $stageInput are coordinator-supplied absolute paths.
-& $python $writer candidate $attempt --checkout $assessedCheckout --input $stageInput --requirements $stageRequirements
-& $python $validator $attempt --stage candidate --checkout $assessedCheckout --requirements $stageRequirements
-```
-
-The following stage examples use checkout-relative script paths for readability;
-dispatch the resolved equivalents. Workers use the assigned path rather than
-discovering a latest attempt or allocating a number. Report the exact published
-path and both writer/validator outcomes. Exit `0` permits advancement, `2` holds
-the transition with complete published records, and `1` refuses or fails the
-operation; carry-forward has the partial-attempt recovery rules below.
+Before dispatch or attempt allocation, read the [dispatch contract](handoff-dispatch.md#dispatch-and-commit-handshake).
 
 ## Retry an unchanged candidate
 
-A prerequisite becoming available or a temporary integration-check failure
-resolving can justify another attempt without a code change. Record the reason
-and previous/new attempt paths in the ticket. The coordinator allocates
-`attempt-002` (or the next unused number) beneath the same candidate commit,
-leaving the earlier attempt
-intact. Select the exact source attempt explicitly and assess the clean unchanged
-candidate commit. Use the helper from the integration checkout:
-
-```powershell
-.venv\Scripts\python.exe .agents/skills/implement-spec-enhanced/scripts/write_handoff.py carry-forward $newAttempt --from $previousAttempt --checkout $candidateCheckout --input $carryInput --requirements $retryRequirements
-```
-
-Both attempt paths must be absolute, distinct and non-nested. The helper accepts
-the coordinator's assignment; it never discovers the latest attempt, increments
-numbers, merges code or edits tickets. Keep the UTF-8 input outside the destination
-attempt. For prerequisite recovery, use:
-
-```json
-{
-  "reason": "The unavailable prerequisite is now available",
-  "carry_verification": false
-}
-```
-
-For a temporary integration failure with still-applicable independent PASS:
-
-```json
-{
-  "reason": "The integration check prerequisite has recovered",
-  "carry_verification": true,
-  "verification_reuse_rationale": "The candidate, assessed inputs and verification conditions are unchanged"
-}
-```
-
-Supply a nonempty reason and an actual JSON boolean. True requires a nonempty
-applicability rationale; false accepts no reuse rationale. Unknown, duplicate or
-helper-owned fields are errors. Choosing true is the coordinator's attestation
-of applicability; machine validation establishes structure/state, not that
-judgment. The auxiliary `carry-forward.json` receipt contains `reason`,
-`source_attempt`, `destination_attempt`, `carry_verification` and, only for
-reuse, `verification_reuse_rationale`. It uses stable JSON without timestamps
-and remains outside the immutable records. Keep the durable conclusion in GitHub.
-
-The helper copies `candidate.json` and any requested PASS `verification.json`
-byte for byte, preserving the original actors and context. It carries every
-check/criterion evidence reference in those records. Absolute references remain
-intact and resolvable; relative files retain their layout and bytes. Evidence
-paths are relative to the final attempt, including `..` paths accepted by the
-validator. A parent-relative path that resolves to an occupied file in the new
-layout is a collision even if its bytes match the source. Select an unused layout
-that preserves the reference; the helper leaves the reference unchanged. Rooted
-or drive-relative Windows references lacking an absolute drive/root combination
-are ambiguous and refused. Equivalent references to the same source/destination
-file are copied once. Evidence aliases of record/receipt names, planned
-file/ancestor collisions and paths into the source attempt are refused.
-
-Known collisions, missing evidence, invalid reuse and invalid Git state fail
-before copying. Existing files/directories at any destination remain unchanged;
-an occupied attempt, including an interrupted staging file, requires a new
-assignment. All requested evidence and the receipt publish before records, with
-candidate last. Each file is atomic without replacement; directory-wide rollback
-is unnecessary. Exit `0` means complete carry and an allowed transition; `2`
-means complete carry with the corresponding candidate/verification transition
-held; `1` means failure. An ordinary I/O failure reports the exact destination
-and warns that any partial attempt is not ready. The helper prints its assigned
-destination before copying, so a forced process termination still leaves an
-exact inspection pointer even though the killed process cannot print a final
-diagnostic. Preserve partial attempts and have the coordinator assign another
-unused attempt. A later invocation refuses the occupied partial directory.
-Candidate presence alone does not prove a completed carry: all requested records,
-evidence, and the receipt must be present and the selected transition validated.
-
-- **Verification was BLOCKED:** dispatch the independent verifier at the same
-  candidate commit after carrying with `carry_verification: false`. It checks
-  the newly available prerequisite and any affected
-  criteria, then publishes a fresh `verification.json` in the new attempt.
-  Reuse unaffected evidence with the normal rationale. Preserve the earlier
-  BLOCKED record in its original directory.
-- **Integration failed temporarily:** carry the passing verification using
-  `carry_verification: true` and the explicit applicability rationale.
-  Otherwise, obtain fresh verification in the new attempt. The merger inspects
-  the current integration state and records the actual `previous_tip` and result
-  for this attempt. If the candidate is already incorporated, rerun the affected
-  checks against the current result; another merge is unnecessary. Publish a new
-  `integration.json` with the digest of this attempt's verification record.
-  Integration records are always fresh; the helper never carries the earlier one.
-  Carry uses the clean candidate checkout even when integration has moved ahead;
-  retain the current integration result and assess it for fresh integration.
-  Capture its full HEAD as `previous_tip_ref` immediately before this retry's
-  integration operation, including when no additional merge is needed.
-
-Validate each transition against the checkout actually assessed. Resume from
-the explicitly selected attempt path, rather than treating an earlier failed
-record as approval. A substantive repair still requires a new candidate commit
-and verification. A required user verdict still comes from the user.
+When a prerequisite recovers or integration can retry without code changes, read
+[retry/carry-forward](handoff-retry.md#retry-an-unchanged-candidate), including
+carried requirements and partial-attempt recovery.
 
 ## Independent automated-check requirements
 
-Before completion checks, the coordinator or reviewer supplies a separate UTF-8
-JSON requirements file for each stage. Pass its absolute path through
-`--requirements` to both publication and standalone validation. Keep this input
-outside published records; its selection comes from ticket scope and stage
-judgment, independently of submitted outcomes. The writer stores the declaration
-and its canonical SHA-256 in the v2 record. Standalone validation compares the
-current stage to the independently supplied declaration. Earlier stages retain
-their published declarations and original execution context.
-
-```json
-{
-  "schema_version": 1,
-  "ticket": "docs/history/ticket.md",
-  "stage": "candidate",
-  "candidate_commit": "0123456789abcdef0123456789abcdef01234567",
-  "assessed_commit": "0123456789abcdef0123456789abcdef01234567",
-  "environment": "gui",
-  "checks": [
-    {
-      "id": "pytest",
-      "fresh": true,
-      "scope": "focused",
-      "selectors": ["tests/test_public_contract.py"],
-      "keyword": null,
-      "marker": null,
-      "require_gui": false
-    },
-    {"id": "lint", "fresh": false}
-  ]
-}
-```
-
-The stage is `candidate`, `verification`, or `integration`. Both commit IDs are
-full IDs: `candidate_commit` identifies the candidate; `assessed_commit` is the
-candidate at implementation/verification, and the inspected result at
-integration. Supported check IDs are `pytest`, `lint`, `format`, and `dependency`.
-Each requirement has an explicit `fresh` boolean. A check may override the stage
-`environment` with `base` or `gui`; this allows the same check ID once in each
-environment. Optional `requirement_key` strings distinguish multiple scopes of
-the same check in one environment: for example `full-suite` and `handoff-tests`
-for full pytest and additional focused pytest outside configured testpaths.
-Each matching submitted result carries the same key. Duplicate
-check/environment/key requirements are refused. A pytest
-requirement includes every scope field shown; `full` has empty selectors and
-null expressions. A full receipt may cover focused selectors only when it
-actually executed their tests. Unknown fields, IDs and versions are errors.
-Manual-only scope uses an explicit empty requirements `checks` array.
-
-A covered automated outcome uses `kind: "runner"`, its `check_id`, optional
-environment override, and an absolute or attempt-relative `receipt` path in
-addition to the ordinary check fields. A successful claim requires an intact
-completed passing runner receipt; the validator invokes the runner's public
-validation CLI for selection, environment, logs and exact Git content binding.
-The claimed exit/status must match the receipt. Fresh results originate from
-the stage's actual `assessed_checkout`; an independent verifier supplies its
-own invocation and receipt. Use `status: "reused"`, null `exit_code`, original
-`source_commit` (the receipt's original run revision, including pre-commit dirty
-execution) and nonempty applicability `reason` to reuse a receipt. Reuse
-cannot satisfy `fresh: true`. For full runner commands and bootstrap/failure
-exceptions, follow [the authoritative testing reference](../../../../docs/testing.md).
-
-Manual/native observations use `kind: "manual"`; they retain their evidence
-and acceptance rules and cannot satisfy a required runner check. Missing entries,
-plain text logs, and an empty submitted result list cannot erase expected checks.
-Failed executed receipts may support honest `failed` entries and held outcomes;
-unavailable attempts retain reason/evidence and hold PASS/integration. Neither
-qualifies completion. Receipt validation performs no new checks.
+For every stage, read [independent requirements](handoff-evidence.md#independent-automated-check-requirements).
 
 ## Historical records and retries
 
-Published schema-v1 files remain immutable and readable through the standalone
-validator's explicit `--historical` mode. That mode validates historical
-structure/state and reports historical evidence, without approving a new
-transition. It cannot be combined with `--requirements`. New writers publish
-v2, and current transitions reject v1 records. Historical v1 candidates cannot
-be carried directly into a new transition.
-
-For explicit historical check reuse in a new v2 record, use `kind: "historical"`,
-`check_id`, `status: "reused"`, null `exit_code`, `source_commit`, applicability
-`reason`, and the original `source_record` path and zero-based `source_check`
-index. Retain the ordinary evidence fields. Validation reads the original v1
-check and evidence and verifies its source commit and successful outcome.
-This preserves provenance; it cannot satisfy a fresh-execution requirement.
-
-Carry-forward preserves original v2 candidate/PASS bytes and runner provenance.
-Its `--requirements` file supplies the current candidate or verification stage
-requirements, according to `carry_verification`. When carrying PASS, supply
-`--candidate-requirements` with a separate current candidate declaration to
-relax original fresh demands into justified reuse. Omitting it retains the
-source candidate's effective declaration. The auxiliary carry receipt
-stores the current declarations; carried executions require `fresh: false`.
-When carrying PASS, candidate requirements retain their published declaration
-and must also permit reuse. Relative runner receipts and their digest-referenced
-logs retain their layout; absolute receipts keep their original context.
-Fresh requirements require new publication with newly executed evidence rather
-than a byte-preserving carry. Every integration outcome remains fresh.
+For v1 records or checks, read [historical evidence](handoff-evidence.md#historical-records-and-retries).
+For byte-preserving v2 carry, read [carried requirements](handoff-retry.md#carried-requirements).
 
 ## Record format
 
@@ -273,384 +84,37 @@ Use identical ticket and candidate identities throughout an attempt.
 
 ### Candidate
 
-Additional fields:
-
-- `spec`: repository-relative accepted specification path.
-- `base_commit`: integration tip incorporated before final candidate checks.
-- `worktree`: absolute path to the implementer's checkout.
-- `owned_files`: repository-relative files or directories assigned to the worker.
-- `criteria`: nonempty array of distinct acceptance criterion IDs or anchors.
-  Reuse accepted presentation IDs where present; reference ticket criteria
-  without copying the spec's prose.
-
-The commit includes the completed change. Required failing checks must be fixed
-before dispatch; unavailable checks remain explicit for the verifier to resolve.
+For this stage's record fields and judgments, read [candidate](handoff-candidate.md#candidate).
 
 #### Publish a candidate
 
-Prepare evidence in the coordinator's exact absolute attempt directory, then
-publish from one UTF-8 JSON input outside the published record names:
-
-```powershell
-.venv\Scripts\python.exe .agents/skills/implement-spec-enhanced/scripts/write_handoff.py candidate $attempt --checkout $implementationCheckout --input $candidateInput --requirements $candidateRequirements
-```
-
-The helper can run from the integration checkout while assessing another
-checkout. Every Git lookup uses `--checkout`; it derives the full candidate HEAD,
-absolute worktree root, schema/kind, and the full commit resolved from `base_ref`.
-It normalizes repository-relative `ticket`, `spec`, and `owned_files` paths and
-rejects parent traversal. The input file remains unchanged.
-
-The input has exactly these fields; substitute existing repository-relative
-ticket/spec files, assigned ownership, actual criterion IDs, and the captured
-commit ID in this illustrative input:
-
-```json
-{
-  "actor": "implementer-session",
-  "ticket": "docs/history/ticket.md",
-  "spec": "docs/history/spec.md",
-  "base_ref": "0123456789abcdef0123456789abcdef01234567",
-  "owned_files": ["src/feature.py"],
-  "criteria": ["A1"],
-  "checks": [
-    {
-      "kind": "runner",
-      "check_id": "pytest",
-      "receipt": "C:/absolute/checkout/tmp/checks/run-id/receipt.json",
-      "name": "Public acceptance tests",
-      "status": "passed",
-      "method": "From the assessed checkout: .venv\\Scripts\\python.exe tools/check.py run --check pytest --test tests/test_public_contract.py",
-      "exit_code": 0,
-      "evidence": ["logs/public-tests.txt"]
-    }
-  ],
-  "limits": []
-}
-```
-
-Capture `base_ref` at integration synchronization: the integration tip
-incorporated before final candidate checks. Prefer its full commit ID so a
-moving branch cannot change the historical value. The helper resolves that
-explicit reference and checks ancestry; ancestry cannot establish when it was
-captured. Keep `actor`, ownership, criteria, checks, and material limits explicit,
-including permitted empty arrays. Unknown fields (including inside checks),
-duplicate JSON keys, and helper-owned fields such as `candidate_commit`,
-`base_commit`, `worktree`, `schema_version`, or `kind` are errors.
-
-Evidence paths are absolute or relative to the final attempt directory, including
-when the input is elsewhere. Check structures and reuse requirements follow
-[Checks and evidence reuse](#checks-and-evidence-reuse). Publication validates
-the prospective record with the standalone validator's candidate-stage rules
-against this evidence, independent stage requirements, and the assessed clean checkout before creating a record.
-
-Exit `0` reports a complete published record and an allowed transition. Exit `2`
-also publishes a complete record, but holds the transition because a candidate
-check failed. Candidate unavailable-check behavior remains unchanged: it can
-advance to the independent verifier, which must resolve prerequisites before
-PASS. Exit `1` reports invalid input/state, an occupied destination, or publication
-failure with no new record. Output names the exact published path and separately
-states whether the transition may advance; writing supplies no verification or
-user verdict.
-
-Publication uses stable UTF-8 JSON and an atomic filesystem operation that refuses
-replacement, even for identical existing bytes. Concurrent writers produce one
-complete winner and one refusal. Failure or interruption before publication can
-leave a hidden `.handoff-*.tmp` sibling; it is disposable and is never a published
-record. Cleanup failure after publication leaves the complete record valid.
-Correct inputs or prerequisites without editing published records; use the
-coordinator's next unused attempt for a retry. The selected filesystem must
-support hard links; unsupported publication fails without a partial JSON record.
+For exact inputs, examples and exits, read [publication](handoff-candidate.md#publish-a-candidate).
 
 ### Verification
 
-Additional fields:
-
-- `verdict`: `PASS`, `REWORK`, or `BLOCKED`.
-- `criteria`: one object for every candidate criterion, with `id`, `status`
-  (`satisfied`, `failed`, or `unverified`), and `evidence` (nonempty file paths).
-- `findings`: array of blocking findings, with criterion/file pointers.
-
-The verifier is a different actor from the implementer. `PASS` requires every
-criterion satisfied, every listed check passed or justifiably reused, and no
-blocking findings. `REWORK` means repair is needed; `BLOCKED` means a required
-prerequisite or check is unavailable. User/native acceptance required by this
-ticket remains unverified until its actual verdict exists. Check coverage against the ticket,
-not merely the candidate's list: omitted requirements invalidate approval.
+For this stage's record fields and judgments, read [verification](handoff-verification.md#verification).
 
 #### Publish independent verification
 
-The independent verifier prepares its observations and publishes from one
-UTF-8 JSON input outside the published record names:
-
-```powershell
-.venv\Scripts\python.exe .agents/skills/implement-spec-enhanced/scripts/write_handoff.py verification $attempt --checkout $verificationCheckout --input $verificationInput --requirements $verificationRequirements
-```
-
-Pass the coordinator's exact absolute attempt path and the clean checkout at
-the candidate commit. The command may run elsewhere; Git state always comes
-from `--checkout`. The helper copies `ticket` and `candidate_commit` from this
-attempt's `candidate.json` and derives schema/kind. The input has exactly these
-fields; replace the example observations with the verifier's actual judgments:
-
-```json
-{
-  "actor": "independent-verifier-session",
-  "verdict": "PASS",
-  "criteria": [
-    {"id": "A1", "status": "satisfied", "evidence": ["logs/independent-review.txt"]}
-  ],
-  "findings": [],
-  "checks": [
-    {
-      "kind": "runner",
-      "check_id": "pytest",
-      "receipt": "C:/absolute/verifier/tmp/checks/run-id/receipt.json",
-      "name": "Independent public acceptance tests",
-      "status": "passed",
-      "method": "From the assessed checkout: .venv\\Scripts\\python.exe tools/check.py run --check pytest --test tests/test_public_contract.py",
-      "exit_code": 0,
-      "evidence": ["logs/independent-tests.txt"]
-    }
-  ],
-  "limits": ["Synthetic CLI checks do not demonstrate native or user acceptance"]
-}
-```
-
-Every criterion object contains exactly `id`, `status`, and `evidence`, and
-every candidate criterion appears once. Evidence paths are absolute or relative
-to the final attempt, including when the input is elsewhere. Arrays and judgments
-remain explicit. Supplied helper-owned fields, unknown fields (including inside
-criteria/checks), duplicate JSON keys, missing evidence, and invalid candidate
-state fail before publication. The input and prior records remain unchanged.
-
-For repair, supply `verdict: "REWORK"`, the actual `failed` or `unverified`
-criterion statuses, blocking findings with criterion/file pointers, and the
-observed checks and evidence. For an unavailable prerequisite, supply
-`verdict: "BLOCKED"`, the affected `unverified` criteria, and checks with
-`status: "unavailable"`, `exit_code: null`, `reason`, and attempted-procedure
-evidence. A required user acceptance criterion stays unverified until the actual
-user verdict exists. Reused checks retain their explicit source commit and
-applicability rationale under [Checks and evidence reuse](#checks-and-evidence-reuse).
-
-Valid PASS publishes with exit `0` when the candidate transition is allowed;
-valid REWORK and BLOCKED publish with exit `2` and hold the transition. Existing
-candidate failures continue to hold it. Contradictory PASS claims (unsatisfied
-criteria, blocking findings, or failing/unavailable verification checks) fail
-with exit `1` and publish nothing. Writing JSON or passing checks supplies no
-omitted verdict, requirement, evidence-applicability judgment, or user acceptance.
-Actor separation checks distinct IDs; the verifier is responsible for independent
-review and coverage against the ticket's actual requirements.
-
-Verification reuses the candidate command's stable serialization and atomic,
-no-overwrite publication. Output reports the exact published path separately
-from permission to advance. Run the standalone validator at the verification
-transition; its format/state result does not establish evidence quality. Correct
-input before publication; for an occupied record or changed judgment, follow the
-coordinator's retry procedure and leave the prior attempt immutable.
+For exact inputs, examples and exits, read [publication](handoff-verification.md#publish-independent-verification).
 
 ### Integration
 
-Additional fields:
-
-- `status`: `integrated` or `failed`.
-- `previous_tip`: full integration-branch commit before this merge.
-- `integration_commit`: full resulting commit; record the inspected HEAD for
-  a failed attempt too.
-- `verification_sha256`: SHA-256 of the exact `verification.json` bytes used.
-
-For `integrated`, both `previous_tip` and `candidate_commit` must be ancestors of
-the result, verification must pass, and all integration checks must pass or have
-documented evidence reuse. Capture the digest after the verifier finishes;
-the validator rejects changed verdict files. A failed attempt never closes work.
+For this stage's record fields and judgments, read [integration](handoff-integration.md#integration).
 
 #### Publish the actual integration outcome
 
-The merger captures the integration tip immediately before performing the merge,
-then inspects the resulting checkout and prepares check evidence. Prefer a full
-commit ID for `previous_tip_ref`: a branch can move during the merge. For example,
-capture `$previousTip = git -C $integrationCheckout rev-parse HEAD` before merging
-and put that captured value in the input. Ancestry validation cannot establish
-capture timing. The writer records an already-performed integration; it performs
-no merge or check execution.
-
-```powershell
-.venv\Scripts\python.exe .agents/skills/implement-spec-enhanced/scripts/write_handoff.py integration $attempt --checkout $integrationCheckout --input $integrationInput --requirements $integrationRequirements
-```
-
-Use the coordinator's exact absolute attempt path. The input has exactly these
-fields; substitute the captured commit ID and actual merger observations:
-
-```json
-{
-  "actor": "merger-session",
-  "status": "integrated",
-  "previous_tip_ref": "0123456789abcdef0123456789abcdef01234567",
-  "checks": [
-    {
-      "kind": "runner",
-      "check_id": "pytest",
-      "receipt": "C:/absolute/integration/tmp/checks/run-id/receipt.json",
-      "name": "Integration acceptance tests",
-      "status": "passed",
-      "method": "From the assessed checkout: .venv\\Scripts\\python.exe tools/check.py run --check pytest --test tests/test_public_contract.py",
-      "exit_code": 0,
-      "evidence": ["logs/integration-tests.txt"]
-    }
-  ],
-  "limits": ["Synthetic CLI checks do not demonstrate native or user acceptance"]
-}
-```
-
-The helper derives schema/kind and copies ticket/candidate identity from this
-attempt's `candidate.json`. It resolves the explicit `previous_tip_ref` to a full
-commit and reads `integration_commit` from assessed HEAD, including for failures.
-All Git operations use `--checkout` even when invoked from another checkout.
-`verification_sha256` hashes the exact finished `verification.json` bytes in
-this attempt, preserving whitespace and UTF-8 distinctions; it never hashes a
-reserialization or a record selected from another attempt. Later verification
-byte changes invalidate the standalone integration transition.
-
-Keep actor, status, checks and limits explicit, including permitted empty
-arrays. Check outcomes, reuse source commits and applicability rationale remain
-agent judgments under [Checks and evidence reuse](#checks-and-evidence-reuse).
-Unknown/duplicate input fields and helper-owned overrides (including ticket,
-commits, schema/kind and digest) are errors. Evidence paths remain absolute or
-relative to the final attempt. Missing evidence, mismatched record identities,
-invalid/non-commit references, dirty checkout state and applicable ancestry
-violations fail before publication. Inputs and prior records remain unchanged.
-
-An `integrated` claim requires an approved candidate, passing verification,
-passing or justifiably reused integration checks, and both the captured previous
-tip and candidate commit as ancestors of the inspected result. For a failed
-attempt supply `status: "failed"`, the captured reference and observed checks
-and limits. Failure records still require a clean inspected checkout, valid
-records/evidence and resolvable commit references; the validator does not impose
-the successful integration's two ancestry conditions, approval or passing checks
-on them. Resolve or abort an unfinished Git merge before publishing its clean
-inspected state.
-
-Valid integrated outcomes publish with exit `0` and allow the transition. Valid
-failed outcomes publish with exit `2` and hold it. Invalid integrated claims,
-invalid inputs/state, occupied destinations and publication failures return
-`1` without a new record. Output names the published path separately from
-permission to advance. Publication uses the same stable UTF-8 serialization
-and atomic no-overwrite mechanism as candidate/verification; even identical
-existing bytes cause refusal. Follow the coordinator's retry procedure instead
-of editing records. Writing never closes tickets, infers user acceptance or
-establishes evidence quality.
+For exact inputs, examples and exits, read [publication](handoff-integration.md#publish-the-actual-integration-outcome).
 
 ## Checks and evidence reuse
 
-Each check has `name`, `status` (`passed`, `failed`, `unavailable`, or `reused`),
-`method` (exact command and working directory, or manual procedure), `exit_code`
-(integer for executed commands; `null` for manual, unavailable, or reused checks), and `evidence`
-(nonempty array of file paths). Paths are absolute or relative to the handoff
-directory. Store output or a concise observation receipt; preserve failures.
-For unavailable checks the evidence records the attempted procedure and reason.
-An empty checks array is allowed only when the independently supplied stage
-requirements also contain no covered checks. The reviewer selects requirements
-from the ticket and repository testing guidance before accepting results.
-
-For example, a command check can be recorded as:
-
-```json
-{
-  "kind": "runner",
-      "check_id": "pytest",
-      "receipt": "C:/absolute/checkout/tmp/checks/run-id/receipt.json",
-      "name": "Public acceptance tests",
-  "status": "passed",
-  "method": "From the candidate checkout: .venv\\Scripts\\python.exe tools/check.py run --check pytest --test tests/test_public_contract.py",
-  "exit_code": 0,
-  "evidence": ["logs/public-tests.txt"]
-}
-```
-
-`failed`, `unavailable`, and `reused` also require `reason`. A reused check also
-requires `source_commit` (full Git ID). Record the prior evidence and explain why
-the changes since that commit cannot affect the checked behavior. Candidate
-checks alone do not constitute independent verification. Reuse expensive native
-evidence when source inputs, generated output, renderer conditions, and relevant
-requirements remain applicable. Rerun affected checks for runtime/output changes
-or contradictory evidence. A ticket-closure-only commit can reuse runtime
-evidence when its diff demonstrates the limited scope; user acceptance is an
-actual verdict, never an inferred check.
+For check fields, manual/native evidence or reused outcomes, read
+[checks and evidence reuse](handoff-evidence.md#checks-and-evidence-reuse).
 
 ## Validate at transitions
 
-Run the standalone `validate_handoff.py` with the project `.venv` interpreter
-from the integration checkout after publication. Writer validation is additional;
-it does not replace this explicit read-only CLI.
-Both CLIs emit UTF-8 diagnostics, including Unicode paths on Windows pipes.
-Decode captured output as UTF-8 so publication outcomes and exact destination
-pointers remain readable. Pass the checkout actually being assessed, which may
-be another worktree:
-
-```powershell
-.venv\Scripts\python.exe .agents/skills/implement-spec-enhanced/scripts/validate_handoff.py $attempt --stage candidate --checkout $implementationCheckout --requirements $candidateRequirements
-.venv\Scripts\python.exe .agents/skills/implement-spec-enhanced/scripts/validate_handoff.py $attempt --stage verification --checkout $verificationCheckout --requirements $verificationRequirements
-.venv\Scripts\python.exe .agents/skills/implement-spec-enhanced/scripts/validate_handoff.py $attempt --stage integration --checkout $integrationCheckout --requirements $integrationRequirements
-```
-
-`$attempt` is the absolute attempt directory. Candidate and verification stages
-require a clean checkout at the candidate commit; integration requires a clean
-checkout at the result. The standalone validator reads records and Git state;
-it performs no merge, test execution, or ticket edits. Exit `0` allows the transition, `1` means
-invalid records or Git state, and `2` means valid records with a failing,
-unavailable, or rework verdict that cannot advance. Candidate-stage unavailable
-checks may proceed to a verifier, who must resolve them before `PASS`.
-
-Validation covers format, evidence-file existence, actor separation, commit
-identity/ancestry, criterion coverage within the records, the verdict digest, and
-runner receipt execution facts, scope, result, content binding and evidence
-integrity. Reviewers still select appropriate coverage and judge manual evidence
-and applicability. Receipts are execution evidence, not a security attestation
-against deliberate forgery.
-
-Use ordinary completion messages such as `candidate ready: <path> (<commit>)`,
-`verification: <path> REWORK`, or `integration: <path> integrated`. Records carry
-the details; the coordinator reads them when the state changes.
-
-When changing the helper, run its self-contained CLI tests from the workspace
-root; they create isolated Git repositories under `tmp/implement-spec-enhanced-tests/`:
-
-```powershell
-.venv\Scripts\python.exe tools/check.py run --check pytest --test .agents/skills/implement-spec-enhanced/tests
-```
+After every publication, read and run [standalone transition validation](handoff-validation.md#validate-at-transitions).
 
 ### Synthetic workflow rehearsal
 
-For a documentation/CLI agreement check, create disposable real Git repositories
-under `tmp/<effort>/`: a candidate checkout, a verifier checkout at the candidate
-commit, and an integration checkout. Track synthetic `ticket.md`, `spec.md`, and
-`output.txt`; use local test identity with hooks/signing disabled. Run the writer
-and standalone validator from outside the candidate/verifier checkout with
-absolute script, attempt, checkout, and input paths. Keep inputs outside attempts.
-Use the stage inputs above with actual synthetic observations; the driver owns
-check execution and merges, while the writer only publishes those observations.
-
-| Operation | Writer exit | Standalone stage/exit |
-| --- | --- | --- |
-| Publish candidate after capturing base, checking and committing | 0 | candidate / 0 |
-| Publish unavailable-prerequisite BLOCKED verification | 2 | verification / 2 |
-| Recover prerequisite; carry candidate to assigned next attempt with false | 0 | candidate / 0; verification / 1 until fresh verdict |
-| Publish fresh independent-role PASS observations | 0 | verification / 0 |
-| Capture pre-merge tip; merge once; publish temporary failed integration | 2 | integration / 2 |
-| Carry candidate/PASS to another assigned attempt with explicit true/rationale | 0 | verification / 0 |
-| Recover check; inspect already-incorporated result; publish fresh integration | 0 | integration / 0 |
-| Repeat publication or carry into an occupied destination | 1 | earlier valid records remain unchanged |
-
-Save exact argv, working directories, stdout/stderr, exits, observations and input
-bytes. Compare all earlier record/evidence bytes before and after carries/refusals;
-compare carried candidate/PASS bytes, nested relative layout, unchanged absolute
-references, and auxiliary receipts. Assert the final digest equals the exact new
-attempt's verification bytes and the already-incorporated retry changes neither
-HEAD nor commit count. Record the full historical base/pre-merge IDs and prove
-both CLIs preserve assessed HEAD and clean state.
-
-This rehearsal checks CLI/file/Git behavior. Focused CLI tests additionally cover
-invalid inputs, concurrency, interruption and partial-attempt recovery. Record
-material limits explicitly: synthetic roles do not demonstrate live multi-agent
-execution, independent evidence judgment, native/user acceptance, remote PRs,
-or managed-worktree lifecycle behavior.
+When rehearsing the workflow, read the [rehearsal procedure](handoff-rehearsal.md#synthetic-workflow-rehearsal).

@@ -36,11 +36,49 @@ file. Link authoritative references and identify the source path.
 Run `gh issue view <number> --comments` and inspect its labels, assignees,
 dependencies and state before acting.
 
+### Discover the implementation frontier
+
+Before claim or dispatch, read the accepted parent/index and discover native
+children and blockers with paginated requests. These read-only commands retain
+current states and assignments on each page; replace `<number>` with the parent or ticket:
+
+```powershell
+gh api repos/FuzzyUn1c0rn/brz2obsidian/issues/<number> --jq '{number,state,assignees: [.assignees[].login],labels: [.labels[].name],sub_issues_summary,issue_dependencies_summary}'
+gh api --paginate repos/FuzzyUn1c0rn/brz2obsidian/issues/<number>/sub_issues --jq 'map({number,title,state,assignees: [.assignees[].login],labels: [.labels[].name]})'
+gh api --paginate repos/FuzzyUn1c0rn/brz2obsidian/issues/<number>/dependencies/blocked_by --jq 'map({number,title,state,assignees: [.assignees[].login]})'
+```
+
+Run blocker discovery for the selected ticket and every open child. Repeat child
+discovery for a proposed ticket with children until the selected work is a leaf. Keep the parent's map
+order when choosing eligible work. Check the parent and child bodies/comments for
+task-list, `Part of #<parent>` and `Blocked by:` fallback relationships; resolve
+each referenced issue's current state with `gh issue view <number> --json
+number,state,labels,assignees`. Reconcile fallbacks with native relationships.
+
+A leaf result requires successful child discovery, agreement with
+`sub_issues_summary.total` when present, and inspection of fallback relationships.
+An empty response alone or a failed/truncated request leaves discovery unresolved.
+If native endpoints are unavailable, record that limit and use the documented
+fallbacks only when they establish the complete relationships; otherwise resolve
+the missing graph before dispatch.
+
+Preparation is complete when a record under `tmp/<effort>/` identifies the
+parent/ticket, discovered children, current states/assignments, blockers, and the
+eligible selected leaf, established leaf result, or empty frontier with reasons.
+Eligibility requires open
+`ready-for-agent` work, all blockers closed, and no other claim. A parent with no
+eligible children has an empty frontier; wait for a blocker or claim to resolve.
+Record explicit user authorization for combined work with its scope and affected
+child tickets instead of requiring leaf selection for that scope. Preserve that
+authorization and record child completion individually against acceptance criteria.
+Publish durable scope/authorization decisions in the issue after claiming.
+
 ## Implementation operations
 
-1. Read the accepted specification and feature index or parent issue. Choose an
-   open `ready-for-agent` issue whose blockers are all closed. This label means
-   specified; dependencies still govern when work starts.
+1. Read the accepted specification and feature index or parent issue. Complete
+   [frontier discovery](#discover-the-implementation-frontier) before choosing
+   work. The `ready-for-agent` label means specified; dependencies and claims
+   still govern when work starts.
 2. Assign the issue before implementation and record the working session or
    agent identifier. An assigned issue is claimed.
 3. Implement its scope and verify the acceptance criteria through the documented

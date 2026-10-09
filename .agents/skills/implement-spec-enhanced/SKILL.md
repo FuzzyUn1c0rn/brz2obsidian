@@ -12,12 +12,17 @@ original skill remains available.
 
 ## Prepare
 
-Read the accepted spec, implementation index, and issue-tracker instructions.
-Select only tickets whose blockers are resolved. Reuse a suitable integration
-branch or create one, recording its starting commit for the final review.
+Read the accepted spec and implementation index. Complete
+[frontier discovery](../../../docs/agents/issue-tracker.md#discover-the-implementation-frontier)
+and record eligible selected leaves, an established leaf result, or the scope of
+explicit user-authorized combined work before claim/dispatch. Reuse a suitable
+integration branch or create one, recording its starting commit for the final review.
 
-Read [the handoff contract](references/handoffs.md) before dispatch; it is the
-authoritative publication, input, evidence, and transition reference. Use its
+Read [the common handoff contract](references/handoffs.md) before dispatch and
+[dispatch details](references/handoff-dispatch.md) when assigning stages or attempts.
+Each agent reads [requirements/evidence](references/handoff-evidence.md) and
+[transition validation](references/handoff-validation.md), then only its applicable
+stage reference below. Use the contract's
 `write_handoff.py` CLI for every candidate, verification, integration, and
 carry-forward publication, followed by the explicit standalone validator.
 Choose one absolute shared root under `tmp/<effort>/handoffs/` in the integration
@@ -49,12 +54,17 @@ Native investigation and approved presentation follow the repository guidance.
    Give each an isolated worktree based on the integration branch. Preserve
    existing changes when correcting a worktree's starting point.
 
+   Implementers read [candidate publication](references/handoff-candidate.md)
+   before preparing their stage input.
+
 2. The implementer builds the ticket through its accepted public testing seams,
    consulting `tdd` for behavioral changes. Synchronize with the current
    integration tip and capture its full ID as `base_ref` at synchronization,
-   before the final candidate checks. Run required checks through the repository
-   runner and retain its receipts. Commit the completed changes and report
-   the commit and clean checkout to the
+   before the final candidate checks. Follow the
+   [stable-candidate checkpoint](../../../docs/testing.md#stable-candidate-checkpoint):
+   finish focused controls and known findings, commit stable source, then run
+   required completion checks through the repository runner and retain receipts
+   bound to that commit. Report the checked commit and clean checkout to the
    coordinator before publication. The coordinator then assigns the exact unused
    absolute attempt for that ticket/commit and returns it with the assessed
    checkout, candidate-input path, and candidate publication command. The initial
@@ -68,6 +78,7 @@ Native investigation and approved presentation follow the repository guidance.
    Agents use assigned attempts; the coordinator owns allocation.
 
 3. Dispatch an independent verifier when the candidate is ready. The verifier
+   reads [independent verification](references/handoff-verification.md),
    inspects that commit in a separate checkout, checks the diff against the
    ticket/spec and approved presentation, and performs the checks needed to
    support a verdict through its own runner invocation and fresh receipt. Validate
@@ -86,14 +97,15 @@ Native investigation and approved presentation follow the repository guidance.
    new candidate commit and directory, followed by new verification. For
    `BLOCKED`, record the unavailable prerequisite in the ticket and continue
    independent ready work. Once it becomes available, follow the contract's
-   [retry procedure](references/handoffs.md#retry-an-unchanged-candidate) to create
+   [retry procedure](references/handoff-retry.md#retry-an-unchanged-candidate) to create
    another attempt for the same commit through `carry-forward` with fresh
    verification. The coordinator supplies exact source/destination attempts,
    candidate checkout, carry-input path, and command, and records the reason and
    both paths in the ticket. Preserve the earlier verdict. Advance to integration
    only after a valid `PASS`.
 
-5. Serialize merges through the merger. It confirms the candidate and verdict
+5. Serialize merges through the merger, which reads
+   [integration publication](references/handoff-integration.md). It confirms the candidate and verdict
    refer to the same ticket and commit, captures the full integration tip as
    `previous_tip_ref` immediately before the actual merge, then
    integrates the verified commit. Abort an unfinished conflicting merge before
