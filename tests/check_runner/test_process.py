@@ -134,6 +134,39 @@ def test_focused_check_uses_selected_checkout_and_publishes_valid_receipt(checko
     assert os.environ.get("PYTHONPATH") == original_path
 
 
+@pytest.mark.parametrize("parent", ["test_selected", "TestSelected::test_selected"])
+def test_parameterized_parent_selector_has_valid_execution_evidence(checkout, parent):
+    (checkout / "tests" / "test_selected.py").write_text(
+        "import pytest\n"
+        "@pytest.mark.parametrize('value', ['alpha', 'beta'])\n"
+        "def test_selected(value):\n"
+        "    assert value in ('alpha', 'beta')\n"
+        "class TestSelected:\n"
+        "    @pytest.mark.parametrize('value', ['alpha', 'beta'])\n"
+        "    def test_selected(self, value):\n"
+        "        assert value in ('alpha', 'beta')\n"
+    )
+    selector = f"tests/test_selected.py::{parent}"
+    result, path, receipt = run(checkout, "--check", "pytest", "--test", selector)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert receipt["checks"][0]["counts"]["passed"] == 2
+    expected = requirements(
+        checkout,
+        [pytest_requirement("focused", [selector])],
+        receipt["environment"],
+    )
+    accepted = command(
+        "validate",
+        "--receipt",
+        path,
+        "--checkout",
+        checkout,
+        "--requirements",
+        expected,
+    )
+    assert accepted.returncode == 0, accepted.stdout + accepted.stderr
+
+
 @pytest.mark.parametrize(
     "defect,check,diagnostic",
     [
