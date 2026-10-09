@@ -25,6 +25,9 @@ def artifacts_for(session):
         ("./note.md",),
         ("folder//note.md",),
         ("NUL.md",),
+        ("COM¹.md",),
+        ("CONIN$",),
+        ("con .txt",),
         ("note.md ",),
     ],
 )

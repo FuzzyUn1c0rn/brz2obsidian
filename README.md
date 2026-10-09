@@ -9,6 +9,92 @@ This is a **one-time conversion into a new vault**. It does not merge into an
 existing vault or keep TheBrain and Obsidian synchronized. Your source archive
 is read without being modified.
 
+## Optional local Windows app
+
+The local app currently supports read-only archive inspection, preliminary
+destination validation, reviewed clean/warning conversion, independent vault checking
+and explicit safe diagnostic copy/save, recovery and optional published-vault actions.
+Final native acceptance is being delivered through
+the [Windows UI implementation](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/93).
+The existing command-line converter remains available below.
+
+From the checkout root, install the optional GUI dependencies and build its
+checkout-bound launcher:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-gui.txt
+.\.venv\Scripts\python.exe -m pip install --no-build-isolation --no-deps -e '.[dev,gui]'
+.\.venv\Scripts\python.exe tools\build_ui.py
+```
+
+Double-click **build/ui/Start brz2obsidian.cmd**, choose a BRZ archive, then
+select **Inspect archive**. Inspection shows planned counts, unavailable actual
+counts, source limitations and pending checks. Diagnostic details are collapsed
+initially and remain available after the worker exits. The source is read-only. Standalone **Inspect** offers **Convert this archive**
+after a usable clean/warning inspection. This carries the source and reviewed
+findings into **Convert**, with destination validation still required. Switching
+tabs does not inspect or acknowledge warnings.
+During inspection, conversion or vault checking the window stays responsive; Close waits for
+completion.
+
+Expand **Diagnostic details** for selectable, bounded report pages. **Copy details**
+copies the complete current safe report; **Save diagnostic report** explicitly saves
+it as local UTF-8 text. Canceling or failing an export keeps the operation result.
+Reports remain in memory only for the current result and expire when it is replaced
+or the app closes. The app creates no diagnostic history or automatic report files.
+
+Use **Check vault** to choose an existing vault folder and check its current
+structure and conventions without changing files. Clean, issues and failed
+checks have distinct outcomes; checker issues are not conversion warnings or
+failures. The check does not repair files or prove preservation of source content.
+
+In **Convert**, choose an existing output parent folder and edit the suggested
+archive-stem vault name. The backend shows the complete destination and adjacent
+errors. Validation is read-only and accepts only an absent or empty target;
+it does not reserve the folder or guarantee writes. Generated paths, collisions,
+manifest feasibility and the final 240 UTF-16-unit path limit remain pending
+until conversion. Editing coalesces checks and discards obsolete results while
+retaining the inspection findings. After a clean inspection and valid destination,
+select **Convert** explicitly. For source warnings, review the findings and use
+**Convert with warnings** explicitly; no checkbox or extra dialog is required.
+This authorization applies only to that current attempt. A changed source or
+review requires fresh inspection and authorization. Conversion rechecks the source review and all final
+publication safeguards. A verified result shows actual counts and its published
+path in place of the destination form. Refusal, failure and uncertain worker
+termination have distinct messages; never treat a visible folder as success.
+A verified warning publication is **Vault created with warnings**.
+The CLI below still creates missing output parents.
+
+After verified publication, explicitly choose **Open folder**, **Open migration
+report**, **Open in Obsidian** or **Check vault** in the result area. These actions
+also remain available when publication succeeded before a later error. Checking
+automatically selects that published folder and remains read-only; no open or
+check starts automatically. An open failure keeps the result and shows a copyable
+path. **Open in Obsidian** requests Obsidian's vault manager. There, choose
+**Open folder as vault** and select the exact published vault folder shown in
+the app. The request does not confirm that the vault opened; you complete folder
+selection in Obsidian. **Open migration report** remains a separate action.
+
+Launching the app again restores or draws attention to its existing window;
+it does not start another operation. If Windows prevents foreground activation,
+the taskbar/caption flashes and the existing window shows a brief message.
+Independent command-line commands remain available while the app is open.
+
+Only the last output parent folder is remembered in
+`%LOCALAPPDATA%\brz2obsidian\preferences.json`. A new launch has no selected
+archive, reviewed inspection, result/check history, diagnostic log or saved window
+geometry. An unreadable preference leaves an empty usable form with a nonfatal
+message; choose the output folder again. A failed preference save preserves the
+current operation result and does not prevent further work.
+
+This launcher uses this checkout's `.venv` and is not a standalone distribution.
+Moving the checkout or environment requires rebuilding. A missing environment
+shows setup guidance; launching never installs or downloads packages. Headless
+installation does not require `requirements-gui.txt`. The tested GUI runtime is
+64-bit CPython 3.14.8, PySide6/Qt 6.12.0 on Windows. In an isolated worktree, the
+helper accepts `--python C:\absolute\project\.venv\Scripts\python.exe` while
+continuing to resolve code from that worktree.
+
 ## Before you start
 
 This guide uses **Windows PowerShell**. You will need:

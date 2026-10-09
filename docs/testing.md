@@ -19,6 +19,174 @@ In a separate worktree, use the integration checkout's full `.venv` interpreter
 path and set `$env:PYTHONPATH = Join-Path (Get-Location) 'src'` for that worktree.
 Do not redirect a shared editable installation while other worktrees are active.
 
+## Optional GUI checks
+
+The UI adapter lives in `src/brz2obsidian_ui`; the application operations,
+host-lifetime session and hidden worker are Qt-independent. Qt-dependent checks
+under `tests/gui` carry the `gui` marker and skip during discovery when PySide6 is
+absent. Install the pinned `requirements-gui.txt` only for GUI development.
+
+```powershell
+$env:QT_QPA_PLATFORM = 'offscreen'
+.\.venv\Scripts\python.exe -m pytest -m gui -q --basetemp=tmp/pytest-gui
+.\.venv\Scripts\python.exe -m pytest -m 'not gui' -q --basetemp=tmp/pytest-headless
+```
+
+The injected public UI seam accepts session commands and presents immutable
+snapshots. Deterministic barriers hold inspection, conversion, vault checking, destination
+validation and diagnostic preparation while queued GUI input is processed,
+before releasing work. Real hidden-worker
+checks cover correlation, UTF-8 framing, separate concurrent pipe draining,
+bounded output, launch/crash failures and safe diagnostic omission. Static and
+import-blocked checks keep backend/CLI use independent of Qt. Launcher checks
+exercise Unicode/spaced source roots, an unrelated CWD and readable setup errors.
+Destination checks also cover reserved/nested names, populated and reparse targets,
+unchanged inventories, no write probes, stale/coalesced revisions, independent
+retained inspection results, adjacent errors/path order and narrow field stacking.
+Publisher and CLI controls preserve final safety and creation of missing parents.
+These controls do not establish final native appearance, platform-dialog behavior
+or actual user acceptance. Use the generated local launcher for strategically
+sampled Windows observations and retain requirement IDs/evidence in the ticket.
+
+`tests/gui/test_transport_parsing_window.py` holds the public response decoder
+after an actual hidden Inspect worker has exited and its pipes have drained.
+Queued heartbeat/disclosure input, repaint, stable busy inputs, primary gating
+and deferred Close must complete before the decoder is released. The original
+decoder then validates the real response and correlation; the window receives
+the actual clean inspection result and the source bytes/inventory stay unchanged.
+The bounded wait is a test guard, not an operation timeout or worker-kill policy.
+The [Windows UI acceptance record](history/windows-ui-acceptance.md) summarizes
+the integrated automated/native checks and their retained evidence limits.
+
+Checker controls exercise actual clean/issues/failed hidden workers, strict
+checker-only aggregate counts, safe diagnostics, deliberate retries and unchanged
+file/directory inventories and bytes. Native synthetic clean/issues selection and
+picker cancellation supplement public GUI responsiveness/deferred-Close checks.
+
+Diagnostic controls exercise public generation/action admission, same-revision and
+identical-result replacement, worker-exit lifetime, bounded selectable pages,
+complete/omitted Unicode copy/save round trips and nonfatal failures. Injected UI
+barriers hold preparation/export while queued input/repaint and Close are processed;
+stale save callbacks, queued exports and paged callbacks cannot use an old report.
+Failed diagnostic saves retain the explicitly selected target as exact selectable
+path text, including unexpected adapter exceptions, without replacing the main
+result or report. Public adapter/runner and GUI controls cover Unicode/spaced
+targets, preserved existing bytes, exception privacy, new action/cancel/success
+clearing, and rejection of delayed paths after identical-result replacement.
+An offscreen, nonnative Qt dialog control verifies Save starts in the absolute
+home directory despite an unrelated working directory, retains its report
+filename and returns focus on keyboard cancellation. Its Qt settings use only
+test-owned INI files; the control does not invoke a native dialog.
+Native synthetic clipboard paste and asynchronous Save cancellation/local UTF-8
+readback supplement these controls; final independent presentation/user checks remain
+separate.
+
+Reviewed conversion controls exercise actual public Workflow/Publisher and hidden
+worker boundaries. They compare all source identity and converter/profile facts
+at the rendered publisher boundary, preserve custom adapters/metadata, and verify
+zero publisher calls and unchanged inventories for stale reviews. Real controls
+cover destination races, source mutation, path/manifest limits, permission and
+disk-full-equivalent failures, exact cleanup guidance and late verified receipts.
+Session and injected UI controls distinguish known not-started from uncertain
+termination, require fresh validation after failure, and retain actual receipt
+paths without directory inference. A synthetic native clean conversion supplements
+these controls. Standalone carry and explicit warning-action controls preserve the
+source/opaque review, reject refused/failed carry, and ensure tab changes do not
+authorize warnings. The host snapshot supplies a strict conversion primary-action
+fact independently of destination readiness; actual widget controls observe every
+review-field access to keep the returned review opaque, including after checker
+results replace inspection presentation. Real warning workers publish with verified receipt/exit2;
+missing/stale authorization and incompatible identity/profile/converter facts
+produce no publisher delegation. Same-path fresh review requires a new explicit
+authorization; malformed warning receipt facts never imply a created vault.
+Completion controls exercise current verified-receipt admission, stale/closed/busy
+intents and atomic selection of the published folder for explicit checking. The
+independent selector remains disabled without its own visible selection. Outer
+adapter controls verify Unicode/spaced paths, path-free Obsidian vault-manager
+requests, missing targets and safe native failures without file changes. Obsidian
+feedback uses the admitted report's folder even when an adapter returns an
+untrusted path or raises; report admission remains unchanged. Public Qt clicks
+observe first-open guidance and exact copyable folder feedback for successful
+dispatch and handler failure. Independent actual Windows verification separately
+confirms that the installed URI handler opens the vault manager.
+A deliberately blocked filesystem check re-admits immediately before dispatch;
+the runner never holds the session lock across platform work. Injected UI controls
+retain clean/warning/late-error results on open failures, process Qt events during
+blocked dispatch and run the actual checker worker against the published target.
+Normal conversion completion and deferred Close start no open/check action.
+Final independent/native user acceptance remains separate. Single-instance and
+preferences have separate controls below.
+
+Independent accepted-presentation controls in
+`tests/gui/test_accepted_presentation.py` derive task order, outcome wording,
+publication replacement and action placement from canonical specification #92
+and its exact C reference. Actual Qt keyboard events exercise forward/reverse
+control order, selectable diagnostic text, narrow reflow and scrolling. Deliberate
+wrong-title, hidden-action and swapped-tab controls prove the presentation
+assertions reject incorrect output. Read-only path displays wrap arbitrary
+unbroken Windows segments without inserting break characters into the selected
+text; actual document line bounds, full height and exact selection are checked
+at a narrow width. Existing completion and diagnostic controls
+also hold asynchronous actions open: focus returns to the invoked action when
+the user has left it unchanged, while later keyboard navigation takes precedence.
+Narrow recovery controls keep contextual footer guidance and every current action
+readable, and wrap previous destinations within the scrollable sheet. Keyboard
+selection controls cover partial Unicode path/report selections as well as Select
+All; copied path and recovery text retain the original characters and paragraphs.
+Findings controls cover long unbroken checker filenames and owned cleanup paths:
+the prominent read-only panel wraps within the task sheet without nested scrolling,
+and exact leftover paths remain selectable in adjacent recovery guidance. Checker
+file findings identify the affected file without suggesting a staging leftover.
+These checks complement strategically sampled Windows scaling, contrast and
+dialog observations; they do not establish comprehensive assistive-technology
+certification or the final independent/user verdict.
+
+### Local startup and preference controls
+
+`tests/application/test_ui_preferences.py` exercises canonical persistence effects
+and the atomic public `ApplicationSession.dispatch_if_current` revision guard.
+Deterministic blocked reads/saves verify newer input still reaches the serialized
+runner, stale startup delivery cannot overwrite it, stale failure feedback is
+discarded, and saves retain their admission order. The closed session command
+vocabulary is unchanged.
+
+The Qt-independent preference, activation and startup adapter controls under
+`tests/gui` run in the headless selection. They use actual UTF-8 preference bytes,
+loopback connections and separate processes in unique pytest-owned directories.
+Only the disposable adapter crash fixture is deliberately terminated. Controls
+verify parent-only content, safe corrupt/unavailable handling, retained prior
+preferences after replacement failure, activation-only authenticated messages,
+CLI independence, foreground-denial attention and crash-stale recovery. A live
+lock owner is never replaced because its endpoint is temporarily unavailable.
+Relative, drive-relative, root-relative and invalid configured preference roots
+are rejected before filesystem access; public controls prove no CWD writes from
+either `LOCALAPPDATA` or an explicit preference adapter directory.
+
+`tests/gui/test_local_startup.py` uses offscreen Qt with synthetic user-profile
+roots. A blocked preference read leaves a queued Qt heartbeat and newer input
+responsive before release. A separate control proves unavailable preferences
+permit a usable empty launch while ownership still prevents a second window.
+These controls inject the native foreground boundary and do not establish actual
+Windows activation or presentation.
+
+Preferences live only in `%LOCALAPPDATA%\brz2obsidian\preferences.json`.
+Transient activation registration and its OS-held byte lock are separate, under
+`%USERPROFILE%\AppData\Local\Temp\brz2obsidian`; this relies on the signed-in
+user's private profile permissions and uses no shared/system-temp or checkout
+fallback. Registration contains only a port and random authentication token;
+normal close removes it, and crash recovery replaces it only after acquiring the
+released lock. An unavailable coordination location safely refuses startup.
+No operation history is stored there and no converter/CLI lock is involved.
+
+Actual local-build acceptance must separately sample two launches, existing
+window restoration or attention, unchanged active inputs, parent-only fresh
+launch behavior, one corrupt-preference case and an idle test-owned crash/stale
+relaunch. Preserve any pre-existing preference bytes before those controls and
+retain local environment, assessed source hashes and observations in the ticket's
+ignored effort evidence. Do not terminate an active conversion or a user-owned
+process for this sample. Final presentation and the user's verdict remain their
+separate gates.
+
 ## Public tests
 
 Ordinary tests require neither private inputs nor GUI access. Shareable synthetic
@@ -375,6 +543,35 @@ selection, covered behaviors and limits; extrapolated confidence in equivalent
 cases is distinct from observing each item. Complete required automated source,
 body/image, inventory and preservation audits keep their full scope. Actual user
 acceptance remains a separate gate when required by the accepted specification.
+
+For the first local Windows UI, the owner's
+[current scaling decision](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/92#issuecomment-6077040155)
+requires **100% only**, with the normal **100%** display setting left unchanged.
+Keep narrow-window, long-path/findings, stacking, scrolling, keyboard and usable
+footer checks. Do not change system scaling or sample other scales. Earlier
+100%/125% reuse, 150% uncertainty and BLOCKED records retain their historical
+scope; owner corrections do not turn old uncertainty into passing observations.
+Independent applicable 100% observations are required before review PASS, and
+the user's actual running-app verdict remains separate.
+
+The UI-P11 scrollbar correction uses Qt's platform style instead of a custom
+scrollbar theme. Background paint is scoped to plain containers rather than all
+QWidget subclasses; inherited typography and targeted sheet/control colors remain
+in place. Because C is explicitly light, MainWindow requests Qt's application-local
+Light color scheme before constructing controls. This retains the platform style
+and does not change Windows theme preferences. A Windows11 dark-scheme thumb can
+otherwise paint white against the light sheet; a widget palette alone does not
+select that native thumb color. See [QStyleHints](https://doc.qt.io/qt-6/qstylehints.html#colorScheme-prop).
+Existing public GUI controls exercise scroll reachability, exact wrapped
+paths, narrow/short reflow, keyboard/focus and the anchored footer. Offscreen
+style comparisons diagnose platform delegation, not actual Windows appearance.
+Offscreen QPA may ignore color-scheme requests; an unchanged Unknown scheme cannot
+prove actual Windows contrast. Public QStyle drawing can isolate the scheme cause,
+but cannot establish pointer usability in the maintained product.
+Independently sample the actual task-sheet and diagnostic scrollbars at 100%,
+including wheel, thumb drag and keyboard access; previous scrollbar observations
+cannot establish this changed appearance. No CSS-mirroring or screenshot-pixel
+oracle is needed as a permanent test.
 
 ## Native review procedure
 
