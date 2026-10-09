@@ -172,6 +172,62 @@ observations and separately specified private acceptance drivers retain their ow
 documented routes. Runner receipt/log directories are immutable evidence; retain
 needed conclusions and pointers before retiring the ignored effort artifacts.
 
+## Hosted Windows checks
+
+`.github/workflows/checks.yml` exposes the stable `Windows checks (base)` status.
+It runs on ordinary pull requests targeting `main` when opened, updated
+(`synchronize`) or reopened, on pushes to `main`, and on manual dispatch. Draft
+requests and changes limited to documentation or workflow files receive the same
+checks; there are no path filters. The workflow uses read-only repository access
+and needs no project secrets.
+
+Each job starts with a fresh checkout on GitHub's `windows-2025` image and 64-bit
+CPython 3.14. It creates its own project `.venv`, installs the pinned runtime,
+build and development dependencies from `requirements.txt`, then installs the
+editable project with its declared development extra and no build isolation.
+It confirms `PySide6` is absent and invokes the maintained runner once with the
+full base selection: pytest, Ruff lint, Ruff format validation and dependency
+consistency. Qt-dependent skips are expected; the full discoverable synthetic
+suite still executes the Qt-independent tests. No test selector narrows the run.
+
+Equivalent local bootstrap and execution from a fresh checkout:
+
+```powershell
+python -m venv .venv
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$checkout = (Get-Location).Path
+$python = Join-Path $checkout '.venv\Scripts\python.exe'
+$runner = Join-Path $checkout 'tools\check.py'
+& $python -m pip install -r requirements.txt
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $python -m pip install --no-build-isolation -e '.[dev]'
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $python $runner run --checkout $checkout --python $python --environment base
+$checkExit = $LASTEXITCODE
+exit $checkExit
+```
+
+Installation failures stop check execution. PowerShell captures each native
+failure before later commands can replace it; the runner's aggregate nonzero
+result fails the job. Logs identify the event, checked revision, runner image,
+interpreter and environment variant. Tool output is streamed by the runner; a
+post-run summary reads exact command arguments, outcomes and pytest counts from
+its receipt while preserving the aggregate exit. The `windows-checks-base-<run>-<attempt>`
+artifact retains the entire original `tmp/checks/` directory, including receipts,
+counts and byte/readable logs, even when check execution fails or is interrupted.
+An earlier setup/installation failure may leave no receipt; the summary reports
+that absence, and installation logs remain the evidence of that failure. Fully
+canceled jobs may end before GitHub can upload artifacts.
+
+Hosted checks use tracked synthetic fixtures and test-generated temporary files.
+They need no private BRZ archive, retained vault, desktop session, Obsidian or
+TheBrain installation. A green status establishes automated synthetic coverage;
+private preservation audits, actual Windows appearance, installed Obsidian
+interactions and user acceptance retain their separate verification boundaries.
+The base status does not establish Qt-dependent GUI execution. Hosted acceptance
+uses actual GitHub job results and downloadable receipts validated against
+independently declared requirements, rather than assertions about workflow text.
+
 ## Optional GUI checks
 
 The UI adapter lives in `src/brz2obsidian_ui`; the application operations,

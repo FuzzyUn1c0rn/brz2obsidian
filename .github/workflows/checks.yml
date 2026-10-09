@@ -1,0 +1,95 @@
+name: Checks
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  base:
+    name: Windows checks (base)
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out assessed revision
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up CPython 3.14 (64-bit)
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.14'
+          architecture: x64
+
+      - name: Install base environment
+        run: |
+          python -m venv .venv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $python = Join-Path $env:GITHUB_WORKSPACE '.venv\Scripts\python.exe'
+          & $python -m pip install -r requirements.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $python -m pip install --no-build-isolation -e '.[dev]'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Identify base environment and confirm Qt absence
+        run: |
+          Write-Output "Event: $env:GITHUB_EVENT_NAME; workflow revision: $env:GITHUB_SHA"
+          Write-Output "Runner: $env:RUNNER_OS / $env:RUNNER_ARCH; image: $env:ImageOS / $env:ImageVersion; variant: base"
+          git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $python = Join-Path $env:GITHUB_WORKSPACE '.venv\Scripts\python.exe'
+          & $python -c "import importlib.util, platform, sys; print('Interpreter:', sys.executable); print('Python:', sys.version); print('Platform:', platform.platform(), platform.machine()); qt = importlib.util.find_spec('PySide6'); print('PySide6:', qt); sys.exit(0 if qt is None else 1)"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run full base checks
+        run: |
+          $checkout = $env:GITHUB_WORKSPACE
+          $python = Join-Path $checkout '.venv\Scripts\python.exe'
+          $runner = Join-Path $checkout 'tools\check.py'
+          & $python $runner run --checkout $checkout --python $python --environment base
+          $checkExit = $LASTEXITCODE
+          $receipts = @(Get-ChildItem -Path 'tmp/checks/*/receipt.json' -ErrorAction SilentlyContinue)
+          foreach ($receiptFile in $receipts) {
+            $receipt = Get-Content -LiteralPath $receiptFile.FullName -Raw | ConvertFrom-Json
+            Write-Output "Runner aggregate: $($receipt.aggregate); exit: $checkExit; receipt: $($receiptFile.FullName)"
+            foreach ($check in $receipt.checks) {
+              Write-Output "Check: $($check.id); status: $($check.status); exit: $($check.exit_code)"
+              Write-Output "Command argv: $($check.argv | ConvertTo-Json -Compress)"
+              if ($null -ne $check.counts) {
+                $counts = $check.counts
+                Write-Output "Pytest: collected=$($counts.collected); passed=$($counts.passed); failed=$($counts.failed); skipped=$($counts.skipped); errors=$($counts.errors); GUI executed=$($counts.gui_executed)"
+              }
+            }
+          }
+          exit $checkExit
+
+      - name: Report runner evidence availability
+        if: always()
+        run: |
+          $receipts = @(Get-ChildItem -Path 'tmp/checks/*/receipt.json' -ErrorAction SilentlyContinue)
+          if ($receipts.Count -eq 0) {
+            $message = 'No runner receipt was produced. Inspect the setup/installation and check-step logs; this does not establish passing checks.'
+          } else {
+            $message = 'Runner evidence is retained in the Windows base checks artifact, including original logs and pytest counts.'
+            $receipts | ForEach-Object { Write-Output "RECEIPT: $($_.FullName)" }
+          }
+          Write-Output $message
+          $message >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Retain original runner receipts and logs
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: windows-checks-base-${{ github.run_id }}-${{ github.run_attempt }}
+          path: tmp/checks/
+          include-hidden-files: true
+          if-no-files-found: warn
