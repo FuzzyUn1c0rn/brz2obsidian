@@ -90,6 +90,13 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
+      - name: Deliberate GUI dependency inconsistency control
+        if: matrix.environment == 'gui'
+        run: |
+          $python = Join-Path $env:GITHUB_WORKSPACE '.venv\Scripts\python.exe'
+          & $python -c "import pathlib, sys, sysconfig; assert pathlib.Path(sys.prefix).resolve() == pathlib.Path('.venv').resolve(), 'Control must target this project venv'; metadata = pathlib.Path(sysconfig.get_path('purelib')) / 'ci_dependency_control-0.0.0.dist-info'; metadata.mkdir(); (metadata / 'METADATA').write_text('Metadata-Version: 2.1\nName: ci-dependency-control\nVersion: 0.0.0\nRequires-Dist: Pillow==999999.0.0\n', encoding='utf-8'); print('Deliberate dependency control metadata:', metadata)"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Identify ${{ matrix.environment }} environment and confirm Qt availability
         run: |
           Write-Output "Event: $env:GITHUB_EVENT_NAME; workflow revision: $env:GITHUB_SHA"
