@@ -223,6 +223,70 @@ def test_public_validation_refuses_damaged_stale_or_insufficient_evidence(
     assert refused.returncode == 2, refused.stdout + refused.stderr
 
 
+@pytest.mark.parametrize("target", ["receipt", "requirements"])
+@pytest.mark.parametrize("version", [True, 1.0])
+def test_schema_version_requires_integer_not_boolean_or_float(
+    checkout, target, version
+):
+    result, path, receipt = run(
+        checkout, "--check", "pytest", "--test", "tests/test_selected.py"
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    expected = requirements(
+        checkout,
+        [pytest_requirement("focused", ["tests/test_selected.py"])],
+        receipt["environment"],
+    )
+    changed = path if target == "receipt" else expected
+    value = json.loads(changed.read_text(encoding="utf-8"))
+    value["schema_version"] = version
+    changed.write_text(json.dumps(value), encoding="utf-8")
+    refused = command(
+        "validate",
+        "--receipt",
+        path,
+        "--checkout",
+        checkout,
+        "--requirements",
+        expected,
+    )
+    assert refused.returncode == 2, refused.stdout + refused.stderr
+
+
+@pytest.mark.parametrize("field", ["exit_code", "gui_count"])
+def test_boolean_cannot_alias_integer_execution_result_or_count(checkout, field):
+    result, path, receipt = run(
+        checkout, "--check", "pytest", "--test", "tests/test_selected.py"
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    expected = requirements(
+        checkout,
+        [pytest_requirement("focused", ["tests/test_selected.py"])],
+        receipt["environment"],
+    )
+    argv = [
+        "validate",
+        "--receipt",
+        path,
+        "--checkout",
+        checkout,
+        "--requirements",
+        expected,
+    ]
+    baseline = command(*argv)
+    assert baseline.returncode == 0, baseline.stdout + baseline.stderr
+    row = receipt["checks"][0]
+    if field == "exit_code":
+        assert row["exit_code"] == 0
+        row["exit_code"] = False
+    else:
+        assert row["counts"]["gui_executed"] == 0
+        row["counts"]["gui_executed"] = False
+    path.write_text(json.dumps(receipt), encoding="utf-8")
+    refused = command(*argv)
+    assert refused.returncode == 2, refused.stdout + refused.stderr
+
+
 def test_unchanged_dirty_snapshot_binds_later_commit_and_explicit_equivalent_reuse(
     checkout, tmp_path
 ):

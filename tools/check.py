@@ -583,8 +583,10 @@ def validate(args):
     expected = load_json(args.requirements)
     if (
         not isinstance(receipt, dict)
+        or type(receipt.get("schema_version")) is not int
         or receipt.get("schema_version") != 1
         or not isinstance(expected, dict)
+        or type(expected.get("schema_version")) is not int
         or expected.get("schema_version") != 1
     ):
         raise Invalid("Unknown or malformed receipt/requirements schema version")
@@ -685,7 +687,7 @@ def validate(args):
             row["id"] not in CHECKS
             or row["status"]
             not in (("passed", "failed") if args.allow_failed else ("passed",))
-            or not isinstance(row["exit_code"], int)
+            or type(row["exit_code"]) is not int
             or (row["status"] == "passed" and row["exit_code"] != 0)
             or not row["started"]
             or not row["ended"]
@@ -769,10 +771,9 @@ def validate(args):
             readable = (args.receipt.parent / f"{row['id']}.{stream}.log").read_bytes()
             if raw.decode("utf-8", errors="replace").encode("utf-8") != readable:
                 raise Invalid("Readable log does not match original output bytes")
-        if (
-            row["id"] == "pytest"
-            and load_json(args.receipt.parent / "counts.json") != row["counts"]
-        ):
+        if row["id"] == "pytest" and encoded(
+            load_json(args.receipt.parent / "counts.json")
+        ) != encoded(row["counts"]):
             raise Invalid("Receipt execution counts differ from captured pytest counts")
     for required in requirements:
         if not isinstance(required, dict) or required.get("id") not in CHECKS:
