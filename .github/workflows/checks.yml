@@ -55,10 +55,10 @@ jobs:
           & $winget install --id 9PG2DK419DRG --exact --source msstore --accept-source-agreements --accept-package-agreements --disable-interactivity --silent
           $codecInstallExit = $LASTEXITCODE
           Write-Output "WebP installation exit: $codecInstallExit"
-          if ($codecInstallExit -ne 0) { exit $codecInstallExit }
           $after = @(Get-AppxPackage -Name Microsoft.WebpImageExtension -ErrorAction Stop)
           Write-Output "WebP packages after: $($after.Count)"
           $after | Select-Object Name, Version, Architecture, Publisher, InstallLocation | Format-List
+          if ($codecInstallExit -ne 0) { exit $codecInstallExit }
           if ($after.Count -eq 0) { throw 'Store installation reported success but WebP extension is not registered for this runner user.' }
 
       - name: Set up CPython 3.14 (64-bit)
