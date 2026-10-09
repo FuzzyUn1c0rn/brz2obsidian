@@ -17,7 +17,7 @@ acceptance remain pending gates in the [current frontier](https://github.com/Fuz
 
 ## External file references (version 4)
 
-The current module/profile and snapshot/policy contracts use version 4, with
+Version 4 introduced external file support. The current version-5 module/profile and snapshot/policy contracts retain it, with
 matching renderer and migration result/record versions. Thought-owned
 `SourceType=2`, `Type=2`, `NoteType=0` records with coherent identities, integer
 nonnegative lengths and ordinary boolean flags represent external files.
@@ -40,6 +40,41 @@ user presentation verdict remain separate gates under issue #78. Attachment
 refusals identify included owners/attachments and evidence with role-specific
 advice; Home guidance is reserved for invalid-entry failures. Forgotten owners
 and excluded associations remain omitted before role interpretation.
+
+## Literal prose (version 5)
+
+The source adapter minimally escapes parser-active, attribute-free, unpaired
+opening words such as `<Enter>` and `<username>`. Names match ASCII letters
+followed by letters, digits or hyphens. This is a syntactic allowance for unknown
+names, rather than a token whitelist. Existing code, escaped text, autolinks,
+comments and accepted line breaks keep their behavior. Active end tags, paired
+markup, attributes, declarations, processing instructions and recognized HTML
+elements remain unsupported.
+
+Recognized names include the current [WHATWG element index](https://html.spec.whatwg.org/multipage/indices.html#elements-3)
+and [obsolete elements](https://html.spec.whatwg.org/multipage/obsolete.html#non-conforming-features),
+reviewed 2026-10-09, plus the legacy `image` parser alias and foreign-content
+roots `svg`/`math`. Thus newer `search`/`selectedcontent`, raw text containers
+and legacy elements cannot become literal prose accidentally. Only parser-active
+positions participate: a matching-looking end token inside code is protected.
+
+`Document.text_adaptations` exposes source-neutral exact edits. Original offsets
+use `scoped_source_text/unicode_codepoints`: UTF-8-sig decoded text after excluded
+reference phrases have been removed, before escaping. Each edit carries that
+representation's SHA-256, original span and before/after strings. Adapted offsets
+use `document.text/unicode_codepoints`; references and document digest use this
+adapted text. Generic validation reconstructs the scoped source and verifies
+every edit before rendering. Reference rewriting composes against adapted text
+without escaping it again. Safe original copies still preserve archived bytes,
+including BOM and line endings; unsafe originals remain omitted.
+
+Version 5 adds closed document/inspection edit fields, adaptation owner/document
+and evidence fields, and `Counts.text_adaptations`. Snapshot/policy, result,
+migration record, renderer and TheBrain module/profile versions change together.
+The independent Folio adapter adopts contract 5 with explicit arbitrary edits;
+its format and module/profile version remain unchanged. Literal edits create no
+authored-reference, payload-copy or source-gap credit. Synthetic coverage does
+not establish the later private-archive/native acceptance gates under #78.
 
 ## Records, Home and relationships
 

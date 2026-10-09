@@ -13,6 +13,7 @@ from .appearance import validate_appearance
 from .classifications import validate_classifications
 from .references import validate_references
 from .source_gaps import validate_source_gaps
+from .text import validate_text_adaptations
 
 
 def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
@@ -29,10 +30,10 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
         )
 
     identity = snapshot.identity
-    if snapshot.contract_version != 4 or policy.contract_version != 4:
+    if snapshot.contract_version != 5 or policy.contract_version != 5:
         refuse(
             "unsupported_format",
-            "Only source snapshot and policy contract version 4 is supported",
+            "Only source snapshot and policy contract version 5 is supported",
         )
     if (
         identity.module_id,
@@ -109,6 +110,7 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
                 "invalid_reference",
                 "External resource lacks its destination URI or supported role",
             )
+    validate_text_adaptations(snapshot)
     validate_references(snapshot)
     validate_appearance(snapshot, refuse)
     if len({r.key for r in snapshot.relationships}) != len(snapshot.relationships):
@@ -206,6 +208,7 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
         )
     validate_source_gaps(snapshot, policy, refuse)
     counts = Counts(
+        text_adaptations=sum(len(d.text_adaptations) for d in snapshot.documents),
         source_gaps=len(snapshot.source_gaps),
         generated_presentations=len(snapshot.generated_presentations),
         source_items=len(items),

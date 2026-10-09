@@ -50,7 +50,7 @@ def validate_references(snapshot, phase="analysis"):
                             message="Reference bounds, overlap, exact text, digest or canonical binding is invalid",
                             affected=(document.key, span.target),
                             evidence=document.evidence,
-                            guidance="Parse and bind references from the unchanged source document before planning or rendering.",
+                            guidance="Parse and bind references against the adapted document text and its digest before planning or rendering.",
                         ),
                     )
                 )

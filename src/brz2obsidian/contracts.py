@@ -122,6 +122,24 @@ class ClassificationAssignment(Contract):
     evidence: tuple[str, ...] = ()
 
 
+class TextAdaptation(Contract):
+    """An exact edit from scoped source text into the document's adapted text."""
+
+    start: int
+    end: int
+    before: str
+    after: str
+    adapted_start: int
+    adapted_end: int
+    source_digest: str
+    source_basis: Literal["scoped_source_text/unicode_codepoints"] = (
+        "scoped_source_text/unicode_codepoints"
+    )
+    adapted_basis: Literal["document.text/unicode_codepoints"] = (
+        "document.text/unicode_codepoints"
+    )
+
+
 class Document(Contract):
     key: str
     owner: str
@@ -130,6 +148,7 @@ class Document(Contract):
     original_asset_id: str | None
     original_copy_omitted: bool = False
     references: tuple[ReferenceSpan, ...] = ()
+    text_adaptations: tuple[TextAdaptation, ...] = ()
     evidence: tuple[str, ...] = ()
 
 
@@ -215,7 +234,7 @@ class SourceAccounting(Contract):
 
 
 class SourceSnapshot(Contract):
-    contract_version: Literal[4] = 4
+    contract_version: Literal[5] = 5
     identity: SourceIdentity
     collection_title: str
     entry_key: str | None
@@ -247,12 +266,13 @@ class SourcePolicy(Contract):
     module_id: str
     module_version: str
     format_version: str
-    contract_version: Literal[4] = 4
+    contract_version: Literal[5] = 5
     entry_required: bool = True
     finding_dispositions: tuple[FindingDisposition, ...] = ()
 
 
 class Counts(Contract):
+    text_adaptations: int | None = None
     source_gaps: int | None = None
     generated_presentations: int | None = None
     planned_generated_embeds: int | None = None
@@ -311,6 +331,10 @@ class Adaptation(Contract):
     kind: str
     affected: str
     description: str
+    document_key: str | None = None
+    owner: str | None = None
+    evidence: tuple[str, ...] = ()
+    text_edit: TextAdaptation | None = None
 
 
 class TagTarget(Contract):
@@ -421,6 +445,7 @@ class DocumentInspection(Contract):
     original_asset_id: str | None
     original_copy_omitted: bool = False
     references: tuple[ReferenceSpan, ...] = ()
+    text_adaptations: tuple[TextAdaptation, ...] = ()
     evidence: tuple[str, ...] = ()
 
 
@@ -450,7 +475,7 @@ class RunResult(Contract):
     schema_: Literal["brz2obsidian.result"] = Field(
         default="brz2obsidian.result", alias="schema"
     )
-    schema_version: Literal[4] = 4
+    schema_version: Literal[5] = 5
     converter_version: str
     operation: Literal["inspect", "convert"]
     outcome: Literal["clean", "warnings", "refused", "failed"]

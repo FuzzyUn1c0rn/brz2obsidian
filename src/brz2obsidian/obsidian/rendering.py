@@ -15,6 +15,7 @@ from brz2obsidian.contracts import (
     RunMetadata,
 )
 from brz2obsidian.core import analyze
+from brz2obsidian.core import plan as build_plan
 from brz2obsidian.core.appearance import icon_snapshots as expected_icon_snapshots
 from brz2obsidian.core.items import assign_item_targets
 from brz2obsidian.core.references import validate_references
@@ -46,17 +47,17 @@ def _json(value):
 def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     snapshot = plan.analysis.snapshot
     if (
-        run_metadata.renderer_version != "4"
-        or snapshot.contract_version != 4
-        or plan.analysis.policy.contract_version != 4
+        run_metadata.renderer_version != "5"
+        or snapshot.contract_version != 5
+        or plan.analysis.policy.contract_version != 5
     ):
         raise MigrationRefused(
             (
                 Issue(
                     code="unsupported_format",
                     phase="rendering",
-                    message="Renderer requires version-4 contracts and renderer metadata",
-                    guidance="Use the current contract and set renderer_version to 4.",
+                    message="Renderer requires version-5 contracts and renderer metadata",
+                    guidance="Use the current contract and set renderer_version to 5.",
                 ),
             )
         )
@@ -87,6 +88,25 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
             )
         )
     checked_analysis = analyze(snapshot, plan.analysis.policy)
+    if (
+        plan.counts.text_adaptations != checked_analysis.counts.text_adaptations
+        or tuple(a for a in plan.adaptations if a.kind == "literal_text")
+        != tuple(
+            a
+            for a in build_plan(checked_analysis).adaptations
+            if a.kind == "literal_text"
+        )
+    ):
+        raise MigrationRefused(
+            (
+                Issue(
+                    code="invalid_reference",
+                    phase="rendering",
+                    message="Planned text adaptation evidence or counts differ from validated document edits",
+                    guidance="Analyze and plan this snapshot again before rendering.",
+                ),
+            )
+        )
     expected_targets = assign_item_targets(checked_analysis, resource_owners(snapshot))
     expected_gaps, expected_presentations = source_gap_targets(
         snapshot, expected_targets, assign_asset_targets(snapshot)
@@ -338,6 +358,15 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     )
     report = "# Migration report\n\nOpen the root Home note to begin. Safe original note bytes are retained under Attachments. Forgotten thoughts are excluded by default; unsafe originals and unscopable history are omitted. Counts describe included scope.\n\n"
     report += f"Created {plan.counts.planned_notes} thought notes; preserved {plan.counts.planned_assets} present payloads.\n\n"
+    if plan.counts.text_adaptations:
+        report += f"Escaped {plan.counts.text_adaptations} literal prose tokens for Markdown display. Exact edits in migration-record.json use scoped source Unicode codepoint offsets before adaptation, with a scoped source digest; reference spans use adapted document text offsets and digest. Safe originals retain exact archived bytes.\n\n"
+        for owner in sorted(
+            {d.owner for d in snapshot.documents if d.text_adaptations}
+        ):
+            target = next(t for t in plan.item_targets if t.item_key == owner)
+            if target.created:
+                report += "- " + note_link(target, target.original_title) + "\n"
+        report += "\n"
     external_files = sum(
         a.role == "file" and a.availability == "external" for a in snapshot.assets
     )
@@ -413,7 +442,7 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     }
     record = {
         "schema": "brz2obsidian.migration",
-        "schema_version": 4,
+        "schema_version": 5,
         "converter_version": run_metadata.converter_version,
         "renderer_version": run_metadata.renderer_version,
         "source_identity": plan.source_identity.model_dump(),

@@ -65,7 +65,7 @@ def test_complete_mixed_v3_output_matches_independent_bytes_graph_and_counts(tmp
     vault = tmp_path / "vault"
     result = default_workflow().convert(source, vault)
     assert result.outcome == "warnings", result.issues
-    assert result.schema_version == 4 and result.profile_version == "4"
+    assert result.schema_version == 5 and result.profile_version == "5"
     assert result.converter_version == "0.3.0"
     assert (
         RunResult.model_validate_json(result.model_dump_json(by_alias=True)) == result
@@ -393,7 +393,7 @@ def test_actual_mixed_console_module_text_json_routes_agree(
         if json_mode:
             envelope = json.loads(inspected.stdout)
             assert (
-                envelope["schema_version"] == 4 and envelope["profile_version"] == "4"
+                envelope["schema_version"] == 5 and envelope["profile_version"] == "5"
             )
             assert envelope["counts"]["planned_generated_embeds"] == 2
         else:

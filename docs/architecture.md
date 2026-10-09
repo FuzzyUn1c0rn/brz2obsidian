@@ -1,6 +1,6 @@
 # Reusable migration interfaces
 
-`contracts.py` owns version-4 strict, closed, frozen Pydantic values with
+`contracts.py` owns version-5 strict, closed, frozen Pydantic values with
 immutable nested tuples. Generic modules treat identities/keys as opaque;
 source modules supply stable hexadecimal naming seeds. Original JSON is
 independently retained as immutable text and embedded directly in the record,
@@ -14,7 +14,7 @@ Every classification relationship must correspond to exactly one assignment;
 members are distinct ordinary items and definitions are live definition items.
 The TheBrain adapter additionally joins each populated `TypeId` to exactly one
 matching exported instance relationship in both directions. These facts remain
-independent of hierarchy and source tags. The core requires contract version 4
+independent of hierarchy and source tags. The core requires contract version 5
 even when both supplied snapshot and policy claim the same older version.
 
 The shared contract includes optional immutable destination-independent facts:
@@ -180,7 +180,7 @@ from brz2obsidian.sources.thebrain.profile import BRZ_POLICY
 
 metadata = RunMetadata(
     converter_version="0.3.0",
-    renderer_version="4",
+    renderer_version="5",
     run_id="example-run",
     run_time="2026-10-04T00:00:00+00:00",
     obsidian_version="1.13.7",
@@ -205,7 +205,7 @@ reads time at the outer boundary; callers may inject a metadata factory.
 ## Result and migration-record schemas
 
 `RunResult.model_dump_json(by_alias=True)` exposes `schema="brz2obsidian.result"`,
-`schema_version=4`, `converter_version`, `operation`, `outcome`, `source_identity`,
+`schema_version=5`, `converter_version`, `operation`, `outcome`, `source_identity`,
 `profile_id`, `profile_version`, `counts`, `issues`, `inspection`, `receipt`.
 Unavailable fields/counts are `null`; issues is an array. Inspect returns planned
 item/tag targets, classification assignments, `icon_snapshots`,
@@ -217,7 +217,7 @@ inspection neither renders nor copies files. Convert returns no inspection
 and, after commit, a receipt with actual inventory/counts. The result supports
 `RunResult.model_validate_json(...)` round-tripping.
 
-`migration-record.json` exposes `schema="brz2obsidian.migration"`, version 4,
+`migration-record.json` exposes `schema="brz2obsidian.migration"`, version 5,
 converter/renderer versions, `source_identity`, profile identity, `run_metadata`,
 `original_evidence`, `item_targets`, `asset_targets`, `relationships`,
 `tag_memberships`, `classification_assignments`, `source_gaps`,
@@ -242,17 +242,22 @@ obligations. The result/record and renderer versions change together with
 snapshot/policy and TheBrain module/profile versions because this expands
 admitted resource meaning; no new fields are required. Earlier
 snapshot/policy/result versions and renderer metadata are refused explicitly.
+Version 5 additionally declares exact source-neutral text edits on documents and
+inspection values, typed adaptation evidence, and a literal-adaptation count.
+The source adapter interprets unknown angle words; generic code validates edits
+and composes reference rewrites against adapted text. See the coordinate and
+digest contract in [reviewed source coverage](source-coverage.md#literal-prose-version-5).
 The closed contract has changed explicitly: consumers
-must accept version 4 rather than interpreting it as an earlier contract. The reviewed
-TheBrain module/profile and renderer now use version `4`; BRZ format stays `5`.
-`RunMetadata.renderer_version` must be `4` when invoking the renderer directly.
+must accept version 5 rather than interpreting it as an earlier contract. The reviewed
+TheBrain module/profile and renderer now use version `5`; BRZ format stays `5`.
+`RunMetadata.renderer_version` must be `5` when invoking the renderer directly.
 The alternate Folio adapter retains the earlier empty optional facts and also
 exercises independently authored opaque category assignments, owned icons,
 calendar triplets and explicit video facts. Its source format stays `folio/1`;
 it imports only contracts and does not decode TheBrain fields.
 
 The package and default workflow identify the converter as `0.3.0`. Migration
-result/record schemas use version 4, and the separately versioned convention
+result/record schemas use version 5, and the separately versioned convention
 checker remains `brz2obsidian.vault-check` version 1. This release version does
 not imply native acceptance. The accepted v2 audit remains historical evidence.
 Version-3 four-original preservation and actual-output native review passed.

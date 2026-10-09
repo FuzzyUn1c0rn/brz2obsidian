@@ -509,16 +509,16 @@ def test_nested_excluded_ownership_omits_the_associated_record_and_its_transitiv
 def test_current_public_envelopes_reserve_empty_gap_and_presentation_facts(tmp_path):
     source = graph_archive(tmp_path / "source.brz", {1: "Home"})
     result = default_workflow().inspect(source)
-    assert result.schema_version == 4
+    assert result.schema_version == 5
     assert result.converter_version == "0.3.0"
-    assert result.profile_version == result.source_identity.module_version == "4"
+    assert result.profile_version == result.source_identity.module_version == "5"
     assert result.inspection.source_gaps == ()
     assert result.inspection.generated_presentations == ()
     vault = tmp_path / "vault"
     converted = default_workflow().convert(source, vault)
     assert converted.outcome == "clean"
     record = json.loads((vault / "migration-record.json").read_bytes())
-    assert record["schema_version"] == 4 and record["renderer_version"] == "4"
+    assert record["schema_version"] == 5 and record["renderer_version"] == "5"
     assert record["source_gaps"] == record["generated_presentations"] == []
 
 

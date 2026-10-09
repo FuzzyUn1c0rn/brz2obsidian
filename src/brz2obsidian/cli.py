@@ -53,6 +53,8 @@ def main(argv=None):
     else:
         print(f"{result.operation}: {result.outcome}")
         if result.counts:
+            if result.counts.text_adaptations:
+                print(f"Literal text adaptations: {result.counts.text_adaptations}")
             print(
                 f"Planned thought notes: {result.counts.planned_notes}; present payloads: {result.counts.present_assets}"
             )

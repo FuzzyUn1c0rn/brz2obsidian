@@ -209,7 +209,9 @@ def trace_note_references(text: str, excluded=()) -> tuple[ReferenceSpan, ...]:
         children = []
         display_parser.inline.parse(value, display_parser, {}, children)
         return "".join(
-            t.content
+            "\\<"
+            if t.type == "text_special" and t.markup == "\\<"
+            else t.content
             if t.type in {"text", "text_special", "code_inline"}
             else "\n"
             if t.type in {"softbreak", "hardbreak"}

@@ -77,6 +77,19 @@ def plan(analysis: Analysis) -> MigrationPlan:
         ),
         adaptations=tuple(
             Adaptation(
+                kind="literal_text",
+                affected=f"text:{document.key}:{index}",
+                document_key=document.key,
+                owner=document.owner,
+                evidence=document.evidence,
+                text_edit=edit,
+                description="Escaped literal prose for Markdown display; exact before/after text and scoped coordinate bases remain in document evidence.",
+            )
+            for document in sorted(snapshot.documents, key=lambda d: d.key)
+            for index, edit in enumerate(document.text_adaptations)
+        )
+        + tuple(
+            Adaptation(
                 kind="category_dashboard",
                 affected=key,
                 description="Parents/Children navigation immediately follows the category title when present; native contextual Members and Gallery Bases follow that navigation, before retained source content, without a generated introductory icon image; linked membership discovery survives link-preserving renames.",

@@ -643,7 +643,7 @@ def test_renderer_refuses_forged_type_gap_destination_obligations(tmp_path, muta
         )
     metadata = RunMetadata(
         converter_version="0.3.0",
-        renderer_version="4",
+        renderer_version="5",
         run_id="test",
         run_time="2026-10-06T00:00:00Z",
         obsidian_version="1.12.4",
