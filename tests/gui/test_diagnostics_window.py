@@ -11,7 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 from PySide6.QtCore import QEvent, QSettings, Qt, QTimer
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QFileDialog
+from PySide6.QtWidgets import QApplication, QFileDialog, QLabel, QTextEdit
 
 from brz2obsidian.application.contracts import (
     InspectCommand,
@@ -232,6 +232,251 @@ def test_save_cancel_and_failed_copy_save_preserve_findings_and_useful_focus(tmp
         assert window.findings.toPlainText() == findings
         assert not list(tmp_path.iterdir())
     finally:
+        finish(app, window)
+
+
+@pytest.mark.parametrize("operation", ["inspection", "conversion", "check"])
+@pytest.mark.parametrize("failure", ["replace", "outer_exception"])
+def test_failed_save_keeps_exact_copyable_target_and_current_result(
+    tmp_path, monkeypatch, operation, failure
+):
+    app = QApplication.instance() or QApplication([])
+    destination = (
+        tmp_path
+        / "Été destination with a long selected folder name and spaces"
+        / "Diagnostic report with readable Unicode 雪 and spaces.txt"
+    )
+    destination.parent.mkdir()
+    destination.write_bytes(b"Previous report remains")
+
+    def denied(source, target):
+        raise PermissionError("PRIVATE exception canary")
+
+    monkeypatch.setattr("os.replace", denied)
+    dialogs = SaveDialog()
+
+    class UnexpectedSave(DiagnosticActions):
+        def save_report(self, text, destination):
+            raise OSError("PRIVATE exception canary")
+
+    options = {
+        "dialogs": dialogs,
+        "diagnostic_actions": DiagnosticActions()
+        if failure == "replace"
+        else UnexpectedSave(),
+    }
+    if operation == "inspection":
+        window = inspected(app, "Safe complete report\n", **options)
+    else:
+        from brz2obsidian.application.contracts import (
+            ApplyResult,
+            SelectVault,
+            SimpleCommand,
+        )
+        from brz2obsidian.application.operations import ApplicationSession, check_vault
+        from tests.application.test_completion_session import published_session
+
+        if operation == "conversion":
+            prepared = tmp_path / "prepared conversion"
+            prepared.mkdir()
+            session, _ = published_session(prepared)
+        else:
+            vault = tmp_path / "checked vault"
+            vault.mkdir()
+            (vault / "Manual.md").write_text("# Safe manual\n", encoding="utf-8")
+            session = ApplicationSession()
+            session.dispatch(SelectVault(path_or_null=str(vault)))
+            effect = session.dispatch(SimpleCommand(command="check_vault")).effects[0]
+            session.dispatch(
+                ApplyResult(
+                    request_id=effect.request.request_id,
+                    input_revision=effect.input_revision,
+                    result=check_vault(vault),
+                    process_status=0,
+                )
+            )
+        window = MainWindow(session=session, **options)
+        window.show()
+        if operation == "check":
+            window.tabs.setCurrentIndex(2)
+        window.submit(SelectVault(path_or_null=None))
+        until(app, lambda: window.snapshot.result is not None)
+    window.resize(453, 850)
+    try:
+        window.disclosure.click()
+        result = window.snapshot.result
+        findings = window.findings.toPlainText()
+        actions = window.snapshot.allowed_actions
+        window.save.click()
+        dialogs.callback(str(destination))
+        until(app, lambda: "could not" in window.diagnostic_feedback.text())
+        path = next(
+            (
+                widget
+                for widget in window.findChildren(QTextEdit)
+                if widget.isVisible() and widget.toPlainText() == str(destination)
+            ),
+            None,
+        )
+        assert path is not None, "Failed Save must show its exact selectable target"
+        assert path.isReadOnly()
+        path.setFocus()
+        QTest.keyClick(path, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+        assert path.textCursor().selectedText() == str(destination)
+        assert path.createMimeDataFromSelection().text() == str(destination)
+        visible = "\n".join(widget.text() for widget in window.findChildren(QLabel))
+        visible += "\n".join(
+            widget.toPlainText() for widget in window.findChildren(QTextEdit)
+        )
+        assert "PRIVATE" not in visible
+        assert window.snapshot.result is result
+        assert window.snapshot.allowed_actions == actions
+        assert window.findings.toPlainText() == findings
+        assert window.copy.isEnabled() and window.save.isEnabled()
+        assert destination.read_bytes() == b"Previous report remains"
+        assert list(destination.parent.iterdir()) == [destination]
+    finally:
+        finish(app, window)
+
+
+@pytest.mark.parametrize(
+    "next_action", ["copy", "cancel", "save", "new_result", "identical_result"]
+)
+def test_save_failure_target_expires_for_the_next_action_or_result(
+    tmp_path, next_action
+):
+    app = QApplication.instance() or QApplication([])
+    dialogs = SaveDialog()
+    copied = []
+    supervisor = PreparedSupervisor("Current safe report\n")
+    window = inspected(
+        app,
+        supervisor.text,
+        supervisor=supervisor,
+        dialogs=dialogs,
+        diagnostic_actions=DiagnosticActions(
+            clipboard=lambda text, owner: copied.append(text)
+        ),
+    )
+    try:
+        window.disclosure.click()
+        old_result = window.snapshot.result
+        window.save.click()
+        target = tmp_path / "absent Café" / "old target 雪.txt"
+        dialogs.callback(str(target))
+        until(app, lambda: "could not be saved" in window.diagnostic_feedback.text())
+        path = next(
+            widget
+            for widget in window.findChildren(QTextEdit)
+            if widget.toPlainText() == str(target)
+        )
+        assert path.isVisible()
+        if next_action == "copy":
+            window.copy.click()
+            assert path.toPlainText() == "" and not path.isVisible()
+            until(app, lambda: bool(copied))
+            assert copied == ["Current safe report\n"]
+            until(app, lambda: "copied" in window.diagnostic_feedback.text())
+        elif next_action in {"cancel", "save"}:
+            window.save.click()
+            assert path.toPlainText() == "" and not path.isVisible()
+            destination = (
+                tmp_path / "new report 雪.txt" if next_action == "save" else None
+            )
+            dialogs.callback(str(destination) if destination else None)
+            until(
+                app,
+                lambda: (
+                    ("saved" if destination else "canceled")
+                    in window.diagnostic_feedback.text()
+                ),
+            )
+            if destination:
+                assert destination.read_bytes() == b"Current safe report\n"
+        else:
+            revision = window.snapshot.revision
+            if next_action == "new_result":
+                supervisor.text = "Replacement safe report\n"
+            window.submit(InspectCommand())
+            until(
+                app,
+                lambda: (
+                    window.snapshot.result is not old_result
+                    and window.snapshot.active_request_id is None
+                ),
+            )
+            assert window.snapshot.revision == revision
+            assert (window.snapshot.result == old_result) is (
+                next_action == "identical_result"
+            )
+            assert window.diagnostic_feedback.text() == ""
+        assert path.toPlainText() == "" and not path.isVisible()
+        assert not target.exists() and not target.parent.exists()
+        assert window.copy.isEnabled() and window.save.isEnabled()
+        if next_action not in {"new_result", "identical_result"}:
+            assert window.snapshot.result is old_result
+    finally:
+        finish(app, window)
+
+
+@pytest.mark.parametrize("identical_result", [False, True])
+def test_delayed_save_exception_cannot_restore_old_target_after_result_replacement(
+    tmp_path, identical_result
+):
+    app = QApplication.instance() or QApplication([])
+    entered, release = Event(), Event()
+    delivered = []
+
+    class SlowUnexpectedSave(DiagnosticActions):
+        def save_report(self, text, destination):
+            entered.set()
+            assert release.wait(10)
+            raise OSError("PRIVATE delayed exception canary")
+
+    dialogs = SaveDialog()
+    supervisor = PreparedSupervisor("Old safe report\n")
+    window = inspected(
+        app,
+        supervisor.text,
+        supervisor=supervisor,
+        dialogs=dialogs,
+        diagnostic_actions=SlowUnexpectedSave(),
+    )
+    window.diagnostic_action_ready.connect(delivered.append)
+    try:
+        window.disclosure.click()
+        old_result = window.snapshot.result
+        revision = window.snapshot.revision
+        window.save.click()
+        target = tmp_path / "old selected target Café 雪.txt"
+        dialogs.callback(str(target))
+        until(app, entered.is_set)
+        if not identical_result:
+            supervisor.text = "New safe report\n"
+        window.submit(InspectCommand())
+        until(
+            app,
+            lambda: (
+                window.snapshot.result is not old_result
+                and window.snapshot.active_request_id is None
+            ),
+        )
+        replacement = window.snapshot.result
+        assert window.snapshot.revision == revision
+        assert (replacement == old_result) is identical_result
+        release.set()
+        until(app, lambda: bool(delivered))
+        assert delivered[-1].path == str(target)
+        assert not any(
+            widget.toPlainText() == str(target)
+            for widget in window.findChildren(QTextEdit)
+        )
+        assert window.diagnostic_feedback.text() == ""
+        assert window.snapshot.result is replacement
+        assert window.copy.isEnabled() and window.save.isEnabled()
+        assert not target.exists()
+    finally:
+        release.set()
         finish(app, window)
 
 

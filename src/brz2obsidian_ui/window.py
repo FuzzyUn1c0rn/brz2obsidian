@@ -387,6 +387,9 @@ class MainWindow(QMainWindow):
         self.diagnostic_feedback = label("", "muted")
         self.diagnostic_feedback.setAccessibleName("Diagnostic action feedback")
         details.addWidget(self.diagnostic_feedback)
+        self.diagnostic_path = PathText()
+        self.diagnostic_path.setAccessibleName("Diagnostic save target")
+        details.addWidget(self.diagnostic_path)
         body.addWidget(self.diagnostic_container)
         self.diagnostic_container.hide()
         self.destination_form = QWidget()
@@ -759,6 +762,7 @@ class MainWindow(QMainWindow):
     def copy_details(self):
         return_focus = self.copy.hasFocus()
         self._diagnostic_busy = True
+        self.diagnostic_path.clear()
         self.diagnostic_feedback.setText("Copying diagnostic details…")
         # Obtain only a native integer on the Qt thread; the adapter accesses no Qt object.
         perform = partial(
@@ -775,6 +779,8 @@ class MainWindow(QMainWindow):
     def save_diagnostic_report(self):
         generation = self._diagnostic_generation
         self._diagnostic_busy = True
+        self.diagnostic_path.clear()
+        self.diagnostic_feedback.clear()
         self._render()
         callback = partial(self.diagnostic_save_selected, generation)
         if self.dialogs is not None:
@@ -803,9 +809,13 @@ class MainWindow(QMainWindow):
                 self.diagnostic_actions.save_report, destination=str(path_or_null)
             )
             self.runner.request_diagnostic_export(
-                "save_diagnostic_report", generation, perform
+                "save_diagnostic_report",
+                generation,
+                perform,
+                failure_path=str(path_or_null),
             )
         elif generation == self._diagnostic_generation:
+            self.diagnostic_path.clear()
             self.diagnostic_feedback.setText("Diagnostic report save canceled.")
         self._render()
         self.save.setFocus()
@@ -831,6 +841,7 @@ class MainWindow(QMainWindow):
         return_focus = self._diagnostic_focus
         self._diagnostic_focus = None
         self.diagnostic_feedback.setText(feedback.message)
+        self.diagnostic_path.setPlainText(feedback.path or "")
         self._render()
         if (
             return_focus is not None
@@ -856,6 +867,7 @@ class MainWindow(QMainWindow):
             self.completion_feedback.clear()
             self.completion_path.clear()
             self.diagnostic_feedback.clear()
+            self.diagnostic_path.clear()
             self.disclosure.setChecked(False)
             self._show_page(prepared.diagnostics)
         if self.snapshot.source != previous.source or self._pending_form == (
@@ -896,6 +908,7 @@ class MainWindow(QMainWindow):
         self.next_page.setVisible(page.next_offset is not None)
 
     def _render(self, *_):
+        self.diagnostic_path.setVisible(bool(self.diagnostic_path.toPlainText()))
         mode = self.tabs.currentIndex()
         self.findings.setAccessibleName(
             "Check findings" if mode == 2 else "Inspection findings"

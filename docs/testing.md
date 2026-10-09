@@ -68,6 +68,11 @@ identical-result replacement, worker-exit lifetime, bounded selectable pages,
 complete/omitted Unicode copy/save round trips and nonfatal failures. Injected UI
 barriers hold preparation/export while queued input/repaint and Close are processed;
 stale save callbacks, queued exports and paged callbacks cannot use an old report.
+Failed diagnostic saves retain the explicitly selected target as exact selectable
+path text, including unexpected adapter exceptions, without replacing the main
+result or report. Public adapter/runner and GUI controls cover Unicode/spaced
+targets, preserved existing bytes, exception privacy, new action/cancel/success
+clearing, and rejection of delayed paths after identical-result replacement.
 An offscreen, nonnative Qt dialog control verifies Save starts in the absolute
 home directory despite an unrelated working directory, retains its report
 filename and returns focus on keyboard cancellation. Its Qt settings use only

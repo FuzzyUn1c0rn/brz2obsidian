@@ -13,6 +13,7 @@ from urllib.parse import quote
 class ActionOutcome:
     succeeded: bool
     message: str
+    path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -133,6 +134,7 @@ class DiagnosticActions:
             return ActionOutcome(
                 False,
                 "The diagnostic report could not be saved. Choose a writable local file and try again.",
+                str(destination),
             )
         finally:
             if temporary is not None:

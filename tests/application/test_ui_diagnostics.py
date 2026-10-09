@@ -224,6 +224,63 @@ def test_report_survives_actual_worker_exit_and_exports_on_outer_thread(tmp_path
         runner.shutdown()
 
 
+def test_save_failure_feedback_retains_selected_target_without_changing_report(
+    tmp_path,
+):
+    from threading import Event
+
+    from brz2obsidian.application.runner import HostRunner
+    from brz2obsidian_ui.platform_actions import DiagnosticActions
+
+    session = ApplicationSession()
+    complete_inspection(session, "Current safe report\n")
+    original = session.snapshot
+    received = []
+    finished = Event()
+
+    def feedback(value):
+        received.append(value)
+        finished.set()
+
+    runner = HostRunner(
+        None,
+        lambda update: None,
+        lambda page: None,
+        session=session,
+        on_diagnostic_feedback=feedback,
+    )
+    target = tmp_path / "absent Café" / "Selected report 雪.txt"
+    try:
+        runner.request_diagnostic_export(
+            "save_diagnostic_report",
+            session.diagnostic_generation,
+            lambda text: DiagnosticActions().save_report(text, target),
+        )
+        assert finished.wait(10)
+        assert not received[0].succeeded
+        assert received[0].path == str(target)
+        assert "could not be saved" in received[0].message
+        assert session.snapshot == original
+        assert session.diagnostics_text() == "Current safe report\n"
+        assert not list(tmp_path.iterdir())
+        finished.clear()
+        received.clear()
+        called = []
+        runner.request_diagnostic_export(
+            "save_diagnostic_report",
+            session.diagnostic_generation - 1,
+            lambda text: called.append(text),
+            failure_path=str(target),
+        )
+        assert finished.wait(10)
+        assert called == []
+        assert received[0].path is None
+        assert "changed" in received[0].message
+        assert session.snapshot == original
+    finally:
+        runner.shutdown()
+
+
 def test_selecting_checker_vault_expires_the_current_inspection_report(tmp_path):
     from brz2obsidian.application.contracts import SelectVault, SimpleCommand
 

@@ -128,3 +128,36 @@ or establish their cause; no external AV/ACL/handle explanation or production
 workaround is asserted. Prior document-association chooser and Obsidian request
 observations also retain their installed-handler limits: they do not prove a
 document opened or that a new vault was registered.
+
+## Follow-up from independent #105 review
+
+The 1931-test/102-GUI and native workflow results above remain historical
+acceptance evidence for `08d251005dcaec4426865279c01ea18be76508ec`. Independent
+specification review subsequently identified UI-W11's missing selected target
+after a failed diagnostic Save. The original finding and public reproduction
+remain unchanged; this finding requires repair and independent recheck.
+
+The repair carries the selected target through immutable host feedback and shows
+it using the existing exact selectable/wrapping path control. Public adapter
+failures retain their destination; explicitly selected UI context also covers
+unexpected outer exceptions. Current generation admission, worker/report lifetime,
+thread ownership and operation policy remain unchanged. New Copy/Save requests,
+cancel, success and result replacement clear old targets. Tests cover real
+replacement failure, missing parents, conversion/check result preservation,
+Unicode/spaces, exception privacy and delayed failures after identical-result
+replacement. Meaningful failing controls and focused passing receipts are retained
+separately from the original acceptance cohort.
+
+Repair acceptance used one fresh full cohort: **1945 tests passed in 476.64
+seconds**, including **115 GUI controls**. All 43 focused diagnostic controls,
+Ruff lint/format, dependency checks, Qt-blocked imports/base discovery (1830
+tests), maintained launcher and local wheel build passed. All 72 wheel modules
+match the repaired source. This new green cohort does not diagnose or fix the
+historical incidental filesystem failures.
+
+Only diagnostic Save failure context and its presentation change. Prior workflow,
+publication, checking, startup/instance, dialog and unrelated presentation evidence
+remains scoped to its recorded behavior; the new runtime must receive an affected
+native failed-Save/path and independent review refresh. The final #105 report
+must identify the actual reviewed candidate. No repaired candidate's native
+observation, independent pass or user's verdict is inferred from the earlier run.

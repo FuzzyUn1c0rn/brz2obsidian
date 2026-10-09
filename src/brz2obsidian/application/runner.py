@@ -34,6 +34,7 @@ class DiagnosticFeedback:
     generation: int
     message: str
     succeeded: bool = False
+    path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -257,11 +258,15 @@ class HostRunner:
         if page is not None:
             self.on_page(DiagnosticPresentation(generation, page))
 
-    def request_diagnostic_export(self, action, expected_generation, perform):
+    def request_diagnostic_export(
+        self, action, expected_generation, perform, *, failure_path=None
+    ):
         """Queue intent only; no old result/report is retained before admission."""
-        self._exports.submit(self._export, action, expected_generation, perform)
+        self._exports.submit(
+            self._export, action, expected_generation, perform, failure_path
+        )
 
-    def _export(self, action, generation, perform):
+    def _export(self, action, generation, perform, failure_path):
         text = self.session.admit_diagnostic_report(action, generation)
         if text is None:
             self.on_diagnostic_feedback(
@@ -274,12 +279,18 @@ class HostRunner:
         try:
             outcome = perform(text)
             feedback = DiagnosticFeedback(
-                generation, outcome.message, outcome.succeeded
+                generation,
+                outcome.message,
+                outcome.succeeded,
+                (failure_path or getattr(outcome, "path", None))
+                if not outcome.succeeded
+                else None,
             )
         except Exception:  # noqa: BLE001 -- outer platform action failures are nonfatal.
             feedback = DiagnosticFeedback(
                 generation,
                 "The diagnostic action could not complete. Your operation result is retained.",
+                path=failure_path,
             )
         self.on_diagnostic_feedback(feedback)
 
