@@ -792,6 +792,35 @@ def test_full_receipt_does_not_infer_execution_for_unmatched_expression(
     assert refused.returncode == 2
 
 
+@pytest.mark.parametrize("narrowing", ["selectors", "keyword", "marker"])
+def test_focused_receipt_cannot_claim_full_by_changing_only_scope(checkout, narrowing):
+    (checkout / "tests" / "test_selected.py").write_text(
+        "import pytest\n@pytest.mark.gui\ndef test_selected():\n    assert True\n"
+        "def test_other():\n    assert True\n"
+    )
+    args = {
+        "selectors": ["--test", "tests/test_selected.py::test_selected"],
+        "keyword": ["-k", "selected"],
+        "marker": ["-m", "gui"],
+    }[narrowing]
+    result, path, receipt = run(checkout, "--check", "pytest", *args)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert receipt["checks"][0]["selection"]["scope"] == "focused"
+    receipt["checks"][0]["selection"]["scope"] = "full"
+    path.write_text(json.dumps(receipt), encoding="utf-8")
+    expected = requirements(checkout, [pytest_requirement()], receipt["environment"])
+    refused = command(
+        "validate",
+        "--receipt",
+        path,
+        "--checkout",
+        checkout,
+        "--requirements",
+        expected,
+    )
+    assert refused.returncode == 2, refused.stdout + refused.stderr
+
+
 @pytest.mark.parametrize("changed_policy", [False, True])
 def test_scoped_git_attributes_preserve_commit_binding_and_fixture_bytes(
     checkout, changed_policy

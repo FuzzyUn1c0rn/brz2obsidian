@@ -705,6 +705,30 @@ def validate(args):
             raise Invalid(
                 "Command working directory/interpreter differs from assessed context"
             )
+        chosen = row["selection"]
+        if row["id"] == "pytest":
+            if (
+                not isinstance(chosen, dict)
+                or set(chosen)
+                != {"scope", "selectors", "keyword", "marker", "require_gui"}
+                or not isinstance(chosen["selectors"], list)
+                or any(not isinstance(node, str) for node in chosen["selectors"])
+                or any(
+                    chosen[key] is not None and not isinstance(chosen[key], str)
+                    for key in ("keyword", "marker")
+                )
+                or not isinstance(chosen["require_gui"], bool)
+            ):
+                raise Invalid("Malformed executed pytest selection")
+            actual_scope = (
+                "focused"
+                if chosen["selectors"] or chosen["keyword"] or chosen["marker"]
+                else "full"
+            )
+            if chosen["scope"] != actual_scope:
+                raise Invalid("Recorded pytest scope contradicts executed selection")
+        elif chosen is not None or row["counts"] is not None:
+            raise Invalid("Non-pytest check cannot declare pytest selection or counts")
         if row["argv"] != command_for(
             row["argv"][0], origin_run, row["id"], row["selection"]
         ):
