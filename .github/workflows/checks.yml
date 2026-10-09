@@ -14,7 +14,7 @@ permissions:
 jobs:
   base:
     name: Windows checks (base diagnostic)
-    runs-on: windows-2022
+    runs-on: windows-2025
     defaults:
       run:
         shell: pwsh
@@ -23,6 +23,25 @@ jobs:
         uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
+
+      - name: Diagnose Server Media Foundation prerequisite
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $feature = Get-WindowsFeature -Name Server-Media-Foundation -ErrorAction Stop
+          if ($null -eq $feature) { throw 'Server-Media-Foundation is unavailable on this image.' }
+          Write-Output "Media feature before: name=$($feature.Name); installed=$($feature.Installed); state=$($feature.InstallState)"
+          if (-not $feature.Installed) {
+            $result = Install-WindowsFeature -Name Server-Media-Foundation -ErrorAction Stop
+            Write-Output "Media installation: success=$($result.Success); restart=$($result.RestartNeeded); exit=$($result.ExitCode)"
+            if (-not $result.Success) { throw 'Media feature installation did not succeed.' }
+            if ([string]$result.RestartNeeded -ne 'No') { throw 'Media feature requires a restart; this diagnostic cannot establish a usable environment without rebooting.' }
+          } else {
+            Write-Output 'Media feature is already installed; no installation was performed.'
+          }
+          $feature = Get-WindowsFeature -Name Server-Media-Foundation -ErrorAction Stop
+          Write-Output "Media feature after: name=$($feature.Name); installed=$($feature.Installed); state=$($feature.InstallState)"
+          if ($null -eq $feature -or -not $feature.Installed) { throw 'Media feature is not installed; no usable environment was established.' }
 
       - name: Set up CPython 3.14 (64-bit)
         uses: actions/setup-python@v7.0.0
