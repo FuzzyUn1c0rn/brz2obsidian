@@ -223,6 +223,37 @@ def carry_forward(attempt, source, checkout, data, expected, candidate_expected=
     prior_declarations = {
         kind: record.get("check_requirements") for kind, record in records.items()
     }
+    # A check's evidence can occupy this reserved name with arbitrary bytes.
+    # Diagnose that alias before interpreting the file as carry metadata.
+    source_receipt = (source / CARRY_RECEIPT).resolve()
+    for kind, record in records.items():
+        load(source, kind, records)
+        references = [
+            reference for check in record["checks"] for reference in check["evidence"]
+        ]
+        references.extend(
+            check[field]
+            for check in record["checks"]
+            for field in ("receipt", "source_record")
+            if text(check.get(field))
+        )
+        criteria = record.get("criteria")
+        if kind == "verification" and isinstance(criteria, list):
+            references.extend(
+                reference
+                for criterion in criteria
+                if isinstance(criterion, dict)
+                and isinstance(criterion.get("evidence"), list)
+                for reference in criterion["evidence"]
+                if text(reference)
+            )
+        require(
+            not any(
+                (source / reference).resolve() == source_receipt
+                for reference in references
+            ),
+            "evidence/carry receipt collision",
+        )
     if (source / CARRY_RECEIPT).is_file():
         prior_declarations.update(
             read_json(source / CARRY_RECEIPT).get("check_requirements", {})
