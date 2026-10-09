@@ -190,6 +190,20 @@ full base selection: pytest, Ruff lint, Ruff format validation and dependency
 consistency. Qt-dependent skips are expected; the full discoverable synthetic
 suite still executes the Qt-independent tests. No test selector narrows the run.
 
+The independent Windows acceptance decoder uses WIC, which requires Microsoft's
+[WebP Image Extension](https://learn.microsoft.com/en-us/windows/win32/wic/native-wic-codecs)
+for the synthetic WebP fixtures. The fresh hosted Server image needs this native
+prerequisite explicitly installed. A bounded native setup step installs Store
+product `9PG2DK419DRG` through Microsoft's noninteractive `winget install` path;
+if WinGet is absent, it uses the documented
+[Microsoft.WinGet.Client bootstrap](https://learn.microsoft.com/en-us/windows/package-manager/winget/).
+This runs only on the disposable hosted machine, uses no account credentials or
+project secrets, and keeps the Python manifests and test assertions unchanged.
+The [focused hosted prerequisite check](https://github.com/FuzzyUn1c0rn/brz2obsidian/actions/runs/37970657648)
+passed with extension version `1.2.31.0`; each job logs its actual WinGet and
+extension versions and fails if native provisioning cannot complete. The local
+Python bootstrap below assumes a usable Windows WebP codec is already available.
+
 Equivalent local bootstrap and execution from a fresh checkout:
 
 ```powershell
@@ -215,9 +229,10 @@ post-run summary reads exact command arguments, outcomes and pytest counts from
 its receipt while preserving the aggregate exit. The `windows-checks-base-<run>-<attempt>`
 artifact retains the entire original `tmp/checks/` directory, including receipts,
 counts and byte/readable logs, even when check execution fails or is interrupted.
-An earlier setup/installation failure may leave no receipt; the summary reports
-that absence, and installation logs remain the evidence of that failure. Fully
-canceled jobs may end before GitHub can upload artifacts.
+An earlier native provisioning, setup or installation failure may leave no
+receipt; the summary reports that absence, and provisioning/installation logs
+remain the evidence of that failure. Fully canceled jobs may end before GitHub
+can upload artifacts.
 
 Hosted checks use tracked synthetic fixtures and test-generated temporary files.
 They need no private BRZ archive, retained vault, desktop session, Obsidian or

@@ -24,6 +24,43 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install Microsoft WebP Image Extension
+        shell: powershell
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $before = @(Get-AppxPackage -Name Microsoft.WebpImageExtension -ErrorAction Stop)
+          Write-Output "WebP packages before: $($before.Count)"
+          $before | Select-Object Name, Version, Architecture, Publisher, InstallLocation | Format-List
+          $wingetCommand = Get-Command winget -ErrorAction SilentlyContinue
+          if ($null -eq $wingetCommand) {
+            Write-Output 'Bootstrapping WinGet using Microsoft.WinGet.Client and Repair-WinGetPackageManager.'
+            Install-PackageProvider -Name NuGet -Force -ErrorAction Stop | Out-Null
+            Install-Module -Name Microsoft.WinGet.Client -Force -Repository PSGallery -ErrorAction Stop | Out-Null
+            Import-Module Microsoft.WinGet.Client -ErrorAction Stop
+            Repair-WinGetPackageManager -AllUsers -ErrorAction Stop
+            $wingetCommand = Get-Command winget -ErrorAction SilentlyContinue
+          }
+          if ($null -ne $wingetCommand) {
+            $winget = $wingetCommand.Source
+          } else {
+            $appInstaller = Get-AppxPackage -Name Microsoft.DesktopAppInstaller -ErrorAction Stop | Sort-Object Version -Descending | Select-Object -First 1
+            if ($null -eq $appInstaller) { throw 'WinGet bootstrap produced no registered App Installer for this runner user.' }
+            $winget = Join-Path $appInstaller.InstallLocation 'winget.exe'
+            if (-not (Test-Path -LiteralPath $winget -PathType Leaf)) { throw 'Registered App Installer contains no usable WinGet executable.' }
+          }
+          Write-Output "WinGet executable: $winget"
+          & $winget --info
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $winget install --id 9PG2DK419DRG --exact --source msstore --accept-source-agreements --accept-package-agreements --disable-interactivity --silent
+          $codecInstallExit = $LASTEXITCODE
+          Write-Output "WebP installation exit: $codecInstallExit"
+          $after = @(Get-AppxPackage -Name Microsoft.WebpImageExtension -ErrorAction Stop)
+          Write-Output "WebP packages after: $($after.Count)"
+          $after | Select-Object Name, Version, Architecture, Publisher, InstallLocation | Format-List
+          if ($codecInstallExit -ne 0) { exit $codecInstallExit }
+          if ($after.Count -eq 0) { throw 'Store installation reported success but WebP extension is not registered for this runner user.' }
+
       - name: Set up CPython 3.14 (64-bit)
         uses: actions/setup-python@v7.0.0
         with:
@@ -77,7 +114,7 @@ jobs:
         run: |
           $receipts = @(Get-ChildItem -Path 'tmp/checks/*/receipt.json' -ErrorAction SilentlyContinue)
           if ($receipts.Count -eq 0) {
-            $message = 'No runner receipt was produced. Inspect the setup/installation and check-step logs; this does not establish passing checks.'
+            $message = 'No runner receipt was produced. Inspect the native provisioning, setup/installation and check-step logs; this does not establish passing checks.'
           } else {
             $message = 'Runner evidence is retained in the Windows base checks artifact, including original logs and pytest counts.'
             $receipts | ForEach-Object { Write-Output "RECEIPT: $($_.FullName)" }
