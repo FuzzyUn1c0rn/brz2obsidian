@@ -23,10 +23,15 @@ carry-forward publication, followed by the explicit standalone validator.
 Choose one absolute shared root under `tmp/<effort>/handoffs/` in the integration
 checkout.
 All agents receive that root, the spec and ticket pointers, integration branch,
-assigned files, and relevant testing instructions. Give absolute interpreter,
-script, assessed-checkout, and stage-input pointers so commands also work from
-another checkout. The ticket remains the source of truth for scope, ownership,
-blockers, and durable completion state.
+assigned files, and [runner testing instructions](../../../docs/testing.md#automated-check-runner).
+Give absolute interpreter, runner, assessed-checkout, selected checks/test scope,
+receipt destination/contract and stage-input pointers so commands work from another
+checkout. Before validating completion, the coordinator independently records each
+stage's required environment, check scope and freshness, bound to the ticket and
+candidate/assessed commit. Supply its absolute JSON path as `--requirements` to
+writers and standalone validators; use the exact schema in the handoff contract.
+Submitted results cannot narrow the independently assigned requirements. The ticket
+remains the source of truth for scope, ownership, blockers, and durable completion state.
 
 Use stable implementer, verifier, and merger responsibilities. Use available
 general-purpose agents if a configured role expects a different workflow; this
@@ -47,23 +52,30 @@ Native investigation and approved presentation follow the repository guidance.
 2. The implementer builds the ticket through its accepted public testing seams,
    consulting `tdd` for behavioral changes. Synchronize with the current
    integration tip and capture its full ID as `base_ref` at synchronization,
-   before the final candidate checks. Commit the completed changes and report
+   before the final candidate checks. Run required checks through the repository
+   runner and retain its receipts. Commit the completed changes and report
    the commit and clean checkout to the
    coordinator before publication. The coordinator then assigns the exact unused
    absolute attempt for that ticket/commit and returns it with the assessed
    checkout, candidate-input path, and candidate publication command. The initial
    dispatch may reserve the input path; it cannot know the final commit-derived
-   attempt. Move prepared evidence from effort scratch to its final locations,
-   author the input with every criterion, ownership, check, and material limit,
+   attempt. Move prepared manual/native evidence from effort scratch to its final
+   locations; keep runner receipts/logs in their original immutable run directories
+   and reference them by absolute path. Author the input with every criterion, ownership, check, and material limit,
    and run the candidate writer and standalone candidate validator. Report the
-   exact record path, commit, and both outcomes. Agents use assigned attempts;
-   the coordinator owns allocation.
+   exact record path, commit, receipt paths/outcomes, and both publication/validation
+   outcomes. Validate receipts against the coordinator's assigned requirements.
+   Agents use assigned attempts; the coordinator owns allocation.
 
 3. Dispatch an independent verifier when the candidate is ready. The verifier
    inspects that commit in a separate checkout, checks the diff against the
    ticket/spec and approved presentation, and performs the checks needed to
-   support a verdict. Dispatch includes the exact assigned attempt, clean assessed
-   candidate checkout, verifier-input path, and verification publication command.
+   support a verdict through its own runner invocation and fresh receipt. Validate
+   candidate evidence and declared coverage against the independent requirements;
+   keep manual/native observations distinct from covered automated checks. Dispatch
+   includes the exact assigned attempt, clean assessed candidate checkout,
+   verifier-input path, independent requirements path, and verification publication
+   command.
    The verifier owns the judgments and invokes the verification writer for
    `PASS`, `REWORK`, or `BLOCKED`, then runs the standalone verification validator
    before reporting the path and outcomes. Distinct actor IDs alone establish no
@@ -86,9 +98,11 @@ Native investigation and approved presentation follow the repository guidance.
    `previous_tip_ref` immediately before the actual merge, then
    integrates the verified commit. Abort an unfinished conflicting merge before
    returning repair to the implementer; substantive integration repairs need a
-   new candidate and verification. Run checks appropriate to the combined result
-   and invoke the integration writer using the assigned attempt, actual integration
-   checkout, and merger-input path. The writer binds the exact verifier bytes
+   new candidate and verification. Run coordinator-required checks appropriate to the
+   combined result through the runner, validate its receipts and coverage, and invoke
+   the integration writer using the assigned attempt, actual integration checkout,
+   merger-input path, and independently assigned integration requirements. The writer
+   binds the exact verifier bytes
    and inspected result. Run the standalone integration validator against the
    clean result, including failed outcomes. Resolve the ticket only after it
    validates successfully and all required acceptance gates are satisfied.
@@ -108,11 +122,13 @@ Native investigation and approved presentation follow the repository guidance.
 ## Coordination and finish
 
 Dispatch messages carry pointers and ownership, completion messages carry a
-manifest path and outcome. Read records on completion, rework, or a meaningful
-state change. Use completion events or bounded waits instead of repeatedly
+manifest path, runner receipt paths and outcomes. Read records on completion,
+rework, or a meaningful state change. Use completion events or bounded waits instead of repeatedly
 requesting unchanged status. Send human updates for progress, blockers, and
 decisions that matter. The contract defines evidence reuse; a new commit alone
-does not require repeating every native check.
+does not require repeating every native check. Existing records remain immutable;
+new transitions use the current contract. Historical reused checks retain their
+provenance and reason and cannot satisfy a fresh-run requirement.
 
 After all tickets integrate, use `code-review` against the recorded starting
 commit and accepted spec. Route fixes through the same candidate/verifier/merger

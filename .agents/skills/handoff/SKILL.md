@@ -5,7 +5,12 @@ argument-hint: "What will the next session be used for?"
 disable-model-invocation: true
 ---
 
-Write a handoff document summarising the current conversation so a fresh agent can continue the work. Save to the temporary directory of the user's OS (`$TMPDIR`, else `/tmp`; `%TEMP%` on Windows) - not the current workspace.
+Write a handoff document summarising the current conversation so a fresh agent can continue the work. Save under `tmp/<effort>/` in the current checkout, following [workspace housekeeping](../../../docs/workspace.md).
+
+For covered automated checks, include assessed checkout, interpreter and runner
+pointers, independently recorded requirements, receipt path and outcome, and any
+reuse reason. Follow [the check contract](../../../docs/testing.md#automated-check-runner);
+text output alone is not completion evidence. Keep manual/native observations separate.
 
 Include a "suggested skills" section in the document, naming which skills the next agent should call the Skill tool for.
 

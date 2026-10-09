@@ -9,6 +9,7 @@ import sys
 import tempfile
 from pathlib import Path, PureWindowsPath
 
+from receipt_requirements import bind, read_json, validate_record
 from validate_handoff import (
     InvalidHandoff,
     git,
@@ -70,7 +71,17 @@ def read_input(path, required, optional=()):
                 check,
                 {"name", "status", "method", "exit_code", "evidence"},
                 f"checks[{index}]",
-                {"reason", "source_commit"},
+                {
+                    "kind",
+                    "reason",
+                    "source_commit",
+                    "check_id",
+                    "receipt",
+                    "environment",
+                    "source_record",
+                    "source_check",
+                    "requirement_key",
+                },
             )
     return data
 
@@ -89,7 +100,7 @@ def candidate_record(data, checkout):
     require(text(data["base_ref"]), "base_ref must be a nonempty Git reference")
     record = {key: value for key, value in data.items() if key != "base_ref"}
     record.update(
-        schema_version=1,
+        schema_version=2,
         kind="candidate",
         candidate_commit=git(checkout, "rev-parse", "--verify", "HEAD^{commit}"),
         base_commit=git(
@@ -117,7 +128,7 @@ def verification_record(data, attempt):
     candidate = load(attempt, "candidate")
     return dict(
         data,
-        schema_version=1,
+        schema_version=2,
         kind="verification",
         ticket=candidate["ticket"],
         candidate_commit=candidate["candidate_commit"],
@@ -132,7 +143,7 @@ def integration_record(data, attempt, checkout):
     candidate = load(attempt, "candidate")
     record = {key: value for key, value in data.items() if key != "previous_tip_ref"}
     record.update(
-        schema_version=1,
+        schema_version=2,
         kind="integration",
         ticket=candidate["ticket"],
         candidate_commit=candidate["candidate_commit"],
@@ -171,7 +182,38 @@ def publish(path, payload):
                 temporary.unlink(missing_ok=True)
 
 
-def carry_forward(attempt, source, checkout, data):
+def direct_evidence_references(record, *, inspecting=False):
+    for check in record["checks"]:
+        for reference in check["evidence"]:
+            yield reference, None
+    for check in record["checks"]:
+        for field, kind in (("receipt", "runner"), ("source_record", "historical")):
+            reference = check.get(field)
+            # Early diagnosis sees any textual alias; validated copying only
+            # includes the extra reference supported by that check's kind.
+            selected = (
+                text(reference)
+                if inspecting
+                else check.get("kind") == kind and reference
+            )
+            if selected:
+                yield reference, field
+    if record["kind"] == "verification":
+        criteria = record.get("criteria") if inspecting else record["criteria"]
+        if inspecting and not isinstance(criteria, list):
+            return
+        for criterion in criteria:
+            if inspecting and (
+                not isinstance(criterion, dict)
+                or not isinstance(criterion.get("evidence"), list)
+            ):
+                continue
+            for reference in criterion["evidence"]:
+                if not inspecting or text(reference):
+                    yield reference, None
+
+
+def carry_forward(attempt, source, checkout, data, expected, candidate_expected=None):
     require(source.is_absolute(), "--from must be an exact absolute path")
     require(text(data["reason"]), "reason must be nonempty")
     require(
@@ -205,23 +247,76 @@ def carry_forward(attempt, source, checkout, data):
         kind: json.loads(payload.decode("utf-8")) for kind, payload in payloads.items()
     }
     stage = "verification" if reuse else "candidate"
-    allowed = validate(source, stage, checkout, records)
+    require(
+        all(record.get("schema_version") == 2 for record in records.values()),
+        "historical v1 records cannot be carried into new transitions",
+    )
+    prior_declarations = {
+        kind: record.get("check_requirements") for kind, record in records.items()
+    }
+    # A check's evidence can occupy this reserved name with arbitrary bytes.
+    # Diagnose that alias before interpreting the file as carry metadata.
+    source_receipt = (source / CARRY_RECEIPT).resolve()
+    for kind, record in records.items():
+        load(source, kind, records)
+        require(
+            not any(
+                (source / reference).resolve() == source_receipt
+                for reference, _ in direct_evidence_references(record, inspecting=True)
+            ),
+            "evidence/carry receipt collision",
+        )
+    if (source / CARRY_RECEIPT).is_file():
+        prior_declarations.update(
+            read_json(source / CARRY_RECEIPT).get("check_requirements", {})
+        )
+    allowed = validate(
+        source,
+        stage,
+        checkout,
+        records,
+        expected=prior_declarations[stage],
+        prior_context=True,
+    )
     if reuse:
         require(
             records["verification"]["verdict"] == "PASS",
             "only PASS verification can be reused; BLOCKED/REWORK require fresh verification",
         )
+    current_declarations = {stage: expected}
+    if reuse:
+        current_declarations["candidate"] = (
+            candidate_expected or prior_declarations["candidate"]
+        )
+    for kind, record in records.items():
+        validate_record(
+            record,
+            source,
+            checkout,
+            current_declarations[kind],
+            carried=True,
+            reuse_reason=data["reason"],
+        )
     copies = {}
     for record in records.values():
-        references = [
-            reference for check in record["checks"] for reference in check["evidence"]
-        ]
-        if record["kind"] == "verification":
-            references += [
-                reference
-                for criterion in record["criteria"]
-                for reference in criterion["evidence"]
-            ]
+        references = []
+        for reference, field in direct_evidence_references(record):
+            references.append(reference)
+            if field == "receipt":
+                receipt_path = source / reference
+                if not Path(reference).is_absolute():
+                    for row in read_json(receipt_path).get("checks", []):
+                        references.extend(
+                            str(Path(reference).parent / item["path"])
+                            for item in row.get("evidence", [])
+                        )
+            if field == "source_record" and not Path(reference).is_absolute():
+                original = read_json(source / reference)
+                for historical_check in original.get("checks", []):
+                    references.extend(
+                        str(Path(reference).parent / item)
+                        for item in historical_check.get("evidence", [])
+                    )
         for reference in references:
             reference_path = Path(reference)
             if not reference_path.is_absolute():
@@ -272,14 +367,19 @@ def carry_forward(attempt, source, checkout, data):
             )
     for destination, origin in copies.items():
         publish(destination, origin.read_bytes())
-    receipt = dict(data, source_attempt=str(source), destination_attempt=str(attempt))
+    receipt = dict(
+        data,
+        source_attempt=str(source),
+        destination_attempt=str(attempt),
+        check_requirements=current_declarations,
+    )
     publish(
         attempt / CARRY_RECEIPT,
         (
             json.dumps(receipt, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
         ).encode("utf-8"),
     )
-    allowed = validate(attempt, stage, checkout, records)
+    allowed = validate(attempt, stage, checkout, records, expected=expected)
     # Candidate is last: an interrupted bundle cannot validate at either stage.
     for kind in reversed(payloads):
         publish(attempt / f"{kind}.json", payloads[kind])
@@ -370,7 +470,7 @@ def main():
             "occupied destinations and record/evidence aliases are refused. Source and "
             "destination attempts must be distinct and non-nested. The stable auxiliary "
             "carry-forward.json receipt retains reason, source/destination paths, explicit "
-            "reuse choice and any rationale outside schema-v1 records. Success requires all "
+            "reuse choice, current check requirements and rationale outside immutable records. Success requires all "
             "requested evidence, receipt and records. Exit 0: carried, transition allowed; "
             "2: carried, transition held; 1: failure, any partial destination is not ready. "
             "Publication is atomic per file without replacement, not a directory transaction. "
@@ -381,6 +481,11 @@ def main():
         ),
     )
     carry.add_argument(
+        "--candidate-requirements",
+        type=Path,
+        help="current independent candidate reuse requirements when carrying PASS",
+    )
+    carry.add_argument(
         "--from",
         dest="source",
         type=Path,
@@ -388,6 +493,12 @@ def main():
         help="exact absolute source attempt",
     )
     for command in (candidate, verification, integration, carry):
+        command.add_argument(
+            "--requirements",
+            type=Path,
+            required=True,
+            help="independently authored stage check requirements JSON (v2)",
+        )
         command.add_argument(
             "attempt", type=Path, help="coordinator's exact absolute attempt directory"
         )
@@ -415,9 +526,21 @@ def main():
             {"verification_reuse_rationale"} if args.stage == "carry-forward" else (),
         )
         checkout = Path(git(args.checkout.resolve(), "rev-parse", "--show-toplevel"))
+        expected = read_json(args.requirements)
         if args.stage == "carry-forward":
             print(f"Assigned carry-forward destination {args.attempt}", flush=True)
-            allowed = carry_forward(args.attempt, args.source, checkout, data)
+            candidate_expected = (
+                read_json(args.candidate_requirements)
+                if args.candidate_requirements
+                else None
+            )
+            require(
+                candidate_expected is None or data["carry_verification"] is True,
+                "--candidate-requirements applies only when carrying PASS",
+            )
+            allowed = carry_forward(
+                args.attempt, args.source, checkout, data, expected, candidate_expected
+            )
             print(f"Carried to {args.attempt}; receipt {args.attempt / CARRY_RECEIPT}")
             print(
                 "Transition allowed"
@@ -431,7 +554,11 @@ def main():
             record = verification_record(data, args.attempt)
         else:
             record = integration_record(data, args.attempt, checkout)
-        allowed = validate(args.attempt, args.stage, checkout, {args.stage: record})
+        record["assessed_checkout"] = str(checkout)
+        bind(record, expected)
+        allowed = validate(
+            args.attempt, args.stage, checkout, {args.stage: record}, expected=expected
+        )
         destination = args.attempt / f"{args.stage}.json"
         publish(
             destination,

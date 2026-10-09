@@ -16,6 +16,13 @@ Communication to and from subagents should be sparse. Communicate primarily thro
 
 **Implementer subagents** should be run in the background where possible for maximum concurrency.
 
+For each dispatch that runs or accepts covered automated checks, supply absolute
+assessed-checkout, project-interpreter and runner pointers, selected check/test scope,
+receipt contract, and independently recorded completion requirements from
+[the testing reference](../../../docs/testing.md#automated-check-runner).
+Completion reports include validated receipt paths and outcomes. Independent review
+runs its own checks and receipt; required scope follows the ticket and stage.
+
 ## Steps
 
 1. Read the spec and tickets to understand the task graph.
@@ -27,9 +34,9 @@ Communication to and from subagents should be sparse. Communicate primarily thro
 4. Use **implementer subagents** to implement each ticket, each in its own worktree on its own branch. Each implementer subagent:
    - confirms its worktree is based on the integration branch before starting, and resets onto it if not;
    - calls the Skill tool with `tdd` to build the ticket;
-   - merges the integration branch tip into its own branch before reporting done
+   - merges the integration branch tip into its own branch, runs the required final checks through the runner, and validates the receipts against the assigned requirements before reporting done
 
-5. Once an **implementer subagent** completes, merge its work to the integration branch with a **merger subagent**.
+5. Once an **implementer subagent** completes, merge its work to the integration branch with a **merger subagent**. The merger validates candidate receipts and coverage, runs checks required for the combined result, and reports its own validated receipts before accepting integration.
 
 6. If this changes the **frontier** of available tickets, kick off more **implementer subagents** to work on the new tickets. This allows for maximum concurrency.
 
