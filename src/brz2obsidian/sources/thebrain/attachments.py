@@ -10,11 +10,13 @@ from brz2obsidian.contracts import (
     Asset,
     Document,
     GeneratedPresentation,
+    MigrationRefused,
     OriginalEvidence,
     SourceFinding,
     SourceGap,
 )
 
+from .external_files import external_file_uri
 from .findings import (
     ABSENT_NOTE_IMAGES_RULE,
     ABSENT_TXT_RULE,
@@ -24,6 +26,7 @@ from .findings import (
     ZERO_LENGTH_ABSENT_TXT_RULE,
 )
 from .images import validate_note_image
+from .literals import adapt_literals, source_position
 from .notes import (
     bind_note_references,
     compact_thought_identity,
@@ -43,6 +46,23 @@ SPECIAL_FLAGS = (
 )
 
 
+def _attachment_refusal(source_refuse, owner, asset_id, pointer, external):
+    def refuse(code, message, affected=()):
+        source_refuse(
+            code,
+            message,
+            tuple(dict.fromkeys((owner, asset_id, *affected))),
+            evidence=(pointer, "meta.json"),
+            guidance=(
+                "Review this attachment's external-file role, original location and local payload declarations; external targets are not accessed."
+                if external
+                else "Review this attachment's declared role and owned archive payload."
+            ),
+        )
+
+    return refuse
+
+
 def normalize_attachments(
     archive, records, meta, thoughts, refuse, uuid, excluded=(), scope_tokens=()
 ):
@@ -51,14 +71,33 @@ def normalize_attachments(
     absent_notes, gaps, presentations = [], [], []
     note_owners = set()
     asset_records = {}
+    source_refuse = refuse
     states = meta["AttachmentFileStates"]
     names = set(archive.namelist())
+    state_owners = {
+        record["Id"]: (index, record) for index, record in enumerate(records)
+    }
     for key, state in states.items():
         uuid(key)
         if type(state) is not int or state not in {1, 2, 3}:
+            if key in state_owners:
+                index, record = state_owners[key]
+                contextual_refuse = _attachment_refusal(
+                    source_refuse,
+                    record["SourceId"],
+                    key,
+                    f"attachments.json:{index}",
+                    record.get("Type") == 2,
+                )
+                contextual_refuse("invalid_source", "Invalid attachment file state")
             refuse("invalid_source", "Invalid attachment file state", (key,))
     for index, record in enumerate(records):
         asset_id, owner = uuid(record["Id"]), uuid(record["SourceId"])
+        pointer = f"attachments.json:{index}"
+
+        refuse = _attachment_refusal(
+            source_refuse, owner, asset_id, pointer, record.get("Type") == 2
+        )
         validate_semantic_fields(record, refuse, ("IsIcon",) + SPECIAL_FLAGS)
         if (
             any(a.asset_id == asset_id for a in assets)
@@ -96,6 +135,7 @@ def normalize_attachments(
             )
         kind, note_type = record["Type"], record["NoteType"]
         if record["SourceType"] != 2 or (kind, note_type) not in {
+            (2, 0),
             (1, 4),
             (1, 0),
             (3, 0),
@@ -122,7 +162,6 @@ def normalize_attachments(
             or ("Name" in record and type(record["Name"]) is not str)
         ):
             refuse("invalid_source", "Attachment location/name is invalid", (asset_id,))
-        pointer = f"attachments.json:{index}"
         asset_records[asset_id] = record
         common = {
             "asset_id": asset_id,
@@ -133,7 +172,7 @@ def normalize_attachments(
             "evidence": (pointer,),
         }
         video = reviewed_video(record, refuse)
-        if kind in {3, 8}:
+        if kind in {2, 3, 8}:
             if asset_id in states:
                 refuse(
                     "invalid_source",
@@ -151,6 +190,11 @@ def normalize_attachments(
                         "External URL scheme is unsupported",
                         (asset_id,),
                     )
+            elif kind == 2:
+                uri = external_file_uri(location, refuse)
+                common["display_name"] = (
+                    record.get("Name") or PureWindowsPath(location).name
+                )
             else:
                 directory = PureWindowsPath(location)
                 if not directory.is_absolute():
@@ -169,7 +213,7 @@ def normalize_attachments(
             assets.append(
                 Asset(
                     **common,
-                    role="url" if kind == 3 else "directory",
+                    role={2: "file", 3: "url", 8: "directory"}[kind],
                     availability="external",
                     external_uri=uri,
                     video_presentation=video,
@@ -362,7 +406,29 @@ def normalize_attachments(
                     "Multiple thought notes have ambiguous ownership",
                     (asset_id,),
                 )
-            references = trace_note_references(text, excluded)
+
+            def trace_scoped(
+                value,
+                omitted=(),
+                owner=owner,
+                asset_id=asset_id,
+                pointer=pointer,
+                member=member,
+            ):
+                try:
+                    adapted, edits = adapt_literals(value)
+                    return adapted, edits, trace_note_references(adapted, omitted)
+                except MigrationRefused as error:
+                    issue = error.issues[0]
+                    source_refuse(
+                        issue.code,
+                        issue.message,
+                        (owner, asset_id),
+                        evidence=(pointer, "payload:" + member),
+                        guidance="Review the affected thought-note Markdown and its preserved source evidence; unsupported HTML or reference syntax must be resolved before retrying.",
+                    )
+
+            adapted, text_adaptations, references = trace_scoped(text, excluded)
             removals = []
             for reference in references:
                 if reference.kind == "item":
@@ -373,14 +439,17 @@ def normalize_attachments(
                 text, scope_tokens
             )
             for reference in reversed(removals):
-                text = text[: reference.start] + text[reference.end :]
+                begin = source_position(reference.start, text_adaptations)
+                end = source_position(reference.end, text_adaptations)
+                text = text[:begin] + text[end:]
             if contains_omitted_identity(text, scope_tokens):
                 refuse(
                     "invalid_reference",
                     "Note contains an excluded association outside removable references",
                 )
             if removals:
-                references = trace_note_references(text)
+                adapted, text_adaptations, references = trace_scoped(text)
+            text = adapted
             documents.append(
                 Document(
                     key=asset_id,
@@ -390,6 +459,7 @@ def normalize_attachments(
                     original_asset_id=None if unsafe_original else asset_id,
                     original_copy_omitted=unsafe_original,
                     references=references,
+                    text_adaptations=text_adaptations,
                     evidence=(pointer,),
                 )
             )
@@ -424,8 +494,20 @@ def normalize_attachments(
                 references=(asset_id,),
             )
         )
+    refuse = source_refuse
+    for asset in assets:
+        if asset.role == "file" and asset.availability == "external":
+            local_member = asset.owner + "/" + PureWindowsPath(asset.original_name).name
+            if local_member in names and local_member not in members.values():
+                refuse(
+                    "invalid_source",
+                    "External file has an unassigned local payload claim",
+                    (asset.owner, asset.asset_id),
+                    evidence=asset.evidence + ("payload:" + local_member,),
+                    guidance="Review the external-file role and conflicting archive payload declaration; declare an internal attachment separately when it owns these bytes.",
+                )
     if set(states) - ({a.asset_id for a in assets} | {d.key for d in documents}):
-        refuse("invalid_source", "File states refer to an absent attachment")
+        source_refuse("invalid_source", "File states refer to an absent attachment")
     for asset_id, owner, location, declared, pointer in absent_records:
         if declared == 0:
             stem = PurePosixPath(location).stem
@@ -595,7 +677,20 @@ def normalize_attachments(
                 image_asset_ids=tuple(a.asset_id for a in images),
             )
         )
-    documents = [bind_note_references(d, assets, thoughts) for d in documents]
+    bound_documents = []
+    for document in documents:
+        try:
+            bound_documents.append(bind_note_references(document, assets, thoughts))
+        except MigrationRefused as error:
+            issue = error.issues[0]
+            source_refuse(
+                issue.code,
+                issue.message,
+                (document.owner, document.key),
+                evidence=document.evidence,
+                guidance="Review the affected thought-note Markdown and declared local references before retrying.",
+            )
+    documents = bound_documents
     accounting.extend(
         AccountingEntry(
             identity=f"reference:{document.key}:{index}",

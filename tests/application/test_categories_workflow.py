@@ -119,7 +119,7 @@ def test_inspection_and_conversion_materialize_categories_and_typed_empty_member
     workflow = default_workflow()
     inspected = workflow.inspect(source)
     assert inspected.outcome == "clean", inspected.issues
-    assert inspected.schema_version == 3 and inspected.profile_version == "3"
+    assert inspected.schema_version == 6 and inspected.profile_version == "9"
     assert inspected.receipt is None and inspected.counts.actual_notes is None
     assert inspected.counts.planned_notes == 3
     assert inspected.counts.source_definitions == 1
@@ -154,7 +154,7 @@ def test_inspection_and_conversion_materialize_categories_and_typed_empty_member
     )
     assert not (vault / "Notes/Untyped empty.md").exists()
     record = json.loads((vault / "migration-record.json").read_bytes())
-    assert record["schema_version"] == 3 and record["renderer_version"] == "3"
+    assert record["schema_version"] == 6 and record["renderer_version"] == "6"
     assert (
         record["classification_assignments"][0]["definition_target"]
         == "Categories/Concept.md"
@@ -389,7 +389,7 @@ def test_typed_cli_matches_read_only_inspection_obligations_and_verified_convers
     )
     assert main(["convert", str(source), str(tmp_path / "vault"), "--json"]) == 0
     converted = json.loads(capsys.readouterr().out)
-    assert converted["schema_version"] == 3 and converted["inspection"] is None
+    assert converted["schema_version"] == 6 and converted["inspection"] is None
     assert converted["receipt"]["verified"] and converted["counts"]["actual_notes"] == 3
     assert (
         converted["counts"]["planned_support_files"]

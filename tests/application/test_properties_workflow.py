@@ -493,7 +493,7 @@ def test_cli_metadata_obligations_agree_with_read_only_library_inspection(
         s.model_dump() for s in expected.inspection.icon_snapshots
     ]
     assert actual["inspection"]["adaptations"] == [
-        a.model_dump() for a in expected.inspection.adaptations
+        a.model_dump(mode="json") for a in expected.inspection.adaptations
     ]
     assert actual["receipt"] is None and actual["counts"]["actual_notes"] is None
     assert main(["convert", str(source), str(tmp_path / "vault"), "--json"]) == 0

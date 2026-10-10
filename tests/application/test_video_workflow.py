@@ -91,7 +91,7 @@ def test_video_embed_and_timing_are_independent_inspect_and_record_adaptations(
     assert result.outcome == "clean", result.issues
     record = json.loads((tmp_path / "vault/migration-record.json").read_bytes())
     assert [a for a in record["adaptations"] if a["affected"] == VIDEO] == [
-        a.model_dump() for a in adaptations
+        a.model_dump(mode="json") for a in adaptations
     ]
 
 

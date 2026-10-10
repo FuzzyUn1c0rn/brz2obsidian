@@ -53,6 +53,12 @@ def main(argv=None):
     else:
         print(f"{result.operation}: {result.outcome}")
         if result.counts:
+            if result.counts.image_presentation_normalizations:
+                print(
+                    f"Image presentation normalizations: {result.counts.image_presentation_normalizations}"
+                )
+            if result.counts.text_adaptations:
+                print(f"Literal text adaptations: {result.counts.text_adaptations}")
             print(
                 f"Planned thought notes: {result.counts.planned_notes}; present payloads: {result.counts.present_assets}"
             )
@@ -75,6 +81,10 @@ def main(argv=None):
             print("Pending: " + ", ".join(result.inspection.pending_checks))
         for issue in result.issues:
             print(f"{issue.code}: {issue.message} {issue.guidance}")
+            if issue.affected:
+                print("Affected: " + ", ".join(issue.affected))
+            if issue.evidence:
+                print("Evidence: " + ", ".join(issue.evidence))
             if issue.leftover_path:
                 print(f"Owned staging left at: {issue.leftover_path}")
     return {"clean": 0, "warnings": 2, "refused": 1, "failed": 1}[result.outcome]

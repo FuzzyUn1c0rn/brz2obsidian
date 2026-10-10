@@ -656,7 +656,119 @@ See [current complete preservation](history/brz-to-obsidian-v2-implementation/re
 the [historical pre-refinement v2 report](history/brz-to-obsidian-v2-implementation/research/three-archive-preservation.md)
 and the [earlier v1 report](history/brz-to-obsidian-v1/research/real-export-acceptance.md).
 
+## Combined external/literal/image preservation audit
+
+The public combined ZIP and Workflow/CLI controls cover an external-file-only
+owner, distinct external and copied PDF resources with the same label, active
+literal edits interleaved with live references, two same-filename images owned by
+two different thoughts, protected Markdown, Home, tags/categories, forgotten
+associations and established TXT/PDF/type gaps. Inspection creates no receipt or
+output; conversion reopens the source. The alternative Folio control composes
+opaque text edits, presentation declarations and external-file facts without BRZ
+syntax in generic modules. All shared contracts remain version 6. The only runtime
+repair in this extension sorts sizing-report documents by identity, preserving
+within-document authored reference order; it changes no admitted meaning or fields.
+
+The oracle uses raw records and archived note/payload bytes as authority. Its
+standard-library activity scanner masks fenced/indented/inline code, comments,
+escapes, autolinks and balanced reference destinations/titles while retaining
+active labels. Unsupported active HTML and source-local autolinks fail closed.
+Protection is lexical rather than successive global regex masking: leaf blocks
+are resolved first, then a matched inline code span or comment owns its contents
+in source order. Comment blocks protect their closing line or continue to the
+end of their container; unterminated inline openers do not acquire that rule.
+Backtick matching stays within an inline region and cannot cross blank lines,
+fences, container exits, headings or thematic breaks. Only CR/LF delimit source
+lines; raw Unicode coordinates and authored bytes remain unchanged. These
+boundaries follow the [CommonMark block grammar](https://spec.commonmark.org/0.31.2/#html-blocks)
+and [inline precedence](https://spec.commonmark.org/0.31.2/#code-spans), with actual
+ZIP/CLI byte, span and rehashed-corruption controls in `test_activity_boundaries.py`.
+State-map keys and identity ownership are checked globally. Scalar state values
+are checked only after independently deriving direct and transitive forgotten
+omission; malformed excluded values cannot block an audit or appear in its output.
+Malformed included values and unknown state keys still refuse.
+Complete note expectations also independently derive generated framing from the
+accumulated expected prefix, including a source label before the first document.
+An open top-level comment or fence gets its exact safety closer only when later
+authored/generated material is appended. Closed blocks, natural quote/list exits,
+indented code and ordinary non-Home EOF notes require no invented closure.
+Resources, relationships and Home navigation are audited at their composition
+boundaries. Guard bytes do not alter original/scoped/adapted document digests,
+spans, payload originals, reference credit, literal adaptations or gap counts.
+`test_generated_boundaries.py` checks full actual-ZIP/CLI note bytes and rejects
+missing, wrong, duplicated or moved guards after repairing all manifest hashes
+and counts; the old oracle's accepted missing-guard corruptions remain RED evidence.
+HTML element boundaries use the [WHATWG element index](https://html.spec.whatwg.org/multipage/indices.html#elements-3)
+and [obsolete features](https://html.spec.whatwg.org/multipage/obsolete.html#non-conforming-features),
+reviewed 2026-10-09, independently of production metadata. Protected matching-looking end tokens never pair with active
+openers. Scoped text follows whole excluded-phrase removal; literal edits retain
+Unicode codepoint spans and scoped digest before escaping, adapted spans/digest
+before reference rewriting, and exact before/after text. Every safe original copy
+remains byte exact; unsafe copies remain absent. Sizing declarations have exact
+adapted-document spans, digest and affected owner/document/image/reference evidence.
+Distinct external identities, original locations and file URIs remain separate
+from copied bytes, actual references, generated fallback and source-gap warnings.
+
+Rehashed/recounted corruptions cover dropped/merged external IDs, URI/location,
+under/overescaping, spans/bases/digests, wrong image owner/bytes, omitted sizing
+warnings, excluded output and invented counts. Actual publication controls cover
+new note/image/report/record staging writes, deletion/truncation/same-length
+corruption, source drift, image stream faults, commit races, junctions/cleanup and
+late teardown/post-commit failures with truthful complete receipts.
+
+The current driver requires five originals and audits fifteen exact/repeat/
+ZIP-and-root-reordered outputs. It inventories every raw stream before inclusion,
+requires exact E totals of 756 thoughts, 963 links and 1,364 attachments, and pins E
+to 219,504,950 bytes with SHA-256
+`bc55f68c9ab3febaa770bfc7a9a90621bcd82107d876664371e1ff8558b4cf68`.
+E's independently derived included gates require 17 external files, five literal
+owners and two sizing references in two distinct owners. Complete owner resources
+are audited by raw IDs/member joins; three same-label PDF entries are a subset,
+not a total-resource assumption. Each conversion obtains a fresh CLI inspection,
+checks identity/count/diagnostic parity and retains complete raw audits, input
+fingerprint guards and the A–D established scoped obligations. Synthetic pins
+exercise the same driver without private inputs. Public success does not establish
+actual E support. The bounded relationship and HTML/declaration qualifications
+remain distinct from the refreshed actual matrix, native and user acceptance gates.
+
+The [reviewed HTML boundary and independent oracle repair](history/red-vs-blue-investigation/reviewed-html-boundary.md)
+records the closed primary registry, raw grammar/leaf precedence and Type2
+Windows display fallback. Public ZIP controls cover complete authored/generated
+bytes, exact originals/spans, genuine HTML refusals and self-consistent forged
+receipts. Historical version-rebound diagnosis remains qualified; the final
+five-original matrix must use the newly verified runtime/oracle.
+
+`test_declaration_blocks_workflow.py` establishes actual ZIP Workflow/CLI refusal
+of active type-4 declarations across LF, CR and CRLF, original indentation/tab
+columns, actual nested container ownership and included document/own-label routes.
+Its exact full-note/original/image/span controls retain protected code/comments,
+escaped and non-block prose and live facts after real container exits. Own labels
+remain opaque strings with no document/edit/reference credit; their safe retained
+field pointers are distinct from raw ordinals after omission. Incomplete inline
+reference display labels use inline-only activity, preserving aliases and complete
+HTML refusal. The standard-library oracle independently follows ordered raw
+container prefixes and original protection. `test_declaration_blocks.py` rebinds
+source roots, payload/document facts, originals, fingerprints and complete output
+manifests to reject fabricated supported declaration claims through both complete
+audit pipelines; extra/missing/moved generated guards also fail after rehashing.
+BRZ module/profile qualification is version9; shared contracts stay6 and Folio3.
+Fresh full GUI-required pytest and all tooling on the clean candidate, independent
+review and integration precede the entirely new five-original/fifteen-output gate.
+
 ## Private full-export acceptance
+
+The fresh five-original/fifteen-output gate passed on 2026-10-10 at clean runtime
+`86998226247a4111b832b56314cc5552425b9770`, with current BRZ module/profile9 and
+shared migration contracts6. All original pins and assessed runtime/audit bytes
+remained unchanged; the complete inventories cover 11,826 files. See the
+[complete actual matrix and qualified supplemental diagnostics](history/red-vs-blue-investigation/actual-archive-acceptance.md).
+All twelve A-D source-free library/CLI checks were clean. E's three outputs each
+retained 16 file-URL image `unsafe_reference` notices (14 distinct strings in one
+note), library `issues` and CLI2, consistent with the contained-read checker
+contract. Complete source-bound preservation passed separately. Native file-image
+handling is unverified; no parser scheme inference supplies native inactivity,
+and the affected sample remains held until an explicit automatic-load guard.
+Native and user acceptance remain separate gates.
 
 The complete v3 four-original gate passed on 2026-10-06 at verified clean root
 `e2c5fc3f05d2daa0d0547d2bbaa2b12557a248b5`, in fresh `tmp/m5`. All twelve
@@ -679,11 +791,11 @@ review. [Actual-output native review](history/management-leadership-implementati
 subsequently passed in observed Obsidian 1.14.4. Actual user acceptance and
 independent final review remain pending; this automated gate supplies neither verdict.
 
-Choose the exact fingerprinted A/B/C/D originals and a fresh short ignored output
+Choose the exact fingerprinted A/B/C/D/E originals and a fresh short ignored output
 directory. D is the original Management & Leadership export (320,594,486 bytes,
 SHA-256 `2b24c1d21b4090f3b0ed3ec0227f269b8c7a4e5b6832ada0e244a1dcfc941ced`);
 a comparison/recovery backup cannot substitute. A/B/C fingerprint pins are retained.
-The driver refuses an existing output directory, performs twelve complete
+The current driver refuses an existing output directory, performs fifteen complete
 conversions (exact, repeat and ZIP/root-record reordered for each source), saves
 private results/operation evidence, and prints aggregate counts. It checks source
 fingerprints before/after every operation and at completion, proves reordered
@@ -697,19 +809,21 @@ Set PYTHONPATH even in the integration checkout.
 
 ```powershell
 $env:PYTHONIOENCODING = 'utf-8'
+$env:PYTHONUTF8 = '1'
 $env:PYTHONPATH = (Join-Path (Get-Location) 'src') + ';' + (Get-Location)
 $sourceA = 'C:\path\to\exact-A.brz'
 $sourceB = 'C:\path\to\exact-B.brz'
 $sourceC = 'C:\path\to\exact-C.brz'
 $sourceD = 'C:\path\to\Management & Leadership 2026-10-05.brz'
+$sourceE = 'C:\path\to\exact-E.brz'
 $output = Join-Path (Get-Location) 'tmp/audit-01'
-.\.venv\Scripts\python.exe -m tests.local_acceptance.run --source-a $sourceA --source-b $sourceB --source-c $sourceC --source-d $sourceD --output $output
+.\.venv\Scripts\python.exe -X utf8 -m tests.local_acceptance.run --source-a $sourceA --source-b $sourceB --source-c $sourceC --source-d $sourceD --source-e $sourceE --output $output
 ```
 
 The synthetic tooling example alone supplies no private-input acceptance; the
 completed four-original gate is recorded above. The public
-synthetic example below exercises the same four-input callable with explicit
-independently computed synthetic pins, producing twelve complete outputs in a
+synthetic example below exercises the same five-input callable with explicit
+independently computed synthetic pins, producing fifteen complete outputs in a
 fresh ignored directory. The CLI always uses the accepted original pins.
 
 ```powershell
@@ -720,16 +834,17 @@ $env:PYTHONPATH = (Join-Path (Get-Location) 'src') + ';' + (Get-Location)
 from pathlib import Path
 from tests.local_acceptance.run import fingerprint, run_acceptance
 from tests.local_acceptance.test_checker_v3 import mixed_v3_archive
+from tests.support.combined_collection import combined_archive
 
 root = Path('tmp/audit-synth-02')
 root.mkdir(parents=True, exist_ok=False)
-sources = {key: mixed_v3_archive(root / (key + '.brz')) for key in 'ABCD'}
+sources = {key: (combined_archive if key == 'E' else mixed_v3_archive)(root / (key + '.brz')) for key in 'ABCDE'}
 pins = {key: fingerprint(path) for key, path in sources.items()}
 run_acceptance(sources, root / 'out', pins)
 '@ | .\.venv\Scripts\python.exe -
 ```
 
-This example and help were executed on 2026-10-06 against selected `0.3.0` code.
+The earlier four-input example and help were executed on 2026-10-06 against selected `0.3.0` code.
 All twelve complete synthetic outputs passed, each with 29 files, five created
 notes, six exact payload copies, three source gaps, two generated embeds and two
 fully decoded PNG/WebP frames. The original synthetic fingerprints remained

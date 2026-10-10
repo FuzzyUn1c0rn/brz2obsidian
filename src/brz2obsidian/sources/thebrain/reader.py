@@ -27,13 +27,14 @@ from brz2obsidian.contracts import (
 from .attachments import normalize_attachments
 from .classifications import decode_classifications
 from .decoding import ROOT_FILES, decode_records
+from .literals import qualify_declaration_blocks
 from .metadata import calendar_dates, declared_appearance
 from .relationships import decode_relationships
-from .scope import records_json, scope_records
+from .scope import contains_omitted_identity, records_json, scope_records
 from .semantics import validate_semantic_fields
 
 
-def _refuse(code, message, affected=()):
+def _refuse(code, message, affected=(), *, evidence=(), guidance=None):
     raise MigrationRefused(
         (
             Issue(
@@ -41,7 +42,13 @@ def _refuse(code, message, affected=()):
                 phase="source",
                 message=message,
                 affected=affected,
-                guidance="Investigate the source, set a valid Home in TheBrain, and re-export.",
+                evidence=evidence,
+                guidance=guidance
+                or (
+                    "Set a valid Home in TheBrain and re-export."
+                    if code == "invalid_entry"
+                    else "Review the affected source records and archive evidence before retrying."
+                ),
             ),
         )
     )
@@ -332,7 +339,7 @@ class BrzSession:
         if any(record.get("Id") in live_ids for record in records["tombstones.json"]):
             _refuse("invalid_source", "A live identity also occurs in deleted history")
         thoughts = {}
-        for record in thought_records:
+        for index, record in enumerate(thought_records):
             key = _uuid(record["Id"])
             validate_semantic_fields(record, _refuse, known_type_fields=("TypeId",))
             if "TagIds" in record and type(record["TagIds"]) is not list:
@@ -364,6 +371,17 @@ class BrzSession:
                 record.get("Label") is not None and type(record["Label"]) is not str
             ):
                 _refuse("invalid_source", "Thought title/label is invalid")
+            if record.get("Label"):
+                try:
+                    qualify_declaration_blocks(record["Label"])
+                except MigrationRefused:
+                    _refuse(
+                        "unsupported_feature",
+                        "Thought label contains an unsupported HTML declaration block",
+                        (key,),
+                        evidence=(f"thoughts.json:{index}.Label",),
+                        guidance="Review the affected thought's own label; active HTML declaration blocks are outside reviewed label coverage.",
+                    )
             thoughts[key] = record
         setting_id = str(uuid5(UUID(brain_id), "20"))
         setting_keys = set()
@@ -451,13 +469,35 @@ class BrzSession:
         identity = SourceIdentity(
             source_id=brain_id,
             module_id="thebrain-brz",
-            module_version="3",
+            module_version="9",
             format_version="5",
             source_sha256=source_hash,
             snapshot_digest=snapshot_digest,
         )
+
+        def relationship_private(value):
+            # Validated scope supplies identity authority; malformed raw scalars
+            # still refuse, without disclosing nested excluded spellings.
+            if isinstance(value, str):
+                return contains_omitted_identity(
+                    value, self.scope_tokens, diagnostic=True
+                )
+            if isinstance(value, dict):
+                return any(
+                    relationship_private(key) or relationship_private(entry)
+                    for key, entry in value.items()
+                )
+            if isinstance(value, (list, tuple)):
+                return any(relationship_private(entry) for entry in value)
+            return False
+
         relationships = decode_relationships(
-            records["links.json"], thoughts, brain_id, _refuse, _uuid
+            records["links.json"],
+            thoughts,
+            brain_id,
+            _refuse,
+            _uuid,
+            private_record=relationship_private,
         )
         assignments = decode_classifications(thoughts, relationships, _refuse, _uuid)
         return SourceSnapshot(

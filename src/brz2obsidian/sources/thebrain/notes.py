@@ -12,7 +12,12 @@ from markdown_it import MarkdownIt
 from markdown_it.rules_block.state_block import StateBlock
 from markdown_it.rules_inline import autolink, image, link
 
-from brz2obsidian.contracts import Issue, MigrationRefused, ReferenceSpan
+from brz2obsidian.contracts import (
+    ImagePresentationNormalization,
+    Issue,
+    MigrationRefused,
+    ReferenceSpan,
+)
 
 
 def _refuse(code, message):
@@ -99,6 +104,7 @@ def bind_note_references(document, assets, thoughts):
     bound = []
     for reference in document.references:
         destination = reference.target
+        normalization = None
         if reference.kind == "item":
             canonical = compact_thought_identity(destination)
             if canonical not in thoughts or thoughts[canonical]["Kind"] == 5:
@@ -108,12 +114,54 @@ def bind_note_references(document, assets, thoughts):
                 )
         else:
             parts = urlsplit(destination)
-            location = unquote(parts.path.removeprefix(".data/md-images/"))
+            raw = document.text[reference.destination_start : reference.destination_end]
+            raw = raw[1:-1] if raw.startswith("<") and raw.endswith(">") else raw
+            raw_path = raw.split("#", 1)[0]
+            if (
+                "?" in destination
+                or "?" in raw
+                or ("#" in destination and not parts.fragment)
+                or re.search(r"%(?![0-9a-fA-F]{2})|%(?:2f|5c)", raw_path, re.IGNORECASE)
+                or re.search(
+                    r"%(?![0-9a-fA-F]{2})|%(?:2f|5c)", parts.path, re.IGNORECASE
+                )
+            ):
+                _refuse(
+                    "invalid_reference",
+                    "Invalid or ambiguous local image destination encoding or query",
+                )
+            if parts.fragment:
+                if (
+                    not re.fullmatch(
+                        r"\$width=([1-9]|[1-9][0-9]|100)p\$", parts.fragment
+                    )
+                    or raw.rsplit("#", 1)[-1] != parts.fragment
+                ):
+                    _refuse(
+                        "invalid_reference",
+                        "Invalid or unsupported local image sizing declaration",
+                    )
+                begin = reference.destination_start + document.text[
+                    reference.destination_start : reference.destination_end
+                ].rindex("#")
+                declaration = "#" + parts.fragment
+                normalization = ImagePresentationNormalization(
+                    declaration=declaration,
+                    start=begin,
+                    end=begin + len(declaration),
+                    document_digest=document.text_digest,
+                )
+            try:
+                location = unquote(
+                    parts.path.removeprefix(".data/md-images/"), errors="strict"
+                )
+            except UnicodeDecodeError:
+                _refuse("invalid_reference", "Invalid local image UTF-8 encoding")
             if (
                 not parts.path.startswith(".data/md-images/")
                 or parts.query
-                or parts.fragment
                 or not location
+                or re.search(r"%[0-9a-fA-F]{2}", location)
                 or "\\" in location
                 or any(p in {"", ".", ".."} for p in location.split("/"))
             ):
@@ -137,7 +185,11 @@ def bind_note_references(document, assets, thoughts):
             canonical = matches[0]
         bound.append(
             reference.model_copy(
-                update={"target": canonical, "source_target": destination}
+                update={
+                    "target": canonical,
+                    "source_target": destination,
+                    "presentation_normalization": normalization,
+                }
             )
         )
     return document.model_copy(update={"references": tuple(bound)})
@@ -209,7 +261,9 @@ def trace_note_references(text: str, excluded=()) -> tuple[ReferenceSpan, ...]:
         children = []
         display_parser.inline.parse(value, display_parser, {}, children)
         return "".join(
-            t.content
+            "\\<"
+            if t.type == "text_special" and t.markup == "\\<"
+            else t.content
             if t.type in {"text", "text_special", "code_inline"}
             else "\n"
             if t.type in {"softbreak", "hardbreak"}

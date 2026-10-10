@@ -15,6 +15,113 @@ they are bounded synthetic coverage. Complete four-original preservation and
 native actual-output review passed; independent final review and actual-user
 acceptance remain pending gates in the [current frontier](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/8).
 
+## External file references (version 4)
+
+Version 4 introduced external file support. The current version-9 module/profile
+retains it through version-6 snapshot/policy, renderer and result/record contracts. Thought-owned
+`SourceType=2`, `Type=2`, `NoteType=0` records with coherent identities, integer
+nonnegative lengths and ordinary boolean flags represent external files.
+Reviewed locations are safe absolute drive-qualified Windows file paths; UNC,
+relative, drive-relative, device paths, traversal, alternate streams and unsafe
+Windows filename shapes remain refusals. Extensions do not change this role.
+
+Each identity receives an encoded file URI and a distinct ordinary Resources
+entry, preserving original location and metadata in scoped evidence. An external
+file alone makes an included owner content-bearing. Historical lengths do not
+assert accessibility: inspect/convert never check, open, execute, fetch, copy or
+relocate external targets. External files contribute no copied payloads, missing
+payload gaps or authored-reference counts. Conflicting local file states and
+unassigned same-owner archive payload claims refuse; a separately declared
+same-named internal file keeps its own identity and intact bytes.
+
+Public actual-ZIP Workflow and thin CLI controls establish this bounded support.
+The complete Red vs Blue archive, raw-source audit, native comparison and final
+user presentation verdict remain separate gates under issue #78. Attachment
+refusals identify included owners/attachments and evidence with role-specific
+advice; Home guidance is reserved for invalid-entry failures. Forgotten owners
+and excluded associations remain omitted before role interpretation.
+
+## Literal prose (version 5)
+
+The source adapter minimally escapes parser-active, attribute-free, unpaired
+opening words such as `<Enter>` and `<username>`. Names match ASCII letters
+followed by letters, digits or hyphens. This is a syntactic allowance for unknown
+names, rather than a token whitelist. Existing code, escaped text, autolinks,
+comments and accepted line breaks keep their behavior. Active end tags, paired
+markup, attributes, declarations, processing instructions and recognized HTML
+elements remain unsupported.
+
+Recognized names include the current [WHATWG element index](https://html.spec.whatwg.org/multipage/indices.html#elements-3)
+and [obsolete elements](https://html.spec.whatwg.org/multipage/obsolete.html#non-conforming-features),
+reviewed 2026-10-09, plus the legacy `image` parser alias and foreign-content
+roots `svg`/`math`. Thus newer `search`/`selectedcontent`, raw text containers
+and legacy elements cannot become literal prose accidentally. Only parser-active
+positions participate: a matching-looking end token inside code is protected.
+
+`Document.text_adaptations` exposes source-neutral exact edits. Original offsets
+use `scoped_source_text/unicode_codepoints`: UTF-8-sig decoded text after excluded
+reference phrases have been removed, before escaping. Each edit carries that
+representation's SHA-256, original span and before/after strings. Adapted offsets
+use `document.text/unicode_codepoints`; references and document digest use this
+adapted text. Generic validation reconstructs the scoped source and verifies
+every edit before rendering. Reference rewriting composes against adapted text
+without escaping it again. Safe original copies still preserve archived bytes,
+including BOM and line endings; unsafe originals remain omitted.
+
+Version 5 adds closed document/inspection edit fields, adaptation owner/document
+and evidence fields, and `Counts.text_adaptations`. Snapshot/policy, result,
+migration record, renderer and TheBrain module/profile versions change together.
+The independent Folio adapter adopts contract 5 with explicit arbitrary edits;
+its format and module/profile version remain unchanged. Literal edits create no
+authored-reference, payload-copy or source-gap credit. Synthetic coverage does
+not establish the later private-archive/native acceptance gates under #78.
+
+The current closed recognized-name review includes historical `content`/`shadow`,
+an explicitly conservative experimental `portal` exclusion and the existing
+`image` alias. These classifications and the exact 148-name list appear in the
+[primary boundary review](history/red-vs-blue-investigation/reviewed-html-boundary.md).
+Module/profile version8 changes refusal meaning without changing shared shapes.
+
+## Sized inline images (version 6)
+
+Parser-active local image destinations can carry exactly `#$width=Np$`, with a
+canonical decimal integer N from 1 through 100. Only that complete raw fragment
+is recognized, including the evidenced 75/90 widths. Entities, escapes or encoded
+near misses cannot acquire support through parser normalization. Empty or
+nonempty queries, unknown/empty/repeated/mixed fragments, leading zeros, signs,
+fractional values and out-of-range widths refuse. Binding still requires exactly
+one present same-owner image with intact payload inventory.
+
+Paths decode percent encoding once, strictly as UTF-8. Malformed percent/UTF-8,
+encoded separators, traversal/backslashes and residual encoded octets refuse as
+ambiguous. Once-encoded spaces, Unicode and URI-significant `#` remain supported;
+`%25` can represent a literal percent when the decoded name does not itself look
+like an encoded octet. Safe vault assignment follows the existing filename policy
+and collision handling, independently of the exact original source name. No
+external targets are probed.
+
+The adapter supplies a source-neutral `ImagePresentationNormalization` on the
+reference: exact declaration, scoped adapted-document codepoint bounds, digest,
+explicit basis and ordinary `responsive` presentation. Literal text adaptations
+and excluded-reference removals retain their separately named coordinate bases.
+Generic validation binds every fact to exact document text and its present owned
+image; planning adds one honest presentation adaptation and an actionable
+`image_presentation_normalized` warning per declaration. The renderer replaces
+only the assigned image destination and recognized fragment, preserving authored
+alt/title/order and exact source image bytes. It adds no HTML, CSS, plugin, pixel
+width, resizing or recompression. Eligible original note bytes remain exact.
+
+The warning/report links included affected notes, retains exact declarations and
+explains ordinary responsive inline Markdown presentation without exact percentage
+fidelity. It is distinct from source gaps and generated fallback images.
+`Counts.image_presentation_normalizations` counts declared presentation facts;
+authored reference and copied payload counts still describe real obligations.
+Snapshot/policy, result/record, renderer and TheBrain module/profile versions all
+move to 6 because reference fields and admitted meaning change. Folio adopts
+contract 6 while retaining module/profile 3 and independently declared facts.
+Original private archive preservation, full raw-source oracle and native
+placement/readability remain later #78 acceptance gates.
+
 ## Records, Home and relationships
 
 Known root files are `meta.json`, `thoughts.json`, `links.json`,
@@ -43,6 +150,13 @@ preserve their unrelated bytes safely. The shared note/evidence safety check
 recognizes known canonical UUIDs with valid case variants, case-exact compact
 identities and omitted associated record IDs. It also inspects one percent-encoding
 layer followed by one serialized `\uXXXX` layer without rewriting source text.
+Relationship diagnostic screening additionally inspects mixed
+percent/Unicode nesting for at most eight shrinking rounds. If decodable escapes
+remain at that budget, context is conservatively suppressed. This bounds work
+without echoing unresolved private-bearing invalid scalars; ownership/scalar
+refusals, trusted inclusion and retained-source screening remain unchanged.
+This screening applies before ownership validation and to later semantic refusal
+evidence using the validated excluded identities.
 Repeated arbitrary decoding and title/pixel matching are not inferred; this is
 bounded identity-association coverage, not a claim to detect every possible
 representation of private content. Safe exact originals and provably
@@ -70,10 +184,11 @@ All reviewed links use Kind 1:
 
 | Meaning | Relation / Meaning / Direction | Endpoints / representation |
 | --- | --- | --- |
-| Hierarchy | 1 / 1 / -1, 1 or 7 | Ordinary A parent, ordinary B child |
+| Hierarchy | 1 / 1 / -1, 1, 3 or 7 | Ordinary A parent, ordinary B child |
 | Hierarchy to source tag | 1 / 1 / -1 | Ordinary A parent, tag B child |
 | Hierarchy to category | 1 / 1 / -1 | Ordinary A parent, definition B child; reciprocal Parents/Children |
 | Jump | 3 / 1 / -1, 3, 5 or 7 | Ordinary endpoints; Related |
+| Normal jump to category | 3 / 1 / -1 | Ordinary A to definition B; reciprocal Related where created, no membership |
 | Tag assignment | 1 / 5 / -1 | Tag A classifies ordinary B; native tags or hidden-membership listing |
 | Instance assignment | 1 / 2 / -1 | Definition A classifies ordinary B; linked category membership |
 | System connection | 1 / 6 / -1 | System A to ordinary/definition/tag B; retained only |
@@ -85,13 +200,54 @@ definition and typed-member selection, the greedy
 hierarchy cover selects parents covering the most uncovered incident edges,
 with canonical key ties. It preserves cycles/multiple parents and does not
 claim a global minimum.
-The category signature does not admit Direction 1/7, reversed definition-to-ordinary
+The category hierarchy signature does not admit Direction 1/3/7, reversed definition-to-ordinary
 edges, definition-to-definition hierarchy or subtype inheritance. Category
 Parents/Children follow the title before Members/Gallery. Every direct included
 parent is linked, including intentional uncreated ordinary targets; hierarchy
 does not create membership or force an empty parent note when its category
 already covers the edge. TypeId and the exact instance link still establish
 classification independently.
+
+### Bounded relationship admission (module/profile version 7)
+
+Only two additional complete signatures are admitted: ordinary/ordinary
+`(Kind,Relation,Meaning,Direction)=(1,1,1,3)` and ordinary A/definition B
+`(1,3,1,-1)`. Child Relation1 fixes A as parent and B as child even when the
+Direction3 arrow points backward. Normal Meaning1/Jump Relation3 contributes
+Related connectivity only; matching instance Meaning2 and TypeId still establish
+membership independently. Related does not force creation of an empty ordinary
+endpoint. Existing category navigation stays after authored content and resources.
+
+The [TheBrain staff enum reference](https://forums.thebrain.com/post/in-links-json-what-are-these-fields-10616870)
+separates relation, meaning and directional bits. Controlled source research in
+[relationship fixtures](history/brz-to-obsidian/research/relationship-fixture-records.md)
+and [reverse-arrow fixtures](history/brz-to-obsidian/research/extended-relationship-fixture.md)
+establishes parent/child independently of arrows. These are documented/source
+facts and a bounded inference; no fresh native observation is claimed.
+
+Identity, collection, live endpoints, scalar types, custom types, unsupported
+roles/order/directions and classification correspondence remain strict. Included
+relationship refusals identify canonical relationship/endpoints, raw pointer and
+signature with relationship-specific guidance. Provisional raw omission suppresses
+pre-validation diagnostic disclosure; it never authorizes inclusion or bypasses
+global identity/ownership validation. Forgotten associations remain private.
+
+The reviewed TheBrain module/profile is now version9: version7 added the two
+relationship signatures; version8 closes the recognized HTML exclusion boundary;
+version9 closes active declaration-block refusal in documents and own labels.
+Source admission/refusal meanings changed. Source-neutral snapshot/policy/result/renderer/record remain version6;
+their fields and hierarchy/related meanings did not change. Alternative sources
+retain their own versions. Actual-ZIP Workflow/CLI exact-navigation controls and
+an independent raw oracle cover both shapes and rehashed semantic corruptions.
+An unchanged-original inspection and eight-record raw/snapshot comparison were
+progress evidence only. The fresh [five-input/fifteen-output preservation gate](history/red-vs-blue-investigation/actual-archive-acceptance.md)
+subsequently passed at clean runtime869982, with all originals unchanged.
+E's source-free checker still reports 16 preserved authored file-image URL
+occurrences per output; these are not archived local image resources or a clean
+editable-vault result. Native file-image handling remains unverified. Formal
+[#123](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/123) verification and
+integration records bind the report-only candidate; native comparison and the
+user's presentation verdict remain #124 under #78.
 
 ## Imported metadata and icon snapshots
 
@@ -128,6 +284,7 @@ Thought-owned attachments use SourceType 2:
 | --- | --- |
 | 1 / 4 | Thought Markdown at owner/Location; active content plus a safe exact `.md.original` backup; unsafe originals are omitted |
 | 1 / 0 | Ordinary file, except a sole nonempty canonical `Notes.md` on an ordinary thought: active Markdown plus a safe exact original backup; unsafe originals are omitted. Empty decoded placeholders remain backups without content eligibility. |
+| 2 / 0 | External file at a reviewed safe absolute drive-qualified Windows path, rendered as an encoded file URI and distinct Resources entry; no target access or payload copying |
 | 3 / 0 | Exact external HTTP/HTTPS URL reference; populated reviewed YouTube metadata adds independently derived native video presentation |
 | 5 / 0 | Decorative icon at owner/.data/Location; copied without Resources clutter |
 | 8 / 0 | Absolute Windows directory reference rendered as file URI |
@@ -178,9 +335,33 @@ text. Rich HTML notes and unverified rich/legacy transformations
 are unsupported. Nonempty events/access/custom-field collections and custom
 type hierarchies/custom link types also refuse.
 
+[CommonMark type-4 declaration blocks](https://spec.commonmark.org/0.31.2/#html-blocks)
+start with `<!` followed immediately by an ASCII letter, after zero through three
+spaces at the actual owning container's content start. Any letter case qualifies;
+refusal does not require a `>` before document or container end. Same-line and
+later closers, paragraph interruption and nested quote/list ownership remain
+unsupported. Already protected code/comments, escaped openers, nonletter and
+non-ASCII near misses and established non-block incomplete prose keep their exact
+authored bytes. Tabs affect block columns without changing raw Unicode offsets.
+Retained nonempty own thought labels use only this block qualification after
+inclusion and role/type/string validation; labels remain opaque Item strings.
+Inline reference display labels are distinct: incomplete inline `<!a` retains
+its exact visible alias, while actual complete HTML declarations still refuse.
+Included failures identify the owner and real document/payload or retained
+thoughts-label field with contextual review guidance. Excluded direct/transitive
+associations cannot leak raw label/content through diagnostics.
+
+The reviewed source route conservatively refuses a declaration following a
+non-1 ordered marker when the preceding paragraph's quote/list prefix is absent
+(for example `> Paragraph\n10. <!a`). The pinned parser starts a new ordered
+container there even with ordinary prose and no later closer. This is an explicit
+reviewed ownership limit, not a universal invalidity claim about CommonMark
+laziness. Matching existing-prefix paragraphs and real new-owner/blank-boundary
+contrasts are independently covered; no broader lazy admission is implemented.
+
 ## Approved warnings
 
-The fixed profile `thebrain-format5-reviewed`, version `3`, currently permits exactly:
+The fixed profile `thebrain-format5-reviewed`, now version `9`, retains the reviewed version-3 gap rules below:
 
 Findings must have the reviewed kind, compatible rule/profile, subject and
 evidence. Missing evidence and unknown kinds refuse; generic core contains no

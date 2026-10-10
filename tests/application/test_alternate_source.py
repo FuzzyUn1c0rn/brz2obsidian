@@ -154,6 +154,65 @@ def update_folio(path, change):
     path.write_text(json.dumps(data), encoding="utf-8")
 
 
+def test_alternate_external_file_materializes_owner_without_payload_access(tmp_path):
+    _, source = paired_sources(tmp_path)
+
+    def add_external_file(data):
+        data["assets"].append(
+            {
+                "key": "external:manual",
+                "owner": "empty:leaf",
+                "seed": "abcdef123456",
+                "name": "original external location",
+                "label": "Offline manual",
+                "role": "file",
+                "uri": "file:///Z:/missing/manual%20%231.pdf",
+            }
+        )
+
+    update_folio(source, add_external_file)
+    operation = workflow(FolioSourceModule(), FOLIO_POLICY)
+    inspected = operation.inspect(source)
+    converted = operation.convert(source, tmp_path / "vault")
+    assert inspected.outcome == converted.outcome == "clean"
+    assert inspected.counts.planned_assets == converted.counts.actual_assets == 4
+    assert converted.counts.actual_notes == 4
+    assert (
+        "[Offline manual](<file:///Z:/missing/manual%20%231.pdf>)"
+        in (tmp_path / "vault/Notes/Empty.md").read_text()
+    )
+    assert not any(
+        p.name == "manual #1.pdf" for p in (tmp_path / "vault/Attachments").rglob("*")
+    )
+
+
+@pytest.mark.parametrize("brz_version", ["3", "7", "8", "10"])
+def test_previous_shared_contract_and_unreviewed_brz_profile_refuse_explicitly(
+    tmp_path, brz_version
+):
+    brz, folio = paired_sources(tmp_path)
+    for source, module, policy in (
+        (
+            folio,
+            FolioSourceModule(),
+            FOLIO_POLICY.model_copy(update={"contract_version": 3}),
+        ),
+        (
+            brz,
+            BrzSourceModule(),
+            BRZ_POLICY.model_copy(
+                update={"module_version": brz_version, "profile_version": brz_version}
+            ),
+        ),
+    ):
+        result = workflow(module, policy).inspect(source)
+        assert (
+            result.outcome == "refused"
+            and result.issues[0].code == "unsupported_format"
+        )
+        assert result.receipt is None and result.inspection is None
+
+
 @pytest.mark.parametrize("start", [None, "absent:key", "tag:focus"])
 def test_alternate_entry_refusal_is_durable_and_does_not_publish(tmp_path, start):
     _, source = paired_sources(tmp_path)

@@ -266,7 +266,7 @@ def test_ordinary_parent_tag_child_keeps_hierarchy_without_forcing_tag_file(tmp_
 
 @pytest.mark.parametrize(
     "relation,meaning,direction",
-    [(1, 1, 0), (2, 1, -1), (4, 1, -1), (1, 1, 3), (3, 6, -1)],
+    [(1, 1, 0), (2, 1, -1), (4, 1, -1), (1, 1, 2), (3, 6, -1)],
 )
 def test_unverified_relationship_signatures_are_refused(
     tmp_path, relation, meaning, direction

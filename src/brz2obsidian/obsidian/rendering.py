@@ -15,6 +15,7 @@ from brz2obsidian.contracts import (
     RunMetadata,
 )
 from brz2obsidian.core import analyze
+from brz2obsidian.core import plan as build_plan
 from brz2obsidian.core.appearance import icon_snapshots as expected_icon_snapshots
 from brz2obsidian.core.items import assign_item_targets
 from brz2obsidian.core.references import validate_references
@@ -46,17 +47,17 @@ def _json(value):
 def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     snapshot = plan.analysis.snapshot
     if (
-        run_metadata.renderer_version != "3"
-        or snapshot.contract_version != 3
-        or plan.analysis.policy.contract_version != 3
+        run_metadata.renderer_version != "6"
+        or snapshot.contract_version != 6
+        or plan.analysis.policy.contract_version != 6
     ):
         raise MigrationRefused(
             (
                 Issue(
                     code="unsupported_format",
                     phase="rendering",
-                    message="Renderer requires version-3 contracts and renderer metadata",
-                    guidance="Use the current contract and set renderer_version to 3.",
+                    message="Renderer requires version-6 contracts and renderer metadata",
+                    guidance="Use the current contract and set renderer_version to 6.",
                 ),
             )
         )
@@ -87,6 +88,37 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
             )
         )
     checked_analysis = analyze(snapshot, plan.analysis.policy)
+    if (
+        plan.counts.text_adaptations != checked_analysis.counts.text_adaptations
+        or plan.counts.image_presentation_normalizations
+        != checked_analysis.counts.image_presentation_normalizations
+        or tuple(
+            a
+            for a in plan.adaptations
+            if a.kind in {"literal_text", "image_presentation"}
+        )
+        != tuple(
+            a
+            for a in build_plan(checked_analysis).adaptations
+            if a.kind in {"literal_text", "image_presentation"}
+        )
+        or tuple(i for i in plan.issues if i.code == "image_presentation_normalized")
+        != tuple(
+            i
+            for i in checked_analysis.issues
+            if i.code == "image_presentation_normalized"
+        )
+    ):
+        raise MigrationRefused(
+            (
+                Issue(
+                    code="invalid_reference",
+                    phase="rendering",
+                    message="Planned text or image presentation evidence, warnings or counts differ from validated document facts",
+                    guidance="Analyze and plan this snapshot again before rendering.",
+                ),
+            )
+        )
     expected_targets = assign_item_targets(checked_analysis, resource_owners(snapshot))
     expected_gaps, expected_presentations = source_gap_targets(
         snapshot, expected_targets, assign_asset_targets(snapshot)
@@ -338,6 +370,20 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     )
     report = "# Migration report\n\nOpen the root Home note to begin. Safe original note bytes are retained under Attachments. Forgotten thoughts are excluded by default; unsafe originals and unscopable history are omitted. Counts describe included scope.\n\n"
     report += f"Created {plan.counts.planned_notes} thought notes; preserved {plan.counts.planned_assets} present payloads.\n\n"
+    if plan.counts.text_adaptations:
+        report += f"Escaped {plan.counts.text_adaptations} literal prose tokens for Markdown display. Exact edits in migration-record.json use scoped source Unicode codepoint offsets before adaptation, with a scoped source digest; reference spans use adapted document text offsets and digest. Safe originals retain exact archived bytes.\n\n"
+        for owner in sorted(
+            {d.owner for d in snapshot.documents if d.text_adaptations}
+        ):
+            target = next(t for t in plan.item_targets if t.item_key == owner)
+            if target.created:
+                report += "- " + note_link(target, target.original_title) + "\n"
+        report += "\n"
+    external_files = sum(
+        a.role == "file" and a.availability == "external" for a in snapshot.assets
+    )
+    if external_files:
+        report += f"Retained {external_files} external file references as ordinary Resources links. Their original locations remain in migration-record.json. External targets were not checked, opened or copied; historical lengths do not establish accessibility.\n\n"
     report += "Unsupported feature classes are refused explicitly.\n"
     report += "\n[[Vault guide.md|Vault guide]] explains manual full-template selection for new objects, direct membership edits on existing notes, canonical properties and future-category starters. Bundled Templates is configured for insertion-day ISO dates; update dates are maintained explicitly.\n"
     report += (
@@ -364,6 +410,25 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     if any(a.video_presentation for a in snapshot.assets):
         report += "\nVideo playback depends on the remote service and network. Offline playback and service availability are not guaranteed. The original resource links remain available; no remote video bytes were archived or downloaded by this conversion.\n"
     report += gap_report(plan)
+    if plan.counts.image_presentation_normalizations:
+        report += "\n> [!warning] Image sizing normalized\n> Original image sizing declarations use ordinary responsive inline Markdown presentation; exact percentage sizing is not reproduced. Review placement and readability in each affected note, and adjust manually if desired. Images retain their original bytes and aspect ratio.\n\n"
+        for document in sorted(snapshot.documents, key=lambda d: d.key):
+            target = next(t for t in plan.item_targets if t.item_key == document.owner)
+            for reference in document.references:
+                normalization = reference.presentation_normalization
+                if normalization:
+                    declaration = (
+                        normalization.declaration.replace("`", "\\`")
+                        .replace("\r", " ")
+                        .replace("\n", " ")
+                    )
+                    report += (
+                        "- "
+                        + note_link(target, target.original_title)
+                        + ": `"
+                        + declaration
+                        + "`; exact declaration, scoped document codepoint span/digest and original reference remain in migration-record.json.\n"
+                    )
     if plan.issues:
         report += "\n## Source warnings\n\n"
         for issue in plan.issues:
@@ -408,7 +473,7 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     }
     record = {
         "schema": "brz2obsidian.migration",
-        "schema_version": 3,
+        "schema_version": 6,
         "converter_version": run_metadata.converter_version,
         "renderer_version": run_metadata.renderer_version,
         "source_identity": plan.source_identity.model_dump(),

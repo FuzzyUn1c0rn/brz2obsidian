@@ -8,25 +8,37 @@ from decimal import Decimal
 from pathlib import PurePosixPath
 from uuid import UUID
 
+from .relationships import relationship_problem
+
 _UUID_TEXT = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
 
 
-def contains_omitted_identity(text, tokens):
+def contains_omitted_identity(text, tokens, *, diagnostic=False):
     """Recognize proven identity spellings without changing retained source text."""
     if not tokens:
         return False
     if any(token in text for token in tokens):
         return True
-    # One URL-encoding layer and one serialized Unicode-escape layer are enough
-    # for these reviewed representations. This is inspection, never rewriting
-    # or repeated arbitrary decoding. Compact base64 identities stay case exact.
-    decoded = re.sub(r"%([0-9a-fA-F]{2})", lambda match: chr(int(match[1], 16)), text)
-    decoded = re.sub(
-        r"\\u([0-9a-fA-F]{4})", lambda match: chr(int(match[1], 16)), decoded
-    )
-    return any(token in decoded for token in tokens) or any(
-        match[0].lower() in tokens for match in _UUID_TEXT.finditer(decoded)
-    )
+    # Retained-source screening keeps its reviewed single pass. Diagnostics can
+    # reveal an arbitrary invalid scalar, so inspect mixed nested escapes for at
+    # most eight shrinking rounds, then suppress unresolved escaped context.
+    # Neither path rewrites source text or authorizes inclusion/validity.
+    decoded = text
+    for _ in range(8 if diagnostic else 1):
+        previous = decoded
+        decoded = re.sub(
+            r"%([0-9a-fA-F]{2})", lambda match: chr(int(match[1], 16)), decoded
+        )
+        decoded = re.sub(
+            r"\\u([0-9a-fA-F]{4})", lambda match: chr(int(match[1], 16)), decoded
+        )
+        if any(token in decoded for token in tokens) or any(
+            match[0].lower() in tokens for match in _UUID_TEXT.finditer(decoded)
+        ):
+            return True
+        if decoded == previous:
+            return False
+    return diagnostic and bool(re.search(r"%[0-9a-fA-F]{2}|\\u[0-9a-fA-F]{4}", decoded))
 
 
 def _positive_absent_txt_declaration(record, states):
@@ -64,10 +76,193 @@ def scope_records(records, physical_members, refuse, uuid):
     brain = uuid(records["meta.json"][0]["BrainId"])
     identities = set()
     thoughts = {}
+    private_ids = {
+        r.get("Id")
+        for r in records["thoughts.json"]
+        if r.get("ForgottenDateTime") and type(r.get("Id")) is str
+    }
+
+    omitted = set(private_ids)
+    for record in records["links.json"]:
+        if (
+            record.get("ThoughtIdA") in private_ids
+            or record.get("ThoughtIdB") in private_ids
+        ) and type(record.get("Id")) is str:
+            omitted.add(record["Id"])
+
+    associations = {
+        "SourceId",
+        "ThoughtId",
+        "AttachmentId",
+        "ObjectId",
+        "ItemId",
+        "LinkId",
+        "TargetId",
+    }
+
+    def decoded(value):
+        if not isinstance(value, str) or value.lstrip()[:1] not in {"{", "[", '"'}:
+            return None
+
+        def pairs(entries):
+            # Inspection must see every ownership declaration, including duplicate
+            # keys in an otherwise opaque serialized string. Never rewrite it.
+            result = {}
+            for key, entry in entries:
+                result[key] = [result[key], entry] if key in result else entry
+            return result
+
+        try:
+            return json.loads(value, parse_float=Decimal, object_pairs_hook=pairs)
+        except ValueError:
+            return None
+
+    def identifies_omitted(value, subjects=None):
+        subjects = omitted if subjects is None else subjects
+        if isinstance(value, str):
+            return (
+                value in subjects
+                or (
+                    _UUID_TEXT.fullmatch(value) is not None
+                    and value.lower() in subjects
+                )
+                or identifies_omitted(decoded(value), subjects)
+            )
+        if isinstance(value, (list, tuple)):
+            return any(identifies_omitted(entry, subjects) for entry in value)
+        return False
+
+    def associated(value, subjects=None):
+        subjects = omitted if subjects is None else subjects
+        if isinstance(value, dict):
+            return any(
+                (field in associations and identifies_omitted(entry, subjects))
+                or associated(entry, subjects)
+                for field, entry in value.items()
+            )
+        if isinstance(value, (list, tuple)):
+            return any(associated(entry, subjects) for entry in value)
+        if isinstance(value, str):
+            return associated(decoded(value), subjects)
+        return False
+
+    # Provisional omission is used only to suppress diagnostics before global
+    # validation. The validated inclusion/omission algorithm below is unchanged.
+    diagnostic_omitted = set(omitted)
+    while True:
+        previous = set(diagnostic_omitted)
+        for collection in records.values():
+            for record in collection:
+                if (
+                    associated(record, diagnostic_omitted)
+                    and type(record.get("Id")) is str
+                ):
+                    diagnostic_omitted.add(record["Id"])
+        if diagnostic_omitted == previous:
+            break
+
+    diagnostic_tokens = set(diagnostic_omitted)
+    for key in diagnostic_omitted:
+        try:
+            canonical = UUID(key)
+        except ValueError:
+            continue
+        diagnostic_tokens.add(
+            base64.urlsafe_b64encode(canonical.bytes_le).decode().rstrip("=")
+        )
+
+    def diagnostic_unsafe(value):
+        if isinstance(value, str):
+            return contains_omitted_identity(
+                value, diagnostic_tokens, diagnostic=True
+            ) or diagnostic_unsafe(decoded(value))
+        if isinstance(value, dict):
+            return any(
+                diagnostic_unsafe(k) or diagnostic_unsafe(v) for k, v in value.items()
+            )
+        if isinstance(value, (list, tuple)):
+            return any(diagnostic_unsafe(v) for v in value)
+        return False
+
+    def relation_problem(record, index, code, message):
+        relationship_problem(
+            record,
+            index,
+            refuse,
+            uuid,
+            code,
+            message,
+            private=diagnostic_unsafe(record) or associated(record, diagnostic_omitted),
+        )
+
+    def extend_omitted():
+        if not omitted:
+            return
+        changed = True
+        while changed:
+            changed = False
+            for collection in records.values():
+                for record in collection:
+                    if record.get("Id") in omitted:
+                        continue
+                    if associated(record) and type(record.get("Id")) is str:
+                        omitted.add(record["Id"])
+                        changed = True
+
+    # This conservative closure controls disclosure only; all identities,
+    # ownership and forgotten markers must still pass validation below.
+    extend_omitted()
+    private_ids = omitted
+
+    def attachment_problem(record, index, message):
+        # Ownership is not yet fully trusted. Never expose a record that names
+        # a forgotten subject; only canonical identifiers enter diagnostics.
+        if contains_omitted_identity(json.dumps(record), private_ids):
+            refuse("invalid_source", message)
+        subjects = []
+        for field in ("SourceId", "Id"):
+            try:
+                subjects.append(uuid(record.get(field)))
+            except ValueError, TypeError, AttributeError:
+                pass
+        refuse(
+            "invalid_source",
+            message,
+            tuple(dict.fromkeys(subjects)),
+            evidence=(f"attachments.json:{index}",),
+            guidance=(
+                "Review the external-file attachment identity and ownership in the source records; external targets are not accessed."
+                if record.get("Type") == 2
+                else "Review the attachment identity and ownership in the source records."
+            ),
+        )
+
     for name in ("thoughts.json", "links.json", "attachments.json"):
-        for record in records[name]:
-            key = uuid(record.get("Id"))
+        for index, record in enumerate(records[name]):
+            try:
+                key = uuid(record.get("Id"))
+            except ValueError, TypeError, AttributeError:
+                if name == "attachments.json":
+                    attachment_problem(record, index, "Invalid attachment identity")
+                if name == "links.json":
+                    relation_problem(
+                        record, index, "invalid_source", "Invalid relationship identity"
+                    )
+                raise
             if key in identities or record.get("BrainId") != brain:
+                if name == "attachments.json":
+                    attachment_problem(
+                        record,
+                        index,
+                        "Invalid attachment identity or collection ownership",
+                    )
+                if name == "links.json":
+                    relation_problem(
+                        record,
+                        index,
+                        "invalid_source",
+                        "Invalid relationship identity or collection ownership",
+                    )
                 refuse(
                     "invalid_source", "Invalid live identity or collection ownership"
                 )
@@ -100,14 +295,17 @@ def scope_records(records, physical_members, refuse, uuid):
         refuse("invalid_source", "A live identity also occurs in deleted history")
     dropped_members = set()
     claimed_members = {}
-    for record in records["attachments.json"]:
-        owner = uuid(record.get("SourceId"))
+    for index, record in enumerate(records["attachments.json"]):
+        try:
+            owner = uuid(record.get("SourceId"))
+        except ValueError, TypeError, AttributeError:
+            attachment_problem(record, index, "Invalid attachment ownership")
         if owner not in thoughts:
-            refuse("invalid_source", "Invalid attachment ownership")
+            attachment_problem(record, index, "Invalid attachment ownership")
         location = record.get("Location")
         if type(location) is not str or not location:
-            refuse("invalid_source", "Invalid attachment location")
-        if record.get("Type") not in {3, 8}:
+            attachment_problem(record, index, "Invalid attachment location")
+        if record.get("Type") not in {2, 3, 8}:
             path = PurePosixPath(location)
             if (
                 path.is_absolute()
@@ -130,10 +328,23 @@ def scope_records(records, physical_members, refuse, uuid):
                 dropped_members.add(member)
         if owner in excluded:
             omitted.add(record["Id"])
-    for record in records["links.json"]:
-        a, b = uuid(record.get("ThoughtIdA")), uuid(record.get("ThoughtIdB"))
+    for index, record in enumerate(records["links.json"]):
+        try:
+            a, b = uuid(record.get("ThoughtIdA")), uuid(record.get("ThoughtIdB"))
+        except ValueError, TypeError, AttributeError:
+            relation_problem(
+                record,
+                index,
+                "invalid_source",
+                "Invalid relationship endpoint identity",
+            )
         if a not in thoughts or b not in thoughts:
-            refuse("invalid_reference", "Relationship has a nonlive endpoint")
+            relation_problem(
+                record,
+                index,
+                "invalid_reference",
+                "Relationship has a nonlive endpoint",
+            )
         if a in excluded or b in excluded:
             omitted.add(record["Id"])
     for record in thoughts.values():
@@ -157,72 +368,46 @@ def scope_records(records, physical_members, refuse, uuid):
                 for record in declarations
             )
         ):
-            refuse("invalid_source", "Multiple declarations assign one payload")
+            if any(
+                contains_omitted_identity(json.dumps(r), private_ids)
+                for r in declarations
+            ):
+                refuse("invalid_source", "Multiple declarations assign one payload")
+            owner = declarations[0]["SourceId"]
+            related = [
+                r
+                for r in records["attachments.json"]
+                if r["SourceId"] == owner
+                and (
+                    r in declarations
+                    or (
+                        type(r.get("SourceType")) is int
+                        and r["SourceType"] == 2
+                        and type(r.get("Type")) is int
+                        and r["Type"] == 1
+                        and type(r.get("NoteType")) is int
+                        and (
+                            r["NoteType"] == 4
+                            or (r["NoteType"] == 0 and r.get("Location") == "Notes.md")
+                        )
+                    )
+                )
+                and not contains_omitted_identity(json.dumps(r), private_ids)
+            ]
+            refuse(
+                "invalid_source",
+                "Multiple declarations assign one payload",
+                (owner, *(r["Id"] for r in related)),
+                evidence=tuple(
+                    f"attachments.json:{i}"
+                    for i, r in enumerate(records["attachments.json"])
+                    if r in related
+                ),
+                guidance="Review the affected note references and attachment declarations; each archived image payload must have one unambiguous identity.",
+            )
     if not excluded:
         return records, excluded, dropped_members, ()
-    associations = {
-        "SourceId",
-        "ThoughtId",
-        "AttachmentId",
-        "ObjectId",
-        "ItemId",
-        "LinkId",
-        "TargetId",
-    }
-
-    def decoded(value):
-        if not isinstance(value, str) or value.lstrip()[:1] not in {"{", "[", '"'}:
-            return None
-
-        def pairs(entries):
-            # Inspection must see every ownership declaration, including duplicate
-            # keys in an otherwise opaque serialized string. Never rewrite it.
-            result = {}
-            for key, entry in entries:
-                result[key] = [result[key], entry] if key in result else entry
-            return result
-
-        try:
-            return json.loads(value, parse_float=Decimal, object_pairs_hook=pairs)
-        except ValueError:
-            return None
-
-    def identifies_omitted(value):
-        if isinstance(value, str):
-            return (
-                value in omitted
-                or (
-                    _UUID_TEXT.fullmatch(value) is not None and value.lower() in omitted
-                )
-                or identifies_omitted(decoded(value))
-            )
-        if isinstance(value, (list, tuple)):
-            return any(identifies_omitted(entry) for entry in value)
-        return False
-
-    def associated(value):
-        if isinstance(value, dict):
-            return any(
-                (field in associations and identifies_omitted(entry))
-                or associated(entry)
-                for field, entry in value.items()
-            )
-        if isinstance(value, (list, tuple)):
-            return any(associated(entry) for entry in value)
-        if isinstance(value, str):
-            return associated(decoded(value))
-        return False
-
-    changed = True
-    while changed:
-        changed = False
-        for collection in records.values():
-            for record in collection:
-                if record.get("Id") in omitted:
-                    continue
-                if associated(record) and type(record.get("Id")) is str:
-                    omitted.add(record["Id"])
-                    changed = True
+    extend_omitted()
     tokens = set(omitted)
     for key in omitted:
         try:

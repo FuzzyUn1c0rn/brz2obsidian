@@ -204,7 +204,7 @@ def test_complete_category_hierarchy_precedes_members_and_preserves_selection(
         ({"Direction": "-1"}, "unsupported_feature"),
         ({"Kind": 2}, "unsupported_feature"),
         ({"Kind": True}, "unsupported_feature"),
-        ({"Relation": 3}, "unsupported_feature"),
+        ({"Relation": 3, "Direction": 3}, "unsupported_feature"),
         ({"Meaning": 3}, "unsupported_feature"),
         ({"Meaning": 2}, "unsupported_feature"),
         ({"TypeId": identity(99)}, "unsupported_feature"),

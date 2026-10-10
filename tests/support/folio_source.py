@@ -32,6 +32,7 @@ from brz2obsidian.contracts import (
     SourceIdentity,
     SourcePolicy,
     SourceSnapshot,
+    TextAdaptation,
     VideoPresentation,
 )
 
@@ -41,7 +42,7 @@ FOLIO_POLICY = SourcePolicy(
     module_id="synthetic-folio",
     module_version="3",
     format_version="folio/1",
-    contract_version=3,
+    contract_version=6,
 )
 
 
@@ -108,7 +109,7 @@ class FolioSession:
         )
         documents = []
         for d in data["documents"]:
-            text = self.original_bytes[d["original"]].decode("utf-8")
+            text = d.get("text", self.original_bytes[d["original"]].decode("utf-8"))
             text_digest = digest(text.encode("utf-8"))
             references = tuple(
                 ReferenceSpan(**r, document_digest=text_digest)
@@ -122,6 +123,9 @@ class FolioSession:
                     text_digest=text_digest,
                     original_asset_id=d["original"],
                     references=references,
+                    text_adaptations=tuple(
+                        TextAdaptation(**e) for e in d.get("text_adaptations", [])
+                    ),
                     evidence=("folio.json",),
                 )
             )
@@ -162,7 +166,7 @@ class FolioSession:
             snapshot_digest="",
         )
         snapshot = SourceSnapshot(
-            contract_version=3,
+            contract_version=6,
             identity=identity,
             collection_title=data["collection"],
             entry_key=data["start"],
