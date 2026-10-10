@@ -17,7 +17,7 @@ acceptance remain pending gates in the [current frontier](https://github.com/Fuz
 
 ## External file references (version 4)
 
-Version 4 introduced external file support. The current version-7 module/profile
+Version 4 introduced external file support. The current version-9 module/profile
 retains it through version-6 snapshot/policy, renderer and result/record contracts. Thought-owned
 `SourceType=2`, `Type=2`, `NoteType=0` records with coherent identities, integer
 nonnegative lengths and ordinary boolean flags represent external files.
@@ -239,10 +239,15 @@ Source admission/refusal meanings changed. Source-neutral snapshot/policy/result
 their fields and hierarchy/related meanings did not change. Alternative sources
 retain their own versions. Actual-ZIP Workflow/CLI exact-navigation controls and
 an independent raw oracle cover both shapes and rehashed semantic corruptions.
-An unchanged-original inspection and eight-record raw/snapshot comparison are
-progress evidence only. Complete five-input/fifteen-output preservation remains
-[#123](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/123); native comparison
-and the user's presentation verdict remain #124 under #78.
+An unchanged-original inspection and eight-record raw/snapshot comparison were
+progress evidence only. The fresh [five-input/fifteen-output preservation gate](history/red-vs-blue-investigation/actual-archive-acceptance.md)
+subsequently passed at clean runtime869982, with all originals unchanged.
+E's source-free checker still reports 16 preserved authored file-image URL
+occurrences per output; these are not archived local image resources or a clean
+editable-vault result. Native file-image handling remains unverified. Formal
+[#123](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/123) verification and
+integration records bind the report-only candidate; native comparison and the
+user's presentation verdict remain #124 under #78.
 
 ## Imported metadata and icon snapshots
 

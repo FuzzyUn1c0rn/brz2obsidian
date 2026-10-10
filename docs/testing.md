@@ -654,6 +654,19 @@ review and integration precede the entirely new five-original/fifteen-output gat
 
 ## Private full-export acceptance
 
+The fresh five-original/fifteen-output gate passed on 2026-10-10 at clean runtime
+`86998226247a4111b832b56314cc5552425b9770`, with current BRZ module/profile9 and
+shared migration contracts6. All original pins and assessed runtime/audit bytes
+remained unchanged; the complete inventories cover 11,826 files. See the
+[complete actual matrix and qualified supplemental diagnostics](history/red-vs-blue-investigation/actual-archive-acceptance.md).
+All twelve A-D source-free library/CLI checks were clean. E's three outputs each
+retained 16 file-URL image `unsafe_reference` notices (14 distinct strings in one
+note), library `issues` and CLI2, consistent with the contained-read checker
+contract. Complete source-bound preservation passed separately. Native file-image
+handling is unverified; no parser scheme inference supplies native inactivity,
+and the affected sample remains held until an explicit automatic-load guard.
+Native and user acceptance remain separate gates.
+
 The complete v3 four-original gate passed on 2026-10-06 at verified clean root
 `e2c5fc3f05d2daa0d0547d2bbaa2b12557a248b5`, in fresh `tmp/m5`. All twelve
 A/B/C/D exact/repeat/reordered outputs passed the driver and a separate complete
@@ -693,6 +706,7 @@ Set PYTHONPATH even in the integration checkout.
 
 ```powershell
 $env:PYTHONIOENCODING = 'utf-8'
+$env:PYTHONUTF8 = '1'
 $env:PYTHONPATH = (Join-Path (Get-Location) 'src') + ';' + (Get-Location)
 $sourceA = 'C:\path\to\exact-A.brz'
 $sourceB = 'C:\path\to\exact-B.brz'
@@ -700,7 +714,7 @@ $sourceC = 'C:\path\to\exact-C.brz'
 $sourceD = 'C:\path\to\Management & Leadership 2026-10-05.brz'
 $sourceE = 'C:\path\to\exact-E.brz'
 $output = Join-Path (Get-Location) 'tmp/audit-01'
-.\.venv\Scripts\python.exe -m tests.local_acceptance.run --source-a $sourceA --source-b $sourceB --source-c $sourceC --source-d $sourceD --source-e $sourceE --output $output
+.\.venv\Scripts\python.exe -X utf8 -m tests.local_acceptance.run --source-a $sourceA --source-b $sourceB --source-c $sourceC --source-d $sourceD --source-e $sourceE --output $output
 ```
 
 The synthetic tooling example alone supplies no private-input acceptance; the
