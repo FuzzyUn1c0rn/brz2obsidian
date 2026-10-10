@@ -244,7 +244,7 @@ def test_cli_reports_literal_counts_and_context_in_both_output_formats(
         == 2
     )
     assert main(["convert", str(source), str(tmp_path / "vault")]) == 0
-    assert "Literal text adaptations: 2" in capsys.readouterr().out
+    assert "Text adaptations: 2" in capsys.readouterr().out
     bad = literal_archive(tmp_path / "bad.brz", b"<Enter></Enter>")
     assert main(["inspect", str(bad)]) == 1
     text = capsys.readouterr().out
@@ -331,7 +331,7 @@ def test_bom_and_transformed_block_coordinates_preserve_original_bytes(
         assert edit.source_digest == sha256(original.encode()).hexdigest()
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 4, 5, 7])
+@pytest.mark.parametrize("version", [1, 2, 3, 4, 5, 6, 8])
 def test_result_consumers_reject_old_and_future_closed_versions(tmp_path, version):
     from pydantic import ValidationError
 

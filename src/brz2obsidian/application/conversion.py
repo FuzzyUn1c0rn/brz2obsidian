@@ -15,6 +15,7 @@ from brz2obsidian.contracts import Counts, Issue, MigrationRefused
 # Never forward source/publisher exception text, evidence or authored guidance.
 # These messages cover safe actions while retaining only explicit path facts.
 _SAFE_FINDINGS = {
+    "formatting_loss": "Included note formatting needs review: table layout may become responsive, custom icons use visible title fallbacks, or an insert remains unsupported. Review affected notes and declarations in the Migration report and edit the converted Markdown if needed.",
     "review_changed": "The current source or conversion compatibility changed. Inspect the current archive before converting.",
     "source_changed": "The source changed during conversion. Inspect a stable export before converting again.",
     "invalid_source": "The source or prepared output is inconsistent. Review the export and inspect again.",

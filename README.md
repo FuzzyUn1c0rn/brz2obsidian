@@ -112,6 +112,13 @@ Export your Brain as a `.brz` archive in TheBrain and keep the original as a
 backup. Make sure the Brain has a Home thought before exporting. Use the `.brz`
 file directly; you do not need to unzip it.
 
+Reviewed Markdown inserts use native Obsidian presentation: static linked ToCs,
+editable responsive tables and all 13 native callout types. Authored emoji icons
+remain visible in callout titles. Formatting-loss warnings identify table layout
+changes, icon fallbacks and unsupported declarations; review the Migration report
+and linked notes after conversion. ToCs need manual updates after heading edits.
+No extra callout plugin, CSS snippet or custom icon assets are required.
+
 **Forgotten thoughts are excluded automatically**, along with their owned
 content and connections. Links and embeds pointing to excluded thoughts are
 removed from imported note text. There is no option to include forgotten

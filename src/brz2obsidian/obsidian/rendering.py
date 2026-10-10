@@ -47,17 +47,17 @@ def _json(value):
 def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     snapshot = plan.analysis.snapshot
     if (
-        run_metadata.renderer_version != "6"
-        or snapshot.contract_version != 6
-        or plan.analysis.policy.contract_version != 6
+        run_metadata.renderer_version != "7"
+        or snapshot.contract_version != 7
+        or plan.analysis.policy.contract_version != 7
     ):
         raise MigrationRefused(
             (
                 Issue(
                     code="unsupported_format",
                     phase="rendering",
-                    message="Renderer requires version-6 contracts and renderer metadata",
-                    guidance="Use the current contract and set renderer_version to 6.",
+                    message="Renderer requires version-7 contracts and renderer metadata",
+                    guidance="Use the current contract and set renderer_version to 7.",
                 ),
             )
         )
@@ -371,7 +371,7 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     report = "# Migration report\n\nOpen the root Home note to begin. Safe original note bytes are retained under Attachments. Forgotten thoughts are excluded by default; unsafe originals and unscopable history are omitted. Counts describe included scope.\n\n"
     report += f"Created {plan.counts.planned_notes} thought notes; preserved {plan.counts.planned_assets} present payloads.\n\n"
     if plan.counts.text_adaptations:
-        report += f"Escaped {plan.counts.text_adaptations} literal prose tokens for Markdown display. Exact edits in migration-record.json use scoped source Unicode codepoint offsets before adaptation, with a scoped source digest; reference spans use adapted document text offsets and digest. Safe originals retain exact archived bytes.\n\n"
+        report += f"Applied {plan.counts.text_adaptations} exact text adaptations for Markdown display, including literal escaping and insert normalization where present. Exact edits in migration-record.json use scoped source Unicode codepoint offsets before adaptation, with a scoped source digest; reference spans use adapted document text offsets and digest. Safe originals retain exact archived bytes. Generated ToCs are static: update their links and heading block IDs after heading edits. Native callouts retain Obsidian's colours and icons; authored icon metadata uses a visible title fallback.\n\n"
         for owner in sorted(
             {d.owner for d in snapshot.documents if d.text_adaptations}
         ):
@@ -432,12 +432,17 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     if plan.issues:
         report += "\n## Source warnings\n\n"
         for issue in plan.issues:
+            affected_notes = [
+                note_link(t, t.original_title)
+                for t in plan.item_targets
+                if t.created and t.item_key in issue.affected
+            ]
             message = (
                 re.sub(r"([\\`*_{}\[\]<>#])", r"\\\1", issue.message)
                 .replace("\r", " ")
                 .replace("\n", " ")
             )
-            report += f"- {issue.code} ({issue.rule_id}): {message} {issue.guidance}\n"
+            report += f"- {', '.join(affected_notes)} — {issue.code} ({issue.rule_id}): {message} {issue.guidance}\n"
     if any(r.kind in {"hierarchy", "related"} for r in snapshot.relationships):
         report += "\nRelationships use simple Parents, Children and Related links. Original arrows and one-way visibility details remain in the migration record.\n"
     listing = uncreated_listing(plan)
@@ -473,7 +478,7 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     }
     record = {
         "schema": "brz2obsidian.migration",
-        "schema_version": 6,
+        "schema_version": 7,
         "converter_version": run_metadata.converter_version,
         "renderer_version": run_metadata.renderer_version,
         "source_identity": plan.source_identity.model_dump(),

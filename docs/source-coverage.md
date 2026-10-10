@@ -17,8 +17,8 @@ acceptance remain pending gates in the [current frontier](https://github.com/Fuz
 
 ## External file references (version 4)
 
-Version 4 introduced external file support. The current version-9 module/profile
-retains it through version-6 snapshot/policy, renderer and result/record contracts. Thought-owned
+Version 4 introduced external file support. The current version-10 module/profile
+retains it through version-7 snapshot/policy, renderer and result/record contracts. Thought-owned
 `SourceType=2`, `Type=2`, `NoteType=0` records with coherent identities, integer
 nonnegative lengths and ordinary boolean flags represent external files.
 Reviewed locations are safe absolute drive-qualified Windows file paths; UNC,
@@ -232,12 +232,15 @@ signature with relationship-specific guidance. Provisional raw omission suppress
 pre-validation diagnostic disclosure; it never authorizes inclusion or bypasses
 global identity/ownership validation. Forgotten associations remain private.
 
-The reviewed TheBrain module/profile is now version9: version7 added the two
-relationship signatures; version8 closes the recognized HTML exclusion boundary;
-version9 closes active declaration-block refusal in documents and own labels.
-Source admission/refusal meanings changed. Source-neutral snapshot/policy/result/renderer/record remain version6;
-their fields and hierarchy/related meanings did not change. Alternative sources
-retain their own versions. Actual-ZIP Workflow/CLI exact-navigation controls and
+The reviewed TheBrain module/profile uses version 10: version 7 added the two
+relationship signatures; version 8 closes the recognized HTML exclusion boundary;
+version 9 closes active declaration-block refusal in documents and own labels;
+version 10 admits reviewed Markdown inserts. These source-profile updates change
+admission, refusal and formatting-loss meanings. Source-neutral snapshot, policy,
+result, renderer and record contracts use version 7 for generic adaptation kinds,
+table-cell reference context and formatting-loss warnings. Existing hierarchy and
+related meanings remain unchanged. Alternative sources retain their own versions.
+Actual-ZIP Workflow/CLI exact-navigation controls and
 an independent raw oracle cover both shapes and rehashed semantic corruptions.
 An unchanged-original inspection and eight-record raw/snapshot comparison were
 progress evidence only. The fresh [five-input/fifteen-output preservation gate](history/red-vs-blue-investigation/actual-archive-acceptance.md)
@@ -361,7 +364,7 @@ contrasts are independently covered; no broader lazy admission is implemented.
 
 ## Approved warnings
 
-The fixed profile `thebrain-format5-reviewed`, now version `9`, retains the reviewed version-3 gap rules below:
+The fixed profile `thebrain-format5-reviewed`, now version `10`, retains the reviewed version-3 gap rules below:
 
 Findings must have the reviewed kind, compatible rule/profile, subject and
 evidence. Missing evidence and unknown kinds refuse; generic core contains no
@@ -462,3 +465,31 @@ Available unrelated icons and the narrow present-icon length discrepancy rule
 retain actual measured bytes and hashes. Decorative absent icons do not create
 Resources clutter or broken local links. The read-only checker accepts neutral
 properties and still reports missing actual image targets.
+
+## Markdown inserts (module/profile 10, contracts 7)
+
+[Accepted scope and native presentation](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/152) admit parser-active standalone `[/toc/]` markers, the evidenced `:(table="column-widths:-1,0,0,0,174;justification:default"):` suffix, and callouts of types note, abstract, info, todo, tip, success, question, warning, failure, danger, bug, example and quote. ToCs list authored headings in source hierarchy, excluding their immediately associated ToC headings and generated content. Static Markdown links to stable block destinations distinguish duplicate labels, Unicode and punctuation. Multiline setext headings normalize to equivalent single-line ATX headings for native Obsidian portability; inline heading content is retained. Generated lists are static and need manual maintenance after edits.
+
+ToC labels include displayed image alt text, including formatted alt text. An
+image with empty alt text contributes the neutral label `Image`; the original
+heading and its image reference remain intact. Empty displayed headings receive
+the neutral label `Heading`. Carets inside authored image alt text, inline code
+and escaped prose remain part of the label; only actual trailing block IDs are
+excluded from display. Unique authored block IDs remain destinations. Repeated
+heading IDs retain the first destination and receive distinct generated IDs for
+later headings; an ID shared with a body block is replaced on the heading.
+These collision repairs retain exact source edits and disclose a formatting-loss
+warning advising authors to update affected links.
+
+Generated labels escape a trailing literal caret-ID-like suffix that Obsidian
+would otherwise hide. Complete single-dollar inline mathematics without link
+brackets or angle delimiters retains its exact formula before Markdown label
+escaping, including commands, grouping and subscripts. Parser-owned code, image
+alt text and escaped dollars remain literal; equal-looking mathematical strings
+in these contexts do not borrow a neighbouring expression's interpretation.
+
+The table declaration requires unambiguous cell counts and numeric width entries (one leading layout entry plus one per column) with default justification. Header separators are added when missing; valid authored tables retain their formatting. Escaped pipes and code spans establish source cell boundaries; native output escapes generated thought-link alias pipes and uses narrowly generated escaped `<code>` elements for pipe-containing code spans without changing displayed cell text or formatting. Imported source HTML keeps its existing refusal policy; only proven generated code regions are protected while tracing references. Exact declarations remain in finding evidence and exact before/after scoped edits in document evidence. Responsive native layout replaces source column widths and justification, with an actionable formatting-loss warning. Malformed or unsupported declarations retain source text and warnings rather than guessed cell structure.
+
+Recognized sibling callout starts become distinct native panels. Titles, +/− folding flags, nested callouts, parent-depth returns and bodies remain intact. `> [!tip|icon:😂]` becomes `> [!tip] 😂 Tip`; authored titles receive the emoji prefix. The warning explains visible title fallback alongside the native icon. Unsupported or ambiguous icon metadata remains visibly in the title with a warning. No native standard type colour/icon differences are losses; no generated CSS, source icons or community plugins are needed.
+
+Code, inline code, comments, escapes and unrelated prose retain parser ownership. Compatible mathematics is unchanged. Adaptations compose with literal-angle words, thought/image destinations and responsive image sizing before reference tracing; original eligible bytes and asset bytes follow existing preservation policy. Included-scope findings reach inspection/conversion, CLI, safe UI warning review and linked migration reports without being classified as missing payloads. Public synthetic actual-BRZ controls exercise these boundaries. Native output verification remains separate from syntax assertions.

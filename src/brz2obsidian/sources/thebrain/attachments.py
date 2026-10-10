@@ -26,6 +26,7 @@ from .findings import (
     ZERO_LENGTH_ABSENT_TXT_RULE,
 )
 from .images import validate_note_image
+from .inserts import INSERT_RULE, adapt_note, trace_adapted_references
 from .literals import adapt_literals, source_position
 from .notes import (
     bind_note_references,
@@ -447,8 +448,28 @@ def normalize_attachments(
                     "invalid_reference",
                     "Note contains an excluded association outside removable references",
                 )
-            if removals:
-                adapted, text_adaptations, references = trace_scoped(text)
+            try:
+                adapted, text_adaptations, insert_losses = adapt_note(text)
+                references = trace_adapted_references(adapted, text_adaptations)
+            except MigrationRefused as error:
+                issue = error.issues[0]
+                source_refuse(
+                    issue.code,
+                    issue.message,
+                    (owner, asset_id),
+                    evidence=(pointer,),
+                    guidance=issue.guidance,
+                )
+            for loss in insert_losses:
+                findings.append(
+                    SourceFinding(
+                        kind="formatting_loss",
+                        rule_id=INSERT_RULE,
+                        affected=(owner, asset_id),
+                        observed_json=json.dumps(loss, ensure_ascii=False),
+                        evidence=(pointer,),
+                    )
+                )
             text = adapted
             documents.append(
                 Document(

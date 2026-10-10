@@ -28,6 +28,8 @@ def render_document(document, note_path, plan):
             )
         if span.kind == "item":
             replacement = note_link(assigned, span.display_text)
+            if span.table_cell:
+                replacement = replacement.replace("|", r"\|")
         else:
             relative = posixpath.relpath(
                 assigned.relative_path, posixpath.dirname(note_path) or "."

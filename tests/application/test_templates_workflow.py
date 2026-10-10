@@ -2,7 +2,10 @@
 
 import hashlib
 import json
+import tempfile
+from pathlib import Path
 
+import pytest
 import yaml
 
 from brz2obsidian.application.wiring import default_workflow
@@ -10,6 +13,15 @@ from tests.application.test_categories_workflow import typed_archive
 from tests.application.test_graph_workflow import graph_archive, identity
 from tests.local_acceptance.checker import compare_vaults
 from tests.local_acceptance.run import reordered_archive
+
+
+@pytest.fixture
+def short_template_path():
+    # Keep maximal imported names within the product's absolute path limit.
+    root = Path(__file__).resolve().parents[2] / "tmp" / "tc"
+    root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=root, prefix="") as path:
+        yield Path(path)
 
 
 def test_native_template_date_tokens_survive_safe_yaml_rewriting_and_insertion(
@@ -203,11 +215,9 @@ def test_inspection_manifest_record_and_configuration_account_for_every_support_
 
 
 def test_category_templates_reuse_safe_targets_through_collisions_and_reordering(
-    tmp_path,
+    short_template_path,
 ):
-    # Leave room for the intentionally maximal names in a managed worktree.
-    tmp_path = tmp_path.parent / "tc"
-    tmp_path.mkdir()
+    tmp_path = short_template_path
     source = graph_archive(
         tmp_path / "collisions.brz",
         {

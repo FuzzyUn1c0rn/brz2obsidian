@@ -8,14 +8,23 @@ from .findings import (
     ICON_LENGTH_RULE,
     ZERO_LENGTH_ABSENT_TXT_RULE,
 )
+from .inserts import INSERT_RULE
 
 BRZ_POLICY = SourcePolicy(
     profile_id="thebrain-format5-reviewed",
-    profile_version="9",
+    profile_version="10",
     module_id="thebrain-brz",
-    module_version="9",
+    module_version="10",
     format_version="5",
     finding_dispositions=(
+        FindingDisposition(
+            rule_id=INSERT_RULE,
+            kind="formatting_loss",
+            disposition="warning",
+            issue_code="formatting_loss",
+            message="Included thought-note formatting uses a visible fallback or remains unsupported.",
+            guidance="Review the declaration and affected note in the Migration report; edit the converted Markdown or repair the source and re-export.",
+        ),
         FindingDisposition(
             rule_id=ABSENT_TYPE_ICON_RULE,
             kind="known_absent_payload",

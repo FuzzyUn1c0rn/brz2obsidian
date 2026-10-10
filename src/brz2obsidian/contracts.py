@@ -67,6 +67,7 @@ class ReferenceSpan(Contract):
     kind: Literal["item", "image"]
     target: str
     display_text: str
+    table_cell: bool = False
     document_digest: str
     source_target: str | None = None
     destination_start: int | None = None
@@ -139,6 +140,7 @@ class ClassificationAssignment(Contract):
 class TextAdaptation(Contract):
     """An exact edit from scoped source text into the document's adapted text."""
 
+    kind: Literal["literal_text", "markdown_insert"] = "literal_text"
     start: int
     end: int
     before: str
@@ -248,7 +250,7 @@ class SourceAccounting(Contract):
 
 
 class SourceSnapshot(Contract):
-    contract_version: Literal[6] = 6
+    contract_version: Literal[7] = 7
     identity: SourceIdentity
     collection_title: str
     entry_key: str | None
@@ -280,7 +282,7 @@ class SourcePolicy(Contract):
     module_id: str
     module_version: str
     format_version: str
-    contract_version: Literal[6] = 6
+    contract_version: Literal[7] = 7
     entry_required: bool = True
     finding_dispositions: tuple[FindingDisposition, ...] = ()
 
@@ -490,7 +492,7 @@ class RunResult(Contract):
     schema_: Literal["brz2obsidian.result"] = Field(
         default="brz2obsidian.result", alias="schema"
     )
-    schema_version: Literal[6] = 6
+    schema_version: Literal[7] = 7
     converter_version: str
     operation: Literal["inspect", "convert"]
     outcome: Literal["clean", "warnings", "refused", "failed"]
