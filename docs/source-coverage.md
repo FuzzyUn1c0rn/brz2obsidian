@@ -481,6 +481,13 @@ later headings; an ID shared with a body block is replaced on the heading.
 These collision repairs retain exact source edits and disclose a formatting-loss
 warning advising authors to update affected links.
 
+Generated labels escape a trailing literal caret-ID-like suffix that Obsidian
+would otherwise hide. Complete single-dollar inline mathematics without link
+brackets or angle delimiters retains its exact formula before Markdown label
+escaping, including commands, grouping and subscripts. Parser-owned code, image
+alt text and escaped dollars remain literal; equal-looking mathematical strings
+in these contexts do not borrow a neighbouring expression's interpretation.
+
 The table declaration requires unambiguous cell counts and numeric width entries (one leading layout entry plus one per column) with default justification. Header separators are added when missing; valid authored tables retain their formatting. Escaped pipes and code spans establish source cell boundaries; native output escapes generated thought-link alias pipes and uses narrowly generated escaped `<code>` elements for pipe-containing code spans without changing displayed cell text or formatting. Imported source HTML keeps its existing refusal policy; only proven generated code regions are protected while tracing references. Exact declarations remain in finding evidence and exact before/after scoped edits in document evidence. Responsive native layout replaces source column widths and justification, with an actionable formatting-loss warning. Malformed or unsupported declarations retain source text and warnings rather than guessed cell structure.
 
 Recognized sibling callout starts become distinct native panels. Titles, +/− folding flags, nested callouts, parent-depth returns and bodies remain intact. `> [!tip|icon:😂]` becomes `> [!tip] 😂 Tip`; authored titles receive the emoji prefix. The warning explains visible title fallback alongside the native icon. Unsupported or ambiguous icon metadata remains visibly in the title with a warning. No native standard type colour/icon differences are losses; no generated CSS, source icons or community plugins are needed.

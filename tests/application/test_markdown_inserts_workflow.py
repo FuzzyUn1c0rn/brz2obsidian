@@ -169,6 +169,21 @@ MIXED ID TARGET
 
 # Ordinary title ^authored-ordinary
 ORDINARY ID TARGET
+
+# Power $x^2$ and literal \\^suffix
+MATH CARET TARGET
+
+# Formula $\\sqrt{a^2+b^2} + x_{1}^2$
+COMPLEX MATH TARGET
+
+# Code `$x^2$` and escaped \\$x^2\\$
+LITERAL MATH TARGET
+
+# Math $x^2$ and code `$x^2$` and image ![$x^2$ `literal`](.data/md-images/a.png)
+MIXED MATH TARGET
+
+# **BRZToc**Math0 and $x^2$
+AUTHORED WORD TARGET
 """
     image = b"exact caret-heading image bytes"
     source = literal_archive(
@@ -187,10 +202,15 @@ ORDINARY ID TARGET
         (tmp_path / "vault/Home — Entry thought.md").read_text(encoding="utf-8")
     )
     assert (
-        "- [Authored ^literal](#^brz-toc-heading-1)\n"
-        "- [Code ^literal](#^brz-toc-heading-2)\n"
-        "- [Mixed Image ^literal Code ^literal](#^authored-mixed)\n"
-        "- [Ordinary title](#^authored-ordinary)" in body
+        "- [Authored \\^literal](#^brz-toc-heading-1)\n"
+        "- [Code \\^literal](#^brz-toc-heading-2)\n"
+        "- [Mixed Image ^literal Code \\^literal](#^authored-mixed)\n"
+        "- [Ordinary title](#^authored-ordinary)\n"
+        "- [Power $x^2$ and literal \\^suffix](#^brz-toc-heading-5)\n"
+        "- [Formula $\\sqrt{a^2+b^2} + x_{1}^2$](#^brz-toc-heading-6)\n"
+        "- [Code \\$x^2\\$ and escaped \\$x^2\\$](#^brz-toc-heading-7)\n"
+        "- [Math $x^2$ and code \\$x^2\\$ and image \\$x^2\\$ literal](#^brz-toc-heading-8)\n"
+        "- [BRZTocMath0 and $x^2$](#^brz-toc-heading-9)" in body
     )
     assert (
         "![Authored ^literal](Attachments/22222222/a.png) ^brz-toc-heading-1\nIMAGE CARET TARGET"
@@ -199,7 +219,19 @@ ORDINARY ID TARGET
     assert "# `Code ^literal` ^brz-toc-heading-2\nCODE CARET TARGET" in body
     assert "`Code ^literal` ^authored-mixed\nMIXED ID TARGET" in body
     assert "# Ordinary title ^authored-ordinary\nORDINARY ID TARGET" in body
-    assert inspected.counts.source_references == converted.counts.actual_references == 2
+    assert (
+        "# Power $x^2$ and literal \\^suffix ^brz-toc-heading-5\nMATH CARET TARGET"
+        in body
+    )
+    assert (
+        "# Formula $\\sqrt{a^2+b^2} + x_{1}^2$ ^brz-toc-heading-6\nCOMPLEX MATH TARGET"
+        in body
+    )
+    assert (
+        "# Code `$x^2$` and escaped \\$x^2\\$ ^brz-toc-heading-7\nLITERAL MATH TARGET"
+        in body
+    )
+    assert inspected.counts.source_references == converted.counts.actual_references == 3
     assert (tmp_path / "vault/Attachments/22222222/a.png").read_bytes() == image
     assert (
         tmp_path / "vault/Attachments/22222222/Notes.md.original"
@@ -246,8 +278,8 @@ MULTILINE ID TARGET
         "- [Heading](#^brz-toc-heading-2)\n"
         "- [Heading](#^brz-toc-heading-3)\n"
         "- [Heading](#^metadata-only)\n"
-        "- [Escaped ^literal](#^brz-toc-heading-5)\n"
-        "- [Closed ^literal](#^brz-toc-heading-6)\n"
+        "- [Escaped \\^literal](#^brz-toc-heading-5)\n"
+        "- [Closed \\^literal](#^brz-toc-heading-6)\n"
         "- [Multi line](#^keep-multiline)" in body
     )
     assert "- [](" not in body

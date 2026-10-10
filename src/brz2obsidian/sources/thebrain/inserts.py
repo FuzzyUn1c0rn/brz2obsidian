@@ -5,6 +5,9 @@ from hashlib import sha256
 from html import escape
 
 from markdown_it import MarkdownIt
+from markdown_it.rules_inline import escape as inline_escape
+from markdown_it.rules_inline import image, link
+from markdown_it.rules_inline.backticks import backtick
 
 from brz2obsidian.contracts import TextAdaptation
 
@@ -77,6 +80,60 @@ def _inline_label(token):
     ).strip()
 
 
+def _heading_label(token):
+    """Protect compatible complete math before flattening Markdown display."""
+    parser, protected = MarkdownIt("commonmark"), []
+
+    def instrument(rule):
+        def wrapped(state, silent):
+            begin = state.pos
+            result = rule(state, silent)
+            if (
+                result
+                and not silent
+                and state.src == token.content
+                and (rule is not inline_escape or state.src[begin : state.pos] == "\\$")
+            ):
+                protected.append((begin, state.pos))
+            return result
+
+        return wrapped
+
+    for name, rule in (
+        ("backticks", backtick),
+        ("escape", inline_escape),
+        ("image", image),
+        ("link", link),
+    ):
+        parser.inline.ruler.at(name, instrument(rule))
+    parser.parseInline(token.content)
+    content, mathematics = token.content, []
+    displayed = _inline_label(token)
+    for match in reversed(list(re.finditer(r"(?<!\\)\$[^$\r\n]+(?<!\\)\$", content))):
+        if any(c in match[0] for c in "[]<>") or any(
+            begin < match.end() and match.start() < end for begin, end in protected
+        ):
+            continue
+        marker = f"BRZTocMath{len(mathematics)}"
+        while marker in content or marker in displayed:
+            marker += "Token"
+        mathematics.append((marker, match[0]))
+        content = content[: match.start()] + marker + content[match.end() :]
+    return _inline_label(MarkdownIt("commonmark").parseInline(content)[0]), mathematics
+
+
+def _toc_label(title, mathematics):
+    # Protect only complete parser-owned math while escaping ordinary label
+    # text. Dollars in code/alt text and escaped source dollars stay literal.
+    label = re.sub(r"([\\`*_{}\[\]<>$])", r"\\\1", title)
+    # Obsidian hides an unescaped trailing ID-like label suffix. Limit this
+    # protection to that suffix so inline mathematics keeps its exponent.
+    label = re.sub(r"(^| )(\^[A-Za-z0-9-]+)$", r"\1\\\2", label)
+    for marker, value in mathematics:
+        label = label.replace(marker, value)
+    return label
+
+
 def _native_code_pipes(row):
     """A narrowly generated code element preserves native code-cell pipes.
 
@@ -124,14 +181,16 @@ def adapt_note(text):
         elif token.type == "inline":
             active.update(extent)
         elif token.type == "heading_open":
+            title, mathematics = _heading_label(tokens[index + 1])
             headings.append(
                 (
                     token.map[0],
                     token.map[1],
                     int(token.tag[1:]),
-                    _inline_label(tokens[index + 1]),
+                    title,
                     token.markup.startswith("#"),
                     tokens[index + 1].content,
+                    mathematics,
                 )
             )
     active -= protected
@@ -314,7 +373,9 @@ def adapt_note(text):
             if match:
                 occurrences.setdefault(match[1], []).append(line)
         retained = set()
-        for number, (line, end, level, _title, atx, authored) in enumerate(selected, 1):
+        for number, (line, end, level, _title, atx, authored, _math) in enumerate(
+            selected, 1
+        ):
             anchor_line = line if atx else end - 2
             raw = lines[anchor_line].rstrip("\r\n")
             existing = re.search(r" \^([A-Za-z0-9-]+)\s*$", raw)
@@ -363,7 +424,7 @@ def adapt_note(text):
                     base = base[: existing.start()]
                 replace(anchor_line, raw, base + " ^" + identifiers[line])
         entries, hierarchy = [], []
-        for line, _end, level, title, _atx, _authored in selected:
+        for line, _end, level, title, _atx, _authored, mathematics in selected:
             while hierarchy and hierarchy[-1] >= level:
                 hierarchy.pop()
             if line in authored_identifiers:
@@ -371,7 +432,7 @@ def adapt_note(text):
                     rf"(?:^| )\^{re.escape(authored_identifiers[line])}\s*$", "", title
                 )
             title = title.strip() or "Heading"
-            label = re.sub(r"([\\`*_{}\[\]<>])", r"\\\1", title)
+            label = _toc_label(title, mathematics)
             entries.append(
                 "  " * len(hierarchy) + f"- [{label}](#^{identifiers[line]})"
             )
