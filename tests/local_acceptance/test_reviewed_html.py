@@ -2,7 +2,9 @@
 
 import hashlib
 import json
+import re
 from copy import deepcopy
+from zipfile import ZipFile
 
 import pytest
 
@@ -13,11 +15,122 @@ from tests.local_acceptance.checker import check_run_result, check_vault, load_j
 from tests.local_acceptance.test_checker_v2 import rewrite_record
 from tests.support.notes import note_body
 
+
+@pytest.mark.parametrize("token", ["<!A>", "<!a>", "<!AB>", "<!A"])
+@pytest.mark.parametrize("newline", ["\n", "\r", "\r\n"])
+@pytest.mark.parametrize("boundary", ["vault", "run"])
+def test_complete_raw_audit_rejects_coherently_forged_declaration_admission(
+    tmp_path, capsys, token, newline, boundary
+):
+    from tests.application.test_literal_angles_workflow import literal_archive
+    from tests.application.test_resources_workflow import HOME
+    from tests.local_acceptance.checker import ROOTS
+
+    # Equal-length non-tag control isolates grammar from lengths and counts.
+    if token.endswith(">"):
+        authored = (
+            "Text <!" + "_" * (len(token) - 3) + "> after." + newline + "Continued."
+        )
+        forged = "Text " + token + " after." + newline + "Continued."
+    else:
+        # Type 4 block grammar owns a canonical opener through EOF; inline
+        # incomplete lookalikes are independently accepted in NON_TAGS below.
+        authored = "Text" + newline + "<!>"
+        forged = "Text" + newline + token
+    assert len(authored.encode()) == len(forged.encode())
+    source = literal_archive(tmp_path / "source.brz", authored.encode())
+    vault = tmp_path / "vault"
+    assert main(["convert", str(source), str(vault), "--json"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    check_run_result(result, vault, check_vault(source, vault))
+    assert (
+        note_body((vault / "Home — Entry thought.md").read_bytes())
+        == (
+            "# Entry thought\n\n"
+            + authored
+            + "\n\n## Categories\n\n[[Categories.md|Browse categories]]\n"
+        ).encode()
+    )
+    record = load_json((vault / "migration-record.json").read_bytes())
+    with ZipFile(source) as archive:
+        parts = {name: archive.read(name) for name in archive.namelist()}
+    member = HOME + "/Notes.md"
+    parts[member] = forged.encode()
+    with ZipFile(source, "w") as archive:
+        for name, data in parts.items():
+            archive.writestr(name, data)
+    before = source.read_bytes()
+    for observed in (
+        default_workflow().inspect(source),
+        default_workflow().convert(source, tmp_path / "refused-vault"),
+    ):
+        assert observed.outcome == "refused" and observed.receipt is None
+        assert observed.issues[0].code == "unsupported_feature"
+    for arguments in (
+        ["inspect", str(source), "--json"],
+        ["convert", str(source), str(tmp_path / "refused-cli-vault"), "--json"],
+    ):
+        assert main(arguments) == 1
+        assert json.loads(capsys.readouterr().out)["outcome"] == "refused"
+    assert not (tmp_path / "refused-vault").exists()
+    assert not (tmp_path / "refused-cli-vault").exists()
+
+    # Forge admission, rebinding every source/payload/document/manifest hash.
+    # These bytes are authored test corruption, never a converter success.
+    payload_hash = hashlib.sha256(forged.encode()).hexdigest()
+    note = vault / "Home — Entry thought.md"
+    note.write_bytes(note.read_bytes().replace(authored.encode(), forged.encode()))
+    asset = next(a for a in record["asset_targets"] if a["original_name"] == "Notes.md")
+    (vault / asset["relative_path"]).write_bytes(forged.encode())
+    asset["actual_sha256"] = payload_hash
+    for evidence in record["original_evidence"]:
+        if evidence["key"] == "payload:" + member:
+            evidence["records"]["sha256"] = payload_hash
+    for item in record["item_targets"]:
+        for document in item["documents"]:
+            document["text_digest"] = payload_hash
+    record["source_identity"]["source_sha256"] = hashlib.sha256(before).hexdigest()
+    # Independently serialize the fixture's complete raw retained population.
+    pieces = []
+    for name in ROOTS:
+        raw = parts[name].decode("utf-8-sig")
+        rows = (
+            [raw]
+            if name == "meta.json"
+            else [line for line in re.split(r"\r\n|\r|\n", raw) if line.strip(" \t")]
+        )
+        pieces.append("[" + ",".join(rows) + "]")
+    pieces.append(
+        json.dumps(
+            {"member": member, "length": len(forged.encode()), "sha256": payload_hash}
+        )
+    )
+    record["source_identity"]["snapshot_digest"] = hashlib.sha256(
+        "".join(pieces).encode()
+    ).hexdigest()
+    rewrite_record(vault, record, result)
+    with pytest.raises(AssertionError, match="active HTML"):
+        if boundary == "vault":
+            check_vault(source, vault)
+        else:
+            # The run audit requires a trusted raw-source summary first.
+            check_run_result(result, vault, check_vault(source, vault))
+    assert source.read_bytes() == before
+
+
 NON_TAGS = [
     "Text <sys/header.h> <Value>",
     "Text <sys/other.h> <Value>",
     'Text <I", example\\_value\n\n## Next\n\n`<Hidden>`\n\nend > <Value>',
     r"Text <SESSION\_KEY> <Value>",
+    "Text <!a\n\n<Value>",
+    "Text <!_> <!1> <!é> <Value>",
+    r"Text \<!a> <Value>",
+    "`<!a>` <Value>",
+    "<!-- <!a> -->\n<Value>",
+    "```\n<!a\n> > prompt\n```\n<Value>",
+    "~~~\n<!a>\n~~~\n<Value>",
+    "    <!a\n\n<Value>",
 ]
 
 

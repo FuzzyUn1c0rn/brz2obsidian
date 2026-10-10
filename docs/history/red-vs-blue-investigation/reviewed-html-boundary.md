@@ -73,6 +73,26 @@ punctuation handling, including backticks and angle characters inside quotes;
 they remain refused, rather than exposing a nested literal token. Link labels
 remain active while complete destinations/titles are protected.
 
+Independent review also found that the oracle required uppercase letters and
+whitespace after a declaration opener. Section 6.6 instead requires `<!`, one
+ASCII letter and zero or more non-`>` characters, then `>`; `<!A>`, `<!a>` and
+`<!AB>` are genuine declarations. Their public Workflow/CLI refusal controls
+and complete source/payload/original/document/manifest-rebound forged admissions
+now exercise raw rejection across LF, CR and CRLF. For a line-start declaration,
+[section 4.6 type 4](https://spec.commonmark.org/0.31.2/#html-blocks) owns the block
+through a closer, its container boundary or EOF. The oracle rejects that active
+block from the original opener, without borrowing inline delimiter requirements.
+Existing code/comment ownership takes precedence; incomplete inline lookalikes,
+escaped openers and invalid first characters remain authored prose.
+
+Neighboring incomplete lowercase/indented declaration probes exposed a separate
+runtime refusal defect. Their failed public controls and immutable receipts are
+retained locally for [#147](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/147),
+a separately scoped follow-up before actual acceptance.
+This oracle repair does not claim that runtime defect is resolved. It changes
+neither runtime admission nor any version beyond the version-8 meaning decision
+already recorded here.
+
 [CommonMark fenced-code ownership](https://spec.commonmark.org/0.31.2/#fenced-code-blocks)
 also keeps quote/list-looking sample lines inside their existing protected leaf.
 Only existing container prefixes and a real matching closer affect ownership.

@@ -184,7 +184,9 @@ _HTML_TOKEN = re.compile(
     + _HTML_NAME
     + _HTML_SPACE
     + r"*)>"
-    + r"|<\?[\s\S]*?\?>|<![A-Z]+[ \t\r\n]+[^>]*>"
+    # A declaration needs one ASCII letter after <! and no required whitespace
+    # (CommonMark 0.31.2 section 6.6); case and empty trailing content are valid.
+    + r"|<\?[\s\S]*?\?>|<![A-Za-z][^>]*>"
     + r"|<!\[CDATA\[[\s\S]*?\]\]>"
 )
 
@@ -289,6 +291,12 @@ def _inline_regions(body):
         elif marker and not (marker[1][0] == "`" and "`" in marker[2]):
             protected = True
             fence = (marker[1], quotes, list_indent)
+        elif re.match(r" {0,3}<![A-Za-z]", content):
+            # CommonMark 4.6 type 4 starts with <! and an ASCII letter.
+            # Its HTML ownership extends to >, the container boundary or EOF;
+            # unlike inline declarations, refusal needs no complete closer.
+            # Existing code/comment leaves were handled before container parsing.
+            raise AssertionError("raw-derived active HTML outside literal policy")
         elif (
             content.startswith(("    ", "\t"))
             and (not paragraph or listing)

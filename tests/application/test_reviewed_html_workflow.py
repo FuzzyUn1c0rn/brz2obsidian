@@ -246,6 +246,17 @@ def test_external_missing_or_empty_name_has_windows_display_and_resource_fallbac
         "Text <Unknown\n x='a'>",
         "Text </Unknown>",
         "Text <Unknown>pair</Unknown>",
+        "Text <!A>",
+        "Text <!a>",
+        "Text <!AB>",
+        "Text <!a0/punctuation>",
+        "Text <!a\nmore>",
+        "Text <?xml?>",
+        "Text <!-- protected --> <!a>",
+        "Text `<!Hidden>` <!a>",
+        "<!A>",
+        "<!a>",
+        "<!A",
     ],
 )
 @pytest.mark.parametrize("newline", ["\n", "\r", "\r\n"])
