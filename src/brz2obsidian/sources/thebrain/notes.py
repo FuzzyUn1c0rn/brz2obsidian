@@ -10,7 +10,8 @@ from uuid import UUID
 
 from markdown_it import MarkdownIt
 from markdown_it.rules_block.state_block import StateBlock
-from markdown_it.rules_inline import autolink, image, link
+from markdown_it.rules_inline import autolink, html_inline, image, link
+from markdown_it.rules_inline.backticks import backtick
 
 from brz2obsidian.contracts import (
     ImagePresentationNormalization,
@@ -247,6 +248,58 @@ class _MappedBlock(StateBlock):
         return _MappedText(value, offsets)
 
 
+def _mapped_blocks(text, parser, env):
+    chars, offsets = [], []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        chars.append("\n" if char == "\r" else "\ufffd" if char == "\0" else char)
+        offsets.append(index)
+        index += 2 if text[index : index + 2] == "\r\n" else 1
+    normalized = _MappedText("".join(chars), offsets)
+    tokens = []
+    if normalized:
+        state = _MappedBlock(normalized, parser, env, tokens)
+        parser.block.tokenize(state, state.line, state.lineMax)
+    return tokens
+
+
+def trace_inline_literal_ranges(text):
+    """Trace code and admitted comments across complete mapped inline containers."""
+    parser, env, code, comments = MarkdownIt("commonmark"), {}, [], []
+
+    def instrument(rule, ranges, token_type):
+        def run(state, silent):
+            begin, count = state.pos, len(state.tokens)
+            success = rule(state, silent)
+            if (
+                success
+                and not silent
+                and any(
+                    token.type == token_type
+                    and (
+                        token_type != "html_inline" or token.content.startswith("<!--")
+                    )
+                    for token in state.tokens[count:]
+                )
+            ):
+                ranges.append(
+                    (state.src.offsets[begin], state.src.offsets[state.pos - 1] + 1)
+                )
+            return success
+
+        return run
+
+    parser.inline.ruler.at("backticks", instrument(backtick, code, "code_inline"))
+    parser.inline.ruler.at(
+        "html_inline", instrument(html_inline, comments, "html_inline")
+    )
+    for token in _mapped_blocks(text, parser, env):
+        if token.type == "inline":
+            parser.inline.parse(token.content, parser, env, [])
+    return tuple(code), tuple(comments)
+
+
 def trace_note_references(text: str, excluded=()) -> tuple[ReferenceSpan, ...]:
     """Trace parser-recognized active links into exact original text spans.
 
@@ -390,18 +443,8 @@ def trace_note_references(text: str, excluded=()) -> tuple[ReferenceSpan, ...]:
     parser.inline.ruler.at("link", instrument(link, "item"))
     parser.inline.ruler.at("image", instrument(image, "image"))
     parser.inline.ruler.at("autolink", instrument(autolink, "autolink"))
-    chars, offsets = [], []
-    index = 0
-    while index < len(text):
-        char = text[index]
-        chars.append("\n" if char == "\r" else "\ufffd" if char == "\0" else char)
-        offsets.append(index)
-        index += 2 if text[index : index + 2] == "\r\n" else 1
-    normalized = _MappedText("".join(chars), offsets)
-    env, tokens = {}, []
-    if normalized:
-        state = _MappedBlock(normalized, parser, env, tokens)
-        parser.block.tokenize(state, state.line, state.lineMax)
+    env = {}
+    tokens = _mapped_blocks(text, parser, env)
     result = []
     digest = sha256(text.encode("utf-8")).hexdigest()
 

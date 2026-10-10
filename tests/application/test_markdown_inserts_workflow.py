@@ -30,6 +30,288 @@ $$c = \\sqrt{a^2+b^2}$$
 """
 
 
+@pytest.mark.parametrize("ending", ["\n", "\r\n", "\r"])
+@pytest.mark.parametrize(
+    "example",
+    [
+        "`literal beginning\n[/toc/]\nliteral end`",
+        "``literal ` beginning\n[/toc depth=2]\nliteral ` end``",
+        "> `literal beginning\n> [!tip|icon:😂]\n> literal end`",
+        "> > ``literal ` beginning\n> > [!mystery|icon:invalid]\n> > literal ` end``",
+        '`literal beginning\n|One|Two|:(table="column-widths:-1,0,84;justification:default"):\n|1|2|\nliteral end`',
+        '`literal beginning\n|One|Two|:(table="ambiguous"):\n|1|2|\nliteral end`',
+        "> `literal beginning\n> [!tip|icon:😂]`",
+        '`literal beginning\n|One|Two|:(table="column-widths:-1,0,84;justification:default"):`\n|1|2|',
+        "- ``literal beginning\n  [/toc/]\n  unmatched ` tick\n  literal end``",
+        "Prose <!-- literal beginning\n[/toc/]\nliteral end -->",
+        "Prose <!-- literal beginning\n[/toc depth=2]\nliteral end -->",
+        "> Prose <!-- literal beginning\n> [!tip|icon:😂]\n> literal end -->",
+        "> Prose <!-- literal beginning\n> [!mystery|icon:invalid]\n> literal end -->",
+        'Prose <!-- literal beginning\n|One|Two|:(table="column-widths:-1,0,84;justification:default"):\n|1|2|\nliteral end -->',
+        'Prose <!-- literal beginning\n|One|Two|:(table="ambiguous"):\n|1|2|\nliteral end -->',
+    ],
+)
+def test_multiline_inline_literals_own_insert_examples_without_adaptations(
+    tmp_path, ending, example
+):
+    text = (example + "\n").replace("\n", ending)
+    source = literal_archive(tmp_path / "source.brz", text.encode())
+    before = source.read_bytes()
+    workflow = default_workflow()
+    inspected = workflow.inspect(source)
+    converted = workflow.convert(source, tmp_path / "vault")
+    assert inspected.outcome == converted.outcome == "clean", (
+        converted.model_dump_json()
+    )
+    assert not inspected.issues and not converted.issues
+    assert not [
+        a
+        for a in inspected.inspection.adaptations
+        if a.kind in {"markdown_insert", "literal_text"}
+    ]
+    body = note_body((tmp_path / "vault/Home — Entry thought.md").read_bytes())
+    assert body.count(text.encode()) == 1
+    assert inspected.counts.source_references == converted.counts.actual_references == 0
+    assert source.read_bytes() == before
+    original = tmp_path / "vault/Attachments/22222222/Notes.md.original"
+    assert original.read_bytes() == text.encode()
+
+
+def test_active_inserts_beside_code_keep_their_own_declaration_positions(tmp_path):
+    text = """### Contents
+[/toc/]
+
+# Real heading
+REAL TARGET
+
+> [!tip|icon:😂] `literal title`
+> Active body.
+
+|`One`|Two|:(table="column-widths:-1,0,84;justification:default"):
+|`x|y`|2|
+
+Unmatched ` tick
+[/toc/]
+"""
+    source = literal_archive(tmp_path / "source.brz", text.encode())
+    before = source.read_bytes()
+    workflow = default_workflow()
+    inspected = workflow.inspect(source)
+    converted = workflow.convert(source, tmp_path / "vault")
+    assert inspected.outcome == converted.outcome == "warnings", (
+        converted.model_dump_json()
+    )
+    assert inspected.issues == converted.issues
+    assert len(converted.issues) == 2
+    assert {i.code for i in converted.issues} == {"formatting_loss"}
+    body = note_body(
+        (tmp_path / "vault/Home — Entry thought.md").read_text(encoding="utf-8")
+    )
+    assert body.count("- [Real heading](#^brz-toc-heading-1)") == 2
+    assert "> [!tip] 😂 `literal title`\n> Active body." in body
+    assert "|`One`|Two|\n|---|---|\n|<code>x&#124;y</code>|2|" in body
+    assert "Unmatched ` tick\n- [Real heading]" in body
+    assert inspected.counts.source_references == converted.counts.actual_references == 0
+    assert (
+        tmp_path / "vault/Attachments/22222222/Notes.md.original"
+    ).read_bytes() == text.encode()
+    assert source.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "> [!tip|icon:`invalid`]\n> Body.\n",
+        '|One|Two|:(table="`ambiguous`"):\n|1|2|\n',
+        "[/toc depth=`2`]\n",
+    ],
+)
+def test_active_unsupported_insert_syntax_is_not_hidden_by_inner_code(tmp_path, text):
+    source = literal_archive(tmp_path / "source.brz", text.encode())
+    result = default_workflow().convert(source, tmp_path / "vault")
+    assert result.outcome == "warnings", result.model_dump_json()
+    assert len(result.issues) == 1
+    assert result.issues[0].code == "formatting_loss"
+    assert (
+        tmp_path / "vault/Attachments/22222222/Notes.md.original"
+    ).read_bytes() == text.encode()
+
+
+@pytest.mark.parametrize(
+    "literal",
+    [
+        "`literal beginning\n^keep-heading\nliteral end`",
+        "Prose <!-- literal beginning\n^keep-heading\nliteral end -->",
+    ],
+)
+def test_literal_owned_id_does_not_replace_a_unique_heading_destination(
+    tmp_path, literal
+):
+    text = (
+        """### Contents
+[/toc/]
+
+# Real ^keep-heading
+REAL TARGET
+
+"""
+        + literal
+        + "\n"
+    )
+    source = literal_archive(tmp_path / "source.brz", text.encode())
+    before = source.read_bytes()
+    workflow = default_workflow()
+    inspected = workflow.inspect(source)
+    converted = workflow.convert(source, tmp_path / "vault")
+    assert inspected.outcome == converted.outcome == "clean", (
+        converted.model_dump_json()
+    )
+    body = note_body(
+        (tmp_path / "vault/Home — Entry thought.md").read_text(encoding="utf-8")
+    )
+    assert "- [Real](#^keep-heading)" in body
+    assert "# Real ^keep-heading\nREAL TARGET" in body
+    assert literal in body
+    assert not inspected.issues and not converted.issues
+    assert (
+        tmp_path / "vault/Attachments/22222222/Notes.md.original"
+    ).read_bytes() == text.encode()
+    assert source.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "literal",
+    [
+        "> > `literal beginning\n> parent literal line\n> literal end`",
+        "> > prose <!-- literal beginning\n> parent literal line\n> literal end -->",
+    ],
+)
+def test_callout_parent_return_inside_an_inline_literal_stays_exact(tmp_path, literal):
+    text = "> > [!tip] Child\n> > body\n" + literal + "\n"
+    source = literal_archive(tmp_path / "source.brz", text.encode())
+    result = default_workflow().convert(source, tmp_path / "vault")
+    assert result.outcome == "clean", result.model_dump_json()
+    body = note_body((tmp_path / "vault/Home — Entry thought.md").read_bytes())
+    assert text.encode() in body
+    assert result.counts.text_adaptations == 0
+    assert (
+        tmp_path / "vault/Attachments/22222222/Notes.md.original"
+    ).read_bytes() == text.encode()
+
+
+@pytest.mark.parametrize(
+    "literal",
+    [
+        "> `literal beginning\nlazy unquoted literal line\n> literal end`",
+        "> prose <!-- literal beginning\nlazy unquoted literal line\n> literal end -->",
+        "> Ordinary body\nlazy unquoted ordinary line",
+    ],
+)
+def test_literal_lazy_lines_keep_a_later_active_callout_sibling_boundary(
+    tmp_path, literal
+):
+    text = "> [!tip] First\n" + literal + "\n> [!note] Second\n> Body\n"
+    source = literal_archive(tmp_path / "source.brz", text.encode())
+    result = default_workflow().convert(source, tmp_path / "vault")
+    assert result.outcome == "clean", result.model_dump_json()
+    body = note_body((tmp_path / "vault/Home — Entry thought.md").read_bytes())
+    assert (
+        "> [!tip] First\n" + literal + "\n\n> [!note] Second\n> Body\n"
+    ).encode() in body
+    assert result.counts.text_adaptations == 1
+    assert (
+        tmp_path / "vault/Attachments/22222222/Notes.md.original"
+    ).read_bytes() == text.encode()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "> [!tip] First\n> Body.\n\nOutside paragraph.\n\n> [!note] Second\n> Body.\n",
+        "> [!tip] First\n> Body.\n```md\n[/toc/]\n```\n> [!note] Second\n> Body.\n",
+    ],
+)
+def test_callout_state_ends_at_an_actual_container_exit(tmp_path, text):
+    source = literal_archive(tmp_path / "source.brz", text.encode())
+    result = default_workflow().convert(source, tmp_path / "vault")
+    assert result.outcome == "clean", result.model_dump_json()
+    body = note_body((tmp_path / "vault/Home — Entry thought.md").read_bytes())
+    assert text.encode() in body
+    assert result.counts.text_adaptations == 0
+
+
+def test_active_table_does_not_rewrite_code_shaped_comment_payload(tmp_path):
+    text = '|One|Two|:(table="column-widths:-1,0,84;justification:default"):\n|<!-- `x\\|y` -->|value|\n'
+    source = literal_archive(tmp_path / "source.brz", text.encode())
+    result = default_workflow().convert(source, tmp_path / "vault")
+    assert result.outcome == "warnings", result.model_dump_json()
+    assert len(result.issues) == 1
+    assert result.issues[0].code == "formatting_loss"
+    body = note_body((tmp_path / "vault/Home — Entry thought.md").read_bytes())
+    assert b"|One|Two|\n|---|---|\n|<!-- `x\\|y` -->|value|\n" in body
+    assert b"<code>" not in body
+    assert (
+        tmp_path / "vault/Attachments/22222222/Notes.md.original"
+    ).read_bytes() == text.encode()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '|One|Two|:(table="column-widths:-1,0,84;justification:default"):\n|<!-- `x|y` -->|value|\n',
+        '|One|Two|:(table="column-widths:-1,0,84;justification:default"):\n|`a|b|\n|c`|d|\n',
+        '`literal beginning\n|literal`|Other|:(table="column-widths:-1,0,84;justification:default"):\n|1|2|\n',
+    ],
+)
+def test_literal_owned_table_boundaries_use_an_exact_actionable_fallback(
+    tmp_path, text
+):
+    source = literal_archive(tmp_path / "source.brz", text.encode())
+    result = default_workflow().convert(source, tmp_path / "vault")
+    assert result.outcome == "warnings", result.model_dump_json()
+    assert len(result.issues) == 1
+    assert result.issues[0].code == "formatting_loss"
+    assert "Malformed or ambiguous table retained" in result.issues[0].message
+    body = note_body((tmp_path / "vault/Home — Entry thought.md").read_bytes())
+    assert text.encode() in body
+    assert result.counts.text_adaptations == 0
+    assert (
+        tmp_path / "vault/Attachments/22222222/Notes.md.original"
+    ).read_bytes() == text.encode()
+
+
+def test_literal_table_metadata_in_a_code_cell_does_not_hide_the_active_suffix(
+    tmp_path,
+):
+    text = '|`code :(table="ambiguous"): literal`|Two|:(table="column-widths:-1,0,84;justification:default"):\n|1|2|\n'
+    source = literal_archive(tmp_path / "source.brz", text.encode())
+    result = default_workflow().convert(source, tmp_path / "vault")
+    assert result.outcome == "warnings", result.model_dump_json()
+    assert len(result.issues) == 1
+    assert result.issues[0].code == "formatting_loss"
+    body = note_body((tmp_path / "vault/Home — Entry thought.md").read_bytes())
+    assert b'|`code :(table="ambiguous"): literal`|Two|\n|---|---|\n|1|2|\n' in body
+    assert (
+        tmp_path / "vault/Attachments/22222222/Notes.md.original"
+    ).read_bytes() == text.encode()
+
+
+def test_parent_return_prose_containing_literal_marker_keeps_its_quote_boundary(
+    tmp_path,
+):
+    text = "> [!note] Parent\n> > [!tip] Child\n> > Child body.\n> Parent `[!tip]` example\n"
+    source = literal_archive(tmp_path / "source.brz", text.encode())
+    result = default_workflow().convert(source, tmp_path / "vault")
+    assert result.outcome == "clean", result.model_dump_json()
+    assert not result.issues
+    body = note_body((tmp_path / "vault/Home — Entry thought.md").read_bytes())
+    assert b"> > Child body.\n> \n> Parent `[!tip]` example\n" in body
+    assert result.counts.text_adaptations == 1
+    assert (
+        tmp_path / "vault/Attachments/22222222/Notes.md.original"
+    ).read_bytes() == text.encode()
+
+
 def test_sample_inserts_preserve_content_and_disclose_only_lossy_adaptations(tmp_path):
     source = literal_archive(tmp_path / "source.brz", SAMPLE.encode())
     before = source.read_bytes()

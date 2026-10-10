@@ -12,7 +12,7 @@ from markdown_it.rules_inline.backticks import backtick
 from brz2obsidian.contracts import TextAdaptation
 
 from .literals import adapt_literals, source_position
-from .notes import trace_note_references
+from .notes import trace_inline_literal_ranges, trace_note_references
 
 INSERT_RULE = "thebrain.markdown-inserts.v1"
 CALLOUTS = frozenset(
@@ -36,12 +36,19 @@ _CALLOUT = re.compile(r"^( {0,3}(?:> ?)+)\[!([A-Za-z]+)([^\]]*)\]([+-]?)(.*)$")
 _TABLE = re.compile(r':\(table="column-widths:([-0-9,]+);justification:([a-z]+)"\):$')
 
 
-def _cells(row):
-    """Pipes in escapes and balanced code spans belong to their authored cell."""
+def _cells(row, source_offset, code_ranges, literal_ranges):
+    """Only parser-owned code or escapes shelter an authored cell's pipes."""
+    source_offset += len(row) - len(row.lstrip())
     row = row.strip()
     if not row.startswith("|") or not row.endswith("|"):
         return None
-    cells, start, index, code = [], 1, 1, 0
+    if any(
+        begin <= boundary < end
+        for begin, end in literal_ranges
+        for boundary in (source_offset, source_offset + len(row) - 1)
+    ):
+        return None
+    cells, start, index = [], 1, 1
     while index < len(row) - 1:
         if row[index] == "\\":
             index += 2
@@ -50,16 +57,22 @@ def _cells(row):
             end = index + 1
             while end < len(row) and row[end] == "`":
                 end += 1
-            width = end - index
-            if not code:
-                # An unmatched tick is prose, not a cell-boundary shelter.
-                if re.search(rf"(?<!`)`{{{width}}}(?!`)", row[end:]):
-                    code = width
-            elif width == code:
-                code = 0
+            owned = next(
+                (
+                    finish
+                    for begin, finish in code_ranges
+                    if begin == source_offset + index
+                ),
+                None,
+            )
+            if owned is not None:
+                # A span crossing rows cannot become a faithful native cell.
+                if owned - source_offset > len(row) - 1:
+                    return None
+                end = owned - source_offset
             index = end
             continue
-        if row[index] == "|" and not code:
+        if row[index] == "|":
             cells.append(row[start:index])
             start = index + 1
         index += 1
@@ -134,7 +147,7 @@ def _toc_label(title, mathematics):
     return label
 
 
-def _native_code_pipes(row):
+def _native_code_pipes(row, source_offset, code_ranges):
     """A narrowly generated code element preserves native code-cell pipes.
 
     Obsidian displays a backslash for pipe escapes inside inline code. Source
@@ -142,6 +155,11 @@ def _native_code_pipes(row):
     """
 
     def replace(match):
+        if (
+            source_offset + match.start(),
+            source_offset + match.end(),
+        ) not in code_ranges:
+            return match[0]
         content = match[2]
         if "|" not in content:
             return match[0]
@@ -171,11 +189,13 @@ def adapt_note(text):
         offsets.append(position)
         position += len(line)
     tokens = MarkdownIt("commonmark").parse(text)
-    active, protected, headings = set(), set(), []
+    active, protected, quoted, headings = set(), set(), set(), []
     for index, token in enumerate(tokens):
         if not token.map:
             continue
         extent = range(*token.map)
+        if token.type == "blockquote_open":
+            quoted.update(extent)
         if token.type in {"fence", "code_block", "html_block"}:
             protected.update(extent)
         elif token.type == "inline":
@@ -194,7 +214,13 @@ def adapt_note(text):
                 )
             )
     active -= protected
+    inline_code, inline_comments = trace_inline_literal_ranges(text)
+    inline_literals = inline_code + inline_comments
     edits, losses = [], []
+
+    def literal_owned(line, start, end):
+        begin, finish = offsets[line] + start, offsets[line] + end
+        return any(left < finish and begin < right for left, right in inline_literals)
 
     def replace(line, before, after):
         begin = offsets[line] + max(0, lines[line].find(before))
@@ -210,6 +236,16 @@ def adapt_note(text):
     seen = {}
     for line in range(len(lines)):
         raw = lines[line].rstrip("\r\n")
+        if line not in quoted:
+            seen.clear()
+        prefix = re.match(r" {0,3}(?:> ?)*", raw)[0]
+        content_start = (
+            len(prefix) + len(raw[len(prefix) :]) - len(raw[len(prefix) :].lstrip())
+        )
+        if content_start < len(raw) and literal_owned(
+            line, content_start, content_start + 1
+        ):
+            continue
         if re.fullmatch(r" {0,3}(?:> ?)+\s*", raw):
             for prior in list(seen):
                 if prior > raw.count(">"):
@@ -219,6 +255,11 @@ def adapt_note(text):
                 seen.clear()
             continue
         match = _CALLOUT.fullmatch(raw)
+        declaration = re.match(r" {0,3}(?:> ?)+(\[!)", raw)
+        if declaration and literal_owned(
+            line, declaration.start(1), declaration.end(1)
+        ):
+            continue
         if not match:
             quote = re.match(r" {0,3}(?:> ?)+", raw)
             if quote and any(prior > quote[0].count(">") for prior in seen):
@@ -232,7 +273,7 @@ def adapt_note(text):
                     raw,
                     "Malformed callout declaration retained as source text; use [!type] with an optional folding flag and title.",
                 )
-            if not raw.strip() or (raw.strip() and not raw.lstrip().startswith(">")):
+            if not raw.strip():
                 seen.clear()
             continue
         prefix, kind, metadata, fold, title = match.groups()
@@ -283,21 +324,28 @@ def adapt_note(text):
         raw = lines[line].rstrip("\r\n")
         if ":(table=" not in raw:
             continue
-        declaration_start = raw.find(":(table=")
-        backslashes = len(raw[:declaration_start]) - len(
-            raw[:declaration_start].rstrip("\\")
-        )
-        if backslashes % 2:
-            continue
-        # Only a suffix outside an inline code span is an insert declaration.
-        inline = MarkdownIt("commonmark").parseInline(raw)[0]
-        if not any(
-            ":(table=" in t.content for t in inline.children or () if t.type == "text"
-        ):
+        declarations = [
+            candidate.start()
+            for candidate in re.finditer(re.escape(":(table="), raw)
+            if not literal_owned(line, candidate.start(), candidate.end())
+            and (
+                len(raw[: candidate.start()])
+                - len(raw[: candidate.start()].rstrip("\\"))
+            )
+            % 2
+            == 0
+        ]
+        if not declarations:
             continue
         match = _TABLE.search(raw)
-        cells = _cells(raw[: match.start()]) if match else None
-        declaration = raw[raw.find(":(table=") :]
+        if match and match.start() not in declarations:
+            match = None
+        cells = (
+            _cells(raw[: match.start()], offsets[line], inline_code, inline_literals)
+            if match
+            else None
+        )
+        declaration = raw[declarations[0] :]
         rows = []
         cursor = line + 1
         while (
@@ -305,7 +353,8 @@ def adapt_note(text):
             and cursor in active
             and lines[cursor].lstrip().startswith("|")
         ):
-            rows.append(_cells(lines[cursor].rstrip("\r\n")))
+            row = lines[cursor].rstrip("\r\n")
+            rows.append(_cells(row, offsets[cursor], inline_code, inline_literals))
             cursor += 1
         widths = match[1].split(",") if match else []
         valid = bool(
@@ -313,7 +362,7 @@ def adapt_note(text):
             and len(cells) >= 1
             and len(widths) == len(cells) + 1
             and all(re.fullmatch(r"-1|0|[1-9][0-9]*", w) for w in widths)
-            and raw.count(":(table=") == 1
+            and len(declarations) == 1
             and match[2] == "default"
             and rows
             and all(r is not None and len(r) == len(cells) for r in rows)
@@ -325,7 +374,7 @@ def adapt_note(text):
                 "Malformed or ambiguous table retained as source text; supply an ordinary Markdown table with a matching header separator.",
             )
             continue
-        header = _native_code_pipes(raw[: match.start()])
+        header = _native_code_pipes(raw[: match.start()], offsets[line], inline_code)
         separator_present = all(re.fullmatch(r"\s*:?-{3,}:?\s*", c) for c in rows[0])
         replacement = (
             header
@@ -335,7 +384,7 @@ def adapt_note(text):
         replace(line, raw, replacement)
         for row_line in range(line + 1, cursor):
             row = lines[row_line].rstrip("\r\n")
-            native_row = _native_code_pipes(row)
+            native_row = _native_code_pipes(row, offsets[row_line], inline_code)
             if row != native_row:
                 replace(row_line, row, native_row)
         loss(
@@ -352,6 +401,7 @@ def adapt_note(text):
                 r"( {0,3}(?:> ?)*)\[/toc/\]\s*", lines[line].rstrip("\r\n")
             )
         )
+        and not literal_owned(line, match.start() + len(match[1]), match.end())
     }
     markers = list(marker_prefixes)
     excluded = set()
@@ -370,7 +420,7 @@ def adapt_note(text):
             match = re.search(
                 r"(?:^| )\^([A-Za-z0-9-]+)\s*$", lines[line].rstrip("\r\n")
             )
-            if match:
+            if match and not literal_owned(line, match.start(1) - 1, match.end(1)):
                 occurrences.setdefault(match[1], []).append(line)
         retained = set()
         for number, (line, end, level, _title, atx, authored, _math) in enumerate(
@@ -446,7 +496,13 @@ def adapt_note(text):
             )
     for line in sorted(active):
         raw = lines[line].strip()
-        if re.fullmatch(r"\[/toc[^\]]*\]", raw) and raw != "[/toc/]":
+        if (
+            re.fullmatch(r"\[/toc[^\]]*\]", raw)
+            and raw != "[/toc/]"
+            and not literal_owned(
+                line, lines[line].find(raw), lines[line].find(raw) + len("[/toc")
+            )
+        ):
             loss(
                 "table_of_contents",
                 raw,
