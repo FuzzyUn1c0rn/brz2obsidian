@@ -154,6 +154,181 @@ ORDINARY TARGET
     assert source.read_bytes() == before
 
 
+def test_toc_carets_in_displayed_labels_are_distinct_from_authored_block_ids(tmp_path):
+    text = """### Contents
+[/toc/]
+
+# ![Authored ^literal](.data/md-images/a.png)
+IMAGE CARET TARGET
+
+# `Code ^literal`
+CODE CARET TARGET
+
+# Mixed ![Image ^literal](.data/md-images/a.png) `Code ^literal` ^authored-mixed
+MIXED ID TARGET
+
+# Ordinary title ^authored-ordinary
+ORDINARY ID TARGET
+"""
+    image = b"exact caret-heading image bytes"
+    source = literal_archive(
+        tmp_path / "source.brz",
+        text.encode(),
+        resources=[({"Type": 12, "Location": "a.png"}, image)],
+    )
+    before = source.read_bytes()
+    workflow = default_workflow()
+    inspected = workflow.inspect(source)
+    converted = workflow.convert(source, tmp_path / "vault")
+    assert inspected.outcome == converted.outcome == "clean", (
+        converted.model_dump_json()
+    )
+    body = note_body(
+        (tmp_path / "vault/Home — Entry thought.md").read_text(encoding="utf-8")
+    )
+    assert (
+        "- [Authored ^literal](#^brz-toc-heading-1)\n"
+        "- [Code ^literal](#^brz-toc-heading-2)\n"
+        "- [Mixed Image ^literal Code ^literal](#^authored-mixed)\n"
+        "- [Ordinary title](#^authored-ordinary)" in body
+    )
+    assert (
+        "![Authored ^literal](Attachments/22222222/a.png) ^brz-toc-heading-1\nIMAGE CARET TARGET"
+        in body
+    )
+    assert "# `Code ^literal` ^brz-toc-heading-2\nCODE CARET TARGET" in body
+    assert "`Code ^literal` ^authored-mixed\nMIXED ID TARGET" in body
+    assert "# Ordinary title ^authored-ordinary\nORDINARY ID TARGET" in body
+    assert inspected.counts.source_references == converted.counts.actual_references == 2
+    assert (tmp_path / "vault/Attachments/22222222/a.png").read_bytes() == image
+    assert (
+        tmp_path / "vault/Attachments/22222222/Notes.md.original"
+    ).read_bytes() == text.encode()
+    assert source.read_bytes() == before
+
+
+def test_toc_empty_labels_and_literal_caret_suffixes_keep_usable_destinations(tmp_path):
+    text = """### Contents
+[/toc/]
+
+#
+EMPTY TARGET
+
+# ` `
+WHITESPACE TARGET
+
+# [](https://example.invalid)
+EMPTY LINK TARGET
+
+# ^metadata-only
+METADATA TARGET
+
+# Escaped \\^literal
+ESCAPED TARGET
+
+# Closed ^literal ###
+CLOSED TARGET
+
+Multi
+line ^keep-multiline
+===
+MULTILINE ID TARGET
+"""
+    source = literal_archive(tmp_path / "source.brz", text.encode())
+    before = source.read_bytes()
+    result = default_workflow().convert(source, tmp_path / "vault")
+    assert result.outcome == "clean", result.model_dump_json()
+    body = note_body(
+        (tmp_path / "vault/Home — Entry thought.md").read_text(encoding="utf-8")
+    )
+    assert (
+        "- [Heading](#^brz-toc-heading-1)\n"
+        "- [Heading](#^brz-toc-heading-2)\n"
+        "- [Heading](#^brz-toc-heading-3)\n"
+        "- [Heading](#^metadata-only)\n"
+        "- [Escaped ^literal](#^brz-toc-heading-5)\n"
+        "- [Closed ^literal](#^brz-toc-heading-6)\n"
+        "- [Multi line](#^keep-multiline)" in body
+    )
+    assert "- [](" not in body
+    assert "# ^metadata-only\nMETADATA TARGET" in body
+    assert "# Escaped \\^literal ^brz-toc-heading-5\nESCAPED TARGET" in body
+    assert "# Closed ^literal ^brz-toc-heading-6\nCLOSED TARGET" in body
+    assert "# Multi line ^keep-multiline\nMULTILINE ID TARGET" in body
+    assert (
+        tmp_path / "vault/Attachments/22222222/Notes.md.original"
+    ).read_bytes() == text.encode()
+    assert source.read_bytes() == before
+
+
+def test_toc_duplicate_authored_ids_and_body_collisions_get_distinct_targets(tmp_path):
+    text = """### Contents
+[/toc/]
+
+# First ^duplicate
+FIRST TARGET
+
+# Second ^duplicate
+SECOND TARGET
+
+Body anchor ^body-collision
+
+# Third ^body-collision
+THIRD TARGET
+
+# Unique ^unique
+UNIQUE TARGET
+
+# Fifth ^body-after
+FIFTH TARGET
+
+Later body anchor ^body-after
+
+See [First authored link](#^duplicate) and [Body authored link](#^body-collision).
+
+Reserved generated identifier ^brz-toc-heading-2
+"""
+    source = literal_archive(tmp_path / "source.brz", text.encode())
+    before = source.read_bytes()
+    workflow = default_workflow()
+    inspected = workflow.inspect(source)
+    converted = workflow.convert(source, tmp_path / "vault")
+    assert inspected.outcome == converted.outcome == "warnings", (
+        converted.model_dump_json()
+    )
+    assert inspected.issues == converted.issues
+    assert len(converted.issues) == 3
+    assert {i.code for i in converted.issues} == {"formatting_loss"}
+    assert all(
+        "block ID" in i.message and "distinct" in i.message for i in converted.issues
+    )
+    body = note_body(
+        (tmp_path / "vault/Home — Entry thought.md").read_text(encoding="utf-8")
+    )
+    assert (
+        "- [First](#^duplicate)\n"
+        "- [Second](#^brz-toc-heading-2-generated)\n"
+        "- [Third](#^brz-toc-heading-3)\n"
+        "- [Unique](#^unique)\n"
+        "- [Fifth](#^brz-toc-heading-5)" in body
+    )
+    assert "# First ^duplicate\nFIRST TARGET" in body
+    assert "# Second ^brz-toc-heading-2-generated\nSECOND TARGET" in body
+    assert "Body anchor ^body-collision" in body
+    assert "# Third ^brz-toc-heading-3\nTHIRD TARGET" in body
+    assert "# Unique ^unique\nUNIQUE TARGET" in body
+    assert "# Fifth ^brz-toc-heading-5\nFIFTH TARGET" in body
+    assert "Later body anchor ^body-after" in body
+    assert (
+        "See [First authored link](#^duplicate) and [Body authored link](#^body-collision)."
+        in body
+    )
+    assert (
+        tmp_path / "vault/Attachments/22222222/Notes.md.original"
+    ).read_bytes() == text.encode()
+    assert source.read_bytes() == before
+
+
 def test_all_native_types_preserve_titles_folds_nesting_and_literal_controls(tmp_path):
     gallery = "\n".join(
         f"> [!{kind}]\n> {kind} body"

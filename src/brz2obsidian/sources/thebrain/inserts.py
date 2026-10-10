@@ -304,39 +304,73 @@ def adapt_note(text):
                 excluded.add(last[0])
     if markers:
         selected = [h for h in headings if h[0] not in excluded]
-        identifiers = {}
+        identifiers, authored_identifiers = {}, {}
+        selected_lines = {h[0] if h[4] else h[1] - 2 for h in selected}
+        occurrences = {}
+        for line in sorted(active):
+            match = re.search(
+                r"(?:^| )\^([A-Za-z0-9-]+)\s*$", lines[line].rstrip("\r\n")
+            )
+            if match:
+                occurrences.setdefault(match[1], []).append(line)
+        retained = set()
         for number, (line, end, level, _title, atx, authored) in enumerate(selected, 1):
             anchor_line = line if atx else end - 2
             raw = lines[anchor_line].rstrip("\r\n")
             existing = re.search(r" \^([A-Za-z0-9-]+)\s*$", raw)
             if existing:
+                authored_identifiers[line] = existing[1]
+            keep_existing = bool(
+                existing
+                and existing[1] not in retained
+                and all(p in selected_lines for p in occurrences[existing[1]])
+            )
+            if keep_existing:
                 identifiers[line] = existing[1]
+                retained.add(existing[1])
             else:
                 identifier = f"brz-toc-heading-{number}"
                 while re.search(rf"\^{re.escape(identifier)}\b", text):
                     identifier += "-generated"
                 identifiers[line] = identifier
-                base = re.sub(r"[ \t]+#+[ \t]*$", "", raw) if atx else raw
-                if not atx and end - line > 2:
-                    before = "".join(lines[line:end]).rstrip("\r\n")
-                    prefix = re.match(r" {0,3}(?:> ?)*", lines[line])[0]
-                    replace(
-                        line,
-                        before,
-                        prefix
-                        + "#" * level
-                        + " "
-                        + " ".join(authored.splitlines())
-                        + " ^"
-                        + identifier,
+                if existing:
+                    loss(
+                        "table_of_contents",
+                        "^" + existing[1],
+                        "A duplicate authored block ID was replaced with a distinct ToC destination; update authored links to this heading if needed.",
                     )
-                else:
-                    replace(anchor_line, raw, base + " ^" + identifier)
+            if not atx and end - line > 2:
+                before = "".join(lines[line:end]).rstrip("\r\n")
+                prefix = re.match(r" {0,3}(?:> ?)*", lines[line])[0]
+                content = authored
+                if existing:
+                    content = re.sub(
+                        rf"(?:^| )\^{re.escape(existing[1])}\s*$", "", content
+                    )
+                replace(
+                    line,
+                    before,
+                    prefix
+                    + "#" * level
+                    + " "
+                    + " ".join(content.splitlines())
+                    + " ^"
+                    + identifiers[line],
+                )
+            elif not keep_existing:
+                base = re.sub(r"[ \t]+#+[ \t]*$", "", raw) if atx else raw
+                if existing:
+                    base = base[: existing.start()]
+                replace(anchor_line, raw, base + " ^" + identifiers[line])
         entries, hierarchy = [], []
         for line, _end, level, title, _atx, _authored in selected:
             while hierarchy and hierarchy[-1] >= level:
                 hierarchy.pop()
-            title = re.sub(r" \^[A-Za-z0-9-]+\s*$", "", title)
+            if line in authored_identifiers:
+                title = re.sub(
+                    rf"(?:^| )\^{re.escape(authored_identifiers[line])}\s*$", "", title
+                )
+            title = title.strip() or "Heading"
             label = re.sub(r"([\\`*_{}\[\]<>])", r"\\\1", title)
             entries.append(
                 "  " * len(hierarchy) + f"- [{label}](#^{identifiers[line]})"

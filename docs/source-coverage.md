@@ -472,7 +472,14 @@ properties and still reports missing actual image targets.
 
 ToC labels include displayed image alt text, including formatted alt text. An
 image with empty alt text contributes the neutral label `Image`; the original
-heading and its image reference remain intact.
+heading and its image reference remain intact. Empty displayed headings receive
+the neutral label `Heading`. Carets inside authored image alt text, inline code
+and escaped prose remain part of the label; only actual trailing block IDs are
+excluded from display. Unique authored block IDs remain destinations. Repeated
+heading IDs retain the first destination and receive distinct generated IDs for
+later headings; an ID shared with a body block is replaced on the heading.
+These collision repairs retain exact source edits and disclose a formatting-loss
+warning advising authors to update affected links.
 
 The table declaration requires unambiguous cell counts and numeric width entries (one leading layout entry plus one per column) with default justification. Header separators are added when missing; valid authored tables retain their formatting. Escaped pipes and code spans establish source cell boundaries; native output escapes generated thought-link alias pipes and uses narrowly generated escaped `<code>` elements for pipe-containing code spans without changing displayed cell text or formatting. Imported source HTML keeps its existing refusal policy; only proven generated code regions are protected while tracing references. Exact declarations remain in finding evidence and exact before/after scoped edits in document evidence. Responsive native layout replaces source column widths and justification, with an actionable formatting-loss warning. Malformed or unsupported declarations retain source text and warnings rather than guessed cell structure.
 
