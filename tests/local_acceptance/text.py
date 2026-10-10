@@ -2,7 +2,7 @@
 
 This scanner never imports the source adapter or its Markdown parser. It refuses
 unestablished active HTML shapes instead of silently omitting expected edits.
-HTML names follow WHATWG current/obsolete element indices (reviewed 2026-10-09).
+HTML names follow the separately reviewed primary inventory (2026-10-10).
 """
 
 import hashlib
@@ -159,6 +159,35 @@ ELEMENTS = {
     "address",
 }
 
+# CommonMark 0.31.2 section 6.6. Match original characters, never a protection
+# mask: replacing escaped punctuation with spaces can invent an attribute.
+# Quoted values own their angle/backtick/punctuation characters as one token.
+_HTML_SPACE = r"[ \t\r\n]"
+_HTML_NAME = r"[A-Za-z][A-Za-z0-9-]*"
+_HTML_ATTRIBUTE = (
+    _HTML_SPACE
+    + r"+[A-Za-z_:][A-Za-z0-9_.:-]*"
+    + r"(?:"
+    + _HTML_SPACE
+    + r"*="
+    + _HTML_SPACE
+    + r"*(?:[^ \t\r\n\"'=<>`]+|'[^']*'|\"[^\"]*\"))?"
+)
+_HTML_TOKEN = re.compile(
+    r"<(?:"
+    + _HTML_NAME
+    + r"(?:"
+    + _HTML_ATTRIBUTE
+    + r")*"
+    + _HTML_SPACE
+    + r"*/?|/"
+    + _HTML_NAME
+    + _HTML_SPACE
+    + r"*)>"
+    + r"|<\?[\s\S]*?\?>|<![A-Z]+[ \t\r\n]+[^>]*>"
+    + r"|<!\[CDATA\[[\s\S]*?\]\]>"
+)
+
 
 def _line_view(line):
     """A bounded container view; slicing never alters raw source coordinates."""
@@ -172,13 +201,19 @@ def _line_view(line):
     )
 
 
-def _inside_container(content, quotes, listing, owner):
+def _owned_block_view(line, owner):
+    """Consume existing container prefixes, never markers inside leaf content."""
     quoted, indentation = owner
-    return quotes == quoted and not (
-        indentation
-        and content.strip()
-        and (listing or len(content) - len(content.lstrip(" ")) < indentation)
-    )
+    content = line
+    for _ in range(quoted):
+        prefix = re.match(r"^ {0,3}> ?", content)
+        if prefix is None:
+            return None
+        content = content[prefix.end() :]
+    spaces = len(content) - len(content.lstrip(" "))
+    if content.strip() and spaces < indentation:
+        return None
+    return content[min(spaces, indentation) :]
 
 
 def _inline_regions(body):
@@ -201,6 +236,33 @@ def _inline_regions(body):
         line = match[0]
         if not line:
             continue
+        owner = fence[1:] if fence else comment
+        if owner is not None:
+            owned = _owned_block_view(line, owner)
+            if owned is not None:
+                # A protected leaf owns its text before new quote/list markers
+                # are considered (CommonMark 4.5/4.6). Only its containing
+                # prefixes and real closer affect ownership.
+                if region is not None:
+                    regions.append((region, match.start()))
+                    region = None
+                mask[match.start() : match.end()] = " " * len(line)
+                if comment is not None:
+                    if "-->" in owned:
+                        comment = None
+                else:
+                    closer = re.match(r" {0,3}(`{3,}|~{3,})(.*)", owned)
+                    if (
+                        closer
+                        and closer[1][0] == fence[0][0]
+                        and len(closer[1]) >= len(fence[0])
+                        and not closer[2].strip()
+                    ):
+                        fence = None
+                previous_quotes, list_indent = owner
+                paragraph = False
+                continue
+            fence = comment = None
         container_content, quotes, listing = _line_view(line)
         if quotes != previous_quotes:
             list_indent = 0
@@ -220,29 +282,7 @@ def _inline_regions(body):
             ]
         marker = re.match(r" {0,3}(`{3,}|~{3,})(.*)", content)
         protected = False
-        if fence and not _inside_container(
-            container_content, quotes, listing, fence[1:]
-        ):
-            fence = None
-        if comment is not None:
-            if not _inside_container(container_content, quotes, listing, comment):
-                comment = None
-            else:
-                protected = True
-                if "-->" in content:
-                    comment = None
-        if protected:
-            pass
-        elif fence:
-            protected = True
-            if (
-                marker
-                and marker[1][0] == fence[0][0]
-                and len(marker[1]) >= len(fence[0])
-                and not marker[2].strip()
-            ):
-                fence = None
-        elif re.match(r" {0,3}<!--", content):
+        if re.match(r" {0,3}<!--", content):
             protected = True
             if "-->" not in content:
                 comment = (quotes, list_indent)
@@ -337,6 +377,13 @@ def active_mask(body, *, autolinks=True):
                 )
                 if link:
                     stop = cursor + link.end()
+            if stop is None and body[cursor] == "<":
+                html = _HTML_TOKEN.match(body, cursor, finish)
+                if html:
+                    # HTML consumes its own quoted attributes before Markdown
+                    # punctuation/code handling. Retain raw token coordinates.
+                    cursor = html.end()
+                    continue
             if stop is not None:
                 mask[cursor:stop] = " " * (stop - cursor)
                 cursor = stop
@@ -417,12 +464,29 @@ def literal_edits(body):
     # Labels are active; balanced whole phrases establish destinations/titles.
     mask = list(scan)
     for _, finish, _, _, start, _ in inline_candidates(body)[0]:
+        # The opening angle delimiter belongs to a destination too. Checking
+        # raw tokens means masking only its interior no longer hides it.
+        if body[start - 1 : start] == "<":
+            start -= 1
         mask[start : finish - 1] = " " * (finish - 1 - start)
     scan = "".join(mask)
     edits = []
     digest = hashlib.sha256(body.encode()).hexdigest()
     shift = 0
-    for match in re.finditer(r"<(?:/?[A-Za-z][^<>]*|![^<>]*|\?[^<>]*)>", scan):
+    regions, _, _ = _inline_regions(body)
+    matches = []
+    for start, finish in regions:
+        cursor = start
+        while cursor < finish:
+            match = (
+                _HTML_TOKEN.match(body, cursor, finish) if scan[cursor] == "<" else None
+            )
+            if match:
+                matches.append(match)
+                cursor = match.end()
+            else:
+                cursor += 1
+    for match in matches:
         token = match[0]
         if re.fullmatch(r"<br\s*/?>", token, re.IGNORECASE):
             continue

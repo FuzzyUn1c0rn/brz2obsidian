@@ -457,7 +457,7 @@ class BrzSession:
         identity = SourceIdentity(
             source_id=brain_id,
             module_id="thebrain-brz",
-            module_version="7",
+            module_version="8",
             format_version="5",
             source_sha256=source_hash,
             snapshot_digest=snapshot_digest,

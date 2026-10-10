@@ -255,8 +255,10 @@ The ordinary image renderer composes assigned destination edits and report
 notices. Explicit metadata/result/reference consumers reject old/future contracts.
 The closed contract has changed explicitly: consumers
 must accept version 6 rather than interpreting it as an earlier contract. The reviewed
-TheBrain module/profile now use version `7` for the two bounded additional
-relationship signatures; the renderer and source-neutral shapes remain version `6`.
+TheBrain module/profile now use version `8`: version7 added two bounded
+relationship signatures, and version8 closes three recognized HTML exclusions.
+The renderer and source-neutral shapes/meanings remain version `6`. See the
+[primary exclusion and oracle review](history/red-vs-blue-investigation/reviewed-html-boundary.md).
 BRZ format stays `5`. Source admission changes do not invent new canonical graph
 meanings or couple the core to TheBrain direction flags.
 `RunMetadata.renderer_version` must be `6` when invoking the renderer directly.

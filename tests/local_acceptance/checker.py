@@ -202,11 +202,11 @@ def check_vault(source, vault):
         ), "collection source identity"
         assert (
             record["source_identity"]["module_id"] == "thebrain-brz"
-            and record["source_identity"]["module_version"] == "7"
+            and record["source_identity"]["module_version"] == "8"
         ), "source module identity"
         assert (record["profile_id"], record["profile_version"]) == (
             "thebrain-format5-reviewed",
-            "7",
+            "8",
         ), "reviewed source profile"
         originals = {e["key"]: e for e in record["original_evidence"]}
         for name in ROOTS:
@@ -1338,7 +1338,11 @@ def expected_resources(raw, owner, body, assets):
             and source["NoteType"] == 0
             and source["Location"] != "Notes.md"
         ):
-            label = source.get("Name") or PurePosixPath(source["Location"]).name
+            label = source.get("Name") or (
+                PureWindowsPath(source["Location"]).name
+                if kind == 2
+                else PurePosixPath(source["Location"]).name
+            )
             label = re.sub(r"[\[\]|\r\n]", " ", label).strip() or "Resource"
             if kind in {2, 3, 8}:
                 uri = (
@@ -1579,7 +1583,11 @@ def check_assets(raw, record, archive, vault, targets):
         ) == (
             owner,
             a["Location"],
-            a.get("Name"),
+            (
+                a.get("Name") or PureWindowsPath(a["Location"]).name
+                if kind == 2
+                else a.get("Name")
+            ),
             key.replace("-", ""),
             role,
             availability,

@@ -628,6 +628,13 @@ exercise the same driver without private inputs. Public success does not establi
 actual E support: further unsupported relationship signatures remain a separate
 bounded ticket (#145), followed by actual matrix, native and user acceptance gates.
 
+The [reviewed HTML boundary and independent oracle repair](history/red-vs-blue-investigation/reviewed-html-boundary.md)
+records the closed primary registry, raw grammar/leaf precedence and Type2
+Windows display fallback. Public ZIP controls cover complete authored/generated
+bytes, exact originals/spans, genuine HTML refusals and self-consistent forged
+receipts. Historical version-rebound diagnosis remains qualified; the final
+five-original matrix must use the newly verified runtime/oracle.
+
 ## Private full-export acceptance
 
 The complete v3 four-original gate passed on 2026-10-06 at verified clean root

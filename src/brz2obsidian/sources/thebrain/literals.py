@@ -10,9 +10,12 @@ from brz2obsidian.contracts import TextAdaptation
 
 from .notes import _HtmlReferences, _MappedBlock, _MappedText, _refuse
 
-# WHATWG element index and obsolete-element list, reviewed 2026-10-09:
+# Closed primary-source exclusion list, reviewed 2026-10-10:
 # https://html.spec.whatwg.org/multipage/indices.html#elements-3
 # https://html.spec.whatwg.org/multipage/obsolete.html#non-conforming-features
+# https://www.w3.org/TR/2014/WD-shadow-dom-20140617/#the-content-element
+# https://www.w3.org/TR/2014/WD-shadow-dom-20140617/#the-shadow-element
+# https://wicg.github.io/portals/#the-portal-element (conservative experimental exclusion)
 # Include recognized obsolete elements and foreign-content roots, not just
 # CommonMark's shorter block-element list. Matching is ASCII case-insensitive.
 HTML_ELEMENTS = frozenset(
@@ -162,6 +165,9 @@ HTML_ELEMENTS = frozenset(
         "spacer",
         "tt",
         "image",
+        "content",
+        "shadow",
+        "portal",
     ]
 )
 

@@ -76,6 +76,12 @@ its format and module/profile version remain unchanged. Literal edits create no
 authored-reference, payload-copy or source-gap credit. Synthetic coverage does
 not establish the later private-archive/native acceptance gates under #78.
 
+The current closed recognized-name review includes historical `content`/`shadow`,
+an explicitly conservative experimental `portal` exclusion and the existing
+`image` alias. These classifications and the exact 148-name list appear in the
+[primary boundary review](history/red-vs-blue-investigation/reviewed-html-boundary.md).
+Module/profile version8 changes refusal meaning without changing shared shapes.
+
 ## Sized inline images (version 6)
 
 Parser-active local image destinations can carry exactly `#$width=Np$`, with a
@@ -226,8 +232,9 @@ signature with relationship-specific guidance. Provisional raw omission suppress
 pre-validation diagnostic disclosure; it never authorizes inclusion or bypasses
 global identity/ownership validation. Forgotten associations remain private.
 
-The reviewed TheBrain module/profile is version7 because admitted source meanings
-changed. Source-neutral snapshot/policy/result/renderer/record remain version6;
+The reviewed TheBrain module/profile is now version8: version7 added the two
+relationship signatures; version8 closes the recognized HTML exclusion boundary.
+Source admission/refusal meanings changed. Source-neutral snapshot/policy/result/renderer/record remain version6;
 their fields and hierarchy/related meanings did not change. Alternative sources
 retain their own versions. Actual-ZIP Workflow/CLI exact-navigation controls and
 an independent raw oracle cover both shapes and rehashed semantic corruptions.
@@ -323,7 +330,7 @@ type hierarchies/custom link types also refuse.
 
 ## Approved warnings
 
-The fixed profile `thebrain-format5-reviewed`, now version `7`, retains the reviewed version-3 gap rules below:
+The fixed profile `thebrain-format5-reviewed`, now version `8`, retains the reviewed version-3 gap rules below:
 
 Findings must have the reviewed kind, compatible rule/profile, subject and
 evidence. Missing evidence and unknown kinds refuse; generic core contains no
