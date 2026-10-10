@@ -68,6 +68,8 @@ def _inline_label(token):
     return "".join(
         t.content
         if t.type in {"text", "text_special", "code_inline"}
+        else (_inline_label(t) or "Image")
+        if t.type == "image"
         else " "
         if t.type in {"softbreak", "hardbreak"}
         else ""

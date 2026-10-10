@@ -98,6 +98,62 @@ Second target.
     )
 
 
+def test_toc_image_headings_keep_visible_labels_targets_and_exact_payloads(tmp_path):
+    text = """### Contents
+[/toc/]
+
+# ![Authored image heading](.data/md-images/a.png)
+IMAGE HEADING TARGET
+
+## Mixed ![authored image](.data/md-images/a.png) heading
+MIXED TARGET
+
+## ![Café *emphasis* `code` [square] & punctuation?!](.data/md-images/a.png)
+FORMATTED TARGET
+
+## ![](.data/md-images/a.png)
+EMPTY ALT TARGET
+
+# Ordinary heading
+ORDINARY TARGET
+"""
+    image = b"exact authored image bytes"
+    source = literal_archive(
+        tmp_path / "source.brz",
+        text.encode(),
+        resources=[({"Type": 12, "Location": "a.png"}, image)],
+    )
+    before = source.read_bytes()
+    workflow = default_workflow()
+    inspected = workflow.inspect(source)
+    converted = workflow.convert(source, tmp_path / "vault")
+    assert inspected.outcome == converted.outcome == "clean", (
+        converted.model_dump_json()
+    )
+    body = note_body(
+        (tmp_path / "vault/Home — Entry thought.md").read_text(encoding="utf-8")
+    )
+    assert (
+        "- [Authored image heading](#^brz-toc-heading-1)\n"
+        "  - [Mixed authored image heading](#^brz-toc-heading-2)\n"
+        "  - [Café emphasis code \\[square\\] & punctuation?!](#^brz-toc-heading-3)\n"
+        "  - [Image](#^brz-toc-heading-4)\n"
+        "- [Ordinary heading](#^brz-toc-heading-5)" in body
+    )
+    assert "- [](" not in body
+    for index, marker in enumerate(
+        ["IMAGE HEADING", "MIXED", "FORMATTED", "EMPTY ALT", "ORDINARY"], 1
+    ):
+        assert f" ^brz-toc-heading-{index}\n{marker} TARGET" in body
+    assert "![Authored image heading](Attachments/22222222/a.png)" in body
+    assert inspected.counts.source_references == converted.counts.actual_references == 4
+    assert (tmp_path / "vault/Attachments/22222222/a.png").read_bytes() == image
+    assert (
+        tmp_path / "vault/Attachments/22222222/Notes.md.original"
+    ).read_bytes() == text.encode()
+    assert source.read_bytes() == before
+
+
 def test_all_native_types_preserve_titles_folds_nesting_and_literal_controls(tmp_path):
     gallery = "\n".join(
         f"> [!{kind}]\n> {kind} body"

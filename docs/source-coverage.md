@@ -232,12 +232,15 @@ signature with relationship-specific guidance. Provisional raw omission suppress
 pre-validation diagnostic disclosure; it never authorizes inclusion or bypasses
 global identity/ownership validation. Forgotten associations remain private.
 
-The reviewed TheBrain module/profile is now version10: version7 added the two
-relationship signatures; version8 closes the recognized HTML exclusion boundary;
-version9 closes active declaration-block refusal in documents and own labels.
-Source admission/refusal meanings changed. Source-neutral snapshot/policy/result/renderer/record now use version7;
-their fields and hierarchy/related meanings did not change. Alternative sources
-retain their own versions. Actual-ZIP Workflow/CLI exact-navigation controls and
+The reviewed TheBrain module/profile uses version 10: version 7 added the two
+relationship signatures; version 8 closes the recognized HTML exclusion boundary;
+version 9 closes active declaration-block refusal in documents and own labels;
+version 10 admits reviewed Markdown inserts. These source-profile updates change
+admission, refusal and formatting-loss meanings. Source-neutral snapshot, policy,
+result, renderer and record contracts use version 7 for generic adaptation kinds,
+table-cell reference context and formatting-loss warnings. Existing hierarchy and
+related meanings remain unchanged. Alternative sources retain their own versions.
+Actual-ZIP Workflow/CLI exact-navigation controls and
 an independent raw oracle cover both shapes and rehashed semantic corruptions.
 An unchanged-original inspection and eight-record raw/snapshot comparison were
 progress evidence only. The fresh [five-input/fifteen-output preservation gate](history/red-vs-blue-investigation/actual-archive-acceptance.md)
@@ -466,6 +469,10 @@ properties and still reports missing actual image targets.
 ## Markdown inserts (module/profile 10, contracts 7)
 
 [Accepted scope and native presentation](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/152) admit parser-active standalone `[/toc/]` markers, the evidenced `:(table="column-widths:-1,0,0,0,174;justification:default"):` suffix, and callouts of types note, abstract, info, todo, tip, success, question, warning, failure, danger, bug, example and quote. ToCs list authored headings in source hierarchy, excluding their immediately associated ToC headings and generated content. Static Markdown links to stable block destinations distinguish duplicate labels, Unicode and punctuation. Multiline setext headings normalize to equivalent single-line ATX headings for native Obsidian portability; inline heading content is retained. Generated lists are static and need manual maintenance after edits.
+
+ToC labels include displayed image alt text, including formatted alt text. An
+image with empty alt text contributes the neutral label `Image`; the original
+heading and its image reference remain intact.
 
 The table declaration requires unambiguous cell counts and numeric width entries (one leading layout entry plus one per column) with default justification. Header separators are added when missing; valid authored tables retain their formatting. Escaped pipes and code spans establish source cell boundaries; native output escapes generated thought-link alias pipes and uses narrowly generated escaped `<code>` elements for pipe-containing code spans without changing displayed cell text or formatting. Imported source HTML keeps its existing refusal policy; only proven generated code regions are protected while tracing references. Exact declarations remain in finding evidence and exact before/after scoped edits in document evidence. Responsive native layout replaces source column widths and justification, with an actionable formatting-loss warning. Malformed or unsupported declarations retain source text and warnings rather than guessed cell structure.
 
