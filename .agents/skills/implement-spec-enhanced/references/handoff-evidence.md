@@ -10,7 +10,10 @@ Before completion checks, the coordinator or reviewer supplies a separate UTF-8
 JSON requirements file for each stage. Pass its absolute path through
 `--requirements` to both publication and standalone validation. Keep this input
 outside published records; its selection comes from ticket scope and stage
-judgment, independently of submitted outcomes. The writer stores the declaration
+judgment, confirmed against the actual diff and affected dependencies under
+[check selection](check-scope.md), independently of submitted outcomes. Record
+the selection rationale alongside this input, keeping extra fields outside the
+strict requirements schema. The writer stores the declaration
 and its canonical SHA-256 in the v2 record. Standalone validation compares the
 current stage to the independently supplied declaration. Earlier stages retain
 their published declarations and original execution context.

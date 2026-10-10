@@ -30,6 +30,12 @@ and put that captured value in the input. Ancestry validation cannot establish
 capture timing. The writer records an already-performed integration; it performs
 no merge or check execution.
 
+Choose integration coverage from the actual combined result under
+[check selection](check-scope.md). A clean fast-forward to the reviewed candidate
+may reuse qualifying receipts when independently assigned requirements permit it.
+Changes from the integration tip or merge resolution require affected combined
+checks; reuse cannot satisfy a fresh-execution requirement.
+
 ```powershell
 .venv\Scripts\python.exe .agents/skills/implement-spec-enhanced/scripts/write_handoff.py integration $attempt --checkout $integrationCheckout --input $integrationInput --requirements $integrationRequirements
 ```

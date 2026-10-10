@@ -6,6 +6,12 @@ Read this before assigning a stage or a commit-derived attempt. Read the
 
 ### Dispatch and commit handshake
 
+Select the path and check scope using [check selection](check-scope.md) before
+dispatch. These publication handshakes apply to the structured path; eligible
+documentation/report work uses [lightweight handoffs](lightweight-handoff.md).
+Include the independently selected scope/freshness rationale with the requirements
+pointer, and confirm it against the candidate diff before completion checks.
+
 Initial implementer dispatch supplies ownership, integration branch, assessed
 checkout, and a reserved candidate-input path. At integration synchronization,
 capture the full incorporated tip as `base_ref`; then finish checks and commit.

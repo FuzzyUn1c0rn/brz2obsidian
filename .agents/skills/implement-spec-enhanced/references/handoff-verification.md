@@ -21,6 +21,11 @@ prerequisite or check is unavailable. User/native acceptance required by this
 ticket remains unverified until its actual verdict exists. Check coverage against the ticket,
 not merely the candidate's list: omitted requirements invalidate approval.
 
+Review the actual diff's impact and the coordinator's scope/reuse rationale under
+[check selection](check-scope.md). Independently execute each check assigned as
+fresh; other checks may use qualifying evidence under the requirements contract.
+Independent judgment is required even for a manual-only verification stage.
+
 #### Publish independent verification
 
 The independent verifier prepares its observations and publishes from one

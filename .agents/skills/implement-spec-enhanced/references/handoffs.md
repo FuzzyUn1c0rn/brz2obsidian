@@ -1,13 +1,18 @@
 # Structured handoffs
 
-Read this common contract once before dispatch or consuming a stage. Then read
+Use this contract for the structured path selected in `SKILL.md`. Eligible
+report/documentation corrections follow [lightweight handoffs](lightweight-handoff.md)
+instead; their Markdown review records are outside the structured schemas and
+CLI validators. Both paths use [change-scoped check selection](check-scope.md).
+
+Read this common contract once before structured dispatch or consuming a stage. Then read
 only the references required by the current role or transition. The linked
 references are authoritative; examples for unrelated stages stay out of the
 current reading path.
 
 ## Stage reading paths
 
-Every publisher and transition reviewer reads
+Every structured publisher and transition reviewer reads
 [requirements/evidence](handoff-evidence.md) and
 [transition validation](handoff-validation.md), including the independently
 supplied requirements. Add the reference for the current operation:

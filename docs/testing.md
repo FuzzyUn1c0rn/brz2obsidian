@@ -81,6 +81,16 @@ scope, requirements and receipt destination/contract. Completion reports name
 receipt paths and outcomes. Independent fresh verification runs its own runner
 invocation and receipt in its assessed checkout.
 
+For `implement-spec-enhanced`, select scope using
+[the actual-change check plan](../.agents/skills/implement-spec-enhanced/references/check-scope.md).
+Eligible report-only and small non-executable documentation corrections may use
+[the lightweight handoff path](../.agents/skills/implement-spec-enhanced/references/lightweight-handoff.md):
+independent diff/evidence review remains required, while unrelated runtime or GUI
+execution does not follow merely from a feature's earlier check scope. Mandatory
+acceptance and freshness requirements still apply. The lightweight record is
+outside the structured handoff schemas; all covered checks it executes still use
+the runner and receipt validation described here.
+
 ### Stable-candidate checkpoint
 
 Before completion checks, plan focused development/audit controls and required
@@ -100,8 +110,10 @@ completion checks against that stable source through the runner, retaining and
 validating receipts bound to that commit. Keep source unchanged during execution
 and until publication; the runner's snapshots detect changes during a run.
 Focused success cannot replace coordinator-assigned full base/GUI or other
-required coverage. Tickets requiring only focused coverage retain that scope;
-independent verification still uses its own assessed checkout and fresh execution.
+required coverage. Tickets requiring only focused coverage retain that scope.
+Independent verification executes assigned fresh checks in its own assessed
+checkout with its own receipts; other evidence follows the independently selected
+scope and reuse rules. A manual-only verdict still requires independent review.
 
 A repair during or after completion checks returns to this checkpoint: resolve
 the finding, complete affected focused controls, commit a new stable candidate,
@@ -187,7 +199,7 @@ coverage fits the ticket. Receipts establish execution and integrity facts, not
 security attestation against deliberate forgery.
 
 The [enhanced handoff contract](../.agents/skills/implement-spec-enhanced/references/handoffs.md)
-is authoritative for structured per-stage requirements, publication commands,
+is authoritative for the structured path's per-stage requirements, publication commands,
 current versus historical schema, reuse and transition validation. Its separately
 authored requirements bind the stage/ticket/candidate and assessed result; they
 must accompany candidate, verification and integration publication and standalone

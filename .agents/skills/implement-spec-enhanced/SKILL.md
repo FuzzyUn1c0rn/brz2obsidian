@@ -1,14 +1,15 @@
 ---
 name: implement-spec-enhanced
-description: "Implement a specification and ticket graph with structured implementation, verification, and integration handoffs."
+description: "Implement specifications and ticket graphs with change-scoped checks, independent review, and structured or lightweight documentation handoffs."
 ---
 
 # Implement Spec Enhanced
 
 Workspace-local adaptation of `implement-spec`. Implement the accepted spec on
 one integration branch, resolving its ticket graph through independently
-verified candidates. Use this copy when structured handoffs are wanted; the
-original skill remains available.
+reviewed candidates. Use structured handoffs for substantive changes and the
+lightweight path for eligible report/documentation corrections. The original
+skill remains available.
 
 ## Prepare
 
@@ -18,7 +19,16 @@ and record eligible selected leaves, an established leaf result, or the scope of
 explicit user-authorized combined work before claim/dispatch. Reuse a suitable
 integration branch or create one, recording its starting commit for the final review.
 
-Read [the common handoff contract](references/handoffs.md) before dispatch and
+Before dispatch, read [check selection](references/check-scope.md). Select the
+path and checks from the proposed changes, affected dependencies and mandatory
+acceptance criteria; confirm them against the actual candidate diff before
+completion checks. Record the rationale independently of submitted results.
+For eligible report-only or small documentation changes, follow
+[lightweight handoffs](references/lightweight-handoff.md) instead of the structured
+sequence below. Keep issue claiming, independent review and required acceptance
+gates in both paths.
+
+For the structured path, read [the common handoff contract](references/handoffs.md) before dispatch and
 [dispatch details](references/handoff-dispatch.md) when assigning stages or attempts.
 Each agent reads [requirements/evidence](references/handoff-evidence.md) and
 [transition validation](references/handoff-validation.md), then only its applicable
@@ -47,7 +57,7 @@ Delegate exploration only for a concrete unresolved question. Save temporary
 notes under the effort's `tmp/` directory; retain decisions in the ticket or spec.
 Native investigation and approved presentation follow the repository guidance.
 
-## Implement, verify, integrate
+## Structured implementation, verification and integration
 
 1. Claim each ready ticket through the issue tracker. Dispatch implementers in
    parallel where dependencies, ownership, and available agent slots permit.
@@ -62,7 +72,8 @@ Native investigation and approved presentation follow the repository guidance.
    integration tip and capture its full ID as `base_ref` at synchronization,
    before the final candidate checks. Follow the
    [stable-candidate checkpoint](../../../docs/testing.md#stable-candidate-checkpoint):
-   finish focused controls and known findings, commit stable source, then run
+   finish focused controls and known findings, confirm the check plan against
+   the actual diff, commit stable source, then run
    required completion checks through the repository runner and retain receipts
    bound to that commit. Report the checked commit and clean checkout to the
    coordinator before publication. The coordinator then assigns the exact unused
@@ -81,7 +92,8 @@ Native investigation and approved presentation follow the repository guidance.
    reads [independent verification](references/handoff-verification.md),
    inspects that commit in a separate checkout, checks the diff against the
    ticket/spec and approved presentation, and performs the checks needed to
-   support a verdict through its own runner invocation and fresh receipt. Validate
+   support a verdict. Execute checks assigned as fresh through its own runner
+   invocation and receipt; apply the check-selection reference for other evidence. Validate
    candidate evidence and declared coverage against the independent requirements;
    keep manual/native observations distinct from covered automated checks. Dispatch
    includes the exact assigned attempt, clean assessed candidate checkout,
@@ -110,8 +122,10 @@ Native investigation and approved presentation follow the repository guidance.
    `previous_tip_ref` immediately before the actual merge, then
    integrates the verified commit. Abort an unfinished conflicting merge before
    returning repair to the implementer; substantive integration repairs need a
-   new candidate and verification. Run coordinator-required checks appropriate to the
-   combined result through the runner, validate its receipts and coverage, and invoke
+   new candidate and verification. Reassess checks for the actual combined result;
+   an unchanged fast-forward may reuse qualifying evidence under the assigned
+   requirements. Run required fresh checks through the runner, validate receipts
+   and coverage, and invoke
    the integration writer using the assigned attempt, actual integration checkout,
    merger-input path, and independently assigned integration requirements. The writer
    binds the exact verifier bytes
@@ -133,18 +147,22 @@ Native investigation and approved presentation follow the repository guidance.
 
 ## Coordination and finish
 
-Dispatch messages carry pointers and ownership, completion messages carry a
-manifest path, runner receipt paths and outcomes. Read records on completion,
+Dispatch messages carry the selected path, check rationale, pointers and ownership;
+completion messages carry the structured manifest or lightweight review-record
+path, runner receipt paths and outcomes. Read records on completion,
 rework, or a meaningful state change. Use completion events or bounded waits instead of repeatedly
 requesting unchanged status. Send human updates for progress, blockers, and
 decisions that matter. The contract defines evidence reuse; a new commit alone
-does not require repeating every native check. Existing records remain immutable;
-new transitions use the current contract. Historical reused checks retain their
+does not require repeating every native check. Published structured records and
+completed or superseded lightweight records remain immutable; in-progress
+lightweight records use the prescribed append-only sequence. New transitions
+use the selected path's contract. Historical reused checks retain their
 provenance and reason and cannot satisfy a fresh-run requirement.
 
 After all tickets integrate, use `code-review` against the recorded starting
-commit and accepted spec. Route fixes through the same candidate/verifier/merger
-sequence. Preserve any required user acceptance gate. Mark a requested PR ready
+commit and accepted spec. Select the path and checks again for each review fix;
+eligible documentation corrections use the lightweight path. Preserve any
+required user acceptance gate. Mark a requested PR ready
 only when required checks and reviews pass, or otherwise report the completed
 integration branch. Retain durable results before archiving managed worktrees
 through their lifecycle and retiring disposable handoff files.
