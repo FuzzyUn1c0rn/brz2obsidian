@@ -284,6 +284,7 @@ Thought-owned attachments use SourceType 2:
 | --- | --- |
 | 1 / 4 | Thought Markdown at owner/Location; active content plus a safe exact `.md.original` backup; unsafe originals are omitted |
 | 1 / 0 | Ordinary file, except a sole nonempty canonical `Notes.md` on an ordinary thought: active Markdown plus a safe exact original backup; unsafe originals are omitted. Empty decoded placeholders remain backups without content eligibility. |
+| 2 / 0 | External file at a reviewed safe absolute drive-qualified Windows path, rendered as an encoded file URI and distinct Resources entry; no target access or payload copying |
 | 3 / 0 | Exact external HTTP/HTTPS URL reference; populated reviewed YouTube metadata adds independently derived native video presentation |
 | 5 / 0 | Decorative icon at owner/.data/Location; copied without Resources clutter |
 | 8 / 0 | Absolute Windows directory reference rendered as file URI |

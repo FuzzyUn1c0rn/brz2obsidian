@@ -332,10 +332,10 @@ reordered-source fingerprints separately. See [current v3 independent preservati
 | Versioned component | Current value |
 | --- | --- |
 | Package / converter | `0.3.0` |
-| Migration result / record schema | `3` |
-| Snapshot / source policy contract | `3` |
-| Reviewed TheBrain module / profile | `3` |
-| Obsidian renderer | `3` |
+| Migration result / record schema | `6` |
+| Snapshot / source policy contract | `6` |
+| Reviewed TheBrain module / profile | `9` |
+| Obsidian renderer | `6` |
 | BRZ exchange format | `5` |
 | Independent vault-check schema | `1` |
 
