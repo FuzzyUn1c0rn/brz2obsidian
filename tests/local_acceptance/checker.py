@@ -202,11 +202,11 @@ def check_vault(source, vault):
         ), "collection source identity"
         assert (
             record["source_identity"]["module_id"] == "thebrain-brz"
-            and record["source_identity"]["module_version"] == "8"
+            and record["source_identity"]["module_version"] == "9"
         ), "source module identity"
         assert (record["profile_id"], record["profile_version"]) == (
             "thebrain-format5-reviewed",
-            "8",
+            "9",
         ), "reviewed source profile"
         originals = {e["key"]: e for e in record["original_evidence"]}
         for name in ROOTS:
@@ -1219,9 +1219,10 @@ def source_references(body, owner, assets, excluded=()):
             )
             kind = "item"
             assert not image or target in excluded, "unexpected linked thought image"
-            assert target in excluded or not inline_candidates(label_text)[0], (
-                "unsupported included nested thought phrase"
-            )
+            assert (
+                target in excluded
+                or not inline_candidates(label_text, inline_only=True)[0]
+            ), "unsupported included nested thought phrase"
         elif image and url.startswith(".data/md-images/"):
             path, separator, fragment = url.partition("#")
             assert "?" not in url, "independent image query refusal"

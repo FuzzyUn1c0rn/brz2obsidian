@@ -232,8 +232,9 @@ signature with relationship-specific guidance. Provisional raw omission suppress
 pre-validation diagnostic disclosure; it never authorizes inclusion or bypasses
 global identity/ownership validation. Forgotten associations remain private.
 
-The reviewed TheBrain module/profile is now version8: version7 added the two
-relationship signatures; version8 closes the recognized HTML exclusion boundary.
+The reviewed TheBrain module/profile is now version9: version7 added the two
+relationship signatures; version8 closes the recognized HTML exclusion boundary;
+version9 closes active declaration-block refusal in documents and own labels.
 Source admission/refusal meanings changed. Source-neutral snapshot/policy/result/renderer/record remain version6;
 their fields and hierarchy/related meanings did not change. Alternative sources
 retain their own versions. Actual-ZIP Workflow/CLI exact-navigation controls and
@@ -328,9 +329,33 @@ text. Rich HTML notes and unverified rich/legacy transformations
 are unsupported. Nonempty events/access/custom-field collections and custom
 type hierarchies/custom link types also refuse.
 
+[CommonMark type-4 declaration blocks](https://spec.commonmark.org/0.31.2/#html-blocks)
+start with `<!` followed immediately by an ASCII letter, after zero through three
+spaces at the actual owning container's content start. Any letter case qualifies;
+refusal does not require a `>` before document or container end. Same-line and
+later closers, paragraph interruption and nested quote/list ownership remain
+unsupported. Already protected code/comments, escaped openers, nonletter and
+non-ASCII near misses and established non-block incomplete prose keep their exact
+authored bytes. Tabs affect block columns without changing raw Unicode offsets.
+Retained nonempty own thought labels use only this block qualification after
+inclusion and role/type/string validation; labels remain opaque Item strings.
+Inline reference display labels are distinct: incomplete inline `<!a` retains
+its exact visible alias, while actual complete HTML declarations still refuse.
+Included failures identify the owner and real document/payload or retained
+thoughts-label field with contextual review guidance. Excluded direct/transitive
+associations cannot leak raw label/content through diagnostics.
+
+The reviewed source route conservatively refuses a declaration following a
+non-1 ordered marker when the preceding paragraph's quote/list prefix is absent
+(for example `> Paragraph\n10. <!a`). The pinned parser starts a new ordered
+container there even with ordinary prose and no later closer. This is an explicit
+reviewed ownership limit, not a universal invalidity claim about CommonMark
+laziness. Matching existing-prefix paragraphs and real new-owner/blank-boundary
+contrasts are independently covered; no broader lazy admission is implemented.
+
 ## Approved warnings
 
-The fixed profile `thebrain-format5-reviewed`, now version `8`, retains the reviewed version-3 gap rules below:
+The fixed profile `thebrain-format5-reviewed`, now version `9`, retains the reviewed version-3 gap rules below:
 
 Findings must have the reviewed kind, compatible rule/profile, subject and
 evidence. Missing evidence and unknown kinds refuse; generic core contains no

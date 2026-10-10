@@ -139,3 +139,34 @@ bind the clean stable candidate, independent review and actual integration.
 Structured handoffs retain criterion coverage, genuine RED/GREEN history and
 separately qualified fixture/launch-authoring mistakes. No failed or partial
 actual matrix substitutes for the refreshed gate.
+
+## Subsequent declaration-block qualification
+
+The separate [#147](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/147)
+runtime boundary follows CommonMark type-4 opening and actual container ownership,
+including lowercase, zero through three spaces and incomplete EOF declarations.
+The source adapter now refuses these active blocks before its pinned parser's
+uppercase-only HTML-block recognition. Silent paragraph/reference/quote lookahead
+reports a boundary without raising; actual parse supplies the existing source
+refusal. Code/comments and escaped/non-block near misses retain exact bytes.
+Retained own thought labels receive the same narrow block qualification after
+inclusion, with owner-only safe raw-field diagnostics. They remain opaque strings;
+inline reference display labels retain their distinct inline grammar.
+
+The independent raw oracle retains original characters and coordinates while
+deriving tab columns, ordered nested container prefixes, list padding, paragraph
+interruption and already protected leaves. Public full-output controls and fully
+rebound declaration forgeries cover the source and complete audit boundaries.
+Missing old quote/list prefixes before a non-1 ordered declaration are a
+conservative reviewed owner limit: bounded observation shows the pinned parser
+starts a new ordered container independently of a later closer. Six initially
+authored accepted expectations failed publicly before any oracle assertion;
+their interim oracle classification is withdrawn. The complete raw controls
+apply the explicit original-character policy, without parser tokens as expected
+facts or a universal CommonMark invalidity claim. No lazy admission is broadened.
+Development evidence distinguishes genuine admission/oracle REDs from invalid
+ownership, output-count and later-closer fixture mistakes. Qualification meaning
+now advances BRZ module/profile8 to9; shared6, Folio3, BRZ format5 and package0.3.0
+stay unchanged. Version8 historical diagnosis remains historical; it neither
+qualifies version9 acceptance nor completes the stopped fifteen-output matrix.
+The refreshed #123 actual matrix and #124 native/user gates remain pending.

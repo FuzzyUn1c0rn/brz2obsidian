@@ -625,8 +625,8 @@ not a total-resource assumption. Each conversion obtains a fresh CLI inspection,
 checks identity/count/diagnostic parity and retains complete raw audits, input
 fingerprint guards and the A–D established scoped obligations. Synthetic pins
 exercise the same driver without private inputs. Public success does not establish
-actual E support: further unsupported relationship signatures remain a separate
-bounded ticket (#145), followed by actual matrix, native and user acceptance gates.
+actual E support. The bounded relationship and HTML/declaration qualifications
+remain distinct from the refreshed actual matrix, native and user acceptance gates.
 
 The [reviewed HTML boundary and independent oracle repair](history/red-vs-blue-investigation/reviewed-html-boundary.md)
 records the closed primary registry, raw grammar/leaf precedence and Type2
@@ -634,6 +634,23 @@ Windows display fallback. Public ZIP controls cover complete authored/generated
 bytes, exact originals/spans, genuine HTML refusals and self-consistent forged
 receipts. Historical version-rebound diagnosis remains qualified; the final
 five-original matrix must use the newly verified runtime/oracle.
+
+`test_declaration_blocks_workflow.py` establishes actual ZIP Workflow/CLI refusal
+of active type-4 declarations across LF, CR and CRLF, original indentation/tab
+columns, actual nested container ownership and included document/own-label routes.
+Its exact full-note/original/image/span controls retain protected code/comments,
+escaped and non-block prose and live facts after real container exits. Own labels
+remain opaque strings with no document/edit/reference credit; their safe retained
+field pointers are distinct from raw ordinals after omission. Incomplete inline
+reference display labels use inline-only activity, preserving aliases and complete
+HTML refusal. The standard-library oracle independently follows ordered raw
+container prefixes and original protection. `test_declaration_blocks.py` rebinds
+source roots, payload/document facts, originals, fingerprints and complete output
+manifests to reject fabricated supported declaration claims through both complete
+audit pipelines; extra/missing/moved generated guards also fail after rehashing.
+BRZ module/profile qualification is version9; shared contracts stay6 and Folio3.
+Fresh full GUI-required pytest and all tooling on the clean candidate, independent
+review and integration precede the entirely new five-original/fifteen-output gate.
 
 ## Private full-export acceptance
 

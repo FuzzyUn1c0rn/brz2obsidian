@@ -185,6 +185,44 @@ def _literal(value):
     return False
 
 
+def _declaration_block(state, start_line, end_line, silent):
+    """Refuse type-4 HTML at the parser's active container content start.
+
+    The pinned block parser recognizes uppercase declarations only. Admission
+    follows CommonMark 0.31.2 section 4.6's ASCII-letter boundary independently
+    of a closer. Earlier parser rules retain code/fence/container ownership.
+    Silent terminator probes establish ownership without raising a refusal.
+    """
+    if state.is_code_block(start_line) or not state.md.options.get("html"):
+        return False
+    pos = state.bMarks[start_line] + state.tShift[start_line]
+    value = state.src[pos : state.eMarks[start_line]]
+    if not re.match(r"<![A-Za-z]", value):
+        return False
+    if silent:
+        return True
+    _refuse(
+        "unsupported_feature",
+        "HTML declarations are outside reviewed Markdown coverage",
+    )
+
+
+def _declaration_parser():
+    parser = MarkdownIt("commonmark")
+    parser.block.ruler.before(
+        "html_block",
+        "reviewed_declaration",
+        _declaration_block,
+        {"alt": ["paragraph", "reference", "blockquote"]},
+    )
+    return parser
+
+
+def qualify_declaration_blocks(text):
+    """Qualify an opaque own label without adapting it or inventing a document."""
+    _declaration_parser().parse(text)
+
+
 def adapt_literals(text):
     """Expose codepoint edits from scoped source into explicitly adapted text.
 
@@ -195,7 +233,7 @@ def adapt_literals(text):
     origins = list(range(len(text)))
     edits = {}
     while True:
-        parser = MarkdownIt("commonmark")
+        parser = _declaration_parser()
         hits = []
 
         def collect(state, silent, hits=hits):

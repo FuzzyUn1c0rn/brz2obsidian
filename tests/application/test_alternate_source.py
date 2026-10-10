@@ -186,7 +186,7 @@ def test_alternate_external_file_materializes_owner_without_payload_access(tmp_p
     )
 
 
-@pytest.mark.parametrize("brz_version", ["3", "7", "9"])
+@pytest.mark.parametrize("brz_version", ["3", "7", "8", "10"])
 def test_previous_shared_contract_and_unreviewed_brz_profile_refuse_explicitly(
     tmp_path, brz_version
 ):

@@ -511,7 +511,7 @@ def test_current_public_envelopes_reserve_empty_gap_and_presentation_facts(tmp_p
     result = default_workflow().inspect(source)
     assert result.schema_version == 6
     assert result.converter_version == "0.3.0"
-    assert result.profile_version == result.source_identity.module_version == "8"
+    assert result.profile_version == result.source_identity.module_version == "9"
     assert result.inspection.source_gaps == ()
     assert result.inspection.generated_presentations == ()
     vault = tmp_path / "vault"

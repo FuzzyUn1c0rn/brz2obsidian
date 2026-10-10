@@ -60,7 +60,7 @@ def test_combined_v2_vault_preserves_independent_facts_and_checks_without_source
     result = default_workflow().convert(source, vault)
     assert result.outcome == "warnings", result.issues
     assert result.receipt.published and result.receipt.verified
-    assert result.schema_version == 6 and result.profile_version == "8"
+    assert result.schema_version == 6 and result.profile_version == "9"
     assert result.converter_version == brz2obsidian.__version__ == "0.3.0"
     package = tomllib.loads(
         (Path(brz2obsidian.__file__).parents[2] / "pyproject.toml").read_text()

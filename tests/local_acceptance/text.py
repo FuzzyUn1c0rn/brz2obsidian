@@ -191,31 +191,52 @@ _HTML_TOKEN = re.compile(
 )
 
 
-def _line_view(line):
+def _line_view(line, *, interrupt=False):
     """A bounded container view; slicing never alters raw source coordinates."""
-    quote = re.match(r"^ {0,3}(?:> ?)+", line)
-    content = line[quote.end() :] if quote else line
-    listing = re.match(r"^ {0,3}(?:[-+*]|[0-9]{1,9}[.)]) +", content)
+    # Columns govern block indentation only. Inline syntax, authored bytes and
+    # offsets still come exclusively from the untouched original body below.
+    content, owner = line.expandtabs(4), []
+    while content:
+        quote = re.match(r"^ {0,3}> ?", content)
+        listing = re.match(r"^( {0,3}(?:[-+*]|[0-9]{1,9}[.)]))( +)", content)
+        if quote:
+            content = content[quote.end() :]
+            owner.append(("quote", 0))
+        elif listing:
+            number = re.match(r"[0-9]+", listing[1].lstrip())
+            if interrupt and not owner and number and int(number[0]) != 1:
+                # A non-1 ordered marker cannot interrupt a raw paragraph.
+                break
+            # CommonMark 5.2: a wide marker gap consumes one space, leaving
+            # at least four as code indentation. Never fabricate an opener.
+            indent = len(listing[1]) + (len(listing[2]) if len(listing[2]) <= 4 else 1)
+            content = content[indent:]
+            owner.append(("indent", indent))
+        else:
+            break
     return (
-        content[listing.end() :] if listing else content,
-        quote[0].count(">") if quote else 0,
-        listing.end() if listing else 0,
+        content,
+        sum(kind == "quote" for kind, _ in owner),
+        sum(width for kind, width in owner if kind == "indent"),
+        tuple(owner),
     )
 
 
 def _owned_block_view(line, owner):
     """Consume existing container prefixes, never markers inside leaf content."""
-    quoted, indentation = owner
-    content = line
-    for _ in range(quoted):
-        prefix = re.match(r"^ {0,3}> ?", content)
-        if prefix is None:
-            return None
-        content = content[prefix.end() :]
-    spaces = len(content) - len(content.lstrip(" "))
-    if content.strip() and spaces < indentation:
-        return None
-    return content[min(spaces, indentation) :]
+    content = line.expandtabs(4)
+    for kind, width in owner:
+        if kind == "quote":
+            prefix = re.match(r"^ {0,3}> ?", content)
+            if prefix is None:
+                return None
+            content = content[prefix.end() :]
+        else:
+            spaces = len(content) - len(content.lstrip(" "))
+            if content.strip() and spaces < width:
+                return None
+            content = content[min(spaces, width) :]
+    return content
 
 
 def _inline_regions(body):
@@ -230,6 +251,7 @@ def _inline_regions(body):
     fence = None
     comment = None
     paragraph = False
+    paragraph_owner = ()
     region = None
     regions = []
     previous_quotes = 0
@@ -238,7 +260,7 @@ def _inline_regions(body):
         line = match[0]
         if not line:
             continue
-        owner = fence[1:] if fence else comment
+        owner = fence[1] if fence else comment
         if owner is not None:
             owned = _owned_block_view(line, owner)
             if owned is not None:
@@ -261,14 +283,31 @@ def _inline_regions(body):
                         and not closer[2].strip()
                     ):
                         fence = None
-                previous_quotes, list_indent = owner
+                previous_quotes = sum(kind == "quote" for kind, _ in owner)
+                list_indent = sum(width for kind, width in owner if kind == "indent")
                 paragraph = False
                 continue
             fence = comment = None
-        container_content, quotes, listing = _line_view(line)
+        continuing = _owned_block_view(line, paragraph_owner) if paragraph else None
+        # The reviewed conservative owner boundary does not extend a missing
+        # quote/list prefix into an ordered declaration route. This is a bounded
+        # source-policy limit, not a claim about all CommonMark lazy paragraphs.
+        container_content, quotes, listing, container_owner = _line_view(
+            continuing if continuing is not None else line,
+            interrupt=continuing is not None,
+        )
+        if continuing is not None:
+            # Existing prefixes precede a new marker. A non-1 ordered marker
+            # cannot interrupt that paragraph within its actual quote/list.
+            container_owner = paragraph_owner + container_owner
+            quotes = sum(kind == "quote" for kind, _ in container_owner)
         if quotes != previous_quotes:
             list_indent = 0
-        if listing:
+        if continuing is not None:
+            list_indent = sum(
+                width for kind, width in container_owner if kind == "indent"
+            )
+        elif listing:
             list_indent = listing
         elif (
             list_indent
@@ -278,19 +317,20 @@ def _inline_regions(body):
         ):
             list_indent = 0
         content = container_content
-        if list_indent and not listing:
+        if continuing is None and list_indent and not listing:
             content = content[
                 min(list_indent, len(content) - len(content.lstrip(" "))) :
             ]
+            container_owner += (("indent", list_indent),)
         marker = re.match(r" {0,3}(`{3,}|~{3,})(.*)", content)
         protected = False
         if re.match(r" {0,3}<!--", content):
             protected = True
             if "-->" not in content:
-                comment = (quotes, list_indent)
+                comment = container_owner
         elif marker and not (marker[1][0] == "`" and "`" in marker[2]):
             protected = True
-            fence = (marker[1], quotes, list_indent)
+            fence = (marker[1], container_owner)
         elif re.match(r" {0,3}<![A-Za-z]", content):
             # CommonMark 4.6 type 4 starts with <! and an ASCII letter.
             # Its HTML ownership extends to >, the container boundary or EOF;
@@ -327,6 +367,7 @@ def _inline_regions(body):
                 regions.append((region, match.end()))
                 region = None
         paragraph = not (protected or not content.strip())
+        paragraph_owner = container_owner if paragraph else ()
         previous_quotes = quotes
     if region is not None:
         regions.append((region, len(body)))
@@ -342,16 +383,20 @@ def generated_boundary(prefix):
     belong to authored document coordinates, digests or adaptation counts.
     """
     _, _, (fence, comment) = _inline_regions(prefix)
-    if fence and fence[1:] == (0, 0):
+    if fence and not fence[1]:
         return "\n\n" + fence[0] + "\n"
-    if comment == (0, 0):
+    if comment == ():
         return "\n\n-->\n"
     return ""
 
 
-def active_mask(body, *, autolinks=True):
+def active_mask(body, *, autolinks=True, inline_only=False):
     """Lexically protect constructs in source order with exact raw coordinates."""
-    regions, mask, _ = _inline_regions(body)
+    if inline_only:
+        # A reference display label is an inline fragment, not a new block.
+        regions, mask = [(0, len(body))], list(body)
+    else:
+        regions, mask, _ = _inline_regions(body)
     for start, finish in regions:
         cursor = start
         while cursor < finish:
@@ -400,9 +445,9 @@ def active_mask(body, *, autolinks=True):
     return "".join(mask)
 
 
-def inline_candidates(body):
+def inline_candidates(body, *, inline_only=False):
     """Find balanced active phrases, distinguishing bracket text from links."""
-    scan = active_mask(body, autolinks=False)
+    scan = active_mask(body, autolinks=False, inline_only=inline_only)
     mask = list(scan)
     # Balanced brackets recognize whole outer phrases, including an image inside
     # a forgotten thought link. Escaped brackets never change nesting depth.

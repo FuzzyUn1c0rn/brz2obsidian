@@ -255,8 +255,15 @@ The ordinary image renderer composes assigned destination edits and report
 notices. Explicit metadata/result/reference consumers reject old/future contracts.
 The closed contract has changed explicitly: consumers
 must accept version 6 rather than interpreting it as an earlier contract. The reviewed
-TheBrain module/profile now use version `8`: version7 added two bounded
-relationship signatures, and version8 closes three recognized HTML exclusions.
+TheBrain module/profile now use version `9`: version7 added two bounded
+relationship signatures, version8 closes three recognized HTML exclusions,
+and version9 refuses active type-4 declaration blocks in reviewed documents and
+retained own labels. A local source parser-state rule checks original content
+after real container prefixes and before HTML-block parsing, retaining code,
+comment and escaped-opener protection. Own labels remain opaque strings without
+document coordinates, edit ledgers or reference credit. Their qualification
+follows inclusion and scalar validation; diagnostic field pointers address the
+retained safe thoughts rows. Inline reference display labels keep inline grammar.
 The renderer and source-neutral shapes/meanings remain version `6`. See the
 [primary exclusion and oracle review](history/red-vs-blue-investigation/reviewed-html-boundary.md).
 BRZ format stays `5`. Source admission changes do not invent new canonical graph

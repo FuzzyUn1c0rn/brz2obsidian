@@ -27,6 +27,7 @@ from brz2obsidian.contracts import (
 from .attachments import normalize_attachments
 from .classifications import decode_classifications
 from .decoding import ROOT_FILES, decode_records
+from .literals import qualify_declaration_blocks
 from .metadata import calendar_dates, declared_appearance
 from .relationships import decode_relationships
 from .scope import contains_omitted_identity, records_json, scope_records
@@ -338,7 +339,7 @@ class BrzSession:
         if any(record.get("Id") in live_ids for record in records["tombstones.json"]):
             _refuse("invalid_source", "A live identity also occurs in deleted history")
         thoughts = {}
-        for record in thought_records:
+        for index, record in enumerate(thought_records):
             key = _uuid(record["Id"])
             validate_semantic_fields(record, _refuse, known_type_fields=("TypeId",))
             if "TagIds" in record and type(record["TagIds"]) is not list:
@@ -370,6 +371,17 @@ class BrzSession:
                 record.get("Label") is not None and type(record["Label"]) is not str
             ):
                 _refuse("invalid_source", "Thought title/label is invalid")
+            if record.get("Label"):
+                try:
+                    qualify_declaration_blocks(record["Label"])
+                except MigrationRefused:
+                    _refuse(
+                        "unsupported_feature",
+                        "Thought label contains an unsupported HTML declaration block",
+                        (key,),
+                        evidence=(f"thoughts.json:{index}.Label",),
+                        guidance="Review the affected thought's own label; active HTML declaration blocks are outside reviewed label coverage.",
+                    )
             thoughts[key] = record
         setting_id = str(uuid5(UUID(brain_id), "20"))
         setting_keys = set()
@@ -457,7 +469,7 @@ class BrzSession:
         identity = SourceIdentity(
             source_id=brain_id,
             module_id="thebrain-brz",
-            module_version="8",
+            module_version="9",
             format_version="5",
             source_sha256=source_hash,
             snapshot_digest=snapshot_digest,

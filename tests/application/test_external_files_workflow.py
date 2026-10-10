@@ -371,7 +371,7 @@ def test_cli_external_html_video_pdf_agrees_with_library(tmp_path, capsys, json_
         assert (
             actual["profile_version"]
             == actual["source_identity"]["module_version"]
-            == "8"
+            == "9"
         )
         assert RunResult.model_validate_json(captured.out) == expected
         actual["schema_version"] = 3
@@ -403,7 +403,7 @@ def test_cli_external_html_video_pdf_agrees_with_library(tmp_path, capsys, json_
     record = json.loads((tmp_path / "vault/migration-record.json").read_bytes())
     assert record["schema_version"] == 6 and record["renderer_version"] == "6"
     assert (
-        record["profile_version"] == record["source_identity"]["module_version"] == "8"
+        record["profile_version"] == record["source_identity"]["module_version"] == "9"
     )
 
 

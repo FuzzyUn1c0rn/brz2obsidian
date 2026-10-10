@@ -119,7 +119,7 @@ def test_inspection_and_conversion_materialize_categories_and_typed_empty_member
     workflow = default_workflow()
     inspected = workflow.inspect(source)
     assert inspected.outcome == "clean", inspected.issues
-    assert inspected.schema_version == 6 and inspected.profile_version == "8"
+    assert inspected.schema_version == 6 and inspected.profile_version == "9"
     assert inspected.receipt is None and inspected.counts.actual_notes is None
     assert inspected.counts.planned_notes == 3
     assert inspected.counts.source_definitions == 1
