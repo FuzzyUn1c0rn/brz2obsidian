@@ -30,10 +30,10 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
         )
 
     identity = snapshot.identity
-    if snapshot.contract_version != 6 or policy.contract_version != 6:
+    if snapshot.contract_version != 7 or policy.contract_version != 7:
         refuse(
             "unsupported_format",
-            "Only source snapshot and policy contract version 6 is supported",
+            "Only source snapshot and policy contract version 7 is supported",
         )
     if (
         identity.module_id,
@@ -148,7 +148,12 @@ def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
         refuse("unsupported_feature", "Reviewed finding dispositions are ambiguous")
     if any(
         d.disposition == "warning"
-        and d.issue_code not in {"approved_source_gap", "approved_metadata_discrepancy"}
+        and d.issue_code
+        not in {
+            "approved_source_gap",
+            "approved_metadata_discrepancy",
+            "formatting_loss",
+        }
         for d in policy.finding_dispositions
     ):
         refuse(

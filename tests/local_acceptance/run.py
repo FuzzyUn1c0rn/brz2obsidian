@@ -143,7 +143,7 @@ def inspect(source):
         response["operation"] == "inspect"
         and response["outcome"] in {"clean", "warnings"}
         and response["receipt"] is None
-        and response["schema_version"] == 6
+        and response["schema_version"] == 7
     ), "inspect envelope/no publication receipt"
     return response
 

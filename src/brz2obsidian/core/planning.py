@@ -92,13 +92,13 @@ def plan(analysis: Analysis) -> MigrationPlan:
         )
         + tuple(
             Adaptation(
-                kind="literal_text",
+                kind=edit.kind,
                 affected=f"text:{document.key}:{index}",
                 document_key=document.key,
                 owner=document.owner,
                 evidence=document.evidence,
                 text_edit=edit,
-                description="Escaped literal prose for Markdown display; exact before/after text and scoped coordinate bases remain in document evidence.",
+                description="Exact scoped text normalization for editable Markdown; before/after text, kind and coordinate bases remain in document evidence.",
             )
             for document in sorted(snapshot.documents, key=lambda d: d.key)
             for index, edit in enumerate(document.text_adaptations)

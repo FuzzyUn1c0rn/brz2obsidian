@@ -108,7 +108,7 @@ def test_combined_cli_matches_library_diagnostics_schema_and_actual_inventory(
     assert not captured.err
     if json_mode:
         result = json.loads(captured.out)
-        assert result["schema_version"] == 6 and result["operation"] == command
+        assert result["schema_version"] == 7 and result["operation"] == command
         assert result["issues"] == [i.model_dump(mode="json") for i in inspected.issues]
         assert result["source_identity"] == inspected.source_identity.model_dump(
             mode="json"

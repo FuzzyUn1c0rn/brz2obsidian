@@ -549,6 +549,7 @@ def literal_edits(body):
         )
         edits.append(
             {
+                "kind": "literal_text",
                 "start": match.start(),
                 "end": match.end(),
                 "before": token,

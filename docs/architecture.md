@@ -1,6 +1,6 @@
 # Reusable migration interfaces
 
-`contracts.py` owns version-6 strict, closed, frozen Pydantic values with
+`contracts.py` owns version-7 strict, closed, frozen Pydantic values with
 immutable nested tuples. Generic modules treat identities/keys as opaque;
 source modules supply stable hexadecimal naming seeds. Original JSON is
 independently retained as immutable text and embedded directly in the record,
@@ -14,7 +14,7 @@ Every classification relationship must correspond to exactly one assignment;
 members are distinct ordinary items and definitions are live definition items.
 The TheBrain adapter additionally joins each populated `TypeId` to exactly one
 matching exported instance relationship in both directions. These facts remain
-independent of hierarchy and source tags. The core requires contract version 6
+independent of hierarchy and source tags. The core requires contract version 7
 even when both supplied snapshot and policy claim the same older version.
 
 The shared contract includes optional immutable destination-independent facts:
@@ -180,7 +180,7 @@ from brz2obsidian.sources.thebrain.profile import BRZ_POLICY
 
 metadata = RunMetadata(
     converter_version="0.3.0",
-    renderer_version="6",
+    renderer_version="7",
     run_id="example-run",
     run_time="2026-10-04T00:00:00+00:00",
     obsidian_version="1.13.7",
@@ -205,7 +205,7 @@ reads time at the outer boundary; callers may inject a metadata factory.
 ## Result and migration-record schemas
 
 `RunResult.model_dump_json(by_alias=True)` exposes `schema="brz2obsidian.result"`,
-`schema_version=6`, `converter_version`, `operation`, `outcome`, `source_identity`,
+`schema_version=7`, `converter_version`, `operation`, `outcome`, `source_identity`,
 `profile_id`, `profile_version`, `counts`, `issues`, `inspection`, `receipt`.
 Unavailable fields/counts are `null`; issues is an array. Inspect returns planned
 item/tag targets, classification assignments, `icon_snapshots`,
@@ -217,7 +217,7 @@ inspection neither renders nor copies files. Convert returns no inspection
 and, after commit, a receipt with actual inventory/counts. The result supports
 `RunResult.model_validate_json(...)` round-tripping.
 
-`migration-record.json` exposes `schema="brz2obsidian.migration"`, version 6,
+`migration-record.json` exposes `schema="brz2obsidian.migration"`, version 7,
 converter/renderer versions, `source_identity`, profile identity, `run_metadata`,
 `original_evidence`, `item_targets`, `asset_targets`, `relationships`,
 `tag_memberships`, `classification_assignments`, `source_gaps`,
@@ -254,8 +254,8 @@ image bindings; proprietary width-fragment recognition remains adapter-owned.
 The ordinary image renderer composes assigned destination edits and report
 notices. Explicit metadata/result/reference consumers reject old/future contracts.
 The closed contract has changed explicitly: consumers
-must accept version 6 rather than interpreting it as an earlier contract. The reviewed
-TheBrain module/profile now use version `9`: version7 added two bounded
+must accept version 7 rather than interpreting it as an earlier contract. The reviewed
+TheBrain module/profile now use version `10`: version7 added two bounded
 relationship signatures, version8 closes three recognized HTML exclusions,
 and version9 refuses active type-4 declaration blocks in reviewed documents and
 retained own labels. A local source parser-state rule checks original content
@@ -264,18 +264,18 @@ comment and escaped-opener protection. Own labels remain opaque strings without
 document coordinates, edit ledgers or reference credit. Their qualification
 follows inclusion and scalar validation; diagnostic field pointers address the
 retained safe thoughts rows. Inline reference display labels keep inline grammar.
-The renderer and source-neutral shapes/meanings remain version `6`. See the
+The renderer and source-neutral shapes/meanings now use version `7`. See the
 [primary exclusion and oracle review](history/red-vs-blue-investigation/reviewed-html-boundary.md).
 BRZ format stays `5`. Source admission changes do not invent new canonical graph
 meanings or couple the core to TheBrain direction flags.
-`RunMetadata.renderer_version` must be `6` when invoking the renderer directly.
+`RunMetadata.renderer_version` must be `7` when invoking the renderer directly.
 The alternate Folio adapter retains the earlier empty optional facts and also
 exercises independently authored opaque category assignments, owned icons,
 calendar triplets and explicit video facts. Its source format stays `folio/1`;
 it imports only contracts and does not decode TheBrain fields.
 
 The package and default workflow identify the converter as `0.3.0`. Migration
-result/record schemas use version 6, and the separately versioned convention
+result/record schemas use version 7, and the separately versioned convention
 checker remains `brz2obsidian.vault-check` version 1. This release version does
 not imply native acceptance. The accepted v2 audit remains historical evidence.
 Version-3 four-original preservation and actual-output native review passed.
@@ -332,10 +332,10 @@ reordered-source fingerprints separately. See [current v3 independent preservati
 | Versioned component | Current value |
 | --- | --- |
 | Package / converter | `0.3.0` |
-| Migration result / record schema | `6` |
-| Snapshot / source policy contract | `6` |
-| Reviewed TheBrain module / profile | `9` |
-| Obsidian renderer | `6` |
+| Migration result / record schema | `7` |
+| Snapshot / source policy contract | `7` |
+| Reviewed TheBrain module / profile | `10` |
+| Obsidian renderer | `7` |
 | BRZ exchange format | `5` |
 | Independent vault-check schema | `1` |
 
@@ -394,3 +394,9 @@ source teardown or publisher failures preserve an available durable receipt.
 The independent source-free checker examines current required image targets and
 neutral properties even when a historical migration receipt says publication
 succeeded. It cannot establish source-gap predicates or preservation completeness.
+
+## Markdown insert adaptations (version 7)
+
+Exact text edits now carry the closed source-neutral kind `literal_text` or `markdown_insert`; reference spans carry the validated `table_cell` presentation context for native-safe alias serialization. Snapshot/policy, renderer and migration result/record versions advance together to 7; the reviewed TheBrain module/profile is 10. The source adapter recognizes scoped active ToCs, evidenced table metadata and canonical callouts, composes literal edits before reference tracing, and supplies exact edit/declaration evidence. The generic core validates coordinates and digests without interpreting proprietary insert syntax. The renderer uses those adapted documents and escapes generated alias pipes in declared table cells.
+
+Formatting-loss findings use an explicit reviewed `formatting_loss` warning disposition. Table widths/justification, title emoji fallbacks and retained unsupported variants share existing warning authorization, safe UI messages, CLI issues and linked migration reports. Native standard callout colours/icons are accepted and produce no loss warning.

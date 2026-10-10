@@ -41,6 +41,7 @@ from brz2obsidian.publication.filesystem import preflight_destination
 # Deliberately static messages: backend Issue.message/evidence can contain authored
 # text, filenames or exception strings. Never project them across this boundary.
 SAFE_ISSUES = {
+    "formatting_loss": "Included note formatting needs review: table layout may become responsive, custom icons use visible title fallbacks, or an insert remains unsupported. Review affected notes and declarations in the Migration report and edit the converted Markdown if needed.",
     "invalid_source": "The archive does not contain a supported, consistent source. Re-export it from TheBrain.",
     "invalid_entry": "The source needs a valid live Home thought. Set Home and re-export.",
     "invalid_reference": "Source references could not be interpreted safely. Review the export and re-export.",

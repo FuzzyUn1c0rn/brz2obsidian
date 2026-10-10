@@ -58,7 +58,7 @@ def main(argv=None):
                     f"Image presentation normalizations: {result.counts.image_presentation_normalizations}"
                 )
             if result.counts.text_adaptations:
-                print(f"Literal text adaptations: {result.counts.text_adaptations}")
+                print(f"Text adaptations: {result.counts.text_adaptations}")
             print(
                 f"Planned thought notes: {result.counts.planned_notes}; present payloads: {result.counts.present_assets}"
             )

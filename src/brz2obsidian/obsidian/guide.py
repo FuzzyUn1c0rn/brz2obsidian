@@ -4,6 +4,30 @@ from brz2obsidian.core.support import category_template_path
 
 GUIDE = """# Vault guide
 
+## Imported Markdown inserts
+
+Generated tables of contents are static links to the authored headings. Their
+block IDs distinguish repeated headings and Unicode or punctuation labels.
+After heading edits, update the list and retain its destination block IDs, or
+edit the links manually; there is no automatic ToC maintenance.
+
+Reviewed source tables become ordinary editable Markdown tables. Native layout
+is responsive; source column widths and justification remain in the migration
+record and are not reproduced. Table link aliases use native pipe escaping;
+code spans containing pipes use narrowly generated, escaped code elements so
+the displayed code and cells remain intact. Review disclosed malformed tables before
+editing their cell structure.
+
+All 13 standard source callout types use their corresponding native Obsidian
+colours and icons. Consecutive callouts become separate panels; titles, folding
+and nested bodies remain editable. Authored emoji icons appear in the title,
+alongside Obsidian's native icon. This is a visible fallback, not an icon
+replacement. Unsupported icon declarations remain visible with warnings.
+No community plugin, generated CSS or custom standard icon assets are required.
+Compatible mathematics is retained. The Migration report links affected notes;
+the migration record retains exact declarations and adaptation edits, and safe
+original note bytes remain under Attachments.
+
 ## Find and create an object
 
 Before creating a note, look up existing names and aliases using Search or the
