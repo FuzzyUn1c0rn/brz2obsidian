@@ -18,7 +18,8 @@ Use the `gh` CLI from this checkout, or pass
   `--remove-label "..."`. Use the mapping in `triage-labels.md`.
 - Claim: `gh issue edit <number> --add-assignee @me`. Record the working
   session or agent identifier in a comment when sharing a GitHub account.
-- Close: `gh issue close <number> --reason completed` after recording results.
+- Close: `gh issue close <number> --reason completed` after the applicable
+  [completion conditions](#pr-delivery-and-issue-completion) and recorded results.
 
 GitHub issue numbers are repository-wide, shared with pull requests. Use full
 URLs for cross-repository references and distinguish legacy local ticket numbers
@@ -88,8 +89,65 @@ Publish durable scope/authorization decisions in the issue after claiming.
 3. Implement its scope and verify the acceptance criteria through the documented
    test seams. Comment on scope conflicts or unresolved criteria.
 4. Check each acceptance box only after its criterion is satisfied. Record
-   verification commands, results and material limits in comments. Close as
-   completed only when every criterion is satisfied.
+   verification commands, results and material limits in comments. Follow
+   [PR delivery and issue completion](#pr-delivery-and-issue-completion) for
+   publication, readiness and closure.
+
+## PR delivery and issue completion
+
+For authorized repository implementation, publish the integration branch and open
+a draft delivery PR targeting `main` after the first publishable integration
+commit, on structured, lightweight and ordinary implementation paths. Reuse a
+suitable existing open delivery PR instead of duplicating it; preserve an already
+ready status while its readiness evidence remains applicable. Confirm its
+repository, base, branch and head correspond to this implementation effort.
+Respect explicit user publication constraints and read-only
+or planning requests. When publication is unavailable or prohibited, record the
+local result and remaining delivery gate and keep the implementation issue open.
+
+Use the [PR skill](../../.agents/skills/pr/SKILL.md) for the body. Link the accepted
+specification and tickets; record the delivery PR URL in each associated issue.
+For a new PR, use an already published head and an explicit base:
+
+```powershell
+gh pr create --repo FuzzyUn1c0rn/brz2obsidian --draft --base main --head <integration-branch> --title "..." --body-file tmp/<effort>/pr-body.md
+```
+
+Local candidate/verification PASS and integration establish stage results.
+GitHub merge is a delivery gate for issue completion, not a prerequisite for
+those local judgments or draft publication. All other assigned acceptance gates
+retain their stage requirements. Mark a delivery PR ready only after required
+checks, independent review, final aggregate review and applicable user/native
+gates pass for its current head and scope. PR creation or readiness supplies no
+authorization to merge; a remote merge requires user authorization.
+
+Before closing an implementation issue, obtain fresh GitHub state for the exact
+associated delivery PR, for example:
+
+```powershell
+gh pr view <delivery-pr-number> --repo FuzzyUn1c0rn/brz2obsidian --json number,url,state,isDraft,baseRefName,headRefName,headRefOid,mergedAt,mergeCommit,closingIssuesReferences
+```
+
+Closure requires `state: MERGED`, `baseRefName: main`, a non-null `mergedAt` and
+`mergeCommit.oid`, and every applicable acceptance/review gate satisfied. Verify
+that the merged PR actually delivers this issue's accepted scope and reviewed
+result: an unrelated merged PR or a stale head missing later accepted changes
+does not qualify. Inspect its diff/commits and the delivered result as needed;
+GitHub's merge evidence supports squash and rebase, so do not require the local
+candidate commit to be an ancestor of `main`.
+
+Record the PR URL, assessed/delivered head, target base, merge time and merge
+commit together with criterion/review outcomes and material limits in the issue
+before closing it. Local integration, handoff PASS, readiness, draft/open state,
+closed-unmerged state, merge into another base, or unavailable merge evidence
+keeps the issue open. Retain the claim and dependency/blocker semantics while
+awaiting delivery; local completion does not unblock a dependency requiring a
+closed issue. Use plain issue links in a PR body until closure gates are met;
+auto-closing keywords must not bypass unresolved acceptance gates.
+
+Answer-only, research or planning tickets that change no repository content need
+no delivery PR. Record their answer/evidence and close only when their own
+accepted criteria are satisfied.
 
 ## Dependencies and wayfinding
 
@@ -112,12 +170,17 @@ Publish durable scope/authorization decisions in the issue after claiming.
   `issue_dependencies_summary.blocked_by` counts open blockers; otherwise
   inspect each issue referenced by the fallback line.
 - Claim: assign the issue as the session's first write before starting work.
-- Resolve: comment with the answer and evidence, close the ticket, and append
-  a summary and issue link to the map's Decisions-so-far.
+- Resolve: record the answer and evidence; close under the applicable
+  [completion conditions](#pr-delivery-and-issue-completion), then append a summary
+  and issue link to the map's Decisions-so-far.
 
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.**
+
+Issues remain the intake, accepted scope, triage and dependency surface. Delivery
+PRs carry implementation review and merge evidence under the lifecycle above;
+their existence or readiness does not replace an issue's triage status or claim.
 
 ## Migrated history and temporary artifacts
 

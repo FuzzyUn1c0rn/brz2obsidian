@@ -54,8 +54,9 @@ Keep work-in-progress notes and stage inputs elsewhere in the effort directory,
 outside published record names. A changed candidate starts at
 `attempt-001` beneath its new commit. An unchanged candidate
 can have further attempts in [retry/carry-forward](handoff-retry.md); keep previous records for
-diagnosis. The coordinator claims/closes tickets so concurrent workers do not
-edit the same bookkeeping files.
+diagnosis. The coordinator owns ticket claims and completion under
+[PR delivery and issue completion](../../../../docs/agents/issue-tracker.md#pr-delivery-and-issue-completion)
+so concurrent workers do not edit the same bookkeeping files.
 
 ## Record format
 

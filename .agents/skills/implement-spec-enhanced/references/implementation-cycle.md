@@ -75,8 +75,8 @@ remain in the [common contract](handoffs.md) and its stage references.
    merger-input path, and independently assigned integration requirements. The writer
    binds the exact verifier bytes
    and inspected result. Run the standalone integration validator against the
-   clean result, including failed outcomes. Resolve the ticket only after it
-   validates successfully and all required acceptance gates are satisfied.
+   clean result, including failed outcomes. A passing integration record establishes
+   the local result; it does not close the ticket.
    If integration is held by a temporary check or prerequisite, use a new
    attempt for the unchanged candidate when it becomes available. Reuse the
    passing verification only with explicit still-applicable PASS rationale in the
@@ -87,5 +87,7 @@ remain in the [common contract](handoffs.md) and its stage references.
 
 6. Save the durable conclusion, commits, verification results, evidence-reuse
    rationale, and material limits in the ticket. Update the frontier and dispatch
-   newly unblocked work. If the tracker requires PRs or the user requested one,
-   open a draft after the first integration commit and link the spec/tickets.
+   newly unblocked work from actual issue/dependency states. After the first
+   publishable integration commit, follow
+   [PR delivery and issue completion](../../../../docs/agents/issue-tracker.md#pr-delivery-and-issue-completion)
+   for default draft publication and eventual issue closure after merge into `main`.

@@ -95,10 +95,15 @@ on completion, rework or a meaningful state change. Use completion events or
 bounded waits; update the user on meaningful progress, blockers and decisions.
 Save temporary notes under `tmp/<effort>/` and durable conclusions in the ticket.
 
+After the first publishable integration commit, follow
+[PR delivery and issue completion](../../../docs/agents/issue-tracker.md#pr-delivery-and-issue-completion)
+for default draft publication and eventual closure after merge into `main` on
+both handoff paths. Respect explicit publication constraints.
+
 After integration, perform [final review](references/final-review.md) against the
 recorded starting commit and accepted scope. Reassess the path and checks for
 each repair, retaining independent review and any required user verdict.
-Mark a requested PR ready only when required checks and reviews pass; otherwise
-report the integration branch and remaining gates. Retain durable results before
+Report the integration branch, delivery state and remaining gates. Retain durable
+results before
 archiving managed worktrees and retiring disposable evidence under
 [workspace housekeeping](../../../docs/workspace.md).

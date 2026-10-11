@@ -20,6 +20,11 @@ the result, verification must pass, and all integration checks must pass or have
 documented evidence reuse. Capture the digest after the verifier finishes;
 the validator rejects changed verdict files. A failed attempt never closes work.
 
+An `integrated` record establishes local integration only. Remote delivery and
+issue closure follow [PR delivery and issue completion](../../../../docs/agents/issue-tracker.md#pr-delivery-and-issue-completion);
+keep that evidence in the ticket, outside immutable handoff records. The local
+ancestry conditions above do not determine GitHub squash/rebase merge completion.
+
 #### Publish the actual integration outcome
 
 The merger captures the integration tip immediately before performing the merge,

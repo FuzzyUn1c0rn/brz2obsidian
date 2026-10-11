@@ -22,3 +22,6 @@ Review the actual changes against the accepted requirements and repository
 standards, following the [final review procedure](../implement-spec-enhanced/references/final-review.md).
 
 Commit your work to the current branch.
+Follow [PR delivery and issue completion](../../../docs/agents/issue-tracker.md#pr-delivery-and-issue-completion)
+for default draft publication after the first publishable commit and implementation
+issue closure after merge into `main`, respecting explicit publication constraints.
