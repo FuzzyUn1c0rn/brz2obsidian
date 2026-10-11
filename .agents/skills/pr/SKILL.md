@@ -16,6 +16,10 @@ Use this template for writing the PR body:
 
 <diagram, diff-sketch, or tree>
 
+## Issues
+
+<associated issue references, or "No associated issue">
+
 ## Evidence
 
 - **Before:** <screenshot/output/failing test run>
@@ -154,6 +158,14 @@ function expandSkill(command: string): string {
 Place each visual next to the short text it supports. Keep only the calls, files, props, states, and boundaries needed to answer the user's current question or the options to resolve the current discussion point.
 
 You may use one of these, you may use several, it is unlikely you will use all of them. Use your judgement and don't overwhelm the user.
+
+### Issues
+
+Link the accepted specification and associated tickets. Apply
+[PR delivery and issue completion](../../../docs/agents/issue-tracker.md#pr-delivery-and-issue-completion)
+to choose ordinary references or closing references, verify the intended issue
+set, and record the PR URL in each associated issue. If there is no associated
+issue, say so.
 
 ### Evidence
 
