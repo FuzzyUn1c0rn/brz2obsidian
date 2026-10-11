@@ -265,7 +265,7 @@ document coordinates, edit ledgers or reference credit. Their qualification
 follows inclusion and scalar validation; diagnostic field pointers address the
 retained safe thoughts rows. Inline reference display labels keep inline grammar.
 The renderer and source-neutral shapes/meanings now use version `7`. See the
-[primary exclusion and oracle review](history/red-vs-blue-investigation/reviewed-html-boundary.md).
+[primary exclusion and oracle review](https://github.com/FuzzyUn1c0rn/brz2obsidian/blob/05b36923cd330261973bd35e19e6fa20ada88290/docs/history/red-vs-blue-investigation/reviewed-html-boundary.md).
 BRZ format stays `5`. Source admission changes do not invent new canonical graph
 meanings or couple the core to TheBrain direction flags.
 `RunMetadata.renderer_version` must be `7` when invoking the renderer directly.
@@ -327,7 +327,7 @@ and unscopable history collections are omitted. Safe retained values preserve
 exact numbers and omission/null distinctions. Consumers needing exact numeric comparisons should use
 an exact decimal JSON representation. Reproducibility compares logical decisions
 and content while handling explicit run metadata, original evidence order and
-reordered-source fingerprints separately. See [current v3 independent preservation](history/management-leadership-implementation/research/four-archive-preservation.md).
+reordered-source fingerprints separately. See [current v3 independent preservation](https://github.com/FuzzyUn1c0rn/brz2obsidian/blob/05b36923cd330261973bd35e19e6fa20ada88290/docs/history/management-leadership-implementation/research/four-archive-preservation.md).
 
 | Versioned component | Current value |
 | --- | --- |

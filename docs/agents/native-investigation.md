@@ -84,6 +84,6 @@ prose, captions or layout, or that missing icons share the same behavior.
 
 Recovering every similar note is unnecessary for that bounded design decision;
 expand for distinct/contradictory cases or a task requiring complete recovery.
-The [historical recovery report](../history/management-leadership-wayfinding/research/native-source-recovery.md)
+The [historical recovery report](https://github.com/FuzzyUn1c0rn/brz2obsidian/blob/05b36923cd330261973bd35e19e6fa20ada88290/docs/history/management-leadership-wayfinding/research/native-source-recovery.md)
 records the earlier complete recovery and its limits; it is evidence, not a
 required preparation step for future conversions.

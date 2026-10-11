@@ -364,7 +364,7 @@ adds forgotten-thought exclusion, reviewed missing-note image display, category
 source-gap handling and category hierarchy. Complete four-archive preservation
 and native output review passed; actual-user acceptance and independent final
 review remain pending. See the [current frontier](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/8)
-and [release verification record](docs/history/management-leadership-implementation/research/release-verification.md).
+and [release verification record](https://github.com/FuzzyUn1c0rn/brz2obsidian/blob/05b36923cd330261973bd35e19e6fa20ada88290/docs/history/management-leadership-implementation/research/release-verification.md).
 
 For contributors and library users:
 

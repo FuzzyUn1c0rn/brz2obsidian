@@ -91,7 +91,7 @@ this procedure adds no extra approval round.
 
 ## Worked example: source-gap warning panels
 
-The [accepted styling correction](../history/management-leadership-implementation/research/final-review.md#actual-vault-styling-follow-up)
+The [accepted styling correction](https://github.com/FuzzyUn1c0rn/brz2obsidian/blob/05b36923cd330261973bd35e19e6fa20ada88290/docs/history/management-leadership-implementation/research/final-review.md#actual-vault-styling-follow-up)
 records the rejected plain blockquotes, exact clarification/repair commits,
 native evidence and eventual user acceptance. These example IDs describe that
 accepted correction, rather than inferring all styling from the earlier A choice.

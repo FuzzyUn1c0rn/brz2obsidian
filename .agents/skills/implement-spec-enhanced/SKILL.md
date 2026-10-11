@@ -1,168 +1,89 @@
 ---
 name: implement-spec-enhanced
-description: "Implement specifications and ticket graphs with change-scoped checks, independent review, and structured or lightweight documentation handoffs."
+description: Implement an accepted specification or ticket graph with scoped checks and independent review.
 ---
 
 # Implement Spec Enhanced
 
-Workspace-local adaptation of `implement-spec`. Implement the accepted spec on
-one integration branch, resolving its ticket graph through independently
-reviewed candidates. Use structured handoffs for substantive changes and the
-lightweight path for eligible report/documentation corrections. The original
-skill remains available.
+Implement the accepted scope on one integration branch, preserving its acceptance
+criteria and existing work. This is the repository's implementation workflow for
+specifications and ticket graphs.
 
-## Prepare
+## Prepare and choose the path
 
-Read the accepted spec and implementation index. Complete
+Read the accepted spec and ticket/index. Complete
 [frontier discovery](../../../docs/agents/issue-tracker.md#discover-the-implementation-frontier)
-and record eligible selected leaves, an established leaf result, or the scope of
-explicit user-authorized combined work before claim/dispatch. Reuse a suitable
-integration branch or create one, recording its starting commit for the final review.
+before claim or dispatch. Record eligible leaves, an established leaf result, or
+explicitly authorized combined scope. Reuse a suitable integration branch or
+create one; record the full starting commit for final review.
 
-Before dispatch, read [check selection](references/check-scope.md). Select the
-path and checks from the proposed changes, affected dependencies and mandatory
-acceptance criteria; confirm them against the actual candidate diff before
-completion checks. Record the rationale independently of submitted results.
-For eligible report-only or small documentation changes, follow
-[lightweight handoffs](references/lightweight-handoff.md) instead of the structured
-sequence below. Keep issue claiming, independent review and required acceptance
-gates in both paths.
+Define completion from the accepted requirements, required checks, independent
+review and any actual-user/native gate. Reuse already approved scope, testing
+boundaries and presentation decisions. Resolve only missing decisions that
+materially affect the work; continue independent authorized work meanwhile.
+A read-only review or planning request produces findings without implementation.
 
-For the structured path, read [the common handoff contract](references/handoffs.md) before dispatch and
-[dispatch details](references/handoff-dispatch.md) when assigning stages or attempts.
-Each agent reads [requirements/evidence](references/handoff-evidence.md) and
-[transition validation](references/handoff-validation.md), then only its applicable
-stage reference below. Use the contract's
-`write_handoff.py` CLI for every candidate, verification, integration, and
-carry-forward publication, followed by the explicit standalone validator.
-Choose one absolute shared root under `tmp/<effort>/handoffs/` in the integration
-checkout.
-All agents receive that root, the spec and ticket pointers, integration branch,
-assigned files, and [runner testing instructions](../../../docs/testing.md#automated-check-runner).
-Give absolute interpreter, runner, assessed-checkout, selected checks/test scope,
-receipt destination/contract and stage-input pointers so commands work from another
-checkout. Before validating completion, the coordinator independently records each
-stage's required environment, check scope and freshness, bound to the ticket and
-candidate/assessed commit. Supply its absolute JSON path as `--requirements` to
-writers and standalone validators; use the exact schema in the handoff contract.
-Submitted results cannot narrow the independently assigned requirements. The ticket
-remains the source of truth for scope, ownership, blockers, and durable completion state.
+Choose coverage using [check selection](references/check-scope.md), recording
+the rationale independently of submitted results and confirming it against the
+actual diff before completion checks.
 
-Use stable implementer, verifier, and merger responsibilities. Use available
-general-purpose agents if a configured role expects a different workflow; this
-skill needs no hidden guard metadata or workflow-specific companion skill. Workers share the
-workspace: assign disjoint files where possible and preserve others' edits.
+- For eligible report-only or small non-executable documentation corrections,
+  use [lightweight handoffs](references/lightweight-handoff.md).
+- For substantive changes, including agent instructions or workflow rules, use
+  the [structured handoff contract](references/handoffs.md). Coordinators read
+  the [implementation cycle](references/implementation-cycle.md) and
+  [dispatch details](references/handoff-dispatch.md). Publishers and transition
+  reviewers read the common contract, requirements/evidence and validation, then
+  only their applicable stage reference.
 
-Delegate exploration only for a concrete unresolved question. Save temporary
-notes under the effort's `tmp/` directory; retain decisions in the ticket or spec.
-Native investigation and approved presentation follow the repository guidance.
+Both paths retain issue claiming, independent review and mandatory acceptance
+gates. The ticket remains authoritative for scope, ownership and durable status.
 
-## Structured implementation, verification and integration
+## Dispatch and preserve evidence
 
-1. Claim each ready ticket through the issue tracker. Dispatch implementers in
-   parallel where dependencies, ownership, and available agent slots permit.
-   Give each an isolated worktree based on the integration branch. Preserve
-   existing changes when correcting a worktree's starting point.
+Use available general-purpose agents with stable implementer, verifier and merger
+responsibilities. Parallelize independent ready tickets when dependencies,
+ownership and available slots permit; serialize integration. Give implementers
+isolated worktrees based on the integration branch. Preserve others' edits and
+existing work when correcting a starting point. Delegate exploration only for a
+concrete unresolved question.
 
-   Implementers read [candidate publication](references/handoff-candidate.md)
-   before preparing their stage input.
+Supply the spec/ticket pointers, branch, assigned files, selected path and check
+rationale. For checks, supply absolute assessed-checkout, project-interpreter and
+runner paths, required scope/freshness and the
+[runner receipt contract](../../../docs/testing.md#automated-check-runner).
+Workers share a workspace: state ownership and the requirement to preserve
+others' edits in each assignment.
 
-2. The implementer builds the ticket through its accepted public testing seams,
-   consulting `tdd` for behavioral changes. Synchronize with the current
-   integration tip and capture its full ID as `base_ref` at synchronization,
-   before the final candidate checks. Follow the
-   [stable-candidate checkpoint](../../../docs/testing.md#stable-candidate-checkpoint):
-   finish focused controls and known findings, confirm the check plan against
-   the actual diff, commit stable source, then run
-   required completion checks through the repository runner and retain receipts
-   bound to that commit. Report the checked commit and clean checkout to the
-   coordinator before publication. The coordinator then assigns the exact unused
-   absolute attempt for that ticket/commit and returns it with the assessed
-   checkout, candidate-input path, and candidate publication command. The initial
-   dispatch may reserve the input path; it cannot know the final commit-derived
-   attempt. Move prepared manual/native evidence from effort scratch to its final
-   locations; keep runner receipts/logs in their original immutable run directories
-   and reference them by absolute path. Author the input with every criterion, ownership, check, and material limit,
-   and run the candidate writer and standalone candidate validator. Report the
-   exact record path, commit, receipt paths/outcomes, and both publication/validation
-   outcomes. Validate receipts against the coordinator's assigned requirements.
-   Agents use assigned attempts; the coordinator owns allocation.
+For structured stages, choose an absolute shared root under
+`tmp/<effort>/handoffs/` in the integration checkout. The coordinator assigns
+attempts and independent requirements; dispatch exact attempt, stage-input,
+requirements and command pointers. Use `write_handoff.py` and the standalone
+validator at every publication/transition. Submitted results cannot narrow
+assigned requirements. Follow the linked stage contracts for commit capture,
+clean assessed checkouts, immutable evidence, repairs and unchanged-candidate
+retries. Advance to integration only after valid independent `PASS`.
 
-3. Dispatch an independent verifier when the candidate is ready. The verifier
-   reads [independent verification](references/handoff-verification.md),
-   inspects that commit in a separate checkout, checks the diff against the
-   ticket/spec and approved presentation, and performs the checks needed to
-   support a verdict. Execute checks assigned as fresh through its own runner
-   invocation and receipt; apply the check-selection reference for other evidence. Validate
-   candidate evidence and declared coverage against the independent requirements;
-   keep manual/native observations distinct from covered automated checks. Dispatch
-   includes the exact assigned attempt, clean assessed candidate checkout,
-   verifier-input path, independent requirements path, and verification publication
-   command.
-   The verifier owns the judgments and invokes the verification writer for
-   `PASS`, `REWORK`, or `BLOCKED`, then runs the standalone verification validator
-   before reporting the path and outcomes. Distinct actor IDs alone establish no
-   independent review. Preserve the candidate's code and actual user acceptance
-   gates.
+Finish focused controls and known findings before expensive completion checks,
+following the [stable-candidate checkpoint](../../../docs/testing.md#stable-candidate-checkpoint).
+Select the smallest coverage that meets the obligations. Once it passes, broaden
+or repeat checks only for new changes, failures, unresolved concerns or explicit
+fresh-execution requirements. Keep reused evidence's provenance and applicability;
+it cannot satisfy a required fresh run. Native and accepted presentation evidence
+retain their separate requirements.
 
-4. For `REWORK`, send the findings pointer to the implementer. Repair produces a
-   new candidate commit and directory, followed by new verification. For
-   `BLOCKED`, record the unavailable prerequisite in the ticket and continue
-   independent ready work. Once it becomes available, follow the contract's
-   [retry procedure](references/handoff-retry.md#retry-an-unchanged-candidate) to create
-   another attempt for the same commit through `carry-forward` with fresh
-   verification. The coordinator supplies exact source/destination attempts,
-   candidate checkout, carry-input path, and command, and records the reason and
-   both paths in the ticket. Preserve the earlier verdict. Advance to integration
-   only after a valid `PASS`.
+## Coordinate and finish
 
-5. Serialize merges through the merger, which reads
-   [integration publication](references/handoff-integration.md). It confirms the candidate and verdict
-   refer to the same ticket and commit, captures the full integration tip as
-   `previous_tip_ref` immediately before the actual merge, then
-   integrates the verified commit. Abort an unfinished conflicting merge before
-   returning repair to the implementer; substantive integration repairs need a
-   new candidate and verification. Reassess checks for the actual combined result;
-   an unchanged fast-forward may reuse qualifying evidence under the assigned
-   requirements. Run required fresh checks through the runner, validate receipts
-   and coverage, and invoke
-   the integration writer using the assigned attempt, actual integration checkout,
-   merger-input path, and independently assigned integration requirements. The writer
-   binds the exact verifier bytes
-   and inspected result. Run the standalone integration validator against the
-   clean result, including failed outcomes. Resolve the ticket only after it
-   validates successfully and all required acceptance gates are satisfied.
-   If integration is held by a temporary check or prerequisite, use a new
-   attempt for the unchanged candidate when it becomes available. Reuse the
-   passing verification only with explicit still-applicable PASS rationale in the
-   carry input. Carry against the unchanged candidate checkout; inspect the current
-   integration checkout for fresh integration, including already-incorporated
-   candidates. Preserve any reported partial attempt and obtain a new unused
-   assignment before retrying; follow the contract's recovery instructions.
+Dispatch messages carry pointers and ownership; completion messages carry the
+manifest or lightweight review record, receipt paths and outcomes. Read records
+on completion, rework or a meaningful state change. Use completion events or
+bounded waits; update the user on meaningful progress, blockers and decisions.
+Save temporary notes under `tmp/<effort>/` and durable conclusions in the ticket.
 
-6. Save the durable conclusion, commits, verification results, evidence-reuse
-   rationale, and material limits in the ticket. Update the frontier and dispatch
-   newly unblocked work. If the tracker requires PRs or the user requested one,
-   open a draft after the first integration commit and link the spec/tickets.
-
-## Coordination and finish
-
-Dispatch messages carry the selected path, check rationale, pointers and ownership;
-completion messages carry the structured manifest or lightweight review-record
-path, runner receipt paths and outcomes. Read records on completion,
-rework, or a meaningful state change. Use completion events or bounded waits instead of repeatedly
-requesting unchanged status. Send human updates for progress, blockers, and
-decisions that matter. The contract defines evidence reuse; a new commit alone
-does not require repeating every native check. Published structured records and
-completed or superseded lightweight records remain immutable; in-progress
-lightweight records use the prescribed append-only sequence. New transitions
-use the selected path's contract. Historical reused checks retain their
-provenance and reason and cannot satisfy a fresh-run requirement.
-
-After all tickets integrate, use `code-review` against the recorded starting
-commit and accepted spec. Select the path and checks again for each review fix;
-eligible documentation corrections use the lightweight path. Preserve any
-required user acceptance gate. Mark a requested PR ready
-only when required checks and reviews pass, or otherwise report the completed
-integration branch. Retain durable results before archiving managed worktrees
-through their lifecycle and retiring disposable handoff files.
+After integration, perform [final review](references/final-review.md) against the
+recorded starting commit and accepted scope. Reassess the path and checks for
+each repair, retaining independent review and any required user verdict.
+Mark a requested PR ready only when required checks and reviews pass; otherwise
+report the integration branch and remaining gates. Retain durable results before
+archiving managed worktrees and retiring disposable evidence under
+[workspace housekeeping](../../../docs/workspace.md).

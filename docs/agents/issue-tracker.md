@@ -121,9 +121,10 @@ On 2026-10-07, existing local specifications, Wayfinder maps, implementation
 indexes and tickets moved to GitHub. Completed work is closed and labelled
 `historical`; original status lines, comments and local ticket numbers in those
 bodies are historical evidence. Use the issue's current state and native
-relationships for tracking. The [migration index](../history/README.md) maps
-former paths to GitHub issues. Supporting research and verification reports
-remain under `docs/history/`.
+relationships for tracking. The [migration index](https://github.com/FuzzyUn1c0rn/brz2obsidian/blob/05b36923cd330261973bd35e19e6fa20ada88290/docs/history/README.md) maps
+former paths to GitHub issues. Supporting research and verification reports are
+retained in the linked Git snapshot. Historical evidence links use that fixed
+revision; current decisions and completion state live in GitHub Issues.
 
 Use `.scratch/<effort>/` only for disposable local artifacts, such as draft
 issue bodies and exploratory notes. It is Git-ignored. Publish accepted specs,

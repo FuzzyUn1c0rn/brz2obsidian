@@ -79,7 +79,7 @@ not establish the later private-archive/native acceptance gates under #78.
 The current closed recognized-name review includes historical `content`/`shadow`,
 an explicitly conservative experimental `portal` exclusion and the existing
 `image` alias. These classifications and the exact 148-name list appear in the
-[primary boundary review](history/red-vs-blue-investigation/reviewed-html-boundary.md).
+[primary boundary review](https://github.com/FuzzyUn1c0rn/brz2obsidian/blob/05b36923cd330261973bd35e19e6fa20ada88290/docs/history/red-vs-blue-investigation/reviewed-html-boundary.md).
 Module/profile version8 changes refusal meaning without changing shared shapes.
 
 ## Sized inline images (version 6)
@@ -220,8 +220,8 @@ endpoint. Existing category navigation stays after authored content and resource
 
 The [TheBrain staff enum reference](https://forums.thebrain.com/post/in-links-json-what-are-these-fields-10616870)
 separates relation, meaning and directional bits. Controlled source research in
-[relationship fixtures](history/brz-to-obsidian/research/relationship-fixture-records.md)
-and [reverse-arrow fixtures](history/brz-to-obsidian/research/extended-relationship-fixture.md)
+[relationship fixtures](https://github.com/FuzzyUn1c0rn/brz2obsidian/blob/05b36923cd330261973bd35e19e6fa20ada88290/docs/history/brz-to-obsidian/research/relationship-fixture-records.md)
+and [reverse-arrow fixtures](https://github.com/FuzzyUn1c0rn/brz2obsidian/blob/05b36923cd330261973bd35e19e6fa20ada88290/docs/history/brz-to-obsidian/research/extended-relationship-fixture.md)
 establishes parent/child independently of arrows. These are documented/source
 facts and a bounded inference; no fresh native observation is claimed.
 
@@ -243,7 +243,7 @@ related meanings remain unchanged. Alternative sources retain their own versions
 Actual-ZIP Workflow/CLI exact-navigation controls and
 an independent raw oracle cover both shapes and rehashed semantic corruptions.
 An unchanged-original inspection and eight-record raw/snapshot comparison were
-progress evidence only. The fresh [five-input/fifteen-output preservation gate](history/red-vs-blue-investigation/actual-archive-acceptance.md)
+progress evidence only. The fresh [five-input/fifteen-output preservation gate](https://github.com/FuzzyUn1c0rn/brz2obsidian/blob/05b36923cd330261973bd35e19e6fa20ada88290/docs/history/red-vs-blue-investigation/actual-archive-acceptance.md)
 subsequently passed at clean runtime869982, with all originals unchanged.
 E's source-free checker still reports 16 preserved authored file-image URL
 occurrences per output; these are not archived local image resources or a clean
@@ -390,7 +390,7 @@ PDF. Those historical nine v2 exact/repeat/reordered conversions exit 2.
 The current v3 four-original matrix also exits 2 for all twelve conversions;
 original D preserves 359 supplied bodies and 63 fallback images, with 47
 definitions/330 members, 1,017 present payloads, 1,552 actual files and 93 warnings.
-See the [complete scoped matrix](history/management-leadership-implementation/research/four-archive-preservation.md). Unmatched missing notes/files/images
+See the [complete scoped matrix](https://github.com/FuzzyUn1c0rn/brz2obsidian/blob/05b36923cd330261973bd35e19e6fa20ada88290/docs/history/management-leadership-implementation/research/four-archive-preservation.md). Unmatched missing notes/files/images
 refuse as missing required payload. Unknown findings/profile incompatibility and
 unsupported meanings cannot be downgraded by caller allowlists.
 
@@ -401,7 +401,7 @@ equivalent TheBrain PDF body search.
 
 Name sanitation, simple graph presentation and intentional uncreated targets
 are adaptations rather than extra warnings. See [complete current four-original
-preservation results](history/management-leadership-implementation/research/four-archive-preservation.md)
+preservation results](https://github.com/FuzzyUn1c0rn/brz2obsidian/blob/05b36923cd330261973bd35e19e6fa20ada88290/docs/history/management-leadership-implementation/research/four-archive-preservation.md)
 and the [source-feature-to-vault comparison](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/5#issuecomment-6040210387).
 
 ## Reviewed absent-note image display (version 3)

@@ -41,6 +41,12 @@ Documentation alone does not require unrelated converter pytest, GUI execution,
 private archive reruns or refreshed native observations. Manual-only verification
 is valid when no automated check establishes an affected obligation. In structured
 requirements, express that as `checks: []`; record the manual evidence separately.
+For skill or agent-guidance changes, inspect activation boundaries, authorization,
+reference routing and the affected workflow. Run existing helper/contract tests
+when that workflow changes; do not add tests that merely match instruction wording.
+An unchanged helper protocol can use its existing focused controls alongside
+manual instruction review. A read-only audit does not imply running checks that
+create receipts or other artifacts when the user's requested scope forbids writes.
 When pytest is needed, name its meaningful selectors: omitting selectors runs the
 full suite, and an empty/zero-test selection is not passing evidence.
 
