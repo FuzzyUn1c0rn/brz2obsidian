@@ -105,6 +105,10 @@ Respect explicit user publication constraints and read-only
 or planning requests. When publication is unavailable or prohibited, record the
 local result and remaining delivery gate and keep the implementation issue open.
 
+The PR head must be a branch distinct from `main`. If the work is already
+committed locally on `main`, publish it from a separate integration branch.
+Do not push `main` as a substitute for PR delivery.
+
 Use the [PR skill](../../.agents/skills/pr/SKILL.md) for the body. Link the accepted
 specification and tickets; record the delivery PR URL in each associated issue.
 For a new PR, use an already published head and an explicit base:
