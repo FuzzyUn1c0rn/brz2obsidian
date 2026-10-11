@@ -50,32 +50,13 @@ no drafts, check execution, merges, ticket edits, worktrees, or user acceptance.
 Run the independently executable read-only standalone validator at each
 transition even after successful writer validation.
 
-Publish each record once, after its evidence is ready, then leave it immutable.
-Keep work-in-progress notes and UTF-8 stage inputs elsewhere in the effort
-directory, outside published record names. A changed candidate starts at
+Keep work-in-progress notes and stage inputs elsewhere in the effort directory,
+outside published record names. A changed candidate starts at
 `attempt-001` beneath its new commit. An unchanged candidate
 can have further attempts in [retry/carry-forward](handoff-retry.md); keep previous records for
-diagnosis. The coordinator claims/closes tickets so concurrent workers do not
-edit the same bookkeeping files.
-
-### Dispatch and commit handshake
-
-Before dispatch or attempt allocation, read the [dispatch contract](handoff-dispatch.md#dispatch-and-commit-handshake).
-
-## Retry an unchanged candidate
-
-When a prerequisite recovers or integration can retry without code changes, read
-[retry/carry-forward](handoff-retry.md#retry-an-unchanged-candidate), including
-carried requirements and partial-attempt recovery.
-
-## Independent automated-check requirements
-
-For every stage, read [independent requirements](handoff-evidence.md#independent-automated-check-requirements).
-
-## Historical records and retries
-
-For v1 records or checks, read [historical evidence](handoff-evidence.md#historical-records-and-retries).
-For byte-preserving v2 carry, read [carried requirements](handoff-retry.md#carried-requirements).
+diagnosis. The coordinator owns ticket claims and completion under
+[PR delivery and issue completion](../../../../docs/agents/issue-tracker.md#pr-delivery-and-issue-completion)
+so concurrent workers do not edit the same bookkeeping files.
 
 ## Record format
 
@@ -89,39 +70,42 @@ Use identical ticket and candidate identities throughout an attempt.
 For URL references, read [GitHub scope snapshots](issue-sources.md); candidate
 records preserve the assessed issue content in hashed attempt-local evidence.
 
-### Candidate
+## Publication contract
 
-For this stage's record fields and judgments, read [candidate](handoff-candidate.md#candidate).
+Before publication, prepare evidence and an explicit UTF-8 JSON input, using the
+assigned absolute attempt, assessed checkout and independent requirements paths.
+The filesystem must support hard links; unsupported publication fails without a
+partial JSON record. Candidate/verification assess a clean candidate checkout;
+integration assesses its clean inspected result. Git lookups use `--checkout`
+even when the helper runs elsewhere.
 
-#### Publish a candidate
+Keep all stage input fields, arrays and judgments explicit, including permitted
+empty arrays. Unknown fields, duplicate JSON keys and helper-owned overrides are
+errors, including within checks/criteria. Evidence paths are absolute or relative
+to the final attempt, even when the input lives elsewhere. Missing evidence or
+invalid stage/Git state fails before record publication. The helper preserves
+inputs and prior records; it validates the prospective record against stage
+requirements before publishing. Stage references define their additional fields,
+derived identities and outcomes; [requirements/evidence](handoff-evidence.md)
+defines common check objects and reuse.
 
-For exact inputs, examples and exits, read [publication](handoff-candidate.md#publish-a-candidate).
+Publish each record once after evidence is ready, then leave it immutable. Stable
+UTF-8 JSON is published atomically without replacement, even for identical bytes.
+Concurrent writers produce one complete winner and one refusal. Correct inputs
+before publication; an occupied record or changed judgment needs the coordinator's
+next unused attempt under [retry/carry-forward](handoff-retry.md).
 
-### Verification
+For ordinary stage publication, exit `0` publishes and allows advancement; `2`
+publishes a complete held outcome; `1` refuses or fails without a new record.
+Candidate unavailable checks may advance to verification; contradictory verifier
+PASS claims publish nothing. Read the applicable stage for these outcome rules.
+Output reports the exact published path separately from permission to advance.
+Writing supplies no independent judgment, evidence-quality or user verdict.
+Run [standalone transition validation](handoff-validation.md#validate-at-transitions)
+after every publication; writer validation does not replace it.
 
-For this stage's record fields and judgments, read [verification](handoff-verification.md#verification).
-
-#### Publish independent verification
-
-For exact inputs, examples and exits, read [publication](handoff-verification.md#publish-independent-verification).
-
-### Integration
-
-For this stage's record fields and judgments, read [integration](handoff-integration.md#integration).
-
-#### Publish the actual integration outcome
-
-For exact inputs, examples and exits, read [publication](handoff-integration.md#publish-the-actual-integration-outcome).
-
-## Checks and evidence reuse
-
-For check fields, manual/native evidence or reused outcomes, read
-[checks and evidence reuse](handoff-evidence.md#checks-and-evidence-reuse).
-
-## Validate at transitions
-
-After every publication, read and run [standalone transition validation](handoff-validation.md#validate-at-transitions).
-
-### Synthetic workflow rehearsal
-
-When rehearsing the workflow, read the [rehearsal procedure](handoff-rehearsal.md#synthetic-workflow-rehearsal).
+If publication is interrupted, a hidden `.handoff-*.tmp` sibling may remain;
+it is disposable and never a published record. Cleanup failure after publication
+leaves the complete record valid. Carry-forward has distinct per-file publication
+and [partial-attempt recovery rules](handoff-retry.md#retry-an-unchanged-candidate);
+exit `1` can leave an incomplete attempt requiring a new assignment.

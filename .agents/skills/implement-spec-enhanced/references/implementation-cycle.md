@@ -11,9 +11,10 @@ remain in the [common contract](handoffs.md) and its stage references.
    Implementers read [candidate publication](handoff-candidate.md)
    before preparing their stage input.
 
-2. The implementer builds the ticket through its accepted public testing seams,
-   using `tdd` for behavioral changes within already approved
-   testing boundaries. Synchronize with the current integration tip and capture its full ID as `base_ref` at synchronization,
+2. The implementer applies `tdd` to features and behavior-changing fixes. Follow
+   its [testing-boundary rules](../../tdd/SKILL.md#seams-where-tests-go) to preserve
+   specified boundaries or select and record an established public interface
+   when none is specified. Synchronize with the current integration tip and capture its full ID as `base_ref` at synchronization,
    before the final candidate checks. Follow the
    [stable-candidate checkpoint](../../../../docs/testing.md#stable-candidate-checkpoint):
    finish focused controls and known findings, confirm the check plan against
@@ -74,8 +75,8 @@ remain in the [common contract](handoffs.md) and its stage references.
    merger-input path, and independently assigned integration requirements. The writer
    binds the exact verifier bytes
    and inspected result. Run the standalone integration validator against the
-   clean result, including failed outcomes. Resolve the ticket only after it
-   validates successfully and all required acceptance gates are satisfied.
+   clean result, including failed outcomes. A passing integration record establishes
+   the local result; it does not close the ticket.
    If integration is held by a temporary check or prerequisite, use a new
    attempt for the unchanged candidate when it becomes available. Reuse the
    passing verification only with explicit still-applicable PASS rationale in the
@@ -86,5 +87,7 @@ remain in the [common contract](handoffs.md) and its stage references.
 
 6. Save the durable conclusion, commits, verification results, evidence-reuse
    rationale, and material limits in the ticket. Update the frontier and dispatch
-   newly unblocked work. If the tracker requires PRs or the user requested one,
-   open a draft after the first integration commit and link the spec/tickets.
+   newly unblocked work from actual issue/dependency states. After the first
+   publishable integration commit, follow
+   [PR delivery and issue completion](../../../../docs/agents/issue-tracker.md#pr-delivery-and-issue-completion)
+   for default draft publication and eventual issue closure after merge into `main`.

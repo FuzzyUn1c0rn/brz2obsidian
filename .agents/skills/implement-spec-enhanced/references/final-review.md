@@ -1,8 +1,10 @@
 # Final review
 
-Read this when assessing completed implementation or a repair. Use an independent
-reviewer for the enhanced workflow's final verdict; one reviewer may assess both
-requirements and standards. Review the actual changes and applicable evidence.
+Read this when assessing changes against accepted requirements. Completed
+implementation or repairs require an independent reviewer for the enhanced
+workflow's final verdict; one reviewer may assess both requirements and standards.
+For an explicit read-only review, inspect the relevant source and evidence and
+return findings within that scope.
 
 ## Identify the assessed changes
 
@@ -16,7 +18,7 @@ When reviewing work in progress, include staged and unstaged tracked changes
 with `git diff HEAD`, and discover untracked files with
 `git ls-files --others --exclude-standard`; read the new files as part of the
 review. A committed diff alone cannot establish a verdict on uncommitted work.
-An empty diff needs an honest no-changes result, not an invented review.
+For a change-only review, an empty diff needs an honest no-changes result.
 
 Freeze the assessed source during review and check execution. A relevant source
 change requires reassessment and invalidates a verdict on the previous source.
@@ -52,6 +54,8 @@ blocking defects from advisories and preserve separate conclusions for
 requirements and standards. Use `PASS`, `REWORK` or `BLOCKED` where the handoff
 path requires a verdict. Missing required evidence remains unverified.
 
-Repair blocking findings, select checks for the actual repair, and obtain renewed
-independent review before completion. The selected handoff path owns publication
+When repairs are unauthorized, end with findings and remaining evidence gaps.
+When implementation or repairs are authorized, repair blocking findings, select
+checks for the actual repair, and obtain renewed independent review before
+completion. The selected handoff path owns publication
 and integration; this procedure supplies the review judgments.

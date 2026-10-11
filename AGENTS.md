@@ -4,21 +4,32 @@
 
 Track issues, specifications and Wayfinder maps in GitHub Issues for
 `FuzzyUn1c0rn/brz2obsidian`.
-See `docs/agents/issue-tracker.md`.
+For issue tracking, specification publication, or implementation from GitHub
+issues, follow `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
 Use the five default triage roles.
-See `docs/agents/triage-labels.md`.
+Use `docs/agents/triage-labels.md` when interpreting or changing triage status.
 
 ### Domain docs
 
 Use a single-context layout with root `GLOSSARY.md` and `docs/adr/`.
-See `docs/agents/domain.md`.
+Consult the glossary when domain terminology or behavior is relevant, and
+applicable ADRs when investigating or changing architecture, module boundaries,
+or public interfaces. Follow `docs/agents/domain.md` for these conventions.
 
 ## Implementation Work
 
-For any implementation work, applying the `tdd` skill is mandatory.
+Apply the `tdd` skill to features and behavior-changing fixes. For refactoring
+and other changes intended to preserve behavior, select verification for the
+changed area and affected consumers; existing checks may suffice. Required
+acceptance gates still apply.
+
+Continue within the requested scope through implementation, applicable
+verification, and repairs caused by the change. Complete only when acceptance
+criteria and required review gates are satisfied; identify any remaining blocker
+or required user verdict.
 
 ## Python environment
 

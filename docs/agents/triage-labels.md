@@ -11,5 +11,7 @@ Use these GitHub labels for the five canonical triage roles.
 | wontfix | wontfix | Will not be actioned |
 
 Assignment represents a claim; closing an issue as completed represents
-resolution. See `issue-tracker.md` for the workflow. Migrated issue bodies retain
-historical `Status:` fields, including `claimed` and `resolved`.
+resolution. PR readiness is separate from triage readiness; implementation issue
+resolution follows [PR delivery and issue completion](issue-tracker.md#pr-delivery-and-issue-completion).
+Migrated issue bodies retain historical `Status:` fields, including `claimed`
+and `resolved`.

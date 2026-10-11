@@ -14,7 +14,9 @@ pointer, and confirm it against the candidate diff before completion checks.
 
 Initial implementer dispatch supplies ownership, integration branch, assessed
 checkout, and a reserved candidate-input path. At integration synchronization,
-capture the full incorporated tip as `base_ref`; then finish checks and commit.
+capture the full incorporated tip as `base_ref`. Finish focused development checks
+and known findings, commit stable source, then run required completion checks under
+the [stable-candidate checkpoint](../../../../docs/testing.md#stable-candidate-checkpoint).
 The implementer reports the commit and clean checkout before publication. Only
 then can the coordinator assign the exact unused commit-derived attempt path.
 The coordinator returns that absolute attempt, assessed checkout, input path,
@@ -39,6 +41,5 @@ $validator = (Resolve-Path .agents/skills/implement-spec-enhanced/scripts/valida
 The linked stage examples use checkout-relative script paths for readability;
 dispatch the resolved equivalents. Workers use the assigned path rather than
 discovering a latest attempt or allocating a number. Report the exact published
-path and both writer/validator outcomes. Exit `0` permits advancement, `2` holds
-the transition with complete published records, and `1` refuses or fails the
-operation; carry-forward has the [partial-attempt recovery rules](handoff-retry.md).
+path and both writer/validator outcomes under the [publication contract](handoffs.md#publication-contract)
+and applicable stage outcomes. Carry-forward has the [partial-attempt recovery rules](handoff-retry.md).

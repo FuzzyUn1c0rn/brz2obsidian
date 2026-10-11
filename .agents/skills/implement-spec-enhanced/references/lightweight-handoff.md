@@ -48,8 +48,9 @@ not a line-count threshold.
    against the independently selected requirements. Execute fresh checks only
    where the plan or review needs them. Existing user/native/archive verdicts
    remain actual evidence with their original scope; unrelated runtime reruns
-   are unnecessary. `PASS` requires all criteria satisfied, required checks
-   passing, and no unresolved finding or acceptance gate.
+   are unnecessary. `PASS` requires all candidate criteria satisfied, required
+   checks passing, and no unresolved finding or candidate acceptance gate.
+   Remote delivery remains a separate issue-completion gate.
 
 4. For `REWORK`, prepare a new candidate and record, retaining the earlier finding
    and verdict. For `BLOCKED`, retain the missing prerequisite and leave the ticket
@@ -65,13 +66,14 @@ not a line-count threshold.
    record and applicable receipt/reuse facts. Run any required integration checks;
    a fast-forward alone is not proof that evidence applies.
 
-6. Append the application/completion result and preserve the finished record.
+6. Append the local application result and preserve the review record.
    Publish a concise durable issue comment covering the selected path/rationale,
    author/reviewer identities, reviewed/result commits, each acceptance outcome,
-   verdict, checks/receipt outcomes, historical reuse and material limits. Close
-   only after actual integration and every required gate is satisfied. Private
-   evidence stays local. The parent feature's final review and PR readiness rules
-   still apply.
+   verdict, checks/receipt outcomes, historical reuse and material limits. Follow
+   [PR delivery and issue completion](../../../../docs/agents/issue-tracker.md#pr-delivery-and-issue-completion)
+   after the first publishable integration commit for default draft publication
+   and closure after merge into `main`; append the delivery outcome when known.
+   Private evidence stays local. The parent feature's final review still applies.
 
 The record is a review aid, not a machine-validated structured transition. Failed
 reviews and superseded candidates remain evidence; never report them as passing

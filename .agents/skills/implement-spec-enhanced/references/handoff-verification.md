@@ -39,7 +39,10 @@ Pass the coordinator's exact absolute attempt path and the clean checkout at
 the candidate commit. The command may run elsewhere; Git state always comes
 from `--checkout`. The helper copies `ticket` and `candidate_commit` from this
 attempt's `candidate.json` and derives schema/kind. The input has exactly these
-fields; replace the example observations with the verifier's actual judgments:
+fields; replace the example observations with the verifier's actual judgments.
+This manual-only example uses `checks: []` only when independent requirements
+assign no covered automated checks. For assigned checks, use actual objects under
+[requirements/evidence](handoff-evidence.md#shared-runner-check-example).
 
 ```json
 {
@@ -49,28 +52,14 @@ fields; replace the example observations with the verifier's actual judgments:
     {"id": "A1", "status": "satisfied", "evidence": ["logs/independent-review.txt"]}
   ],
   "findings": [],
-  "checks": [
-    {
-      "kind": "runner",
-      "check_id": "pytest",
-      "receipt": "C:/absolute/verifier/tmp/checks/run-id/receipt.json",
-      "name": "Independent public acceptance tests",
-      "status": "passed",
-      "method": "From the assessed checkout: .venv\\Scripts\\python.exe tools/check.py run --check pytest --test tests/test_public_contract.py",
-      "exit_code": 0,
-      "evidence": ["logs/independent-tests.txt"]
-    }
-  ],
+  "checks": [],
   "limits": ["Synthetic CLI checks do not demonstrate native or user acceptance"]
 }
 ```
 
 Every criterion object contains exactly `id`, `status`, and `evidence`, and
-every candidate criterion appears once. Evidence paths are absolute or relative
-to the final attempt, including when the input is elsewhere. Arrays and judgments
-remain explicit. Supplied helper-owned fields, unknown fields (including inside
-criteria/checks), duplicate JSON keys, missing evidence, and invalid candidate
-state fail before publication. The input and prior records remain unchanged.
+every candidate criterion appears once. Apply the common
+[input/evidence/publication rules](handoffs.md#publication-contract).
 
 For repair, supply `verdict: "REWORK"`, the actual `failed` or `unverified`
 criterion statuses, blocking findings with criterion/file pointers, and the
@@ -89,10 +78,3 @@ with exit `1` and publish nothing. Writing JSON or passing checks supplies no
 omitted verdict, requirement, evidence-applicability judgment, or user acceptance.
 Actor separation checks distinct IDs; the verifier is responsible for independent
 review and coverage against the ticket's actual requirements.
-
-Verification reuses the candidate command's stable serialization and atomic,
-no-overwrite publication. Output reports the exact published path separately
-from permission to advance. Run the standalone validator at the verification
-transition; its format/state result does not establish evidence quality. Correct
-input before publication; for an occupied record or changed judgment, follow the
-coordinator's retry procedure and leave the prior attempt immutable.

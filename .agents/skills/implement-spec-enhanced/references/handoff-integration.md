@@ -20,6 +20,11 @@ the result, verification must pass, and all integration checks must pass or have
 documented evidence reuse. Capture the digest after the verifier finishes;
 the validator rejects changed verdict files. A failed attempt never closes work.
 
+An `integrated` record establishes local integration only. Remote delivery and
+issue closure follow [PR delivery and issue completion](../../../../docs/agents/issue-tracker.md#pr-delivery-and-issue-completion);
+keep that evidence in the ticket, outside immutable handoff records. The local
+ancestry conditions above do not determine GitHub squash/rebase merge completion.
+
 #### Publish the actual integration outcome
 
 The merger captures the integration tip immediately before performing the merge,
@@ -41,25 +46,17 @@ checks; reuse cannot satisfy a fresh-execution requirement.
 ```
 
 Use the coordinator's exact absolute attempt path. The input has exactly these
-fields; substitute the captured commit ID and actual merger observations:
+fields; substitute the captured commit ID and actual merger observations. This
+manual-only example uses `checks: []` only when independent requirements assign
+no covered automated checks. For assigned checks, use actual objects under
+[requirements/evidence](handoff-evidence.md#shared-runner-check-example).
 
 ```json
 {
   "actor": "merger-session",
   "status": "integrated",
   "previous_tip_ref": "0123456789abcdef0123456789abcdef01234567",
-  "checks": [
-    {
-      "kind": "runner",
-      "check_id": "pytest",
-      "receipt": "C:/absolute/integration/tmp/checks/run-id/receipt.json",
-      "name": "Integration acceptance tests",
-      "status": "passed",
-      "method": "From the assessed checkout: .venv\\Scripts\\python.exe tools/check.py run --check pytest --test tests/test_public_contract.py",
-      "exit_code": 0,
-      "evidence": ["logs/integration-tests.txt"]
-    }
-  ],
+  "checks": [],
   "limits": ["Synthetic CLI checks do not demonstrate native or user acceptance"]
 }
 ```
@@ -73,14 +70,10 @@ this attempt, preserving whitespace and UTF-8 distinctions; it never hashes a
 reserialization or a record selected from another attempt. Later verification
 byte changes invalidate the standalone integration transition.
 
-Keep actor, status, checks and limits explicit, including permitted empty
-arrays. Check outcomes, reuse source commits and applicability rationale remain
-agent judgments under [Checks and evidence reuse](handoff-evidence.md#checks-and-evidence-reuse).
-Unknown/duplicate input fields and helper-owned overrides (including ticket,
-commits, schema/kind and digest) are errors. Evidence paths remain absolute or
-relative to the final attempt. Missing evidence, mismatched record identities,
-invalid/non-commit references, dirty checkout state and applicable ancestry
-violations fail before publication. Inputs and prior records remain unchanged.
+Ticket, commits, schema/kind and digest are helper-owned. Apply the common
+[input/evidence/publication rules](handoffs.md#publication-contract); mismatched
+record identities, invalid/non-commit references and applicable ancestry
+violations fail before publication.
 
 An `integrated` claim requires an approved candidate, passing verification,
 passing or justifiably reused integration checks, and both the captured previous
@@ -95,9 +88,5 @@ inspected state.
 Valid integrated outcomes publish with exit `0` and allow the transition. Valid
 failed outcomes publish with exit `2` and hold it. Invalid integrated claims,
 invalid inputs/state, occupied destinations and publication failures return
-`1` without a new record. Output names the published path separately from
-permission to advance. Publication uses the same stable UTF-8 serialization
-and atomic no-overwrite mechanism as candidate/verification; even identical
-existing bytes cause refusal. Follow the coordinator's retry procedure instead
-of editing records. Writing never closes tickets, infers user acceptance or
-establishes evidence quality.
+`1` without a new record. Writing never closes tickets or establishes an actual
+user verdict; the common publication contract governs retries and evidence quality.
