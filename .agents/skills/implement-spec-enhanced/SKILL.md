@@ -9,7 +9,19 @@ Implement the accepted scope on one integration branch, preserving its acceptanc
 criteria and existing work. This is the repository's implementation workflow for
 specifications and ticket graphs.
 
-## Prepare and choose the path
+## Route the request
+
+For an explicit read-only review or planning request, inspect the relevant scope,
+source and evidence and return findings or a plan in the conversation. Reuse
+already approved requirements and decisions. Apply the relevant assessment guidance
+in [final review](references/final-review.md) for a review. End this route with the
+requested findings or plan; implementation preparation, claims, branch changes,
+dispatch and repairs require implementation authorization. Relevant read-only
+inspection is allowed within the requested scope.
+
+For authorized implementation, continue below.
+
+## Prepare and choose the implementation path
 
 Read the accepted spec and ticket/index. Complete
 [frontier discovery](../../../docs/agents/issue-tracker.md#discover-the-implementation-frontier)
@@ -23,7 +35,6 @@ presentation decisions. Follow the [TDD testing-boundary rules](../tdd/SKILL.md#
 to preserve specified boundaries or select and record an established public
 interface when none is specified. Resolve only missing decisions that materially
 affect the work; continue independent authorized work meanwhile.
-A read-only review or planning request produces findings without implementation.
 
 Choose coverage using [check selection](references/check-scope.md), recording
 the rationale independently of submitted results and confirming it against the
@@ -45,9 +56,11 @@ gates. The ticket remains authoritative for scope, ownership and durable status.
 
 Use available general-purpose agents with stable implementer, verifier and merger
 responsibilities. Parallelize independent ready tickets when dependencies,
-ownership and available slots permit; serialize integration. Give implementers
-isolated worktrees based on the integration branch. Preserve others' edits and
-existing work when correcting a starting point. Delegate exploration only for a
+ownership and available slots permit; serialize integration. On the structured
+path, give implementers isolated worktrees based on the integration branch;
+lightweight work follows its frozen-checkout and serialization safeguards.
+Preserve others' edits and existing work when correcting a starting point.
+Delegate exploration only for a
 concrete unresolved question.
 
 Supply the spec/ticket pointers, branch, assigned files, selected path and check
@@ -68,13 +81,11 @@ assigned requirements. Follow the linked stage contracts for commit capture,
 clean assessed checkouts, immutable evidence, repairs and unchanged-candidate
 retries. Advance to integration only after valid independent `PASS`.
 
-Finish focused controls and known findings before expensive completion checks,
-following the [stable-candidate checkpoint](../../../docs/testing.md#stable-candidate-checkpoint).
-Select the smallest coverage that meets the obligations. Once it passes, broaden
-or repeat checks only for new changes, failures, unresolved concerns or explicit
-fresh-execution requirements. Keep reused evidence's provenance and applicability;
-it cannot satisfy a required fresh run. Native and accepted presentation evidence
-retain their separate requirements.
+Follow the [stable-candidate checkpoint](../../../docs/testing.md#stable-candidate-checkpoint):
+finish focused development checks and known findings, commit stable source, then
+run required completion checks. Apply [check selection](references/check-scope.md)
+for coverage and evidence reuse, preserving required fresh, native and accepted
+presentation gates.
 
 ## Coordinate and finish
 

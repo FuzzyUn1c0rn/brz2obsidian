@@ -89,16 +89,19 @@ An empty checks array is allowed only when the independently supplied stage
 requirements also contain no covered checks. The reviewer selects requirements
 from the ticket and repository testing guidance before accepting results.
 
-For example, a command check can be recorded as:
+### Shared runner check example
+
+Use this check object within any stage input, replacing the paths, command,
+selection and outcome with actual evidence:
 
 ```json
 {
   "kind": "runner",
-      "check_id": "pytest",
-      "receipt": "C:/absolute/checkout/tmp/checks/run-id/receipt.json",
-      "name": "Public acceptance tests",
+  "check_id": "pytest",
+  "receipt": "C:/absolute/checkout/tmp/checks/run-id/receipt.json",
+  "name": "Public acceptance tests",
   "status": "passed",
-  "method": "From the candidate checkout: .venv\\Scripts\\python.exe tools/check.py run --check pytest --test tests/test_public_contract.py",
+  "method": "From C:/absolute/checkout: C:/absolute/project/.venv/Scripts/python.exe C:/absolute/checkout/tools/check.py run --checkout C:/absolute/checkout --python C:/absolute/project/.venv/Scripts/python.exe --environment gui --check pytest --test tests/test_public_contract.py",
   "exit_code": 0,
   "evidence": ["logs/public-tests.txt"]
 }

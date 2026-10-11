@@ -19,7 +19,7 @@ check execution and merges, while the writer only publishes those observations.
 
 | Operation | Writer exit | Standalone stage/exit |
 | --- | --- | --- |
-| Publish candidate after capturing base, checking and committing | 0 | candidate / 0 |
+| Capture base; finish focused development checks; commit stable source; run completion checks; publish candidate | 0 | candidate / 0 |
 | Publish unavailable-prerequisite BLOCKED verification | 2 | verification / 2 |
 | Recover prerequisite; carry candidate to assigned next attempt with false | 0 | candidate / 0; verification / 1 until fresh verdict |
 | Publish fresh independent-role PASS observations | 0 | verification / 0 |
