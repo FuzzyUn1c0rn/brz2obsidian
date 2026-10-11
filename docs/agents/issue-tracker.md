@@ -18,8 +18,10 @@ Use the `gh` CLI from this checkout, or pass
   `--remove-label "..."`. Use the mapping in `triage-labels.md`.
 - Claim: `gh issue edit <number> --add-assignee @me`. Record the working
   session or agent identifier in a comment when sharing a GitHub account.
-- Close: `gh issue close <number> --reason completed` after the applicable
-  [completion conditions](#pr-delivery-and-issue-completion) and recorded results.
+- Close: implementation issues use automatic closure on merge when eligible under
+  [PR delivery and issue completion](#pr-delivery-and-issue-completion).
+  Use `gh issue close <number> --reason completed` for manual closure after the
+  applicable completion conditions and recorded results.
 
 GitHub issue numbers are repository-wide, shared with pull requests. Use full
 URLs for cross-repository references and distinguish legacy local ticket numbers
@@ -111,6 +113,7 @@ Do not push `main` as a substitute for PR delivery.
 
 Use the [PR skill](../../.agents/skills/pr/SKILL.md) for the body. Link the accepted
 specification and tickets; record the delivery PR URL in each associated issue.
+Use ordinary issue references while acceptance or review gates remain unresolved.
 For a new PR, use an already published head and an explicit base:
 
 ```powershell
@@ -121,19 +124,41 @@ Local candidate/verification PASS and integration establish stage results.
 GitHub merge is a delivery gate for issue completion, not a prerequisite for
 those local judgments or draft publication. All other assigned acceptance gates
 retain their stage requirements. Mark a delivery PR ready only after required
-checks, independent review, final aggregate review and applicable user/native
-gates pass for its current head and scope. PR creation or readiness supplies no
-authorization to merge; a remote merge requires user authorization.
+checks, independent review, final aggregate review and applicable pre-merge
+user/native gates pass for its current head and scope. PR creation or readiness
+supplies no authorization to merge; a remote merge requires user authorization.
 
-Before closing an implementation issue, obtain fresh GitHub state for the exact
-associated delivery PR, for example:
+Before marking the delivery PR ready, record acceptance and review outcomes and
+material limits in each associated issue. If merge into `main` is the only
+remaining completion condition for an issue, add `Closes #<number>` to the PR
+description, with a separate closing reference for each fully delivered issue.
+Keep ordinary references for partial work, parent issues with unfinished scope,
+and issues with acceptance gates assigned after merge; close those manually only
+after all their completion conditions pass. Closing references must not bypass
+unresolved acceptance gates.
+
+Verify that the PR targets `main`, that `main` is the repository's default branch,
+and that `closingIssuesReferences` matches the intended issues before readiness.
+Reassess closing references when scope or applicable readiness evidence changes;
+remove any that are no longer justified. For readiness checks and after merge,
+obtain fresh GitHub state for the exact associated delivery PR, for example:
 
 ```powershell
 gh pr view <delivery-pr-number> --repo FuzzyUn1c0rn/brz2obsidian --json number,url,state,isDraft,baseRefName,headRefName,headRefOid,mergedAt,mergeCommit,closingIssuesReferences
 ```
 
-Closure requires `state: MERGED`, `baseRefName: main`, a non-null `mergedAt` and
-`mergeCommit.oid`, and every applicable acceptance/review gate satisfied. Verify
+Automatic closure requires the repository setting **Settings → General → Issues →
+Auto-close issues with merged linked pull requests** to be enabled. Confirm this
+as a repository setup prerequisite; do not change it on every delivery. GitHub
+interprets closing keywords in the PR description when the PR targets the default
+branch. See [GitHub's linking rules](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue)
+and [automatic closure setting](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/managing-repository-settings/managing-auto-closing-issues).
+
+After merge, verify merge evidence and each intended issue's closure with
+`gh issue view <number> --json number,url,state,closedAt`.
+Completed delivery requires `state: MERGED`, `baseRefName: main`, a non-null
+`mergedAt` and `mergeCommit.oid`, and every applicable acceptance/review gate
+satisfied. Verify
 that the merged PR actually delivers this issue's accepted scope and reviewed
 result: an unrelated merged PR or a stale head missing later accepted changes
 does not qualify. Inspect its diff/commits and the delivered result as needed;
@@ -141,13 +166,15 @@ GitHub's merge evidence supports squash and rebase, so do not require the local
 candidate commit to be an ancestor of `main`.
 
 Record the PR URL, assessed/delivered head, target base, merge time and merge
-commit together with criterion/review outcomes and material limits in the issue
-before closing it. Local integration, handoff PASS, readiness, draft/open state,
-closed-unmerged state, merge into another base, or unavailable merge evidence
-keeps the issue open. Retain the claim and dependency/blocker semantics while
+commit together with final criterion/review outcomes and material limits in the
+issue after automatic closure. If automatic closure did not occur, or an issue
+has acceptance gates assigned after merge, record that evidence before manual
+closure and close only when all applicable completion conditions pass.
+Local integration, handoff PASS, readiness, draft/open state, closed-unmerged
+state, merge into another base, or unavailable merge evidence does not establish
+issue completion. Retain the claim and dependency/blocker semantics while
 awaiting delivery; local completion does not unblock a dependency requiring a
-closed issue. Use plain issue links in a PR body until closure gates are met;
-auto-closing keywords must not bypass unresolved acceptance gates.
+closed issue.
 
 Answer-only, research or planning tickets that change no repository content need
 no delivery PR. Record their answer/evidence and close only when their own
