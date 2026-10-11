@@ -1,0 +1,100 @@
+[
+  {
+    "id": "research-factual-question",
+    "prompt": "Which export format does this fixture support? Give a short answer based on the repository.",
+    "allowed_writes": [],
+    "forbidden_skill_reads": ["research", "domain-modeling"],
+    "expect_no_questions": true,
+    "rubric": ["Answers JSON and identifies docs/facts.md or the public source; performs a bounded lookup without creating a report or delegating."]
+  },
+  {
+    "id": "research-saved-report",
+    "prompt": "Investigate the fixture's supported export and unsupported formats using its local primary sources. Save a short cited report to .scratch/research/report.md.",
+    "allowed_writes": [".scratch/research/report.md"],
+    "required_writes": [".scratch/research/report.md"],
+    "must_read_skills": ["research"],
+    "expect_no_questions": true,
+    "rubric": ["Report cites local authoritative facts, distinguishes JSON support from unsupported XML, and stays within the requested output."]
+  },
+  {
+    "id": "research-explicit-read-only",
+    "prompt": "Use $research to investigate whether XML export is supported. Keep this read-only and return your cited findings here.",
+    "allowed_writes": [],
+    "must_read_skills": ["research"],
+    "expect_no_questions": true,
+    "rubric": ["Returns the unsupported XML finding with primary evidence; does not create a report or delegate this bounded lookup."]
+  },
+  {
+    "id": "domain-explanation",
+    "prompt": "What does Record mean in this project's glossary? Explain the existing term briefly.",
+    "allowed_writes": [],
+    "forbidden_skill_reads": ["domain-modeling"],
+    "expect_no_questions": true,
+    "rubric": ["Explains the existing single exported item definition without challenging or rewriting an already settled term."]
+  },
+  {
+    "id": "domain-authorized-edit",
+    "prompt": "We have accepted this new domain term: Export means the complete JSON document containing records and attachments. Add that definition to GLOSSARY.md.",
+    "allowed_writes": ["GLOSSARY.md"],
+    "required_writes": ["GLOSSARY.md"],
+    "must_read_skills": ["domain-modeling"],
+    "expect_no_questions": true,
+    "rubric": ["Records the accepted Export definition, preserves Record, and avoids unnecessary ADRs or further interviews."]
+  },
+  {
+    "id": "domain-explicit-read-only",
+    "prompt": "Use $domain-modeling to propose a glossary entry for Export: the complete JSON document containing records and attachments. This is a read-only proposal; return the proposed entry here.",
+    "allowed_writes": [],
+    "must_read_skills": ["domain-modeling"],
+    "expect_no_questions": true,
+    "rubric": ["Supplies a proposed domain entry in the response and preserves all files."]
+  },
+  {
+    "id": "spec-approved-boundary",
+    "prompt": "Use $to-spec to draft the accepted change: add an exported record count. The user already approved export_records as the public testing boundary and approved a count field in its returned JSON document. Draft here only; do not publish or implement.",
+    "allowed_writes": [],
+    "must_read_skills": ["to-spec"],
+    "expect_no_questions": true,
+    "rubric": ["Uses the approved export_records boundary and its stated approval source; synthesizes a concise spec without another approval request or speculative stories."]
+  },
+  {
+    "id": "spec-unresolved-boundary",
+    "prompt": "Use $to-spec to draft XML import support. We have not decided whether this needs a new public import interface or an extension of an existing interface. Draft what is known here; do not publish or implement.",
+    "allowed_writes": [],
+    "must_read_skills": ["to-spec"],
+    "rubric": ["Identifies the genuinely missing interface decision, proposes a suitable public boundary, and completes independent draft sections without claiming agent readiness."]
+  },
+  {
+    "id": "tdd-approved-boundary",
+    "prompt": "Use $tdd to prepare a test plan only for adding a count to the exported JSON. export_records is the public testing boundary already approved by the user in this conversation. Return the plan here; write no tests or implementation yet.",
+    "allowed_writes": [],
+    "must_read_skills": ["tdd"],
+    "expect_no_questions": true,
+    "rubric": ["Records the existing approval, chooses independently expected count cases through export_records, and does not ask to reconfirm the boundary."]
+  },
+  {
+    "id": "read-only-documentation-check",
+    "prompt": "Review README.md against docs/facts.md for factual accuracy. Keep the review read-only. Report any needed corrections with evidence.",
+    "allowed_writes": [],
+    "forbidden_skill_reads": ["research", "tdd", "implement-spec-enhanced"],
+    "expect_no_questions": true,
+    "rubric": ["Assesses the actual documents with proportionate inspection, preserves files, and does not run unrelated checks or create receipts."]
+  },
+  {
+    "id": "prototype-design-only",
+    "prompt": "Use $prototype to build a single HTML demo of an export record counter with add/remove buttons so I can evaluate the idea. Save it to tmp/counter-demo/index.html. This task ends with the runnable demo and findings.",
+    "allowed_writes": ["tmp/counter-demo/index.html"],
+    "required_writes": ["tmp/counter-demo/index.html"],
+    "must_read_skills": ["prototype"],
+    "expect_no_questions": true,
+    "rubric": ["Produces a runnable disposable HTML demo with visible count state, explains limits, and preserves production code and tracker state."]
+  },
+  {
+    "id": "prototype-approved-decision",
+    "prompt": "Use $prototype to record this accepted design decision in the conversation: an export counter is the desired UI. I approve the design; production implementation will be a separate task. There is no further prototype code to build.",
+    "allowed_writes": [],
+    "must_read_skills": ["prototype"],
+    "expect_no_questions": true,
+    "rubric": ["Records design acceptance and the task boundary without implementing production code, committing branches or publishing external records."]
+  }
+]

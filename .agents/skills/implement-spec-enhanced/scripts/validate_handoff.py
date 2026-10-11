@@ -6,7 +6,7 @@ import json
 import re
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 
 class InvalidHandoff(ValueError):
@@ -42,6 +42,86 @@ def relative_path(value, label):
         not path.is_absolute() and not path.drive and ".." not in path.parts,
         f"{label} must be repository-relative without parent traversal",
     )
+
+
+def github_issue(value):
+    return isinstance(value, str) and bool(
+        re.fullmatch(r"https://github\.com/[\w.-]+/[\w.-]+/issues/[1-9][0-9]*", value)
+    )
+
+
+def source_reference(value, label):
+    if github_issue(value):
+        return
+    require(
+        text(value) and "://" not in value,
+        f"{label} must be a local path or GitHub issue URL",
+    )
+    relative_path(value, label)
+    windows = PureWindowsPath(value)
+    require(
+        not windows.drive and not windows.root and ".." not in windows.parts,
+        f"{label} must be repository-relative without parent traversal",
+    )
+
+
+def validate_sources(candidate, bundle, checkout):
+    issue_fields = {key for key in ("ticket", "spec") if github_issue(candidate[key])}
+    snapshots = candidate.get("source_snapshots", {})
+    require(
+        isinstance(snapshots, dict) and snapshots.keys() == issue_fields,
+        "source_snapshots must cover exactly the GitHub ticket/spec references",
+    )
+    for key in ("ticket", "spec"):
+        if key not in issue_fields:
+            require((checkout / candidate[key]).is_file(), f"missing {key} in checkout")
+            continue
+        snapshot = snapshots[key]
+        require(
+            isinstance(snapshot, dict) and snapshot.keys() == {"path", "sha256"},
+            f"invalid {key} source snapshot",
+        )
+        relative_path(snapshot["path"], f"{key} snapshot path")
+        path = (bundle / snapshot["path"]).resolve()
+        require(
+            path.is_relative_to(bundle.resolve()),
+            "source snapshot must be inside attempt",
+        )
+        require(
+            path.name
+            not in {
+                "candidate.json",
+                "verification.json",
+                "integration.json",
+                "carry-forward.json",
+            },
+            "source snapshot aliases a reserved record",
+        )
+        payload = path.read_bytes()
+        require(
+            hashlib.sha256(payload).hexdigest() == snapshot["sha256"],
+            f"{key} source snapshot digest mismatch",
+        )
+        source = json.loads(payload)
+        require(
+            isinstance(source, dict) and source.get("url") == candidate[key],
+            f"{key} source snapshot URL mismatch",
+        )
+        require(
+            text(source.get("title"))
+            and isinstance(source.get("body"), str)
+            and text(source.get("updatedAt")),
+            f"{key} source snapshot lacks issue content/version",
+        )
+        comments = source.get("comments")
+        require(
+            isinstance(comments, list)
+            and all(
+                isinstance(comment, dict) and isinstance(comment.get("body"), str)
+                for comment in comments
+            ),
+            f"{key} source snapshot lacks complete comments",
+        )
 
 
 def evidence(value, bundle, label):
@@ -89,7 +169,7 @@ def load(bundle, kind, records=None):
     require(record["schema_version"] in (1, 2), "unsupported schema_version")
     require(record.get("kind") == kind, f"expected kind {kind}")
     require(text(record.get("actor")), f"{kind}.actor is required")
-    relative_path(record.get("ticket"), f"{kind}.ticket")
+    source_reference(record.get("ticket"), f"{kind}.ticket")
     commit(record.get("candidate_commit"), f"{kind}.candidate_commit")
     strings(record.get("limits"), f"{kind}.limits")
     checks(record.get("checks"), bundle)
@@ -136,9 +216,8 @@ def validate(
     prior_context=False,
 ):
     candidate = load(bundle, "candidate", records)
-    relative_path(candidate.get("spec"), "candidate.spec")
-    for key in ("ticket", "spec"):
-        require((checkout / candidate[key]).is_file(), f"missing {key} in checkout")
+    source_reference(candidate.get("spec"), "candidate.spec")
+    validate_sources(candidate, bundle, checkout)
     commit(candidate.get("base_commit"), "candidate.base_commit")
     require(
         text(candidate.get("worktree")) and Path(candidate["worktree"]).is_absolute(),

@@ -7,7 +7,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from validate_handoff import commit, evidence, load, relative_path, require, text
+from validate_handoff import commit, evidence, load, require, source_reference, text
 
 CHECK_IDS = {"pytest", "lint", "format", "dependency"}
 
@@ -40,7 +40,7 @@ def requirements(data, stage, ticket, candidate_commit, assessed_commit):
         type(data["schema_version"]) is int and data["schema_version"] == 1,
         "unsupported requirements schema_version",
     )
-    relative_path(data["ticket"], "requirements.ticket")
+    source_reference(data["ticket"], "requirements.ticket")
     require(data["ticket"] == ticket, "requirements ticket mismatch")
     require(data["stage"] == stage, "requirements stage mismatch")
     for key, expected in (

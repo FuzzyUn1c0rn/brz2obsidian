@@ -12,7 +12,7 @@ pointers, independently recorded requirements, receipt path and outcome, and any
 reuse reason. Follow [the check contract](../../../docs/testing.md#automated-check-runner);
 text output alone is not completion evidence. Keep manual/native observations separate.
 
-Include a "suggested skills" section in the document, naming which skills the next agent should call the Skill tool for.
+Include a "suggested skills" section with paths to the relevant `SKILL.md` files and when the next agent should read each one.
 
 Do not duplicate content already captured in other artifacts (specs, plans, ADRs, issues, commits, diffs). Reference them by path or URL instead.
 

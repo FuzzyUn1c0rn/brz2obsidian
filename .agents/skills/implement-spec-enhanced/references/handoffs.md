@@ -81,11 +81,13 @@ For byte-preserving v2 carry, read [carried requirements](handoff-retry.md#carri
 
 New records are UTF-8 JSON objects with `schema_version: 2`, `kind`
 (`candidate`, `verification`, or `integration`), `actor` (agent/session ID),
-`ticket` (repository-relative path), `candidate_commit` (full Git object ID),
+`ticket` (repository-relative path or canonical GitHub issue URL), `candidate_commit` (full Git object ID),
 `assessed_checkout` (derived absolute stage checkout), `check_requirements` and
 `check_requirements_sha256` (derived from independent input),
 `checks`, and `limits` (array of material-limit strings; empty when none).
 Use identical ticket and candidate identities throughout an attempt.
+For URL references, read [GitHub scope snapshots](issue-sources.md); candidate
+records preserve the assessed issue content in hashed attempt-local evidence.
 
 ### Candidate
 

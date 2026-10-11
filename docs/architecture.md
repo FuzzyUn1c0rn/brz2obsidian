@@ -245,8 +245,10 @@ snapshot/policy/result versions and renderer metadata are refused explicitly.
 Version 5 additionally declares exact source-neutral text edits on documents and
 inspection values, typed adaptation evidence, and a literal-adaptation count.
 The source adapter interprets unknown angle words; generic code validates edits
-and composes reference rewrites against adapted text. See the coordinate and
-digest contract in [reviewed source coverage](source-coverage.md#literal-prose-version-5).
+and composes reference rewrites against adapted text.
+[Text-adaptation validation](../src/brz2obsidian/core/text.py) checks nonoverlapping
+Unicode codepoint spans, exact before/after text, and SHA-256 digests of the scoped
+source text and adapted document.
 Version 6 adds source-neutral exact image presentation declarations on reference
 spans and `image_presentation_normalizations` counts. Generic validation and
 warnings require exact scoped document coordinates/digest and present owned

@@ -35,6 +35,10 @@ file. Link authoritative references and identify the source path.
 
 Run `gh issue view <number> --comments` and inspect its labels, assignees,
 dependencies and state before acting.
+For structured implementation handoffs, preserve the accepted body/comments
+using [GitHub scope snapshots](../../.agents/skills/implement-spec-enhanced/references/issue-sources.md).
+Records use the issue URL as identity; local snapshots retain the exact assessed
+scope while GitHub remains authoritative for current state.
 
 ### Discover the implementation frontier
 

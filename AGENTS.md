@@ -16,12 +16,15 @@ See `docs/agents/triage-labels.md`.
 Use a single-context layout with root `GLOSSARY.md` and `docs/adr/`.
 See `docs/agents/domain.md`.
 
+## Implementation Work
+
+For any implementation work, applying the `tdd` skill is mandatory.
+
 ## Python environment
 
 Use the project `.venv` interpreter for Python development and tooling
-(`.venv\Scripts\python.exe` on Windows). Create it with the available base
-Python using `python -m venv .venv` if missing. Install runtime, build,
-and development packages only inside this environment, as they become
+(`.venv\Scripts\python.exe` on Windows). Create it if missing.
+Install runtime, build, and development packages only inside this environment, as they become
 needed. See `README.md` for bootstrap commands and dependency manifests.
 
 ## Automated checks
@@ -30,6 +33,7 @@ Select checks from the actual change, affected consumers and mandatory acceptanc
 criteria. Run or accept pytest, Ruff lint/format and dependency checks only through
 `tools/check.py`; before running or accepting them, read
 [the runner and receipt contract](docs/testing.md#automated-check-runner).
+
 Focused or manual-only verification is valid when it establishes the required
 scope. Broaden or repeat checks for new changes, failures or unresolved concerns.
 Required full-suite, fresh-execution and user/native acceptance gates still apply.

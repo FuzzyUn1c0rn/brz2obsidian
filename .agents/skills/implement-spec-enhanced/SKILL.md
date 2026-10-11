@@ -54,6 +54,8 @@ runner paths, required scope/freshness and the
 [runner receipt contract](../../../docs/testing.md#automated-check-runner).
 Workers share a workspace: state ownership and the requirement to preserve
 others' edits in each assignment.
+When scope lives in GitHub Issues, use [preserved issue sources](references/issue-sources.md)
+so structured reviews assess the same accepted content across worktrees.
 
 For structured stages, choose an absolute shared root under
 `tmp/<effort>/handoffs/` in the integration checkout. The coordinator assigns

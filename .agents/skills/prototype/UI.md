@@ -13,11 +13,18 @@ If the question is about logic/state rather than what something looks like, this
 
 ## Two sub-shapes: strongly prefer sub-shape A
 
-A UI prototype is much easier to judge when it's **butting up against the rest of the app**: real header, real sidebar, real data, real density. A throwaway route on its own is a vacuum: every variant looks fine in isolation. Default to sub-shape A whenever there's a plausible existing page to host the variants. Only reach for sub-shape B if the prototype genuinely has no nearby home.
+Use representative app context: header, sidebar, data shape and density. Default
+to a standalone demo under `tmp/<effort>/` that reproduces that context with
+synthetic data. Use the two route-based shapes below only when experimenting in
+the existing app has been authorized; isolate those changes in a suitable
+worktree or branch as described in [SKILL.md](SKILL.md).
 
 ### Sub-shape A: adjustment to an existing page (preferred)
 
-The route already exists. Variants are rendered **on the same route**, gated by a `?variant=` URL search param. The existing data fetching, params, and auth all stay. Only the rendering swaps. This is the default; pick it unless there's a specific reason not to.
+For authorized app experiments, prefer an existing route when it fits the design
+question. Render variants on that route with a `?variant=` search parameter.
+Preserve its integration context while using synthetic data and stubbed mutations
+for the prototype. Standalone disposable demos remain the overall default.
 
 If the prototype is for something that doesn't yet have a page but *would naturally live inside one* (a new section of the dashboard, a new card on the settings screen, a new step in an existing flow), it's still sub-shape A. Mount the variants inside the host page.
 
@@ -89,7 +96,8 @@ Behaviour:
 - Visually distinct from the page (e.g. high-contrast pill, subtle shadow) so it's obviously not part of the design being evaluated.
 - Hidden in production builds: gate on `process.env.NODE_ENV !== 'production'` or an equivalent check, so a stray prototype merge can't ship the bar to users.
 
-Put the switcher in a single shared component so both sub-shapes can reuse it. Locate it wherever shared UI lives in the project.
+Put the switcher in a shared component inside the disposable demo, or in the
+isolated app checkout when route-based experimentation is authorized.
 
 ### 5. Hand it over
 
@@ -97,12 +105,11 @@ Surface the URL (and the `?variant=` keys). The user will flip through whenever 
 
 ### 6. Capture the answer and clean up
 
-Once a variant has won, capture the answer (which variant and why), then capture the prototype the way the [SKILL](SKILL.md) describes. Fold the winner into the real code and move the rest onto the throwaway branch, not into main:
-
-- **Sub-shape A**: fold the winner into the existing page; drop the losing variants and the switcher from main.
-- **Sub-shape B**: promote the winning variant to a real route; drop the throwaway route and the switcher from main.
-
-The full set of variants is the primary source, so it lands on the throwaway branch, not the bin, since variant components and the switcher left in the main branch rot fast and confuse the next reader.
+Capture which variant was selected, why, and its evidence, following
+[the skill's completion rules](SKILL.md). Deliver and preserve the runnable
+variants. If production implementation is also authorized, implement the accepted
+design with normal application checks and presentation acceptance, then retire
+temporary variants and the switcher after preserving required evidence.
 
 ## Anti-patterns
 

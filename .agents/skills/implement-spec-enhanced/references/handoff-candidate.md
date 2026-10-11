@@ -9,7 +9,11 @@ temporary prerequisite recovery, read [retry/carry-forward](handoff-retry.md).
 
 Additional fields:
 
-- `spec`: repository-relative accepted specification path.
+- `spec`: repository-relative accepted specification path or canonical GitHub issue URL.
+- `source_snapshots`: required for URL sources; the input maps `ticket`/`spec` to
+  attempt-relative captured issue JSON. The helper derives each path/digest pair
+  in the record. Read [GitHub scope snapshots](issue-sources.md) for retrieval,
+  publication and review rules.
 - `base_commit`: integration tip incorporated before final candidate checks.
 - `worktree`: absolute path to the implementer's checkout.
 - `owned_files`: repository-relative files or directories assigned to the worker.
@@ -32,12 +36,14 @@ publish from one UTF-8 JSON input outside the published record names:
 The helper can run from the integration checkout while assessing another
 checkout. Every Git lookup uses `--checkout`; it derives the full candidate HEAD,
 absolute worktree root, schema/kind, and the full commit resolved from `base_ref`.
-It normalizes repository-relative `ticket`, `spec`, and `owned_files` paths and
-rejects parent traversal. The input file remains unchanged.
+It normalizes repository-relative paths and preserves canonical issue URLs.
+URL sources bind to captured snapshots; parent traversal is refused. The input
+file remains unchanged.
 
-The input has exactly these fields; substitute existing repository-relative
-ticket/spec files, assigned ownership, actual criterion IDs, and the captured
-commit ID in this illustrative input:
+The input requires the fields below, plus `source_snapshots` for URL references.
+Substitute existing repository-relative files or the issue references and
+snapshots described above, assigned ownership, actual criterion IDs, and the
+captured commit ID in this illustrative local-file input:
 
 ```json
 {

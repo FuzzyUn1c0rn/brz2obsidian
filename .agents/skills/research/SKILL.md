@@ -1,12 +1,21 @@
 ---
 name: research
-description: Investigate a question against high-trust primary sources and capture the findings as a Markdown file in the repo. Use when the user wants a topic researched, docs or API facts gathered, or reading legwork delegated to a background agent.
+description: Produce a cited research report when the user requests a saved investigation or delegates substantial research. Ordinary factual questions use direct answers.
 ---
 
-Spin up a **background agent** to do the research, so you keep working while it reads.
+Investigate against primary sources: official docs, source code, specifications
+and first-party APIs. Follow claims back to the source that owns them.
 
-Its job:
+Preserve the requested output and side effects. For a read-only request, return
+cited findings in the conversation. Save a report only when requested or already
+authorized; use the requested destination and repository conventions. Temporary
+research notes belong under `.scratch/<effort>/` or `tmp/<effort>/`.
 
-1. Investigate the question against **primary sources** (official docs, source code, specs, first-party APIs), not a secondary write-up of them. Follow every claim back to the source that owns it.
-2. Write the findings to a single Markdown file, citing each claim's source.
-3. Save it where the repo already keeps such notes; match the existing convention, and if there is none, put it somewhere sensible and say where.
+Handle a bounded investigation directly. Delegate substantial independent reading
+when it makes useful progress while other work continues and delegation is
+available and authorized. Assign one research owner; a delegated researcher
+performs the investigation rather than spawning another researcher by default.
+
+Report the question, supported findings with citations, uncertainties and any
+material limits. Identify the saved report when one was requested. Prefer the
+OpenAI Docs skill for OpenAI product or API documentation questions.

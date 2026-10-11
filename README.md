@@ -106,7 +106,8 @@ This guide uses **Windows PowerShell**. You will need:
 - **Obsidian**, installed so you can open the converted vault.
 - A **TheBrain BRZ export**. The converter supports reviewed features of
   TheBrain 15's BRZ exchange format 5. An archive with unsupported features may
-  be refused; see [source coverage](docs/source-coverage.md).
+  be refused; [inspect the archive](#4-inspect-the-archive) for diagnostics before
+  conversion.
 
 Export your Brain as a `.brz` archive in TheBrain and keep the original as a
 backup. Make sure the Brain has a Home thought before exporting. Use the `.brz`
@@ -349,7 +350,7 @@ its exit code.
 | The destination is not empty | Choose a new output folder. Conversion does not overwrite or merge existing files. |
 | An output path is too long | Choose a shorter destination, such as `C:\v\Brain`. |
 | Home is missing or forgotten | Set an included Home thought in TheBrain, export again and inspect the new archive. |
-| Source content or features are refused | Read the diagnostic and [supported source rules](docs/source-coverage.md). Repair or simplify the source in TheBrain where appropriate, then re-export. |
+| Source content or features are refused | Follow the [inspection guidance](#4-inspect-the-archive) and the printed diagnostic. Repair or simplify the source in TheBrain where appropriate, then re-export. |
 | Conversion succeeds with warnings | Review `MIGRATION REPORT.md`, including any optional source-repair steps. |
 | The checker reports issues | Follow its diagnostics and the [checker guide](docs/vault-checker.md). It does not modify the vault. |
 
@@ -370,7 +371,7 @@ For contributors and library users:
 
 - [Architecture and runnable library examples](docs/architecture.md)
 - [Test commands and verification procedures](docs/testing.md)
-- [Source coverage and warning rules](docs/source-coverage.md)
+- [Source inclusion rules](docs/architecture.md#included-scope-and-version-3-facts)
 - [Workspace housekeeping and private-data locations](docs/workspace.md)
 - [Glossary](GLOSSARY.md) and [architecture decision](docs/adr/0001-source-neutral-core.md)
 

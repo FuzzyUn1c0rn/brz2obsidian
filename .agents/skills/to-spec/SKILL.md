@@ -1,10 +1,10 @@
 ---
 name: to-spec
-description: "Turn the current conversation into a spec and publish it to the project issue tracker: no interview, just synthesis of what you've already discussed."
+description: "Synthesize the current conversation into a proportional specification; publish only when requested or already authorized."
 disable-model-invocation: true
 ---
 
-This skill takes the current conversation context and codebase understanding and produces a spec. Do NOT interview the user; just synthesize what you already know.
+This skill produces a spec from the current conversation and codebase understanding. Synthesize settled decisions; ask only for missing material decisions as described below.
 
 The issue tracker and triage label vocabulary should have been provided to you. If not, tell the user to run `/setup-matt-pocock-skills`.
 
@@ -12,11 +12,22 @@ The issue tracker and triage label vocabulary should have been provided to you. 
 
 1. Explore the repo to understand the current state of the codebase, if you haven't already. Use the project's domain glossary vocabulary throughout the spec, and respect any ADRs in the area you're touching.
 
-2. Sketch out the seams at which you're going to test the feature. Existing seams should be preferred to new ones. Use the highest seam possible. If new seams are needed, propose them at the highest point you can. The fewer seams across the codebase, the better - the ideal number is one.
+2. Reuse testing boundaries already approved in the conversation, accepted spec
+or ticket, recording their approval source. Prefer existing public interfaces
+that can establish the acceptance criteria. Propose a new boundary only when
+the accepted ones cannot establish the requested behavior.
 
-Check with the user that these seams match their expectations.
+When a required interface or testing boundary is unresolved, recommend a suitable
+public boundary and explain which observable behavior it can establish. Label
+the recommendation as proposed, record the decision as pending, and ask a focused
+question about that missing decision. Complete independent synthesis while it
+is pending. Existing approval is sufficient; do not reopen settled decisions.
 
-3. Write the spec using the template below, then publish it to the project issue tracker. Apply the `ready-for-agent` triage label - no need for additional triage.
+3. Write the spec using the template below, proportional to the accepted scope.
+Publish it when requested or already authorized. A draft-only or read-only
+request returns the specification in the conversation. Mark published work
+`ready-for-agent` only when necessary scope and testing decisions are settled;
+retain unresolved decisions explicitly rather than inventing requirements.
 
 <spec-template>
 
@@ -30,7 +41,8 @@ The solution to the problem, from the user's perspective.
 
 ## User Stories
 
-A LONG, numbered list of user stories. Each user story should be in the format of:
+A concise numbered list covering the accepted user capabilities and material
+edge cases. Each user story should be in the format of:
 
 1. As an <actor>, I want a <feature>, so that <benefit>
 
@@ -38,7 +50,8 @@ A LONG, numbered list of user stories. Each user story should be in the format o
 1. As a mobile bank customer, I want to see balance on my accounts, so that I can make better informed decisions about my spending
 </user-story-example>
 
-This list of user stories should be extremely extensive and cover all aspects of the feature.
+Include only stories needed to describe the agreed feature; avoid repetition
+and speculative capabilities beyond its scope.
 
 ## Implementation Decisions
 

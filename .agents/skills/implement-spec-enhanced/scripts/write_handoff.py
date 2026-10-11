@@ -13,9 +13,11 @@ from receipt_requirements import bind, read_json, validate_record
 from validate_handoff import (
     InvalidHandoff,
     git,
+    github_issue,
     load,
     relative_path,
     require,
+    source_reference,
     text,
     validate,
 )
@@ -96,7 +98,7 @@ def repository_path(value, label):
     return Path(value.replace("\\", "/")).as_posix()
 
 
-def candidate_record(data, checkout):
+def candidate_record(data, checkout, attempt):
     require(text(data["base_ref"]), "base_ref must be a nonempty Git reference")
     record = {key: value for key, value in data.items() if key != "base_ref"}
     record.update(
@@ -113,7 +115,25 @@ def candidate_record(data, checkout):
         worktree=str(checkout),
     )
     for key in ("ticket", "spec"):
-        record[key] = repository_path(record[key], key)
+        source_reference(record[key], key)
+        if not github_issue(record[key]):
+            record[key] = repository_path(record[key], key)
+    if "source_snapshots" in record:
+        snapshots = record["source_snapshots"]
+        require(isinstance(snapshots, dict), "source_snapshots must be an object")
+        bound = {}
+        for key, reference in snapshots.items():
+            path = repository_path(reference, "source snapshot path")
+            resolved = (attempt / path).resolve()
+            require(
+                resolved.is_relative_to(attempt.resolve()),
+                "source snapshot must be inside attempt",
+            )
+            bound[key] = {
+                "path": path,
+                "sha256": hashlib.sha256(resolved.read_bytes()).hexdigest(),
+            }
+        record["source_snapshots"] = bound
     require(isinstance(record["owned_files"], list), "owned_files must be an array")
     record["owned_files"] = [
         repository_path(item, "owned_files entry") for item in record["owned_files"]
@@ -183,6 +203,12 @@ def publish(path, payload):
 
 
 def direct_evidence_references(record, *, inspecting=False):
+    if record["kind"] == "candidate":
+        snapshots = record.get("source_snapshots", {})
+        if isinstance(snapshots, dict):
+            for snapshot in snapshots.values():
+                if isinstance(snapshot, dict) and text(snapshot.get("path")):
+                    yield snapshot["path"], None
     for check in record["checks"]:
         for reference in check["evidence"]:
             yield reference, None
@@ -397,7 +423,9 @@ def main():
         description="Publish candidate.json from one UTF-8 JSON object.",
         epilog=(
             "Required input: actor, ticket, spec, base_ref, owned_files, criteria, "
-            "checks, limits. Arrays remain explicit, including checks/limits when empty. "
+            "checks, limits. GitHub issue URLs additionally need source_snapshots mapping "
+            "ticket/spec to attempt-relative captured issue JSON; the helper binds SHA-256. "
+            "Arrays remain explicit, including checks/limits when empty. "
             "Use a captured full commit ID for base_ref: the integration tip incorporated "
             "before final candidate checks, rather than a moving branch. Git context comes "
             "from --checkout. Repository paths are normalized; evidence files are absolute "
@@ -523,7 +551,10 @@ def main():
         data = read_input(
             args.input,
             required[args.stage],
-            {"verification_reuse_rationale"} if args.stage == "carry-forward" else (),
+            {
+                "candidate": {"source_snapshots"},
+                "carry-forward": {"verification_reuse_rationale"},
+            }.get(args.stage, ()),
         )
         checkout = Path(git(args.checkout.resolve(), "rev-parse", "--show-toplevel"))
         expected = read_json(args.requirements)
@@ -549,7 +580,7 @@ def main():
             )
             return 0 if allowed else 2
         if args.stage == "candidate":
-            record = candidate_record(data, checkout)
+            record = candidate_record(data, checkout, args.attempt)
         elif args.stage == "verification":
             record = verification_record(data, args.attempt)
         else:
