@@ -88,15 +88,19 @@ The block:
 
 ### Issue tracker
 
-[one-line summary of where issues are tracked]. See `docs/agents/issue-tracker.md`.
+[one-line summary of where issues are tracked]. For issue tracking, specification
+publication, or implementation from tracked issues, follow `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
-[one-line summary of the label vocabulary]. See `docs/agents/triage-labels.md`.
+[one-line summary of the label vocabulary]. Use `docs/agents/triage-labels.md`
+when interpreting or changing triage status.
 
 ### Domain docs
 
-[one-line summary of layout: "single-context" or "multi-context"]. See `docs/agents/domain.md`.
+[one-line summary of layout: "single-context" or "multi-context"]. Consult relevant
+glossaries for domain terminology or behavior, and applicable ADRs for architecture,
+module boundaries, or public interfaces. Follow `docs/agents/domain.md` for these conventions.
 ```
 
 Include the `### Triage labels` sub-block, and write `docs/agents/triage-labels.md`, only when `triage` is installed and Section B ran. When it isn't, both are omitted.

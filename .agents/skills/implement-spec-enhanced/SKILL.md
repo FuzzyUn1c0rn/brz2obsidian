@@ -18,9 +18,11 @@ explicitly authorized combined scope. Reuse a suitable integration branch or
 create one; record the full starting commit for final review.
 
 Define completion from the accepted requirements, required checks, independent
-review and any actual-user/native gate. Reuse already approved scope, testing
-boundaries and presentation decisions. Resolve only missing decisions that
-materially affect the work; continue independent authorized work meanwhile.
+review and any actual-user/native gate. Reuse already approved scope and
+presentation decisions. Follow the [TDD testing-boundary rules](../tdd/SKILL.md#seams-where-tests-go)
+to preserve specified boundaries or select and record an established public
+interface when none is specified. Resolve only missing decisions that materially
+affect the work; continue independent authorized work meanwhile.
 A read-only review or planning request produces findings without implementation.
 
 Choose coverage using [check selection](references/check-scope.md), recording

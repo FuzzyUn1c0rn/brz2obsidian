@@ -10,18 +10,23 @@ The issue tracker and triage label vocabulary should have been provided to you. 
 
 ## Process
 
-1. Explore the repo to understand the current state of the codebase, if you haven't already. Use the project's domain glossary vocabulary throughout the spec, and respect any ADRs in the area you're touching.
+1. Explore the repo to understand the current state of the codebase, if you haven't
+already. Consult the glossary when domain terminology or behavior is relevant,
+and use its vocabulary throughout the spec. Read applicable ADRs when
+investigating or changing architecture, module boundaries, or public interfaces.
 
-2. Reuse testing boundaries already approved in the conversation, accepted spec
-or ticket, recording their approval source. Prefer existing public interfaces
-that can establish the acceptance criteria. Propose a new boundary only when
-the accepted ones cannot establish the requested behavior.
+2. Use testing boundaries specified in the conversation, accepted specification,
+or ticket, recording their decision source. If none is specified, select an
+established public interface that can demonstrate the requested behavior, and
+record the choice and rationale in the spec. Existing decisions are sufficient;
+do not reopen them.
 
-When a required interface or testing boundary is unresolved, recommend a suitable
+Ask when a material interface or acceptance decision remains unresolved, or the
+choice would contradict an explicit testing decision. Recommend a suitable
 public boundary and explain which observable behavior it can establish. Label
 the recommendation as proposed, record the decision as pending, and ask a focused
 question about that missing decision. Complete independent synthesis while it
-is pending. Existing approval is sufficient; do not reopen settled decisions.
+is pending.
 
 3. Write the spec using the template below, proportional to the accepted scope.
 Publish it when requested or already authorized. A draft-only or read-only

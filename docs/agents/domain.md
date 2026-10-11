@@ -7,8 +7,9 @@ This repo uses a single-context layout:
 - `GLOSSARY.md` at the repo root defines domain vocabulary.
 - `docs/adr/` holds architecture decision records.
 
-Before exploring the codebase, read the glossary and ADRs
-relevant to the area being investigated.
+Consult the glossary when domain terminology or behavior is relevant. Read
+applicable ADRs when investigating or changing architecture, module boundaries,
+or public interfaces.
 
 When these documents are absent, proceed silently.
 Create them through domain-modeling when terms or decisions

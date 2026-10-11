@@ -11,9 +11,10 @@ remain in the [common contract](handoffs.md) and its stage references.
    Implementers read [candidate publication](handoff-candidate.md)
    before preparing their stage input.
 
-2. The implementer builds the ticket through its accepted public testing seams,
-   using `tdd` for behavioral changes within already approved
-   testing boundaries. Synchronize with the current integration tip and capture its full ID as `base_ref` at synchronization,
+2. The implementer applies `tdd` to features and behavior-changing fixes. Follow
+   its [testing-boundary rules](../../tdd/SKILL.md#seams-where-tests-go) to preserve
+   specified boundaries or select and record an established public interface
+   when none is specified. Synchronize with the current integration tip and capture its full ID as `base_ref` at synchronization,
    before the final candidate checks. Follow the
    [stable-candidate checkpoint](../../../../docs/testing.md#stable-candidate-checkpoint):
    finish focused controls and known findings, confirm the check plan against
