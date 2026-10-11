@@ -16,7 +16,6 @@ locations below so a finished temporary effort can be deleted safely.
 | `.scratch/<effort>/` | Draft issue bodies, exploratory notes and other small temporary artifacts | Disposable; Git-ignored |
 | `tests/` | Synthetic fixtures, reusable test helpers and the independent acceptance driver | Versioned development support |
 | GitHub Issues | Specifications, Wayfinder maps, tickets, accepted decisions and durable discussion; see `docs/agents/issue-tracker.md` | Durable project records |
-| `docs/history/` | Supporting research and verification reports from completed work, plus the GitHub migration index | Versioned historical evidence |
 | `docs/`, `GLOSSARY.md`, `AGENTS.md` | Current development guidance and domain decisions | Versioned project records |
 
 The existing `brz/Software Engineering v2` vault keeps its established path.
@@ -57,48 +56,3 @@ Managed Git worktrees use the Codex app's worktree lifecycle and their assigned
 paths. Archive them through that lifecycle, preserving needed ignored files
 first, rather than moving their checkouts into `tmp/`.
 
-## Planning records migrated on 2026-10-07
-
-Specifications, Wayfinder maps, implementation indexes and tickets moved from
-`.scratch/` to GitHub Issues. Completed work remains closed; the writer-helper
-specification remains open as issue #3. Approved layouts and breakdowns are
-comments on their feature issues. Supporting research and verification reports
-remain under `docs/history/`; its [migration index](history/README.md) maps the
-former paths to their destinations. Current documentation links use those
-destinations.
-
-`.scratch/` is now empty and Git-ignored, ready for disposable artifacts.
-Byte-preserved migration preimages are retained under
-`backups/scratch-migration-2026-10-07/`; the migration receipt in `docs/history/`
-records source hashes and verified relationships. These backups are restore
-evidence, separate from the GitHub tracking records.
-
-## Existing artifacts moved on 2026-10-05
-
-Completed development artifacts have these replacement locations:
-
-| Former location | Replacement |
-| --- | --- |
-| Historical generated directories and evidence files under `brz/` | `tmp/legacy/brz/<original-name>` |
-| Sibling `../brz2obsidian-agent-notes/` | `tmp/legacy/agent-notes/` |
-| Sibling `../brz2obsidian-worktrees/` containing four research notes | `tmp/legacy/worktree-notes/` |
-| Root `.pytest_cache/` and `.ruff_cache/` | `tmp/legacy/caches/pytest/` and `tmp/legacy/caches/ruff/` |
-| `brz/v2-native/ticket-14-reviewed-update/` | `backups/software-engineering-v2/category-update-2026-10-05/` |
-
-The `brz/` directory retains the four original exports, including Management &
-Leadership, and the reviewed Software Engineering vault. The small controlled
-research exports are temporary evidence under `tmp/legacy/brz/`; the checked-in
-synthetic fixtures remain under `tests/fixtures/`.
-
-Historical reports and archived one-off scripts record paths used at the time
-of their original verification. Use the mapping above to find relocated
-evidence; archived scripts need their paths reviewed before reuse. Current
-development commands use `tmp/`.
-
-Links to private temporary evidence are available locally while it is retained;
-the versioned reports keep the conclusions after that evidence is deleted.
-
-The local relocation inventory and verification receipt live under
-`tmp/housekeeping/2026-10-05/`. They are temporary bookkeeping, not test inputs.
-No tests, original exports, user-vault files or versioned decision records are
-retired by this move.
