@@ -55,9 +55,8 @@ FORGED_DECLARATIONS = [
 
 @pytest.mark.parametrize("newline", ["\n", "\r", "\r\n"])
 @pytest.mark.parametrize("label", ["<!a", "   <!A", "> <!a\n> data", "- <!a\n  data"])
-@pytest.mark.parametrize("boundary", ["vault", "run"])
 def test_complete_audits_reject_fully_rebound_own_label_declarations(
-    tmp_path, label, newline, boundary
+    tmp_path, label, newline
 ):
     from tests.application.test_graph_workflow import graph_archive, identity
 
@@ -123,18 +122,14 @@ def test_complete_audits_reject_fully_rebound_own_label_declarations(
     rewrite_record(vault, record, result)
     frozen = source.read_bytes()
     with pytest.raises(AssertionError, match="raw-derived active HTML"):
-        if boundary == "vault":
-            check_vault(source, vault)
-        else:
-            check_run_result(result, vault, check_vault(source, vault))
+        check_vault(source, vault)
     assert source.read_bytes() == frozen
 
 
 @pytest.mark.parametrize("newline", ["\n", "\r", "\r\n"])
 @pytest.mark.parametrize("unsupported", FORGED_DECLARATIONS)
-@pytest.mark.parametrize("boundary", ["vault", "run"])
 def test_complete_audits_reject_fully_rebound_declaration_source(
-    tmp_path, capsys, unsupported, newline, boundary
+    tmp_path, capsys, unsupported, newline
 ):
     forged = unsupported.replace("\n", newline)
     # Equal byte lengths and no literal/reference edits keep every count honest.
@@ -203,11 +198,7 @@ def test_complete_audits_reject_fully_rebound_declaration_source(
     ).hexdigest()
     rewrite_record(vault, record, result)
     with pytest.raises(AssertionError, match="raw-derived active HTML"):
-        if boundary == "vault":
-            check_vault(source, vault)
-        else:
-            # Complete result checking consumes a trusted independent raw audit.
-            check_run_result(result, vault, check_vault(source, vault))
+        check_vault(source, vault)
     assert source.read_bytes() == before
 
 
