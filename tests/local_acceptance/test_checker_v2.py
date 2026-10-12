@@ -2,13 +2,15 @@
 
 import hashlib
 import json
+import shutil
+from copy import deepcopy
 from zipfile import ZipFile
 
 import pytest
 
 from brz2obsidian.application.wiring import default_workflow
 from tests.application.test_graph_workflow import identity
-from tests.local_acceptance.checker import check_vault, compare_vaults
+from tests.local_acceptance.checker import check_run_result, check_vault, compare_vaults
 from tests.local_acceptance.run import reordered_archive
 from tests.local_acceptance.scope import dump_json
 from tests.support.v2_collection import mixed_archive
@@ -54,6 +56,82 @@ def fixture(tmp_path):
     check_vault(source, vault)
     record = json.loads((vault / "migration-record.json").read_bytes())
     return source, vault, result, record
+
+
+def copy_case(prepared, destination):
+    source, vault, result, record = prepared
+    destination.mkdir()
+    copied_source = destination / "source.brz"
+    copied_vault = destination / "vault"
+    shutil.copy2(source, copied_source)
+    shutil.copytree(vault, copied_vault)
+    copied_result, copied_record = deepcopy((result, record))
+    copied_result["receipt"]["destination"] = str(copied_vault.resolve())
+    return copied_source, copied_vault, copied_result, copied_record
+
+
+def isolation_sample(prepared):
+    source, vault, _, record = prepared
+    return (
+        source.read_bytes(),
+        (vault / "migration-record.json").read_bytes(),
+        deepcopy(
+            next(
+                e for e in record["original_evidence"] if e["key"] == "attachments.json"
+            )
+        ),
+        deepcopy(record["adaptations"]),
+    )
+
+
+@pytest.fixture(scope="module")
+def verified_v2_seed(tmp_path_factory):
+    root = tmp_path_factory.mktemp("verified-v2")
+    source = mixed_archive(root / "source.brz")
+    vault = root / "vault"
+    result = (
+        default_workflow().convert(source, vault).model_dump(mode="json", by_alias=True)
+    )
+    summary = check_vault(source, vault)
+    check_run_result(result, vault, summary)
+    assert tuple(
+        summary[key]
+        for key in ("notes", "payloads", "backups", "references", "warnings", "videos")
+    ) == (7, 8, 3, 2, 1, 1)
+    record = json.loads((vault / "migration-record.json").read_bytes())
+    prepared = source, vault, result, record
+    # A second private case witnesses both file and nested-data isolation.
+    sentinel = copy_case(prepared, root / "sentinel")
+    expected = isolation_sample(prepared)
+
+    def assert_untouched():
+        # Check before reuse: a tainted seed must never prepare another case.
+        assert isolation_sample(prepared) == expected, "verified seed was mutated"
+        assert isolation_sample(sentinel) == expected, "separate case was mutated"
+
+    yield prepared, assert_untouched
+    assert_untouched()
+
+
+@pytest.fixture
+def isolated_v2_case(tmp_path, verified_v2_seed, request):
+    prepared, assert_untouched = verified_v2_seed
+    assert_untouched()
+    copied = copy_case(prepared, tmp_path / "case")
+    yield copied
+    damage = request.node.callspec.params["damage"]
+    if damage in {"ordinary_url_video", "adaptation_fact"}:
+        source, vault, _, record = copied
+        seed_source, seed_vault, _, seed_record = prepared
+        if damage == "ordinary_url_video":
+            assert source.read_bytes() != seed_source.read_bytes()
+            assert record["original_evidence"] != seed_record["original_evidence"]
+        else:
+            assert record["adaptations"] != seed_record["adaptations"]
+            assert (vault / "migration-record.json").read_bytes() != (
+                seed_vault / "migration-record.json"
+            ).read_bytes()
+        assert_untouched()
 
 
 @pytest.mark.parametrize(
@@ -245,8 +323,10 @@ def test_oracle_still_rejects_changed_declared_source_colours_after_consistent_r
         "reservation",
     ],
 )
-def test_oracle_detects_v2_lies_after_receipt_rehash_and_recount(tmp_path, damage):
-    source, vault, result, record = fixture(tmp_path)
+def test_oracle_detects_v2_lies_after_receipt_rehash_and_recount(
+    isolated_v2_case, damage
+):
+    source, vault, result, record = isolated_v2_case
     items = {t["item_key"]: t for t in record["item_targets"]}
     assets = {a["asset_id"]: a for a in record["asset_targets"]}
     empty, category, exceptional = (
