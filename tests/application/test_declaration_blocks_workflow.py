@@ -308,127 +308,89 @@ def test_omission_precedes_own_label_qualification_and_context_uses_retained_ind
     assert sha256(source.read_bytes()).digest() == sha256(before).digest()
 
 
-PROTECTED_NEIGHBORS = [
-    "`<!a>`",
-    "`<!a`",
-    r"\<!a>",
-    r"\<!A",
-    "<!é> <!1> <!_>",
-    "Prose <!a\ncontinued",
-    "Prose\n    <!a\ncontinued",  # paragraph lazy continuation, not a new block
-    "    <!a\n    > > literal code",
-    "\t<!a",
-    "```\n<!a\n> > literal code\n- literal code\n```",
-    "~~~~\n   <!A\n> literal code\n~~~~",
-    "<!--\n<!a\n> > comment data\n- comment data\n-->",
-    "> ```\n> <!a\n> ```",
-    "- ~~~\n  <!a\n  ~~~",
-    "> ```\n> <!a",  # containing quote ends naturally before live paragraph
-    "- ~~~\n  <!a",  # containing list ends naturally before live paragraph
-    ">     <!a",
-    "-     <!a",
-    "- > ```\n  > <!a\n  > ```",
-    "> - ~~~\n>   <!a\n>   ~~~",
-    "- > ```\n  > <!a",  # nested container exit is not a top-level guard
-    "> - <!--\n>   <!a\n>   -->",
-    "-\t  <!a",
-    "-\t\t<!a",
-    "1.\t   <!a",
-    "10. \t<!a",
-    "123.\t <!a",
-    "- ordinary\n\n      <!a",
-    "1.    ordinary\n\n          <!a",
-    "- ordinary\n\n\t\t<!a",
-    "> - \t<!a",
-    "Paragraph\n10. <!a",
-    "> Paragraph\n> 10. <!a",
-    "- Paragraph\n  10. <!a",
-    "- >     <!a\n  >     code",
-    "> -     <!a\n>       code",
-]
+@pytest.mark.parametrize(
+    "case_id", ["P01-CR", "P26-LF", "P15-CR", "P22-CRLF", "P21-LF"]
+)
+def test_protected_declaration_compositions(tmp_path, capsys, case_id):
+    from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
 
-
-@pytest.mark.parametrize("newline", ["\n", "\r", "\r\n"])
-@pytest.mark.parametrize("prefix", PROTECTED_NEIGHBORS)
-def test_protected_neighbors_keep_exact_live_facts_and_complete_raw_audits(
-    tmp_path, capsys, prefix, newline
-):
-    from tests.application.test_links_workflow import COMPACT, links_archive
-    from tests.application.test_sized_images_workflow import images
+    from tests.application.test_declaration_preservation_modules import (
+        DOCUMENT,
+        HOME,
+        IMAGE,
+        IMAGE_PATH,
+        NEWLINES,
+        NOTE_PATH,
+        ORIGINAL_PATH,
+        assert_counts,
+        assert_record,
+        authored_facts,
+        declaration_archive,
+    )
     from tests.local_acceptance.checker import check_run_result, check_vault
     from tests.support.notes import note_body
 
-    phrase = f"[Live](brain://{COMPACT}/ignored)"
-    image_phrase = '![photo](.data/md-images/a.png "caption")'
-    body = (prefix + "\n\n<Value> é " + phrase + " " + image_phrase).replace(
-        "\n", newline
+    prefix_id, newline_id = case_id.split("-")
+    source_text, _adapted, document, expected_note = authored_facts(
+        int(prefix_id[1:]), NEWLINES[newline_id]
     )
-    adapted = body.replace("<Value>", "\\<Value>")
-    expected = adapted.replace(phrase, "[[Notes/Topic.v2.md|Live]]").replace(
-        ".data/md-images/a.png", "Attachments/22222222/a.png"
-    )
-    image = images()[0]
-    source = links_archive(
-        tmp_path / "source.brz",
-        body,
-        resources=[({"Type": 12, "Location": "a.png"}, image)],
+    source = tmp_path / "source.brz"
+    compressed = case_id == "P21-LF"
+    members = declaration_archive(
+        source, source_text, compression=ZIP_DEFLATED if compressed else ZIP_STORED
     )
     before = source.read_bytes()
-    inspected = default_workflow().inspect(source)
-    assert inspected.outcome == "clean", inspected.model_dump_json()
-    assert inspected.receipt is None and inspected.issues == ()
-    assert inspected.counts.text_adaptations == 1
-    assert inspected.counts.source_references == 2
-    assert inspected.counts.source_gaps == inspected.counts.generated_presentations == 0
-    document = inspected.inspection.documents[0]
-    edit = document.text_adaptations[0]
-    start = body.index("<Value>")
-    assert (edit.start, edit.end, edit.adapted_start, edit.adapted_end) == (
-        start,
-        start + 7,
-        start,
-        start + 8,
+    workflow = default_workflow()
+    if compressed:
+        with ZipFile(source) as archive:
+            assert archive.getinfo(HOME + "/Notes.md").compress_type == ZIP_DEFLATED
+            assert archive.read(HOME + "/Notes.md") == source_text.encode()
+        inspected = workflow.inspect(source)
+        assert inspected.outcome == "clean", inspected.model_dump_json()
+        assert inspected.operation == "inspect" and inspected.receipt is None
+        assert inspected.issues == ()
+        assert_counts(inspected.counts.model_dump())
+        assert len(inspected.inspection.documents) == 1
+        assert inspected.inspection.documents[0].model_dump(mode="json") == document
+        assert inspected.inspection.documents[0].key == DOCUMENT
+        assert main(["inspect", str(source), "--json"]) == 0
+        envelope = json.loads(capsys.readouterr().out)
+        assert envelope["outcome"] == "clean" and envelope["operation"] == "inspect"
+        assert envelope["issues"] == [] and envelope["receipt"] is None
+        assert_counts(envelope["counts"])
+        assert envelope["inspection"]["documents"] == [document]
+
+    operations = (
+        ("workflow", "cli")
+        if case_id == "P01-CR"
+        else ("cli" if compressed else "workflow",)
     )
-    assert (edit.before, edit.after) == ("<Value>", "\\<Value>")
-    assert edit.source_digest == sha256(body.encode()).hexdigest()
-    assert edit.source_basis == "scoped_source_text/unicode_codepoints"
-    assert edit.adapted_basis == "document.text/unicode_codepoints"
-    assert document.text_digest == sha256(adapted.encode()).hexdigest()
-    for reference, original in zip(
-        document.references, (phrase, image_phrase), strict=True
-    ):
-        assert (reference.start, reference.end) == (
-            adapted.index(original),
-            adapted.index(original) + len(original),
-        )
-        assert reference.expected_original == original
-    assert main(["inspect", str(source), "--json"]) == 0
-    envelope = json.loads(capsys.readouterr().out)
-    assert envelope["receipt"] is None and envelope["counts"]["source_references"] == 2
-    vault = tmp_path / "vault"
-    result = default_workflow().convert(source, vault).model_dump(mode="json")
-    assert result["outcome"] == "clean" and result["counts"]["actual_references"] == 2
-    assert (
-        note_body((vault / "Home — Entry thought.md").read_bytes())
-        == (
-            "# Entry thought\n\n"
-            + expected
-            + "\n\n## Categories\n\n[[Categories.md|Browse categories]]\n"
-        ).encode()
-    )
-    assert (
-        vault / "Attachments/22222222/Notes.md.original"
-    ).read_bytes() == body.encode()
-    assert (vault / "Attachments/22222222/a.png").read_bytes() == image
-    check_run_result(result, vault, check_vault(source, vault))
-    cli_vault = tmp_path / "cli-vault"
-    assert main(["convert", str(source), str(cli_vault), "--json"]) == 0
-    cli_result = json.loads(capsys.readouterr().out)
-    check_run_result(cli_result, cli_vault, check_vault(source, cli_vault))
-    assert (cli_vault / "Home — Entry thought.md").read_bytes() == (
-        vault / "Home — Entry thought.md"
-    ).read_bytes()
-    assert source.read_bytes() == before
+    published_notes = []
+    for operation in operations:
+        vault = tmp_path / (operation + "-vault")
+        if operation == "workflow":
+            result = workflow.convert(source, vault).model_dump(mode="json")
+        else:
+            assert main(["convert", str(source), str(vault), "--json"]) == 0
+            result = json.loads(capsys.readouterr().out)
+        assert result["outcome"] == "clean", result
+        assert result["operation"] == "convert" and result["issues"] == []
+        assert result["receipt"] is not None
+        assert_counts(result["counts"], published=True)
+        published = (vault / NOTE_PATH).read_bytes()
+        assert note_body(published) == expected_note
+        assert (vault / ORIGINAL_PATH).read_bytes() == source_text.encode()
+        assert (vault / IMAGE_PATH).read_bytes() == IMAGE
+        assert not (vault / "Notes/Topic.v2.md").exists()
+        record = json.loads((vault / "migration-record.json").read_bytes())
+        assert_record(record, document, members, before)
+        assert_counts(record["counts"], rendered=True)
+        summary = check_vault(source, vault)
+        check_run_result(result, vault, summary)
+        assert source.read_bytes() == before
+        published_notes.append(published)
+    if case_id == "P01-CR":
+        assert published_notes[0] == published_notes[1]
 
 
 @pytest.mark.parametrize("ownership", ["direct", "transitive", "opaque"])
