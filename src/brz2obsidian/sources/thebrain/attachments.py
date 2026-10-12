@@ -8,9 +8,7 @@ from urllib.parse import urlsplit
 from brz2obsidian.contracts import (
     AccountingEntry,
     Asset,
-    Document,
     GeneratedPresentation,
-    MigrationRefused,
     OriginalEvidence,
     SourceFinding,
     SourceGap,
@@ -26,14 +24,7 @@ from .findings import (
     ZERO_LENGTH_ABSENT_TXT_RULE,
 )
 from .images import validate_note_image
-from .inserts import INSERT_RULE, adapt_note, trace_adapted_references
-from .literals import adapt_literals, source_position
-from .notes import (
-    bind_note_references,
-    compact_thought_identity,
-    trace_note_references,
-)
-from .scope import contains_omitted_identity
+from .note_preparation import bind_prepared_notes, prepare_note
 from .semantics import validate_semantic_fields
 from .videos import reviewed_video
 
@@ -408,84 +399,20 @@ def normalize_attachments(
                     (asset_id,),
                 )
 
-            def trace_scoped(
-                value,
-                omitted=(),
+            document, note_findings = prepare_note(
+                text,
                 owner=owner,
                 asset_id=asset_id,
                 pointer=pointer,
                 member=member,
-            ):
-                try:
-                    adapted, edits = adapt_literals(value)
-                    return adapted, edits, trace_note_references(adapted, omitted)
-                except MigrationRefused as error:
-                    issue = error.issues[0]
-                    source_refuse(
-                        issue.code,
-                        issue.message,
-                        (owner, asset_id),
-                        evidence=(pointer, "payload:" + member),
-                        guidance="Review the affected thought-note Markdown and its preserved source evidence; unsupported HTML or reference syntax must be resolved before retrying.",
-                    )
-
-            adapted, text_adaptations, references = trace_scoped(text, excluded)
-            removals = []
-            for reference in references:
-                if reference.kind == "item":
-                    target = compact_thought_identity(reference.target)
-                    if target in excluded:
-                        removals.append(reference)
-            unsafe_original = bool(removals) or contains_omitted_identity(
-                text, scope_tokens
+                excluded=excluded,
+                scope_tokens=scope_tokens,
+                source_refuse=source_refuse,
             )
-            for reference in reversed(removals):
-                begin = source_position(reference.start, text_adaptations)
-                end = source_position(reference.end, text_adaptations)
-                text = text[:begin] + text[end:]
-            if contains_omitted_identity(text, scope_tokens):
-                refuse(
-                    "invalid_reference",
-                    "Note contains an excluded association outside removable references",
-                )
-            try:
-                adapted, text_adaptations, insert_losses = adapt_note(text)
-                references = trace_adapted_references(adapted, text_adaptations)
-            except MigrationRefused as error:
-                issue = error.issues[0]
-                source_refuse(
-                    issue.code,
-                    issue.message,
-                    (owner, asset_id),
-                    evidence=(pointer,),
-                    guidance=issue.guidance,
-                )
-            for loss in insert_losses:
-                findings.append(
-                    SourceFinding(
-                        kind="formatting_loss",
-                        rule_id=INSERT_RULE,
-                        affected=(owner, asset_id),
-                        observed_json=json.dumps(loss, ensure_ascii=False),
-                        evidence=(pointer,),
-                    )
-                )
-            text = adapted
-            documents.append(
-                Document(
-                    key=asset_id,
-                    owner=owner,
-                    text=text,
-                    text_digest=hashlib.sha256(text.encode()).hexdigest(),
-                    original_asset_id=None if unsafe_original else asset_id,
-                    original_copy_omitted=unsafe_original,
-                    references=references,
-                    text_adaptations=text_adaptations,
-                    evidence=(pointer,),
-                )
-            )
+            documents.append(document)
+            findings.extend(note_findings)
             role = "note_original"
-            if unsafe_original:
+            if document.original_copy_omitted:
                 members[asset_id] = member
                 continue
         assets.append(
@@ -698,20 +625,7 @@ def normalize_attachments(
                 image_asset_ids=tuple(a.asset_id for a in images),
             )
         )
-    bound_documents = []
-    for document in documents:
-        try:
-            bound_documents.append(bind_note_references(document, assets, thoughts))
-        except MigrationRefused as error:
-            issue = error.issues[0]
-            source_refuse(
-                issue.code,
-                issue.message,
-                (document.owner, document.key),
-                evidence=document.evidence,
-                guidance="Review the affected thought-note Markdown and declared local references before retrying.",
-            )
-    documents = bound_documents
+    documents = bind_prepared_notes(documents, assets, thoughts, source_refuse)
     accounting.extend(
         AccountingEntry(
             identity=f"reference:{document.key}:{index}",
