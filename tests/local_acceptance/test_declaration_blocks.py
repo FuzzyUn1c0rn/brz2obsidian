@@ -53,8 +53,14 @@ FORGED_DECLARATIONS = [
 ]
 
 
-@pytest.mark.parametrize("newline", ["\n", "\r", "\r\n"])
-@pytest.mark.parametrize("label", ["<!a", "   <!A", "> <!a\n> data", "- <!a\n  data"])
+@pytest.mark.parametrize(
+    "label,newline",
+    [
+        (label, newline)
+        for label in ["<!a", "   <!A", "> <!a\n> data", "- <!a\n  data"]
+        for newline in (["\n", "\r", "\r\n"] if "\n" in label else ["\n"])
+    ],
+)
 def test_complete_audits_reject_fully_rebound_own_label_declarations(
     tmp_path, label, newline
 ):
@@ -126,8 +132,15 @@ def test_complete_audits_reject_fully_rebound_own_label_declarations(
     assert source.read_bytes() == frozen
 
 
-@pytest.mark.parametrize("newline", ["\n", "\r", "\r\n"])
-@pytest.mark.parametrize("unsupported", FORGED_DECLARATIONS)
+@pytest.mark.parametrize(
+    "unsupported,newline",
+    [
+        (unsupported, newline)
+        for unsupported in FORGED_DECLARATIONS
+        # Replacing absent newlines does not create another source encoding.
+        for newline in (["\n", "\r", "\r\n"] if "\n" in unsupported else ["\n"])
+    ],
+)
 def test_complete_audits_reject_fully_rebound_declaration_source(
     tmp_path, capsys, unsupported, newline
 ):
@@ -203,16 +216,20 @@ def test_complete_audits_reject_fully_rebound_declaration_source(
 
 
 @pytest.mark.parametrize(
-    "prefix,guard",
+    "prefix,guard,damage",
     [
-        ("````\n<!a\n> > data", "\n\n````\n"),
-        ("~~~~\n   <!A\n- data", "\n\n~~~~\n"),
-        ("<!--\n<!a\n> > data", "\n\n-->\n"),
-        ("> ````\n> <!a", ""),
-        ("- ~~~~\n  <!a", ""),
+        (prefix, guard, damage)
+        for prefix, guard in [
+            ("````\n<!a\n> > data", "\n\n````\n"),
+            ("~~~~\n   <!A\n- data", "\n\n~~~~\n"),
+            ("<!--\n<!a\n> > data", "\n\n-->\n"),
+            ("> ````\n> <!a", ""),
+            ("- ~~~~\n  <!a", ""),
+        ]
+        # Empty-guard corruption is always an extra closure.
+        for damage in (["missing", "wrong", "extra", "moved"] if guard else ["extra"])
     ],
 )
-@pytest.mark.parametrize("damage", ["missing", "wrong", "extra", "moved"])
 @pytest.mark.parametrize("newline", ["\n", "\r", "\r\n"])
 def test_protected_declarations_have_only_required_generated_guards(
     tmp_path, prefix, guard, damage, newline

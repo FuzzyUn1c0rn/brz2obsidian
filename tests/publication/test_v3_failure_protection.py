@@ -19,7 +19,11 @@ from tests.application.test_failure_protection import (
 )
 from tests.application.test_graph_workflow import identity
 from tests.application.test_integrated_v3_workflow import EMPTY
-from tests.publication.test_failure_protection import SessionBoundary, artifacts_for
+from tests.publication.test_failure_protection import (
+    SessionBoundary,
+    artifacts_for,
+    mutate_complete_staging_on_walk,
+)
 from tests.publication.test_v2_failure_protection import (
     caller_files,
     failed_safely,
@@ -58,29 +62,37 @@ def test_real_v3_write_and_staging_corruption_prevent_partial_acceptance(
             raise OSError("Controlled mixed artifact partial write")
         return original(path, mode, *args, **kwargs)
 
-    def corrupt():
-        path = next(tmp_path.glob(".brz2obsidian-*")) / target
+    def corrupt(staging):
+        path = staging / target
         body = path.read_bytes()
+        assert body
         reached.append(path)
         if fault == "delete":
             path.unlink()
+            assert not path.exists()
         elif fault == "truncate":
+            assert len(body) > 2
             path.write_bytes(body[:2])
+            assert path.read_bytes() == body[:2]
         else:
-            path.write_bytes(bytes([body[0] ^ 1]) + body[1:])
+            altered = bytes([body[0] ^ 1]) + body[1:]
+            assert len(altered) == len(body) and altered != body
+            path.write_bytes(altered)
+            assert path.read_bytes() == altered
 
     with BrzSourceModule().open(source) as session:
         artifacts = artifacts_for(session)
         if fault == "write":
             monkeypatch.setattr(Path, "open", partial_write)
-        boundary = (
-            session
-            if fault == "write"
-            else SessionBoundary(session, before_commit=corrupt)
-        )
+        else:
+            staged = mutate_complete_staging_on_walk(
+                monkeypatch, tmp_path, artifacts.manifest, corrupt
+            )
         with pytest.raises(MigrationFailed) as error:
-            publish(artifacts, boundary, tmp_path / "vault")
+            publish(artifacts, session, tmp_path / "vault")
     assert len(reached) == 1
+    if fault != "write":
+        assert len(staged) == 1
     assert source.read_bytes() == source_before
     failed_safely(
         tmp_path,
