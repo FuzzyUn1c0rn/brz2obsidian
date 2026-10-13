@@ -51,8 +51,14 @@ def source_with_tail(path, body, tail, *, label=None):
     return source, owner, "Home — Home.md" if owner == 1 else "Notes/Probe.md"
 
 
-def authored_full_note(body, guard, tail, *, prefix=None):
-    """Fixture declares guard explicitly; no parser/output decides its obligation."""
+def authored_full_note(body, guard, tail, *, section_break="\n\n", prefix=None):
+    """Assemble authored bytes with fixture-declared guard and literal section break.
+
+    The caller works the break from its known ending; this helper neither
+    normalizes source encodings nor infers padding from body/guard content.
+    Resources always add two LF bytes; their final LF leaves one before Children,
+    whose final LF in turn leaves one before Categories.
+    """
     text = (
         prefix
         if prefix is not None
@@ -61,16 +67,13 @@ def authored_full_note(body, guard, tail, *, prefix=None):
     text += body
     if tail != "none":
         text += guard
-    if tail in {"resources", "all"}:
-        text += "\n\n" + RESOURCES
-    for section in ([CHILDREN] if tail in {"children", "all"} else []) + (
-        [NAVIGATION] if tail in {"home", "all"} else []
-    ):
-        ending = text.replace("\r\n", "\n").replace("\r", "\n")
-        text += (
-            "" if ending.endswith("\n\n") else "\n" if ending.endswith("\n") else "\n\n"
-        )
-        text += section
+    text += {
+        "none": "",
+        "resources": "\n\n" + RESOURCES,
+        "children": section_break + CHILDREN,
+        "home": section_break + NAVIGATION,
+        "all": "\n\n" + RESOURCES + "\n" + CHILDREN + "\n" + NAVIGATION,
+    }[tail]
     return text.encode()
 
 
@@ -103,7 +106,7 @@ def test_raw_open_block_and_generated_sections_have_complete_exact_bytes(
     result = operation.convert(source, vault)
     assert result.outcome == "clean", result.model_dump_json()
     assert note_body((vault / note_path).read_bytes()) == authored_full_note(
-        body, guard, tail
+        body, guard, tail, section_break="\n"
     )
     original = vault / (
         "Attachments/" + identity(owner).replace("-", "") + "/Notes.md.original"
@@ -120,30 +123,31 @@ def test_raw_open_block_and_generated_sections_have_complete_exact_bytes(
 
 
 @pytest.mark.parametrize(
-    "body,guard",
+    "body,guard,section_break",
     [
-        ("<!-- unfinished comment <Value>", "\n\n-->\n"),
-        ("<!-- closed -->", ""),
-        ("```md\n<Hidden>\n```", ""),
-        ("~~~~md\r\n<Hidden>\r\n~~~~~~", ""),
-        ("`````md\n<Hidden>\n```", "\n\n`````\n"),
-        ("~~~~md\r<Hidden>\r~~~~ text", "\n\n~~~~\n"),
-        ("> <!-- unfinished\n> <Hidden>", ""),
-        ("- <!-- unfinished\n  <Hidden>", ""),
-        ("> ```md\n> <Hidden>", ""),
-        ("- ```md\n  <Hidden>", ""),
-        ("- example\n\n  ```md\n  <Hidden>", ""),
-        ("> - ```md\n>   <Hidden>", ""),
-        ("> > <!-- unfinished\n> > <Hidden>", ""),
-        ("    <!-- <Hidden>\r\n", ""),
-        ("<!-- ```\n<Hidden>", "\n\n-->\n"),
-        ("~~~md\n<!-- <Hidden>", "\n\n~~~\n"),
-        ("plain `<!--`", ""),
+        ("<!-- unfinished comment <Value>", "\n\n-->\n", "\n"),
+        ("<!-- closed -->", "", "\n\n"),
+        ("```md\n<Hidden>\n```", "", "\n\n"),
+        ("~~~~md\r\n<Hidden>\r\n~~~~~~", "", "\n\n"),
+        ("`````md\n<Hidden>\n```", "\n\n`````\n", "\n"),
+        ("~~~~md\r<Hidden>\r~~~~ text", "\n\n~~~~\n", "\n"),
+        ("> <!-- unfinished\n> <Hidden>", "", "\n\n"),
+        ("- <!-- unfinished\n  <Hidden>", "", "\n\n"),
+        ("> ```md\n> <Hidden>", "", "\n\n"),
+        ("- ```md\n  <Hidden>", "", "\n\n"),
+        ("- example\n\n  ```md\n  <Hidden>", "", "\n\n"),
+        ("> - ```md\n>   <Hidden>", "", "\n\n"),
+        ("> > <!-- unfinished\n> > <Hidden>", "", "\n\n"),
+        # One authored CRLF is retained verbatim; only one generated LF is needed.
+        ("    <!-- <Hidden>\r\n", "", "\n"),
+        ("<!-- ```\n<Hidden>", "\n\n-->\n", "\n"),
+        ("~~~md\n<!-- <Hidden>", "\n\n~~~\n", "\n"),
+        ("plain `<!--`", "", "\n\n"),
     ],
 )
 @pytest.mark.parametrize("tail", ["none", "home", "children", "resources"])
 def test_closed_container_and_delimiter_boundaries_do_not_invent_guards(
-    tmp_path, body, guard, tail
+    tmp_path, body, guard, section_break, tail
 ):
     source, _, note_path = source_with_tail(tmp_path / "source.brz", body, tail)
     vault = tmp_path / "vault"
@@ -151,9 +155,32 @@ def test_closed_container_and_delimiter_boundaries_do_not_invent_guards(
     assert result.outcome == "clean", result.model_dump_json()
     assert result.counts.text_adaptations == result.counts.actual_references == 0
     assert note_body((vault / note_path).read_bytes()) == authored_full_note(
-        body, guard, tail
+        body, guard, tail, section_break=section_break
     )
     check_vault(source, vault)
+
+
+def test_mixed_authored_endings_need_no_separator_after_two_endings(tmp_path):
+    # Worked bytes: the final LF + CRLF already give the blank line before
+    # Categories. Internal CRLF/CR/LF and both ending bytes remain authored.
+    body = "plain\r\nrow\rlast\n\r\n"
+    expected = (
+        b"# Home\n\nplain\r\nrow\rlast\n\r\n"
+        b"## Categories\n\n[[Categories.md|Browse categories]]\n"
+    )
+    source, owner, note_path = source_with_tail(tmp_path / "source.brz", body, "home")
+    before = source.read_bytes()
+    vault = tmp_path / "vault"
+    result = default_workflow().convert(source, vault)
+    assert result.outcome == "clean", result.model_dump_json()
+    assert result.counts.text_adaptations == result.counts.actual_references == 0
+    assert note_body((vault / note_path).read_bytes()) == expected
+    assert (
+        vault
+        / ("Attachments/" + identity(owner).replace("-", "") + "/Notes.md.original")
+    ).read_bytes() == b"plain\r\nrow\rlast\n\r\n"
+    check_run_result(result.model_dump(mode="json"), vault, check_vault(source, vault))
+    assert source.read_bytes() == before
 
 
 @pytest.mark.parametrize(
@@ -171,11 +198,11 @@ def test_closed_container_and_delimiter_boundaries_do_not_invent_guards(
 def test_rehashed_missing_wrong_extra_moved_generated_closures_reject(
     tmp_path, block, tail, damage
 ):
-    opener, closer = {
-        "comment": ("<!-- unfinished", "-->"),
-        "backtick": ("````md", "````"),
-        "tilde": ("~~~~md", "~~~~"),
-        "closed": ("<!-- closed -->", ""),
+    opener, closer, section_break = {
+        "comment": ("<!-- unfinished", "-->", "\n"),
+        "backtick": ("````md", "````", "\n"),
+        "tilde": ("~~~~md", "~~~~", "\n"),
+        "closed": ("<!-- closed -->", "", "\n\n"),
     }[block]
     body = opener + ("\n<Hidden>" if block != "closed" else "")
     guard = "\n\n" + closer + "\n" if closer else ""
@@ -185,7 +212,9 @@ def test_rehashed_missing_wrong_extra_moved_generated_closures_reject(
     assert result["outcome"] == "clean"
     path = vault / note_path
     before = path.read_bytes()
-    assert note_body(before) == authored_full_note(body, guard, tail)
+    assert note_body(before) == authored_full_note(
+        body, guard, tail, section_break=section_break
+    )
     if not guard:
         forged = before.replace(body.encode(), (body + "\n\n-->\n").encode(), 1)
     elif damage == "missing":
