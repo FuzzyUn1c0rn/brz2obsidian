@@ -156,9 +156,18 @@ def test_closed_container_and_delimiter_boundaries_do_not_invent_guards(
     check_vault(source, vault)
 
 
-@pytest.mark.parametrize("block", ["comment", "backtick", "tilde", "closed"])
+@pytest.mark.parametrize(
+    "block,damage",
+    [
+        (block, damage)
+        for block in ["comment", "backtick", "tilde", "closed"]
+        # Closed blocks take the same extra-closure corruption in every branch.
+        for damage in (
+            ["extra"] if block == "closed" else ["missing", "wrong", "extra", "moved"]
+        )
+    ],
+)
 @pytest.mark.parametrize("tail", ["home", "children", "resources"])
-@pytest.mark.parametrize("damage", ["missing", "wrong", "extra", "moved"])
 def test_rehashed_missing_wrong_extra_moved_generated_closures_reject(
     tmp_path, block, tail, damage
 ):

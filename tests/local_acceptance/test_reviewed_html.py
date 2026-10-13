@@ -18,9 +18,8 @@ from tests.support.notes import note_body
 
 @pytest.mark.parametrize("token", ["<!A>", "<!a>", "<!AB>", "<!A"])
 @pytest.mark.parametrize("newline", ["\n", "\r", "\r\n"])
-@pytest.mark.parametrize("boundary", ["vault", "run"])
 def test_complete_raw_audit_rejects_coherently_forged_declaration_admission(
-    tmp_path, capsys, token, newline, boundary
+    tmp_path, capsys, token, newline
 ):
     from tests.application.test_literal_angles_workflow import literal_archive
     from tests.application.test_resources_workflow import HOME
@@ -110,11 +109,8 @@ def test_complete_raw_audit_rejects_coherently_forged_declaration_admission(
     ).hexdigest()
     rewrite_record(vault, record, result)
     with pytest.raises(AssertionError, match="active HTML"):
-        if boundary == "vault":
-            check_vault(source, vault)
-        else:
-            # The run audit requires a trusted raw-source summary first.
-            check_run_result(result, vault, check_vault(source, vault))
+        # Raw-source rejection precedes any result audit for this corruption.
+        check_vault(source, vault)
     assert source.read_bytes() == before
 
 
