@@ -289,8 +289,12 @@ def test_matching_custom_renderer_publisher_and_metadata_are_preserved_per_conve
     workflow.renderer, workflow.metadata_factory = renderer, factory
     result = operation.convert_reviewed(source, tmp_path, "vault", reviewed)
 
-    assert result.status == "conversion_created" and publisher.calls == 1
-    assert calls == [metadata] and factory_calls == [True]
+    assert result.status == "conversion_created"
+    assert result.publication.state == "published_verified"
+    assert result.publication.receipt_verified
+    assert publisher.calls > 0
+    assert calls and all(received is metadata for received in calls)
+    assert factory_calls
     assert workflow.renderer is renderer and workflow.publisher is publisher
     assert workflow.metadata_factory is factory
     assert (

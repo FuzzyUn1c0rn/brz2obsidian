@@ -12,7 +12,11 @@ from brz2obsidian.contracts import GeneratedFile, MigrationFailed, MigrationRefu
 from brz2obsidian.publication import publish
 from brz2obsidian.sources.thebrain import BrzSourceModule
 from tests.application.test_graph_workflow import identity
-from tests.publication.test_failure_protection import SessionBoundary, artifacts_for
+from tests.publication.test_failure_protection import (
+    SessionBoundary,
+    artifacts_for,
+    mutate_complete_staging_on_walk,
+)
 from tests.support.v2_collection import CATEGORY_ICON, inventory, mixed_archive
 
 SUPPORT_TARGETS = (
@@ -90,34 +94,37 @@ def test_partial_real_support_write_reaches_selected_family_and_cleans_owned_sta
 @pytest.mark.parametrize("target", SUPPORT_TARGETS)
 @pytest.mark.parametrize("corruption", ["delete", "truncate", "same_length"])
 def test_selected_staged_support_corruption_cannot_publish(
-    tmp_path, target, corruption
+    tmp_path, monkeypatch, target, corruption
 ):
     caller, before = caller_files(tmp_path)
     reached = []
     with BrzSourceModule().open(mixed_archive(tmp_path / "source.brz")) as session:
         artifacts = artifacts_for(session)
 
-        def corrupt():
-            path = next(tmp_path.glob(".brz2obsidian-*")) / target
+        def corrupt(staging):
+            path = staging / target
             original = path.read_bytes()
             assert original
             reached.append(target)
             if corruption == "delete":
                 path.unlink()
+                assert not path.exists()
             elif corruption == "truncate":
+                assert len(original) > 2
                 path.write_bytes(original[:2])
+                assert path.read_bytes() == original[:2]
             else:
                 altered = bytes([original[0] ^ 1]) + original[1:]
                 assert len(altered) == len(original) and altered != original
                 path.write_bytes(altered)
+                assert path.read_bytes() == altered
 
+        staged = mutate_complete_staging_on_walk(
+            monkeypatch, tmp_path, artifacts.manifest, corrupt
+        )
         with pytest.raises(MigrationFailed) as error:
-            publish(
-                artifacts,
-                SessionBoundary(session, before_commit=corrupt),
-                tmp_path / "vault",
-            )
-    assert reached == [target]
+            publish(artifacts, session, tmp_path / "vault")
+    assert reached == [target] and len(staged) == 1
     failed_safely(tmp_path, caller, before, error, "payload_integrity_failure")
 
 
@@ -162,22 +169,26 @@ def test_support_rich_plan_remains_bound_to_source_identity(tmp_path, field):
 
 
 @pytest.mark.parametrize("when", ["before_staging", "after_staging"])
-def test_support_rich_source_truncation_refuses_commit(tmp_path, when):
+def test_support_rich_source_truncation_refuses_commit(tmp_path, monkeypatch, when):
     caller, before = caller_files(tmp_path)
     source = mixed_archive(tmp_path / "source.brz")
     with BrzSourceModule().open(source) as session:
         artifacts = artifacts_for(session)
         if when == "before_staging":
             source.write_bytes(b"truncated")
-        boundary = (
-            SessionBoundary(
-                session, before_commit=lambda: source.write_bytes(b"truncated")
+
+        def truncate_source(staging):
+            source.write_bytes(b"truncated")
+            assert source.read_bytes() == b"truncated"
+
+        if when == "after_staging":
+            reached = mutate_complete_staging_on_walk(
+                monkeypatch, tmp_path, artifacts.manifest, truncate_source
             )
-            if when == "after_staging"
-            else session
-        )
         with pytest.raises(MigrationRefused) as error:
-            publish(artifacts, boundary, tmp_path / "vault")
+            publish(artifacts, session, tmp_path / "vault")
+    if when == "after_staging":
+        assert len(reached) == 1
     failed_safely(tmp_path, caller, before, error, "source_changed")
 
 

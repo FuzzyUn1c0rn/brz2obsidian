@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -78,13 +79,11 @@ def test_source_truncation_refuses_commit_and_cleans_staging(tmp_path):
 
 
 class SessionBoundary:
-    def __init__(self, session, before_copy=None, before_commit=None):
+    def __init__(self, session, before_copy=None):
         self.snapshot = session.snapshot
         self.source_identity = session.source_identity
         self.session = session
         self.before_copy = before_copy
-        self.before_commit = before_commit
-        self.checks = 0
 
     def open_payload(self, asset_id):
         if self.before_copy:
@@ -92,25 +91,50 @@ class SessionBoundary:
         return self.session.open_payload(asset_id)
 
     def verify_consistency(self):
-        self.checks += 1
-        if self.checks == 2 and self.before_commit:
-            self.before_commit()
         self.session.verify_consistency()
 
 
-def test_staged_extra_file_is_refused_even_when_added_at_final_source_check(tmp_path):
+def mutate_complete_staging_on_walk(monkeypatch, parent, manifest, mutate):
+    """Inject once when the filesystem inventories fully written staging.
+
+    Check the actual files before mutation; consistency verification remains real
+    and may run any number of times. Delegate all walks, including cleanup.
+    """
+    original = os.walk
+    reached = []
+
+    def walk(root, *args, **kwargs):
+        staging = Path(root)
+        if (
+            staging.parent == parent
+            and staging.name.startswith(".brz2obsidian-")
+            and not reached
+        ):
+            assert all((staging / path).is_file() for path in manifest)
+            mutate(staging)
+            reached.append(staging)
+        return original(root, *args, **kwargs)
+
+    monkeypatch.setattr(os, "walk", walk)
+    return reached
+
+
+def test_staged_extra_file_is_refused_when_added_before_staged_inventory(
+    tmp_path, monkeypatch
+):
     with BrzSourceModule().open(make_archive(tmp_path / "source.brz")) as session:
+        artifacts = artifacts_for(session)
 
-        def add_extra():
-            staging = next(tmp_path.glob(".brz2obsidian-*"))
+        def add_extra(staging):
             (staging / "unplanned.txt").write_bytes(b"unplanned")
+            assert (staging / "unplanned.txt").read_bytes() == b"unplanned"
 
+        reached = mutate_complete_staging_on_walk(
+            monkeypatch, tmp_path, artifacts.manifest, add_extra
+        )
         with pytest.raises(Exception) as error:
-            publish(
-                artifacts_for(session),
-                SessionBoundary(session, before_commit=add_extra),
-                tmp_path / "vault",
-            )
+            publish(artifacts, session, tmp_path / "vault")
+    assert len(reached) == 1
     assert error.value.issues[0].code == "payload_integrity_failure"
     assert not (tmp_path / "vault").exists()
     assert list(tmp_path.glob(".brz2obsidian-*")) == []
@@ -313,19 +337,23 @@ def test_partial_real_write_failure_cleans_staging_and_preserves_caller_files(
     assert list(tmp_path.glob(".brz2obsidian-*")) == []
 
 
-def test_source_mutation_during_staging_is_detected_before_commit(tmp_path):
+def test_source_mutation_during_staging_is_detected_before_commit(
+    tmp_path, monkeypatch
+):
     source = make_archive(tmp_path / "source.brz")
-    with (
-        BrzSourceModule().open(source) as session,
-        pytest.raises(MigrationRefused) as error,
-    ):
-        publish(
-            artifacts_for(session),
-            SessionBoundary(
-                session, before_commit=lambda: source.write_bytes(b"changed")
-            ),
-            tmp_path / "vault",
+    with BrzSourceModule().open(source) as session:
+        artifacts = artifacts_for(session)
+
+        def change_source(staging):
+            source.write_bytes(b"changed")
+            assert source.read_bytes() == b"changed"
+
+        reached = mutate_complete_staging_on_walk(
+            monkeypatch, tmp_path, artifacts.manifest, change_source
         )
+        with pytest.raises(MigrationRefused) as error:
+            publish(artifacts, session, tmp_path / "vault")
+    assert len(reached) == 1
     assert error.value.issues[0].code == "source_changed"
     assert not (tmp_path / "vault").exists()
     assert list(tmp_path.glob(".brz2obsidian-*")) == []
