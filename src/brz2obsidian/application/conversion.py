@@ -8,6 +8,7 @@ from brz2obsidian.application.contracts import (
     Finding,
     Publication,
     ReviewedInspection,
+    same_source_selection,
 )
 from brz2obsidian.application.workflow import Workflow
 from brz2obsidian.contracts import Counts, Issue, MigrationRefused
@@ -139,9 +140,13 @@ def _refused(
     )
 
 
-def convert(workflow, source, validation, reviewed, proceed_with_warnings):
+def convert(
+    workflow, source, validation, reviewed, proceed_with_warnings, *, source_selection
+):
     destination = validation.destination
-    if not isinstance(reviewed, ReviewedInspection) or reviewed.source != str(source):
+    if not isinstance(reviewed, ReviewedInspection) or not same_source_selection(
+        reviewed.source_selection, source_selection
+    ):
         return _refused(
             "review_required",
             "Inspect the selected current archive before converting.",

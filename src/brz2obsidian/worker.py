@@ -31,14 +31,14 @@ def main() -> int:
     try:
         arguments = request.arguments
         if request.operation == "inspect":
-            result = operations.inspect(Path(arguments.source))
+            result = operations.inspect(arguments.source_selection)
         elif request.operation == "validate_destination":
             result = operations.validate_destination(
                 Path(arguments.parent), arguments.vault_name
             )
         elif request.operation == "convert_reviewed":
             result = operations.convert_reviewed(
-                Path(arguments.source),
+                arguments.source_selection,
                 Path(arguments.parent),
                 arguments.vault_name,
                 arguments.reviewed,

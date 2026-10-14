@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from brz2obsidian.application.contracts import (
+    BrzSourceSelection,
     ConvertCommand,
     InspectCommand,
     SelectSource,
@@ -712,7 +713,11 @@ class MainWindow(QMainWindow):
     def source_selected(self, path_or_null):
         """Asynchronous picker callback; cancellation preserves current state."""
         if path_or_null:
-            self.submit(SelectSource(path_or_null=str(path_or_null)))
+            self.submit(
+                SelectSource(
+                    source_selection=BrzSourceSelection(path=str(path_or_null))
+                )
+            )
 
     def _picker_finished(self, _):
         if self._dialog is not None:
