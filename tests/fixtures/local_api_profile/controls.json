@@ -993,7 +993,7 @@
     {
       "id": "J16",
       "family": "classification",
-      "basis": "Independent one-factor tag predicate negatives",
+      "basis": "Independent negative: a definition member lacks required authoritative definition-inventory agreement; successful tag/link joins alone do not include it",
       "input": {
         "tuple": [
           1,
@@ -1014,9 +1014,10 @@
         "tagGraphChildAgrees": true,
         "memberGraphTagsAgrees": true,
         "directLinkBothGraphsAgree": true,
-        "linkTypeId": null
+        "linkTypeId": null,
+        "definitionInventoryAgrees": false
       },
-      "expected": "refuse/hold unqualified or contradictory included assignment; suppress private/excluded content",
+      "expected": "refuse missing member-definition inventory agreement; memberRole2 alone does not cause refusal when all included-item and tag-join predicates qualify",
       "qualification": "scope-contract"
     },
     {
