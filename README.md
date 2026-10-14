@@ -5,6 +5,12 @@ The converter creates Markdown notes, copies attachments, and turns supported
 relationships, tags and thought types into Obsidian links, tags and categories.
 No community plugins are required.
 
+The library and CLI also support a bounded metadata-only local API source.
+See the [local API guide](docs/local-api.md) for Brain UUID selection, external
+credentials, search options and the current content-stage limits. Acquisition
+spans requests and is not an atomic snapshot; conversion reacquires after
+inspection.
+
 This is a **one-time conversion into a new vault**. It does not merge into an
 existing vault or keep TheBrain and Obsidian synchronized. Your source archive
 is read without being modified.

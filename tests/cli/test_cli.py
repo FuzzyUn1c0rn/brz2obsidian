@@ -1,9 +1,90 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 from tests.application.test_minimal_workflow import make_archive
+
+
+def test_local_api_installed_and_module_inspect_convert_json_and_text(tmp_path):
+    from tests.support.local_api import BRAIN, KEY, api_server
+
+    environment = dict(os.environ, THE_BRAIN_LOCAL_API_KEY=KEY)
+    console = Path(sys.executable).with_name("brz2obsidian.exe")
+    with api_server() as (_, address):
+        for index, command in enumerate(
+            ([str(console)], [sys.executable, "-m", "brz2obsidian"])
+        ):
+            common = [
+                "--source-kind",
+                "local-api",
+                "--api-url",
+                address,
+                "--api-search-initial-results",
+                "5000",
+                "--api-search-timeout",
+                "300",
+                "--api-search-max-response-bytes",
+                "128000000",
+                "--api-search-max-results",
+                "7500",
+            ]
+            inspected = subprocess.run(
+                [*command, "inspect", BRAIN, *common, "--json"],
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert inspected.returncode == 0, inspected.stderr + inspected.stdout
+            assert inspected.stderr == ""
+            envelope = json.loads(inspected.stdout)
+            assert (
+                envelope["schema_version"] == 7
+                and envelope["counts"]["source_items"] == 2
+            )
+            converted = subprocess.run(
+                [*command, "convert", BRAIN, str(tmp_path / f"vault{index}"), *common],
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert converted.returncode == 0, converted.stderr + converted.stdout
+            assert "not an atomic snapshot" in converted.stdout
+            assert (
+                KEY
+                not in inspected.stdout
+                + inspected.stderr
+                + converted.stdout
+                + converted.stderr
+            )
+            assert "Verified vault published" in converted.stdout
+
+
+def test_cli_local_api_configuration_errors_are_safe_json_and_brz_rejects_api_options(
+    capsys,
+):
+    from brz2obsidian.cli import main
+
+    for options in (
+        [
+            "--source-kind",
+            "local-api",
+            "--api-url",
+            "http://user:SECRET_CANARY@127.0.0.1/api",
+        ],
+        ["--source-kind", "local-api", "--api-search-max-results", "-1"],
+        ["--api-url", "http://127.0.0.1/api"],
+    ):
+        assert main(["inspect", "UUID_CANARY", *options, "--json"]) == 1
+        captured = capsys.readouterr()
+        assert "CANARY" not in captured.out + captured.err
+        assert json.loads(captured.out)["outcome"] == "refused"
+    assert main(["inspect", "value", "--source-kind", "SECRET_CANARY"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == "" and "CANARY" not in captured.err
 
 
 def test_installed_console_and_module_emit_one_json_envelope(tmp_path):

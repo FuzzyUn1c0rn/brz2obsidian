@@ -1,8 +1,22 @@
 import argparse
+import sys
+
+
+class SafeArgumentParser(argparse.ArgumentParser):
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("allow_abbrev", False)
+        super().__init__(*args, **kwargs)
+
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        self.exit(
+            2,
+            f"{self.prog}: error: invalid command arguments; use --help for accepted options\n",
+        )
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog="brz2obsidian")
+    parser = SafeArgumentParser(prog="brz2obsidian")
     commands = parser.add_subparsers(dest="operation", required=True)
     for name in ("inspect", "convert"):
         command = commands.add_parser(name)
@@ -10,6 +24,34 @@ def main(argv=None):
         if name == "convert":
             command.add_argument("destination")
         command.add_argument("--json", action="store_true", dest="json_output")
+        command.add_argument(
+            "--source-kind", choices=("brz", "local-api"), default="brz"
+        )
+        command.add_argument(
+            "--api-url",
+            help="Local API address from TheBrain settings (default http://127.0.0.1:11522/api)",
+        )
+        command.add_argument(
+            "--api-search-initial-results",
+            type=int,
+            help="Initial raw result limit (default 5000)",
+        )
+        command.add_argument(
+            "--api-search-timeout",
+            type=float,
+            help="Total wildcard budget in seconds (default 300)",
+        )
+        command.add_argument(
+            "--api-search-max-response-bytes",
+            type=int,
+            help="Post-decompression bytes per wildcard reply (default 128000000)",
+        )
+        command.add_argument(
+            "--api-search-max-results",
+            type=int,
+            help="Optional raw result ceiling (default disabled)",
+        )
+        command.epilog = "Local API acquisition spans requests over time and is not an atomic snapshot. Inspection releases its capture; conversion acquires again. Credentials use THE_BRAIN_LOCAL_API_KEY."
     checker = commands.add_parser("check-vault")
     checker.add_argument("vault")
     checker.add_argument("--json", action="store_true", dest="json_output")
@@ -40,18 +82,64 @@ def main(argv=None):
                 if issue.candidates:
                     print("Candidates: " + ", ".join(issue.candidates))
         return {"clean": 0, "issues": 2, "failed": 1}[result.outcome]
-    from brz2obsidian.application.wiring import default_workflow
+    from brz2obsidian import __version__
+    from brz2obsidian.application.wiring import default_workflow, local_api_workflow
+    from brz2obsidian.contracts import Issue, RunResult
 
-    workflow = default_workflow()
-    result = (
-        workflow.inspect(args.source)
-        if args.operation == "inspect"
-        else workflow.convert(args.source, args.destination)
-    )
+    options = {
+        name: getattr(args, "api_" + name)
+        for name in (
+            "url",
+            "search_initial_results",
+            "search_timeout",
+            "search_max_response_bytes",
+            "search_max_results",
+        )
+        if getattr(args, "api_" + name) is not None
+    }
+    try:
+        if args.source_kind == "brz":
+            if options:
+                raise ValueError
+            workflow, reference = default_workflow(), args.source
+        else:
+            from brz2obsidian.sources.thebrain.local_api import (
+                LocalApiConfig,
+                LocalApiSourceRef,
+            )
+
+            if "url" in options:
+                options["api_url"] = options.pop("url")
+            reference = LocalApiSourceRef(args.source)
+            workflow = local_api_workflow(LocalApiConfig(**options))
+    except ValueError, TypeError:
+        result = RunResult(
+            converter_version=__version__,
+            operation=args.operation,
+            outcome="refused",
+            issues=(
+                Issue(
+                    code="invalid_source_configuration",
+                    phase="source",
+                    message="Source selection or acquisition configuration is invalid",
+                    guidance="Use a canonical Brain UUID and valid local API options with --source-kind local-api; API options require that source kind.",
+                ),
+            ),
+        )
+    else:
+        result = (
+            workflow.inspect(reference)
+            if args.operation == "inspect"
+            else workflow.convert(reference, args.destination)
+        )
     if args.json_output:
         print(result.model_dump_json(by_alias=True))
     else:
         print(f"{result.operation}: {result.outcome}")
+        if args.source_kind == "local-api":
+            print(
+                "Local API acquisition is not an atomic snapshot. Inspection releases its capture; conversion acquires again. Capture verification checks the retained copy, not live atomicity or universal discovery completeness."
+            )
         if result.counts:
             if result.counts.image_presentation_normalizations:
                 print(
