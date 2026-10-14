@@ -1,0 +1,109 @@
+# Local API import
+
+The library and CLI can inspect and publish a supported metadata-only Brain from
+the running TheBrain desktop application. Enable the local API in TheBrain's
+settings and copy its current address and API key. The default address is
+`http://127.0.0.1:11522/api`; the converter does not scan ports or open/navigate a
+Brain. Requests are read-only and use a validated local HTTP(S) origin.
+
+The current stage includes public, non-forgotten ordinary thoughts, thought types
+and tags with a valid ordinary Home. Disconnected thoughts are discovered too.
+Known forgotten/system items retain only minimal scope evidence. Encountered
+relationships, assignments, authored notes, resources and non-null appearance
+declarations refuse at this stage. Those content stages must extend the adapter
+before a Brain containing them can convert. No partial vault is published.
+An empty non-Home item can remain an intentionally uncreated target under the
+existing planner; the migration record accounts for it.
+
+## CLI
+
+Provide the key externally in `THE_BRAIN_LOCAL_API_KEY`. Do not pass a key in the
+source reference, address or command options. For example, after setting that
+environment variable in your shell:
+
+```powershell
+brz2obsidian inspect 11111111-1111-4111-8111-111111111111 --source-kind local-api --api-url http://127.0.0.1:11522/api --json
+brz2obsidian convert 11111111-1111-4111-8111-111111111111 new-vault --source-kind local-api --api-url http://127.0.0.1:11522/api
+```
+
+`python -m brz2obsidian` accepts the same arguments. Replace the example UUID
+with the Brain's exact lowercase, hyphenated, nonzero UUID. The positional source
+remains an archive path when `--source-kind` is omitted or is `brz`. API options
+require `--source-kind local-api`. Existing text/JSON result envelopes and exit
+codes apply; JSON emits one result object. Invalid configuration and remote or
+filesystem failures use safe classified issues without echoing remote bodies,
+credentials, request URLs or arbitrary exception text.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--api-search-initial-results` | 5000 | Raw wildcard hit limit before owner deduplication. |
+| `--api-search-timeout` | 300 | Total wildcard seconds, including response waits, decompression, parsing and repeated searches. |
+| `--api-search-max-response-bytes` | 128000000 | Complete post-decompression bytes per wildcard reply. |
+| `--api-search-max-results` | disabled | Optional positive count ceiling. A saturated final request refuses. |
+
+Search uses `queryText=*` and `onlySearchThoughtNames=false`. Saturated raw replies
+double the requested limit; a non-power-of-two ceiling is requested once. Search
+counts fit the API signed 32-bit integer range. Search stubs only seed candidates;
+the adapter fetches authoritative metadata and definitions, expands graphs with
+`includeSiblings=true`, validates repeated facts and reconciles the five qualified
+start/end counters. Optional pins add seeds when Python configuration enables
+them; their request must succeed. Null sibling inventories refuse. Null graph
+attachments require a separate successful empty owner inventory to prove no note.
+
+## Python and capture lifetime
+
+```python
+from brz2obsidian.application.wiring import local_api_workflow
+from brz2obsidian.sources.thebrain.local_api import LocalApiConfig, LocalApiSourceRef
+
+workflow = local_api_workflow(LocalApiConfig())  # uses the environment provider
+reference = LocalApiSourceRef("11111111-1111-4111-8111-111111111111")
+result = workflow.inspect(reference)
+```
+
+`LocalApiSourceModule(config, credentials=provider)` accepts a zero-argument
+provider returning the key at acquisition time. `local_api_workflow` accepts the
+same provider. References/configuration contain no credential field. The module
+implements `SourceModule.open`; its frozen session supplies `snapshot`,
+`source_identity`, `open_payload` and `verify_consistency`. Direct session
+construction accepts already qualified scoped facts plus the normalized snapshot,
+closed acquisition audit and measured payload mapping; it validates identities,
+evidence, storage associations and fixed capture compatibility before freezing.
+It grants no additional live content support.
+
+Additional Python bounds are request timeout 30 seconds, non-search response
+16000000 bytes, 100000 requests, 100000 discovered thought/link identities,
+1000000000 total capture bytes and 256000000 bytes per payload. The total capture
+limit also bounds aggregate post-decompression response bytes before freezing.
+All limits are positive finite values; timeouts use whole milliseconds and are at
+most one day. Storage is private and generated; session close revokes streams and
+cleans only its own capture. Integrity checks never reread the live Brain.
+
+The [capture contract](local-api-capture.md) defines CJSON1 bytes, both content
+digests and a separate pinned integrity digest covering all metadata, audit,
+payload bytes and ownership/storage bindings. Origin/port, acquisition times and
+generated storage names do not change content identity. Authored timestamps,
+values, ordered aliases, scope decisions and payload measurements do. The current
+profile uses the assessed schema/build qualification baseline recorded in that
+contract; this is not a fresh measurement of the running desktop build.
+
+The source-specific outer metadata adds `run_metadata.source_acquisition` to the
+published migration record. It contains exactly the closed `audit` and
+`integrity_sha256` of the frozen capture, never its temporary filesystem path.
+BRZ run metadata keeps its existing shape. Audit operations name resource
+families: accessible-Brain listing is `brain` with `subject_id=null`; optional pin
+listing is `thought` with `subject_id=null`. Each request still records the
+verified requested Brain ID, sequence, outcome, times and measured reply length.
+The exact failed tag400 zero-inventory exception is recorded as a classified
+failed request and scoped source decision, not a successful empty response.
+
+## Consistency
+
+The local API import reads a Brain through several requests over time. It is not
+an atomic snapshot. Editing or syncing during acquisition can produce a mixture
+of source states. After acquisition, conversion uses a captured copy and verifies
+that copy's integrity. This does not prove that the live Brain stayed unchanged,
+that every captured object existed at the same moment, or that API discovery is
+universally complete. Inspection releases its session; conversion acquires again
+and therefore pays the acquisition cost again. Published acquisition evidence
+records `atomic=false`, start/end times and these limits.

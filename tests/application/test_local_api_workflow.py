@@ -1,0 +1,219 @@
+import json
+
+import pytest
+
+from brz2obsidian.application.wiring import local_api_workflow
+from brz2obsidian.sources.thebrain.local_api import LocalApiConfig, LocalApiSourceRef
+from tests.support.local_api import ALONE, BRAIN, HOME, KEY, api_server
+
+
+def test_metadata_only_home_and_disconnected_item_use_real_workflow(tmp_path):
+    with api_server() as (api, address):
+        workflow = local_api_workflow(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        )
+        reference = LocalApiSourceRef(BRAIN)
+        inspected = workflow.inspect(reference)
+        assert inspected.outcome == "clean", inspected.issues
+        assert inspected.counts.source_items == 2
+        assert inspected.counts.planned_notes == 1
+        converted = workflow.convert(reference, tmp_path / "vault")
+    assert converted.outcome == "clean", converted.issues
+    assert converted.receipt.verified and converted.counts.actual_notes == 1
+    record = json.loads((tmp_path / "vault/migration-record.json").read_bytes())
+    assert record["source_identity"]["source_id"] == BRAIN
+    assert {t["item_key"]: t["created"] for t in record["item_targets"]} == {
+        HOME: True,
+        ALONE: False,
+    }
+    assert "# Entry\n" in (tmp_path / "vault/Home — Entry.md").read_text(
+        encoding="utf-8"
+    )
+    assert KEY not in json.dumps(record)
+    acquisition = record["run_metadata"]["source_acquisition"]
+    assert acquisition["audit"]["atomic"] is False
+    assert acquisition["audit"]["started_at"] <= acquisition["audit"]["finished_at"]
+    assert len(acquisition["integrity_sha256"]) == 64
+    assert acquisition["audit"]["requests"][0]["operation"] == "brain"
+    assert acquisition["audit"]["requests"][1]["operation"] == "brain"
+    assert acquisition["audit"]["requests"][1]["subject_id"] is None
+    assert acquisition["audit"]["requests"][-1]["operation"] == "statistics"
+    assert all(
+        set(request)
+        == {
+            "sequence",
+            "operation",
+            "brain_id",
+            "subject_id",
+            "status",
+            "outcome",
+            "started_at",
+            "finished_at",
+            "actual_length",
+        }
+        for request in acquisition["audit"]["requests"]
+    )
+    from brz2obsidian.contracts import MigrationFailed
+
+    with pytest.raises(MigrationFailed):
+        workflow.metadata_factory()
+    searches = [
+        query for path, query, _ in api.requests if path.startswith("/api/search/")
+    ]
+    assert all(
+        q["queryText"] == ["*"] and q["onlySearchThoughtNames"] == ["false"]
+        for q in searches
+    )
+
+
+def test_published_receipt_survives_safe_capture_cleanup_failure(tmp_path, monkeypatch):
+    import shutil
+    import tempfile
+
+    captures = tmp_path / "captures"
+    captures.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(captures))
+    original = shutil.rmtree
+
+    def cannot_remove_capture(path, *args, **kwargs):
+        if path.name.startswith("brz2obsidian-api-"):
+            raise OSError("HEADER_CANARY SERVICE_TOKEN_CANARY")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(shutil, "rmtree", cannot_remove_capture)
+    with api_server() as (_, address):
+        workflow = local_api_workflow(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        )
+        result = workflow.convert(LocalApiSourceRef(BRAIN), tmp_path / "vault")
+    assert result.outcome == "failed"
+    assert result.receipt.published and result.receipt.verified
+    assert (tmp_path / "vault/migration-record.json").is_file()
+    assert {issue.code for issue in result.issues} >= {
+        "api_capture_cleanup_failed",
+        "publication_occurred",
+    }
+    assert "CANARY" not in result.model_dump_json()
+    from brz2obsidian.contracts import MigrationFailed
+
+    with pytest.raises(MigrationFailed):
+        workflow.metadata_factory()
+    # This injected filesystem failure leaves only test-owned captures; release
+    # them through the external filesystem seam after the failure observation.
+    leftovers = list(captures.iterdir())
+    assert len(leftovers) == 1
+    original(leftovers[0])
+
+
+def test_metadata_context_is_nested_and_concurrent_and_never_crosses_closed_sessions(
+    tmp_path,
+):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from brz2obsidian.contracts import MigrationFailed
+
+    with api_server() as (_, address):
+        workflow = local_api_workflow(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        )
+        module = workflow.binding.source
+        with module.open(LocalApiSourceRef(BRAIN)) as first:
+            initial = workflow.metadata_factory().source_acquisition
+            assert initial == first.acquisition
+            with module.open(LocalApiSourceRef(BRAIN)) as second:
+                assert (
+                    workflow.metadata_factory().source_acquisition == second.acquisition
+                )
+                assert second.acquisition != initial
+            assert workflow.metadata_factory().source_acquisition == initial
+        with pytest.raises(MigrationFailed):
+            workflow.metadata_factory()
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            results = list(
+                workers.map(
+                    lambda index: workflow.convert(
+                        LocalApiSourceRef(BRAIN), tmp_path / str(index)
+                    ),
+                    range(2),
+                )
+            )
+        assert all(result.outcome == "clean" for result in results)
+        records = [
+            json.loads((tmp_path / str(index) / "migration-record.json").read_bytes())
+            for index in range(2)
+        ]
+        assert records[0]["source_identity"] == records[1]["source_identity"]
+        assert (
+            records[0]["run_metadata"]["source_acquisition"]
+            != records[1]["run_metadata"]["source_acquisition"]
+        )
+        with pytest.raises(MigrationFailed):
+            workflow.metadata_factory()
+
+
+@pytest.mark.parametrize("failure", ["provider", "capture_write"])
+def test_external_provider_and_filesystem_errors_are_typed_before_workflow(
+    tmp_path, monkeypatch, failure
+):
+    import tempfile
+    from pathlib import Path
+
+    captures = tmp_path / "captures"
+    captures.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(captures))
+
+    def broken_provider():
+        raise RuntimeError("KEY_CANARY SERVICE_TOKEN_CANARY")
+
+    if failure == "capture_write":
+        original = Path.write_bytes
+
+        def broken_write(path, value):
+            if path.name == "metadata.json":
+                raise OSError("KEY_CANARY SERVICE_TOKEN_CANARY")
+            return original(path, value)
+
+        monkeypatch.setattr(Path, "write_bytes", broken_write)
+    with api_server() as (_, address):
+        workflow = local_api_workflow(
+            LocalApiConfig(api_url=address),
+            credentials=broken_provider if failure == "provider" else lambda: KEY,
+        )
+        result = workflow.convert(LocalApiSourceRef(BRAIN), tmp_path / "vault")
+    assert result.outcome == "failed"
+    assert result.receipt is None
+    assert "CANARY" not in result.model_dump_json()
+    assert list(captures.iterdir()) == []
+
+
+def test_public_definition_and_tag_metadata_use_the_real_planner_and_publisher(
+    tmp_path,
+):
+    from tests.support.local_api import MetadataApi, thought
+
+    api = MetadataApi()
+    definition, tag = (
+        "44444444-4444-4444-8444-444444444444",
+        "55555555-5555-4555-8555-555555555555",
+    )
+    api.thoughts[definition] = thought(definition, "Definition") | {"kind": 2}
+    api.thoughts[tag] = thought(tag, "Tag") | {"kind": 4}
+    api.types = [api.thoughts[definition]]
+    api.tags = [api.thoughts[tag]]
+    with api_server(api) as (_, address):
+        workflow = local_api_workflow(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        )
+        inspected = workflow.inspect(LocalApiSourceRef(BRAIN))
+        assert inspected.outcome == "clean", inspected.issues
+        assert inspected.counts.source_items == 4
+        result = workflow.convert(LocalApiSourceRef(BRAIN), tmp_path / "vault")
+    assert result.outcome == "clean", result.issues
+    assert result.receipt.verified
+    record = json.loads((tmp_path / "vault/migration-record.json").read_bytes())
+    assert {target["item_key"] for target in record["item_targets"]} == {
+        HOME,
+        ALONE,
+        definition,
+        tag,
+    }
