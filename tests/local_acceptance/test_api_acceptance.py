@@ -844,3 +844,16 @@ def test_txt404_cannot_use_a_profile2_generic_file_as_its_required_pdf(tmp_path,
     write_json(baseline.manifest_path, data)
     with pytest.raises(AssertionError, match="same-owner PDF"):
         audit_baseline(reseal(baseline), profile_version="2")
+
+
+def test_raw_owned_png_note_joins_its_complete_api_image_inventory(tmp_path):
+    from tests.local_acceptance.api_checker import audit_baseline
+
+    baseline, _ = resource_case(tmp_path, "image-png")
+    data = json.loads(baseline.manifest_path.read_bytes())
+    note_path = baseline.manifest_path.parent / data["payloads"][identity(201)]["path"]
+    note_path.write_bytes(
+        ("![owned image](.data/md-images/" + identity(202) + ".png)\n").encode()
+    )
+    result = audit_baseline(reseal(baseline), profile_version="2")
+    assert result["resource_eligibility"][identity(202)]["format"] == "PNG"

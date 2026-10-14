@@ -401,6 +401,7 @@ def audit_baseline(baseline, *, profile_version="1"):
             baseline, attachment, profile_version, proofs
         )
         bindings[attachment["id"]] = {
+            "asset_id": attachment["id"],
             "owner": attachment["sourceId"],
             "role": role,
             "original_name": attachment["location"],
