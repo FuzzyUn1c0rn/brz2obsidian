@@ -4,7 +4,13 @@ from pathlib import Path
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import Field, TypeAdapter, field_validator, model_validator
+from pydantic import (
+    Field,
+    TypeAdapter,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from brz2obsidian.contracts import Contract, Counts, SourceIdentity
 from brz2obsidian.vault_check.contracts import VaultCheckCounts
@@ -43,8 +49,85 @@ def request_identity(value: str) -> str:
     return value
 
 
+SourceKind = Literal["brz", "local-api"]
+
+
+class BrzSourceSelection(Contract):
+    kind: Literal["brz"] = "brz"
+    path: str
+    _absolute = field_validator("path")(absolute)
+
+    @field_validator("path")
+    @classmethod
+    def lexical_path(cls, value):
+        return str(Path(value).absolute())
+
+
+class LocalApiSourceSelection(Contract):
+    kind: Literal["local-api"] = "local-api"
+    brain_id: str
+    _canonical = field_validator("brain_id")(request_identity)
+
+
+SourceSelection = Annotated[
+    BrzSourceSelection | LocalApiSourceSelection, Field(discriminator="kind")
+]
+
+
+def same_source_selection(
+    left: SourceSelection | None, right: SourceSelection | None
+) -> bool:
+    """Associate archive spellings using native path rules, UUIDs as identities."""
+    if isinstance(left, BrzSourceSelection) and isinstance(right, BrzSourceSelection):
+        return Path(left.path) == Path(right.path)
+    return left == right
+
+
+def source_selection(value: Path | str | SourceSelection) -> SourceSelection:
+    """Expand the existing Python archive input into a validated selection."""
+    if isinstance(value, (BrzSourceSelection, LocalApiSourceSelection)):
+        return value
+    if not isinstance(value, (Path, str)):
+        raise TypeError("A typed source selection or archive path is required")
+    # A bare Brain UUID needs an explicit source kind, even for legacy callers.
+    try:
+        UUID(str(value))
+    except ValueError:
+        pass
+    else:
+        raise ValueError("A Brain UUID requires a local-api source selection")
+    return BrzSourceSelection(path=str(Path(value).absolute()))
+
+
+class SourceArguments(Contract):
+    source_selection: SourceSelection
+
+    @model_validator(mode="before")
+    @classmethod
+    def legacy_archive(cls, value, info: ValidationInfo):
+        # Python callers retain source= while JSON requires the expanded shape.
+        if isinstance(value, dict) and "source" in value:
+            if info.mode == "json":
+                raise ValueError("Typed source selection is required in JSON")
+            value = dict(value)
+            source = value.pop("source")
+            if "source_selection" in value:
+                raise ValueError("Choose one source selection")
+            value["source_selection"] = (
+                BrzSourceSelection(path=source) if source is not None else None
+            )
+        return value
+
+    @property
+    def source(self) -> str | None:
+        """Compatibility access for archive callers; Brain IDs are never paths."""
+        if isinstance(self.source_selection, BrzSourceSelection):
+            return self.source_selection.path
+        return None
+
+
 class Versioned(Contract):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
 
     @field_validator("schema_version", mode="before")
     @classmethod
@@ -54,17 +137,26 @@ class Versioned(Contract):
         return value
 
 
-class ReviewedInspection(Versioned):
+class ReviewedInspection(Versioned, SourceArguments):
     schema_: Literal["brz2obsidian.review"] = Field(
         default="brz2obsidian.review", alias="schema"
     )
-    source: str
     source_identity: SourceIdentity
     converter_version: str
     profile_id: str
     profile_version: str
     outcome: Literal["clean", "warnings"]
-    _absolute = field_validator("source")(absolute)
+
+    @model_validator(mode="before")
+    @classmethod
+    def explicit_json_schema(cls, value, info: ValidationInfo):
+        if (
+            info.mode == "json"
+            and isinstance(value, dict)
+            and ("schema" not in value or "schema_version" not in value)
+        ):
+            raise ValueError("An explicit JSON schema and version are required")
+        return value
 
 
 class Finding(Contract):
@@ -220,9 +312,8 @@ OperationResult = Annotated[
 RESULT = TypeAdapter(OperationResult)
 
 
-class InspectArguments(Contract):
-    source: str
-    _absolute = field_validator("source")(absolute)
+class InspectArguments(SourceArguments):
+    pass
 
 
 class DestinationArguments(Contract):
@@ -231,11 +322,9 @@ class DestinationArguments(Contract):
     _absolute = field_validator("parent")(absolute)
 
 
-class ConvertArguments(DestinationArguments):
-    source: str
+class ConvertArguments(DestinationArguments, SourceArguments):
     reviewed: ReviewedInspection
     proceed_with_warnings: bool
-    _source = field_validator("source")(absolute)
 
 
 class CheckArguments(Contract):
@@ -295,9 +384,26 @@ class WorkerResponse(Versioned):
         return self
 
 
-class SelectSource(Contract):
+class SelectSource(SourceArguments):
     command: Literal["select_source"] = "select_source"
-    path_or_null: str | None
+    source_selection: SourceSelection | None
+
+    @model_validator(mode="before")
+    @classmethod
+    def legacy_picker(cls, value, info: ValidationInfo):
+        if isinstance(value, dict) and "path_or_null" in value:
+            if info.mode == "json":
+                raise ValueError("Typed source selection is required in JSON")
+            value = dict(value)
+            path = value.pop("path_or_null")
+            if "source_selection" in value or "source" in value:
+                raise ValueError("Choose one source selection")
+            value["source"] = path
+        return value
+
+    @property
+    def path_or_null(self) -> str | None:
+        return self.source
 
 
 class SetDestination(Contract):
@@ -371,9 +477,9 @@ SessionCommand = Annotated[
 COMMAND = TypeAdapter(SessionCommand)
 
 
-class SessionSnapshot(Contract):
+class SessionSnapshot(SourceArguments):
     revision: int = 0
-    source: str | None = None
+    source_selection: SourceSelection | None = None
     parent: str | None = None
     vault_name: str = ""
     vault: str | None = None

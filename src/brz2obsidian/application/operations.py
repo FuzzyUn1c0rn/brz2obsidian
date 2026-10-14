@@ -12,6 +12,7 @@ from brz2obsidian import __version__
 from brz2obsidian.application.contracts import (
     ApplyResult,
     ApplyTransportFailure,
+    BrzSourceSelection,
     CheckArguments,
     CheckResult,
     CloseWindow,
@@ -23,6 +24,7 @@ from brz2obsidian.application.contracts import (
     Finding,
     InspectArguments,
     InspectionResult,
+    LocalApiSourceSelection,
     PersistOutputParent,
     Publication,
     ReviewedInspection,
@@ -32,7 +34,10 @@ from brz2obsidian.application.contracts import (
     SessionSnapshot,
     SessionUpdate,
     SimpleCommand,
+    SourceSelection,
     WorkerRequest,
+    same_source_selection,
+    source_selection,
 )
 from brz2obsidian.application.conversion import convert
 from brz2obsidian.contracts import Counts
@@ -58,6 +63,25 @@ SAFE_ISSUES = {
 }
 
 
+def _source_unavailable(operation):
+    """The selection contract precedes local API acquisition/composition."""
+    message = "The selected source kind is not available in this build."
+    facts = {
+        "outcome": "failed",
+        "status": "inspection_failed"
+        if operation == "inspect"
+        else "conversion_failed",
+        "findings": (
+            Finding(code="operation_unavailable", severity="error", message=message),
+        ),
+        "review_required": True,
+        "diagnostic_text": f"brz2obsidian diagnostic report\nOperation: {operation}\nOutcome: failed\noperation_unavailable: {message}",
+    }
+    if operation == "inspect":
+        return InspectionResult(**facts)
+    return ConversionResult(**facts, publication=Publication(state="not_published"))
+
+
 class Operations:
     """Explicitly injected migration and checker composition for headless callers."""
 
@@ -67,12 +91,16 @@ class Operations:
 
     def convert_reviewed(
         self,
-        source: Path,
+        source: Path | str | SourceSelection,
         parent: Path,
         vault_name: str,
         reviewed: ReviewedInspection,
         proceed_with_warnings: bool = False,
     ) -> ConversionResult:
+        selection = source_selection(source)
+        if isinstance(selection, LocalApiSourceSelection):
+            return _source_unavailable("convert_reviewed")
+        source = Path(selection.path)
         if self.workflow is None:
             from brz2obsidian.application.wiring import default_workflow
 
@@ -83,9 +111,14 @@ class Operations:
             validate_destination(parent, vault_name),
             reviewed,
             proceed_with_warnings,
+            source_selection=selection,
         )
 
-    def inspect(self, source: Path) -> InspectionResult:
+    def inspect(self, source: Path | str | SourceSelection) -> InspectionResult:
+        selection = source_selection(source)
+        if isinstance(selection, LocalApiSourceSelection):
+            return _source_unavailable("inspect")
+        source = Path(selection.path)
         if self.workflow is None:
             from brz2obsidian.application.wiring import default_workflow
 
@@ -104,7 +137,7 @@ class Operations:
         )
         reviewed = (
             ReviewedInspection(
-                source=str(source),
+                source_selection=selection,
                 source_identity=raw.source_identity,
                 converter_version=raw.converter_version,
                 profile_id=raw.profile_id,
@@ -179,7 +212,7 @@ class Operations:
         return check_current_vault(vault, checker=self.checker)
 
 
-def inspect(source: Path) -> InspectionResult:
+def inspect(source: Path | str | SourceSelection) -> InspectionResult:
     return Operations().inspect(source)
 
 
@@ -228,7 +261,7 @@ def validate_destination(parent: Path, vault_name: str) -> DestinationValidation
 
 
 def convert_reviewed(
-    source: Path,
+    source: Path | str | SourceSelection,
     parent: Path,
     vault_name: str,
     reviewed: ReviewedInspection,
@@ -336,7 +369,10 @@ class ApplicationSession:
                         command.result.reviewed
                         if eligible
                         and command.result.reviewed is not None
-                        and command.result.reviewed.source == state.source
+                        and same_source_selection(
+                            command.result.reviewed.source_selection,
+                            state.source_selection,
+                        )
                         else None
                     )
                     if command.result.operation == "check_vault" or (
@@ -463,23 +499,15 @@ class ApplicationSession:
             # unknown attempt published or discards a verified receipt.
             return SessionUpdate(snapshot=state)
         elif name == "select_source":
-            from brz2obsidian.application.contracts import absolute
-
-            selected = command.path_or_null
-            if selected is not None:
-                absolute(selected)
-                # Native Qt paths use forward slashes on Windows. Keep the
-                # same lexical absolute representation used by the worker;
-                # never resolve/read the archive to establish association.
-                selected = str(Path(selected).absolute())
-            if selected is not None and (
-                state.source is None or Path(selected) != Path(state.source)
+            selected = command.source_selection
+            if selected is not None and not same_source_selection(
+                selected, state.source_selection
             ):
                 self._diagnostic_generation += 1
                 self._diagnostic_text = ""
                 state = state.model_copy(
                     update={
-                        "source": selected,
+                        "source_selection": selected,
                         "revision": state.revision + 1,
                         "result": None,
                         "reviewed": None,
@@ -487,7 +515,9 @@ class ApplicationSession:
                         "retry_operation": None,
                         "operational_status": None,
                         "feedback": "",
-                        "vault_name": Path(selected).stem,
+                        "vault_name": Path(selected.path).stem
+                        if isinstance(selected, BrzSourceSelection)
+                        else "",
                     }
                 )
                 state = self._destination_edited(state)
@@ -549,7 +579,7 @@ class ApplicationSession:
             request = WorkerRequest(
                 request_id=str(uuid4()),
                 operation="inspect",
-                arguments=InspectArguments(source=state.source),
+                arguments=InspectArguments(source_selection=state.source_selection),
             )
             self._active_revision = state.revision
             state = state.model_copy(
@@ -577,7 +607,7 @@ class ApplicationSession:
                 request_id=str(uuid4()),
                 operation="convert_reviewed",
                 arguments=ConvertArguments(
-                    source=state.source,
+                    source_selection=state.source_selection,
                     parent=state.parent,
                     vault_name=state.vault_name,
                     reviewed=state.reviewed,
@@ -660,7 +690,7 @@ class ApplicationSession:
                 and not state.destination_review_acknowledged
             ):
                 actions.append("review_destination")
-            if state.source and (
+            if state.source_selection and (
                 state.publication is None
                 or state.publication.state == "not_published"
                 or state.destination_review_acknowledged
@@ -670,7 +700,9 @@ class ApplicationSession:
                 actions.append("convert_this_archive")
             if (
                 state.reviewed is not None
-                and state.reviewed.source == state.source
+                and same_source_selection(
+                    state.reviewed.source_selection, state.source_selection
+                )
                 and not state.review_required
                 and state.destination_validation is not None
                 and state.destination_validation.outcome == "valid"
@@ -723,7 +755,9 @@ class ApplicationSession:
         conversion_primary_action = None
         if (
             state.reviewed is not None
-            and state.reviewed.source == state.source
+            and same_source_selection(
+                state.reviewed.source_selection, state.source_selection
+            )
             and not state.review_required
         ):
             conversion_primary_action = (

@@ -82,7 +82,7 @@ def test_wire_rejects_untrustworthy_terminal_results(mutation):
     elif mutation == "wrong_schema":
         data["schema"] = "wrong"
     elif mutation == "wrong_version":
-        data["schema_version"] = 2
+        data["schema_version"] = 1
     elif mutation == "extra_field":
         data["result"]["source_tree"] = {}
     elif mutation == "missing_schema":
@@ -100,7 +100,7 @@ def test_wire_rejects_untrustworthy_terminal_results(mutation):
     wire = json.dumps(data).encode() + b"\n"
     if mutation == "duplicate":
         wire = wire.replace(
-            b'"schema_version": 1', b'"schema_version": 1, "schema_version": 1', 1
+            b'"schema_version": 2', b'"schema_version": 2, "schema_version": 2', 1
         )
     elif mutation == "extra_json":
         wire += b"{}\n"

@@ -4,6 +4,7 @@ from zipfile import ZipFile
 
 import pytest
 
+from brz2obsidian.application.contracts import BrzSourceSelection
 from brz2obsidian.application.operations import Operations, convert_reviewed, inspect
 from brz2obsidian.application.wiring import default_workflow
 
@@ -172,7 +173,11 @@ def test_backend_admission_refuses_unsafe_inputs_without_publisher(tmp_path, con
     if control == "no_review":
         reviewed = None
     elif control == "other_source":
-        reviewed = reviewed.model_copy(update={"source": str(tmp_path / "other.brz")})
+        reviewed = reviewed.model_copy(
+            update={
+                "source_selection": BrzSourceSelection(path=str(tmp_path / "other.brz"))
+            }
+        )
     elif control == "warnings":
         reviewed = reviewed.model_copy(update={"outcome": "warnings"})
     elif control == "invalid_name":
