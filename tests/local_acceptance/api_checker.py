@@ -369,6 +369,26 @@ def qualify_v2_bytes(payload, format_name, asset_id, proofs):
         proofs[asset_id] = proof
 
 
+def has_measured_pdf(baseline, attachments, owner, profile_version, proofs):
+    for attachment in attachments.values():
+        if (
+            attachment["sourceId"] == owner
+            and attachment["type"] == 1
+            and not attachment["isNotes"]
+            and attachment["location"].lower().endswith(".pdf")
+        ):
+            role, availability, payload = expected_asset(
+                baseline, attachment, profile_version, proofs
+            )
+            if (
+                role == "file"
+                and availability == "present"
+                and payload.startswith(b"%PDF-")
+            ):
+                return True
+    return False
+
+
 def audit_baseline(baseline, *, profile_version="1"):
     """Qualify every scoped raw fact/outcome before any conversion takes place."""
     thoughts, relationships, attachments, _ = source_facts(baseline)
@@ -388,12 +408,8 @@ def audit_baseline(baseline, *, profile_version="1"):
         present += availability == "present"
         absent += availability == "absent"
         if availability == "absent":
-            assert any(
-                a["sourceId"] == attachment["sourceId"]
-                and a["type"] == 1
-                and not a["isNotes"]
-                and expected_asset(baseline, a, profile_version, proofs)[1] == "present"
-                for a in attachments.values()
+            assert has_measured_pdf(
+                baseline, attachments, attachment["sourceId"], profile_version, proofs
             ), "missing TXT lacks measured same-owner PDF"
     # This independent parser consumes only raw Markdown and owner/role/name
     # dictionaries. API DTOs and API outcomes remain the source oracle; no BRZ
@@ -565,13 +581,12 @@ def check_api_vault(baseline, vault, *, profile_version="1"):
                     "authored external URI"
                 )
             else:
-                assert any(
-                    a["sourceId"] == attachment["sourceId"]
-                    and a["type"] == 1
-                    and not a["isNotes"]
-                    and expected_asset(baseline, a, profile_version, proofs)[1]
-                    == "present"
-                    for a in attachments.values()
+                assert has_measured_pdf(
+                    baseline,
+                    attachments,
+                    attachment["sourceId"],
+                    profile_version,
+                    proofs,
                 ), "missing TXT lacks measured same-owner PDF"
     baseline.verify()
     return {

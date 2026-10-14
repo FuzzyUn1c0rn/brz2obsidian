@@ -827,3 +827,20 @@ def test_api_verdict_rejects_incompatible_source_contract_versions(
     write_json(path, record)
     with pytest.raises(AssertionError, match="API module/format"):
         check_api_vault(baseline, vault)
+
+
+@pytest.mark.parametrize("shape", ["file-png", "file-zip"])
+def test_txt404_cannot_use_a_profile2_generic_file_as_its_required_pdf(tmp_path, shape):
+    from tests.local_acceptance.api_checker import audit_baseline
+
+    baseline, _ = resource_case(tmp_path, shape)
+    data = json.loads(baseline.manifest_path.read_bytes())
+    path = baseline.manifest_path.parent / data["graphs"][identity(2)]
+    graph = json.loads(path.read_bytes())
+    graph["attachments"] = [a for a in graph["attachments"] if a["id"] != identity(203)]
+    write_json(path, graph)
+    data["scope"]["attachment_ids"].remove(identity(203))
+    del data["payloads"][identity(203)]
+    write_json(baseline.manifest_path, data)
+    with pytest.raises(AssertionError, match="same-owner PDF"):
+        audit_baseline(reseal(baseline), profile_version="2")
