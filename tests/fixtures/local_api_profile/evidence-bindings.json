@@ -1,0 +1,452 @@
+{
+  "profile_id": "thebrain-local-api-reviewed",
+  "profile_version": "1",
+  "observed_date": "2026-10-14",
+  "openapi": "3.0.1",
+  "api_version": "1.0",
+  "desktop_build": "15.0.640.0",
+  "desktop_build_basis": "Observed in native About during coordinator bounded source batch on 2026-10-14; source report O54. Historical earlier build evidence remains separately limited.",
+  "schema_sha256": "7eba4646236dbecf2dd4c265d5cd52f782245a9b17f2ab92e90aa2e167a3b318",
+  "inputs": [
+    {
+      "input_id": "O01",
+      "length": 116831,
+      "sha256": "31a60750b147f6579c1b8765cc20fe2f3812bccae0af0f1050d75118997f8107",
+      "description": "Earlier schema (comparison only)"
+    },
+    {
+      "input_id": "O02",
+      "length": 7081,
+      "sha256": "7a2090ac775de4be06f30c35acab1d1449a19733cc6aa2810762eb009003a735",
+      "description": "Home graph"
+    },
+    {
+      "input_id": "O03",
+      "length": 198,
+      "sha256": "2941d173a168f8ff10f840292c83e181c1b00be8785e4654774d9c6faf4ef08e",
+      "description": "Empty note wrapper (no rendered body retained)"
+    },
+    {
+      "input_id": "O04",
+      "length": 1923,
+      "sha256": "d8b4e20a8c70d62677a441d53a6eb1361e3784d1e486d6f9e3a8b13877ade11e",
+      "description": "Type graph"
+    },
+    {
+      "input_id": "O05",
+      "length": 2393,
+      "sha256": "6f6b867dd25555209d3a493d397d147540a3c2701f2fd0585221a450948170cc",
+      "description": "Raw-note owner graph"
+    },
+    {
+      "input_id": "O06",
+      "length": 65,
+      "sha256": "709bf016aef7394c0a0d6ef855192a84a3cc0d83443f37cf7b4420d5b5dc1f51",
+      "description": "Raw Markdown bytes"
+    },
+    {
+      "input_id": "O07",
+      "length": 278,
+      "sha256": "7cc336d86dd0d4eb45682b620c0b5000c38b0e8f7591786a534b576617acad5f",
+      "description": "Raw Markdown retrieval receipt"
+    },
+    {
+      "input_id": "O08",
+      "length": 72868,
+      "sha256": "3afce08a1e00bb4edb5e4b9a72d35bbdbe6e3e02a4487f8cadbc1681181dfa83",
+      "description": "WEBP bytes"
+    },
+    {
+      "input_id": "O09",
+      "length": 275,
+      "sha256": "77852afae795c36522e10c9f46d0cd3dbc5f265b74673c37314e2f007247113a",
+      "description": "WEBP retrieval receipt"
+    },
+    {
+      "input_id": "O10",
+      "length": 3695,
+      "sha256": "247d56092664afd6415511b632454aa0cc7ff62571ec8b7f092f06e6897a77ab",
+      "description": "PNG icon bytes"
+    },
+    {
+      "input_id": "O11",
+      "length": 230,
+      "sha256": "9daaed824a75a256277ecdf5051426f14cf889a3cdecbed77b7060f8d894ff66",
+      "description": "PNG icon retrieval receipt"
+    },
+    {
+      "input_id": "O12",
+      "length": 117020,
+      "sha256": "7eba4646236dbecf2dd4c265d5cd52f782245a9b17f2ab92e90aa2e167a3b318",
+      "description": "Assessed live schema"
+    },
+    {
+      "input_id": "O13",
+      "length": 342,
+      "sha256": "eb5dd2899b098e335a803891ceafd5b51f7e3b1c04fb7e00536d00ca4fd28608",
+      "description": "Relationship aggregate audit"
+    },
+    {
+      "input_id": "O14",
+      "length": 738,
+      "sha256": "dfa6145f60f628074e3cc8ccdc0b1372f7152bc68dc301a84ed077aa922b5724",
+      "description": "Direct unresolved system-link controls"
+    },
+    {
+      "input_id": "O15",
+      "length": 427,
+      "sha256": "603ec31d1c2164ae5a1849fc3fb6b73ea5c6b7e39eff834c4c8faf6a4253f362",
+      "description": "Starting statistics"
+    },
+    {
+      "input_id": "O16",
+      "length": 78,
+      "sha256": "2d610d69b34b022f7fda287e453ed5d89f0696f16786359ac36dbab9b3d56294",
+      "description": "Plaintext tag failure"
+    },
+    {
+      "input_id": "O17",
+      "length": 3414,
+      "sha256": "b342a473dbd4a3b8ea48f99560eef88dbaa7c3b3565f741dd6770cc09bd3f025",
+      "description": "Type inventory"
+    },
+    {
+      "input_id": "O18",
+      "length": 127,
+      "sha256": "278684abd4f7d7afb0e3b0d3fce5e7fc9c2257f30cc784435b7a4e74e6512bd2",
+      "description": "Controlled collection record"
+    },
+    {
+      "input_id": "O19",
+      "length": 9186,
+      "sha256": "e686f28cf5d4913498a37b0fb2d4c9588278111f4eab5cf2a16bd4c288cd7183",
+      "description": "Controlled initial Home graph"
+    },
+    {
+      "input_id": "O20",
+      "length": 3396,
+      "sha256": "82c0fd0b040faf1f9f4d7f6fc9e9ea491fbc6df9ec0dc9b5ff68a6ffede92d4b",
+      "description": "Controlled created child graph"
+    },
+    {
+      "input_id": "O21",
+      "length": 228,
+      "sha256": "0a48a3792fb2b75ad9e992d27710b2cd80ba05058e28624d8132fdb341e7c109",
+      "description": "Controlled child creation request (historical evidence)"
+    },
+    {
+      "input_id": "O22",
+      "length": 78,
+      "sha256": "cfcdd3f1a3b82a597982194a61d2b9ae4939f6ee4dd3d03ab1b10cf3ab693613",
+      "description": "Controlled starting tag failure"
+    },
+    {
+      "input_id": "O23",
+      "length": 78,
+      "sha256": "cfcdd3f1a3b82a597982194a61d2b9ae4939f6ee4dd3d03ab1b10cf3ab693613",
+      "description": "Controlled ending tag failure"
+    },
+    {
+      "input_id": "O24",
+      "length": 406,
+      "sha256": "3d91d671c7a19ec2a9470bec00a14a95750f5020cbb1f2d12e7c69960ad69224",
+      "description": "Controlled starting statistics"
+    },
+    {
+      "input_id": "O25",
+      "length": 412,
+      "sha256": "72fbef1457870a4d36f19dbe46abca98691e583de37e5ef1f543b34dad8a657d",
+      "description": "Controlled ending statistics"
+    },
+    {
+      "input_id": "O26",
+      "length": 21518,
+      "sha256": "83348bed316b148b93e8cec1be81100da4de70771d04b8fd779237f14927c0d5",
+      "description": "Second collection type inventory"
+    },
+    {
+      "input_id": "O27",
+      "length": 434,
+      "sha256": "92bf3ded5cf40a80a973e79f0aed34ecfdbcbc3cfa2da5b25f8b4ccaf7f737b5",
+      "description": "Second collection tag inventory"
+    },
+    {
+      "input_id": "O28",
+      "length": 438,
+      "sha256": "b4d77a67f50f9f345f71449acb4948298df32dec96442ee1a7645ea26e86dbe4",
+      "description": "Second collection starting statistics"
+    },
+    {
+      "input_id": "O29",
+      "length": 438,
+      "sha256": "0f4bb0062ad3f002dc0aa4f8ffada6625d3a33ec84d898c0e55f7f532ab2e318",
+      "description": "Second collection ending statistics"
+    },
+    {
+      "input_id": "O31",
+      "length": 441,
+      "sha256": "392dfc249dce56c853647c75156ef567ae02fffc59308ef701fbe5f3ab16ae47",
+      "description": "Non-note TXT metadata"
+    },
+    {
+      "input_id": "O32",
+      "length": 888,
+      "sha256": "4d3a7c9bb9b22194c4fdd72e4ca9e0beb42645453e1669aedd767536be4228eb",
+      "description": "TXT metadata retrieval receipt"
+    },
+    {
+      "input_id": "O33",
+      "length": 387,
+      "sha256": "19ec8a899d15dc2b540e08e207d36133beb32559aa0d99b30629cddb8c94b10d",
+      "description": "TXT payload failure receipt (raw error not copied)"
+    },
+    {
+      "input_id": "O34",
+      "length": 435,
+      "sha256": "4dd90faeb0a792931c7cc1d4f94b20b6813993a8022b8c5d7d9f6102034ff213",
+      "description": "Same-owner PDF metadata"
+    },
+    {
+      "input_id": "O35",
+      "length": 882,
+      "sha256": "5692a45f02ff56e4b2875751fd74d5d17a13f682eda020ddb5e26d7f87ab6848",
+      "description": "PDF metadata retrieval receipt"
+    },
+    {
+      "input_id": "O36",
+      "length": 3625406,
+      "sha256": "1f64d4e545e0e9c1e923df1e56e5f72ae88965b4638188727472c0567afcf77d",
+      "description": "Measured same-owner PDF bytes"
+    },
+    {
+      "input_id": "O37",
+      "length": 384,
+      "sha256": "8258ff22d567c4f68024afd98c9d79403cef87114c3a5c5a2e41753b7dddf0db",
+      "description": "PDF payload retrieval receipt"
+    },
+    {
+      "input_id": "O38",
+      "length": 6666,
+      "sha256": "0b431fd805017ae693215e24095b7e1170caf121db14bf583d015a01681b2f95",
+      "description": "Historical published native evidence: docs/history/brz-to-obsidian/research/extended-relationship-fixture.md",
+      "git_blob_source": "05b36923cd330261973bd35e19e6fa20ada88290:docs/history/brz-to-obsidian/research/extended-relationship-fixture.md"
+    },
+    {
+      "input_id": "O39",
+      "length": 2406,
+      "sha256": "16beafa3ba28361e0e7d5f91abe65c8c08f57daba8d6b2c7d66f3031f747cd08",
+      "description": "Historical published native evidence: docs/history/brz-to-obsidian/research/relationship-fixture-ui.md",
+      "git_blob_source": "05b36923cd330261973bd35e19e6fa20ada88290:docs/history/brz-to-obsidian/research/relationship-fixture-ui.md"
+    },
+    {
+      "input_id": "O40",
+      "length": 12685,
+      "sha256": "15cb11eee115751a1dbb4d5c486e5e9b384851061ba460866709830b710caee2",
+      "description": "Historical published native evidence: docs/history/brz-to-obsidian-v2/research/native-source-behavior.md",
+      "git_blob_source": "05b36923cd330261973bd35e19e6fa20ada88290:docs/history/brz-to-obsidian-v2/research/native-source-behavior.md"
+    },
+    {
+      "input_id": "O42",
+      "length": 442,
+      "sha256": "666bb6443b7657bed8d6da9a7c0014bab671f09dff5a295b8f48940654d9d979",
+      "description": "Available non-note TXT metadata.body"
+    },
+    {
+      "input_id": "O43",
+      "length": 889,
+      "sha256": "9c416a6a93b50e62d2a0b14a8d3db739dec531b9d4e055a8e0ad67521dd61d5a",
+      "description": "Available non-note TXT metadata.result.json"
+    },
+    {
+      "input_id": "O44",
+      "length": 21309,
+      "sha256": "e6516a579638703205aa9d5b91e19548ba68789c2389fffa2f1a74575b64c569",
+      "description": "Available non-note TXT content.body"
+    },
+    {
+      "input_id": "O45",
+      "length": 377,
+      "sha256": "6a0b3262ccef347b1d0eeb00d85c0a5bc79113a764fccb7c05b7cb53ae9d88c2",
+      "description": "Available non-note TXT content.result.json"
+    },
+    {
+      "input_id": "O46",
+      "length": 1287,
+      "sha256": "80f6f128e09e149651dec6d87724306e5f02b98ee5c211f75deb7ba3d6bfb161",
+      "description": "Original request/outcome log: requests-baseline.json"
+    },
+    {
+      "input_id": "O47",
+      "length": 7537,
+      "sha256": "9f86c17823ca0ba4079f7ad4e1fe2ca5524aa087830c3b8bb3bff77039773930",
+      "description": "Original request/outcome log: requests-discover.json"
+    },
+    {
+      "input_id": "O48",
+      "length": 1009,
+      "sha256": "21ba9b0fb095a55fd3cb7d99db39fc5a933f452be9c7058971d7bc7a708937fe",
+      "description": "Original request/outcome log: requests-bootstrap.json"
+    },
+    {
+      "input_id": "O50",
+      "length": 19046,
+      "sha256": "d3b2a004ef3407cd5e3f509fc1e26f3f3e1baed732f07537b1941a380115d3dc",
+      "description": "Fresh native controlled export qualification baseline; ZIP CRC verified; not historical equivalence"
+    },
+    {
+      "input_id": "O51",
+      "length": 53973,
+      "sha256": "bea9204e64c2a64986ab3a7269e92b922394d1d449b56a099a671beedc605a48",
+      "description": "Independent supported thought-ID/census comparison; not converter expectations or preservation verdict"
+    },
+    {
+      "input_id": "O52",
+      "length": 9266,
+      "sha256": "8eb9ef5bb0b971ba3be915d71e12eff483ca60bbee3c2e5f02fe5dad69810199",
+      "description": "Bounded tag source acquisition allowlisted projection",
+      "raw_response_body_retained": false,
+      "raw_responses": [
+        {
+          "ordinal": 1,
+          "method": "GET",
+          "status": 200,
+          "length": 1931,
+          "sha256": "9cf435ca1a10d69ebfced6d916cc9100c4cf83bf20ac44e1d2b042f7992d5c89"
+        },
+        {
+          "ordinal": 2,
+          "method": "GET",
+          "status": 200,
+          "length": 9771,
+          "sha256": "effc69a5f343a9ef9754ce38ff7fb94498dbe21bcbfdd26d4c9d2561432ece32"
+        },
+        {
+          "ordinal": 3,
+          "method": "GET",
+          "status": 200,
+          "length": 424,
+          "sha256": "db230691bc57e553da5ca4b0794242cfb424f104a4e69dc50a9dc6cc4b33e7dd"
+        }
+      ],
+      "projection_limit": "Raw bodies hashed in memory and discarded. Projection retains only selected identity/role/access/null/tuple/empty-state fields; no names,rendered text,URLs,headers or attachments."
+    },
+    {
+      "input_id": "O53",
+      "length": 2527,
+      "sha256": "a02ae057cd14d4f8a650abf334bdc4e06ff5b86d39a4aa0638947dc0b2d3466a",
+      "description": "Bounded empty-owner no-authored-note source acquisition allowlisted projection",
+      "raw_response_body_retained": false,
+      "raw_responses": [
+        {
+          "ordinal": 1,
+          "method": "GET",
+          "status": 200,
+          "length": 459,
+          "sha256": "7e46ad566f28c950d499797bd17f8538c962ddbc88b915b90ea533b0c684f3a4"
+        },
+        {
+          "ordinal": 2,
+          "method": "GET",
+          "status": 200,
+          "length": 2,
+          "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        {
+          "ordinal": 3,
+          "method": "GET",
+          "status": 200,
+          "length": 198,
+          "sha256": "12d53d4ab24414e96a534155b8e55be569919788abdd1af96d418cebea67ccbc"
+        }
+      ],
+      "projection_limit": "Raw bodies hashed in memory and discarded. Projection retains only selected identity/role/access/null/tuple/empty-state fields; no names,rendered text,URLs,headers or attachments."
+    },
+    {
+      "input_id": "O54",
+      "length": 6825,
+      "sha256": "f99232a5dc51d201ed11819b676df5add403c72e78f4e50a4bf3fa9d8ca8ae60",
+      "description": "Current bounded native source report: About/build, exact arrow/one-way flags/visibility and inherited appearance"
+    },
+    {
+      "input_id": "O55",
+      "length": 3172,
+      "sha256": "39ecd3fcbd5ee83f4d4667d9955c940ebedbcb13a2b15b1069c9901904966410",
+      "description": "Bounded file-only no-authored-note allowlisted projection",
+      "raw_response_body_retained": false,
+      "raw_responses": [
+        {
+          "ordinal": 1,
+          "method": "GET",
+          "status": 200,
+          "length": 857,
+          "sha256": "05c9b072b382475c132d379d5b7e70e7a899bb8d9a6daa45ff0a26697deae98c"
+        },
+        {
+          "ordinal": 2,
+          "method": "GET",
+          "status": 200,
+          "length": 198,
+          "sha256": "3d811302dfb9927b2a06c21b2ca07dcc773c13579af8c7382d3bf7aeb8b9ccde"
+        }
+      ],
+      "projection_limit": "Raw bodies hashed in memory and discarded. Identity/role/ownership/non-note extension and empty-wrapper fields retained; no names,full locations,rendered text or headers."
+    },
+    {
+      "input_id": "O57",
+      "description": "Measured current controlled type-owned PNG icon from O50 native backup",
+      "parent_input_id": "O50",
+      "length": 6914,
+      "sha256": "7f71a6e300ee48daf80b029ee3edbd7f0bdb4894423026b6cb00ae7631d71573",
+      "signature": "PNG"
+    },
+    {
+      "input_id": "O58",
+      "length": 62438,
+      "sha256": "5c29b62b8308ac09d6feb3fbdd65d6a2e6b6fabef9bf8eb312f37894530075d9",
+      "description": "Independent ordinary/forgotten census and raw statistics comparison"
+    },
+    {
+      "input_id": "O59",
+      "length": 22426,
+      "sha256": "4f88a57c0a813374fd5c07753952780fdfc589d805f4dcedfd116c5faad2236d",
+      "description": "Normative existing pure Markdown adaptation grammar at assessed integration base"
+    },
+    {
+      "input_id": "O60",
+      "length": 19471,
+      "sha256": "51777c5f9e2ba3552c51bd42e405a7d4fca4e09150554ada91da3304fea83d4e",
+      "description": "Existing pure Markdown/reference grammar; API binding must use source-neutral role facts"
+    }
+  ],
+  "corpora": [
+    {
+      "input_id": "O30",
+      "description": "371 raw graph responses from original discovery",
+      "count": 371,
+      "inventory_sha256": "cf47a29c1c08b80384af1801296967907157a66681b90c96f09bcf8720306db8",
+      "encoding": "Sorted by ASCII filename; list of {file,length,sha256}; JSON sort_keys=true, separators=(comma,colon), ensure_ascii=true, UTF-8, no final newline. Each sha256 hashes unmodified input bytes."
+    },
+    {
+      "input_id": "O41",
+      "description": "19 authoritative thought metadata responses:16 non-sentinel forgotten timestamps,3 null",
+      "count": 19,
+      "inventory_sha256": "1366c35c11a956fc1702e830517a8bdc1b060df8547c921e262bb30890f7e297",
+      "encoding": "Sorted by ASCII filename; list of {file,length,sha256}; JSON sort_keys=true, separators=(comma,colon), ensure_ascii=true, UTF-8, no final newline. Each sha256 hashes unmodified input bytes."
+    },
+    {
+      "input_id": "O49",
+      "description": "10 controlled graph responses; no authoritative tag metadata or graph tag observed",
+      "count": 10,
+      "inventory_sha256": "f439bc49c316cdab7b20662af3e36d19aaec213614d1af61805ff74cd9ebbe66",
+      "encoding": "Sorted by ASCII filename; list of {file,length,sha256}; JSON sort_keys=true, separators=(comma,colon), ensure_ascii=true, UTF-8, no final newline. Each sha256 hashes unmodified input bytes."
+    },
+    {
+      "input_id": "O56",
+      "description": "20 current native source screenshots; arrow/one-way direct IDs and flags, independent visibility, no-note context, inherited appearance",
+      "count": 20,
+      "inventory_sha256": "7604ae3311aced2ffb9e879575f0a059e59e0436af436e541ba411649ec7580a",
+      "encoding": "Sorted by ASCII filename; list of {file,length,sha256}; JSON sort_keys=true, separators=(comma,colon), ensure_ascii=true, UTF-8, no final newline. Each sha256 hashes unmodified input bytes."
+    }
+  ],
+  "privacy": "Raw files stay private. No raw response bodies, names, authored destinations or rendered-note URLs are copied. Input ordinal to private path mapping is retained in the candidate evidence."
+}

@@ -1,0 +1,3685 @@
+{
+  "author": "independent verifier profile_controls",
+  "basis": "Accepted #177/#178 and retained source/schema only; no adapter-generated values; source object UUIDs replaced consistently with synthetic fixture UUIDs",
+  "controls": [
+    {
+      "id": "C01",
+      "family": "collection",
+      "basis": "Brain/home raw observations plus glossary entry meaning",
+      "input": {
+        "requestedBrain": "eacf6b35-4e19-5e36-b548-e6a164efbb1d",
+        "brainId": "eacf6b35-4e19-5e36-b548-e6a164efbb1d",
+        "homeId": "c84a7654-6364-5f60-b3c7-b05f8e135671",
+        "homeBrainId": "eacf6b35-4e19-5e36-b548-e6a164efbb1d",
+        "homeKind": 1
+      },
+      "expected": "Map entry to exact Home ID; do not infer entry from graph topology",
+      "qualification": "source-shape-observed"
+    },
+    {
+      "id": "C02",
+      "family": "collection",
+      "basis": "Parent valid ordinary live Home requirement",
+      "input": {
+        "brainId": "d88ea32b-2b7f-55d2-9c89-4285f9b06717"
+      },
+      "expected": "refuse",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "C03",
+      "family": "collection",
+      "basis": "Parent valid ordinary live Home requirement",
+      "input": {
+        "homeBrainId": "d88ea32b-2b7f-55d2-9c89-4285f9b06717"
+      },
+      "expected": "refuse",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "C04",
+      "family": "collection",
+      "basis": "Parent valid ordinary live Home requirement",
+      "input": {
+        "homeKind": 2
+      },
+      "expected": "refuse",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "C05",
+      "family": "collection",
+      "basis": "Parent valid ordinary live Home requirement",
+      "input": {
+        "homeId": null
+      },
+      "expected": "refuse",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "S01",
+      "family": "scope",
+      "basis": "371 authoritative graphs + thought GET description Normal=1/Public=0",
+      "input": {
+        "kind": 1,
+        "acType": 0,
+        "forgottenDateTime": null
+      },
+      "expected": "public ordinary live role; null forgottenDateTime observed on 371 source objects",
+      "qualification": "source-shape-observed + documented-meaning"
+    },
+    {
+      "id": "S02",
+      "family": "scope",
+      "basis": "47 authoritative type inventory objects",
+      "input": {
+        "kind": 2,
+        "inventory": "types"
+      },
+      "expected": "definition role; require agreement of authoritative metadata and inventory",
+      "qualification": "source-shape-observed"
+    },
+    {
+      "id": "S03",
+      "family": "scope",
+      "basis": "one authoritative tag inventory object",
+      "input": {
+        "kind": 4,
+        "inventory": "tags"
+      },
+      "expected": "tag role; require agreement of authoritative metadata and inventory",
+      "qualification": "source-shape-observed"
+    },
+    {
+      "id": "S04",
+      "family": "scope",
+      "basis": "Parent unsupported/private refusal and no inferred enum/default semantics",
+      "input": {
+        "kind": 0
+      },
+      "expected": "refuse/hold meaning; a search stub is not authoritative; do not default missing fields",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "S05",
+      "family": "scope",
+      "basis": "Parent unsupported/private refusal and no inferred enum/default semantics",
+      "input": {
+        "kind": 99
+      },
+      "expected": "refuse/hold meaning; a search stub is not authoritative; do not default missing fields",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "S06",
+      "family": "scope",
+      "basis": "Parent unsupported/private refusal and no inferred enum/default semantics",
+      "input": {
+        "kind": null
+      },
+      "expected": "refuse/hold meaning; a search stub is not authoritative; do not default missing fields",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "S07",
+      "family": "scope",
+      "basis": "Parent unsupported/private refusal and no inferred enum/default semantics",
+      "input": {
+        "acType": 1
+      },
+      "expected": "refuse/hold meaning; a search stub is not authoritative; do not default missing fields",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "S08",
+      "family": "scope",
+      "basis": "Parent unsupported/private refusal and no inferred enum/default semantics",
+      "input": {
+        "acType": null
+      },
+      "expected": "refuse/hold meaning; a search stub is not authoritative; do not default missing fields",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "S09",
+      "family": "scope",
+      "basis": "Parent unsupported/private refusal and no inferred enum/default semantics",
+      "input": {
+        "acType": "omitted"
+      },
+      "expected": "refuse/hold meaning; a search stub is not authoritative; do not default missing fields",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "S10",
+      "family": "scope",
+      "basis": "Parent unsupported/private refusal and no inferred enum/default semantics",
+      "input": {
+        "forgottenDateTime": "0001-01-01T00:00:00"
+      },
+      "expected": "refuse/hold meaning; a search stub is not authoritative; do not default missing fields",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "S11",
+      "family": "scope",
+      "basis": "16 authoritative Management metadata dates + thought GET description forgottenDateTime",
+      "input": {
+        "forgottenDateTime": "2024-01-01T12:00:00"
+      },
+      "expected": "known forgotten; exclude and suppress associated content; year-1 sentinel remains held",
+      "qualification": "source-shape-observed + documented-meaning"
+    },
+    {
+      "id": "S12",
+      "family": "scope",
+      "basis": "Seven raw direct system-link controls and archive corroboration",
+      "input": {
+        "tuple": [
+          1,
+          1,
+          6,
+          -1
+        ],
+        "endpoint": "known-system-ID"
+      },
+      "expected": "retain permitted safe exclusion evidence; do not invent unavailable system thought",
+      "qualification": "source-shape-observed; general-system-predicate-held"
+    },
+    {
+      "id": "S13",
+      "family": "scope",
+      "basis": "Independent authoritative Management ordinary metadata and named GET date meaning",
+      "input": {
+        "kind": 1,
+        "acType": 0,
+        "forgottenDateTime": "2024-12-20T15:37:42.741151"
+      },
+      "expected": "exclude ordinary known forgotten and its associations; retain safe scope evidence",
+      "qualification": "source-shape-observed"
+    },
+    {
+      "id": "S14",
+      "family": "scope",
+      "basis": "Named common ThoughtDto forgotten field meaning; independent absence/sentinel boundaries",
+      "input": {
+        "forgottenDateTime": "omitted"
+      },
+      "expected": "refuse unsupported/absent sentinel declaration; no default live/excluded inference",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "S15",
+      "family": "scope",
+      "basis": "Named common ThoughtDto forgotten field meaning; independent absence/sentinel boundaries",
+      "input": {
+        "forgottenDateTime": ""
+      },
+      "expected": "refuse unsupported/absent sentinel declaration; no default live/excluded inference",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "S16",
+      "family": "scope",
+      "basis": "Named common ThoughtDto forgotten field meaning; independent absence/sentinel boundaries",
+      "input": {
+        "forgottenDateTime": "0001-01-01T00:00:00Z"
+      },
+      "expected": "refuse unsupported/absent sentinel declaration; no default live/excluded inference",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "S17",
+      "family": "scope",
+      "basis": "Named common ThoughtDto forgotten field meaning; independent absence/sentinel boundaries",
+      "input": {
+        "kind": 2,
+        "forgottenDateTime": "2024-01-01T12:00:00"
+      },
+      "expected": "known forgotten definition excluded when authoritative identity/access agree; no implied live/zero-date default",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "S18",
+      "family": "scope",
+      "basis": "Vendor GET explicitly names System5/Public0/Private1 and common forgottenDateTime meaning; source ordinary dates and safe synthetic boundaries",
+      "input": {
+        "authoritative": true,
+        "sameBrain": true,
+        "kind": 5,
+        "acType": 0
+      },
+      "expected": "exclude documented System role with minimal safe scope evidence and associations; no content retention",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "S19",
+      "family": "scope",
+      "basis": "Vendor GET explicitly names System5/Public0/Private1 and common forgottenDateTime meaning; source ordinary dates and safe synthetic boundaries",
+      "input": {
+        "linkMeaning": 6,
+        "endpointStatus": 404,
+        "authoritativeSystemRole": false
+      },
+      "expected": "refuse unresolved included endpoint; neither6 nor404 establishes System",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "S20",
+      "family": "scope",
+      "basis": "Vendor GET explicitly names System5/Public0/Private1 and common forgottenDateTime meaning; source ordinary dates and safe synthetic boundaries",
+      "input": {
+        "authoritative": true,
+        "sameBrain": false,
+        "kind": 5,
+        "acType": 0
+      },
+      "expected": "refuse foreign identity before exclusion",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "S21",
+      "family": "scope",
+      "basis": "Vendor GET explicitly names System5/Public0/Private1 and common forgottenDateTime meaning; source ordinary dates and safe synthetic boundaries",
+      "input": {
+        "authoritative": true,
+        "sameBrain": true,
+        "kind": 5,
+        "acType": 1
+      },
+      "expected": "refuse encountered private content before acquisition/retention",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "S22",
+      "family": "scope",
+      "basis": "Vendor GET explicitly names System5/Public0/Private1 and common forgottenDateTime meaning; source ordinary dates and safe synthetic boundaries",
+      "input": {
+        "knownSystemEndpoint": 5,
+        "associationMeaning": "unqualified"
+      },
+      "expected": "exclude association through qualified endpoint scope without assigning numeric link meaning",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "S23",
+      "family": "scope",
+      "basis": "Vendor GET explicitly names System5/Public0/Private1 and common forgottenDateTime meaning; source ordinary dates and safe synthetic boundaries",
+      "input": {
+        "kind": "5",
+        "acType": 0
+      },
+      "expected": "refuse wrong scalar type; do not coerce role",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "S24",
+      "family": "scope",
+      "basis": "Vendor GET explicitly names System5/Public0/Private1 and common forgottenDateTime meaning; source ordinary dates and safe synthetic boundaries",
+      "input": {
+        "kind": 4,
+        "acType": 0,
+        "forgottenDateTime": "2024-01-01T12:00:00"
+      },
+      "expected": "exclude known forgotten source tag and associations under documented common field meaning",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "R01",
+      "family": "relationships",
+      "basis": "Home children array independently establishes hierarchy orientation",
+      "input": {
+        "id": "69e3a2ed-c10f-5eba-85be-1dc23a9549ba",
+        "kind": 1,
+        "relation": 1,
+        "meaning": 1,
+        "direction": -1,
+        "thoughtIdA": "c84a7654-6364-5f60-b3c7-b05f8e135671",
+        "thoughtIdB": "7f5df3dd-e64a-59fd-ac83-afeea2fbd96b"
+      },
+      "expected": "hierarchy item_a=A parent, item_b=B child; retained original direction; arrow/one-way meaning remains held",
+      "qualification": "source-shape-observed"
+    },
+    {
+      "id": "R02",
+      "family": "relationships",
+      "basis": "Both endpoint graph jumps arrays plus original link",
+      "input": {
+        "id": "0b902542-80fa-5504-b50c-b51f0426a549",
+        "kind": 1,
+        "relation": 3,
+        "meaning": 1,
+        "direction": -1,
+        "thoughtIdA": "a88853cc-8190-5535-9a6a-d21a039fa1b4",
+        "thoughtIdB": "955eb697-9ca2-5bd2-93a4-3dfc18c48d28"
+      },
+      "expected": "related A/B; no inferred arrow or one-way meaning",
+      "qualification": "source-shape-observed"
+    },
+    {
+      "id": "R03",
+      "family": "relationships",
+      "basis": "Parent tuple qualification/unsupported ownership requirement",
+      "input": {
+        "direction": 0
+      },
+      "expected": "refuse unqualified/conflicting included shape; do not silently drop content",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "R04",
+      "family": "relationships",
+      "basis": "Parent tuple qualification/unsupported ownership requirement",
+      "input": {
+        "direction": 1
+      },
+      "expected": "direction1 may qualify a forward-arrow hierarchy with complete reviewed tuple/endpoints; contradictions and unqualified combinations still refuse",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "R05",
+      "family": "relationships",
+      "basis": "Parent tuple qualification/unsupported ownership requirement",
+      "input": {
+        "relation": 2
+      },
+      "expected": "refuse unqualified/conflicting included shape; do not silently drop content",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "R06",
+      "family": "relationships",
+      "basis": "Parent tuple qualification/unsupported ownership requirement",
+      "input": {
+        "kind": 2
+      },
+      "expected": "refuse unqualified/conflicting included shape; do not silently drop content",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "R07",
+      "family": "relationships",
+      "basis": "Parent tuple qualification/unsupported ownership requirement",
+      "input": {
+        "meaning": 99
+      },
+      "expected": "refuse unqualified/conflicting included shape; do not silently drop content",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "R08",
+      "family": "relationships",
+      "basis": "Parent tuple qualification/unsupported ownership requirement",
+      "input": {
+        "typeId": "d88ea32b-2b7f-55d2-9c89-4285f9b06717"
+      },
+      "expected": "refuse unqualified/conflicting included shape; do not silently drop content",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "R09",
+      "family": "relationships",
+      "basis": "Parent tuple qualification/unsupported ownership requirement",
+      "input": {
+        "duplicateId": "69e3a2ed-c10f-5eba-85be-1dc23a9549ba",
+        "changedEndpoint": "d88ea32b-2b7f-55d2-9c89-4285f9b06717"
+      },
+      "expected": "refuse unqualified/conflicting included shape; do not silently drop content",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "R10",
+      "family": "relationships",
+      "basis": "Parent tuple qualification/unsupported ownership requirement",
+      "input": {
+        "includedEndpoint": "unresolved"
+      },
+      "expected": "refuse unqualified/conflicting included shape; do not silently drop content",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "R11",
+      "family": "relationships",
+      "basis": "Parent tuple qualification/unsupported ownership requirement",
+      "input": {
+        "endpoint": "forgotten/private"
+      },
+      "expected": "refuse unqualified/conflicting included shape; do not silently drop content",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "R12",
+      "family": "relationships",
+      "basis": "Parent tuple qualification/unsupported ownership requirement",
+      "input": {
+        "relationshipAttachments": [
+          "populated"
+        ]
+      },
+      "expected": "refuse unqualified/conflicting included shape; do not silently drop content",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "R13",
+      "family": "relationships",
+      "basis": "Parent one-way source-bound control requirement",
+      "input": {
+        "independentNativeReport": "05b36923cd330261973bd35e19e6fa20ada88290",
+        "sameIdApiJoin": "not yet independently established"
+      },
+      "expected": "hold API one-way qualification until exact source identity joins to independently known visibility control; returned links/counts alone cannot qualify omitted visibility",
+      "qualification": "held-one-way-identity"
+    },
+    {
+      "id": "R14",
+      "family": "relationships",
+      "basis": "Independent native report at pinned historical commit; retained CONTROLLED_EXPORT API walks expose same uniquely named shapes",
+      "input": {
+        "direction": 1,
+        "kind": 1,
+        "meaning": 1
+      },
+      "expected": "A-to-B arrow, not one-way; canonical plain hierarchy/related mapping preserves tuple as original evidence, subject to exact identity qualification",
+      "qualification": "native-meaning-observed; API-identity-join-held"
+    },
+    {
+      "id": "R15",
+      "family": "relationships",
+      "basis": "Independent native report at pinned historical commit; retained CONTROLLED_EXPORT API walks expose same uniquely named shapes",
+      "input": {
+        "direction": 3,
+        "kind": 1,
+        "meaning": 1
+      },
+      "expected": "B-to-A arrow, not one-way; canonical plain hierarchy/related mapping preserves tuple as original evidence, subject to exact identity qualification",
+      "qualification": "native-meaning-observed; API-identity-join-held"
+    },
+    {
+      "id": "R16",
+      "family": "relationships",
+      "basis": "Independent native report at pinned historical commit; retained CONTROLLED_EXPORT API walks expose same uniquely named shapes",
+      "input": {
+        "direction": 5,
+        "kind": 1,
+        "meaning": 1
+      },
+      "expected": "A-to-B one-way; independently opened destination suppresses source neighbor; canonical plain hierarchy/related mapping preserves tuple as original evidence, subject to exact identity qualification",
+      "qualification": "native-meaning-observed; API-identity-join-held"
+    },
+    {
+      "id": "R17",
+      "family": "relationships",
+      "basis": "Independent native report at pinned historical commit; retained CONTROLLED_EXPORT API walks expose same uniquely named shapes",
+      "input": {
+        "direction": 7,
+        "kind": 1,
+        "meaning": 1
+      },
+      "expected": "B-to-A one-way; independently opened A suppresses B neighbor; canonical plain hierarchy/related mapping preserves tuple as original evidence, subject to exact identity qualification",
+      "qualification": "native-meaning-observed; API-identity-join-held"
+    },
+    {
+      "id": "R18",
+      "family": "relationships",
+      "basis": "Native reverse arrow and reverse one-way contrast",
+      "input": {
+        "directions": [
+          3,
+          7
+        ]
+      },
+      "expected": "Do not infer one-way solely from reverse arrow or endpoint order; preserve endpoints and source tuple",
+      "qualification": "independent-native-control"
+    },
+    {
+      "id": "R19",
+      "family": "relationships",
+      "basis": "Fresh independently CRC/fingerprint-qualified CONTROLLED_EXPORT + exact-ID native properties/flag + retained API tuple/endpoints",
+      "input": {
+        "linkId": "f440c326-d733-5c7e-813e-9f1f33a38c12",
+        "tuple": [
+          1,
+          3,
+          1,
+          5
+        ],
+        "itemA": "2f223afc-1ff5-5d4f-a4f6-812376f14671",
+        "itemB": "115cfb1c-74de-5f22-a3a9-56a99711a9d5",
+        "nativeOneWay": true,
+        "nativeArrow": "A-to-B",
+        "apiExactIdentityTupleJoin": true
+      },
+      "expected": "preserve source arrow/one-way distinctions in original evidence; canonical hierarchy for relation1/related for relation3 with unchanged source endpoints under accepted source-neutral mapping",
+      "qualification": "fresh-source/native-shape-qualified"
+    },
+    {
+      "id": "R20",
+      "family": "relationships",
+      "basis": "Fresh independently CRC/fingerprint-qualified CONTROLLED_EXPORT + exact-ID native properties/flag + retained API tuple/endpoints",
+      "input": {
+        "linkId": "77d6f85d-0fb7-5949-a602-9e2d50cd7ea8",
+        "tuple": [
+          1,
+          3,
+          1,
+          7
+        ],
+        "itemA": "2f223afc-1ff5-5d4f-a4f6-812376f14671",
+        "itemB": "78802423-ce01-525d-beae-4ea409c86dda",
+        "nativeOneWay": true,
+        "nativeArrow": "B-to-A",
+        "apiExactIdentityTupleJoin": true
+      },
+      "expected": "preserve source arrow/one-way distinctions in original evidence; canonical hierarchy for relation1/related for relation3 with unchanged source endpoints under accepted source-neutral mapping",
+      "qualification": "fresh-source/native-shape-qualified"
+    },
+    {
+      "id": "R21",
+      "family": "relationships",
+      "basis": "Fresh independently CRC/fingerprint-qualified CONTROLLED_EXPORT + exact-ID native properties/flag + retained API tuple/endpoints",
+      "input": {
+        "linkId": "cad38c6b-08e7-52ea-bcdb-83ebd8e2f056",
+        "tuple": [
+          1,
+          3,
+          1,
+          3
+        ],
+        "itemA": "2f223afc-1ff5-5d4f-a4f6-812376f14671",
+        "itemB": "ed75e3e8-88fb-5842-a9fc-eae9fa41f41a",
+        "nativeOneWay": false,
+        "nativeArrow": "B-to-A",
+        "apiExactIdentityTupleJoin": true
+      },
+      "expected": "preserve source arrow/one-way distinctions in original evidence; canonical hierarchy for relation1/related for relation3 with unchanged source endpoints under accepted source-neutral mapping",
+      "qualification": "fresh-source/native-shape-qualified"
+    },
+    {
+      "id": "R22",
+      "family": "relationships",
+      "basis": "Fresh independently CRC/fingerprint-qualified CONTROLLED_EXPORT + exact-ID native properties/flag + retained API tuple/endpoints",
+      "input": {
+        "linkId": "b1db9b10-4881-56b7-bc68-603f8cd167ac",
+        "tuple": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "itemA": "2f223afc-1ff5-5d4f-a4f6-812376f14671",
+        "itemB": "379026ef-5dbc-5d49-8073-e0ce4199e647",
+        "nativeOneWay": false,
+        "nativeArrow": "A-to-B",
+        "apiExactIdentityTupleJoin": true
+      },
+      "expected": "preserve source arrow/one-way distinctions in original evidence; canonical hierarchy for relation1/related for relation3 with unchanged source endpoints under accepted source-neutral mapping",
+      "qualification": "fresh-source/native-shape-qualified"
+    },
+    {
+      "id": "R23",
+      "family": "relationships",
+      "basis": "Independent negatives/visibility distinctions from source-controlled one-way/arrow cases",
+      "input": {
+        "direction": 3,
+        "nativeOneWay": true
+      },
+      "expected": "refuse/requalify contradictory source shape",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "R24",
+      "family": "relationships",
+      "basis": "Independent negatives/visibility distinctions from source-controlled one-way/arrow cases",
+      "input": {
+        "direction": 5,
+        "nativeOneWay": false
+      },
+      "expected": "refuse/requalify contradictory source shape",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "R25",
+      "family": "relationships",
+      "basis": "Independent negatives/visibility distinctions from source-controlled one-way/arrow cases",
+      "input": {
+        "direction": 5,
+        "nativeDestinationShowsSource": false,
+        "apiContainsBothEndpointsAndLink": true
+      },
+      "expected": "preserve both items/relationship; native suppression does not mean private/deleted/excluded",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "R26",
+      "family": "relationships",
+      "basis": "Independent negatives/visibility distinctions from source-controlled one-way/arrow cases",
+      "input": {
+        "directNavigationRetainsPreviousNeighbor": true
+      },
+      "expected": "use independent navigation context for normal visibility; previous-thought retention is not proof one-way is disabled",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "R27",
+      "family": "relationships",
+      "basis": "Independent negatives/visibility distinctions from source-controlled one-way/arrow cases",
+      "input": {
+        "direction": 9
+      },
+      "expected": "refuse unqualified direction even if a familiar bit pattern is guessed",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "R28",
+      "family": "relationships",
+      "basis": "Independent negatives/visibility distinctions from source-controlled one-way/arrow cases",
+      "input": {
+        "nativeHiddenNeighbor": true,
+        "apiReturnsNeighbor": true
+      },
+      "expected": "retain API relationship; different native presentation/API inventory semantics are not contradictory repeated transport records",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "J01",
+      "family": "classification",
+      "basis": "Type active thought, child typeId and classification-link independent join",
+      "input": {
+        "definition": "4e9bf7e6-26b4-5967-944d-ff4c162764ca",
+        "member": "76523144-bb6d-54d1-9c80-75bb8bfd7bdf",
+        "memberTypeId": "4e9bf7e6-26b4-5967-944d-ff4c162764ca",
+        "tuple": [
+          1,
+          1,
+          2,
+          -1
+        ]
+      },
+      "expected": "classification A definition/B member plus assignment referencing same link",
+      "qualification": "source-shape-observed"
+    },
+    {
+      "id": "J02",
+      "family": "classification",
+      "basis": "Parent complete agreeing definition/reference joins",
+      "input": {
+        "memberTypeId": "d88ea32b-2b7f-55d2-9c89-4285f9b06717"
+      },
+      "expected": "refuse unresolved/contradictory included assignment",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "J03",
+      "family": "classification",
+      "basis": "Parent complete agreeing definition/reference joins",
+      "input": {
+        "definitionInventory": "missing"
+      },
+      "expected": "refuse unresolved/contradictory included assignment",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "J04",
+      "family": "classification",
+      "basis": "Parent complete agreeing definition/reference joins",
+      "input": {
+        "classificationLink": "missing"
+      },
+      "expected": "refuse unresolved/contradictory included assignment",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "J05",
+      "family": "classification",
+      "basis": "Parent complete agreeing definition/reference joins",
+      "input": {
+        "definitionKind": 1
+      },
+      "expected": "refuse unresolved/contradictory included assignment",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "J06",
+      "family": "classification",
+      "basis": "Parent complete agreeing definition/reference joins",
+      "input": {
+        "tagLink": "member/member"
+      },
+      "expected": "refuse unresolved/contradictory included assignment",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "J07",
+      "family": "classification",
+      "basis": "Parent complete agreeing definition/reference joins",
+      "input": {
+        "tagInventory": "failed"
+      },
+      "expected": "refuse unresolved/contradictory included assignment",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "J08",
+      "family": "classification",
+      "basis": "Independently assessed current authoritative tag/member graphs + direct GET link and retained inventory",
+      "input": {
+        "tuple": [
+          1,
+          1,
+          5,
+          -1
+        ],
+        "tagId": "a74f8c0f-45e1-57b5-b56f-e4da7993d302",
+        "memberId": "7b66dcb6-e9ce-5d12-bd9c-559a64b81a87",
+        "linkId": "74f406e9-8c39-50ec-a861-3551e5b35aac",
+        "tagRole": 4,
+        "memberRole": 1,
+        "tagEndpoint": "A",
+        "memberEndpoint": "B",
+        "access": 0,
+        "forgottenDateTime": null,
+        "inventoryAgrees": true,
+        "tagGraphChildAgrees": true,
+        "memberGraphTagsAgrees": true,
+        "directLinkBothGraphsAgree": true,
+        "linkTypeId": null
+      },
+      "expected": "tag Relationship item_a=tag A/item_b=member B; retain exact link identity/tuple; require all joins",
+      "qualification": "source-shape-observed + independently-qualified"
+    },
+    {
+      "id": "J09",
+      "family": "classification",
+      "basis": "Independent one-factor tag predicate negatives",
+      "input": {
+        "tuple": [
+          1,
+          1,
+          1,
+          -1
+        ],
+        "tagId": "a74f8c0f-45e1-57b5-b56f-e4da7993d302",
+        "memberId": "7b66dcb6-e9ce-5d12-bd9c-559a64b81a87",
+        "linkId": "74f406e9-8c39-50ec-a861-3551e5b35aac",
+        "tagRole": 4,
+        "memberRole": 1,
+        "tagEndpoint": "A",
+        "memberEndpoint": "B",
+        "access": 0,
+        "forgottenDateTime": null,
+        "inventoryAgrees": true,
+        "tagGraphChildAgrees": true,
+        "memberGraphTagsAgrees": true,
+        "directLinkBothGraphsAgree": true,
+        "linkTypeId": null
+      },
+      "expected": "refuse/hold unqualified or contradictory included assignment; suppress private/excluded content",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "J10",
+      "family": "classification",
+      "basis": "Independent one-factor tag predicate negatives",
+      "input": {
+        "tuple": [
+          1,
+          1,
+          5,
+          -1
+        ],
+        "tagId": "a74f8c0f-45e1-57b5-b56f-e4da7993d302",
+        "memberId": "7b66dcb6-e9ce-5d12-bd9c-559a64b81a87",
+        "linkId": "74f406e9-8c39-50ec-a861-3551e5b35aac",
+        "tagRole": 4,
+        "memberRole": 1,
+        "tagEndpoint": "B",
+        "memberEndpoint": "A",
+        "access": 0,
+        "forgottenDateTime": null,
+        "inventoryAgrees": true,
+        "tagGraphChildAgrees": true,
+        "memberGraphTagsAgrees": true,
+        "directLinkBothGraphsAgree": true,
+        "linkTypeId": null
+      },
+      "expected": "refuse/hold unqualified or contradictory included assignment; suppress private/excluded content",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "J11",
+      "family": "classification",
+      "basis": "Independent one-factor tag predicate negatives",
+      "input": {
+        "tuple": [
+          1,
+          1,
+          5,
+          -1
+        ],
+        "tagId": "a74f8c0f-45e1-57b5-b56f-e4da7993d302",
+        "memberId": "7b66dcb6-e9ce-5d12-bd9c-559a64b81a87",
+        "linkId": "74f406e9-8c39-50ec-a861-3551e5b35aac",
+        "tagRole": 4,
+        "memberRole": 1,
+        "tagEndpoint": "A",
+        "memberEndpoint": "B",
+        "access": 0,
+        "forgottenDateTime": null,
+        "inventoryAgrees": true,
+        "tagGraphChildAgrees": true,
+        "memberGraphTagsAgrees": false,
+        "directLinkBothGraphsAgree": true,
+        "linkTypeId": null
+      },
+      "expected": "refuse/hold unqualified or contradictory included assignment; suppress private/excluded content",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "J12",
+      "family": "classification",
+      "basis": "Independent one-factor tag predicate negatives",
+      "input": {
+        "tuple": [
+          1,
+          1,
+          5,
+          -1
+        ],
+        "tagId": "a74f8c0f-45e1-57b5-b56f-e4da7993d302",
+        "memberId": "7b66dcb6-e9ce-5d12-bd9c-559a64b81a87",
+        "linkId": "74f406e9-8c39-50ec-a861-3551e5b35aac",
+        "tagRole": 4,
+        "memberRole": 1,
+        "tagEndpoint": "A",
+        "memberEndpoint": "B",
+        "access": 0,
+        "forgottenDateTime": null,
+        "inventoryAgrees": false,
+        "tagGraphChildAgrees": true,
+        "memberGraphTagsAgrees": true,
+        "directLinkBothGraphsAgree": true,
+        "linkTypeId": null
+      },
+      "expected": "refuse/hold unqualified or contradictory included assignment; suppress private/excluded content",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "J13",
+      "family": "classification",
+      "basis": "Independent one-factor tag predicate negatives",
+      "input": {
+        "tuple": [
+          1,
+          1,
+          5,
+          -1
+        ],
+        "tagId": "a74f8c0f-45e1-57b5-b56f-e4da7993d302",
+        "memberId": "7b66dcb6-e9ce-5d12-bd9c-559a64b81a87",
+        "linkId": "74f406e9-8c39-50ec-a861-3551e5b35aac",
+        "tagRole": 4,
+        "memberRole": 1,
+        "tagEndpoint": "A",
+        "memberEndpoint": "B",
+        "access": 1,
+        "forgottenDateTime": null,
+        "inventoryAgrees": true,
+        "tagGraphChildAgrees": true,
+        "memberGraphTagsAgrees": true,
+        "directLinkBothGraphsAgree": true,
+        "linkTypeId": null
+      },
+      "expected": "refuse/hold unqualified or contradictory included assignment; suppress private/excluded content",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "J14",
+      "family": "classification",
+      "basis": "Independent one-factor tag predicate negatives",
+      "input": {
+        "tuple": [
+          1,
+          1,
+          5,
+          -1
+        ],
+        "tagId": "a74f8c0f-45e1-57b5-b56f-e4da7993d302",
+        "memberId": "7b66dcb6-e9ce-5d12-bd9c-559a64b81a87",
+        "linkId": "74f406e9-8c39-50ec-a861-3551e5b35aac",
+        "tagRole": 4,
+        "memberRole": 1,
+        "tagEndpoint": "A",
+        "memberEndpoint": "B",
+        "access": 0,
+        "forgottenDateTime": "2024-01-01T12:00:00",
+        "inventoryAgrees": true,
+        "tagGraphChildAgrees": true,
+        "memberGraphTagsAgrees": true,
+        "directLinkBothGraphsAgree": true,
+        "linkTypeId": null
+      },
+      "expected": "refuse/hold unqualified or contradictory included assignment; suppress private/excluded content",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "J15",
+      "family": "classification",
+      "basis": "Independent one-factor tag predicate negatives",
+      "input": {
+        "tuple": [
+          1,
+          1,
+          5,
+          -1
+        ],
+        "tagId": "a74f8c0f-45e1-57b5-b56f-e4da7993d302",
+        "memberId": "7b66dcb6-e9ce-5d12-bd9c-559a64b81a87",
+        "linkId": "74f406e9-8c39-50ec-a861-3551e5b35aac",
+        "tagRole": 2,
+        "memberRole": 1,
+        "tagEndpoint": "A",
+        "memberEndpoint": "B",
+        "access": 0,
+        "forgottenDateTime": null,
+        "inventoryAgrees": true,
+        "tagGraphChildAgrees": true,
+        "memberGraphTagsAgrees": true,
+        "directLinkBothGraphsAgree": true,
+        "linkTypeId": null
+      },
+      "expected": "refuse/hold unqualified or contradictory included assignment; suppress private/excluded content",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "J16",
+      "family": "classification",
+      "basis": "Independent one-factor tag predicate negatives",
+      "input": {
+        "tuple": [
+          1,
+          1,
+          5,
+          -1
+        ],
+        "tagId": "a74f8c0f-45e1-57b5-b56f-e4da7993d302",
+        "memberId": "7b66dcb6-e9ce-5d12-bd9c-559a64b81a87",
+        "linkId": "74f406e9-8c39-50ec-a861-3551e5b35aac",
+        "tagRole": 4,
+        "memberRole": 2,
+        "tagEndpoint": "A",
+        "memberEndpoint": "B",
+        "access": 0,
+        "forgottenDateTime": null,
+        "inventoryAgrees": true,
+        "tagGraphChildAgrees": true,
+        "memberGraphTagsAgrees": true,
+        "directLinkBothGraphsAgree": true,
+        "linkTypeId": null
+      },
+      "expected": "refuse/hold unqualified or contradictory included assignment; suppress private/excluded content",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "J17",
+      "family": "classification",
+      "basis": "Independent one-factor tag predicate negatives",
+      "input": {
+        "tuple": [
+          1,
+          1,
+          5,
+          -1
+        ],
+        "tagId": "a74f8c0f-45e1-57b5-b56f-e4da7993d302",
+        "memberId": "7b66dcb6-e9ce-5d12-bd9c-559a64b81a87",
+        "linkId": "74f406e9-8c39-50ec-a861-3551e5b35aac",
+        "tagRole": 4,
+        "memberRole": 1,
+        "tagEndpoint": "A",
+        "memberEndpoint": "B",
+        "access": 0,
+        "forgottenDateTime": null,
+        "inventoryAgrees": true,
+        "tagGraphChildAgrees": false,
+        "memberGraphTagsAgrees": true,
+        "directLinkBothGraphsAgree": true,
+        "linkTypeId": null
+      },
+      "expected": "refuse/hold unqualified or contradictory included assignment; suppress private/excluded content",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "J18",
+      "family": "classification",
+      "basis": "Independent one-factor tag predicate negatives",
+      "input": {
+        "tuple": [
+          1,
+          1,
+          5,
+          -1
+        ],
+        "tagId": "a74f8c0f-45e1-57b5-b56f-e4da7993d302",
+        "memberId": "7b66dcb6-e9ce-5d12-bd9c-559a64b81a87",
+        "linkId": "74f406e9-8c39-50ec-a861-3551e5b35aac",
+        "tagRole": 4,
+        "memberRole": 1,
+        "tagEndpoint": "A",
+        "memberEndpoint": "B",
+        "access": 0,
+        "forgottenDateTime": null,
+        "inventoryAgrees": true,
+        "tagGraphChildAgrees": true,
+        "memberGraphTagsAgrees": true,
+        "directLinkBothGraphsAgree": false,
+        "linkTypeId": null
+      },
+      "expected": "refuse/hold unqualified or contradictory included assignment; suppress private/excluded content",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "J19",
+      "family": "classification",
+      "basis": "Independent one-factor tag predicate negatives",
+      "input": {
+        "tuple": [
+          1,
+          1,
+          5,
+          -1
+        ],
+        "tagId": "a74f8c0f-45e1-57b5-b56f-e4da7993d302",
+        "memberId": "7b66dcb6-e9ce-5d12-bd9c-559a64b81a87",
+        "linkId": "74f406e9-8c39-50ec-a861-3551e5b35aac",
+        "tagRole": 4,
+        "memberRole": 1,
+        "tagEndpoint": "A",
+        "memberEndpoint": "B",
+        "access": 0,
+        "forgottenDateTime": null,
+        "inventoryAgrees": true,
+        "tagGraphChildAgrees": true,
+        "memberGraphTagsAgrees": true,
+        "directLinkBothGraphsAgree": true,
+        "linkTypeId": "d88ea32b-2b7f-55d2-9c89-4285f9b06717"
+      },
+      "expected": "refuse/hold unqualified or contradictory included assignment; suppress private/excluded content",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "J20",
+      "family": "classification",
+      "basis": "Independent one-factor tag predicate negatives",
+      "input": {
+        "tuple": [
+          1,
+          1,
+          5,
+          0
+        ],
+        "tagId": "a74f8c0f-45e1-57b5-b56f-e4da7993d302",
+        "memberId": "7b66dcb6-e9ce-5d12-bd9c-559a64b81a87",
+        "linkId": "74f406e9-8c39-50ec-a861-3551e5b35aac",
+        "tagRole": 4,
+        "memberRole": 1,
+        "tagEndpoint": "A",
+        "memberEndpoint": "B",
+        "access": 0,
+        "forgottenDateTime": null,
+        "inventoryAgrees": true,
+        "tagGraphChildAgrees": true,
+        "memberGraphTagsAgrees": true,
+        "directLinkBothGraphsAgree": true,
+        "linkTypeId": null
+      },
+      "expected": "refuse/hold unqualified or contradictory included assignment; suppress private/excluded content",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "J21",
+      "family": "classification",
+      "basis": "Independent one-factor tag predicate negatives",
+      "input": {
+        "tuple": [
+          1,
+          1,
+          5,
+          -1
+        ],
+        "tagId": "a74f8c0f-45e1-57b5-b56f-e4da7993d302",
+        "memberId": "7b66dcb6-e9ce-5d12-bd9c-559a64b81a87",
+        "linkId": "74f406e9-8c39-50ec-a861-3551e5b35aac",
+        "tagRole": 4,
+        "memberRole": 1,
+        "tagEndpoint": "A",
+        "memberEndpoint": "B",
+        "access": 0,
+        "forgottenDateTime": null,
+        "inventoryAgrees": true,
+        "tagGraphChildAgrees": true,
+        "memberGraphTagsAgrees": true,
+        "directLinkBothGraphsAgree": true,
+        "linkTypeId": null,
+        "foreignEndpointBrain": true
+      },
+      "expected": "refuse/hold unqualified or contradictory included assignment; suppress private/excluded content",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "J22",
+      "family": "classification",
+      "basis": "Independent one-factor tag predicate negatives",
+      "input": {
+        "tuple": [
+          1,
+          1,
+          5,
+          -1
+        ],
+        "tagId": "a74f8c0f-45e1-57b5-b56f-e4da7993d302",
+        "memberId": "7b66dcb6-e9ce-5d12-bd9c-559a64b81a87",
+        "linkId": "74f406e9-8c39-50ec-a861-3551e5b35aac",
+        "tagRole": 4,
+        "memberRole": 1,
+        "tagEndpoint": "A",
+        "memberEndpoint": "B",
+        "access": 0,
+        "forgottenDateTime": null,
+        "inventoryAgrees": false,
+        "tagGraphChildAgrees": true,
+        "memberGraphTagsAgrees": true,
+        "directLinkBothGraphsAgree": true,
+        "linkTypeId": null,
+        "onlyTupleKnown": true
+      },
+      "expected": "refuse/hold unqualified or contradictory included assignment; suppress private/excluded content",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N01",
+      "family": "raw-notes",
+      "basis": "Raw note attachment, bytes and independently matched BRZ member",
+      "input": {
+        "id": "d7a628a3-4784-5e60-ba0a-d235ef2020fc",
+        "brainId": "eacf6b35-4e19-5e36-b548-e6a164efbb1d",
+        "sourceId": "82791298-8f6a-5b1a-8532-0a17b427aa70",
+        "sourceType": 2,
+        "type": 1,
+        "isNotes": true,
+        "name": null,
+        "location": "Notes.md",
+        "actual_length": 65,
+        "sha256": "709bf016aef7394c0a0d6ef855192a84a3cc0d83443f37cf7b4420d5b5dc1f51"
+      },
+      "expected": "strict UTF-8 raw Markdown document + preserved note_original asset; references resolve against owned resource inventory",
+      "qualification": "source-shape-observed"
+    },
+    {
+      "id": "N02",
+      "family": "raw-notes",
+      "basis": "Parent raw-note/absence/fallback/reference rules",
+      "input": {
+        "type": 1,
+        "isNotes": false
+      },
+      "expected": "refuse unavailable/unsupported authored note or hold unresolved absence; never silently use rendered/token-bearing fallback",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N03",
+      "family": "raw-notes",
+      "basis": "Parent raw-note/absence/fallback/reference rules",
+      "input": {
+        "isNotes": true,
+        "location": null
+      },
+      "expected": "refuse unavailable/unsupported authored note or hold unresolved absence; never silently use rendered/token-bearing fallback",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N04",
+      "family": "raw-notes",
+      "basis": "Parent raw-note/absence/fallback/reference rules",
+      "input": {
+        "isNotes": true,
+        "location": "Notes.html"
+      },
+      "expected": "refuse unavailable/unsupported authored note or hold unresolved absence; never silently use rendered/token-bearing fallback",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N05",
+      "family": "raw-notes",
+      "basis": "Parent raw-note/absence/fallback/reference rules",
+      "input": {
+        "sourceType": 3
+      },
+      "expected": "refuse unavailable/unsupported authored note or hold unresolved absence; never silently use rendered/token-bearing fallback",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N06",
+      "family": "raw-notes",
+      "basis": "Parent raw-note/absence/fallback/reference rules",
+      "input": {
+        "sourceId": "d88ea32b-2b7f-55d2-9c89-4285f9b06717"
+      },
+      "expected": "refuse unavailable/unsupported authored note or hold unresolved absence; never silently use rendered/token-bearing fallback",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N07",
+      "family": "raw-notes",
+      "basis": "Parent raw-note/absence/fallback/reference rules",
+      "input": {
+        "status": 404,
+        "isNotes": true
+      },
+      "expected": "refuse unavailable/unsupported authored note or hold unresolved absence; never silently use rendered/token-bearing fallback",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N08",
+      "family": "raw-notes",
+      "basis": "Parent raw-note/absence/fallback/reference rules",
+      "input": {
+        "content": "invalid UTF-8"
+      },
+      "expected": "refuse unavailable/unsupported authored note or hold unresolved absence; never silently use rendered/token-bearing fallback",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N09",
+      "family": "raw-notes",
+      "basis": "Parent raw-note/absence/fallback/reference rules",
+      "input": {
+        "noteAttachments": "two conflicting raw notes"
+      },
+      "expected": "refuse unavailable/unsupported authored note or hold unresolved absence; never silently use rendered/token-bearing fallback",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N10",
+      "family": "raw-notes",
+      "basis": "Parent raw-note/absence/fallback/reference rules",
+      "input": {
+        "renderedMarkdown": "empty",
+        "rawInventory": "failed"
+      },
+      "expected": "refuse unavailable/unsupported authored note or hold unresolved absence; never silently use rendered/token-bearing fallback",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N11",
+      "family": "raw-notes",
+      "basis": "Parent raw-note/absence/fallback/reference rules",
+      "input": {
+        "renderedMarkdown": "nonempty",
+        "rawInventory": "empty"
+      },
+      "expected": "refuse unavailable/unsupported authored note or hold unresolved absence; never silently use rendered/token-bearing fallback",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N12",
+      "family": "raw-notes",
+      "basis": "Parent raw-note/absence/fallback/reference rules",
+      "input": {
+        "rawReference": "unresolved owned image"
+      },
+      "expected": "refuse unavailable/unsupported authored note or hold unresolved absence; never silently use rendered/token-bearing fallback",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N13",
+      "family": "raw-notes",
+      "basis": "Home no attachments + empty NotesDto reported in retained research",
+      "input": {
+        "rawInventory": [],
+        "renderedMarkdown": "empty",
+        "notesDate": "0001-01-01T00:00:00"
+      },
+      "expected": "candidate no authored note; independent complete inventory and absence interpretation still required",
+      "qualification": "held-no-note-meaning"
+    },
+    {
+      "id": "N14",
+      "family": "raw-notes",
+      "basis": "Independently assessed 3GET same-owner facts, current backup zero owner resources and native PARENT blank-body corroboration",
+      "input": {
+        "ownerRole": 1,
+        "ownerAccess": 0,
+        "ownerForgottenDateTime": null,
+        "ownerAgrees": true,
+        "attachmentStatus": 200,
+        "rawInventory": [],
+        "wrapperStatus": 200,
+        "wrapperSourceType": 2,
+        "markdown": "",
+        "html": null,
+        "text": null,
+        "notesDate": "0001-01-01T00:00:00"
+      },
+      "expected": "no authored Document; retain exact safe no-note declarations; empty date alone is never an absence predicate",
+      "qualification": "source-shape-observed + independently-qualified"
+    },
+    {
+      "id": "N15",
+      "family": "raw-notes",
+      "basis": "Independent absence-versus-unavailable/unsupported/contradictory note boundary",
+      "input": {
+        "ownerRole": 1,
+        "ownerAccess": 0,
+        "ownerForgottenDateTime": null,
+        "ownerAgrees": true,
+        "attachmentStatus": 404,
+        "rawInventory": [],
+        "wrapperStatus": 200,
+        "wrapperSourceType": 2,
+        "markdown": "",
+        "html": null,
+        "text": null,
+        "notesDate": "0001-01-01T00:00:00"
+      },
+      "expected": "refuse/hold; exact no-authored-note shape is unsatisfied; no rendered fallback or fabricated empty raw bytes",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N16",
+      "family": "raw-notes",
+      "basis": "Independent absence-versus-unavailable/unsupported/contradictory note boundary",
+      "input": {
+        "ownerRole": 1,
+        "ownerAccess": 0,
+        "ownerForgottenDateTime": null,
+        "ownerAgrees": true,
+        "attachmentStatus": 200,
+        "rawInventory": [],
+        "wrapperStatus": 200,
+        "wrapperSourceType": 2,
+        "markdown": null,
+        "html": null,
+        "text": null,
+        "notesDate": "0001-01-01T00:00:00"
+      },
+      "expected": "refuse/hold; exact no-authored-note shape is unsatisfied; no rendered fallback or fabricated empty raw bytes",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N17",
+      "family": "raw-notes",
+      "basis": "Independent absence-versus-unavailable/unsupported/contradictory note boundary",
+      "input": {
+        "ownerRole": 1,
+        "ownerAccess": 0,
+        "ownerForgottenDateTime": null,
+        "ownerAgrees": true,
+        "attachmentStatus": 200,
+        "rawInventory": [],
+        "wrapperStatus": 200,
+        "wrapperSourceType": 2,
+        "markdown": "",
+        "html": "nonempty authored declaration",
+        "text": null,
+        "notesDate": "0001-01-01T00:00:00"
+      },
+      "expected": "refuse/hold; exact no-authored-note shape is unsatisfied; no rendered fallback or fabricated empty raw bytes",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N18",
+      "family": "raw-notes",
+      "basis": "Independent absence-versus-unavailable/unsupported/contradictory note boundary",
+      "input": {
+        "ownerRole": 1,
+        "ownerAccess": 0,
+        "ownerForgottenDateTime": null,
+        "ownerAgrees": true,
+        "attachmentStatus": 200,
+        "rawInventory": [],
+        "wrapperStatus": 200,
+        "wrapperSourceType": 2,
+        "markdown": "",
+        "html": null,
+        "text": null,
+        "notesDate": "0001-01-01T00:00:00",
+        "omittedWrapperFields": [
+          "text"
+        ]
+      },
+      "expected": "refuse/hold; exact no-authored-note shape is unsatisfied; no rendered fallback or fabricated empty raw bytes",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N19",
+      "family": "raw-notes",
+      "basis": "Independent absence-versus-unavailable/unsupported/contradictory note boundary",
+      "input": {
+        "ownerRole": 1,
+        "ownerAccess": 0,
+        "ownerForgottenDateTime": null,
+        "ownerAgrees": true,
+        "attachmentStatus": 200,
+        "rawInventory": [],
+        "wrapperStatus": 200,
+        "wrapperSourceType": 2,
+        "markdown": "",
+        "html": null,
+        "text": null,
+        "notesDate": "0001-01-01T00:00:00Z"
+      },
+      "expected": "refuse/hold; exact no-authored-note shape is unsatisfied; no rendered fallback or fabricated empty raw bytes",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N20",
+      "family": "raw-notes",
+      "basis": "Independent absence-versus-unavailable/unsupported/contradictory note boundary",
+      "input": {
+        "ownerRole": 1,
+        "ownerAccess": 0,
+        "ownerForgottenDateTime": null,
+        "ownerAgrees": true,
+        "attachmentStatus": 200,
+        "rawInventory": [
+          {
+            "isNotes": true,
+            "contentStatus": 404
+          }
+        ],
+        "wrapperStatus": 200,
+        "wrapperSourceType": 2,
+        "markdown": "",
+        "html": null,
+        "text": null,
+        "notesDate": "0001-01-01T00:00:00"
+      },
+      "expected": "refuse/hold; exact no-authored-note shape is unsatisfied; no rendered fallback or fabricated empty raw bytes",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N21",
+      "family": "raw-notes",
+      "basis": "Independent absence-versus-unavailable/unsupported/contradictory note boundary",
+      "input": {
+        "ownerRole": 1,
+        "ownerAccess": 0,
+        "ownerForgottenDateTime": null,
+        "ownerAgrees": true,
+        "attachmentStatus": 500,
+        "rawInventory": [],
+        "wrapperStatus": 200,
+        "wrapperSourceType": 2,
+        "markdown": "",
+        "html": null,
+        "text": null,
+        "notesDate": "0001-01-01T00:00:00"
+      },
+      "expected": "refuse/hold; exact no-authored-note shape is unsatisfied; no rendered fallback or fabricated empty raw bytes",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N22",
+      "family": "raw-notes",
+      "basis": "Independent absence-versus-unavailable/unsupported/contradictory note boundary",
+      "input": {
+        "ownerRole": 1,
+        "ownerAccess": 1,
+        "ownerForgottenDateTime": null,
+        "ownerAgrees": true,
+        "attachmentStatus": 200,
+        "rawInventory": [],
+        "wrapperStatus": 200,
+        "wrapperSourceType": 2,
+        "markdown": "",
+        "html": null,
+        "text": null,
+        "notesDate": "0001-01-01T00:00:00"
+      },
+      "expected": "refuse/hold; exact no-authored-note shape is unsatisfied; no rendered fallback or fabricated empty raw bytes",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N23",
+      "family": "raw-notes",
+      "basis": "Independent absence-versus-unavailable/unsupported/contradictory note boundary",
+      "input": {
+        "ownerRole": 1,
+        "ownerAccess": 0,
+        "ownerForgottenDateTime": null,
+        "ownerAgrees": false,
+        "attachmentStatus": 200,
+        "rawInventory": [],
+        "wrapperStatus": 200,
+        "wrapperSourceType": 2,
+        "markdown": "",
+        "html": null,
+        "text": null,
+        "notesDate": "0001-01-01T00:00:00"
+      },
+      "expected": "refuse/hold; exact no-authored-note shape is unsatisfied; no rendered fallback or fabricated empty raw bytes",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N24",
+      "family": "raw-notes",
+      "basis": "Independent absence-versus-unavailable/unsupported/contradictory note boundary",
+      "input": {
+        "ownerRole": 1,
+        "ownerAccess": 0,
+        "ownerForgottenDateTime": null,
+        "ownerAgrees": true,
+        "attachmentStatus": 200,
+        "rawInventory": [
+          {
+            "isNotes": false,
+            "location": "guide.pdf"
+          }
+        ],
+        "wrapperStatus": 200,
+        "wrapperSourceType": 2,
+        "markdown": "",
+        "html": null,
+        "text": null,
+        "notesDate": "0001-01-01T00:00:00"
+      },
+      "expected": "refuse/hold; exact no-authored-note shape is unsatisfied; no rendered fallback or fabricated empty raw bytes",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N25",
+      "family": "raw-notes",
+      "basis": "Independent absence-versus-unavailable/unsupported/contradictory note boundary",
+      "input": {
+        "ownerRole": 2,
+        "ownerAccess": 0,
+        "ownerForgottenDateTime": null,
+        "ownerAgrees": true,
+        "attachmentStatus": 200,
+        "rawInventory": [],
+        "wrapperStatus": 200,
+        "wrapperSourceType": 2,
+        "markdown": "",
+        "html": null,
+        "text": null,
+        "notesDate": "0001-01-01T00:00:00",
+        "definitionInventoryAgrees": false
+      },
+      "expected": "refuse/hold; exact no-authored-note shape is unsatisfied; no rendered fallback or fabricated empty raw bytes",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N26",
+      "family": "raw-notes",
+      "basis": "Independent absence-versus-unavailable/unsupported/contradictory note boundary",
+      "input": {
+        "ownerRole": 1,
+        "ownerAccess": 0,
+        "ownerForgottenDateTime": null,
+        "ownerAgrees": true,
+        "attachmentStatus": 200,
+        "rawInventory": [],
+        "wrapperStatus": 200,
+        "wrapperSourceType": 3,
+        "markdown": "",
+        "html": null,
+        "text": null,
+        "notesDate": "0001-01-01T00:00:00"
+      },
+      "expected": "refuse/hold; exact no-authored-note shape is unsatisfied; no rendered fallback or fabricated empty raw bytes",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N27",
+      "family": "raw-notes",
+      "basis": "Independent absence-versus-unavailable/unsupported/contradictory note boundary",
+      "input": {
+        "ownerRole": 1,
+        "ownerAccess": 0,
+        "ownerForgottenDateTime": null,
+        "ownerAgrees": true,
+        "attachmentStatus": 200,
+        "rawInventory": [],
+        "wrapperStatus": 200,
+        "wrapperSourceType": 2,
+        "markdown": "authored text",
+        "html": null,
+        "text": null,
+        "notesDate": "0001-01-01T00:00:00"
+      },
+      "expected": "refuse/hold; exact no-authored-note shape is unsatisfied; no rendered fallback or fabricated empty raw bytes",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N28",
+      "family": "raw-notes",
+      "basis": "Independently assessed CHILD same-ID public/live metadata, current complete PDF/TXT non-note inventory and exact empty wrapper, backup no Notes.md",
+      "input": {
+        "ownerRole": 1,
+        "ownerAccess": 0,
+        "ownerForgottenDateTime": null,
+        "ownerAgrees": true,
+        "attachmentStatus": 200,
+        "qualifiedNonNoteInventory": [
+          {
+            "type": 1,
+            "isNotes": false,
+            "location": "guide.pdf"
+          },
+          {
+            "type": 15,
+            "isNotes": false,
+            "location": "file-control.txt"
+          }
+        ],
+        "wrapperStatus": 200,
+        "wrapperSourceType": 2,
+        "markdown": "",
+        "html": null,
+        "text": null,
+        "notesDate": "0001-01-01T00:00:00"
+      },
+      "expected": "no authored Document; every PDF/TXT resource still needs separate qualified role/availability/payload preservation; no PDF/TXT equivalence claim",
+      "qualification": "fresh-source-shape-qualified"
+    },
+    {
+      "id": "N29",
+      "family": "raw-notes",
+      "basis": "Independently authored file-owning no-note refusal boundaries",
+      "input": {
+        "ownerRole": 1,
+        "ownerAccess": 0,
+        "ownerForgottenDateTime": null,
+        "ownerAgrees": true,
+        "attachmentStatus": 200,
+        "qualifiedNonNoteInventory": [
+          {
+            "type": 1,
+            "isNotes": true,
+            "location": "Notes.md"
+          }
+        ],
+        "wrapperStatus": 200,
+        "wrapperSourceType": 2,
+        "markdown": "",
+        "html": null,
+        "text": null,
+        "notesDate": "0001-01-01T00:00:00"
+      },
+      "expected": "refuse/hold contradictory or unqualified no-note shape; do not treat resources as authored note or erase authored note declaration",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N30",
+      "family": "raw-notes",
+      "basis": "Independently authored file-owning no-note refusal boundaries",
+      "input": {
+        "ownerRole": 1,
+        "ownerAccess": 0,
+        "ownerForgottenDateTime": null,
+        "ownerAgrees": true,
+        "attachmentStatus": 200,
+        "qualifiedNonNoteInventory": [
+          {
+            "type": 1,
+            "isNotes": false,
+            "location": "Notes.md"
+          }
+        ],
+        "wrapperStatus": 200,
+        "wrapperSourceType": 2,
+        "markdown": "",
+        "html": null,
+        "text": null,
+        "notesDate": "0001-01-01T00:00:00"
+      },
+      "expected": "refuse/hold contradictory or unqualified no-note shape; do not treat resources as authored note or erase authored note declaration",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N31",
+      "family": "raw-notes",
+      "basis": "Independently authored file-owning no-note refusal boundaries",
+      "input": {
+        "ownerRole": 1,
+        "ownerAccess": 0,
+        "ownerForgottenDateTime": null,
+        "ownerAgrees": true,
+        "attachmentStatus": 200,
+        "qualifiedNonNoteInventory": [
+          {
+            "type": 99,
+            "isNotes": false,
+            "location": "unknown.bin"
+          }
+        ],
+        "wrapperStatus": 200,
+        "wrapperSourceType": 2,
+        "markdown": "",
+        "html": null,
+        "text": null,
+        "notesDate": "0001-01-01T00:00:00"
+      },
+      "expected": "refuse/hold contradictory or unqualified no-note shape; do not treat resources as authored note or erase authored note declaration",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N32",
+      "family": "raw-notes",
+      "basis": "Independently authored file-owning no-note refusal boundaries",
+      "input": {
+        "ownerRole": 1,
+        "ownerAccess": 0,
+        "ownerForgottenDateTime": null,
+        "ownerAgrees": true,
+        "attachmentStatus": 200,
+        "qualifiedNonNoteInventory": [
+          {
+            "type": 1,
+            "isNotes": false,
+            "location": "guide.pdf"
+          },
+          {
+            "type": 15,
+            "isNotes": false,
+            "location": "file-control.txt"
+          }
+        ],
+        "wrapperStatus": 200,
+        "wrapperSourceType": 2,
+        "markdown": "authored text",
+        "html": null,
+        "text": null,
+        "notesDate": "0001-01-01T00:00:00"
+      },
+      "expected": "refuse/hold contradictory or unqualified no-note shape; do not treat resources as authored note or erase authored note declaration",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N33",
+      "family": "raw-notes",
+      "basis": "Independently authored file-owning no-note refusal boundaries",
+      "input": {
+        "ownerRole": 1,
+        "ownerAccess": 0,
+        "ownerForgottenDateTime": null,
+        "ownerAgrees": true,
+        "attachmentStatus": 404,
+        "qualifiedNonNoteInventory": [
+          {
+            "type": 1,
+            "isNotes": false,
+            "location": "guide.pdf"
+          },
+          {
+            "type": 15,
+            "isNotes": false,
+            "location": "file-control.txt"
+          }
+        ],
+        "wrapperStatus": 200,
+        "wrapperSourceType": 2,
+        "markdown": "",
+        "html": null,
+        "text": null,
+        "notesDate": "0001-01-01T00:00:00"
+      },
+      "expected": "refuse/hold contradictory or unqualified no-note shape; do not treat resources as authored note or erase authored note declaration",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N34",
+      "family": "raw-notes",
+      "basis": "Independently authored file-owning no-note refusal boundaries",
+      "input": {
+        "ownerRole": 1,
+        "ownerAccess": 0,
+        "ownerForgottenDateTime": null,
+        "ownerAgrees": true,
+        "attachmentStatus": 200,
+        "qualifiedNonNoteInventory": [
+          {
+            "type": 1,
+            "isNotes": false,
+            "location": "guide.pdf"
+          },
+          {
+            "type": 15,
+            "isNotes": false,
+            "location": "file-control.txt"
+          }
+        ],
+        "wrapperStatus": 200,
+        "wrapperSourceType": 2,
+        "markdown": "",
+        "html": null,
+        "text": null,
+        "notesDate": "0001-01-01T00:00:00",
+        "inventoryOwnerForeign": true
+      },
+      "expected": "refuse/hold contradictory or unqualified no-note shape; do not treat resources as authored note or erase authored note declaration",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N35",
+      "family": "raw-notes",
+      "basis": "Independently authored file-owning no-note refusal boundaries",
+      "input": {
+        "ownerRole": 1,
+        "ownerAccess": 0,
+        "ownerForgottenDateTime": null,
+        "ownerAgrees": true,
+        "attachmentStatus": 200,
+        "qualifiedNonNoteInventory": [
+          {
+            "type": 1,
+            "isNotes": false,
+            "location": "guide.pdf"
+          },
+          {
+            "type": 15,
+            "isNotes": false,
+            "location": "file-control.txt"
+          }
+        ],
+        "wrapperStatus": 200,
+        "wrapperSourceType": 3,
+        "markdown": "",
+        "html": null,
+        "text": null,
+        "notesDate": "0001-01-01T00:00:00"
+      },
+      "expected": "refuse/hold contradictory or unqualified no-note shape; do not treat resources as authored note or erase authored note declaration",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N36",
+      "family": "raw-notes",
+      "basis": "Established compact TheBrain reference syntax is interpreted from qualified raw UTF8 Markdown, independent of container",
+      "input": {
+        "markdown": "[Target](brain://EREREREREUGBEREREREREQ/Target)",
+        "decoded_uuid_hex": "11111111111141118111111111111111",
+        "targetKnownIncludedSameBrain": true
+      },
+      "expected": "ReferenceSpan item resolves that included UUID; bind exact original/adapted spans and text digest; preserve raw bytes",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N37",
+      "family": "raw-notes",
+      "basis": "Independent compact-reference grammar/scope negative",
+      "input": {
+        "uri": "brain://api.thebrain.com/server-qualified"
+      },
+      "expected": "refuse invalid/unresolved/cross-server internal reference; no inferred external fetch",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N38",
+      "family": "raw-notes",
+      "basis": "Independent compact-reference grammar/scope negative",
+      "input": {
+        "uri": "brain://EREREREREUGBEREREREREQ/Target",
+        "targetKnownIncludedSameBrain": false
+      },
+      "expected": "refuse invalid/unresolved/cross-server internal reference; no inferred external fetch",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N39",
+      "family": "raw-notes",
+      "basis": "Independent compact-reference grammar/scope negative",
+      "input": {
+        "uri": "brain://EREREREREUGBEREREREREQ/Target?token=authored"
+      },
+      "expected": "refuse invalid/unresolved/cross-server internal reference; no inferred external fetch",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N40",
+      "family": "raw-notes",
+      "basis": "Actual65-byte source uses .data/md-images prefix while attachment.location is basename",
+      "input": {
+        "markdown": "![Map](.data/md-images/f7400031-af5e-5b65-83c1-edfdebe45714.webp)",
+        "assetId": "f7400031-af5e-5b65-83c1-edfdebe45714",
+        "attachmentLocation": "f7400031-af5e-5b65-83c1-edfdebe45714.webp",
+        "sameOwner": true,
+        "qualifiedImage": true
+      },
+      "expected": "resolve exact reviewed prefix+basename to unique same-owner captured image asset; preserve source destination/span/digest",
+      "qualification": "source-shape-observed + independently-qualified"
+    },
+    {
+      "id": "N41",
+      "family": "raw-notes",
+      "basis": "Independent ownership/transport/unsupported sizing/integrity boundary",
+      "input": {
+        "sameOwner": false,
+        "rawImagePath": ".data/md-images/owned.webp"
+      },
+      "expected": "refuse unsupported/unresolved reference; no service URL retention, fabricated target or stale span",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N42",
+      "family": "raw-notes",
+      "basis": "Independent ownership/transport/unsupported sizing/integrity boundary",
+      "input": {
+        "sourceTransport": "rendered fallback",
+        "containsServiceToken": true
+      },
+      "expected": "refuse unsupported/unresolved reference; no service URL retention, fabricated target or stale span",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N44",
+      "family": "raw-notes",
+      "basis": "Independent ownership/transport/unsupported sizing/integrity boundary",
+      "input": {
+        "rawSizing": "#$width=101p$"
+      },
+      "expected": "refuse unsupported/unresolved reference; no service URL retention, fabricated target or stale span",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N45",
+      "family": "raw-notes",
+      "basis": "Independent ownership/transport/unsupported sizing/integrity boundary",
+      "input": {
+        "referenceDocumentDigest": "altered"
+      },
+      "expected": "refuse unsupported/unresolved reference; no service URL retention, fabricated target or stale span",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "N43",
+      "family": "raw-notes",
+      "basis": "Existing reviewed pure image-reference presentation contract applied to raw Markdown",
+      "input": {
+        "declaration": "#$width=50p$",
+        "sameOwnerQualifiedImage": true,
+        "capturedBytesPreserved": true
+      },
+      "expected": "responsive image presentation with exact declaration/span/document digest retained; shared core warning image_presentation_normalized, not an absent-payload permission",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A01",
+      "family": "resources",
+      "basis": "Owned attachment and binary/BRZ comparison",
+      "input": {
+        "filename": "note-image.bin",
+        "length": 72868,
+        "sha256": "3afce08a1e00bb4edb5e4b9a72d35bbdbe6e3e02a4487f8cadbc1681181dfa83"
+      },
+      "expected": "image: measured valid WEBP; type12 alone insufficient",
+      "qualification": "source-shape-observed"
+    },
+    {
+      "id": "A02",
+      "family": "resources",
+      "basis": "Owned attachment and binary/BRZ comparison",
+      "input": {
+        "filename": "type-icon.bin",
+        "length": 3695,
+        "sha256": "247d56092664afd6415511b632454aa0cc7ff62571ec8b7f092f06e6897a77ab"
+      },
+      "expected": "icon: measured valid PNG; inherited appearance comes from qualified type assignment",
+      "qualification": "source-shape-observed"
+    },
+    {
+      "id": "A03",
+      "family": "resources",
+      "basis": "Parent ownership/preservation/security contract",
+      "input": {
+        "requiredImageStatus": 404
+      },
+      "expected": "refuse/hold unqualified or unavailable required payload/ownership",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A04",
+      "family": "resources",
+      "basis": "Parent ownership/preservation/security contract",
+      "input": {
+        "requiredIconStatus": 404
+      },
+      "expected": "refuse/hold unqualified or unavailable required payload/ownership",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A05",
+      "family": "resources",
+      "basis": "Parent ownership/preservation/security contract",
+      "input": {
+        "declaredLength": 65,
+        "actualLength": 66
+      },
+      "expected": "use measured actual value; retain declared discrepancy as source evidence; mismatch alone is not absence",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A06",
+      "family": "resources",
+      "basis": "Parent ownership/preservation/security contract",
+      "input": {
+        "type": 12,
+        "bytes": "invalid image signature"
+      },
+      "expected": "refuse/hold unqualified or unavailable required payload/ownership",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A07",
+      "family": "resources",
+      "basis": "Parent ownership/preservation/security contract",
+      "input": {
+        "location": "../outside.bin"
+      },
+      "expected": "refuse/hold unqualified or unavailable required payload/ownership",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A08",
+      "family": "resources",
+      "basis": "Parent ownership/preservation/security contract",
+      "input": {
+        "sourceType": "link",
+        "inventory": "populated"
+      },
+      "expected": "refuse/hold unqualified or unavailable required payload/ownership",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A09",
+      "family": "resources",
+      "basis": "Parent ownership/preservation/security contract",
+      "input": {
+        "externalDestination": "authored query value resembles token"
+      },
+      "expected": "preserve authored destination without fetching",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A10",
+      "family": "resources",
+      "basis": "Independently authored literal-basename and transport/path boundary",
+      "input": {
+        "location": "folder/file.pdf",
+        "isNotes": false
+      },
+      "expected": "refuse unqualified path/name; generated capture keys cannot authorize unsafe source interpretation",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A11",
+      "family": "resources",
+      "basis": "Independently authored literal-basename and transport/path boundary",
+      "input": {
+        "location": "folder\\file.pdf",
+        "isNotes": false
+      },
+      "expected": "refuse unqualified path/name; generated capture keys cannot authorize unsafe source interpretation",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A12",
+      "family": "resources",
+      "basis": "Independently authored literal-basename and transport/path boundary",
+      "input": {
+        "location": "C:file.pdf",
+        "isNotes": false
+      },
+      "expected": "refuse unqualified path/name; generated capture keys cannot authorize unsafe source interpretation",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A13",
+      "family": "resources",
+      "basis": "Independently authored literal-basename and transport/path boundary",
+      "input": {
+        "location": "file%2epdf",
+        "isNotes": false
+      },
+      "expected": "refuse unqualified path/name; generated capture keys cannot authorize unsafe source interpretation",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A14",
+      "family": "resources",
+      "basis": "Independently authored literal-basename and transport/path boundary",
+      "input": {
+        "location": " file.pdf",
+        "isNotes": false
+      },
+      "expected": "refuse unqualified path/name; generated capture keys cannot authorize unsafe source interpretation",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A15",
+      "family": "resources",
+      "basis": "Independently authored literal-basename and transport/path boundary",
+      "input": {
+        "location": "file.pdf ",
+        "isNotes": false
+      },
+      "expected": "refuse unqualified path/name; generated capture keys cannot authorize unsafe source interpretation",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A16",
+      "family": "resources",
+      "basis": "Independently authored literal-basename and transport/path boundary",
+      "input": {
+        "location": ".",
+        "isNotes": false
+      },
+      "expected": "refuse unqualified path/name; generated capture keys cannot authorize unsafe source interpretation",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A17",
+      "family": "resources",
+      "basis": "Independently authored literal-basename and transport/path boundary",
+      "input": {
+        "location": "..",
+        "isNotes": false
+      },
+      "expected": "refuse unqualified path/name; generated capture keys cannot authorize unsafe source interpretation",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A18",
+      "family": "resources",
+      "basis": "Independently authored literal-basename and transport/path boundary",
+      "input": {
+        "location": "file\u0000.pdf",
+        "isNotes": false
+      },
+      "expected": "refuse unqualified path/name; generated capture keys cannot authorize unsafe source interpretation",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A19",
+      "family": "resources",
+      "basis": "Independently authored literal-basename and transport/path boundary",
+      "input": {
+        "location": "file\u007f.pdf",
+        "isNotes": false
+      },
+      "expected": "refuse unqualified path/name; generated capture keys cannot authorize unsafe source interpretation",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A20",
+      "family": "resources",
+      "basis": "Parent exact identity/role declaration scope and synthetic boundary",
+      "input": {
+        "location": "guide.PDF",
+        "name": null
+      },
+      "expected": "eligible filename shape; PDF signature and measured bytes still required",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A21",
+      "family": "resources",
+      "basis": "Parent exact identity/role declaration scope and synthetic boundary",
+      "input": {
+        "location": "guide.pdf",
+        "name": "Displayed guide"
+      },
+      "expected": "display name retained independently of literal filename; no role inference from display name",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A22",
+      "family": "resources",
+      "basis": "Parent exact identity/role declaration scope and synthetic boundary",
+      "input": {
+        "location": "guide.pdf",
+        "name": ""
+      },
+      "expected": "refuse unqualified empty display name",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A23",
+      "family": "resources",
+      "basis": "Parent exact identity/role declaration scope and synthetic boundary",
+      "input": {
+        "location": "guide.pdf",
+        "name": 42
+      },
+      "expected": "refuse wrong name type",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A24",
+      "family": "resources",
+      "basis": "Parent exact identity/role declaration scope and synthetic boundary",
+      "input": {
+        "location": "guide.pdf",
+        "omittedFields": [
+          "name"
+        ]
+      },
+      "expected": "refuse missing declaration; do not substitute null",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A25",
+      "family": "resources",
+      "basis": "Vendor GETby-location explicitly names type3 URL;18 retained owned non-note HTTP(S) declarations",
+      "input": {
+        "sourceType": 2,
+        "type": 3,
+        "isNotes": false,
+        "sameBrainOwner": true,
+        "location": "https://example.test/resource?token=authored-value&x=1#section"
+      },
+      "expected": "Asset url/external preserves exact authored destination including query/fragment; no destination fetch, downloaded bytes or transport-token rewriting",
+      "qualification": "documented-meaning + source-shape-observed"
+    },
+    {
+      "id": "A26",
+      "family": "resources",
+      "basis": "Independent bounded URL-role/ownership/URI/contradiction negatives",
+      "input": {
+        "sourceType": 2,
+        "type": 3,
+        "sameBrainOwner": false
+      },
+      "expected": "refuse unqualified/contradictory source shape; preserve only accepted authored destinations",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A27",
+      "family": "resources",
+      "basis": "Independent bounded URL-role/ownership/URI/contradiction negatives",
+      "input": {
+        "type": 2,
+        "location": "C:\\external-file.pdf"
+      },
+      "expected": "refuse unqualified/contradictory source shape; preserve only accepted authored destinations",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A28",
+      "family": "resources",
+      "basis": "Independent bounded URL-role/ownership/URI/contradiction negatives",
+      "input": {
+        "type": 8,
+        "location": "C:\\external-directory"
+      },
+      "expected": "refuse unqualified/contradictory source shape; preserve only accepted authored destinations",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A29",
+      "family": "resources",
+      "basis": "Independent bounded URL-role/ownership/URI/contradiction negatives",
+      "input": {
+        "type": 3,
+        "location": "mailto:person@example.test"
+      },
+      "expected": "refuse unqualified/contradictory source shape; preserve only accepted authored destinations",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A30",
+      "family": "resources",
+      "basis": "Independent bounded URL-role/ownership/URI/contradiction negatives",
+      "input": {
+        "type": 3,
+        "sourceType": 3,
+        "populatedLinkOwned": true
+      },
+      "expected": "refuse unqualified/contradictory source shape; preserve only accepted authored destinations",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A31",
+      "family": "resources",
+      "basis": "Independent bounded URL-role/ownership/URI/contradiction negatives",
+      "input": {
+        "type": 3,
+        "isNotes": true
+      },
+      "expected": "refuse unqualified/contradictory source shape; preserve only accepted authored destinations",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A32",
+      "family": "resources",
+      "basis": "Independent bounded URL-role/ownership/URI/contradiction negatives",
+      "input": {
+        "type": 3,
+        "location": "relative/path"
+      },
+      "expected": "refuse unqualified/contradictory source shape; preserve only accepted authored destinations",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A33",
+      "family": "resources",
+      "basis": "Independent bounded URL-role/ownership/URI/contradiction negatives",
+      "input": {
+        "type": 3,
+        "location": "https://example.test/line\nbreak"
+      },
+      "expected": "refuse unqualified/contradictory source shape; preserve only accepted authored destinations",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A34",
+      "family": "resources",
+      "basis": "Independent bounded URL-role/ownership/URI/contradiction negatives",
+      "input": {
+        "type": 3,
+        "inventoryLocation": "https://example.test/one",
+        "metadataLocation": "https://example.test/two"
+      },
+      "expected": "refuse unqualified/contradictory source shape; preserve only accepted authored destinations",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A35",
+      "family": "resources",
+      "basis": "Named link attachment-list endpoint + parent empty-only ownership rule",
+      "input": {
+        "linkAttachmentStatus": 200,
+        "inventory": []
+      },
+      "expected": "successful empty link-owned inventory; no resources to normalize",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A36",
+      "family": "resources",
+      "basis": "Named link attachment-list endpoint + parent empty-only ownership rule",
+      "input": {
+        "linkAttachmentStatus": 200,
+        "inventory": [
+          {
+            "sourceType": 3
+          }
+        ]
+      },
+      "expected": "refuse populated unreviewed link-owned content",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A37",
+      "family": "resources",
+      "basis": "Named link attachment-list endpoint + parent empty-only ownership rule",
+      "input": {
+        "linkAttachmentStatus": 200,
+        "inventory": null
+      },
+      "expected": "refuse invalid inventory shape; null is not empty",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "A38",
+      "family": "resources",
+      "basis": "Named link attachment-list endpoint + parent empty-only ownership rule",
+      "input": {
+        "linkAttachmentStatus": 500
+      },
+      "expected": "typed operational failure; no empty-success or source-gap exception",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "T01",
+      "family": "TXT/PDF",
+      "basis": "Accepted parent narrow exception; retained Team Tactics independent raw cohort",
+      "input": {
+        "validIdentityOwnership": true,
+        "isNotes": false,
+        "filenameRole": "confirmed non-note TXT",
+        "contentStatus": 404,
+        "sameOwnerPdfDownloadedMeasuredPreserved": true
+      },
+      "expected": "absent TXT asset + metadata/failure retained + API-specific approved_source_gap warning; no equivalence/redundancy claim",
+      "qualification": "scope-contract; source sample corroborated"
+    },
+    {
+      "id": "T02",
+      "family": "TXT/PDF",
+      "basis": "Accepted parent exact warning restrictions",
+      "input": {
+        "validIdentityOwnership": true,
+        "isNotes": true,
+        "filenameRole": "confirmed non-note TXT",
+        "contentStatus": 404,
+        "sameOwnerPdfDownloadedMeasuredPreserved": true
+      },
+      "expected": "refuse; warning predicate is not satisfied",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "T03",
+      "family": "TXT/PDF",
+      "basis": "Accepted parent exact warning restrictions",
+      "input": {
+        "validIdentityOwnership": true,
+        "isNotes": false,
+        "filenameRole": "type15 only",
+        "contentStatus": 404,
+        "sameOwnerPdfDownloadedMeasuredPreserved": true
+      },
+      "expected": "refuse; warning predicate is not satisfied",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "T04",
+      "family": "TXT/PDF",
+      "basis": "Accepted parent exact warning restrictions",
+      "input": {
+        "validIdentityOwnership": true,
+        "isNotes": false,
+        "filenameRole": "confirmed non-note TXT",
+        "contentStatus": 401,
+        "sameOwnerPdfDownloadedMeasuredPreserved": true
+      },
+      "expected": "refuse; warning predicate is not satisfied",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "T05",
+      "family": "TXT/PDF",
+      "basis": "Accepted parent exact warning restrictions",
+      "input": {
+        "validIdentityOwnership": true,
+        "isNotes": false,
+        "filenameRole": "confirmed non-note TXT",
+        "contentStatus": 403,
+        "sameOwnerPdfDownloadedMeasuredPreserved": true
+      },
+      "expected": "refuse; warning predicate is not satisfied",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "T06",
+      "family": "TXT/PDF",
+      "basis": "Accepted parent exact warning restrictions",
+      "input": {
+        "validIdentityOwnership": true,
+        "isNotes": false,
+        "filenameRole": "confirmed non-note TXT",
+        "contentStatus": "timeout",
+        "sameOwnerPdfDownloadedMeasuredPreserved": true
+      },
+      "expected": "refuse; warning predicate is not satisfied",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "T07",
+      "family": "TXT/PDF",
+      "basis": "Accepted parent exact warning restrictions",
+      "input": {
+        "validIdentityOwnership": true,
+        "isNotes": false,
+        "filenameRole": "confirmed non-note TXT",
+        "contentStatus": "interrupted-read",
+        "sameOwnerPdfDownloadedMeasuredPreserved": true
+      },
+      "expected": "refuse; warning predicate is not satisfied",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "T08",
+      "family": "TXT/PDF",
+      "basis": "Accepted parent exact warning restrictions",
+      "input": {
+        "validIdentityOwnership": true,
+        "isNotes": false,
+        "filenameRole": "confirmed non-note TXT",
+        "contentStatus": 404,
+        "sameOwnerPdfDownloadedMeasuredPreserved": false
+      },
+      "expected": "refuse; warning predicate is not satisfied",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "T09",
+      "family": "TXT/PDF",
+      "basis": "Accepted parent exact warning restrictions",
+      "input": {
+        "validIdentityOwnership": false,
+        "isNotes": false,
+        "filenameRole": "confirmed non-note TXT",
+        "contentStatus": 404,
+        "sameOwnerPdfDownloadedMeasuredPreserved": true
+      },
+      "expected": "refuse; warning predicate is not satisfied",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "T10",
+      "family": "TXT/PDF",
+      "basis": "Accepted parent exact warning restrictions",
+      "input": {
+        "validIdentityOwnership": true,
+        "isNotes": false,
+        "filenameRole": "confirmed non-note TXT",
+        "contentStatus": "metadata 404; no content request",
+        "sameOwnerPdfDownloadedMeasuredPreserved": true
+      },
+      "expected": "refuse; warning predicate is not satisfied",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "T11",
+      "family": "TXT/PDF",
+      "basis": "API-available cf154e9d TXT absent in BRZ proves archive is incomplete live oracle",
+      "input": {
+        "contentStatus": 200,
+        "actualLength": 21309,
+        "sha256": "e6516a579638703205aa9d5b91e19548ba68789c2389fffa2f1a74575b64c569"
+      },
+      "expected": "preserve current bytes; do not apply missing gap or infer historical equivalence",
+      "qualification": "source-observed"
+    },
+    {
+      "id": "T12",
+      "family": "TXT/PDF",
+      "basis": "Independently authored narrow-gap boundary",
+      "input": {
+        "validIdentityOwnership": true,
+        "isNotes": false,
+        "filenameRole": "confirmed non-note TXT",
+        "contentStatus": 404,
+        "sameOwnerPdfDownloadedMeasuredPreserved": true,
+        "txtLocation": "../guide.txt"
+      },
+      "expected": "refuse; required TXT/PDF identity/name/ownership/signature/preservation predicate unsatisfied",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "T13",
+      "family": "TXT/PDF",
+      "basis": "Independently authored narrow-gap boundary",
+      "input": {
+        "validIdentityOwnership": true,
+        "isNotes": false,
+        "filenameRole": "confirmed non-note TXT",
+        "contentStatus": 404,
+        "sameOwnerPdfDownloadedMeasuredPreserved": true,
+        "pdfLocation": "C:guide.pdf"
+      },
+      "expected": "refuse; required TXT/PDF identity/name/ownership/signature/preservation predicate unsatisfied",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "T14",
+      "family": "TXT/PDF",
+      "basis": "Independently authored narrow-gap boundary",
+      "input": {
+        "validIdentityOwnership": true,
+        "isNotes": false,
+        "filenameRole": "confirmed non-note TXT",
+        "contentStatus": 404,
+        "sameOwnerPdfDownloadedMeasuredPreserved": true,
+        "txtName": ""
+      },
+      "expected": "refuse; required TXT/PDF identity/name/ownership/signature/preservation predicate unsatisfied",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "T15",
+      "family": "TXT/PDF",
+      "basis": "Independently authored narrow-gap boundary",
+      "input": {
+        "validIdentityOwnership": true,
+        "isNotes": false,
+        "filenameRole": "confirmed non-note TXT",
+        "contentStatus": 404,
+        "sameOwnerPdfDownloadedMeasuredPreserved": true,
+        "pdfSignature": "HTML error despite status200"
+      },
+      "expected": "refuse; required TXT/PDF identity/name/ownership/signature/preservation predicate unsatisfied",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "T16",
+      "family": "TXT/PDF",
+      "basis": "Independently authored narrow-gap boundary",
+      "input": {
+        "validIdentityOwnership": true,
+        "isNotes": false,
+        "filenameRole": "confirmed non-note TXT",
+        "contentStatus": 404,
+        "sameOwnerPdfDownloadedMeasuredPreserved": true,
+        "pdfPreserved": false
+      },
+      "expected": "refuse; required TXT/PDF identity/name/ownership/signature/preservation predicate unsatisfied",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "T17",
+      "family": "TXT/PDF",
+      "basis": "Independently authored narrow-gap boundary",
+      "input": {
+        "validIdentityOwnership": true,
+        "isNotes": false,
+        "filenameRole": "confirmed non-note TXT",
+        "contentStatus": 404,
+        "sameOwnerPdfDownloadedMeasuredPreserved": true,
+        "txtOwner": "owner-A",
+        "pdfOwner": "owner-B"
+      },
+      "expected": "refuse; required TXT/PDF identity/name/ownership/signature/preservation predicate unsatisfied",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "P01",
+      "family": "appearance/dates",
+      "basis": "Source colour/date shape plus source-neutral glossary/contracts",
+      "input": {
+        "foregroundColor": "#c8a46d"
+      },
+      "expected": "direct colour string; no ARGB integer conversion",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "P02",
+      "family": "appearance/dates",
+      "basis": "Source colour/date shape plus source-neutral glossary/contracts",
+      "input": {
+        "foregroundColor": null,
+        "typeForeground": "#c8a46d"
+      },
+      "expected": "retain direct null; effective inheritance requires reviewed canonical join",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "P03",
+      "family": "appearance/dates",
+      "basis": "Source colour/date shape plus source-neutral glossary/contracts",
+      "input": {
+        "foregroundColor": "#11223344"
+      },
+      "expected": "refuse unsupported colour",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "P04",
+      "family": "appearance/dates",
+      "basis": "Source colour/date shape plus source-neutral glossary/contracts",
+      "input": {
+        "creationDateTime": "2024-05-16T05:46:15.4173822"
+      },
+      "expected": "calendar date 2024-05-16 using source components",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "P05",
+      "family": "appearance/dates",
+      "basis": "Source colour/date shape plus source-neutral glossary/contracts",
+      "input": {
+        "creationDateTime": "0001-01-01T00:00:00"
+      },
+      "expected": "hold sentinel date semantics; do not publish year 1 as authored date",
+      "qualification": "held-sentinel"
+    },
+    {
+      "id": "P06",
+      "family": "appearance/dates",
+      "basis": "Source colour/date shape plus source-neutral glossary/contracts",
+      "input": {
+        "iconAttachments": "multiple conflicting explicit icons"
+      },
+      "expected": "refuse unresolved appearance",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "P07",
+      "family": "appearance/dates",
+      "basis": "Source colour/date shape plus source-neutral glossary/contracts",
+      "input": {
+        "explicitColor": "#112233",
+        "inheritedColor": "#445566"
+      },
+      "expected": "explicit corresponding value takes precedence under glossary",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "P08",
+      "family": "appearance/dates",
+      "basis": "Independent timestamp syntax/calendar/offset boundary",
+      "input": {
+        "creationDateTime": "2024-02-29T23:59:59.1234567+14:00"
+      },
+      "expected": "source date2024-02-29; no timezone conversion",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "P09",
+      "family": "appearance/dates",
+      "basis": "Independent timestamp syntax/calendar/offset boundary",
+      "input": {
+        "creationDateTime": "2023-02-29T12:00:00"
+      },
+      "expected": "refuse invalid calendar date",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "P10",
+      "family": "appearance/dates",
+      "basis": "Independent timestamp syntax/calendar/offset boundary",
+      "input": {
+        "creationDateTime": "2024-01-01"
+      },
+      "expected": "refuse date-only source shape",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "P11",
+      "family": "appearance/dates",
+      "basis": "Independent timestamp syntax/calendar/offset boundary",
+      "input": {
+        "creationDateTime": "2024-01-01T24:00:00"
+      },
+      "expected": "refuse invalid time",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "P12",
+      "family": "appearance/dates",
+      "basis": "Independent timestamp syntax/calendar/offset boundary",
+      "input": {
+        "creationDateTime": "2024-01-01T00:00:00.12345678Z"
+      },
+      "expected": "refuse unqualified fraction length",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "P13",
+      "family": "appearance/dates",
+      "basis": "Independent timestamp syntax/calendar/offset boundary",
+      "input": {
+        "creationDateTime": "2024-01-01T00:00:00+14:01"
+      },
+      "expected": "refuse unqualified offset",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "P14",
+      "family": "appearance/dates",
+      "basis": "Independent timestamp syntax/calendar/offset boundary",
+      "input": {
+        "creationDateTime": " 2024-01-01T00:00:00Z"
+      },
+      "expected": "refuse unqualified leading whitespace",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "P15",
+      "family": "appearance/dates",
+      "basis": "Independent timestamp syntax/calendar/offset boundary",
+      "input": {
+        "creationDateTime": "0001-01-01T00:00:00Z"
+      },
+      "expected": "hold/refuse sentinel",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "P16",
+      "family": "appearance/dates",
+      "basis": "Independent timestamp syntax/calendar/offset boundary",
+      "input": {
+        "creationDateTime": "2024-01-01T00:00:00-14:00"
+      },
+      "expected": "source date2024-01-01; no timezone conversion",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "P17",
+      "family": "appearance/dates",
+      "basis": "Current exact-ID CHILD default screenshots/raw type joins, accepted glossary and historical paired overrides",
+      "input": {
+        "memberForeground": null,
+        "memberBackground": null,
+        "memberOwnedIcon": null,
+        "typeForeground": "#6070ff",
+        "typeBackground": "#ffe050",
+        "typeIcon": "qualified-type-icon",
+        "assignmentAgrees": true
+      },
+      "expected": "retain member declared nulls; effective type colour/icon defaults; no copied note/label",
+      "qualification": "source/native + accepted canonical semantics"
+    },
+    {
+      "id": "P18",
+      "family": "appearance/dates",
+      "basis": "Current exact-ID CHILD default screenshots/raw type joins, accepted glossary and historical paired overrides",
+      "input": {
+        "memberForeground": "#aa1122",
+        "memberBackground": null,
+        "typeForeground": "#6070ff",
+        "typeBackground": "#ffe050"
+      },
+      "expected": "effective foreground#aa1122 and background#ffe050; precedence applies per corresponding value",
+      "qualification": "source/native + accepted canonical semantics"
+    },
+    {
+      "id": "P19",
+      "family": "appearance/dates",
+      "basis": "Current exact-ID CHILD default screenshots/raw type joins, accepted glossary and historical paired overrides",
+      "input": {
+        "memberOwnedIcon": "member-icon",
+        "typeIcon": "type-icon"
+      },
+      "expected": "effective icon member-icon; retain type icon separately, no first-category substitution",
+      "qualification": "source/native + accepted canonical semantics"
+    },
+    {
+      "id": "P20",
+      "family": "appearance/dates",
+      "basis": "Current exact-ID CHILD default screenshots/raw type joins, accepted glossary and historical paired overrides",
+      "input": {
+        "memberLabel": null,
+        "typeLabel": "TYPE LABEL A"
+      },
+      "expected": "member label remains null; no inherited label",
+      "qualification": "source/native + accepted canonical semantics"
+    },
+    {
+      "id": "P21",
+      "family": "appearance/dates",
+      "basis": "Current exact-ID CHILD default screenshots/raw type joins, accepted glossary and historical paired overrides",
+      "input": {
+        "nativeDefaultTextPicker": "#000000",
+        "nativeDefaultFillPicker": "#ffffff",
+        "memberDirectColours": null,
+        "typeColoursPresent": true
+      },
+      "expected": "Default picker literals are not owned declarations or proof of effective Plex colours; preserve direct null/type defaults",
+      "qualification": "source/native + accepted canonical semantics"
+    },
+    {
+      "id": "P22",
+      "family": "appearance/dates",
+      "basis": "Current exact-ID CHILD default screenshots/raw type joins, accepted glossary and historical paired overrides",
+      "input": {
+        "typeAssignmentAgrees": false
+      },
+      "expected": "refuse unresolved inheritance join; do not choose a substitute definition",
+      "qualification": "source/native + accepted canonical semantics"
+    },
+    {
+      "id": "P23",
+      "family": "appearance/dates",
+      "basis": "Current exact-ID CHILD default screenshots/raw type joins, accepted glossary and historical paired overrides",
+      "input": {
+        "memberForeground": "#1234",
+        "typeForeground": "#6070ff"
+      },
+      "expected": "refuse unsupported explicit value; do not hide it with inherited default",
+      "qualification": "source/native + accepted canonical semantics"
+    },
+    {
+      "id": "P24",
+      "family": "appearance/dates",
+      "basis": "Current exact-ID CHILD default screenshots/raw type joins, accepted glossary and historical paired overrides",
+      "input": {
+        "effectivePlexForeground": "#6070ff",
+        "nativeHeadingForeground": "#000000"
+      },
+      "expected": "do not claim source note-heading text inherits Plex foreground; destination presentation follows existing accepted contract",
+      "qualification": "source/native + accepted canonical semantics"
+    },
+    {
+      "id": "F01",
+      "family": "findings/accounting",
+      "basis": "Parent + existing source-neutral accounting/SourcePolicy contracts",
+      "input": {
+        "fact": "normalized included thought"
+      },
+      "expected": "normalized accounting references its canonical item and evidence",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F02",
+      "family": "findings/accounting",
+      "basis": "Parent + existing source-neutral accounting/SourcePolicy contracts",
+      "input": {
+        "fact": "safe original retained extra scalar"
+      },
+      "expected": "retained_only with resolvable original evidence",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F03",
+      "family": "findings/accounting",
+      "basis": "Parent + existing source-neutral accounting/SourcePolicy contracts",
+      "input": {
+        "fact": "required unresolved meaning"
+      },
+      "expected": "unresolved and refusal; cannot call supported",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F04",
+      "family": "findings/accounting",
+      "basis": "Parent + existing source-neutral accounting/SourcePolicy contracts",
+      "input": {
+        "finding": "TXT 404 qualified gap"
+      },
+      "expected": "exact API policy rule uses approved_source_gap and warning; unavailable bytes have no fabricated hash/empty payload",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F05",
+      "family": "findings/accounting",
+      "basis": "Parent + existing source-neutral accounting/SourcePolicy contracts",
+      "input": {
+        "finding": "unregistered rule ID"
+      },
+      "expected": "refuse; every emitted finding must have exact policy disposition",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F06",
+      "family": "findings/accounting",
+      "basis": "Parent + existing source-neutral accounting/SourcePolicy contracts",
+      "input": {
+        "fact": "private/excluded authored content"
+      },
+      "expected": "no retained note/content/diagnostic leak; only permitted safe scope evidence",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F07",
+      "family": "findings/accounting",
+      "basis": "Parent + existing source-neutral accounting/SourcePolicy contracts",
+      "input": {
+        "statisticsLinks": 491,
+        "returnedLinks": 686,
+        "classificationLinks": 195
+      },
+      "expected": "do not refuse solely because statistics links is not universal total",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F08",
+      "family": "findings/accounting",
+      "basis": "Parent + existing source-neutral accounting/SourcePolicy contracts",
+      "input": {
+        "generatedExpected": "normalizer output"
+      },
+      "expected": "invalid independence; fixtures must remain source/spec-derived",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F09",
+      "family": "findings/accounting",
+      "basis": "371 independently inventoried raw Software graphs + direct statistics response",
+      "input": {
+        "statistics": {
+          "brainId": "eacf6b35-4e19-5e36-b548-e6a164efbb1d",
+          "thoughts": 364,
+          "thoughtTypes": 7,
+          "tags": 0,
+          "links": 491
+        },
+        "raw_id_counts": {
+          "ordinary": 364,
+          "definition": 7,
+          "tag": 0
+        },
+        "raw_link_counts": {
+          "hierarchy": 488,
+          "jump": 3,
+          "classification": 195
+        }
+      },
+      "expected": "narrow count cross-check agrees; retain empirical counter scope; links491 cannot be compared with all686 relationships",
+      "qualification": "source-shape-observed"
+    },
+    {
+      "id": "F10",
+      "family": "findings/accounting",
+      "basis": "Independently authored count/ownership/drift/cross-check boundary",
+      "input": {
+        "reportedOrdinary": 364,
+        "actualKnownOrdinaryIds": 363
+      },
+      "expected": "refuse unresolved population coverage",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F11",
+      "family": "findings/accounting",
+      "basis": "Independently authored count/ownership/drift/cross-check boundary",
+      "input": {
+        "reportedTypes": 7,
+        "actualKnownDefinitionIds": 6
+      },
+      "expected": "refuse incomplete definition coverage",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F12",
+      "family": "findings/accounting",
+      "basis": "Independently authored count/ownership/drift/cross-check boundary",
+      "input": {
+        "reportedTags": 0,
+        "actualAuthoritativeTagIds": 1
+      },
+      "expected": "refuse contradictory inventory; zero-tag exception cannot apply",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F13",
+      "family": "findings/accounting",
+      "basis": "Independently authored count/ownership/drift/cross-check boundary",
+      "input": {
+        "count": false
+      },
+      "expected": "refuse boolean count despite numeric equality to zero",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F14",
+      "family": "findings/accounting",
+      "basis": "Independently authored count/ownership/drift/cross-check boundary",
+      "input": {
+        "count": -1
+      },
+      "expected": "refuse negative count",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F15",
+      "family": "findings/accounting",
+      "basis": "Independently authored count/ownership/drift/cross-check boundary",
+      "input": {
+        "count": null
+      },
+      "expected": "refuse missing/null required count",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F16",
+      "family": "findings/accounting",
+      "basis": "Independently authored count/ownership/drift/cross-check boundary",
+      "input": {
+        "count": 1.0
+      },
+      "expected": "refuse non-integer scalar",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F17",
+      "family": "findings/accounting",
+      "basis": "Independently authored count/ownership/drift/cross-check boundary",
+      "input": {
+        "statisticsBrain": "d88ea32b-2b7f-55d2-9c89-4285f9b06717",
+        "requestedBrain": "eacf6b35-4e19-5e36-b548-e6a164efbb1d"
+      },
+      "expected": "refuse foreign statistics ownership",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F18",
+      "family": "findings/accounting",
+      "basis": "Independently authored count/ownership/drift/cross-check boundary",
+      "input": {
+        "startOrdinary": 364,
+        "endOrdinary": 365
+      },
+      "expected": "refuse detected population drift",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F19",
+      "family": "findings/accounting",
+      "basis": "Independently authored count/ownership/drift/cross-check boundary",
+      "input": {
+        "count": 0,
+        "knownExpectedCount": 0
+      },
+      "expected": "valid zero counter; distinguish count evidence from successful inventory",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F20",
+      "family": "findings/accounting",
+      "basis": "Independently authored count/ownership/drift/cross-check boundary",
+      "input": {
+        "reportedForgotten": 16,
+        "scopeIncludesForgotten": false
+      },
+      "expected": "retain excluded-population counter as evidence; qualification of every forgotten count meaning still held",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F21",
+      "family": "findings/accounting",
+      "basis": "Independently authored count/ownership/drift/cross-check boundary",
+      "input": {
+        "rawIds": [
+          "A",
+          "B"
+        ],
+        "reportedCount": 2,
+        "actualPayloadCompleteness": "unverified"
+      },
+      "expected": "matching counts alone do not establish relationship/payload preservation",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F22",
+      "family": "findings/accounting",
+      "basis": "Independently authored raw-text/canonical adaptation/registry controls and existing Management census",
+      "input": {
+        "rawMarkdown": "Plain authored text.\n",
+        "capturedOriginalPreserved": true
+      },
+      "expected": "same text/digest, no formatting finding",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F23",
+      "family": "findings/accounting",
+      "basis": "Independently authored raw-text/canonical adaptation/registry controls and existing Management census",
+      "input": {
+        "rawMarkdown": "|A|B|:(table=\"column-widths:-1,20,80;justification:default\"):\n|1|2|\n"
+      },
+      "expected": "native responsive table preserving cell text; exact adaptation spans/digests/original bytes retained; local-api.note-formatting.v1 kindformatting_loss warningcodeformatting_loss permits_absent_payloadfalse",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F24",
+      "family": "findings/accounting",
+      "basis": "Independently authored raw-text/canonical adaptation/registry controls and existing Management census",
+      "input": {
+        "rawMarkdown": "```md\n:(table=\"unknown\"):\n```\n"
+      },
+      "expected": "literal code remains literal; no active insert adaptation/finding",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F25",
+      "family": "findings/accounting",
+      "basis": "Independently authored raw-text/canonical adaptation/registry controls and existing Management census",
+      "input": {
+        "rawMarkdown": "<script>unsafe()</script>"
+      },
+      "expected": "refuse unsupported authored HTML; no silent adaptation or execution",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F26",
+      "family": "findings/accounting",
+      "basis": "Independently authored raw-text/canonical adaptation/registry controls and existing Management census",
+      "input": {
+        "adaptationSourceDigest": "wrong"
+      },
+      "expected": "refuse stale/corrupt adaptation evidence",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F27",
+      "family": "findings/accounting",
+      "basis": "Independently authored raw-text/canonical adaptation/registry controls and existing Management census",
+      "input": {
+        "ruleId": "local-api.note-formatting.v1",
+        "permitsAbsentPayload": true
+      },
+      "expected": "reject wrong disposition; formatting never authorizes payload loss",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F28",
+      "family": "findings/accounting",
+      "basis": "Independently authored raw-text/canonical adaptation/registry controls and existing Management census",
+      "input": {
+        "ruleId": "local-api.missing-txt-pdf.v1",
+        "qualifiedGap": true
+      },
+      "expected": "kindknown_absent_payload,warningcodeapproved_source_gap,permits_absent_payloadtrue only for qualified gap",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F29",
+      "family": "findings/accounting",
+      "basis": "Independently authored raw-text/canonical adaptation/registry controls and existing Management census",
+      "input": {
+        "ruleId": "unregistered.api.finding",
+        "kind": "formatting_loss"
+      },
+      "expected": "refuse; kind alone cannot bypass exact API rule registry",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F30",
+      "family": "findings/accounting",
+      "basis": "Independently authored raw-text/canonical adaptation/registry controls and existing Management census",
+      "input": {
+        "statisticsThoughts": 521,
+        "statisticsForgotten": 16,
+        "types": 47,
+        "tags": 1,
+        "rawOrdinary": 537
+      },
+      "expected": "active scoped count569=521+47+1; forgotten16 is separate corroboration, never subtracted again",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "F31",
+      "family": "findings/accounting",
+      "basis": "Independently authored raw-text/canonical adaptation/registry controls and existing Management census",
+      "input": {
+        "statisticsThoughts": 521,
+        "statisticsForgotten": 16,
+        "computedActiveOrdinary": 505
+      },
+      "expected": "reject double subtraction; independently known active ordinary count521",
+      "qualification": "scope-contract"
+    },
+    {
+      "id": "Z01",
+      "family": "tag400",
+      "basis": "Accepted exact plaintext matcher/corroboration",
+      "input": {
+        "request": {
+          "method": "GET",
+          "endpoint": "tags",
+          "brainId": "eacf6b35-4e19-5e36-b548-e6a164efbb1d",
+          "status": 400
+        },
+        "body_hex": "436f756c64206e6f74207265747269657665206c697374206f66205461677320666f7220627261696e2065616366366233352d346531392d356533362d623534382d653661313634656662623164",
+        "startingTags": 0,
+        "endingTags": 0,
+        "tagRevealed": false
+      },
+      "expected": "qualified failed-empty exception",
+      "qualification": "independent-contract-control"
+    },
+    {
+      "id": "Z02",
+      "family": "tag400",
+      "basis": "Accepted exact plaintext matcher/corroboration",
+      "input": {
+        "request": {
+          "method": "GET",
+          "endpoint": "tags",
+          "brainId": "eacf6b35-4e19-5e36-b548-e6a164efbb1d",
+          "status": 400
+        },
+        "body_hex": "200d0a436f756c64206e6f74207265747269657665206c697374206f66205461677320666f7220627261696e2065616366366233352d346531392d356533362d623534382d65366131363465666262316409",
+        "startingTags": 0,
+        "endingTags": 0,
+        "tagRevealed": false
+      },
+      "expected": "qualified failed-empty exception",
+      "qualification": "independent-contract-control"
+    },
+    {
+      "id": "Z03",
+      "family": "tag400",
+      "basis": "Accepted exact plaintext matcher/corroboration",
+      "input": {
+        "request": {
+          "method": "GET",
+          "endpoint": "tags",
+          "brainId": "eacf6b35-4e19-5e36-b548-e6a164efbb1d",
+          "status": 400
+        },
+        "body_hex": "436f756c64206e6f74207265747269657665206c697374206f66205461677320666f7220627261696e2064383865613332622d326237662d353564322d396338392d343238356639623036373137",
+        "startingTags": 0,
+        "endingTags": 0,
+        "tagRevealed": false
+      },
+      "expected": "refuse",
+      "qualification": "independent-contract-control"
+    },
+    {
+      "id": "Z04",
+      "family": "tag400",
+      "basis": "Accepted exact plaintext matcher/corroboration",
+      "input": {
+        "request": {
+          "method": "GET",
+          "endpoint": "tags",
+          "brainId": "eacf6b35-4e19-5e36-b548-e6a164efbb1d",
+          "status": 400
+        },
+        "body_hex": "436f756c64206e6f74207265747269657665206c697374206f66205461677320666f7220627261696e2065616366366233352d346531392d356533362d623534382d6536613136346566626231642e",
+        "startingTags": 0,
+        "endingTags": 0,
+        "tagRevealed": false
+      },
+      "expected": "refuse",
+      "qualification": "independent-contract-control"
+    },
+    {
+      "id": "Z05",
+      "family": "tag400",
+      "basis": "Accepted exact plaintext matcher/corroboration",
+      "input": {
+        "request": {
+          "method": "GET",
+          "endpoint": "tags",
+          "brainId": "eacf6b35-4e19-5e36-b548-e6a164efbb1d",
+          "status": 400
+        },
+        "body_hex": "436f756c64206e6f74207265747269657665206c69737420206f66205461677320666f7220627261696e2065616366366233352d346531392d356533362d623534382d653661313634656662623164",
+        "startingTags": 0,
+        "endingTags": 0,
+        "tagRevealed": false
+      },
+      "expected": "refuse",
+      "qualification": "independent-contract-control"
+    },
+    {
+      "id": "Z06",
+      "family": "tag400",
+      "basis": "Accepted exact plaintext matcher/corroboration",
+      "input": {
+        "request": {
+          "method": "GET",
+          "endpoint": "tags",
+          "brainId": "eacf6b35-4e19-5e36-b548-e6a164efbb1d",
+          "status": 400
+        },
+        "body_hex": "ff436f756c64206e6f74207265747269657665206c697374206f66205461677320666f7220627261696e2065616366366233352d346531392d356533362d623534382d653661313634656662623164",
+        "startingTags": 0,
+        "endingTags": 0,
+        "tagRevealed": false
+      },
+      "expected": "refuse",
+      "qualification": "independent-contract-control"
+    },
+    {
+      "id": "Z07",
+      "family": "tag400",
+      "basis": "Accepted exact plaintext matcher/corroboration",
+      "input": {
+        "request": {
+          "method": "GET",
+          "endpoint": "tags",
+          "brainId": "eacf6b35-4e19-5e36-b548-e6a164efbb1d",
+          "status": 400
+        },
+        "body_hex": "436f756c64206e6f74207265747269657665206c697374206f66205461677320666f7220627261696e2065616366366233352d346531392d356533362d623534382d653661313634656662623164",
+        "startingTags": 1,
+        "endingTags": 0,
+        "tagRevealed": false
+      },
+      "expected": "refuse",
+      "qualification": "independent-contract-control"
+    },
+    {
+      "id": "Z08",
+      "family": "tag400",
+      "basis": "Accepted exact plaintext matcher/corroboration",
+      "input": {
+        "request": {
+          "method": "GET",
+          "endpoint": "tags",
+          "brainId": "eacf6b35-4e19-5e36-b548-e6a164efbb1d",
+          "status": 400
+        },
+        "body_hex": "436f756c64206e6f74207265747269657665206c697374206f66205461677320666f7220627261696e2065616366366233352d346531392d356533362d623534382d653661313634656662623164",
+        "startingTags": 0,
+        "endingTags": 1,
+        "tagRevealed": false
+      },
+      "expected": "refuse",
+      "qualification": "independent-contract-control"
+    },
+    {
+      "id": "Z09",
+      "family": "tag400",
+      "basis": "Accepted exact plaintext matcher/corroboration",
+      "input": {
+        "request": {
+          "method": "GET",
+          "endpoint": "tags",
+          "brainId": "eacf6b35-4e19-5e36-b548-e6a164efbb1d",
+          "status": 400
+        },
+        "body_hex": "436f756c64206e6f74207265747269657665206c697374206f66205461677320666f7220627261696e2065616366366233352d346531392d356533362d623534382d653661313634656662623164",
+        "startingTags": 0,
+        "endingTags": 0,
+        "tagRevealed": true
+      },
+      "expected": "refuse",
+      "qualification": "independent-contract-control"
+    },
+    {
+      "id": "Z10",
+      "family": "tag400",
+      "basis": "Accepted exact plaintext matcher/corroboration",
+      "input": {
+        "request": {
+          "method": "GET",
+          "endpoint": "tags",
+          "brainId": "eacf6b35-4e19-5e36-b548-e6a164efbb1d",
+          "status": 401
+        },
+        "body_hex": "436f756c64206e6f74207265747269657665206c697374206f66205461677320666f7220627261696e2065616366366233352d346531392d356533362d623534382d653661313634656662623164",
+        "startingTags": 0,
+        "endingTags": 0,
+        "tagRevealed": false
+      },
+      "expected": "refuse",
+      "qualification": "independent-contract-control"
+    },
+    {
+      "id": "Z11",
+      "family": "tag400",
+      "basis": "Accepted exact plaintext matcher/corroboration",
+      "input": {
+        "request": {
+          "method": "POST",
+          "endpoint": "tags",
+          "brainId": "eacf6b35-4e19-5e36-b548-e6a164efbb1d",
+          "status": 400
+        },
+        "body_hex": "436f756c64206e6f74207265747269657665206c697374206f66205461677320666f7220627261696e2065616366366233352d346531392d356533362d623534382d653661313634656662623164",
+        "startingTags": 0,
+        "endingTags": 0,
+        "tagRevealed": false
+      },
+      "expected": "refuse",
+      "qualification": "independent-contract-control"
+    },
+    {
+      "id": "Z12",
+      "family": "tag400",
+      "basis": "Accepted exact plaintext matcher/corroboration",
+      "input": {
+        "request": {
+          "method": "GET",
+          "endpoint": "types",
+          "brainId": "eacf6b35-4e19-5e36-b548-e6a164efbb1d",
+          "status": 400
+        },
+        "body_hex": "436f756c64206e6f74207265747269657665206c697374206f66205461677320666f7220627261696e2065616366366233352d346531392d356533362d623534382d653661313634656662623164",
+        "startingTags": 0,
+        "endingTags": 0,
+        "tagRevealed": false
+      },
+      "expected": "refuse",
+      "qualification": "independent-contract-control"
+    },
+    {
+      "id": "Z13",
+      "family": "tag400",
+      "basis": "Accepted exact plaintext matcher/corroboration",
+      "input": {
+        "request": {
+          "method": "GET",
+          "endpoint": "tags",
+          "brainId": "eacf6b35-4e19-5e36-b548-e6a164efbb1d",
+          "status": 400
+        },
+        "body_hex": "22436f756c64206e6f74207265747269657665206c697374206f66205461677320666f7220627261696e2065616366366233352d346531392d356533362d623534382d65366131363465666262316422",
+        "startingTags": 0,
+        "endingTags": 0,
+        "tagRevealed": false
+      },
+      "expected": "refuse",
+      "qualification": "independent-contract-control"
+    },
+    {
+      "id": "Z14",
+      "family": "tag400",
+      "basis": "Accepted exact plaintext matcher/corroboration",
+      "input": {
+        "request": {
+          "method": "GET",
+          "endpoint": "tags",
+          "brainId": "eacf6b35-4e19-5e36-b548-e6a164efbb1d",
+          "status": 400
+        },
+        "body_hex": "434f554c44204e4f54205245545249455645204c495354204f46205441475320464f5220425241494e2045414346364233352d344531392d354533362d423534382d453641313634454642423144",
+        "startingTags": 0,
+        "endingTags": 0,
+        "tagRevealed": false
+      },
+      "expected": "refuse",
+      "qualification": "independent-contract-control"
+    },
+    {
+      "id": "Z15",
+      "family": "tag400",
+      "basis": "Accepted exact plaintext matcher/corroboration",
+      "input": {
+        "request": {
+          "method": "GET",
+          "endpoint": "tags",
+          "brainId": "eacf6b35-4e19-5e36-b548-e6a164efbb1d",
+          "status": 400
+        },
+        "body_hex": "436f756c64206e6f74207265747269657665206c697374206f66205461677320666f7220627261696e2065616366366233352d346531392d356533362d623534382d653661313634656662623164",
+        "startingTags": null,
+        "endingTags": 0,
+        "tagRevealed": false
+      },
+      "expected": "refuse",
+      "qualification": "independent-contract-control"
+    },
+    {
+      "id": "Z16",
+      "family": "tag400",
+      "basis": "Accepted exact plaintext matcher/corroboration",
+      "input": {
+        "request": {
+          "method": "GET",
+          "endpoint": "tags",
+          "brainId": "eacf6b35-4e19-5e36-b548-e6a164efbb1d",
+          "status": 400
+        },
+        "body_hex": "436f756c64206e6f74207265747269657665206c697374206f66205461677320666f7220627261696e2065616366366233352d346531392d356533362d623534382d65366131363465666262316400",
+        "startingTags": 0,
+        "endingTags": 0,
+        "tagRevealed": false
+      },
+      "expected": "refuse",
+      "qualification": "independent-contract-control"
+    },
+    {
+      "id": "Z17",
+      "family": "tag400",
+      "basis": "Accepted exact plaintext matcher/corroboration",
+      "input": {
+        "request": {
+          "method": "GET",
+          "endpoint": "tags",
+          "brainId": "eacf6b35-4e19-5e36-b548-e6a164efbb1d",
+          "status": 400
+        },
+        "body_hex": "436f756c64206e6f74207265747269657665206c697374206f66205461677320666f7220627261696e2065616366366233352d346531392d356533362d623534382d653661313634656662623164",
+        "startingTags": false,
+        "endingTags": 0,
+        "tagRevealed": false
+      },
+      "expected": "refuse",
+      "qualification": "independent-contract-control"
+    },
+    {
+      "id": "Z18",
+      "family": "tag400",
+      "basis": "Accepted exact plaintext matcher/corroboration",
+      "input": {
+        "request": {
+          "method": "GET",
+          "endpoint": "tags",
+          "brainId": "eacf6b35-4e19-5e36-b548-e6a164efbb1d",
+          "status": 400
+        },
+        "body_hex": "436f756c64206e6f74207265747269657665206c697374206f66205461677320666f7220627261696e2065616366366233352d346531392d356533362d623534382d653661313634656662623164",
+        "startingTags": 0,
+        "endingTags": false,
+        "tagRevealed": false
+      },
+      "expected": "refuse",
+      "qualification": "independent-contract-control"
+    },
+    {
+      "id": "Z19",
+      "family": "tag400",
+      "basis": "Accepted exact plaintext matcher/corroboration",
+      "input": {
+        "request": {
+          "method": "GET",
+          "endpoint": "tags",
+          "brainId": "eacf6b35-4e19-5e36-b548-e6a164efbb1d",
+          "status": 400
+        },
+        "body_hex": "436f756c64206e6f74207265747269657665206c697374206f66205461677320666f7220627261696e2045414346364233352d344531392d354533362d423534382d453641313634454642423144",
+        "startingTags": 0,
+        "endingTags": 0,
+        "tagRevealed": false
+      },
+      "expected": "refuse",
+      "qualification": "independent-contract-control"
+    },
+    {
+      "id": "Z20",
+      "family": "tag400",
+      "basis": "Accepted exact plaintext matcher/corroboration",
+      "input": {
+        "request": {
+          "method": "GET",
+          "endpoint": "tags",
+          "brainId": "eacf6b35-4e19-5e36-b548-e6a164efbb1d",
+          "status": 400
+        },
+        "body_hex": "efbbbf436f756c64206e6f74207265747269657665206c697374206f66205461677320666f7220627261696e2065616366366233352d346531392d356533362d623534382d653661313634656662623164",
+        "startingTags": 0,
+        "endingTags": 0,
+        "tagRevealed": false
+      },
+      "expected": "refuse",
+      "qualification": "independent-contract-control"
+    },
+    {
+      "id": "Z21",
+      "family": "tag400",
+      "basis": "Accepted exact plaintext matcher/corroboration",
+      "input": {
+        "request": {
+          "method": "GET",
+          "endpoint": "tags",
+          "brainId": "EACF6B35-4E19-5E36-B548-E6A164EFBB1D",
+          "status": 400
+        },
+        "body_hex": "436f756c64206e6f74207265747269657665206c697374206f66205461677320666f7220627261696e2065616366366233352d346531392d356533362d623534382d653661313634656662623164",
+        "startingTags": 0,
+        "endingTags": 0,
+        "tagRevealed": false
+      },
+      "expected": "refuse",
+      "qualification": "independent-contract-control"
+    }
+  ],
+  "usage": "Declarative independent qualification controls. No runtime implementation/assertion execution or complete preservation verdict. Measured sample lengths/hashes are safe aggregate evidence; no user payloads included."
+}
