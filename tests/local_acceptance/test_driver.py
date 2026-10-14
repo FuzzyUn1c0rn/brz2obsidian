@@ -104,7 +104,17 @@ def test_final_fingerprint_guard_detects_same_count_opaque_source_change(tmp_pat
 
 def test_expected_fact_oracle_has_only_stdlib_and_local_oracle_imports():
     root = Path(__file__).parent
-    modules = {"checker", "facts", "support", "scope", "images", "gaps", "text"}
+    modules = {
+        "api_checker",
+        "api_manifest",
+        "checker",
+        "facts",
+        "support",
+        "scope",
+        "images",
+        "gaps",
+        "text",
+    }
     assert {
         p.stem for p in root.glob("*.py") if not p.stem.startswith("test_")
     } == modules | {"run", "__init__"}
