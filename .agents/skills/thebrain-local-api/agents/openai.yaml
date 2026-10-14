@@ -1,0 +1,4 @@
+interface:
+  display_name: "TheBrain Local API"
+  short_description: "Use the desktop API for notes and attachments"
+  default_prompt: "Use $thebrain-local-api to inspect the running Brain and retrieve the requested source content."
