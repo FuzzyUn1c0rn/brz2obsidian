@@ -2,8 +2,17 @@
 
 import json
 import re
+from collections import defaultdict, deque
 
-from .declarations import COUNTERS, THOUGHT_FIELDS, collection, counters, thought, uuid
+from .declarations import (
+    COUNTERS,
+    THOUGHT_FIELDS,
+    collection,
+    counters,
+    source_date,
+    thought,
+    uuid,
+)
 from .errors import refuse
 
 
@@ -285,6 +294,19 @@ def validate_source(source):
             fields(value, {"text"})
             if not isinstance(value["text"], str):
                 refuse("Captured note text is invalid")
+        elif domain == "exclusion":
+            fields(value, allowed[domain])
+            if (
+                type(value["acType"]) is not int
+                or value["acType"] != 0
+                or type(value["kind"]) is not int
+                or value["kind"] not in {1, 2, 4, 5}
+            ):
+                refuse("A captured exclusion lacks qualified public role evidence")
+            if value["forgottenDateTime"] is not None:
+                source_date(value["forgottenDateTime"])
+            elif value["kind"] != 5:
+                refuse("A captured forgotten exclusion lacks its source timestamp")
     records = {r["key"]: r for r in source["records"]}
     included = set(all_ids)
     if {
@@ -372,6 +394,93 @@ def validate_source(source):
             or decision["key"] in decision["evidence"]
         ):
             refuse("A captured scope decision has unresolved evidence")
+    validate_scope_references(records, source["payloads"], decisions)
+
+
+def validate_scope_references(records, payloads, decisions):
+    """Check the finite evidence graph without recursion or unbounded walks."""
+    by_key = {decision["key"]: decision for decision in decisions}
+    dependencies = {
+        key: {ref for ref in decision["evidence"] if ref in by_key}
+        for key, decision in by_key.items()
+    }
+    dependents = defaultdict(list)
+    remaining = {key: len(refs) for key, refs in dependencies.items()}
+    for key, refs in dependencies.items():
+        for reference in refs:
+            dependents[reference].append(key)
+    ready = deque(key for key, count in remaining.items() if count == 0)
+    visited = 0
+    while ready:
+        key = ready.popleft()
+        visited += 1
+        for dependent in dependents[key]:
+            remaining[dependent] -= 1
+            if remaining[dependent] == 0:
+                ready.append(dependent)
+    if visited != len(decisions):
+        refuse("Captured scope evidence contains a reference cycle")
+
+    def reaches(decision, target):
+        seen, pending = set(), [decision["key"]]
+        while pending:
+            key = pending.pop()
+            if key in seen:
+                continue
+            seen.add(key)
+            for reference in by_key[key]["evidence"]:
+                if reference == target:
+                    return True
+                if reference in by_key and reference not in seen:
+                    pending.append(reference)
+        return False
+
+    known = set(records) | {"payload:" + fact["asset_id"] for fact in payloads}
+    for decision in decisions:
+        excluded = set()
+        for subject in decision["subjects"]:
+            if subject in known:
+                continue
+            if not isinstance(subject, str) or not subject.startswith("thought:"):
+                continue
+            identity = uuid(subject.removeprefix("thought:"))
+            exclusion_key = "exclusion:" + identity
+            exclusion = records.get(exclusion_key)
+            if (
+                exclusion is None
+                or decision["outcome"]
+                not in {"excluded_forgotten", "excluded_system", "excluded_association"}
+                or not reaches(decision, exclusion_key)
+            ):
+                continue
+            value = exclusion["value"]
+            if decision["outcome"] == "excluded_system" and value["kind"] != 5:
+                continue
+            if decision["outcome"] == "excluded_forgotten" and (
+                value["kind"] == 5 or value["forgottenDateTime"] is None
+            ):
+                continue
+            excluded.add(subject)
+        included_endpoint = any(
+            subject.startswith("thought:")
+            and subject in records
+            and records[subject]["domain"] == "thought"
+            for subject in decision["subjects"]
+            if isinstance(subject, str)
+        )
+        for subject in decision["subjects"]:
+            if subject in known or subject in excluded:
+                continue
+            if (
+                isinstance(subject, str)
+                and subject.startswith("link:")
+                and decision["outcome"] == "excluded_association"
+                and excluded
+                and included_endpoint
+            ):
+                uuid(subject.removeprefix("link:"))
+                continue
+            refuse("A captured scope subject has no qualified source reference")
 
 
 def validate_binding(source, snapshot, audit):

@@ -51,6 +51,8 @@ def golden_inputs():
         "boolean_note_flag",
         "wrong_scope_rule",
         "numeric_atomic",
+        "scope_cycle",
+        "unknown_subject",
     ],
 )
 def test_public_capture_rejects_unqualified_shapes_before_writing(tmp_path, mutation):
@@ -130,6 +132,37 @@ def test_public_capture_rejects_unqualified_shapes_before_writing(tmp_path, muta
         evidence["original_json"] = json.dumps(decision)
     elif mutation == "numeric_atomic":
         audit["atomic"] = 0
+    elif mutation in {"scope_cycle", "unknown_subject"}:
+        import copy
+
+        decisions = source["scope"]["decisions"]
+        if mutation == "scope_cycle":
+            extra = copy.deepcopy(decisions[0])
+            extra["key"] += ":second"
+            decisions.append(extra)
+            snapshot["original_evidence"].append(
+                {
+                    "key": extra["key"],
+                    "kind": "records",
+                    "original_json": json.dumps(extra),
+                }
+            )
+            snapshot["accounting"]["entries"].append(
+                {
+                    "identity": extra["key"],
+                    "disposition": "retained_only",
+                    "references": [extra["key"]],
+                }
+            )
+            decisions[0]["evidence"] = [decisions[1]["key"]]
+            decisions[1]["evidence"] = [decisions[0]["key"]]
+        else:
+            decisions[0]["subjects"] = ["thought:99999999-9999-4999-8999-999999999999"]
+        for decision in decisions:
+            evidence = next(
+                e for e in snapshot["original_evidence"] if e["key"] == decision["key"]
+            )
+            evidence["original_json"] = json.dumps(decision)
     with pytest.raises((MigrationFailed, MigrationRefused)) as error:
         LocalApiSession(
             source=source,
@@ -453,6 +486,7 @@ def test_identical_authoritative_observations_collapse_without_losing_scope():
     api.overrides[f"/api/brains/{BRAIN}/statistics"] = (
         200,
         {
+            "brainId": BRAIN,
             "thoughts": 2,
             "thoughtTypes": 1,
             "tags": 0,
@@ -811,6 +845,7 @@ def test_public_capture_identity_ignores_response_order_but_binds_authored_dates
         "private",
         "unknown_role",
         "boolean_role",
+        "negative_zero",
         "foreign_metadata",
         "unknown_field",
         "invalid_date",
@@ -827,8 +862,11 @@ def test_public_capture_identity_ignores_response_order_but_binds_authored_dates
         "appearance",
         "stats_boolean",
         "stats_drift",
+        "foreign_statistics",
+        "missing_statistics",
         "tag_nonzero",
         "tag_contradiction",
+        "forgotten_tag_contradiction",
         "pins_failure",
         "malformed_json",
         "malformed_utf8",
@@ -849,6 +887,10 @@ def test_incomplete_or_unimplemented_source_never_publishes_or_echoes_transport_
         api.thoughts[HOME]["kind"] = 9
     elif mutation == "boolean_role":
         api.thoughts[HOME]["kind"] = True
+    elif mutation == "negative_zero":
+        raw = json.dumps(api.thoughts[HOME]).encode()
+        assert raw.count(b'"acType": 0') == 1
+        api.overrides[key] = 200, raw.replace(b'"acType": 0', b'"acType": -0')
     elif mutation == "foreign_metadata":
         api.thoughts[HOME]["brainId"] = ALONE
     elif mutation == "unknown_field":
@@ -901,6 +943,7 @@ def test_incomplete_or_unimplemented_source_never_publishes_or_echoes_transport_
         api.overrides[f"/api/brains/{BRAIN}/statistics"] = (
             200,
             {
+                "brainId": BRAIN,
                 "thoughts": True,
                 "thoughtTypes": 0,
                 "tags": 0,
@@ -914,6 +957,7 @@ def test_incomplete_or_unimplemented_source_never_publishes_or_echoes_transport_
         def statistics(query):
             calls[0] += 1
             return 200, {
+                "brainId": BRAIN,
                 "thoughts": 2 if calls[0] == 1 else 3,
                 "thoughtTypes": 0,
                 "tags": 0,
@@ -922,7 +966,18 @@ def test_incomplete_or_unimplemented_source_never_publishes_or_echoes_transport_
             }
 
         api.overrides[f"/api/brains/{BRAIN}/statistics"] = statistics
-    elif mutation in {"tag_nonzero", "tag_contradiction"}:
+    elif mutation in {"foreign_statistics", "missing_statistics"}:
+        statistics = api.response(f"/api/brains/{BRAIN}/statistics", {})[1]
+        if mutation == "foreign_statistics":
+            statistics["brainId"] = ALONE
+        else:
+            del statistics["brainId"]
+        api.overrides[f"/api/brains/{BRAIN}/statistics"] = 200, statistics
+    elif mutation in {
+        "tag_nonzero",
+        "tag_contradiction",
+        "forgotten_tag_contradiction",
+    }:
         api.overrides[f"/api/thoughts/{BRAIN}/tags"] = (
             400,
             ("Could not retrieve list of Tags for brain " + BRAIN).encode(),
@@ -931,6 +986,8 @@ def test_incomplete_or_unimplemented_source_never_publishes_or_echoes_transport_
             api.tags = [api.thoughts[ALONE]]
         else:
             api.thoughts[ALONE]["kind"] = 4
+            if mutation == "forgotten_tag_contradiction":
+                api.thoughts[ALONE]["forgottenDateTime"] = "2026-10-14T11:00:00"
     elif mutation == "pins_failure":
         api.overrides[f"/api/thoughts/{BRAIN}/pins"] = 400, b"SERVICE_TOKEN_CANARY"
     elif mutation == "malformed_json":

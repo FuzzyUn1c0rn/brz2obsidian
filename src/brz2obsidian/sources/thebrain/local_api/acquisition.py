@@ -42,6 +42,12 @@ class Acquisition:
     def get(self, operation, path, subject=None, deadline=None):
         return self.client.json(operation, path, subject, deadline=deadline)
 
+    def statistics(self):
+        value = self.get("statistics", "/brains/" + self.brain_id + "/statistics")
+        if not isinstance(value, dict) or value.get("brainId") != self.brain_id:
+            refuse("Source statistics have missing or foreign Brain ownership")
+        return counters(value)
+
     def seed(self, key):
         self.ids.add(uuid(key))
         if len(self.ids) + len(self.link_ids) > self.config.max_traversal_items:
@@ -96,7 +102,7 @@ class Acquisition:
         ]
         if not matches or any(collection(value, b) != brain for value in matches):
             refuse("The requested Brain does not agree with accessible Brain inventory")
-        start = counters(self.get("statistics", "/brains/" + b + "/statistics"))
+        start = self.statistics()
         definitions = {}
         for role, operation in ((2, "types"), (4, "tags")):
             status, raw = self.client.request(
@@ -189,6 +195,10 @@ class Acquisition:
             )
             self.observe(value)
             self.thoughts[key] = value
+            if tag400 and value["kind"] == 4:
+                refuse(
+                    "Authoritative tag metadata contradicts the reviewed zero-tag rule"
+                )
             if value["kind"] == 5 or value["forgottenDateTime"] is not None:
                 continue
             if value["kind"] in {2, 4} and key not in definitions[value["kind"]]:
@@ -339,7 +349,7 @@ class Acquisition:
             )
         if brain["homeThoughtId"] not in included[1]:
             refuse("Home must be an included ordinary live thought")
-        end = counters(self.get("statistics", "/brains/" + b + "/statistics"))
+        end = self.statistics()
         if (
             start != end
             or end

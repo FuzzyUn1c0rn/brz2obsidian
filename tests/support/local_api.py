@@ -67,6 +67,7 @@ class MetadataApi:
             ]
         if path == f"/api/brains/{BRAIN}/statistics":
             return 200, {
+                "brainId": BRAIN,
                 "thoughts": sum(
                     t["kind"] == 1 and t["forgottenDateTime"] is None
                     for t in self.thoughts.values()

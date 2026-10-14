@@ -18,6 +18,14 @@ def timestamp():
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
+class NegativeZeroInteger(int):
+    """Raw -0 kept distinct until field qualification; not a CJSON1 integer.
+
+    Strict integer fields reject this type. A later attachment-position decoder
+    can explicitly normalize its numeric value under that field's decimal rule.
+    """
+
+
 class LocalHttp:
     def __init__(self, config, token, brain_id, clock):
         self.config, self._token, self.brain_id, self.clock = (
@@ -234,10 +242,16 @@ class LocalHttp:
         def invalid(value):
             refuse("Local API JSON contains an invalid number")
 
+        def integer(value):
+            if value == "-0":
+                return NegativeZeroInteger(0)
+            return int(value)
+
         try:
             value = json.loads(
                 raw.decode("utf-8"),
                 object_pairs_hook=pairs,
+                parse_int=integer,
                 parse_float=Decimal,
                 parse_constant=invalid,
             )

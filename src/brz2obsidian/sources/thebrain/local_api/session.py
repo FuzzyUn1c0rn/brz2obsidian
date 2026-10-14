@@ -15,6 +15,7 @@ from .capture import (
     IDENTIFIERS,
     SCHEMA_SHA256,
     canonical,
+    parse_json,
     snapshot_projection,
     source_projection,
     validate_binding,
@@ -246,6 +247,7 @@ class LocalApiSession:
                 refuse("The captured source storage identity changed")
             expected = {e["storage_key"]: e for e in self._manifest["files"]}
             found = set()
+            documents = {}
             for path in self._directory.rglob("*"):
                 info = path.lstat()
                 if (
@@ -261,8 +263,10 @@ class LocalApiSession:
                     continue
                 found.add(key)
                 if key == "manifest.json":
-                    if path.read_bytes() != self._manifest_bytes:
+                    raw = path.read_bytes()
+                    if raw != self._manifest_bytes:
                         refuse("The pinned capture manifest changed")
+                    documents[key] = raw
                 elif key not in expected:
                     refuse("Captured storage contains an unexpected file")
                 else:
@@ -273,21 +277,65 @@ class LocalApiSession:
                         or hashlib.sha256(raw).hexdigest() != entry["actual_sha256"]
                     ):
                         refuse("Captured source bytes or metadata changed")
+                    if key in {
+                        "source.json",
+                        "snapshot.json",
+                        "metadata.json",
+                        "audit.json",
+                    }:
+                        documents[key] = raw
             if found != set(expected) | {"manifest.json"}:
                 refuse("Captured source files are missing")
+            parsed = {
+                key: parse_json(raw.decode("utf-8")) for key, raw in documents.items()
+            }
+            if any(canonical(parsed[key]) != raw for key, raw in documents.items()):
+                refuse("Captured metadata is not canonical UTF-8")
+            source = source_projection(parsed["source.json"])
+            if (
+                source["identifiers"] != IDENTIFIERS
+                or canonical(source) != documents["source.json"]
+            ):
+                refuse("Captured source compatibility or canonical ordering changed")
+            snapshot = SourceSnapshot.model_validate_json(documents["snapshot.json"])
+            projected = snapshot_projection(snapshot)
+            if (
+                canonical(projected) != documents["snapshot.json"]
+                or snapshot.identity != self.source_identity
+            ):
+                refuse("Captured snapshot shape or frozen identity changed")
+            source_hash = digest("source", source)
+            projected["identity"].pop("snapshot_digest")
+            snapshot_hash = digest("snapshot", projected)
+            if (source_hash, snapshot_hash) != (
+                self.source_identity.source_sha256,
+                self.source_identity.snapshot_digest,
+            ):
+                refuse(
+                    "Recomputed captured content digests disagree with frozen identity"
+                )
+            audit = AcquisitionAudit.model_validate_json(documents["audit.json"])
+            if audit != self._audit:
+                refuse("Captured acquisition audit changed")
+            validate_binding(source, snapshot, audit)
+            metadata = {
+                "identifiers": IDENTIFIERS,
+                "identity": self.source_identity.model_dump(mode="json"),
+                "schema_sha256": SCHEMA_SHA256,
+                "desktop_build": DESKTOP_BUILD,
+            }
+            if parsed["metadata.json"] != metadata:
+                refuse("Captured metadata compatibility or identity changed")
+            manifest = parsed["manifest.json"]
             if (
                 digest(
                     "integrity",
-                    {
-                        k: v
-                        for k, v in self._manifest.items()
-                        if k != "integrity_sha256"
-                    },
+                    {k: v for k, v in manifest.items() if k != "integrity_sha256"},
                 )
                 != self._root
             ):
                 refuse("The pinned capture association changed")
-        except OSError:
+        except OSError, ValueError, KeyError, TypeError, RecursionError:
             raise failure(
                 "api_capture_read_failed",
                 "Captured source integrity could not be checked safely",
