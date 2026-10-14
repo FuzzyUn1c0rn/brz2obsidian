@@ -1,0 +1,618 @@
+{
+  "author": "selection_verifier",
+  "basis": "Independent controls from accepted #177/#180 and explicit capture contract; no runtime/product digest implementation.",
+  "integrity_and_schema_controls": [
+    {
+      "id": "INT01",
+      "base": "CAP01",
+      "target": "audit.json",
+      "mutation": {
+        "replace_first_exact_utf8": [
+          "\"actual_length\":160",
+          "\"actual_length\":161"
+        ],
+        "expected_changed_file_sha256": "b231c09887ca3d7c88f90fa312cd6bfb0394166c66e9a3ac6a5e50605c45c637"
+      },
+      "expected": "reject_against_unchanged_pinned_manifest",
+      "reason": "Changed safe audit counters preserve source/snapshot identities but violate bound exact audit bytes."
+    },
+    {
+      "id": "INT02",
+      "base": "CAP01",
+      "target": "metadata.json",
+      "mutation": {
+        "replace_first_exact_utf8": [
+          "\"desktop_build\":\"15.0.640.0\"",
+          "\"desktop_build\":\"15.0.640.1\""
+        ],
+        "expected_changed_file_sha256": "66d5dfccc080fc89458750712f5dc4ac9850b3dda1b5b4ccd5974105a5bd384c"
+      },
+      "expected": "reject_against_unchanged_pinned_manifest",
+      "reason": "Changed retained compatibility metadata must not be refreshed from disk into expected hashes."
+    },
+    {
+      "id": "INT03",
+      "base": "CAP01",
+      "target": "payload/0000000000000001.bin",
+      "mutation": {
+        "replace_first_exact_utf8": [
+          "A\nB\n",
+          "A\nC\n"
+        ],
+        "expected_changed_file_sha256": "e184bae4ce7b4bf189edbb464a79196fe005e9bbe677fdf83927cee359d6569d"
+      },
+      "expected": "reject_against_unchanged_pinned_manifest",
+      "reason": "Changed complete payload bytes reject even at unchanged byte length."
+    },
+    {
+      "id": "INT04",
+      "base": "CAP01",
+      "target": "snapshot.json",
+      "mutation": {
+        "replace_first_exact_utf8": [
+          "\"title\":\"Home\"",
+          "\"title\":\"House\""
+        ],
+        "expected_changed_file_sha256": "9ab813ced2e6eb7a9b91238ffd08712d9d8fabf8d4cb3bdcae4f9274ca3db48d"
+      },
+      "expected": "reject_against_unchanged_pinned_manifest",
+      "reason": "Changed normalized metadata breaks exact file hash, content digest and frozen association."
+    },
+    {
+      "id": "INT05",
+      "base": "CAP01",
+      "target": "source.json",
+      "mutation": {
+        "replace_first_exact_utf8": [
+          "\"aliases\":[\"first\",\"second\"]",
+          "\"aliases\":[\"second\",\"first\"]"
+        ],
+        "expected_changed_file_sha256": "1f3833b1f9c512e4583ee88711d2335177ddca47e28dbd0db600fd22fe9ebc5f"
+      },
+      "expected": "reject_against_unchanged_pinned_manifest",
+      "reason": "Meaningful source-array mutation is not transport inventory reorder."
+    },
+    {
+      "id": "INT06",
+      "base": "CAP01",
+      "target": "manifest.json",
+      "mutation": {
+        "replace_first_exact_utf8": [
+          "\"owner_id\":\"00000000-0000-4000-8000-000000000002\"",
+          "\"owner_id\":\"00000000-0000-4000-8000-000000000005\""
+        ],
+        "expected_changed_file_sha256": "d38c396c0788b7b2d08fc869a87de88657a0bfb5384bc67468b19011b5d4db3a"
+      },
+      "expected": "reject_against_unchanged_pinned_manifest",
+      "reason": "Payload owner association must agree with frozen source/snapshot and pinned manifest root."
+    },
+    {
+      "id": "INT07",
+      "base": "CAP01",
+      "target": "manifest.json",
+      "mutation": {
+        "set_json_pointer": "/payload_bindings/0/asset_id",
+        "value": "00000000-0000-4000-8000-000000000004",
+        "recompute_untrusted_integrity_sha256": true
+      },
+      "expected": "reject_against_unchanged_trusted_root",
+      "reason": "An attacker-refreshed internal manifest hash cannot authorize changed asset association; external asset cannot gain a payload."
+    },
+    {
+      "id": "INT08",
+      "base": "CAP01",
+      "target": "capture_files",
+      "mutation": {
+        "rename": [
+          "payload/0000000000000001.bin",
+          "payload/0000000000000002.bin"
+        ],
+        "preserve_bytes": true
+      },
+      "expected": "reject_missing_extra_file_and_binding",
+      "reason": "Same bytes under a different storage key do not satisfy unchanged manifest association."
+    },
+    {
+      "id": "INT09",
+      "base": "CAP01",
+      "target": "capture_files",
+      "mutation": {
+        "delete": "payload/0000000000000001.bin"
+      },
+      "expected": "reject_missing_required_payload",
+      "reason": "Present asset must retain its bound bytes."
+    },
+    {
+      "id": "INT10",
+      "base": "CAP01",
+      "target": "capture_files",
+      "mutation": {
+        "add": {
+          "storage_key": "extra.json",
+          "utf8": "{}"
+        }
+      },
+      "expected": "reject_unlisted_file",
+      "reason": "Manifest covers the complete retained file inventory."
+    },
+    {
+      "id": "INT11",
+      "base": "CAP01",
+      "target": "manifest.json",
+      "mutation": {
+        "duplicate_entry_at_json_pointer": "/files/0"
+      },
+      "expected": "reject_duplicate_storage_key_role",
+      "reason": "A duplicate exact file entry is not harmless extra evidence."
+    },
+    {
+      "id": "INT12",
+      "base": "CAP01",
+      "target": "manifest.json",
+      "mutation": {
+        "duplicate_entry_at_json_pointer": "/payload_bindings/0"
+      },
+      "expected": "reject_duplicate_asset_or_storage_binding",
+      "reason": "Identical bytes cannot authorize duplicate bindings or shared storage."
+    },
+    {
+      "id": "INT13",
+      "base": "CAP01",
+      "target": "capture_files",
+      "mutation": {
+        "replace_regular_file_with_symlink_or_reparse_point": "payload/0000000000000001.bin"
+      },
+      "expected": "reject_nonowned_alias_storage",
+      "reason": "Only actual session-owned regular files qualify."
+    },
+    {
+      "id": "INT14",
+      "base": "CAP01",
+      "target": "manifest.json",
+      "mutation": {
+        "set_json_pointer": "/payload_bindings/0/storage_key",
+        "value": "../payload.bin"
+      },
+      "expected": "reject_noncanonical_unsafe_storage_key",
+      "reason": "Generated relative keys have one exact spelling; source paths/percent/case aliases cannot enter capture associations."
+    },
+    {
+      "id": "INT15",
+      "base": "CAP01",
+      "target": "manifest.json",
+      "mutation": {
+        "set_json_pointer": "/payload_bindings/0/storage_key",
+        "value": "/payload.bin"
+      },
+      "expected": "reject_noncanonical_unsafe_storage_key",
+      "reason": "Generated relative keys have one exact spelling; source paths/percent/case aliases cannot enter capture associations."
+    },
+    {
+      "id": "INT16",
+      "base": "CAP01",
+      "target": "manifest.json",
+      "mutation": {
+        "set_json_pointer": "/payload_bindings/0/storage_key",
+        "value": "C:/payload.bin"
+      },
+      "expected": "reject_noncanonical_unsafe_storage_key",
+      "reason": "Generated relative keys have one exact spelling; source paths/percent/case aliases cannot enter capture associations."
+    },
+    {
+      "id": "INT17",
+      "base": "CAP01",
+      "target": "manifest.json",
+      "mutation": {
+        "set_json_pointer": "/payload_bindings/0/storage_key",
+        "value": "\\\\server\\payload.bin"
+      },
+      "expected": "reject_noncanonical_unsafe_storage_key",
+      "reason": "Generated relative keys have one exact spelling; source paths/percent/case aliases cannot enter capture associations."
+    },
+    {
+      "id": "INT18",
+      "base": "CAP01",
+      "target": "manifest.json",
+      "mutation": {
+        "set_json_pointer": "/payload_bindings/0/storage_key",
+        "value": "payload\\0000000000000001.bin"
+      },
+      "expected": "reject_noncanonical_unsafe_storage_key",
+      "reason": "Generated relative keys have one exact spelling; source paths/percent/case aliases cannot enter capture associations."
+    },
+    {
+      "id": "INT19",
+      "base": "CAP01",
+      "target": "manifest.json",
+      "mutation": {
+        "set_json_pointer": "/payload_bindings/0/storage_key",
+        "value": "payload/%30.bin"
+      },
+      "expected": "reject_noncanonical_unsafe_storage_key",
+      "reason": "Generated relative keys have one exact spelling; source paths/percent/case aliases cannot enter capture associations."
+    },
+    {
+      "id": "INT20",
+      "base": "CAP01",
+      "target": "manifest.json",
+      "mutation": {
+        "set_json_pointer": "/payload_bindings/0/storage_key",
+        "value": "payload/./0000000000000001.bin"
+      },
+      "expected": "reject_noncanonical_unsafe_storage_key",
+      "reason": "Generated relative keys have one exact spelling; source paths/percent/case aliases cannot enter capture associations."
+    },
+    {
+      "id": "INT21",
+      "base": "CAP01",
+      "target": "manifest.json",
+      "mutation": {
+        "set_json_pointer": "/payload_bindings/0/storage_key",
+        "value": "Payload/0000000000000001.bin"
+      },
+      "expected": "reject_noncanonical_unsafe_storage_key",
+      "reason": "Generated relative keys have one exact spelling; source paths/percent/case aliases cannot enter capture associations."
+    },
+    {
+      "id": "INT22",
+      "base": "CAP01",
+      "target": "manifest.json",
+      "mutation": {
+        "append_file_entry_for": "manifest.json"
+      },
+      "expected": "reject_self_listing",
+      "reason": "Manifest omits its own bytes; pinned root hashes its self-field-omitted semantics."
+    },
+    {
+      "id": "INT23",
+      "base": "CAP01",
+      "target": "snapshot_digest_preimage",
+      "mutation": {
+        "set_json_pointer": "/identity/snapshot_digest",
+        "value": null
+      },
+      "expected": "reject_incorrect_preimage",
+      "reason": "Own digest must be omitted entirely, not replaced by null, empty or zero."
+    },
+    {
+      "id": "INT24",
+      "base": "CAP01",
+      "target": "source.json",
+      "mutation": {
+        "add_json_pointer": "/source_sha256",
+        "value": "4e71f6e3b436723930602368ef0b975d55ecc517f41e540972af27f39b10d5ef"
+      },
+      "expected": "reject_unknown_recursive_source_field",
+      "reason": "Source input has no digest fields or manifest/snapshot references."
+    },
+    {
+      "id": "INT25",
+      "base": "CAP01",
+      "target": "frozen_session_association",
+      "mutation": {
+        "replace_snapshot_with": "CAP03",
+        "keep_original_identity_and_trusted_root": true
+      },
+      "expected": "reject_snapshot_identity_association",
+      "reason": "A separately valid snapshot from another content identity cannot replace the frozen snapshot."
+    },
+    {
+      "id": "INT26",
+      "base": "CAP01",
+      "target": "manifest.json",
+      "mutation": {
+        "recompute_all_internal_hashes_after_payload_change": true,
+        "keep_trusted_session_integrity_root": "46f26a0acf864db8a509ba336d1bdb0c85a2f1edd33c8a1e328fd63d9a255e30"
+      },
+      "expected": "reject_against_unchanged_trusted_root",
+      "reason": "Recomputing untrusted expectations cannot repair a changed pinned capture."
+    },
+    {
+      "id": "INT27",
+      "base": "CAP01",
+      "target": "source.json",
+      "mutation": {
+        "duplicate_record_key": "statistics:start"
+      },
+      "expected": "reject_duplicate_record_identity",
+      "reason": "Equivalent observations collapse before encoding; duplicate semantic records refuse."
+    },
+    {
+      "id": "INT28",
+      "base": "CAP01",
+      "target": "source.json",
+      "mutation": {
+        "set_json_pointer": "/payloads/0/actual_length",
+        "value": true
+      },
+      "expected": "reject_boolean_as_integer",
+      "reason": "Boolean true is not an actual length1."
+    },
+    {
+      "id": "INT29",
+      "base": "CAP01",
+      "target": "source.json",
+      "mutation": {
+        "set_json_pointer": "/payloads/0/availability",
+        "value": "absent",
+        "keep_length_hash_and_manifest_binding": true
+      },
+      "expected": "reject_inconsistent_availability_association",
+      "reason": "Missing bytes cannot be represented by relabeling a present note; only the exact qualified TXT gap permits absent payload."
+    },
+    {
+      "id": "INT30",
+      "base": "CAP01",
+      "target": "snapshot.json",
+      "mutation": {
+        "set_json_pointer": "/original_evidence/0/original_json",
+        "value": "{\"id\":\"x\",\"id\":\"x\"}"
+      },
+      "expected": "reject_duplicate_embedded_json_keys",
+      "reason": "Embedded source JSON is strictly parsed, not hashed as arbitrary uninterpreted transport text."
+    }
+  ],
+  "secret_and_provenance_controls": [
+    {
+      "id": "SEC01",
+      "base": "CAP01",
+      "target": "source.json",
+      "set_or_add_json_pointer": "/api_key",
+      "value": "API_KEY_CANARY",
+      "expected": "reject_without_retaining_or_echoing_transport_canary",
+      "reason": "Closed source roots cannot retain acquisition credentials."
+    },
+    {
+      "id": "SEC02",
+      "base": "CAP01",
+      "target": "audit.json",
+      "set_or_add_json_pointer": "/headers",
+      "value": {
+        "Authorization": "Bearer HEADER_CANARY"
+      },
+      "expected": "reject_without_retaining_or_echoing_transport_canary",
+      "reason": "Audit retains symbolic operations/classifications, no headers."
+    },
+    {
+      "id": "SEC03",
+      "base": "CAP01",
+      "target": "metadata.json",
+      "set_or_add_json_pointer": "/authorization",
+      "value": "HEADER_CANARY",
+      "expected": "reject_without_retaining_or_echoing_transport_canary",
+      "reason": "Hash binding does not make unsafe compatibility metadata safe."
+    },
+    {
+      "id": "SEC04",
+      "base": "CAP01",
+      "target": "manifest.json",
+      "set_or_add_json_pointer": "/service_token",
+      "value": "SERVICE_TOKEN_CANARY",
+      "expected": "reject_without_retaining_or_echoing_transport_canary",
+      "reason": "Integrity manifests contain only declared identity/file associations."
+    },
+    {
+      "id": "SEC05",
+      "base": "CAP01",
+      "target": "snapshot.json",
+      "set_or_add_json_pointer": "/identity/api_key",
+      "value": "API_KEY_CANARY",
+      "expected": "reject_without_retaining_or_echoing_transport_canary",
+      "reason": "Normalized identity is closed and credential-free."
+    },
+    {
+      "id": "SEC06",
+      "base": "CAP01",
+      "target": "snapshot.json",
+      "set_or_add_json_pointer": "/original_evidence/0/original_json",
+      "value": "{\"authorization\":\"HEADER_CANARY\"}",
+      "expected": "reject_without_retaining_or_echoing_transport_canary",
+      "reason": "Nested evidence follows admitted domain fields; it is not an escape hatch for transport data."
+    },
+    {
+      "id": "SEC07",
+      "base": "CAP01",
+      "target": "snapshot.json",
+      "set_or_add_json_pointer": "/findings",
+      "value": [
+        {
+          "kind": "arbitrary_error",
+          "rule_id": "local-api.unknown.v1",
+          "observed_json": "{\"error\":\"SERVICE_TOKEN_CANARY\"}",
+          "affected": [],
+          "evidence": []
+        }
+      ],
+      "expected": "reject_without_retaining_or_echoing_transport_canary",
+      "reason": "Unknown finding rules/arbitrary transport errors refuse without exposing raw text."
+    },
+    {
+      "id": "SEC08",
+      "base": "CAP01",
+      "target": "audit.json",
+      "set_or_add_json_pointer": "/requests/0/url",
+      "value": "http://127.0.0.1:11522/api/rendered?token=SERVICE_TOKEN_CANARY",
+      "expected": "reject_without_retaining_or_echoing_transport_canary",
+      "reason": "Service-issued request/rendered URLs are not symbolic request identities."
+    },
+    {
+      "id": "SEC09",
+      "base": "CAP01",
+      "external_acquisition_context": {
+        "credential_provider_value": "API_KEY_CANARY",
+        "headers": {
+          "Authorization": "Bearer HEADER_CANARY"
+        },
+        "service_rendered_note_url": "http://127.0.0.1:11522/render?token=SERVICE_TOKEN_CANARY"
+      },
+      "expected": "same_exact_retained_files_as_CAP01_without_any_transport_canary",
+      "reason": "Separate transport/provider inputs never enter semantic source/snapshot/audit/manifest/payload/result/log/vault projections."
+    },
+    {
+      "id": "SEC10",
+      "base": "CAP01",
+      "target": "payload/0000000000000001.bin",
+      "replacement_utf8": "HEADER_CANARY",
+      "provenance": "copied-transport-header",
+      "expected": "reject_unsafe_retention_and_payload_hash_mismatch",
+      "reason": "Payload capture is not storage for headers; all partial/failure artifacts obey the boundary."
+    },
+    {
+      "id": "SEC11",
+      "base": "CAP01",
+      "authored_external_uri": "https://example.invalid/resource?token=authored-value&x=1#part",
+      "provenance": "qualified-source-attachment-type3",
+      "expected": "preserve_exact_URI_in_source_payload_attachment_and_normalized_asset",
+      "reason": "A query key named token does not turn an authored external destination into transport data."
+    },
+    {
+      "id": "SEC12",
+      "base": "CAP01",
+      "candidate_external_uri": "http://127.0.0.1:11522/render?token=SERVICE_TOKEN_CANARY",
+      "provenance": "service-issued-rendered-note",
+      "expected": "reject_as_authored_external_resource_without_retaining_or_echoing_service_token",
+      "reason": "Provenance distinguishes service URLs from authored destinations; never rewrite/query-strip and pretend equivalence."
+    }
+  ],
+  "decimal_position_vectors": [
+    {
+      "id": "DEC01",
+      "raw_API_position_number_token": "1",
+      "expected_projected_canonical_utf8": "{\"decimal\":\"1\"}",
+      "expected_unframed_sha256": "c29c82eacf73826817b2f416d59af32da0567593d64f0e3161ccb482da51061e"
+    },
+    {
+      "id": "DEC02",
+      "raw_API_position_number_token": "1.0",
+      "expected_projected_canonical_utf8": "{\"decimal\":\"1\"}",
+      "expected_unframed_sha256": "c29c82eacf73826817b2f416d59af32da0567593d64f0e3161ccb482da51061e"
+    },
+    {
+      "id": "DEC03",
+      "raw_API_position_number_token": "1e0",
+      "expected_projected_canonical_utf8": "{\"decimal\":\"1\"}",
+      "expected_unframed_sha256": "c29c82eacf73826817b2f416d59af32da0567593d64f0e3161ccb482da51061e"
+    },
+    {
+      "id": "DEC04",
+      "raw_API_position_number_token": "1.25",
+      "expected_projected_canonical_utf8": "{\"decimal\":\"1.25\"}",
+      "expected_unframed_sha256": "4a53a5a6b8f2208b3e79707a24f2c7a4540274e6bb275ab8287809618bdb6ed3"
+    },
+    {
+      "id": "DEC05",
+      "raw_API_position_number_token": "1.2500",
+      "expected_projected_canonical_utf8": "{\"decimal\":\"1.25\"}",
+      "expected_unframed_sha256": "4a53a5a6b8f2208b3e79707a24f2c7a4540274e6bb275ab8287809618bdb6ed3"
+    },
+    {
+      "id": "DEC06",
+      "raw_API_position_number_token": "125e-2",
+      "expected_projected_canonical_utf8": "{\"decimal\":\"1.25\"}",
+      "expected_unframed_sha256": "4a53a5a6b8f2208b3e79707a24f2c7a4540274e6bb275ab8287809618bdb6ed3"
+    },
+    {
+      "id": "DEC07",
+      "raw_API_position_number_token": "1e-7",
+      "expected_projected_canonical_utf8": "{\"decimal\":\"0.0000001\"}",
+      "expected_unframed_sha256": "4539fe25132ade9b4f33052da24707c211eb1ff0803473b47eb07084736b7bc5"
+    },
+    {
+      "id": "DEC08",
+      "raw_API_position_number_token": "-0",
+      "expected_projected_canonical_utf8": "{\"decimal\":\"0\"}",
+      "expected_unframed_sha256": "7aa7e6afd39e9f2857aed0063cfdf95d8550f9da510557703e4838eb904ace01"
+    },
+    {
+      "id": "DEC09",
+      "raw_API_position_number_token": "-0.0e+10",
+      "expected_projected_canonical_utf8": "{\"decimal\":\"0\"}",
+      "expected_unframed_sha256": "7aa7e6afd39e9f2857aed0063cfdf95d8550f9da510557703e4838eb904ace01"
+    },
+    {
+      "id": "DEC10",
+      "raw_API_position_number_token": "9007199254740993.1",
+      "expected_projected_canonical_utf8": "{\"decimal\":\"9007199254740993.1\"}",
+      "expected_unframed_sha256": "cc09adf2f77c312a8ab87b123a330778c706c3f2294470442421201ab62b1e2a"
+    },
+    {
+      "id": "DEC11",
+      "raw_API_position_number_token": "-12.34000",
+      "expected_projected_canonical_utf8": "{\"decimal\":\"-12.34\"}",
+      "expected_unframed_sha256": "c9ba24dab7c1a00e910d0ab664c7376384280ad384577b4a4a0aff5f5603734b"
+    },
+    {
+      "id": "DEC12",
+      "raw_API_position_number_token": "1.5",
+      "expected_projected_canonical_utf8": "{\"decimal\":\"1.5\"}",
+      "expected_unframed_sha256": "df8f1a0115056dc29cff1931ae9e0f4af17de364f33126f2f3865e61728a59fb"
+    }
+  ],
+  "decimal_position_relations": [
+    {
+      "cases": [
+        "DEC01",
+        "DEC02",
+        "DEC03"
+      ],
+      "expected": "equal"
+    },
+    {
+      "cases": [
+        "DEC04",
+        "DEC05",
+        "DEC06"
+      ],
+      "expected": "equal"
+    },
+    {
+      "cases": [
+        "DEC08",
+        "DEC09"
+      ],
+      "expected": "equal"
+    },
+    {
+      "cases": [
+        "DEC04",
+        "DEC12"
+      ],
+      "expected": "different"
+    }
+  ],
+  "decimal_position_rejections": [
+    {
+      "raw_API_position_token": "true",
+      "expected": "reject_non_numeric_position"
+    },
+    {
+      "raw_API_position_token": "\"1.25\"",
+      "expected": "reject_non_numeric_position"
+    },
+    {
+      "raw_API_position_token": "null",
+      "expected": "reject_non_numeric_position"
+    },
+    {
+      "raw_API_position_token": "NaN",
+      "expected": "reject_non_numeric_position"
+    },
+    {
+      "raw_API_position_token": "Infinity",
+      "expected": "reject_non_numeric_position"
+    },
+    {
+      "raw_API_position_token": "{\"decimal\":\"1\"}",
+      "expected": "reject_non_numeric_position"
+    },
+    {
+      "raw_API_position_number_token": "1e1000000000",
+      "remaining_encoded_metadata_budget": 1024,
+      "expected": "safe_limit_failure_before_expansion",
+      "reason": "Estimate exact expanded byte/digit length before allocation; never round or silently truncate."
+    }
+  ],
+  "limits": [
+    "These are fixed declarative expected outcomes for the later library implementation; no implemented runtime verifier, secret audit or live preservation is claimed."
+  ]
+}

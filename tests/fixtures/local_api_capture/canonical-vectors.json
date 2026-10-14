@@ -1,0 +1,209 @@
+{
+  "author": "selection_verifier",
+  "basis": "Accepted #177/#180 plus proposed CJSON1 framing; expected canonical strings are independently authored literals, not product-generated output.",
+  "canonicalizer": "CJSON1",
+  "vectors": [
+    {
+      "id": "CJ01",
+      "meaning": "Object ordering, null, booleans and integers",
+      "input_json": "{\"z\":null,\"t\":true,\"f\":false,\"n\":-12,\"zero\":0}",
+      "expected_canonical_utf8": "{\"f\":false,\"n\":-12,\"t\":true,\"z\":null,\"zero\":0}",
+      "expected_canonical_hex": "7b2266223a66616c73652c226e223a2d31322c2274223a747275652c227a223a6e756c6c2c227a65726f223a307d",
+      "expected_canonical_length": 46,
+      "expected_unframed_sha256": "c81be3cbe96cb552df5ed7db7b10a3e8e06e6a3b32d0876a7e2071fa04fc1f63"
+    },
+    {
+      "id": "CJ02",
+      "meaning": "UTF-8 key ordering and literal Unicode scalar encoding",
+      "input_json": "{\"😀\":\"emoji\",\"é\":\"accent\",\"a\":\"ascii\",\"中\":\"ideograph\",\"\":\"private-use scalar\"}",
+      "expected_canonical_utf8": "{\"a\":\"ascii\",\"é\":\"accent\",\"中\":\"ideograph\",\"\":\"private-use scalar\",\"😀\":\"emoji\"}",
+      "expected_canonical_hex": "7b2261223a226173636969222c22c3a9223a22616363656e74222c22e4b8ad223a226964656f6772617068222c22ee8080223a22707269766174652d757365207363616c6172222c22f09f9880223a22656d6f6a69227d",
+      "expected_canonical_length": 87,
+      "expected_unframed_sha256": "7dbaef43a5250c6e5fe5042d419b6099d63de2ed8cae2e6dd193c244a911b133"
+    },
+    {
+      "id": "CJ03",
+      "meaning": "C0 escaping uses lowercase u00xx rather than short JSON escapes",
+      "input_json": "{\"s\":\"\\u0000\\b\\t\\n\\f\\r\\u001f\"}",
+      "expected_canonical_utf8": "{\"s\":\"\\u0000\\u0008\\u0009\\u000a\\u000c\\u000d\\u001f\"}",
+      "expected_canonical_hex": "7b2273223a225c75303030305c75303030385c75303030395c75303030615c75303030635c75303030645c7530303166227d",
+      "expected_canonical_length": 50,
+      "expected_unframed_sha256": "44da4b656d54e507235af9522eeea778480c33ba4f89e34ba46dd879419ac636"
+    },
+    {
+      "id": "CJ04",
+      "meaning": "Only quote/backslash and C0 are escaped; slash and non-C0 remain literal",
+      "input_json": "{\"s\":\"quote\\\" slash\\/ backslash\\\\\"}",
+      "expected_canonical_utf8": "{\"s\":\"quote\\\" slash/ backslash\\\\\"}",
+      "expected_canonical_hex": "7b2273223a2271756f74655c2220736c6173682f206261636b736c6173685c5c227d",
+      "expected_canonical_length": 34,
+      "expected_unframed_sha256": "12516da96346b229e838f9ef93760546d295f0bdc2051afdc62bc8967f2c509d"
+    },
+    {
+      "id": "CJ05",
+      "meaning": "Arrays retain order and authored whitespace/literal backslash-n",
+      "input_json": "{\"sequence\":[\"first\",\"second\"],\"text\":\"  Café\\\\n\"}",
+      "expected_canonical_utf8": "{\"sequence\":[\"first\",\"second\"],\"text\":\"  Café\\\\n\"}",
+      "expected_canonical_hex": "7b2273657175656e6365223a5b226669727374222c227365636f6e64225d2c2274657874223a222020436166c3a95c5c6e227d",
+      "expected_canonical_length": 51,
+      "expected_unframed_sha256": "80d4aa334fc7054de2defb345015ace2c91f07d9d1d4c9db00b1fa63507b04f3"
+    },
+    {
+      "id": "CJ06",
+      "meaning": "Decomposed authored Unicode is not NFC-normalized",
+      "input_json": "{\"text\":\"é\"}",
+      "expected_canonical_utf8": "{\"text\":\"é\"}",
+      "expected_canonical_hex": "7b2274657874223a2265cc81227d",
+      "expected_canonical_length": 14,
+      "expected_unframed_sha256": "9b53287cd41955684903378d2b1b4a3ddea9d80d67dcd026319a7c5a9a8a8b42"
+    },
+    {
+      "id": "CJ07",
+      "meaning": "Precomposed authored Unicode remains distinct from CJ06",
+      "input_json": "{\"text\":\"é\"}",
+      "expected_canonical_utf8": "{\"text\":\"é\"}",
+      "expected_canonical_hex": "7b2274657874223a22c3a9227d",
+      "expected_canonical_length": 13,
+      "expected_unframed_sha256": "42d3cbf59fdccced04e5dff14433fb52d34d58e385e9770ffd896ff517d63b92"
+    },
+    {
+      "id": "CJ08",
+      "meaning": "Missing property and explicit null remain distinct",
+      "input_json": "{\"empty\":\"\",\"present\":null}",
+      "expected_canonical_utf8": "{\"empty\":\"\",\"present\":null}",
+      "expected_canonical_hex": "7b22656d707479223a22222c2270726573656e74223a6e756c6c7d",
+      "expected_canonical_length": 27,
+      "expected_unframed_sha256": "0611630babb19d103683bbc95c69f7fb68e446493e203547311a565dfe91cd3d"
+    },
+    {
+      "id": "CJ09",
+      "meaning": "An absent property stays absent",
+      "input_json": "{\"empty\":\"\"}",
+      "expected_canonical_utf8": "{\"empty\":\"\"}",
+      "expected_canonical_hex": "7b22656d707479223a22227d",
+      "expected_canonical_length": 12,
+      "expected_unframed_sha256": "5ddea0bed9ab50512425b4c9fa9698e0bacfb81414a3e65f3af66c9e85a9c8f0"
+    },
+    {
+      "id": "CJ10",
+      "meaning": "JSON spelling variations canonicalize to the same scalar values as CJ07",
+      "input_json": " { \"text\" : \"\\u00e9\" } ",
+      "expected_canonical_utf8": "{\"text\":\"é\"}",
+      "expected_canonical_hex": "7b2274657874223a22c3a9227d",
+      "expected_canonical_length": 13,
+      "expected_unframed_sha256": "42d3cbf59fdccced04e5dff14433fb52d34d58e385e9770ffd896ff517d63b92"
+    },
+    {
+      "id": "CJ11",
+      "meaning": "Unescaped U+007F, U+2028 and U+2029 are literal UTF-8",
+      "input_json": "{\"s\":\"  \"}",
+      "expected_canonical_utf8": "{\"s\":\"  \"}",
+      "expected_canonical_hex": "7b2273223a227fe280a8e280a9227d",
+      "expected_canonical_length": 15,
+      "expected_unframed_sha256": "da4cc65bdb6002dcd6eb1076f48a550e2b3fbb139844a8ad738a6be0c574f716"
+    },
+    {
+      "id": "CJ12",
+      "meaning": "Authored CRLF is retained as two exact C0 scalars",
+      "input_json": "{\"text\":\"line1\\r\\nline2\\n\"}",
+      "expected_canonical_utf8": "{\"text\":\"line1\\u000d\\u000aline2\\u000a\"}",
+      "expected_canonical_hex": "7b2274657874223a226c696e65315c75303030645c75303030616c696e65325c7530303061227d",
+      "expected_canonical_length": 39,
+      "expected_unframed_sha256": "abab79eb0cb0455d2ef0fcd5897c42d2cf4f2e4f2109c76d23b2f66662c24197"
+    },
+    {
+      "id": "CJ13",
+      "meaning": "Escaped surrogate pair decodes to one valid Unicode scalar",
+      "input_json": "{\"s\":\"\\ud83d\\ude00\"}",
+      "expected_canonical_utf8": "{\"s\":\"😀\"}",
+      "expected_canonical_hex": "7b2273223a22f09f9880227d",
+      "expected_canonical_length": 12,
+      "expected_unframed_sha256": "f9949e1006d1ca22bc0b60ea94f09779f11a8f0a29bae250fc7ab313d879f5e7"
+    }
+  ],
+  "relations": [
+    {
+      "left": "CJ06",
+      "right": "CJ07",
+      "expected": "different_canonical_bytes_and_sha256",
+      "reason": "Authored Unicode normalization distinction is preserved."
+    },
+    {
+      "left": "CJ07",
+      "right": "CJ10",
+      "expected": "equal_canonical_bytes_and_sha256",
+      "reason": "JSON lexical spelling is not authored source text."
+    },
+    {
+      "left": "CJ08",
+      "right": "CJ09",
+      "expected": "different_canonical_bytes_and_sha256",
+      "reason": "Explicit null is not omission."
+    }
+  ],
+  "invalid": [
+    {
+      "id": "CJ-N01",
+      "meaning": "Duplicate member names refuse, including equal values",
+      "input_json": "{\"a\":1,\"a\":1}",
+      "expected": "reject_cjson1"
+    },
+    {
+      "id": "CJ-N02",
+      "meaning": "Fractional numbers refuse",
+      "input_json": "{\"n\":1.0}",
+      "expected": "reject_cjson1"
+    },
+    {
+      "id": "CJ-N03",
+      "meaning": "Exponent number spellings refuse",
+      "input_json": "{\"n\":1e0}",
+      "expected": "reject_cjson1"
+    },
+    {
+      "id": "CJ-N04",
+      "meaning": "Negative-zero source JSON spelling refuses before numeric normalization",
+      "input_json": "{\"n\":-0}",
+      "expected": "reject_cjson1"
+    },
+    {
+      "id": "CJ-N05",
+      "meaning": "Non-finite numbers refuse",
+      "input_json": "{\"n\":NaN}",
+      "expected": "reject_cjson1"
+    },
+    {
+      "id": "CJ-N06",
+      "meaning": "Lone UTF-16 surrogate is not a Unicode scalar",
+      "input_json": "{\"s\":\"\\ud800\"}",
+      "expected": "reject_cjson1"
+    },
+    {
+      "id": "CJ-N10",
+      "meaning": "Leading-zero integer spellings refuse",
+      "input_json": "{\"n\":01}",
+      "expected": "reject_cjson1"
+    },
+    {
+      "id": "CJ-N11",
+      "meaning": "Escaped-equivalent object keys are duplicates after decoding",
+      "input_json": "{\"a\":1,\"\\u0061\":2}",
+      "expected": "reject_cjson1"
+    },
+    {
+      "id": "CJ-N08",
+      "meaning": "Invalid UTF-8 refuses before JSON parsing",
+      "input_bytes_hex": "7b2273223a22ff227d",
+      "expected": "reject_cjson1"
+    },
+    {
+      "id": "CJ-N09",
+      "meaning": "UTF-8 BOM refuses at canonical JSON ingestion boundary",
+      "input_bytes_hex": "efbbbf7b7d",
+      "expected": "reject_cjson1"
+    }
+  ],
+  "limits": [
+    "These primitive values establish byte encoding only; semantic source/snapshot/manifest documents require their separate closed schemas and projection rules."
+  ]
+}
