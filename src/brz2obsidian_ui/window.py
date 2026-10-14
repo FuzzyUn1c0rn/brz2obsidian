@@ -366,6 +366,7 @@ class MainWindow(QMainWindow):
         api_layout.addWidget(self.api_refresh)
         self.api_brains = QComboBox()
         self.api_brains.setAccessibleName("Accessible Brains")
+        self.api_brains.view().setTextElideMode(Qt.TextElideMode.ElideRight)
         self.api_brains.setMinimumContentsLength(12)
         self.api_brains.setSizeAdjustPolicy(
             QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
@@ -722,11 +723,23 @@ class MainWindow(QMainWindow):
             selected_name = None
             for brain in self.snapshot.brains:
                 self.api_brains.addItem(
-                    brain.name + " — " + brain.brain_id, brain.brain_id
+                    brain.brain_id + " — " + brain.name, brain.brain_id
                 )
                 if brain.brain_id == selected_id:
                     self.api_brains.setCurrentIndex(self.api_brains.count() - 1)
                     selected_name = brain.name
+            # Keep complete identities before the elided name, including the
+            # popup's scrollbar/margins at the task sheet's minimum width.
+            identity_width = max(
+                (
+                    self.api_brains.view().fontMetrics().horizontalAdvance(b.brain_id)
+                    for b in self.snapshot.brains
+                ),
+                default=0,
+            )
+            self.api_brains.view().setMinimumWidth(
+                min(self.screen().availableGeometry().width(), identity_width + 48)
+            )
             self.source_name.setText(selected_name or "Choose an accessible Brain")
             self.source_path.setPlainText(selected_id or "No Brain selected")
             self.source_path.setAccessibleName("Selected Brain ID")

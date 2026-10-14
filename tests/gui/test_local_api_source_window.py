@@ -8,9 +8,17 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QComboBox, QLineEdit, QPushButton
+from PySide6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QLineEdit,
+    QPushButton,
+    QStyle,
+    QStyleOptionViewItem,
+)
 
 from tests.support.local_api import BRAIN, HOME, KEY, api_server
 
@@ -224,5 +232,75 @@ def test_failed_api_refresh_shows_safe_guidance_and_retries_same_selection(monke
             assert window.snapshot.source_selection.brain_id == BRAIN
             assert control(window, QPushButton, "Inspect Brain").isEnabled()
         finally:
+            window.shutdown()
+            window.deleteLater()
+
+
+def test_narrow_popup_keeps_complete_distinct_ids_before_eliding_duplicate_names(
+    monkeypatch,
+):
+    from brz2obsidian_ui.window import MainWindow
+
+    monkeypatch.setenv("THE_BRAIN_LOCAL_API_KEY", KEY)
+    app = QApplication.instance() or QApplication([])
+    ids = [
+        BRAIN,
+        "00000002-1111-4111-8111-111111111111",
+        "00000003-1111-4111-8111-111111111111",
+    ]
+    with api_server() as (api, address):
+        api.overrides["/api/brains"] = (
+            200,
+            [
+                {
+                    "id": key,
+                    "name": "Synthetic duplicate Brain " * 8,
+                    "homeThoughtId": HOME,
+                }
+                for key in ids
+            ],
+        )
+        window = MainWindow()
+        window.resize(440, 570)
+        window.show()
+        try:
+            control(window, QComboBox, "Source kind").setCurrentIndex(1)
+            until(app, lambda: window.snapshot.source_kind == "local-api")
+            control(window, QLineEdit, "Local API address").setText(address)
+            until(app, lambda: window.snapshot.api_config.api_url == address)
+            control(window, QPushButton, "Refresh accessible Brains").click()
+            until(app, lambda: window.snapshot.brain_list_status == "ready")
+            brains = control(window, QComboBox, "Accessible Brains")
+            brains.showPopup()
+            app.processEvents()
+            view = brains.view()
+            assert view.isVisible() and window.width() == 440
+            rendered = []
+            for row, brain_id in enumerate(ids, start=1):
+                index = view.model().index(row, 0)
+                option = QStyleOptionViewItem()
+                option.initFrom(view)
+                option.rect = view.visualRect(index)
+                option.textElideMode = view.textElideMode()
+                option.font = view.font()
+                option.text = index.data(Qt.ItemDataRole.DisplayRole)
+                text_rect = view.style().subElementRect(
+                    QStyle.SubElement.SE_ItemViewItemText, option, view
+                )
+                shown = QFontMetrics(option.font).elidedText(
+                    option.text, option.textElideMode, text_rect.width()
+                )
+                assert brain_id in shown
+                rendered.append(shown)
+            assert len(set(rendered)) == 3
+            QTest.mouseClick(
+                view.viewport(),
+                Qt.MouseButton.LeftButton,
+                pos=view.visualRect(view.model().index(2, 0)).center(),
+            )
+            until(app, lambda: window.snapshot.source_selection is not None)
+            assert window.snapshot.source_selection.brain_id == ids[1]
+        finally:
+            brains.hidePopup() if "brains" in locals() else None
             window.shutdown()
             window.deleteLater()
