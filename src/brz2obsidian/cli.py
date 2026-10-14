@@ -9,9 +9,14 @@ class SafeArgumentParser(argparse.ArgumentParser):
 
     def error(self, message):
         self.print_usage(sys.stderr)
+        category = (
+            "unrecognized arguments"
+            if message.startswith("unrecognized arguments:")
+            else "invalid command arguments"
+        )
         self.exit(
             2,
-            f"{self.prog}: error: invalid command arguments; use --help for accepted options\n",
+            f"{self.prog}: error: {category}; use --help for accepted options\n",
         )
 
 

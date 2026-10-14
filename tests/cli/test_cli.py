@@ -85,6 +85,11 @@ def test_cli_local_api_configuration_errors_are_safe_json_and_brz_rejects_api_op
     assert main(["inspect", "value", "--source-kind", "SECRET_CANARY"]) == 1
     captured = capsys.readouterr()
     assert captured.out == "" and "CANARY" not in captured.err
+    assert "invalid command arguments; use --help" in captured.err
+    assert main(["inspect", "value", "--SECRET_CANARY", "VALUE_CANARY"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == "" and "CANARY" not in captured.err
+    assert "unrecognized arguments; use --help" in captured.err
 
 
 def test_installed_console_and_module_emit_one_json_envelope(tmp_path):
