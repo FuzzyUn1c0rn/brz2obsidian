@@ -4,6 +4,7 @@ import os
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar
+from dataclasses import dataclass
 
 from brz2obsidian.contracts import MigrationFailed, MigrationRefused
 
@@ -12,6 +13,12 @@ from .config import LocalApiConfig, LocalApiSourceRef
 from .errors import failure, refuse
 from .metadata import LocalApiRunMetadata
 from .transport import LocalHttp
+
+
+@dataclass(frozen=True)
+class AccessibleBrain:
+    brain_id: str
+    name: str
 
 
 class LocalApiSourceModule:
@@ -30,6 +37,44 @@ class LocalApiSourceModule:
         )
         self._active_session = ContextVar("local_api_active_session", default=None)
 
+    def list_brains(self):
+        """Bounded unscoped listing; no capture or invented Brain audit identity."""
+        try:
+            token = self.credentials()
+            if not isinstance(token, str) or not token:
+                raise failure(
+                    "api_credentials_missing",
+                    "The local API credential provider is unavailable",
+                )
+            client = LocalHttp(self.config, token, None, self.clock)
+            rows = client.json("brain", "/brains")
+            if (
+                not isinstance(rows, list)
+                or len(rows) > self.config.max_traversal_items
+            ):
+                refuse("Accessible Brain inventory is malformed or exceeds its bound")
+            client.ensure_safe(rows)
+            seen, result = set(), []
+            for row in rows:
+                if (
+                    not isinstance(row, dict)
+                    or not isinstance(row.get("name"), str)
+                    or not row["name"].strip()
+                ):
+                    refuse("Accessible Brain metadata is malformed")
+                brain_id = LocalApiSourceRef(row.get("id")).brain_id
+                if brain_id in seen:
+                    refuse("Accessible Brain identities conflict")
+                seen.add(brain_id)
+                result.append(AccessibleBrain(brain_id, row["name"]))
+            return tuple(result)
+        except MigrationFailed, MigrationRefused:
+            raise
+        except Exception:  # noqa: BLE001 -- never expose external provider or malformed input text.
+            raise failure(
+                "api_listing_failed", "Accessible Brains could not be listed safely"
+            ) from None
+
     def run_metadata(self, metadata):
         session = self._active_session.get()
         if session is None or session.closed:
@@ -47,7 +92,10 @@ class LocalApiSourceModule:
                 refuse("Select a canonical local API Brain reference")
             token = self.credentials()
             if not isinstance(token, str) or not token:
-                refuse("The local API credential provider is unavailable")
+                raise failure(
+                    "api_credentials_missing",
+                    "The local API credential provider is unavailable",
+                )
             client = LocalHttp(self.config, token, source_ref.brain_id, self.clock)
             session = Acquisition(
                 client, self.config, source_ref.brain_id, self.clock

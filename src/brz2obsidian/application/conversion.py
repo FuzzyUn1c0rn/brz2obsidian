@@ -17,13 +17,13 @@ from brz2obsidian.contracts import Counts, Issue, MigrationRefused
 # These messages cover safe actions while retaining only explicit path facts.
 _SAFE_FINDINGS = {
     "formatting_loss": "Included note formatting needs review: table layout may become responsive, custom icons use visible title fallbacks, or an insert remains unsupported. Review affected notes and declarations in the Migration report and edit the converted Markdown if needed.",
-    "review_changed": "The current source or conversion compatibility changed. Inspect the current archive before converting.",
-    "source_changed": "The source changed during conversion. Inspect a stable export before converting again.",
-    "invalid_source": "The source or prepared output is inconsistent. Review the export and inspect again.",
-    "invalid_entry": "The export needs a valid live Home thought. Set Home and re-export.",
-    "invalid_reference": "Source references could not be interpreted safely. Review the export and inspect again.",
-    "unsupported_feature": "The source contains an unsupported feature. Review the export before continuing.",
-    "unsupported_format": "The source format and conversion profile are incompatible. Review the export and inspect again.",
+    "review_changed": "The current source or conversion compatibility changed. Inspect the current source before converting.",
+    "source_changed": "The source changed during conversion. Inspect the current stable source before converting again.",
+    "invalid_source": "The source or prepared output is inconsistent. Review the source and inspect again.",
+    "invalid_entry": "The source needs a valid live Home thought. Set Home and inspect again.",
+    "invalid_reference": "Source references could not be interpreted safely. Review the source and inspect again.",
+    "unsupported_feature": "The source contains an unsupported feature. Review the source before continuing.",
+    "unsupported_format": "The source format and conversion profile are incompatible. Review the source and inspect again.",
     "approved_source_gap": "Source note, icon or resource bytes are unavailable. Conversion discloses these source limitations; review the migration report.",
     "approved_metadata_discrepancy": "Source metadata differs from verified available bytes. Review the migration report for the disclosed discrepancy.",
     "target_path_too_long": "A generated path exceeds the final supported Windows limit. Choose a shorter output parent or vault name.",
@@ -31,7 +31,7 @@ _SAFE_FINDINGS = {
     "destination_not_empty": "The destination is populated or unavailable. Review it and choose another absent or empty destination.",
     "unsafe_destination": "The destination has an unsafe path or reparse ancestor. Choose another output parent.",
     "write_failure": "Conversion could not write or publish the vault. Review filesystem access, free space and the destination before another attempt.",
-    "payload_integrity_failure": "Staged output failed verification. Review the export and filesystem before another attempt.",
+    "payload_integrity_failure": "Staged output failed verification. Review the source and filesystem before another attempt.",
     "cleanup_failure": "Owned staging cleanup did not complete. Review the exact reported leftover path; the app will not delete it or retry automatically. Use an absent or empty destination with a shorter path and check filesystem access.",
     "session_teardown_failure": "The source could not be closed normally. Review source access and the reported publication status.",
     "operation_failure": "Conversion did not complete normally. Review source access and the destination before another attempt.",
@@ -53,7 +53,7 @@ def _safe_finding(issue):
         severity=issue.severity,
         message=_SAFE_FINDINGS.get(
             issue.code,
-            "Conversion reported a source or filesystem limitation. Review the export, destination and publication status before continuing.",
+            "Conversion reported a source or filesystem limitation. Review the source, destination and publication status before continuing.",
         ),
         path=path,
     )
@@ -105,7 +105,7 @@ class _ReviewedPublisher:
                         code="review_changed",
                         phase="publication",
                         message="The current source or conversion compatibility does not match the reviewed inspection.",
-                        guidance="Inspect the current archive before converting.",
+                        guidance="Inspect the current source before converting.",
                     ),
                 )
             )
@@ -149,7 +149,7 @@ def convert(
     ):
         return _refused(
             "review_required",
-            "Inspect the selected current archive before converting.",
+            "Inspect the selected current source before converting.",
             destination,
             source=source,
             reviewed=reviewed,

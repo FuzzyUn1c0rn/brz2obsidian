@@ -31,3 +31,30 @@ def local_api_workflow(config=None, *, credentials=None):
     metadata_factory = workflow.metadata_factory
     workflow.metadata_factory = lambda: module.run_metadata(metadata_factory())
     return workflow
+
+
+def validate_api_config(values):
+    from brz2obsidian.sources.thebrain.local_api import LocalApiConfig
+
+    try:
+        return LocalApiConfig(**values)
+    except ValueError, TypeError:
+        raise ValueError(
+            "Use a permitted local API address and valid bounded acquisition settings"
+        ) from None
+
+
+def selected_api_workflow(selection, credentials=None):
+    from brz2obsidian.sources.thebrain.local_api import LocalApiSourceRef
+
+    return local_api_workflow(
+        validate_api_config(selection.config.model_dump()), credentials=credentials
+    ), LocalApiSourceRef(selection.brain_id)
+
+
+def list_api_brains(config, credentials=None):
+    from brz2obsidian.sources.thebrain.local_api import LocalApiSourceModule
+
+    return LocalApiSourceModule(
+        validate_api_config(config.model_dump()), credentials=credentials
+    ).list_brains()

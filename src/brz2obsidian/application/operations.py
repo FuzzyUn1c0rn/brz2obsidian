@@ -10,8 +10,11 @@ from uuid import uuid4
 
 from brz2obsidian import __version__
 from brz2obsidian.application.contracts import (
+    ApiAcquisitionConfig,
     ApplyResult,
     ApplyTransportFailure,
+    BrainChoice,
+    BrainListResult,
     BrzSourceSelection,
     CheckArguments,
     CheckResult,
@@ -24,6 +27,7 @@ from brz2obsidian.application.contracts import (
     Finding,
     InspectArguments,
     InspectionResult,
+    ListBrainsArguments,
     LocalApiSourceSelection,
     PersistOutputParent,
     Publication,
@@ -40,54 +44,83 @@ from brz2obsidian.application.contracts import (
     source_selection,
 )
 from brz2obsidian.application.conversion import convert
-from brz2obsidian.contracts import Counts
+from brz2obsidian.contracts import Counts, MigrationFailed, MigrationRefused
 from brz2obsidian.publication.filesystem import preflight_destination
 
 # Deliberately static messages: backend Issue.message/evidence can contain authored
 # text, filenames or exception strings. Never project them across this boundary.
 SAFE_ISSUES = {
+    "api_credentials_missing": "Set THE_BRAIN_LOCAL_API_KEY in the launch environment or configure the external credential provider, then try again.",
+    "api_authentication_failed": "The local API denied access. Check its current key in TheBrain settings and update the credential provider or THE_BRAIN_LOCAL_API_KEY.",
+    "api_transport_failed": "The local API could not be reached. Start TheBrain, enable its local API and check the configured address before retrying.",
+    "api_request_timeout": "A local API request timed out. Check TheBrain and the configured bounds, then retry.",
     "formatting_loss": "Included note formatting needs review: table layout may become responsive, custom icons use visible title fallbacks, or an insert remains unsupported. Review affected notes and declarations in the Migration report and edit the converted Markdown if needed.",
-    "invalid_source": "The archive does not contain a supported, consistent source. Re-export it from TheBrain.",
-    "invalid_entry": "The source needs a valid live Home thought. Set Home and re-export.",
-    "invalid_reference": "Source references could not be interpreted safely. Review the export and re-export.",
-    "unsupported_feature": "The source contains an unsupported feature. Review the export before continuing.",
-    "source_changed": "The source changed while it was being read. Inspect a stable export again.",
-    "payload_read_failure": "An archived resource could not be read. Check the export and source access.",
+    "invalid_source": "The selected source is not supported or consistent. Correct the source and inspect again.",
+    "invalid_entry": "The source needs a valid live Home thought. Set Home and inspect again.",
+    "invalid_reference": "Source references could not be interpreted safely. Correct the source and inspect again.",
+    "unsupported_feature": "The source contains an unsupported feature. Review the source before continuing.",
+    "source_changed": "The source changed while it was being read. Inspect the current stable source again.",
+    "payload_read_failure": "A source resource could not be read. Check the source and access.",
     "operation_failure": "Inspection could not complete. Check source access and inspect again.",
     "session_teardown_failure": "The source could not be closed normally. Check source access and inspect again.",
     "target_path_too_long": "A planned path exceeds the supported Windows path limit.",
-    "absent_payload": "An archived resource is unavailable. Review source warnings before conversion.",
+    "absent_payload": "A source resource is unavailable. Review source warnings before conversion.",
     "source_gap": "Source content is unavailable. Review source warnings before conversion.",
     "approved_source_gap": "Source note, icon or resource bytes are unavailable. Their absence will be disclosed during conversion. Review these source limitations before continuing.",
     "approved_metadata_discrepancy": "Source resource metadata differs from the available bytes. Conversion preserves verified actual bytes and reports the discrepancy.",
 }
 
 
-def _source_unavailable(operation):
-    """The selection contract precedes local API acquisition/composition."""
-    message = "The selected source kind is not available in this build."
-    facts = {
-        "outcome": "failed",
-        "status": "inspection_failed"
-        if operation == "inspect"
-        else "conversion_failed",
-        "findings": (
-            Finding(code="operation_unavailable", severity="error", message=message),
-        ),
-        "review_required": True,
-        "diagnostic_text": f"brz2obsidian diagnostic report\nOperation: {operation}\nOutcome: failed\noperation_unavailable: {message}",
-    }
-    if operation == "inspect":
-        return InspectionResult(**facts)
-    return ConversionResult(**facts, publication=Publication(state="not_published"))
-
-
 class Operations:
     """Explicitly injected migration and checker composition for headless callers."""
 
-    def __init__(self, workflow=None, *, checker=None):
+    def __init__(self, workflow=None, *, checker=None, credentials=None):
         self.workflow = workflow
         self.checker = checker
+        self.credentials = credentials
+
+    def _selected_workflow(self, selection):
+        if isinstance(selection, LocalApiSourceSelection):
+            from brz2obsidian.application.wiring import selected_api_workflow
+
+            return selected_api_workflow(selection, self.credentials)
+        if self.workflow is None:
+            from brz2obsidian.application.wiring import default_workflow
+
+            self.workflow = default_workflow()
+        return self.workflow, Path(selection.path).absolute()
+
+    def list_brains(self, config: ApiAcquisitionConfig) -> BrainListResult:
+        from brz2obsidian.application.wiring import list_api_brains
+
+        try:
+            brains = list_api_brains(config, self.credentials)
+            return BrainListResult(
+                outcome="clean",
+                status="brains_listed",
+                brains=tuple(
+                    BrainChoice(brain_id=b.brain_id, name=b.name) for b in brains
+                ),
+            )
+        except (MigrationFailed, MigrationRefused) as error:
+            outcome = "refused" if isinstance(error, MigrationRefused) else "failed"
+            findings = tuple(
+                Finding(
+                    code=i.code if i.code in SAFE_ISSUES else "api_listing_failed",
+                    severity="error",
+                    message=SAFE_ISSUES.get(
+                        i.code,
+                        "The accessible Brain list could not be read safely. Check TheBrain and retry.",
+                    ),
+                )
+                for i in error.issues
+            )
+            return BrainListResult(
+                outcome=outcome,
+                status="brains_" + outcome,
+                findings=findings,
+                diagnostic_text="\n".join(f.message for f in findings),
+            )
 
     def convert_reviewed(
         self,
@@ -98,16 +131,10 @@ class Operations:
         proceed_with_warnings: bool = False,
     ) -> ConversionResult:
         selection = source_selection(source)
-        if isinstance(selection, LocalApiSourceSelection):
-            return _source_unavailable("convert_reviewed")
-        source = Path(selection.path)
-        if self.workflow is None:
-            from brz2obsidian.application.wiring import default_workflow
-
-            self.workflow = default_workflow()
+        workflow, source = self._selected_workflow(selection)
         return convert(
-            self.workflow,
-            source.absolute(),
+            workflow,
+            source,
             validate_destination(parent, vault_name),
             reviewed,
             proceed_with_warnings,
@@ -116,15 +143,8 @@ class Operations:
 
     def inspect(self, source: Path | str | SourceSelection) -> InspectionResult:
         selection = source_selection(source)
-        if isinstance(selection, LocalApiSourceSelection):
-            return _source_unavailable("inspect")
-        source = Path(selection.path)
-        if self.workflow is None:
-            from brz2obsidian.application.wiring import default_workflow
-
-            self.workflow = default_workflow()
-        source = source.absolute()
-        raw = self.workflow.inspect(source)
+        workflow, source = self._selected_workflow(selection)
+        raw = workflow.inspect(source)
         usable = (
             raw.outcome in ("clean", "warnings")
             and raw.inspection is not None
@@ -153,7 +173,7 @@ class Operations:
                 severity=issue.severity,
                 message=SAFE_ISSUES.get(
                     issue.code,
-                    "Inspection found a source limitation. Review the export and its supported content before conversion.",
+                    "Inspection found a source limitation. Review the source and its supported content before conversion.",
                 ),
                 field="source",
             )
@@ -214,6 +234,10 @@ class Operations:
 
 def inspect(source: Path | str | SourceSelection) -> InspectionResult:
     return Operations().inspect(source)
+
+
+def list_brains(config: ApiAcquisitionConfig) -> BrainListResult:
+    return Operations().list_brains(config)
 
 
 def validate_destination(parent: Path, vault_name: str) -> DestinationValidation:
@@ -340,6 +364,62 @@ class ApplicationSession:
             and command.request_id == state.validation_request_id
         ):
             state = self._validation_terminal(state, command)
+        elif (
+            isinstance(command, (ApplyResult, ApplyTransportFailure))
+            and state.busy_operation == "list_brains"
+        ):
+            if command.request_id != state.active_request_id:
+                return SessionUpdate(snapshot=state)
+            trusted = (
+                isinstance(command, ApplyResult)
+                and isinstance(command.result, BrainListResult)
+                and command.input_revision == self._active_revision == state.revision
+                and command.process_status
+                == (0 if command.result.outcome == "clean" else 1)
+            )
+            result = (
+                command.result
+                if trusted
+                else BrainListResult(
+                    outcome="failed",
+                    status="brains_failed",
+                    findings=(
+                        Finding(
+                            code="api_listing_failed",
+                            severity="error",
+                            message="Brain listing did not complete reliably. Check the connection and refresh again.",
+                        ),
+                    ),
+                )
+            )
+            brains = result.brains if result.outcome == "clean" else state.brains
+            selected = state.source_selection
+            if (
+                result.outcome == "clean"
+                and isinstance(selected, LocalApiSourceSelection)
+                and selected.brain_id not in {b.brain_id for b in brains}
+            ):
+                selected = None
+            state = state.model_copy(
+                update={
+                    "brains": brains,
+                    "brain_list_status": "failed"
+                    if result.outcome != "clean"
+                    else "ready"
+                    if brains
+                    else "empty",
+                    "source_selection": selected,
+                    "result": result,
+                    "active_request_id": None,
+                    "busy_operation": None,
+                    "feedback": "",
+                    "reviewed": None,
+                    "review_required": True,
+                }
+            )
+            self._active_revision = None
+            self._diagnostic_text = result.diagnostic_text
+            self._diagnostic_generation += 1
         elif isinstance(command, (ApplyResult, ApplyTransportFailure)):
             if command.request_id != state.active_request_id:
                 return SessionUpdate(snapshot=state)
@@ -460,7 +540,7 @@ class ApplicationSession:
                     "validation_pending": False,
                     "field_errors": (),
                     "operational_status": None,
-                    "feedback": "Inspect the current archive and choose another usable destination for a new conversion.",
+                    "feedback": "Inspect the current source and choose another usable destination for a new conversion.",
                 }
             )
         elif (
@@ -474,7 +554,7 @@ class ApplicationSession:
                         "destination_review_acknowledged": True,
                         "reviewed": None,
                         "review_required": True,
-                        "feedback": "Destination review acknowledged. Publication remains unknown. Inspect the current archive and validate a usable destination before another attempt.",
+                        "feedback": "Destination review acknowledged. Publication remains unknown. Inspect the current source and validate a usable destination before another attempt.",
                     }
                 )
             )
@@ -493,11 +573,56 @@ class ApplicationSession:
                 "inspect",
                 "start_another_conversion",
                 "acknowledge_destination_review",
+                "configure_api",
+                "set_source_kind",
+                "list_brains",
             )
         ):
             # Neither a bypassed form command nor a retry establishes what an
             # unknown attempt published or discards a verified receipt.
             return SessionUpdate(snapshot=state)
+        elif name in ("configure_api", "set_source_kind"):
+            config = command.config if name == "configure_api" else state.api_config
+            kind = command.kind if name == "set_source_kind" else "local-api"
+            if kind != state.source_kind or config != state.api_config:
+                state = state.model_copy(
+                    update={
+                        "revision": state.revision + 1,
+                        "source_kind": kind,
+                        "api_config": config,
+                        "source_selection": None,
+                        "brains": (),
+                        "brain_list_status": "idle",
+                        "reviewed": None,
+                        "review_required": True,
+                        "result": None,
+                        "retry_operation": None,
+                        "feedback": "",
+                        "vault_name": "",
+                    }
+                )
+                self._diagnostic_text = ""
+                self._diagnostic_generation += 1
+                state = self._destination_edited(state)
+        elif name == "list_brains" and "list_brains" in state.allowed_actions:
+            request = WorkerRequest(
+                request_id=str(uuid4()),
+                operation="list_brains",
+                arguments=ListBrainsArguments(config=state.api_config),
+            )
+            self._active_revision = state.revision
+            state = state.model_copy(
+                update={
+                    "active_request_id": request.request_id,
+                    "busy_operation": "list_brains",
+                    "brain_list_status": "loading",
+                    "reviewed": None,
+                    "review_required": True,
+                    "result": None,
+                    "feedback": "",
+                }
+            )
+            effects = (RunOperation(request=request, input_revision=state.revision),)
         elif name == "select_source":
             selected = command.source_selection
             if selected is not None and not same_source_selection(
@@ -508,6 +633,10 @@ class ApplicationSession:
                 state = state.model_copy(
                     update={
                         "source_selection": selected,
+                        "source_kind": selected.kind,
+                        "api_config": selected.config
+                        if isinstance(selected, LocalApiSourceSelection)
+                        else state.api_config,
                         "revision": state.revision + 1,
                         "result": None,
                         "reviewed": None,
@@ -682,6 +811,16 @@ class ApplicationSession:
                 )
         actions = []
         if not self._closed and not state.active_request_id and not state.close_pending:
+            if (
+                state.source_kind == "local-api"
+                and state.api_config is not None
+                and (
+                    state.publication is None
+                    or state.publication.state == "not_published"
+                    or state.destination_review_acknowledged
+                )
+            ):
+                actions.append("list_brains")
             if state.publication is not None and state.publication.receipt_verified:
                 actions.append("start_another_conversion")
             if (
@@ -690,10 +829,17 @@ class ApplicationSession:
                 and not state.destination_review_acknowledged
             ):
                 actions.append("review_destination")
-            if state.source_selection and (
-                state.publication is None
-                or state.publication.state == "not_published"
-                or state.destination_review_acknowledged
+            if (
+                state.source_selection
+                and not (
+                    state.source_kind == "local-api"
+                    and state.brain_list_status == "failed"
+                )
+                and (
+                    state.publication is None
+                    or state.publication.state == "not_published"
+                    or state.destination_review_acknowledged
+                )
             ):
                 actions.append("inspect")
             if state.reviewed:

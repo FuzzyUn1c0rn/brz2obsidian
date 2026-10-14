@@ -12,6 +12,7 @@ from PySide6.QtGui import QTextOption
 from PySide6.QtWidgets import (
     QApplication,
     QBoxLayout,
+    QComboBox,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -31,13 +32,18 @@ from PySide6.QtWidgets import (
 )
 
 from brz2obsidian.application.contracts import (
+    ApiAcquisitionConfig,
     BrzSourceSelection,
+    ConfigureApi,
     ConvertCommand,
     InspectCommand,
+    ListBrainsCommand,
+    LocalApiSourceSelection,
     SelectSource,
     SelectVault,
     SessionSnapshot,
     SetDestination,
+    SetSourceKind,
     SimpleCommand,
 )
 from brz2obsidian.application.runner import HostRunner
@@ -52,7 +58,10 @@ EXPLANATIONS = (
 TITLES = {
     "inspection_clean": "Inspection completed — ready for review",
     "inspection_warnings": "Inspection completed — source warnings",
-    "inspection_refused": "Archive cannot be used",
+    "inspection_refused": "Source cannot be used",
+    "brains_listed": "Accessible Brains loaded",
+    "brains_refused": "Brain listing was refused",
+    "brains_failed": "Brain listing could not complete",
     "inspection_failed": "Inspection could not complete",
     "check_clean": "Check completed — no issues found",
     "check_issues": "Check completed — issues found",
@@ -105,8 +114,8 @@ QPushButton#diagnosticDisclosure:focus { border: 2px solid #315b4c; }
 QPlainTextEdit { background: #f4f6f2; border: 1px solid #e0e5de; font-family: Consolas; font-size: 9pt; }
 QPlainTextEdit:focus { border: 2px solid #315b4c; }
 QLabel:focus { background: #e8f0e8; }
-QLineEdit { background: white; border: 1px solid #cbd3cb; border-radius: 4px; padding: 8px; }
-QLineEdit:focus { border: 2px solid #315b4c; }
+QLineEdit, QComboBox { background: white; border: 1px solid #cbd3cb; border-radius: 4px; padding: 8px; }
+QLineEdit:focus, QComboBox:focus { border: 2px solid #315b4c; }
 QLabel#fieldError { color: #984b3e; }
 QTabBar::tab { padding: 12px 13px; border-bottom: 3px solid transparent; color: #68776e; }
 QTabBar, QTabBar::tab { background: #f8faf7; }
@@ -254,6 +263,7 @@ class MainWindow(QMainWindow):
         self._focus_tracking = True
         QApplication.instance().focusChanged.connect(self._focus_changed)
         self._pending_form = None
+        self._updating_api = False
         self.dialogs = dialogs
         self.diagnostic_actions = diagnostic_actions or DiagnosticActions()
         self.completion_actions = completion_actions or CompletionActions()
@@ -314,6 +324,11 @@ class MainWindow(QMainWindow):
         body.setSpacing(14)
         self.source_heading = label("Source archive", "sectionTitle")
         body.addWidget(self.source_heading)
+        self.source_kind = QComboBox()
+        self.source_kind.setAccessibleName("Source kind")
+        self.source_kind.addItems(["BRZ archive", "TheBrain local API"])
+        self.source_kind.currentIndexChanged.connect(self._source_kind_changed)
+        body.addWidget(self.source_kind)
         source_row = QHBoxLayout()
         source_icon = QLabel()
         source_icon.setPixmap(
@@ -332,6 +347,68 @@ class MainWindow(QMainWindow):
         self.choose.clicked.connect(self.choose_source)
         source_row.addWidget(self.choose)
         body.addLayout(source_row)
+        self.api_panel = QWidget()
+        api_layout = QVBoxLayout(self.api_panel)
+        api_layout.setContentsMargins(0, 0, 0, 0)
+        api_layout.addWidget(label("Local API address"))
+        self.api_address = QLineEdit(ApiAcquisitionConfig().api_url)
+        self.api_address.setAccessibleName("Local API address")
+        self.api_address.textChanged.connect(self._api_settings_edited)
+        api_layout.addWidget(self.api_address)
+        self.api_help = label(
+            "Enable Local API in TheBrain settings and use its current address. Set THE_BRAIN_LOCAL_API_KEY in the launch environment; keys are supplied externally.",
+            "muted",
+        )
+        api_layout.addWidget(self.api_help)
+        self.api_refresh = QPushButton("Refresh Brains")
+        self.api_refresh.setAccessibleName("Refresh accessible Brains")
+        self.api_refresh.clicked.connect(lambda: self.submit(ListBrainsCommand()))
+        api_layout.addWidget(self.api_refresh)
+        self.api_brains = QComboBox()
+        self.api_brains.setAccessibleName("Accessible Brains")
+        self.api_brains.setMinimumContentsLength(12)
+        self.api_brains.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.api_brains.currentIndexChanged.connect(self._api_brain_chosen)
+        api_layout.addWidget(self.api_brains)
+        self.api_status = label("", "muted")
+        self.api_status.setAccessibleName("API connection status")
+        api_layout.addWidget(self.api_status)
+        self.api_advanced_toggle = QPushButton(
+            "▸ Advanced search limits", objectName="diagnosticDisclosure"
+        )
+        self.api_advanced_toggle.setAccessibleName("Advanced API search limits")
+        self.api_advanced_toggle.setCheckable(True)
+        self.api_advanced = QWidget()
+        advanced_layout = QVBoxLayout(self.api_advanced)
+        advanced_layout.setContentsMargins(0, 0, 0, 0)
+        self.api_search_fields = {}
+        for key, title, default in (
+            ("search_initial_results", "Initial result limit", "5000"),
+            ("search_timeout", "Total search seconds", "300"),
+            ("search_max_response_bytes", "Maximum search response bytes", "128000000"),
+            ("search_max_results", "Maximum results (blank disables ceiling)", ""),
+        ):
+            advanced_layout.addWidget(label(title))
+            field = QLineEdit(default)
+            field.setAccessibleName(title)
+            field.textChanged.connect(self._api_settings_edited)
+            self.api_search_fields[key] = field
+            advanced_layout.addWidget(field)
+        self.api_advanced_toggle.toggled.connect(self._api_advanced_changed)
+        self.api_advanced.hide()
+        api_layout.addWidget(self.api_advanced_toggle)
+        api_layout.addWidget(self.api_advanced)
+        self.api_error = label("", "fieldError")
+        self.api_error.setAccessibleName("API configuration error")
+        api_layout.addWidget(self.api_error)
+        self.api_consistency = label(
+            "API acquisition reads several requests over time and is not an atomic snapshot. Inspection acquires and releases a captured copy. Conversion acquires again, repeats the cost and requires another review if content or compatibility changed. Capture verification checks the captured copy, not an unchanged live Brain.",
+            "muted",
+        )
+        api_layout.addWidget(self.api_consistency)
+        body.addWidget(self.api_panel)
         self.vault_error = label("", "fieldError")
         self.vault_error.setAccessibleName("Vault folder error")
         body.addWidget(self.vault_error)
@@ -563,6 +640,118 @@ class MainWindow(QMainWindow):
 
     def submit(self, command):
         self.runner.submit(command)
+
+    def _source_kind_changed(self, index):
+        if not self._updating_api:
+            self.submit(SetSourceKind(kind="local-api" if index == 1 else "brz"))
+
+    def _api_advanced_changed(self, expanded):
+        self.api_advanced.setVisible(expanded)
+        self.api_advanced_toggle.setText(
+            ("▾" if expanded else "▸") + " Advanced search limits"
+        )
+
+    def _api_settings_edited(self, *_):
+        if self._updating_api or self.source_kind.currentIndex() != 1:
+            return
+        try:
+            values = (self.snapshot.api_config or ApiAcquisitionConfig()).model_dump()
+            values["api_url"] = self.api_address.text()
+            for key, field in self.api_search_fields.items():
+                raw = field.text()
+                values[key] = (
+                    None
+                    if key == "search_max_results" and raw == ""
+                    else float(raw)
+                    if key == "search_timeout"
+                    else int(raw)
+                )
+            config = ApiAcquisitionConfig(**values)
+        except ValueError, TypeError:
+            config = None
+        self.api_error.setText(
+            "Use a local HTTP(S) API address without credentials and positive bounded search limits. The optional maximum must be a positive API integer."
+            if config is None
+            else ""
+        )
+        self.submit(ConfigureApi(config=config))
+
+    def _api_brain_chosen(self, index):
+        if self._updating_api or index < 1 or self.snapshot.api_config is None:
+            return
+        brain_id = self.api_brains.itemData(index)
+        self.submit(
+            SelectSource(
+                source_selection=LocalApiSourceSelection(
+                    brain_id=brain_id, config=self.snapshot.api_config
+                )
+            )
+        )
+
+    def _render_api(self, mode, locked):
+        api = mode != 2 and self.snapshot.source_kind == "local-api"
+        busy = bool(
+            self.snapshot.active_request_id or self.snapshot.close_pending or locked
+        )
+        self._updating_api = True
+        self.source_kind.setCurrentIndex(
+            1 if self.snapshot.source_kind == "local-api" else 0
+        )
+        self.source_kind.setVisible(mode != 2)
+        self.source_kind.setEnabled(not busy)
+        self.api_panel.setVisible(api)
+        self.api_panel.setEnabled(not busy)
+        self.choose.setVisible(not api)
+        if api:
+            self.source_heading.setText("Source Brain")
+            self.explanation.setText(
+                "Convert a local API Brain into a new Obsidian vault."
+                if mode == 0
+                else "Inspect a local API Brain without creating a vault."
+            )
+            self.api_refresh.setEnabled("list_brains" in self.snapshot.allowed_actions)
+            self.api_brains.clear()
+            self.api_brains.addItem("Choose a Brain…", None)
+            self.api_brains.model().item(0).setEnabled(False)
+            selected = self.snapshot.source_selection
+            selected_id = (
+                selected.brain_id
+                if isinstance(selected, LocalApiSourceSelection)
+                else None
+            )
+            selected_name = None
+            for brain in self.snapshot.brains:
+                self.api_brains.addItem(
+                    brain.name + " — " + brain.brain_id, brain.brain_id
+                )
+                if brain.brain_id == selected_id:
+                    self.api_brains.setCurrentIndex(self.api_brains.count() - 1)
+                    selected_name = brain.name
+            self.source_name.setText(selected_name or "Choose an accessible Brain")
+            self.source_path.setPlainText(selected_id or "No Brain selected")
+            self.source_path.setAccessibleName("Selected Brain ID")
+            self.api_status.setText(
+                {
+                    "idle": "Refresh accessible Brains, then choose one explicitly.",
+                    "loading": "Loading accessible Brains…",
+                    "ready": "Choose a Brain by name and stable ID.",
+                    "empty": "No accessible Brains were returned. Check TheBrain and refresh again.",
+                    "failed": "Connection failed or listing was refused. Review the guidance and refresh to retry.",
+                }[self.snapshot.brain_list_status]
+            )
+            self.api_brains.setEnabled(
+                self.snapshot.brain_list_status == "ready" and not busy
+            )
+            if self.primary.text() == "Inspect archive":
+                self.primary.setText("Inspect Brain")
+            elif self.primary.text() == "Convert this archive":
+                self.primary.setText("Convert this Brain")
+            self.primary.setAccessibleName(self.primary.text())
+            if not self.snapshot.result and not self.snapshot.active_request_id:
+                self.findings.setPlainText(
+                    "Inspect the selected Brain to see its planned contents. Nothing is written during inspection."
+                )
+        self._updating_api = False
 
     def _focus_changed(self, previous, current):
         self._focus_revision += 1
@@ -1029,7 +1218,7 @@ class MainWindow(QMainWindow):
             recovery.append(
                 "Publication status unknown. Previous destination: "
                 + (publication.destination or "unavailable")
-                + "\nReview that destination before acknowledging. Acknowledgment does not establish publication. Inspect the current archive and validate a usable destination before another attempt."
+                + "\nReview that destination before acknowledging. Acknowledgment does not establish publication. Inspect the current source and validate a usable destination before another attempt."
             )
         recovery.extend(
             finding.message
@@ -1044,9 +1233,9 @@ class MainWindow(QMainWindow):
             self.primary.setToolTip(
                 "Choose a valid destination before converting."
                 if primary_action not in self.snapshot.allowed_actions
-                else "Convert the current reviewed archive with the warnings shown above."
+                else "Convert the current reviewed source with the warnings shown above."
                 if primary_action == "convert_with_warnings"
-                else "Convert the reviewed archive into the displayed fresh vault."
+                else "Convert the reviewed source into the displayed fresh vault."
             )
         self.destination_form.setVisible(mode == 0 and not published)
         self.published_panel.setVisible(mode == 0 and published)
@@ -1111,6 +1300,14 @@ class MainWindow(QMainWindow):
                 (
                     "Checking vault"
                     if self.snapshot.busy_operation == "check_vault"
+                    else "Loading accessible Brains"
+                    if self.snapshot.busy_operation == "list_brains"
+                    else "Converting source"
+                    if self.snapshot.busy_operation == "convert_reviewed"
+                    and self.snapshot.source_kind == "local-api"
+                    else "Inspecting Brain"
+                    if self.snapshot.busy_operation == "inspect"
+                    and self.snapshot.source_kind == "local-api"
                     else "Converting archive"
                     if self.snapshot.busy_operation == "convert_reviewed"
                     else "Inspecting archive"
@@ -1215,6 +1412,7 @@ class MainWindow(QMainWindow):
             if result and result.pending
             else ""
         )
+        self._render_api(mode, locked)
         self._elapsed()
 
     def _elapsed(self):
@@ -1222,9 +1420,16 @@ class MainWindow(QMainWindow):
             seconds = (
                 int(monotonic() - self._started) if self._started is not None else 0
             )
+            noun = "Brain" if self.snapshot.source_kind == "local-api" else "archive"
+            operation = {
+                "check_vault": "Checking vault",
+                "convert_reviewed": "Converting " + noun,
+                "inspect": "Inspecting " + noun,
+                "list_brains": "Loading accessible Brains",
+            }.get(self.snapshot.busy_operation, "Validating destination")
             self.guidance.setText(
                 ("Close requested. " if self.snapshot.close_pending else "")
-                + f"{'Checking vault' if self.snapshot.busy_operation == 'check_vault' else 'Converting archive' if self.snapshot.busy_operation == 'convert_reviewed' else 'Inspecting archive' if self.snapshot.active_request_id else 'Validating destination'} · {seconds // 60}:{seconds % 60:02d} elapsed"
+                + f"{operation} · {seconds // 60}:{seconds % 60:02d} elapsed"
             )
         else:
             self.guidance.setText(

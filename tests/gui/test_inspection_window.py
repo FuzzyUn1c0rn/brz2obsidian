@@ -124,7 +124,7 @@ def test_slow_host_diagnostic_preparation_keeps_queued_gui_input_responsive():
     [
         ("clean", "ready for review"),
         ("warnings", "source warnings"),
-        ("refused", "Archive cannot be used"),
+        ("refused", "Source cannot be used"),
         ("failed", "Inspection could not complete"),
     ],
 )

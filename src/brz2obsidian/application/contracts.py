@@ -1,5 +1,6 @@
 """Closed, immutable application and transport values; no GUI dependencies."""
 
+import json
 from pathlib import Path
 from typing import Annotated, Literal
 from uuid import UUID
@@ -16,9 +17,10 @@ from brz2obsidian.contracts import Contract, Counts, SourceIdentity
 from brz2obsidian.vault_check.contracts import VaultCheckCounts
 
 Operation = Literal[
-    "inspect", "validate_destination", "convert_reviewed", "check_vault"
+    "inspect", "validate_destination", "convert_reviewed", "check_vault", "list_brains"
 ]
 Action = Literal[
+    "list_brains",
     "inspect",
     "convert",
     "convert_with_warnings",
@@ -63,10 +65,61 @@ class BrzSourceSelection(Contract):
         return str(Path(value).absolute())
 
 
+class ApiAcquisitionConfig(Contract):
+    api_url: str = "http://127.0.0.1:11522/api"
+    search_initial_results: int = 5000
+    search_timeout: float = 300
+    search_max_response_bytes: int = 128000000
+    search_max_results: int | None = None
+    request_timeout: float = 30
+    max_response_bytes: int = 16000000
+    max_requests: int = 100000
+    max_traversal_items: int = 100000
+    max_total_capture_bytes: int = 1000000000
+    max_payload_bytes: int = 256000000
+    include_pins: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def explicit_effective_bounds(cls, value, info: ValidationInfo):
+        if (
+            info.mode == "json"
+            and isinstance(value, dict)
+            and not set(cls.model_fields).issubset(value)
+        ):
+            raise ValueError("All effective acquisition settings are required")
+        return value
+
+    @model_validator(mode="after")
+    def valid_bounds(self):
+        self.source_config()
+        return self
+
+    def source_config(self):
+        from brz2obsidian.application.wiring import validate_api_config
+
+        return validate_api_config(self.model_dump())
+
+
 class LocalApiSourceSelection(Contract):
     kind: Literal["local-api"] = "local-api"
     brain_id: str
+    config: ApiAcquisitionConfig = Field(default_factory=ApiAcquisitionConfig)
     _canonical = field_validator("brain_id")(request_identity)
+
+    @model_validator(mode="before")
+    @classmethod
+    def explicit_configuration(cls, value, info: ValidationInfo):
+        if info.mode == "json" and isinstance(value, dict) and "config" not in value:
+            raise ValueError("Explicit acquisition configuration is required")
+        return value
+
+    @field_validator("brain_id")
+    @classmethod
+    def nonzero(cls, value):
+        if not UUID(value).int:
+            raise ValueError("A nonzero Brain UUID is required")
+        return value
 
 
 SourceSelection = Annotated[
@@ -127,7 +180,7 @@ class SourceArguments(Contract):
 
 
 class Versioned(Contract):
-    schema_version: Literal[2] = 2
+    schema_version: Literal[3] = 3
 
     @field_validator("schema_version", mode="before")
     @classmethod
@@ -305,8 +358,50 @@ class CheckResult(Result):
         return self
 
 
+class BrainChoice(Contract):
+    brain_id: str
+    name: str
+    _canonical = field_validator("brain_id")(request_identity)
+
+    @model_validator(mode="after")
+    def valid_identity(self):
+        if not UUID(self.brain_id).int or not self.name.strip():
+            raise ValueError("A named canonical Brain is required")
+        return self
+
+
+class BrainListResult(Result):
+    operation: Literal["list_brains"] = "list_brains"
+    outcome: Literal["clean", "refused", "failed"]
+    status: Literal["brains_listed", "brains_refused", "brains_failed"]
+    brains: tuple[BrainChoice, ...] = ()
+
+    @model_validator(mode="after")
+    def consistent(self):
+        if (
+            self.status
+            != {
+                "clean": "brains_listed",
+                "refused": "brains_refused",
+                "failed": "brains_failed",
+            }[self.outcome]
+            or self.reviewed
+            or self.publication
+        ):
+            raise ValueError("Inconsistent Brain listing")
+        if self.outcome != "clean" and self.brains:
+            raise ValueError("Failed listing cannot supply choices")
+        if len({b.brain_id for b in self.brains}) != len(self.brains):
+            raise ValueError("Brain identities must be distinct")
+        return self
+
+
 OperationResult = Annotated[
-    InspectionResult | DestinationValidation | ConversionResult | CheckResult,
+    InspectionResult
+    | DestinationValidation
+    | ConversionResult
+    | CheckResult
+    | BrainListResult,
     Field(discriminator="operation"),
 ]
 RESULT = TypeAdapter(OperationResult)
@@ -314,6 +409,10 @@ RESULT = TypeAdapter(OperationResult)
 
 class InspectArguments(SourceArguments):
     pass
+
+
+class ListBrainsArguments(Contract):
+    config: ApiAcquisitionConfig
 
 
 class DestinationArguments(Contract):
@@ -339,9 +438,31 @@ class WorkerRequest(Versioned):
     request_id: str
     operation: Operation
     arguments: (
-        InspectArguments | DestinationArguments | ConvertArguments | CheckArguments
+        ConvertArguments
+        | InspectArguments
+        | DestinationArguments
+        | CheckArguments
+        | ListBrainsArguments
     )
     _identity = field_validator("request_id")(request_identity)
+
+    @field_validator("arguments", mode="before")
+    @classmethod
+    def operation_arguments(cls, value, info: ValidationInfo):
+        expected = {
+            "inspect": InspectArguments,
+            "validate_destination": DestinationArguments,
+            "convert_reviewed": ConvertArguments,
+            "check_vault": CheckArguments,
+            "list_brains": ListBrainsArguments,
+        }.get(info.data.get("operation"))
+        if expected is None:
+            raise ValueError("A supported operation is required")
+        return (
+            expected.model_validate_json(json.dumps(value))
+            if info.mode == "json"
+            else expected.model_validate(value)
+        )
 
     @model_validator(mode="after")
     def argument_shape(self):
@@ -350,6 +471,7 @@ class WorkerRequest(Versioned):
             "validate_destination": DestinationArguments,
             "convert_reviewed": ConvertArguments,
             "check_vault": CheckArguments,
+            "list_brains": ListBrainsArguments,
         }[self.operation]
         if type(self.arguments) is not expected:
             raise ValueError("Arguments disagree with operation")
@@ -431,6 +553,20 @@ class InspectCommand(Contract):
     command: Literal["inspect"] = "inspect"
 
 
+class ConfigureApi(Contract):
+    command: Literal["configure_api"] = "configure_api"
+    config: ApiAcquisitionConfig | None
+
+
+class SetSourceKind(Contract):
+    command: Literal["set_source_kind"] = "set_source_kind"
+    kind: SourceKind
+
+
+class ListBrainsCommand(Contract):
+    command: Literal["list_brains"] = "list_brains"
+
+
 class ConvertCommand(Contract):
     command: Literal["convert"] = "convert"
     proceed_with_warnings: bool = False
@@ -471,7 +607,10 @@ SessionCommand = Annotated[
     | ConvertCommand
     | SimpleCommand
     | ApplyResult
-    | ApplyTransportFailure,
+    | ApplyTransportFailure
+    | ConfigureApi
+    | SetSourceKind
+    | ListBrainsCommand,
     Field(discriminator="command"),
 ]
 COMMAND = TypeAdapter(SessionCommand)
@@ -480,6 +619,12 @@ COMMAND = TypeAdapter(SessionCommand)
 class SessionSnapshot(SourceArguments):
     revision: int = 0
     source_selection: SourceSelection | None = None
+    source_kind: SourceKind = "brz"
+    api_config: ApiAcquisitionConfig | None = Field(
+        default_factory=ApiAcquisitionConfig
+    )
+    brains: tuple[BrainChoice, ...] = ()
+    brain_list_status: Literal["idle", "loading", "ready", "empty", "failed"] = "idle"
     parent: str | None = None
     vault_name: str = ""
     vault: str | None = None
