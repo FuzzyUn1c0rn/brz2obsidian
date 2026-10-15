@@ -34,6 +34,20 @@ from .transport import timestamp
 ZERO_UUID = "00000000-0000-0000-0000-000000000000"
 
 
+def _same_observation(left, right):
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict):
+        return left.keys() == right.keys() and all(
+            _same_observation(left[key], right[key]) for key in left
+        )
+    if isinstance(left, list):
+        return len(left) == len(right) and all(
+            _same_observation(a, b) for a, b in zip(left, right)
+        )
+    return left == right
+
+
 def _candidate_shape(hit, brain_id):
     required = {
         "brainId",
@@ -69,26 +83,6 @@ def _candidate_shape(hit, brain_id):
         uuid(hit["attachmentId"])
         return "attachment"
     return None
-
-
-def _sibling_context(link, graph):
-    return (
-        link.get("thoughtIdA") != link.get("thoughtIdB")
-        and link.get("thoughtIdA") in graph["parents_ids"]
-        and link.get("thoughtIdB") in graph["sibling_ids"]
-    )
-
-
-def _hierarchy_context(link):
-    return (
-        all(
-            type(link.get(field)) is int
-            for field in ("kind", "relation", "meaning", "direction")
-        )
-        and (link["kind"], link["relation"], link["meaning"]) == (1, 1, 1)
-        and link["direction"] in (-1, 1)
-        and link.get("typeId") is None
-    )
 
 
 class Acquisition:
@@ -140,7 +134,7 @@ class Acquisition:
 
     def observe_link(self, value, expected_id=None):
         key = link_identity(value, self.brain_id, expected_id)
-        if key in self.links and self.links[key] != value:
+        if key in self.links and not _same_observation(self.links[key], value):
             refuse("Repeated authoritative relationship observations disagree")
         self.links[key] = value
         self.link_ids.add(key)
@@ -269,7 +263,7 @@ class Acquisition:
                     "incomplete_source",
                 )
             limit = min(limit * 2, ceiling)
-        resolved_links, excluded_context_candidates = set(), set()
+        resolved_links = set()
         while self.ids - self.thoughts.keys() or self.link_ids - resolved_links:
             if self.link_ids - resolved_links:
                 link_id = min(self.link_ids - resolved_links)
@@ -313,16 +307,16 @@ class Acquisition:
             links = array(graph["links"])
             incident_links = set()
             for link in links:
-                if not isinstance(link, dict):
-                    refuse("A graph carries an unrelated relationship")
+                if not isinstance(link, dict) or link.get("thoughtIdA") == link.get(
+                    "thoughtIdB"
+                ):
+                    refuse("A graph carries a malformed relationship candidate")
                 incident = key in (link.get("thoughtIdA"), link.get("thoughtIdB"))
-                if not incident and not _sibling_context(link, projected):
-                    refuse("A graph carries an unrelated relationship")
+                # Discovery is Brain-wide; only complete authoritative endpoint
+                # graphs can qualify a candidate's relationship meaning.
                 observed = self.observe_link(link)
                 if incident:
                     incident_links.add(observed)
-                elif not _hierarchy_context(link):
-                    excluded_context_candidates.add(observed)
             projected["link_ids"] = sorted(incident_links)
             attachments = graph["attachments"]
             if attachments is not None and not isinstance(attachments, list):
@@ -334,15 +328,6 @@ class Acquisition:
             for key, value in self.thoughts.items()
             if value["kind"] == 5 or value["forgottenDateTime"] is not None
         }
-        if any(
-            not {
-                self.links[link_id]["thoughtIdA"],
-                self.links[link_id]["thoughtIdB"],
-            }
-            & excluded
-            for link_id in excluded_context_candidates
-        ):
-            refuse("A graph carries an unqualified included context relationship")
         active_links = {
             key: value
             for key, value in self.links.items()

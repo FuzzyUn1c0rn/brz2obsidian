@@ -19,6 +19,154 @@ SIBLING = "44444444-4444-4444-8444-444444444444"
 OTHER_LINK = "55555555-5555-4555-8555-555555555555"
 
 
+def test_third_owner_graph_candidates_require_real_complete_global_facts(tmp_path):
+    from tests.support.local_api_graph import (
+        ONE_WAY_FORWARD,
+        TAG_LINK,
+        TYPE_LINK,
+        CompleteGraphApi,
+        assert_published_graph,
+    )
+
+    identities = []
+    for reordered in (False, True):
+        api = CompleteGraphApi()
+        api.thoughts[SIBLING] = thought(SIBLING, "Independent owner")
+        api.search.append(
+            {
+                "brainId": BRAIN,
+                "isFromOtherBrain": False,
+                "sourceThought": {"id": SIBLING, "brainId": BRAIN, "kind": 0},
+                "sourceLink": None,
+            }
+        )
+        path = f"/api/thoughts/{BRAIN}/{SIBLING}/graph"
+        graph = api.response(path, {})[1]
+        graph["links"] = [
+            api.links[key] for key in (HIERARCHY, TYPE_LINK, TAG_LINK, ONE_WAY_FORWARD)
+        ]
+        if reordered:
+            graph["links"] = list(reversed(graph["links"])) * 2
+        api.overrides[path] = 200, graph
+        destination = tmp_path / ("reordered" if reordered else "vault")
+        with api_server(api) as (_, address):
+            converted = local_api_workflow(
+                LocalApiConfig(api_url=address), credentials=lambda: KEY
+            ).convert(LocalApiSourceRef(BRAIN), destination)
+        assert converted.outcome == "clean"
+        assert converted.receipt.verified
+        record = assert_published_graph(destination)
+        originals = {row["key"]: row["records"] for row in record["original_evidence"]}
+        assert originals["graph:" + SIBLING] == {
+            "parents_ids": [],
+            "children_ids": [],
+            "jump_ids": [],
+            "sibling_ids": [],
+            "tag_ids": [],
+            "type_ids": [],
+            "link_ids": [],
+            "attachment_ids": [],
+        }
+        identities.append(converted.source_identity)
+    assert identities[0] == identities[1]
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "malformed",
+        "zero_link",
+        "zero_endpoint",
+        "foreign",
+        "self",
+        "conflicting_repeat",
+        "get_disagrees",
+        "get_unavailable",
+        "endpoint_unavailable",
+        "private_endpoint",
+        "unsupported_endpoint",
+        "unsupported_tuple",
+        "missing_join",
+        "missing_endpoint_link",
+        "link_content",
+        "link_content_unavailable",
+    ],
+)
+def test_third_owner_candidate_cannot_bypass_authority_or_global_proofs(
+    tmp_path, damage
+):
+    api = GraphApi()
+    api.thoughts[SIBLING] = thought(SIBLING, "Independent owner")
+    api.search.append(
+        {
+            "brainId": BRAIN,
+            "isFromOtherBrain": False,
+            "sourceThought": {"id": SIBLING, "brainId": BRAIN, "kind": 0},
+            "sourceLink": None,
+        }
+    )
+    path = f"/api/thoughts/{BRAIN}/{SIBLING}/graph"
+    graph = api.response(path, {})[1]
+    candidate = copy.deepcopy(api.links[HIERARCHY])
+    graph["links"] = [candidate]
+    zero = "00000000-0000-0000-0000-000000000000"
+    if damage == "malformed":
+        graph["links"] = [None]
+    elif damage in {"zero_link", "zero_endpoint", "foreign", "self"}:
+        field, value = {
+            "zero_link": ("id", zero),
+            "zero_endpoint": ("thoughtIdA", zero),
+            "foreign": ("brainId", SIBLING),
+            "self": ("thoughtIdB", HOME),
+        }[damage]
+        candidate[field] = value
+    elif damage == "conflicting_repeat":
+        graph["links"].append(candidate | {"color": "#abcdef"})
+    elif damage == "get_disagrees":
+        api.overrides[f"/api/links/{BRAIN}/{HIERARCHY}"] = (
+            200,
+            candidate | {"name": "CONFLICT_CANARY"},
+        )
+    elif damage in {"get_unavailable", "endpoint_unavailable"}:
+        unavailable = (
+            f"/api/links/{BRAIN}/{HIERARCHY}"
+            if damage == "get_unavailable"
+            else f"/api/thoughts/{BRAIN}/{ALONE}"
+        )
+        api.overrides[unavailable] = 404, b"UNAVAILABLE_CANARY"
+    elif damage in {"private_endpoint", "unsupported_endpoint"}:
+        api.thoughts[ALONE]["acType" if damage == "private_endpoint" else "kind"] = (
+            1 if damage == "private_endpoint" else 3
+        )
+    elif damage == "unsupported_tuple":
+        candidate["meaning"] = 6
+        api.links[HIERARCHY] = copy.deepcopy(candidate)
+    elif damage in {"missing_join", "missing_endpoint_link"}:
+        endpoint_path = f"/api/thoughts/{BRAIN}/{ALONE}/graph"
+        endpoint = api.response(endpoint_path, {})[1]
+        endpoint["parents" if damage == "missing_join" else "links"] = []
+        api.overrides[endpoint_path] = 200, endpoint
+    else:
+        api.overrides[f"/api/links/{BRAIN}/{HIERARCHY}/attachments"] = (
+            (200, [{"name": "LINK_CONTENT_CANARY"}])
+            if damage == "link_content"
+            else (404, b"CONTENT_UNAVAILABLE_CANARY")
+        )
+    api.overrides[path] = 200, graph
+    with api_server(api) as (_, address):
+        result = local_api_workflow(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        ).convert(LocalApiSourceRef(BRAIN), tmp_path / "vault")
+    assert result.outcome == (
+        "failed"
+        if damage
+        in {"get_unavailable", "endpoint_unavailable", "link_content_unavailable"}
+        else "refused"
+    )
+    assert result.receipt is None and not (tmp_path / "vault").exists()
+    assert "CANARY" not in result.model_dump_json()
+
+
 def test_forgotten_population_does_not_invent_included_link_count_equation(tmp_path):
     api = GraphApi()
     path = f"/api/brains/{BRAIN}/statistics"
@@ -370,13 +518,15 @@ def test_context_order_and_duplicates_keep_identity_and_endpoint_only_projection
     "damage",
     [
         "parent_not_displayed",
-        "sibling_not_displayed",
         "other_displayed_arrays",
         "reversed",
         "classification",
         "jump",
         "direction",
         "boolean_kind",
+        "boolean_relation",
+        "decimal_kind",
+        "decimal_direction",
         "custom_type",
         "foreign_brain",
         "zero_identity",
@@ -398,8 +548,6 @@ def test_unqualified_context_or_global_contradiction_prevents_publication(
     context = next(row for row in graph["links"] if row["id"] == OTHER_LINK)
     if damage == "parent_not_displayed":
         graph["parents"] = []
-    elif damage == "sibling_not_displayed":
-        graph["siblings"] = []
     elif damage == "other_displayed_arrays":
         graph["children"], graph["parents"] = graph["parents"], []
         graph["jumps"], graph["siblings"] = graph["siblings"], []
@@ -410,6 +558,9 @@ def test_unqualified_context_or_global_contradiction_prevents_publication(
         "jump",
         "direction",
         "boolean_kind",
+        "boolean_relation",
+        "decimal_kind",
+        "decimal_direction",
         "custom_type",
     }:
         field, value = {
@@ -417,6 +568,9 @@ def test_unqualified_context_or_global_contradiction_prevents_publication(
             "jump": ("relation", 3),
             "direction": ("direction", 3),
             "boolean_kind": ("kind", True),
+            "boolean_relation": ("relation", True),
+            "decimal_kind": ("kind", 1.0),
+            "decimal_direction": ("direction", 1.0),
             "custom_type": ("typeId", SIBLING),
         }[damage]
         context[field] = value
@@ -500,7 +654,10 @@ def test_recomputed_capture_cannot_assign_context_link_to_active_owner(
 
 
 @pytest.mark.parametrize("excluded_kind", [1, 5])
-def test_qualified_excluded_context_retains_only_minimal_scope(tmp_path, excluded_kind):
+@pytest.mark.parametrize("displayed", [False, True])
+def test_qualified_excluded_context_retains_only_minimal_scope(
+    tmp_path, excluded_kind, displayed
+):
     api = SiblingGraphApi()
     api.thoughts[SIBLING] |= {
         "kind": excluded_kind,
@@ -515,6 +672,11 @@ def test_qualified_excluded_context_retains_only_minimal_scope(tmp_path, exclude
         "name": "EXCLUDED_CONTENT_CANARY",
         "color": "EXCLUDED_CONTENT_CANARY",
     }
+    if not displayed:
+        path = f"/api/thoughts/{BRAIN}/{ALONE}/graph"
+        graph = api.response(path, {})[1]
+        graph["siblings"] = []
+        api.overrides[path] = 200, graph
     with api_server(api) as (_, address):
         result = local_api_workflow(
             LocalApiConfig(api_url=address), credentials=lambda: KEY
@@ -527,22 +689,13 @@ def test_qualified_excluded_context_retains_only_minimal_scope(tmp_path, exclude
     assert "EXCLUDED_CONTENT_CANARY" not in json.dumps(record)
 
 
-@pytest.mark.parametrize(
-    "contradiction", ["included", "not_displayed", "get_disagrees"]
-)
-def test_context_exclusion_requires_authoritative_scope_and_structural_roles(
-    tmp_path, contradiction
-):
+@pytest.mark.parametrize("contradiction", ["included", "get_disagrees"])
+def test_context_exclusion_requires_authoritative_scope(tmp_path, contradiction):
     api = SiblingGraphApi()
     api.links[OTHER_LINK]["meaning"] = 6
     if contradiction != "included":
         api.thoughts[SIBLING]["forgottenDateTime"] = "2026-01-01T00:00:00"
-    if contradiction == "not_displayed":
-        path = f"/api/thoughts/{BRAIN}/{ALONE}/graph"
-        graph = api.response(path, {})[1]
-        graph["siblings"] = []
-        api.overrides[path] = 200, graph
-    elif contradiction == "get_disagrees":
+    if contradiction == "get_disagrees":
         api.overrides[f"/api/thoughts/{BRAIN}/{SIBLING}"] = (
             200,
             api.thoughts[SIBLING] | {"forgottenDateTime": None},

@@ -115,35 +115,40 @@ Management entries, covering all classified members. No tag-parent overlap was
 observed or admitted. This clarifies graph evidence under existing classification
 meaning and preserves profile/capture identifiers and all authoritative joins.
 
-## Graph sibling context
+## Graph relationship candidates
 
-With `includeSiblings=true`, a graph may also contain the displayed parent's
-hierarchy links to displayed siblings. An included nonincident link qualifies
-only when its
-parent endpoint is in the active graph's `parents`, its child endpoint is in
-`siblings`, and its exact existing tuple is kind1/relation1/meaning1/direction-1
-or1 with null typeId. The same parent-to-active hierarchy must be corroborated by
-the qualified authoritative relationships and graph joins. Both endpoints are
-canonical same-Brain displayed thoughts; all normal ownership, access, role,
-scope, declaration, conflict and link-content checks remain required.
+The accepted scope is the complete public live ordinary/type/tag Brain. A raw
+`ThoughtGraphDto.links` row supplies a discovery candidate, including when neither
+endpoint is the active thought or appears in its displayed neighbor arrays.
+The schema supplies no incident-only or display-role guarantee for this array.
+Every row must be an object with canonical nonzero link and distinct endpoint
+identities and exact requested Brain ownership. Observe every row through the
+conflict registry, fetch its authoritative link and both authoritative endpoints,
+and reconcile all observed values. A displayed role never establishes meaning.
 
-Apply known forgotten/system scope before interpreting an association's tuple.
-A structurally bounded displayed-parent-to-sibling candidate still requires
-canonical same-Brain identity and authoritative endpoint reconciliation. After
-all authoritative fetches, an association with an independently qualified excluded
-endpoint retains only existing minimal exclusion evidence; its unqualified
-meaning does not become an included relationship. Both-included candidates require
-the exact hierarchy tuple and global joins above. Private, conflicting or
-unqualified endpoints refuse, and no arbitrary context is silently discarded.
+Included relationships still require the existing supported declaration and
+tuple, public endpoint roles, definition inventories, full reciprocal endpoint
+adjacency and incident link inventories, exact type/tag assignments, and
+successful empty link-content inventories. Missing, private, unavailable, foreign,
+conflicting or unsupported facts refuse. Preserve each global relationship and
+assignment once; no context placement invents a relationship to the active owner.
 
-Discover and authoritatively fetch these links and endpoints; preserve each global
-relationship once. The active graph's normalized `link_ids` contains only links
-incident to the active thought, while its observed sibling inventory remains
-separate. Context never invents a direct active-to-sibling relationship. Other
-nonincident tuples, reversed joins, arbitrary displayed endpoints and type/tag
-context are unqualified and refuse. Independent #189 qualification checked the
-retained controlled sibling-walk graphs; this clarifies discovery under existing
-hierarchy meanings and leaves profile/capture identifiers unchanged.
+Apply authoritative forgotten/system scope before interpreting an association's
+tuple. An association with a qualified excluded endpoint retains only existing
+minimal exclusion evidence. No raw candidate may be silently discarded, and
+unknown/private endpoints cannot be inferred to be excluded. The active graph's
+normalized `link_ids` contains only its incident included IDs. Preserve separately
+observed scoped neighbor inventories; a nonincident raw row cannot become an
+arbitrary captured graph member.
+
+Independent #189 review qualified this candidate/global-fact distinction from
+whole-Brain scope, the schema and existing authoritative joins. It supersedes the
+earlier displayed-parent-to-sibling admission restriction, without changing
+relationship meanings or profile/capture identifiers. Earlier Controlled sibling
+observations remain valid. A bounded three-graph Management sample matched the
+retained source facts but did not reveal the exact row that triggered the earlier
+refusal; this rule does not claim that row or every vendor display context was
+observed.
 
 ## Search candidate envelopes
 
