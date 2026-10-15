@@ -107,6 +107,10 @@ orchestrator; they do not publish delivery PRs.
 The outer orchestrator reconciles the full scope and subtask graph. Once all
 implementation is complete and integrated and pre-publication gates pass, it
 creates the single draft PR from the feature root to `main`, linked to the spec.
+Put `Closes #<number>` for the specification and each open ticket the PR is
+intended to resolve in the initial description, when creating the draft.
+Immediately verify GitHub's `closingIssuesReferences` against that intended set;
+do not defer closing references until review, readiness or handoff.
 Then assign an independent reviewer to the entire PR using
 [final review](references/final-review.md). Repair findings on the same root/PR
 with renewed independent review. The default handoff remains draft, even after

@@ -168,8 +168,13 @@ assigned stage.
 
 Only then does the outer orchestrator publish the feature root and create one
 draft delivery PR from it to `main`, linked to the full specification and
-subtasks. Use the [PR skill](../../.agents/skills/pr/SKILL.md) and record the URL
-in the parent and relevant tickets. State that independent final review is pending.
+subtasks. Include `Closes #<number>` for the specification and each open ticket
+the PR is intended to resolve in its initial description, at creation. Do not
+wait for final review, readiness or a later handoff to add these references.
+Immediately after creation, verify that `closingIssuesReferences` contains
+exactly those intended issues and that the PR targets the default branch `main`.
+Use the [PR skill](../../.agents/skills/pr/SKILL.md) and record the URL in the
+parent and relevant tickets. State that independent final review is pending.
 For a new PR, use an already published head and explicit base:
 
 ```powershell
@@ -206,21 +211,20 @@ authorization; reuse existing authorization within its scope without asking agai
 ### Deliver and close the parent specification
 
 Keep the parent open through draft publication and final review. Parent completion
-requires actual delivery to `main` and every assigned acceptance gate. Use ordinary
-issue references while closure conditions remain unresolved. For a later authorized
-readiness transition, record current acceptance/review outcomes and limits. If
-merge into `main` is an issue's only remaining condition, add `Closes #<number>`
-with one reference per eligible issue. Already completed internal subtasks need no
-deferred auto-closure. Keep ordinary references for partial scope and post-merge
-acceptance; closing keywords must not bypass gates.
+requires actual delivery to `main` and every assigned acceptance gate. Closing
+references are present from draft creation; they schedule closure on merge and
+do not close the issues when the draft is created. Review and acceptance gates
+still govern readiness and merge. Already completed internal subtasks and issues
+outside the PR's intended resolution scope use ordinary references.
 
 Verify that the PR targets `main`, that `main` is the repository's default branch,
-and that `closingIssuesReferences` matches the intended issues before readiness.
-Reassess closing references when scope or applicable readiness evidence changes;
-remove any that are no longer justified. For readiness checks and after merge,
-obtain fresh GitHub state for the exact associated delivery PR, for example:
+and that `closingIssuesReferences` matches the intended issues immediately after
+creation and before handoff or readiness. Update the closing references if the
+PR's intended resolution scope changes. Obtain fresh GitHub state for the exact
+associated delivery PR at those points and after merge, for example:
 
 ```powershell
+gh repo view FuzzyUn1c0rn/brz2obsidian --json defaultBranchRef
 gh pr view <delivery-pr-number> --repo FuzzyUn1c0rn/brz2obsidian --json number,url,state,isDraft,baseRefName,headRefName,headRefOid,mergedAt,mergeCommit,closingIssuesReferences
 ```
 
