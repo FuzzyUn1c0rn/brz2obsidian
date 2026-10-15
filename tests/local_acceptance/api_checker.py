@@ -286,7 +286,7 @@ def source_facts(baseline):
 
 
 def expected_asset(baseline, attachment, profile_version="1", proofs=None):
-    assert profile_version in {"1", "2"}, "unsupported API profile version"
+    assert profile_version in {"1", "2", "3"}, "unsupported API profile version"
     kind, note = attachment["type"], attachment["isNotes"]
     assert type(kind) is int and type(note) is bool, "raw attachment role"
     name = attachment["location"]
@@ -314,7 +314,7 @@ def expected_asset(baseline, attachment, profile_version="1", proofs=None):
     elif kind == 12:
         assert (
             name == attachment["id"] + ".webp"
-            or profile_version == "2"
+            or profile_version in {"2", "3"}
             and name == attachment["id"] + ".png"
         ) and display is None, "raw image role"
         role = "image"
@@ -322,7 +322,9 @@ def expected_asset(baseline, attachment, profile_version="1", proofs=None):
         assert name == "Icon.png" and display is None, "raw icon role"
         role = "icon"
     else:
-        suffixes = (".pdf", ".png", ".zip") if profile_version == "2" else (".pdf",)
+        suffixes = (
+            (".pdf", ".png", ".zip") if profile_version in {"2", "3"} else (".pdf",)
+        )
         assert (
             kind == 1
             and name.lower().endswith(suffixes)
@@ -348,7 +350,7 @@ def expected_asset(baseline, attachment, profile_version="1", proofs=None):
                 "raw image signature"
             )
     elif kind == 5:
-        if profile_version == "2" and payload.startswith(b"\xff\xd8\xff"):
+        if profile_version in {"2", "3"} and payload.startswith(b"\xff\xd8\xff"):
             qualify_v2_bytes(payload, "JPEG", attachment["id"], proofs)
         else:
             assert payload.startswith(b"\x89PNG\r\n\x1a\n"), "raw icon signature"
@@ -428,7 +430,7 @@ def has_measured_pdf(baseline, attachments, owner, profile_version, proofs):
 def audit_baseline(baseline, *, profile_version="1"):
     """Qualify every scoped raw fact/outcome before any conversion takes place."""
     thoughts, relationships, attachments, _ = source_facts(baseline)
-    assert profile_version in {"1", "2"}, "unsupported API profile version"
+    assert profile_version in {"1", "2", "3"}, "unsupported API profile version"
     local = {key for key, a in attachments.items() if a["type"] != 3}
     assert set(baseline.data["payloads"]) == local, "baseline payload coverage"
     present, absent, proofs, bindings = 0, 0, {}, {}
@@ -494,7 +496,7 @@ def audit_baseline(baseline, *, profile_version="1"):
         "archive_matches": len(matches),
         "live_only_payloads": present - len(matches),
     }
-    if profile_version == "2":
+    if profile_version in {"2", "3"}:
         summary["resource_eligibility"] = proofs
     return summary
 

@@ -846,6 +846,12 @@ def test_independent_profile2_controls_use_raw_fields_and_derived_byte_proofs(
 ):
     from tests.local_acceptance.api_checker import audit_baseline, check_api_vault
 
+    # Profile 3 is now qualified; preserve the unknown-profile negative with 4.
+    if case["expected"] == "refuse_unknown_profile_version":
+        from copy import deepcopy
+
+        case = deepcopy(case)
+        case["input"]["profile_version"] = "4"
     baseline, vault = resource_case(tmp_path, case["shape"])
     if case["id"] == "V2-J03":
         # API input contains no decoder-label assertion. A contradictory claim
@@ -947,3 +953,154 @@ def test_raw_owned_png_note_joins_its_complete_api_image_inventory(tmp_path):
     )
     result = audit_baseline(reseal(baseline), profile_version="2")
     assert result["resource_eligibility"][identity(202)]["format"] == "PNG"
+
+
+@pytest.mark.parametrize("profile", ["1", "2", "3"])
+def test_public_api_oracle_entrypoints_preserve_inherited_facts(tmp_path, profile):
+    from tests.local_acceptance.api_checker import (
+        audit_baseline,
+        check_api_vault,
+        expected_asset,
+    )
+
+    baseline, vault = source_case(tmp_path)
+    graph = baseline.json(baseline.data["graphs"][identity(2)])
+    note = graph["attachments"][0]
+    role, availability, payload = expected_asset(baseline, note, profile)
+    assert (role, availability) == ("note_original", "present")
+    assert payload == b"Original note.\n"
+    assert audit_baseline(baseline, profile_version=profile)["relationships"] == 5
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    record["profile_version"] = profile
+    write_json(path, record)
+    assert check_api_vault(baseline, vault, profile_version=profile)["payloads"] == 3
+
+
+@pytest.mark.parametrize("case", RESOURCE_CONTROLS, ids=lambda case: case["id"])
+def test_profile3_inherits_independent_profile2_resource_controls(tmp_path, case):
+    from copy import deepcopy
+
+    from tests.local_acceptance.api_checker import audit_baseline, check_api_vault
+
+    case = deepcopy(case)
+    if case["input"]["profile_version"] == "2":
+        case["input"]["profile_version"] = "3"
+    # Profile 3 is now qualified; preserve the unknown-profile negative with 4.
+    if case["expected"] == "refuse_unknown_profile_version":
+        from copy import deepcopy
+
+        case = deepcopy(case)
+        case["input"]["profile_version"] = "4"
+    baseline, vault = resource_case(tmp_path, case["shape"])
+    if case["id"] == "V2-J03":
+        proof = audit_baseline(baseline, profile_version="3")["resource_eligibility"][
+            identity(202)
+        ]
+        assert proof["format"] == "JPEG" != case["input"]["decoder_classification"]
+        return
+    accepted = isinstance(case["expected"], dict) and case["expected"].get("accept")
+    if accepted:
+        baseline = apply_resource_control(baseline, vault, case)
+        result = check_api_vault(baseline, vault, profile_version="3")
+        assert (result["payloads"], result["relationships"]) == (3, 5)
+    else:
+        with pytest.raises(AssertionError):
+            baseline = apply_resource_control(baseline, vault, case)
+            audit_baseline(baseline, profile_version=case["input"]["profile_version"])
+
+
+@pytest.mark.parametrize("profile", ["", "4", "unknown", None, 3, True])
+def test_public_api_oracle_entrypoints_refuse_unknown_profiles(tmp_path, profile):
+    from tests.local_acceptance.api_checker import (
+        audit_baseline,
+        check_api_vault,
+        expected_asset,
+    )
+
+    baseline, vault = source_case(tmp_path)
+    note = baseline.json(baseline.data["graphs"][identity(2)])["attachments"][0]
+    for operation in (
+        lambda: expected_asset(baseline, note, profile),
+        lambda: audit_baseline(baseline, profile_version=profile),
+        lambda: check_api_vault(baseline, vault, profile_version=profile),
+    ):
+        with pytest.raises(AssertionError, match="unsupported API profile version"):
+            operation()
+
+
+@pytest.mark.parametrize("record_profile", ["1", "2"])
+def test_profile3_oracle_refuses_older_vault_profile(tmp_path, record_profile):
+    from tests.local_acceptance.api_checker import check_api_vault
+
+    baseline, vault = source_case(tmp_path)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    record["profile_version"] = record_profile
+    write_json(path, record)
+    with pytest.raises(AssertionError, match="API-bound profile"):
+        check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize(
+    "family", ["external-file", "external-folder", "jpeg", "svg", "reverse-hierarchy"]
+)
+def test_profile3_shared_oracle_keeps_future_family_eligibility_held(tmp_path, family):
+    from tests.local_acceptance.api_checker import audit_baseline, expected_asset
+
+    baseline, _ = source_case(tmp_path)
+    path = baseline.manifest_path.parent / baseline.data["graphs"][identity(2)]
+    graph = json.loads(path.read_bytes())
+    resource = graph["attachments"][1]
+    if family == "reverse-hierarchy":
+        # Both raw endpoint graph observations agree on the newly unqualified tuple.
+        for graph_name in baseline.data["graphs"].values():
+            graph_path = baseline.manifest_path.parent / graph_name
+            value = json.loads(graph_path.read_bytes())
+            for link in value["links"]:
+                if link["id"] == identity(101):
+                    link["direction"] = 3
+            write_json(graph_path, value)
+    else:
+        if family in {"external-file", "external-folder"}:
+            resource.update(
+                type=2 if family == "external-file" else 8,
+                location="C:\\External\\Reference",
+            )
+        else:
+            resource.update(
+                type=12,
+                location=resource["id"] + (".jpg" if family == "jpeg" else ".svg"),
+            )
+        write_json(path, graph)
+        with pytest.raises(AssertionError):
+            expected_asset(reseal(baseline), resource, "3")
+    with pytest.raises(AssertionError):
+        audit_baseline(reseal(baseline), profile_version="3")
+
+
+def test_profile3_oracle_retains_pin_and_complete_preservation_guards(tmp_path):
+    from tests.local_acceptance.api_checker import audit_baseline, check_api_vault
+
+    baseline, vault = source_case(tmp_path)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    record["profile_version"] = "3"
+    record["relationships"][0]["item_a"], record["relationships"][0]["item_b"] = (
+        record["relationships"][0]["item_b"],
+        record["relationships"][0]["item_a"],
+    )
+    write_json(path, record)
+    with pytest.raises(AssertionError, match="relationship endpoints/kind"):
+        check_api_vault(baseline, vault, profile_version="3")
+    note = (
+        baseline.manifest_path.parent / baseline.data["payloads"][identity(201)]["path"]
+    )
+    original = note.read_bytes()
+    timestamp = note.stat().st_mtime_ns
+    note.write_bytes(bytes([original[0] ^ 1]) + original[1:])
+    import os
+
+    os.utime(note, ns=(timestamp, timestamp))
+    with pytest.raises(AssertionError, match="baseline evidence changed"):
+        audit_baseline(baseline, profile_version="3")
