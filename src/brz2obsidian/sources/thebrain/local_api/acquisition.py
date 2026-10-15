@@ -73,6 +73,14 @@ def _candidate_shape(hit, brain_id):
 
 def _sibling_context(link, graph):
     return (
+        link.get("thoughtIdA") != link.get("thoughtIdB")
+        and link.get("thoughtIdA") in graph["parents_ids"]
+        and link.get("thoughtIdB") in graph["sibling_ids"]
+    )
+
+
+def _hierarchy_context(link):
+    return (
         all(
             type(link.get(field)) is int
             for field in ("kind", "relation", "meaning", "direction")
@@ -80,8 +88,6 @@ def _sibling_context(link, graph):
         and (link["kind"], link["relation"], link["meaning"]) == (1, 1, 1)
         and link["direction"] in (-1, 1)
         and link.get("typeId") is None
-        and link.get("thoughtIdA") in graph["parents_ids"]
-        and link.get("thoughtIdB") in graph["sibling_ids"]
     )
 
 
@@ -263,7 +269,7 @@ class Acquisition:
                     "incomplete_source",
                 )
             limit = min(limit * 2, ceiling)
-        resolved_links = set()
+        resolved_links, excluded_context_candidates = set(), set()
         while self.ids - self.thoughts.keys() or self.link_ids - resolved_links:
             if self.link_ids - resolved_links:
                 link_id = min(self.link_ids - resolved_links)
@@ -315,6 +321,8 @@ class Acquisition:
                 observed = self.observe_link(link)
                 if incident:
                     incident_links.add(observed)
+                elif not _hierarchy_context(link):
+                    excluded_context_candidates.add(observed)
             projected["link_ids"] = sorted(incident_links)
             attachments = graph["attachments"]
             if attachments is not None and not isinstance(attachments, list):
@@ -326,6 +334,15 @@ class Acquisition:
             for key, value in self.thoughts.items()
             if value["kind"] == 5 or value["forgottenDateTime"] is not None
         }
+        if any(
+            not {
+                self.links[link_id]["thoughtIdA"],
+                self.links[link_id]["thoughtIdB"],
+            }
+            & excluded
+            for link_id in excluded_context_candidates
+        ):
+            refuse("A graph carries an unqualified included context relationship")
         active_links = {
             key: value
             for key, value in self.links.items()

@@ -79,13 +79,23 @@ All control families below require both independent positive and negative cases.
 ## Graph sibling context
 
 With `includeSiblings=true`, a graph may also contain the displayed parent's
-hierarchy links to displayed siblings. A nonincident link qualifies only when its
+hierarchy links to displayed siblings. An included nonincident link qualifies
+only when its
 parent endpoint is in the active graph's `parents`, its child endpoint is in
 `siblings`, and its exact existing tuple is kind1/relation1/meaning1/direction-1
 or1 with null typeId. The same parent-to-active hierarchy must be corroborated by
 the qualified authoritative relationships and graph joins. Both endpoints are
 canonical same-Brain displayed thoughts; all normal ownership, access, role,
 scope, declaration, conflict and link-content checks remain required.
+
+Apply known forgotten/system scope before interpreting an association's tuple.
+A structurally bounded displayed-parent-to-sibling candidate still requires
+canonical same-Brain identity and authoritative endpoint reconciliation. After
+all authoritative fetches, an association with an independently qualified excluded
+endpoint retains only existing minimal exclusion evidence; its unqualified
+meaning does not become an included relationship. Both-included candidates require
+the exact hierarchy tuple and global joins above. Private, conflicting or
+unqualified endpoints refuse, and no arbitrary context is silently discarded.
 
 Discover and authoritatively fetch these links and endpoints; preserve each global
 relationship once. The active graph's normalized `link_ids` contains only links

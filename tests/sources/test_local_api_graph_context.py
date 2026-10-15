@@ -226,3 +226,59 @@ def test_recomputed_capture_cannot_assign_context_link_to_active_owner(
             )
             with pytest.raises(MigrationRefused):
                 LocalApiSession(source=source, snapshot=changed, audit=audit)
+
+
+@pytest.mark.parametrize("excluded_kind", [1, 5])
+def test_qualified_excluded_context_retains_only_minimal_scope(tmp_path, excluded_kind):
+    api = SiblingGraphApi()
+    api.thoughts[SIBLING] |= {
+        "kind": excluded_kind,
+        "name": "EXCLUDED_CONTENT_CANARY",
+        "label": "EXCLUDED_CONTENT_CANARY",
+        "aliases": ["EXCLUDED_CONTENT_CANARY"],
+    }
+    if excluded_kind == 1:
+        api.thoughts[SIBLING]["forgottenDateTime"] = "2026-01-01T00:00:00"
+    api.links[OTHER_LINK] |= {
+        "meaning": 6,
+        "name": "EXCLUDED_CONTENT_CANARY",
+        "color": "EXCLUDED_CONTENT_CANARY",
+    }
+    with api_server(api) as (_, address):
+        result = local_api_workflow(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        ).convert(LocalApiSourceRef(BRAIN), tmp_path / "vault")
+    assert result.outcome == "clean"
+    assert result.receipt.verified
+    record = json.loads((tmp_path / "vault/migration-record.json").read_bytes())
+    assert {row["item_key"] for row in record["item_targets"]} == {HOME, ALONE}
+    assert [row["key"] for row in record["relationships"]] == [HIERARCHY]
+    assert "EXCLUDED_CONTENT_CANARY" not in json.dumps(record)
+
+
+@pytest.mark.parametrize(
+    "contradiction", ["included", "not_displayed", "get_disagrees"]
+)
+def test_context_exclusion_requires_authoritative_scope_and_structural_roles(
+    tmp_path, contradiction
+):
+    api = SiblingGraphApi()
+    api.links[OTHER_LINK]["meaning"] = 6
+    if contradiction != "included":
+        api.thoughts[SIBLING]["forgottenDateTime"] = "2026-01-01T00:00:00"
+    if contradiction == "not_displayed":
+        path = f"/api/thoughts/{BRAIN}/{ALONE}/graph"
+        graph = api.response(path, {})[1]
+        graph["siblings"] = []
+        api.overrides[path] = 200, graph
+    elif contradiction == "get_disagrees":
+        api.overrides[f"/api/thoughts/{BRAIN}/{SIBLING}"] = (
+            200,
+            api.thoughts[SIBLING] | {"forgottenDateTime": None},
+        )
+    with api_server(api) as (_, address):
+        result = local_api_workflow(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        ).convert(LocalApiSourceRef(BRAIN), tmp_path / "vault")
+    assert result.outcome == "refused"
+    assert result.receipt is None and not (tmp_path / "vault").exists()
