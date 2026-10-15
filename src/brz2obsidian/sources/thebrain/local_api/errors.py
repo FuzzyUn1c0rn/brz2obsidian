@@ -27,3 +27,16 @@ def failure(code, message):
             ),
         )
     )
+
+
+SHAPE_MESSAGES = {
+    "search": "The local API returned an unsupported search result. This source shape needs review.",
+    "relationship": "The local API returned an unsupported relationship. Its source form needs review.",
+    "resource": "The local API returned an unsupported resource declaration. Its source form needs review.",
+}
+
+
+def unsupported_shape(profile_version, stage, legacy_message):
+    if profile_version == "3":
+        refuse(SHAPE_MESSAGES[stage], f"api_{stage}_shape_unsupported")
+    refuse(legacy_message)

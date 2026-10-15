@@ -91,7 +91,7 @@ def test_real_worker_gui_payload_review_icon_refusal_and_fresh_conversion(
                     and not window.snapshot.busy_operation
                 ),
             )
-            assert window.snapshot.reviewed.profile_version == "2"
+            assert window.snapshot.reviewed.profile_version == "3"
             assert window.snapshot.result.counts.source_references == 2
             window.parent_selected(str(tmp_path))
             QTest.keyClicks(
@@ -718,6 +718,63 @@ def test_real_worker_gui_requires_explicit_txt_gap_warning_action_and_fresh_revi
             )
             assert window.snapshot.result.status == "conversion_created_with_warnings"
             assert_published_txt_pdf_gap(tmp_path / "Reviewed gap vault")
+        finally:
+            window.shutdown()
+            window.deleteLater()
+
+
+@pytest.mark.parametrize("stage", ["search", "relationship", "resource"])
+def test_real_worker_gui_stage_diagnostic_copy_and_save(tmp_path, monkeypatch, stage):
+    from brz2obsidian_ui.platform_actions import DiagnosticActions
+    from brz2obsidian_ui.window import MainWindow
+    from tests.support.local_api_payloads import SHAPE_MESSAGES, unsupported_shape_api
+
+    class SaveDialog:
+        def save_report(self, callback):
+            self.callback = callback
+
+    copied = []
+    dialogs = SaveDialog()
+    actions = DiagnosticActions(clipboard=lambda text, owner: copied.append(text))
+    monkeypatch.setenv("THE_BRAIN_LOCAL_API_KEY", KEY)
+    app = QApplication.instance() or QApplication([])
+    with api_server(unsupported_shape_api(stage)) as (_, address):
+        window = MainWindow(dialogs=dialogs, diagnostic_actions=actions)
+        window.show()
+        try:
+            control(window, QComboBox, "Source kind").setCurrentIndex(1)
+            until(app, lambda: window.snapshot.source_kind == "local-api")
+            control(window, QLineEdit, "Local API address").setText(address)
+            until(app, lambda: window.snapshot.api_config.api_url == address)
+            control(window, QPushButton, "Refresh accessible Brains").click()
+            until(app, lambda: window.snapshot.brain_list_status == "ready")
+            control(window, QComboBox, "Accessible Brains").setCurrentIndex(1)
+            until(app, lambda: window.snapshot.source_selection is not None)
+            control(window, QPushButton, "Inspect Brain").click()
+            until(
+                app,
+                lambda: (
+                    window.snapshot.result is not None
+                    and not window.snapshot.busy_operation
+                ),
+            )
+            result = window.snapshot.result
+            assert result.findings[0].code == f"api_{stage}_shape_unsupported"
+            assert SHAPE_MESSAGES[stage] in window.findings.toPlainText()
+            assert window.snapshot.reviewed is None
+            window.disclosure.click()
+            assert SHAPE_MESSAGES[stage] in window.diagnostic_text.toPlainText()
+            window.copy.click()
+            until(app, lambda: bool(copied))
+            assert copied == [result.diagnostic_text]
+            until(app, window.save.isEnabled)
+            window.save.click()
+            destination = tmp_path / "safe report.txt"
+            dialogs.callback(str(destination))
+            until(app, destination.exists)
+            until(app, lambda: "saved" in window.diagnostic_feedback.text())
+            assert destination.read_text(encoding="utf-8") == result.diagnostic_text
+            assert "CANARY" not in result.diagnostic_text
         finally:
             window.shutdown()
             window.deleteLater()

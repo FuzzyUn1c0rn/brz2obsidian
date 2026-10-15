@@ -66,7 +66,7 @@ IDENTIFIERS = {
 
 
 def identifiers(profile_version):
-    if profile_version not in {"1", "2"}:
+    if profile_version not in {"1", "2", "3"}:
         refuse("Select an explicitly reviewed local API profile")
     return dict(IDENTIFIERS, profile_version=profile_version)
 
@@ -677,7 +677,13 @@ def validate_graph_binding(source, snapshot):
                 refuse("Excluded relationship evidence is not minimal and scoped")
             continue
         links[key] = value
-    expected, assignments = normalize_relationships(links, graphs, thoughts, excluded)
+    expected, assignments = normalize_relationships(
+        links,
+        graphs,
+        thoughts,
+        excluded,
+        profile_version=source["identifiers"]["profile_version"],
+    )
     signatures = lambda values: {(r.key, r.kind, r.item_a, r.item_b) for r in values}
     assignment_signatures = lambda values: {
         (a.relationship_key, a.definition_key, a.item_key) for a in values

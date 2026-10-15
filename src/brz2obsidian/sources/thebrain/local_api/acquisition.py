@@ -24,7 +24,7 @@ from .declarations import (
     thought,
     uuid,
 )
-from .errors import refuse
+from .errors import refuse, unsupported_shape
 from .graph import link_identity, normalize_relationships
 from .notes import bind_documents
 from .resources import capture_owner
@@ -155,7 +155,11 @@ class Acquisition:
             else None
         )
         if hit["brainId"] == ZERO_UUID and shape is None:
-            refuse("A wildcard candidate envelope is not qualified")
+            unsupported_shape(
+                self.profile_version,
+                "search",
+                "A wildcard candidate envelope is not qualified",
+            )
         found = False
         node = hit.get("sourceThought")
         if node is not None:
@@ -174,11 +178,19 @@ class Acquisition:
         if hit.get("attachmentId") is not None:
             if hit["attachmentId"] == ZERO_UUID:
                 if shape != "thought":
-                    refuse("A wildcard attachment identity is not qualified")
+                    unsupported_shape(
+                        self.profile_version,
+                        "search",
+                        "A wildcard attachment identity is not qualified",
+                    )
             else:
                 uuid(hit["attachmentId"])
         if not found:
-            refuse("A wildcard hit has no resolvable authoritative owner")
+            unsupported_shape(
+                self.profile_version,
+                "search",
+                "A wildcard hit has no resolvable authoritative owner",
+            )
 
     def acquire(self):
         b = self.brain_id
@@ -338,6 +350,7 @@ class Acquisition:
             self.graphs,
             {key: value for key, value in self.thoughts.items() if key not in excluded},
             excluded,
+            profile_version=self.profile_version,
         )
         # These retained inventories are scoped facts, not raw graph wrappers.
         # Keep removed identities only in minimal exclusion/scope evidence.

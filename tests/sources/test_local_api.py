@@ -14,10 +14,18 @@ from brz2obsidian.sources.thebrain.local_api import (
 FIXTURES = Path(__file__).parents[1] / "fixtures/local_api_capture"
 
 
-def golden_inputs():
-    vector = json.loads(
-        (FIXTURES / "capture-vectors.json").read_text(encoding="utf-8")
-    )["cases"][0]
+def golden_inputs(profile_version="1"):
+    vector = (
+        json.loads((FIXTURES / "capture-vectors.json").read_text(encoding="utf-8"))[
+            "cases"
+        ][0]
+        if profile_version == "1"
+        else json.loads(
+            (FIXTURES / f"profile{profile_version}-capture-vector.json").read_text(
+                encoding="utf-8"
+            )
+        )
+    )
     files = {
         f["storage_key"]: f["utf8"].encode("utf-8") for f in vector["retained_files"]
     }
@@ -55,8 +63,11 @@ def golden_inputs():
         "unknown_subject",
     ],
 )
-def test_public_capture_rejects_unqualified_shapes_before_writing(tmp_path, mutation):
-    source, snapshot, audit, payloads = golden_inputs()
+@pytest.mark.parametrize("profile_version", ["1", "3"])
+def test_public_capture_rejects_unqualified_shapes_before_writing(
+    tmp_path, mutation, profile_version
+):
+    source, snapshot, audit, payloads = golden_inputs(profile_version)
     snapshot["identity"]["source_sha256"] = snapshot["identity"]["snapshot_digest"] = ""
     if mutation == "extra_source":
         source["Authorization"] = "HEADER_CANARY"
@@ -170,6 +181,7 @@ def test_public_capture_rejects_unqualified_shapes_before_writing(tmp_path, muta
             audit=audit,
             payloads=payloads,
             capture_parent=tmp_path,
+            profile_version=profile_version,
         )
     assert "CANARY" not in str(error.value)
     assert list(tmp_path.iterdir()) == []
@@ -187,16 +199,18 @@ def test_public_capture_rejects_unqualified_shapes_before_writing(tmp_path, muta
         "extra.json",
     ],
 )
+@pytest.mark.parametrize("profile_version", ["1", "3"])
 def test_pinned_capture_detects_every_file_mutation_and_revokes_streams(
-    tmp_path, target
+    tmp_path, target, profile_version
 ):
-    source, snapshot, audit, payloads = golden_inputs()
+    source, snapshot, audit, payloads = golden_inputs(profile_version)
     session = LocalApiSession(
         source=source,
         snapshot=SourceSnapshot.model_validate_json(json.dumps(snapshot)),
         audit=audit,
         payloads=payloads,
         capture_parent=tmp_path,
+        profile_version=profile_version,
     )
     root = next(tmp_path.iterdir())
     identity = session.source_identity
@@ -236,8 +250,9 @@ def test_closing_capture_revokes_outstanding_stream_and_unknown_access(tmp_path)
     assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.parametrize("profile_version", ["2", "3"])
 def test_repeated_payload_reads_still_detect_unrequested_same_stat_corruption(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, profile_version
 ):
     import os
     import tempfile
@@ -256,7 +271,7 @@ def test_repeated_payload_reads_still_detect_unrequested_same_stat_corruption(
         module = LocalApiSourceModule(
             LocalApiConfig(api_url=address),
             credentials=lambda: KEY,
-            profile_version="2",
+            profile_version=profile_version,
         )
         with module.open(LocalApiSourceRef(BRAIN)) as session:
             identity = session.source_identity

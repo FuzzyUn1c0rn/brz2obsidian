@@ -30,3 +30,5 @@ LOCAL_API_POLICY = SourcePolicy(
 )
 
 LOCAL_API_POLICY_V2 = LOCAL_API_POLICY.model_copy(update={"profile_version": "2"})
+
+LOCAL_API_POLICY_V3 = LOCAL_API_POLICY.model_copy(update={"profile_version": "3"})

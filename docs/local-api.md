@@ -139,10 +139,13 @@ result = workflow.inspect(reference)
 
 `LocalApiSourceModule(config, credentials=provider)` accepts a zero-argument
 provider returning the key at acquisition time. `local_api_workflow` accepts the
-same provider. References/configuration contain no credential field. The outer `local_api_workflow` explicitly pairs reviewed profile 2 with the
-module. Direct `LocalApiSourceModule` construction defaults to profile 1, which
-refuses the additional profile 2 shapes; explicit `profile_version="2"` requires
-its matching `LOCAL_API_POLICY_V2` when composing a workflow. There is no automatic
+same provider. References/configuration contain no credential field. The outer
+`local_api_workflow` explicitly pairs profile 3 with `LOCAL_API_POLICY_V3`; the
+CLI and Windows app use this factory. Profile 3 inherits every profile 2 resource
+predicate and warning disposition. Direct `LocalApiSourceModule` and
+`LocalApiSession` construction still default to profile 1. Explicit profiles 1
+and 2 remain available with their matching `LOCAL_API_POLICY` and
+`LOCAL_API_POLICY_V2`; explicit profile 3 uses `LOCAL_API_POLICY_V3`. There is no automatic
 fallback or additional GUI/CLI setting. Custom source/policy bindings remain
 caller-owned composition; the factory supplies the reviewed pair. Existing config
 and worker shapes remain unchanged. The module
@@ -196,3 +199,15 @@ that every captured object existed at the same moment, or that API discovery is
 universally complete. Inspection releases its session; conversion acquires again
 and therefore pays the acquisition cost again. Published acquisition evidence
 records `atomic=false`, start/end times and these limits.
+
+
+Profile-3 unsupported search, relationship and resource forms return respectively
+`api_search_shape_unsupported`, `api_relationship_shape_unsupported` and
+`api_resource_shape_unsupported`, using fixed stage-specific messages through
+CLI and Windows diagnostic report/copy/save. Ownership, invalid bytes,
+credentials and operational errors retain their existing classifications;
+explicit older profiles retain their earlier result codes. The finite additional
+source meanings are qualified in [the profile-3 table](local-api-profile3-qualification.md)
+and are implemented in their assigned source-family slices. Qualification alone
+never makes unsupported source content importable. Profile changes require a
+fresh compatible inspection; the worker/review schema remains version 3.

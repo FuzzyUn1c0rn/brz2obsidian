@@ -13,7 +13,7 @@ from PIL import Image
 from brz2obsidian.contracts import Asset, Document
 
 from .declarations import source_date, uuid
-from .errors import refuse
+from .errors import refuse, unsupported_shape
 from .notes import scope_text
 
 ATTACHMENT_FIELDS = {
@@ -128,7 +128,7 @@ def role(value, profile_version):
         and name is None
         and location
         in {value["id"] + ".webp"}
-        | ({value["id"] + ".png"} if profile_version == "2" else set())
+        | ({value["id"] + ".png"} if profile_version in {"2", "3"} else set())
     ):
         return "image"
     if kind in {1, 15}:
@@ -143,12 +143,16 @@ def role(value, profile_version):
         suffix = location.rsplit(".", 1)[-1].lower() if "." in location else ""
         if (
             (kind, suffix) in {(1, "pdf"), (15, "txt")}
-            or profile_version == "2"
+            or profile_version in {"2", "3"}
             and name is None
             and (kind, suffix) in {(1, "png"), (1, "zip")}
         ):
             return "file"
-    refuse("The attachment role/location is outside the reviewed profile")
+    unsupported_shape(
+        profile_version,
+        "resource",
+        "The attachment role/location is outside the reviewed profile",
+    )
 
 
 def validate_bytes(value, raw, profile_version):
@@ -190,7 +194,7 @@ def validate_bytes(value, raw, profile_version):
         expected = "PNG"
     elif (
         selected == "icon"
-        and profile_version == "2"
+        and profile_version in {"2", "3"}
         and prefix.startswith(b"\xff\xd8\xff")
     ):
         expected = "JPEG"

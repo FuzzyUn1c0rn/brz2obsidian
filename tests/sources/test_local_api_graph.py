@@ -582,8 +582,9 @@ def test_acquired_graph_scopes_excluded_tag_without_removing_other_relationships
         "unknown_sibling_reference",
     ],
 )
+@pytest.mark.parametrize("profile_version", ["1", "3"])
 def test_frozen_capture_binds_graph_and_metadata_facts_to_scoped_originals(
-    tmp_path, monkeypatch, mutation
+    tmp_path, monkeypatch, mutation, profile_version
 ):
     import json
     import tempfile
@@ -596,7 +597,9 @@ def test_frozen_capture_binds_graph_and_metadata_facts_to_scoped_originals(
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
     with api_server(CompleteGraphApi()) as (_, address):
         module = LocalApiSourceModule(
-            LocalApiConfig(api_url=address), credentials=lambda: KEY
+            LocalApiConfig(api_url=address),
+            credentials=lambda: KEY,
+            profile_version=profile_version,
         )
         with module.open(LocalApiSourceRef(BRAIN)) as session:
             # Retained filenames are the accepted public capture format. No
@@ -665,6 +668,7 @@ def test_frozen_capture_binds_graph_and_metadata_facts_to_scoped_originals(
                     source=source,
                     snapshot=snapshot.model_copy(update=changed),
                     audit=audit,
+                    profile_version=profile_version,
                 )
 
 

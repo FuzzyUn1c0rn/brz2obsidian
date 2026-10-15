@@ -159,3 +159,26 @@ For acquisition using the independently qualified [additive resource profile2](l
 The outer LOCAL_API_POLICY and capture identifiers must explicitly select the same reviewed profile version. A version1 capture remains bound to version1 support; it cannot silently acquire version2 semantics. Unknown versions or policy/identifier mismatch refuse. A reviewed version1 identity is incompatible with version2 until another inspection/review because profile_version participates in C(source) and its bound source_sha256; the snapshot and integrity digests consequently differ. No automatic profile fallback or replacement of old fixed expectations is permitted.
 
 All three original version1 fixture files remain byte-for-byte unchanged as committed. The separately authored [profile2 capture literal](../tests/fixtures/local_api_capture/profile2-capture-vector.json) supplies one independent case changing only the profile identifier and consequent source/snapshot/metadata/manifest hash bindings. It specifies the version alternative using existing format1 facts,not a new canonical encoder or a claim of runtime support. Resource-v2 positive/negative controls independently qualify the additional roles/formats. Actual stored-byte file hashes remain unframed and distinct from content digests as above.
+
+
+## Explicit profile3 alternative
+
+Profile 3 adds `profile_version="3"` as an explicit identifier alternative with
+all other format1 identifiers, contract7, CJSON1, digest domains and self-field
+omission rules unchanged. `LOCAL_API_POLICY_V3` is the matching outer policy.
+The [independently qualified table](local-api-profile3-qualification.md) bounds
+source semantics; profile selection never grants blanket role/extension support.
+Live, sealed and reopened captures inherit profile2 support under profile3 and
+retain exact profile matching. Direct module/session defaults remain profile1;
+explicit profiles1/2 preserve their semantics. Unknown or mismatched identifiers
+refuse. Generic custom policy/module composition remains caller-owned.
+
+The [independently authored profile3 literal](../tests/fixtures/local_api_capture/profile3-capture-vector.json)
+is an additional oracle; older fixture bytes and expectations remain unchanged.
+Its framed source/snapshot/integrity expectations differ solely because profile
+identity is bound. Ordinary retained-file hashes remain unframed. Operational
+host/capture/storage paths are excluded from content identity; authored external
+locations and their derived URI/display facts remain content-bound. Pinned
+mutations refuse even with recomputed untrusted manifests. A fresh valid capture
+with valid changed content receives a different identity and needs a new review;
+independent original-source preservation is established by baseline comparison.

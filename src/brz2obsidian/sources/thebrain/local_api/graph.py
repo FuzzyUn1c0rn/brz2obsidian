@@ -5,7 +5,7 @@ import re
 from brz2obsidian.contracts import ClassificationAssignment, Relationship
 
 from .declarations import source_date, uuid
-from .errors import refuse
+from .errors import refuse, unsupported_shape
 
 LINK_FIELDS = {
     "id",
@@ -37,7 +37,9 @@ def link_identity(value, brain_id, expected_id=None):
     return key
 
 
-def normalize_relationships(links, graphs, thoughts, excluded=()):
+def normalize_relationships(
+    links, graphs, thoughts, excluded=(), *, profile_version="1"
+):
     result, assignments = [], []
     excluded, providers_by_item = set(excluded), {}
     expected_graphs = {
@@ -64,8 +66,16 @@ def normalize_relationships(links, graphs, thoughts, excluded=()):
             if type(value[name]) is not int:
                 refuse("A relationship scalar is not qualified")
         a, b = value["thoughtIdA"], value["thoughtIdB"]
-        if a == b or value["kind"] != 1 or value["typeId"] is not None:
+        if a == b:
             refuse("An included relationship meaning is not qualified")
+        if profile_version == "3" and value["typeId"] is not None:
+            uuid(value["typeId"])
+        if value["kind"] != 1 or value["typeId"] is not None:
+            unsupported_shape(
+                profile_version,
+                "relationship",
+                "An included relationship meaning is not qualified",
+            )
         pair = value["relation"], value["direction"]
         if value["meaning"] == 2 and pair == (1, -1):
             if thoughts[a]["kind"] != 2 or thoughts[b]["kind"] != 1:
@@ -93,7 +103,11 @@ def normalize_relationships(links, graphs, thoughts, excluded=()):
         elif value["meaning"] == 1 and pair in {(3, -1), (3, 3), (3, 5), (3, 7)}:
             kind, left, right = "related", "jump_ids", "jump_ids"
         else:
-            refuse("An included relationship tuple is not qualified")
+            unsupported_shape(
+                profile_version,
+                "relationship",
+                "An included relationship tuple is not qualified",
+            )
         if b not in graphs[a][0][left] or a not in graphs[b][0][right]:
             refuse("Relationship endpoints do not agree with graph adjacency")
         if any(key not in graphs[node][0]["link_ids"] for node in (a, b)):

@@ -245,3 +245,16 @@ These successful normalizations produce no new SourceFinding. Unqualified additi
 The retained census independently checked all100 additional IDs across51 owner graphs:91 generic PNG files,7 generic ZIP files,one PNG note image and one JPEG icon. Four representatives establish distinct decoder/signature controls. These are conditional per-resource predicates: every accepted resource must satisfy its decoder/directory requirement during the full audit. The100-ID signature/hash census and selected representative decodes do not establish100 per-resource decode/directory verdicts. The PNG note image joins its64-byte raw note by exact destination once. The JPEG icon's273600 measured bytes have SHA-256 `2f50caaed5260f5cf6c96fcf68a8091b67855a9b15c96772785165ec4620a90e`; an independent full-pixel WIC decode corroborates actual JPEG eligibility. The ZIP control has a valid224-member directory without extraction or member CRC claims. No new API/native requests or Brain changes were used. Decoder success is format eligibility,not output appearance acceptance.
 
 The closed capture format does not acquire an actual_format field or a new source domain. Present payload identity/length/hash bind the exact bytes; the independently retained format qualification explains the accepted predicate. Any recorded source/payload format description must be truthful about JPEG bytes despite the declared `.png` suffix. [Capture compatibility](local-api-capture.md#explicit-profile2-alternative) adds only the reviewed profile_version2 identifier alternative; CJSON1,format1,module1 and every version1 fixed vector remain unchanged.
+
+
+## Profile3 qualification and compatibility
+
+[Profile 3](local-api-profile3-qualification.md) is an explicitly reviewed
+alternative that includes every profile2 predicate and disposition. The standard
+library workflow, CLI and Windows factory pair a module configured for profile 3
+with `LOCAL_API_POLICY_V3`.
+Direct source-module/session constructors retain profile1 defaults; explicit
+profiles1/2 and their controls remain available. Capture format1, module1,
+contract7 and worker/review schema3 are unchanged. Every new source-family
+predicate requires matching live and frozen implementation under its assigned
+slice; raw capture or profile selection never expands the finite qualification.

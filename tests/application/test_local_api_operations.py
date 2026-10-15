@@ -59,9 +59,9 @@ def test_resource_review_rejects_cross_profile_compatibility_and_changed_payload
         operations = Operations()
         inspected = operations.inspect(selection)
         assert inspected.reviewed is not None
-        assert inspected.reviewed.profile_version == "2"
+        assert inspected.reviewed.profile_version == "3"
         previous_profile = inspected.reviewed.model_copy(
-            update={"profile_version": "1"}
+            update={"profile_version": "2"}
         )
         refused = operations.convert_reviewed(
             selection, tmp_path, "old-profile", previous_profile
@@ -800,3 +800,112 @@ def test_real_worker_requires_gap_warning_authorization_and_fresh_pdf_review(
         assert converted.status == "conversion_created_with_warnings"
         assert converted.publication.receipt_verified
         assert_published_txt_pdf_gap(tmp_path / "authorized")
+
+
+@pytest.mark.parametrize("stage", ["search", "relationship", "resource"])
+def test_profile3_fixed_stage_messages_survive_real_worker_and_reviewed_conversion(
+    tmp_path, monkeypatch, stage
+):
+    from tests.support.local_api import MetadataApi
+    from tests.support.local_api_graph import HIERARCHY
+    from tests.support.local_api_payloads import (
+        FILE,
+        SHAPE_MESSAGES,
+        unsupported_shape_api,
+    )
+
+    monkeypatch.setenv("THE_BRAIN_LOCAL_API_KEY", KEY)
+    api = unsupported_shape_api(stage)
+    if stage == "search":
+        fault = api.search
+        api.search = MetadataApi().search
+    elif stage == "relationship":
+        fault = api.links[HIERARCHY]["relation"]
+        api.links[HIERARCHY]["relation"] = 1
+    else:
+        fault = api.attachments.pop(FILE)
+    worker = Supervisor(Path(sys.executable), Path(__file__).parents[2] / "src")
+    with api_server(api) as (_, address):
+        selection = LocalApiSourceSelection(
+            brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+        )
+        operations = Operations()
+        review = operations.inspect(selection).reviewed
+        assert review is not None
+        if stage == "search":
+            api.search = fault
+        elif stage == "relationship":
+            api.links[HIERARCHY]["relation"] = fault
+        else:
+            api.attachments[FILE] = fault
+        results = [
+            operations.inspect(selection),
+            operations.convert_reviewed(selection, tmp_path, "refused", review),
+        ]
+        for operation, arguments in (
+            ("inspect", InspectArguments(source_selection=selection)),
+            (
+                "convert_reviewed",
+                ConvertArguments(
+                    source_selection=selection,
+                    parent=str(tmp_path),
+                    vault_name="worker-refused",
+                    reviewed=review,
+                    proceed_with_warnings=False,
+                ),
+            ),
+        ):
+            terminal = worker.run(
+                WorkerRequest(
+                    request_id=str(uuid4()), operation=operation, arguments=arguments
+                )
+            )
+            assert terminal.phase == "completed"
+            results.append(terminal.response.result)
+        for result in results:
+            assert result.outcome == "refused"
+            assert result.findings[0].code == f"api_{stage}_shape_unsupported"
+            assert result.findings[0].message == SHAPE_MESSAGES[stage]
+            assert SHAPE_MESSAGES[stage] in result.diagnostic_text
+            assert "CANARY" not in result.model_dump_json()
+        assert not (tmp_path / "refused").exists()
+        assert not (tmp_path / "worker-refused").exists()
+
+
+def test_valid_replacement_image_has_new_identity_and_needs_new_review(tmp_path):
+    from io import BytesIO
+
+    from PIL import Image
+
+    from tests.support.local_api_payloads import IMAGE, RichPayloadApi
+
+    stream = BytesIO()
+    Image.new("RGB", (2, 1), "blue").save(stream, format="PNG")
+    replacement = stream.getvalue()
+    with api_server(RichPayloadApi()) as (api, address):
+        selection = LocalApiSourceSelection(
+            brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+        )
+        operations = Operations(credentials=lambda: KEY)
+        original = operations.inspect(selection)
+        assert original.reviewed is not None
+        api.payloads[IMAGE] = replacement
+        current = operations.inspect(selection)
+        assert current.reviewed is not None
+        assert current.reviewed.source_identity != original.reviewed.source_identity
+        assert (
+            current.reviewed.source_identity.source_sha256
+            != original.reviewed.source_identity.source_sha256
+        )
+        refused = operations.convert_reviewed(
+            selection, tmp_path, "old-review", original.reviewed
+        )
+        assert refused.findings[0].code == "review_changed"
+        assert not (tmp_path / "old-review").exists()
+        accepted = operations.convert_reviewed(
+            selection, tmp_path, "new-review", current.reviewed
+        )
+        assert accepted.publication.receipt_verified
+        assert (
+            tmp_path / f"new-review/Attachments/22222222/{IMAGE}.png"
+        ).read_bytes() == replacement
