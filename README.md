@@ -10,8 +10,11 @@ with qualified graph, classification, authored Markdown and owned resources,
 including explicit and inherited icons.
 See the [local API guide](docs/local-api.md) for Brain UUID selection, external
 credentials, search options and the current content-stage limits. Acquisition
-spans requests and is not an atomic snapshot; conversion reacquires after
-inspection.
+spans requests and is not an atomic snapshot. Editing or syncing during
+acquisition can produce a mixture of source states. Conversion verifies the
+captured copy's integrity; this does not prove that the live Brain stayed
+unchanged or that every captured object existed at the same moment. Inspection
+releases its capture, so conversion acquires again and pays that cost again.
 
 This is a **one-time conversion into a new vault**. It does not merge into an
 existing vault or keep TheBrain and Obsidian synchronized. Your source archive
