@@ -328,5 +328,7 @@ def test_missing_api_txt_warns_and_publishes_preserved_pdf_with_neutral_notice(
         assert "Conversion used captured source material only." in report
         assert "convert the updated source into a fresh vault" in report
         assert "archived material" not in report
+        assert "Declaration and unavailable bytes:" in report
+        assert "physical absence" not in report
         assert TXT in report and PDF in report
         assert "CANARY" not in result.model_dump_json() + report + note

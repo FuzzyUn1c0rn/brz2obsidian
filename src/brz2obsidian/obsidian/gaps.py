@@ -54,7 +54,7 @@ def gap_report(plan):
             )
             text += f"- [ ] {owner}; thought ID {plain(asset.owner)}; attachment {plain(asset_id)}; role {role}; outcome {outcome}.\n"
             text += (
-                "  Declaration and physical absence: "
+                "  Declaration and unavailable bytes: "
                 + plain(finding.observed_json)
                 + "\n"
             )

@@ -2407,7 +2407,7 @@ def check_report(vault, raw, record, names, assets, summary, payloads):
             )
             assert row.startswith(heading), "raw owner/target/role/outcome diagnostic"
             lines = row[len(heading) :].rstrip("\n").splitlines()
-            assert lines[0].startswith("  Declaration and physical absence: "), (
+            assert lines[0].startswith("  Declaration and unavailable bytes: "), (
                 "required raw diagnostic observation"
             )
             decoded = re.sub(r"\\([\\`*_{}\[\]<>#])", r"\1", lines[0].split(": ", 1)[1])
