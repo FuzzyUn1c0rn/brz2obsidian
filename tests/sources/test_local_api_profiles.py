@@ -336,3 +336,56 @@ def test_fresh_profile3_capture_refuses_unknown_identifier_bindings(field, value
             profile_version="3",
         )
         session.close()
+
+
+@pytest.mark.parametrize("nested", ["thought", "link", "malformed_owner"])
+@pytest.mark.parametrize("version", ["1", "2", "3"])
+def test_search_nested_ownership_keeps_invalid_source_classification(nested, version):
+    from tests.support.local_api import HOME, MetadataApi
+    from tests.support.local_api_graph import HIERARCHY
+
+    api = MetadataApi()
+    hit = {
+        "brainId": "00000000-0000-0000-0000-000000000000",
+        "isFromOtherBrain": False,
+        "sourceThought": {"id": HOME, "brainId": BRAIN},
+        "sourceLink": None,
+        "searchResultType": 1,
+        "entityType": 2,
+        "sourceType": 0,
+        "attachmentId": "00000000-0000-0000-0000-000000000000",
+        "name": "PRIVATE_HINT_CANARY",
+    }
+    if nested == "thought":
+        hit["sourceThought"]["brainId"] = "99999999-9999-4999-8999-999999999999"
+    elif nested == "link":
+        hit.update(
+            sourceThought=None,
+            entityType=3,
+            sourceLink={
+                "id": HIERARCHY,
+                "brainId": "99999999-9999-4999-8999-999999999999",
+            },
+        )
+    else:
+        hit["sourceThought"] = "PRIVATE_OWNER_CANARY"
+    api.search = [hit]
+    with api_server(api) as (_, address):
+        module = LocalApiSourceModule(
+            LocalApiConfig(api_url=address),
+            credentials=lambda: KEY,
+            profile_version=version,
+        )
+        policy = {
+            "1": LOCAL_API_POLICY,
+            "2": LOCAL_API_POLICY_V2,
+            "3": LOCAL_API_POLICY_V3,
+        }[version]
+        result = Workflow(
+            SourceModuleBinding(module, policy),
+            ObsidianRenderer(),
+            FilesystemPublisher(),
+        ).inspect(LocalApiSourceRef(BRAIN))
+    assert result.outcome == "refused"
+    assert result.issues[0].code == "invalid_source"
+    assert "CANARY" not in result.model_dump_json()

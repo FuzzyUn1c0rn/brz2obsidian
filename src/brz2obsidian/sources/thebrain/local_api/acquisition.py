@@ -149,6 +149,12 @@ class Acquisition:
             or hit.get("isFromOtherBrain") is not False
         ):
             refuse("A wildcard candidate has foreign or invalid ownership")
+        if self.profile_version == "3" and any(
+            node is not None
+            and (not isinstance(node, dict) or node.get("brainId") != self.brain_id)
+            for node in (hit.get("sourceThought"), hit.get("sourceLink"))
+        ):
+            refuse("A wildcard candidate has foreign or invalid ownership")
         shape = (
             _candidate_shape(hit, self.brain_id)
             if hit["brainId"] == ZERO_UUID or hit.get("attachmentId") == ZERO_UUID
