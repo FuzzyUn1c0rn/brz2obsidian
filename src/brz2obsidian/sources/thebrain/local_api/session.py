@@ -24,6 +24,7 @@ from .capture import (
 )
 from .errors import failure, refuse
 from .metadata import AcquisitionAudit, SourceAcquisition
+from .storage import StagedPayload
 
 
 def digest(domain, value):
@@ -167,7 +168,7 @@ class LocalApiSession:
                 supplied = payloads[asset_id]
                 stream = (
                     supplied.open("rb")
-                    if isinstance(supplied, Path)
+                    if isinstance(supplied, (Path, StagedPayload))
                     else BytesIO(bytes(supplied))
                 )
                 length, measured = 0, hashlib.sha256()

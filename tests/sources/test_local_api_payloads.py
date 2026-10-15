@@ -71,6 +71,21 @@ def test_explicit_profile2_outer_pairing_preserves_generic_png_without_promoting
         ).read_text(encoding="utf-8")
 
 
+def test_populated_owned_content_requires_an_actual_graph_attachment_inventory():
+    api = PayloadApi()
+    path = f"/api/thoughts/{BRAIN}/{HOME}/graph"
+    graph = api.response(path, {})[1]
+    api.overrides[path] = 200, dict(graph, attachments=None)
+    with (
+        api_server(api) as (_, address),
+        pytest.raises(MigrationRefused),
+        LocalApiSourceModule(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        ).open(LocalApiSourceRef(BRAIN)),
+    ):
+        pytest.fail("A null graph cannot corroborate populated owned content")
+
+
 def test_raw_markdown_is_captured_exactly_and_read_after_remote_bytes_change():
     with api_server(PayloadApi()) as (api, address):
         module = LocalApiSourceModule(
@@ -509,6 +524,82 @@ def test_replaced_acquisition_storage_preserves_unowned_directory_and_refuses(
     assert (replacement / "unowned.txt").read_bytes() == b"UNOWNED_CANARY"
 
 
+@pytest.mark.parametrize("asset_id", [NOTE, FILE])
+def test_staging_ownership_loss_refuses_before_note_or_opaque_write(
+    asset_id, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    api = FilePayloadApi()
+    replacement_file = None
+    unowned = b"UNOWNED_EXISTING_BYTES"
+
+    def replace_before_payload(query):
+        nonlocal replacement_file
+        directory = next(tmp_path.glob("brz2obsidian-api-acquire-*"))
+        directory.rename(tmp_path / "moved-owned-staging")
+        directory.mkdir()
+        replacement_file = directory / f"{len(api.requests):016x}.bin"
+        replacement_file.write_bytes(unowned)
+        return 200, api.attachments[asset_id]
+
+    api.overrides[f"/api/attachments/{BRAIN}/{asset_id}/metadata"] = (
+        replace_before_payload
+    )
+    with (
+        api_server(api) as (_, address),
+        pytest.raises(MigrationFailed) as failure,
+        LocalApiSourceModule(
+            LocalApiConfig(api_url=address),
+            credentials=lambda: KEY,
+            profile_version="2",
+        ).open(LocalApiSourceRef(BRAIN)),
+    ):
+        pytest.fail("Unowned replacement storage cannot receive source bytes")
+    assert "UNOWNED" not in str(failure.value)
+    assert replacement_file is not None
+    assert replacement_file.parent.is_dir()
+    assert replacement_file.read_bytes() == unowned
+
+
+def test_staging_ownership_is_checked_when_payloads_are_copied_to_frozen_capture(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    actual_create, actual_open = tempfile.mkdtemp, Path.open
+    replacement, unowned_reads = None, []
+
+    def replace_before_frozen_copy(*args, **kwargs):
+        nonlocal replacement
+        if kwargs.get("prefix") == "brz2obsidian-api-":
+            replacement = next(tmp_path.glob("brz2obsidian-api-acquire-*"))
+            moved = tmp_path / "moved-owned-staging"
+            replacement.rename(moved)
+            replacement.mkdir()
+            for original in moved.iterdir():
+                (replacement / original.name).write_bytes(original.read_bytes())
+        return actual_create(*args, **kwargs)
+
+    def observe_replacement_reads(path, mode="r", *args, **kwargs):
+        if replacement is not None and replacement in path.parents and mode == "rb":
+            unowned_reads.append(path.name)
+        return actual_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(tempfile, "mkdtemp", replace_before_frozen_copy)
+    monkeypatch.setattr(Path, "open", observe_replacement_reads)
+    with (
+        api_server(FilePayloadApi()) as (_, address),
+        pytest.raises(MigrationFailed),
+        LocalApiSourceModule(
+            LocalApiConfig(api_url=address),
+            credentials=lambda: KEY,
+            profile_version="2",
+        ).open(LocalApiSourceRef(BRAIN)),
+    ):
+        pytest.fail("Replaced staging cannot supply an owned frozen capture")
+    assert replacement is not None and replacement.is_dir()
+    assert unowned_reads == []
+
+
 def test_captured_authored_note_cannot_become_an_uninterpreted_asset():
     source, snapshot, audit, payloads = golden_inputs()
     note_keys = {r["key"] for r in source["records"] if r["domain"] == "note_text"}
@@ -679,7 +770,7 @@ def test_excluded_original_never_reaches_disk_even_when_staging_cleanup_fails(
         stream = actual_open(path, mode, *args, **kwargs)
         return (
             ObservedWriter(stream)
-            if mode == "wb" and tmp_path in path.parents
+            if mode in {"wb", "xb"} and tmp_path in path.parents
             else stream
         )
 

@@ -581,6 +581,7 @@ class Acquisition:
         }
         self.client.ensure_safe(source)
         self.client.ensure_safe(snapshot.model_dump(mode="json"))
+        self.capture_directory.verify()
         return LocalApiSession(
             source=source,
             snapshot=snapshot,

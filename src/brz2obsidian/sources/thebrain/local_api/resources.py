@@ -248,6 +248,8 @@ def capture_owner(
     ]
     if len({a["id"] for a in declarations}) != len(declarations):
         refuse("Owned attachment identities are duplicated")
+    if graph_attachments is None and declarations:
+        refuse("A populated attachment inventory needs actual graph agreement")
     if graph_attachments is not None:
         observed = [
             declaration(a, brain, owner, config.max_response_bytes)
@@ -296,7 +298,7 @@ def capture_owner(
                 )
             )
             continue
-        raw = directory / f"{len(client.requests):016x}.bin"
+        raw = directory.path / f"{len(client.requests):016x}.bin"
         note_bytes = None
         if selected == "note_original":
             # Qualify scope before any original note bytes reach disk. The
@@ -312,16 +314,17 @@ def capture_owner(
             validate_bytes(value, note_bytes, profile_version)
             measured_length, measured_hash = len(note_bytes), hashlib.sha256(note_bytes)
         else:
-            with raw.open("wb") as stream:
+            with directory.open(raw.name, "xb") as stream:
                 client.request(
                     "attachment-content",
                     f"/attachments/{brain}/{asset_id}/file-content",
                     asset_id,
                     sink=stream,
                 )
+            directory.verify()
             validate_bytes(value, raw, profile_version)
             measured_length, measured_hash = 0, hashlib.sha256()
-            with raw.open("rb") as stream:
+            with directory.open(raw.name, "rb") as stream:
                 while chunk := stream.read(65536):
                     measured_length += len(chunk)
                     measured_hash.update(chunk)
@@ -360,7 +363,10 @@ def capture_owner(
         if selected == "note_original" and documents[-1].original_copy_omitted:
             continue
         if selected == "note_original":
-            with BytesIO(note_bytes) as source_stream, raw.open("wb") as destination:
+            with (
+                BytesIO(note_bytes) as source_stream,
+                directory.open(raw.name, "xb") as destination,
+            ):
                 while chunk := source_stream.read(65536):
                     destination.write(chunk)
         assets.append(
@@ -372,7 +378,7 @@ def capture_owner(
                 actual_sha256=measured_hash.hexdigest(),
             )
         )
-        payloads[asset_id] = raw
+        payloads[asset_id] = directory.payload(raw.name)
     if len([a for a in assets if a.role == "icon"]) > 1 or len(
         {a.original_name for a in assets if a.role == "image"}
     ) != len([a for a in assets if a.role == "image"]):
