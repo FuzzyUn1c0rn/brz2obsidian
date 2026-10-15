@@ -481,6 +481,18 @@ class Acquisition:
             set().union(*map(set, included.values())),
             with_findings=True,
         )
+        from .gaps import gap_projections
+
+        gap_findings, gap_decisions = gap_projections(
+            assets,
+            {
+                r["value"]["id"]: r["value"]
+                for r in records
+                if r["domain"] == "attachment"
+            },
+        )
+        findings.extend(gap_findings)
+        decisions.extend(gap_decisions)
         source = {
             "identifiers": identifiers(self.profile_version),
             "brain": brain,

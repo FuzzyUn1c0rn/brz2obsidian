@@ -315,12 +315,16 @@ def capture_owner(
             measured_length, measured_hash = len(note_bytes), hashlib.sha256(note_bytes)
         else:
             with directory.open(raw.name, "xb") as stream:
-                client.request(
+                status, _ = client.request(
                     "attachment-content",
                     f"/attachments/{brain}/{asset_id}/file-content",
                     asset_id,
                     sink=stream,
+                    allow_missing_txt=value["type"] == 15,
                 )
+            if status == 404:
+                assets.append(Asset(**common, role="file", availability="absent"))
+                continue
             directory.verify()
             validate_bytes(value, raw, profile_version)
             measured_length, measured_hash = 0, hashlib.sha256()
@@ -386,7 +390,7 @@ def capture_owner(
     return assets, documents, payloads
 
 
-def validate_payload_binding(source, snapshot):
+def validate_payload_binding(source, snapshot, audit):
     """Bind normalized content to closed qualified source facts, not just hashes."""
     from .notes import bind_documents
 
@@ -435,12 +439,31 @@ def validate_payload_binding(source, snapshot):
                 else value["location"]
             )
             or asset.display_name != value["name"]
-            or asset.availability != ("external" if selected == "url" else "present")
+            or asset.availability
+            not in ({"external"} if selected == "url" else {"present", "absent"})
             or asset.external_uri != (value["location"] if selected == "url" else None)
             or asset.video_presentation is not None
         ):
             refuse("Normalized payload roles or source declarations disagree")
-    owners, expected_findings = set(), []
+    from .gaps import gap_projections, validate_gap_audit
+
+    expected_findings, expected_decisions = gap_projections(
+        snapshot.assets, attachments
+    )
+    if (
+        sorted(
+            (
+                d
+                for d in source["scope"]["decisions"]
+                if d["outcome"] == "missing_txt404"
+            ),
+            key=lambda d: d["key"],
+        )
+        != expected_decisions
+    ):
+        refuse("Missing TXT scope decisions disagree with qualified payload facts")
+    validate_gap_audit(snapshot.assets, audit, expected_decisions)
+    owners = set()
     for document in snapshot.documents:
         if document.owner in owners or document.owner not in texts:
             refuse("Authored note ownership is ambiguous or unbound")

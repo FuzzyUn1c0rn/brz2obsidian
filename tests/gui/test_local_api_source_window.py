@@ -546,3 +546,95 @@ def test_narrow_popup_keeps_complete_distinct_ids_before_eliding_duplicate_names
             brains.hidePopup() if "brains" in locals() else None
             window.shutdown()
             window.deleteLater()
+
+
+def test_real_worker_gui_requires_explicit_txt_gap_warning_action_and_fresh_review(
+    tmp_path, monkeypatch
+):
+    from brz2obsidian_ui.window import MainWindow
+    from tests.support.local_api_payloads import (
+        PDF,
+        PDF_BYTES,
+        MissingTxtPdfApi,
+        assert_published_txt_pdf_gap,
+    )
+
+    monkeypatch.setenv("THE_BRAIN_LOCAL_API_KEY", KEY)
+    app = QApplication.instance() or QApplication([])
+    with api_server(MissingTxtPdfApi()) as (api, address):
+        window = MainWindow()
+        window.show()
+        try:
+            control(window, QComboBox, "Source kind").setCurrentIndex(1)
+            until(app, lambda: window.snapshot.source_kind == "local-api")
+            control(window, QLineEdit, "Local API address").setText(address)
+            until(app, lambda: window.snapshot.api_config.api_url == address)
+            control(window, QPushButton, "Refresh accessible Brains").click()
+            until(app, lambda: window.snapshot.brain_list_status == "ready")
+            control(window, QComboBox, "Accessible Brains").setCurrentIndex(1)
+            until(app, lambda: window.snapshot.source_selection is not None)
+            control(window, QPushButton, "Inspect Brain").click()
+            until(
+                app,
+                lambda: (
+                    window.snapshot.reviewed is not None
+                    and not window.snapshot.busy_operation
+                ),
+            )
+            assert window.snapshot.reviewed.outcome == "warnings"
+            assert {f.code for f in window.snapshot.result.findings} == {
+                "approved_source_gap"
+            }
+            button = control(window, QPushButton, "Convert with warnings")
+            assert not button.isEnabled()
+            assert not [
+                b
+                for b in window.findChildren(QPushButton)
+                if b.text() == "Convert" and b.isVisible()
+            ]
+            window.parent_selected(str(tmp_path))
+            QTest.keyClicks(
+                control(window, QLineEdit, "Vault name"), "Changed gap vault"
+            )
+            until(app, button.isEnabled)
+            api.payloads[PDF] += b"Changed PDF bytes"
+            button.click()
+            until(
+                app,
+                lambda: (
+                    window.snapshot.result.status == "conversion_refused"
+                    and not window.snapshot.busy_operation
+                ),
+            )
+            assert not (tmp_path / "Changed gap vault").exists()
+            api.payloads[PDF] = PDF_BYTES
+            next(
+                b
+                for b in window.findChildren(QPushButton)
+                if b.text() == "Inspect again"
+            ).click()
+            until(
+                app,
+                lambda: (
+                    window.snapshot.reviewed is not None
+                    and not window.snapshot.busy_operation
+                ),
+            )
+            name = control(window, QLineEdit, "Vault name")
+            name.selectAll()
+            QTest.keyClicks(name, "Reviewed gap vault")
+            button = control(window, QPushButton, "Convert with warnings")
+            until(app, button.isEnabled)
+            button.click()
+            until(
+                app,
+                lambda: (
+                    window.snapshot.publication is not None
+                    and window.snapshot.publication.receipt_verified
+                ),
+            )
+            assert window.snapshot.result.status == "conversion_created_with_warnings"
+            assert_published_txt_pdf_gap(tmp_path / "Reviewed gap vault")
+        finally:
+            window.shutdown()
+            window.deleteLater()

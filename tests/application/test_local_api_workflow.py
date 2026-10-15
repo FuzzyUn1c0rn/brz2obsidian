@@ -295,3 +295,40 @@ def test_public_definition_and_tag_metadata_use_the_real_planner_and_publisher(
         definition,
         tag,
     }
+
+
+def test_missing_api_txt_warns_and_publishes_preserved_pdf_with_neutral_notice(
+    tmp_path,
+):
+    from tests.support.local_api_payloads import PDF, PDF_BYTES, TXT, MissingTxtPdfApi
+
+    with api_server(MissingTxtPdfApi()) as (_, address):
+        workflow = local_api_workflow(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        )
+        inspected = workflow.inspect(LocalApiSourceRef(BRAIN))
+        assert inspected.outcome == "warnings", inspected.issues
+        (issue,) = inspected.issues
+        assert (issue.code, issue.rule_id, issue.affected) == (
+            "approved_source_gap",
+            "local-api.missing-txt-pdf.v1",
+            (TXT,),
+        )
+        destination = tmp_path / "gap-vault"
+        result = workflow.convert(LocalApiSourceRef(BRAIN), destination)
+        assert result.outcome == "warnings", result.issues
+        assert result.receipt.published and result.receipt.verified
+        assert (
+            destination / "Attachments/22222222/different-purpose.pdf"
+        ).read_bytes() == PDF_BYTES
+        assert not list(destination.rglob("*.txt"))
+        note = (destination / "Home — Entry.md").read_text(encoding="utf-8")
+        assert "Absent source file: authored.txt" in note
+        report = (destination / "Migration report.md").read_text(encoding="utf-8")
+        assert "Conversion used captured source material only." in report
+        assert "convert the updated source into a fresh vault" in report
+        assert "archived material" not in report
+        assert "Declaration and unavailable bytes:" in report
+        assert "physical absence" not in report
+        assert TXT in report and PDF in report
+        assert "CANARY" not in result.model_dump_json() + report + note

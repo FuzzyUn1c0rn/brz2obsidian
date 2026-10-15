@@ -62,6 +62,7 @@ class LocalHttp:
         *,
         deadline=None,
         allow_tag_error=False,
+        allow_missing_txt=False,
         sink=None,
     ):
         self._check(deadline)
@@ -135,6 +136,27 @@ class LocalHttp:
                 raise failure(
                     "api_authentication_failed", "The local API denied access"
                 )
+            if (
+                allow_missing_txt
+                and operation == "attachment-content"
+                and response.status == 404
+            ):
+                # Classify the status without reading or retaining arbitrary
+                # error bodies, headers or service-generated URLs.
+                self.requests.append(
+                    {
+                        "sequence": len(self.requests) + 1,
+                        "operation": operation,
+                        "brain_id": self.brain_id,
+                        "subject_id": subject_id,
+                        "status": 404,
+                        "outcome": "missing_txt_404",
+                        "started_at": started,
+                        "finished_at": timestamp(),
+                        "actual_length": 0,
+                    }
+                )
+                return 404, b""
             if response.status != 200 and not (
                 allow_tag_error and operation == "tags" and response.status == 400
             ):

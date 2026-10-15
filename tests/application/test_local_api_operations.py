@@ -414,3 +414,73 @@ def test_api_inspection_releases_capture_and_reviewed_conversion_acquires_again(
         HOME,
         "33333333-3333-4333-8333-333333333333",
     }
+
+
+def test_real_worker_requires_gap_warning_authorization_and_fresh_pdf_review(
+    tmp_path, monkeypatch
+):
+    from tests.support.local_api_payloads import (
+        PDF,
+        PDF_BYTES,
+        MissingTxtPdfApi,
+        assert_published_txt_pdf_gap,
+    )
+
+    monkeypatch.setenv("THE_BRAIN_LOCAL_API_KEY", KEY)
+    with api_server(MissingTxtPdfApi()) as (api, address):
+        selection = LocalApiSourceSelection(
+            brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+        )
+        worker = Supervisor(Path(sys.executable), Path(__file__).parents[2] / "src")
+
+        def inspect():
+            return worker.run(
+                WorkerRequest(
+                    request_id=str(uuid4()),
+                    operation="inspect",
+                    arguments=InspectArguments(source_selection=selection),
+                )
+            ).response.result
+
+        def convert(name, reviewed, authorized):
+            return worker.run(
+                WorkerRequest(
+                    request_id=str(uuid4()),
+                    operation="convert_reviewed",
+                    arguments=ConvertArguments(
+                        source_selection=selection,
+                        parent=str(tmp_path),
+                        vault_name=name,
+                        reviewed=reviewed,
+                        proceed_with_warnings=authorized,
+                    ),
+                )
+            ).response.result
+
+        inspected = inspect()
+        assert inspected.reviewed.outcome == "warnings"
+        refused = convert("unauthorized", inspected.reviewed, False)
+        assert refused.status == "conversion_refused"
+        assert refused.findings[0].code == "warning_authorization_required"
+        assert not (tmp_path / "unauthorized").exists()
+        api.payloads[PDF] += b"Changed PDF bytes"
+        changed = convert("changed", inspected.reviewed, True)
+        assert changed.status == "conversion_refused"
+        assert "review_changed" in {finding.code for finding in changed.findings}
+        assert not (tmp_path / "changed").exists()
+        api.payloads[PDF] = PDF_BYTES
+        from tests.support.local_api_payloads import TXT
+
+        path = f"/api/attachments/{BRAIN}/{TXT}/file-content"
+        unavailable = api.overrides[path]
+        api.overrides[path] = 200, b"Now available source TXT"
+        available = convert("availability-changed", inspected.reviewed, True)
+        assert available.status == "conversion_refused"
+        assert "review_changed" in {finding.code for finding in available.findings}
+        assert not (tmp_path / "availability-changed").exists()
+        api.overrides[path] = unavailable
+        fresh = inspect()
+        converted = convert("authorized", fresh.reviewed, True)
+        assert converted.status == "conversion_created_with_warnings"
+        assert converted.publication.receipt_verified
+        assert_published_txt_pdf_gap(tmp_path / "authorized")

@@ -10,6 +10,15 @@ LOCAL_API_POLICY = SourcePolicy(
     format_version="1",
     finding_dispositions=(
         FindingDisposition(
+            rule_id="local-api.missing-txt-pdf.v1",
+            kind="known_absent_payload",
+            disposition="warning",
+            issue_code="approved_source_gap",
+            permits_absent_payload=True,
+            message="A qualified non-note TXT could not be retrieved (HTTP404); same-owner PDF bytes were preserved.",
+            guidance="Review the missing TXT declaration and preserved PDF separately; no equivalence is claimed.",
+        ),
+        FindingDisposition(
             rule_id="local-api.note-formatting.v1",
             kind="formatting_loss",
             disposition="warning",

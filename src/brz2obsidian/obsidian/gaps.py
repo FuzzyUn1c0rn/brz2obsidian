@@ -24,7 +24,7 @@ def gap_report(plan):
     paths = {t.asset_id: t.relative_path for t in plan.asset_targets}
     gaps = {g.gap.asset_id: g for g in plan.source_gaps}
     text = "\n## Source-gap evidence and optional repair checklist\n\n"
-    text += "Conversion used archived material only. Optionally locate the thought by title/ID, restore missing content in the source and re-export into a fresh vault. Unknown prose, captions and layout were not recovered.\n\n"
+    text += "Conversion used captured source material only. Optionally locate the thought by title/ID, restore missing content in the source and convert the updated source into a fresh vault. Unknown prose, captions and layout were not recovered.\n\n"
     if plan.source_gaps:
         text += f"Source fingerprint: {snapshot.identity.source_sha256}; scoped digest: {snapshot.identity.snapshot_digest}; collection: {plain(snapshot.collection_title)} ({plain(snapshot.identity.source_id)}).\n\n"
     else:
@@ -54,7 +54,7 @@ def gap_report(plan):
             )
             text += f"- [ ] {owner}; thought ID {plain(asset.owner)}; attachment {plain(asset_id)}; role {role}; outcome {outcome}.\n"
             text += (
-                "  Declaration and physical absence: "
+                "  Declaration and unavailable bytes: "
                 + plain(finding.observed_json)
                 + "\n"
             )
