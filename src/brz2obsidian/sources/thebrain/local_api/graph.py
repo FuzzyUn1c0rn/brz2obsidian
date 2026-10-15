@@ -82,6 +82,8 @@ def normalize_relationships(links, graphs, thoughts, excluded=()):
                 )
             )
             providers_by_item.setdefault(b, []).append(a)
+            if a in graphs[b][0]["parents_ids"]:
+                expected_graphs[b]["parents_ids"].add(a)
         elif value["meaning"] == 5 and pair == (1, -1):
             if thoughts[a]["kind"] != 4:
                 refuse("A tag association requires an inventoried source tag")

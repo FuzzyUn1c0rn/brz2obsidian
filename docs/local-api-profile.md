@@ -76,6 +76,24 @@ All control families below require both independent positive and negative cases.
 | `local-api.accounting.v1` Candidate contract; LA-C13 | Every scoped identity/fact/payload/exclusion has one explicit normalized/retained_only/unresolved disposition with evidence references. No dangling included relationship/document/resource; no duplicate conflicting accounting. Unresolved included facts or unqualified rule prevents publication. | Normalized references actual Item/Relationship/Assignment/Document/Asset; retained_only references safe original facts/exclusions/outcomes; unresolved references safe refusal evidence. Refuse `local-api.accounting-refused.v1`. | Existing SourceAccounting contract and parent requirement; independent omission/conflict controls; complete live manifest belongs to #179 |
 | `local-api.note-formatting.v1` Candidate pure-text reuse; LA-C13 | Only qualified scoped raw Markdown enters unchanged fingerprinted adapt_note(text),trace_adapted_references/reference grammar O59/O60. Preserve parser block/literal ownership,exact source/adapted spans/scoped digest; bind against complete API inventories. Apply existing pure literal/insert/table/callout/code/ToC predicates only when exact text inputs match. Helper refusal becomes safe API refusal; no BRZ NoteType/flags/member paths or rendered fallback are fabricated. | Each helper loss maps SourceFinding rule_id=local-api.note-formatting.v1,kind=formatting_loss,warning code=formatting_loss,permits_absent_payload=false. Preserve exact safe declaration/change/TextAdaptation evidence. Core image_presentation_normalized is separately generated from qualified percentage ReferenceSpan,not another SourceFinding. Unsupported grammar: `local-api.note-refused.v1`. | O59/O60 existing pure functions and accepted TextAdaptation/ReferenceSpan contracts; separately authored raw-text/registry controls; no new numeric-flag meaning |
 
+## Type provider in graph parents
+
+A member's graph may additionally list its qualified type provider in `parents`,
+alongside the same provider in `type`. This overlap is explained only by the
+complete existing type-assignment join: inventoried public live kind2 provider,
+member typeId and graph.type, exact meaning2 relationship, provider.children and
+both endpoint link inventories must agree. Retain the observed parent entry as
+a scoped source fact; produce only the actual classification relationship and
+assignment. The overlap is optional, and no hierarchy link is invented. Other
+unexplained parents, including unassigned definitions or tags, still refuse.
+
+Independent #189 review compared all retained Controlled12 graphs/10 links and
+Management569 graphs/720 links. The only unexplained adjacency under the previous
+implementation was this provider overlap: two Controlled entries and330
+Management entries, covering all classified members. No tag-parent overlap was
+observed or admitted. This clarifies graph evidence under existing classification
+meaning and preserves profile/capture identifiers and all authoritative joins.
+
 ## Graph sibling context
 
 With `includeSiblings=true`, a graph may also contain the displayed parent's

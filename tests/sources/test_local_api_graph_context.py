@@ -19,6 +19,161 @@ SIBLING = "44444444-4444-4444-8444-444444444444"
 OTHER_LINK = "55555555-5555-4555-8555-555555555555"
 
 
+def test_type_provider_also_displayed_as_parent_keeps_only_actual_relationships(
+    tmp_path,
+):
+    from tests.support.local_api_graph import (
+        DEFINITION,
+        EXPECTED_RELATIONSHIPS,
+        TYPE_LINK,
+        CompleteGraphApi,
+    )
+
+    api = CompleteGraphApi()
+    api.links[HIERARCHY].update(thoughtIdA=ALONE, thoughtIdB=HOME)
+    path = f"/api/thoughts/{BRAIN}/{HOME}/graph"
+    graph = api.response(path, {})[1]
+    graph["parents"].append(api.thoughts[DEFINITION])
+    api.overrides[path] = 200, graph
+    with api_server(api) as (_, address):
+        converted = local_api_workflow(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        ).convert(LocalApiSourceRef(BRAIN), tmp_path / "vault")
+    assert converted.outcome == "clean"
+    assert converted.receipt.verified
+    record = json.loads((tmp_path / "vault/migration-record.json").read_bytes())
+    assert {
+        (row["key"], row["kind"], row["item_a"], row["item_b"])
+        for row in record["relationships"]
+    } == EXPECTED_RELATIONSHIPS - {(HIERARCHY, "hierarchy", HOME, ALONE)} | {
+        (HIERARCHY, "hierarchy", ALONE, HOME)
+    }
+    assert [
+        (row["relationship_key"], row["definition_key"], row["item_key"])
+        for row in record["classification_assignments"]
+    ] == [(TYPE_LINK, DEFINITION, HOME)]
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "unassigned_definition",
+        "tag_parent",
+        "ordinary_parent",
+        "missing_assignment",
+        "wrong_type_field",
+        "missing_type_graph",
+        "missing_provider_child",
+        "missing_endpoint_link",
+    ],
+)
+def test_parent_overlap_requires_complete_exact_type_assignment(tmp_path, damage):
+    from tests.support.local_api_graph import (
+        DEFINITION,
+        TAG,
+        TYPE_LINK,
+        CompleteGraphApi,
+    )
+
+    api = CompleteGraphApi()
+    path = f"/api/thoughts/{BRAIN}/{HOME}/graph"
+    graph = api.response(path, {})[1]
+    graph["parents"].append(api.thoughts[DEFINITION])
+    if damage == "unassigned_definition":
+        api.thoughts[SIBLING] = thought(SIBLING, "Unassigned definition") | {"kind": 2}
+        api.types.append(api.thoughts[SIBLING])
+        graph["parents"].append(api.thoughts[SIBLING])
+    elif damage in {"tag_parent", "ordinary_parent"}:
+        graph["parents"].append(api.thoughts[TAG if damage == "tag_parent" else ALONE])
+    elif damage == "missing_assignment":
+        del api.links[TYPE_LINK]
+        graph["links"] = [row for row in graph["links"] if row["id"] != TYPE_LINK]
+    elif damage == "wrong_type_field":
+        api.thoughts[HOME]["typeId"] = None
+    elif damage == "missing_type_graph":
+        graph["type"] = None
+    elif damage == "missing_provider_child":
+        provider_path = f"/api/thoughts/{BRAIN}/{DEFINITION}/graph"
+        provider = api.response(provider_path, {})[1]
+        provider["children"] = []
+        api.overrides[provider_path] = 200, provider
+    else:
+        graph["links"] = [row for row in graph["links"] if row["id"] != TYPE_LINK]
+    api.overrides[path] = 200, graph
+    with api_server(api) as (_, address):
+        converted = local_api_workflow(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        ).convert(LocalApiSourceRef(BRAIN), tmp_path / "vault")
+    assert converted.outcome == "refused"
+    assert converted.receipt is None
+    assert not (tmp_path / "vault").exists()
+
+
+def test_type_parent_overlap_is_retained_in_consistent_frozen_capture():
+    from tests.support.local_api_graph import DEFINITION, TYPE_LINK, CompleteGraphApi
+
+    api = CompleteGraphApi()
+    api.links[HIERARCHY].update(thoughtIdA=ALONE, thoughtIdB=HOME)
+    path = f"/api/thoughts/{BRAIN}/{HOME}/graph"
+    graph = api.response(path, {})[1]
+    graph["parents"].append(api.thoughts[DEFINITION])
+    api.overrides[path] = 200, graph
+    with api_server(api) as (_, address):
+        module = LocalApiSourceModule(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        )
+        with module.open(LocalApiSourceRef(BRAIN)) as session:
+            originals = {
+                row.key: json.loads(row.original_json)
+                for row in session.snapshot.original_evidence
+            }
+            assert originals["graph:" + HOME]["parents_ids"] == [ALONE, DEFINITION]
+            assert originals["graph:" + HOME]["type_ids"] == [DEFINITION]
+            assert [
+                (row.relationship_key, row.definition_key, row.item_key)
+                for row in session.snapshot.classification_assignments
+            ] == [(TYPE_LINK, DEFINITION, HOME)]
+            session.verify_consistency()
+
+
+def test_recomputed_capture_cannot_add_an_unexplained_type_parent(
+    tmp_path, monkeypatch
+):
+    from tests.support.local_api_graph import DEFINITION, CompleteGraphApi
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    with api_server(CompleteGraphApi()) as (_, address):
+        module = LocalApiSourceModule(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        )
+        with module.open(LocalApiSourceRef(BRAIN)) as session:
+            capture = next(tmp_path.glob("brz2obsidian-api-*"))
+            source = json.loads((capture / "source.json").read_bytes())
+            audit = json.loads((capture / "audit.json").read_bytes())
+            identity = session.snapshot.identity.model_copy(
+                update={"source_sha256": "", "snapshot_digest": ""}
+            )
+            clean_snapshot = session.snapshot.model_copy(update={"identity": identity})
+            graph = next(
+                row for row in source["records"] if row["key"] == "graph:" + ALONE
+            )
+            graph["value"]["parents_ids"].append(DEFINITION)
+            changed = clean_snapshot.model_copy(
+                update={
+                    "original_evidence": tuple(
+                        row.model_copy(
+                            update={"original_json": json.dumps(graph["value"])}
+                        )
+                        if row.key == graph["key"]
+                        else row
+                        for row in clean_snapshot.original_evidence
+                    )
+                }
+            )
+            with pytest.raises(MigrationRefused):
+                LocalApiSession(source=source, snapshot=changed, audit=audit)
+
+
 class SiblingGraphApi(GraphApi):
     def __init__(self):
         super().__init__()
