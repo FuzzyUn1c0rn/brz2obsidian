@@ -98,7 +98,8 @@ remains an archive path when `--source-kind` is omitted or is `brz`. API options
 require `--source-kind local-api`. Existing text/JSON result envelopes and exit
 codes apply; JSON emits one result object. Qualified TXT404 inspection and direct
 CLI conversion return warning exit code 2; conversion publishes the preserved PDF
-with its absence notice and verified receipt, without another approval option. Invalid configuration and remote or
+with its absence notice and verified receipt, without another approval option.
+Invalid configuration and remote or
 filesystem failures use safe classified issues without echoing remote bodies,
 credentials, request URLs or arbitrary exception text.
 
@@ -108,6 +109,13 @@ credentials, request URLs or arbitrary exception text.
 | `--api-search-timeout` | 300 | Total wildcard seconds, including response waits, decompression, parsing and repeated searches. |
 | `--api-search-max-response-bytes` | 128000000 | Complete post-decompression bytes per wildcard reply. |
 | `--api-search-max-results` | disabled | Optional positive count ceiling. A saturated final request refuses. |
+
+The initial limit and optional ceiling accept integers from 1 to 2147483647.
+The byte limit accepts integers from 1 to 9223372036854775807. The timeout accepts
+0.001 to 86400 seconds in whole milliseconds; non-finite and finer values refuse.
+Omit `--api-search-max-results` to disable the ceiling. Use `inspect --help` or
+`convert --help` for these bounds and the source/address guidance. Discovery
+reconciliation is empirical and does not prove universal discovery completeness.
 
 Search uses `queryText=*` and `onlySearchThoughtNames=false`. Saturated raw replies
 double the requested limit; a non-power-of-two ceiling is requested once. Search

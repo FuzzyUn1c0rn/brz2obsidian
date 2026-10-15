@@ -1,0 +1,185 @@
+import json
+
+import pytest
+
+from brz2obsidian.cli import main
+
+
+@pytest.mark.parametrize("operation", ["inspect", "convert"])
+def test_api_help_explains_source_bounds_and_capture_limits(
+    operation, capsys, monkeypatch
+):
+    monkeypatch.setenv("THE_BRAIN_LOCAL_API_KEY", "KEY_CANARY")
+    assert main([operation, "--help"]) == 0
+    captured = capsys.readouterr()
+    help_text = " ".join(captured.out.split())
+    for required in (
+        "BRZ archive path or canonical lowercase Brain UUID",
+        "default brz",
+        "TheBrain settings",
+        "1..2147483647",
+        "0.001..86400",
+        "whole milliseconds",
+        "1..9223372036854775807",
+        "default 5000",
+        "default 300",
+        "default 128000000",
+        "default disabled",
+        "not an atomic snapshot",
+        "Inspection releases its capture; conversion acquires again",
+        "retained copy",
+        "empirical",
+        "universal discovery completeness",
+        "THE_BRAIN_LOCAL_API_KEY",
+    ):
+        assert required in help_text
+    assert "CANARY" not in captured.out + captured.err
+    assert "--api-key" not in captured.out
+    assert captured.err == ""
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["--api-search-initial-results", "0"],
+        ["--api-search-initial-results", "2147483648"],
+        ["--api-search-max-results", "-1"],
+        ["--api-search-max-results", "2147483648"],
+        ["--api-search-max-response-bytes", "0"],
+        ["--api-search-max-response-bytes", "9223372036854775808"],
+        ["--api-search-timeout", "nan"],
+        ["--api-search-timeout", "inf"],
+        ["--api-search-timeout", "0.0001"],
+        ["--api-search-timeout", "0.0015"],
+        ["--api-search-timeout", "86400.001"],
+        ["--api-url", "http://example.invalid/api"],
+        ["--api-url", "http://127.0.0.1:65536/api"],
+        ["--api-url", "http://127.0.0.1/api?token=SERVICE_TOKEN_CANARY"],
+        ["--api-url", "http://user:KEY_CANARY@127.0.0.1/api"],
+        ["--api-url", "http://127.0.0.1/other"],
+        ["--api-url", "http://127.0.0.1/api#HEADER_CANARY"],
+    ],
+)
+def test_invalid_api_bounds_and_origins_have_actionable_safe_json(options, capsys):
+    from tests.support.local_api import BRAIN
+
+    assert (
+        main(["inspect", BRAIN, "--source-kind", "local-api", *options, "--json"]) == 1
+    )
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    assert result["outcome"] == "refused" and result["receipt"] is None
+    assert [issue["code"] for issue in result["issues"]] == [
+        "invalid_source_configuration"
+    ]
+    assert "--help" in result["issues"][0]["guidance"]
+    assert "CANARY" not in captured.out + captured.err
+    assert captured.err == ""
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+@pytest.mark.parametrize("fault", ["acquisition", "payload", "filesystem", "teardown"])
+def test_real_cli_failure_surfaces_preserve_safe_errors_and_publication_receipt(
+    tmp_path, monkeypatch, capsys, as_json, fault
+):
+    import shutil
+    import tempfile
+    from pathlib import Path
+
+    from tests.support.local_api import BRAIN, KEY, api_server
+    from tests.support.local_api_payloads import (
+        TYPE_ICON,
+        RichPayloadApi,
+        assert_published_payloads,
+    )
+
+    captures = tmp_path / "captures"
+    captures.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(captures))
+    monkeypatch.setenv("THE_BRAIN_LOCAL_API_KEY", KEY)
+    real_write, real_remove = Path.write_bytes, shutil.rmtree
+
+    def fail_write(path, value):
+        if path.name == "metadata.json":
+            raise OSError("KEY_CANARY HEADER_CANARY SERVICE_TOKEN_CANARY")
+        return real_write(path, value)
+
+    def fail_remove(path, *args, **kwargs):
+        if (Path(path) / "manifest.json").is_file():
+            raise OSError("KEY_CANARY HEADER_CANARY SERVICE_TOKEN_CANARY")
+        return real_remove(path, *args, **kwargs)
+
+    if fault == "filesystem":
+        monkeypatch.setattr(Path, "write_bytes", fail_write)
+    elif fault == "teardown":
+        monkeypatch.setattr(shutil, "rmtree", fail_remove)
+    api = RichPayloadApi(explicit=True, jpeg=True)
+    if fault in {"acquisition", "payload"}:
+        path = (
+            f"/api/brains/{BRAIN}"
+            if fault == "acquisition"
+            else f"/api/attachments/{BRAIN}/{TYPE_ICON}/file-content"
+        )
+        api.overrides[path] = (
+            401 if fault == "acquisition" else 404,
+            b"KEY_CANARY HEADER_CANARY SERVICE_TOKEN_CANARY",
+            {"X-Secret": "HEADER_CANARY"},
+        )
+    vault = tmp_path / "vault"
+    with api_server(api) as (_, address):
+        arguments = [
+            "convert",
+            BRAIN,
+            str(vault),
+            "--source-kind",
+            "local-api",
+            "--api-url",
+            address,
+        ]
+        if as_json:
+            arguments.append("--json")
+        assert main(arguments) == 1
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "CANARY" not in captured.out
+    if as_json:
+        result = json.loads(captured.out)
+        assert result["outcome"] in {"failed", "refused"}
+        if fault == "teardown":
+            assert result["receipt"]["published"] and result["receipt"]["verified"]
+            assert "publication_occurred" in {
+                issue["code"] for issue in result["issues"]
+            }
+        else:
+            assert result["receipt"] is None
+    elif fault == "teardown":
+        assert "Verified vault published" in captured.out
+        assert "publication_occurred" in captured.out
+    if fault == "teardown":
+        assert_published_payloads(vault, explicit=True, jpeg=True)
+        monkeypatch.setattr(shutil, "rmtree", real_remove)
+    else:
+        assert not vault.exists()
+    for path in tmp_path.rglob("*"):
+        if path.is_file():
+            assert b"CANARY" not in path.read_bytes()
+
+
+@pytest.mark.parametrize(
+    "option",
+    [
+        "--api-url",
+        "--api-search-initial-results",
+        "--api-search-timeout",
+        "--api-search-max-response-bytes",
+        "--api-search-max-results",
+    ],
+)
+def test_default_brz_source_rejects_every_api_option(option, capsys):
+    value = "http://127.0.0.1/api" if option == "--api-url" else "1"
+    assert main(["inspect", "archive.brz", option, value, "--json"]) == 1
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    assert result["outcome"] == "refused"
+    assert result["issues"][0]["code"] == "invalid_source_configuration"
+    assert captured.err == ""

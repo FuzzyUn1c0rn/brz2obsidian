@@ -25,12 +25,17 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="operation", required=True)
     for name in ("inspect", "convert"):
         command = commands.add_parser(name)
-        command.add_argument("source")
+        command.add_argument(
+            "source", help="BRZ archive path or canonical lowercase Brain UUID"
+        )
         if name == "convert":
-            command.add_argument("destination")
+            command.add_argument("destination", help="New vault directory to publish")
         command.add_argument("--json", action="store_true", dest="json_output")
         command.add_argument(
-            "--source-kind", choices=("brz", "local-api"), default="brz"
+            "--source-kind",
+            choices=("brz", "local-api"),
+            default="brz",
+            help="Source selection (default brz); API options require local-api",
         )
         command.add_argument(
             "--api-url",
@@ -39,24 +44,24 @@ def main(argv=None):
         command.add_argument(
             "--api-search-initial-results",
             type=int,
-            help="Initial raw result limit (default 5000)",
+            help="Initial raw result limit, 1..2147483647 (default 5000)",
         )
         command.add_argument(
             "--api-search-timeout",
             type=float,
-            help="Total wildcard budget in seconds (default 300)",
+            help="Total wildcard budget, 0.001..86400 seconds in whole milliseconds (default 300)",
         )
         command.add_argument(
             "--api-search-max-response-bytes",
             type=int,
-            help="Post-decompression bytes per wildcard reply (default 128000000)",
+            help="Post-decompression bytes per wildcard reply, 1..9223372036854775807 (default 128000000)",
         )
         command.add_argument(
             "--api-search-max-results",
             type=int,
-            help="Optional raw result ceiling (default disabled)",
+            help="Optional raw result ceiling, 1..2147483647 (default disabled)",
         )
-        command.epilog = "Local API acquisition spans requests over time and is not an atomic snapshot. Inspection releases its capture; conversion acquires again. Credentials use THE_BRAIN_LOCAL_API_KEY."
+        command.epilog = "Local API acquisition spans requests over time and is not an atomic snapshot. Inspection releases its capture; conversion acquires again. Capture verification checks the retained copy. Discovery reconciliation is empirical and does not prove universal discovery completeness. Credentials use THE_BRAIN_LOCAL_API_KEY."
     checker = commands.add_parser("check-vault")
     checker.add_argument("vault")
     checker.add_argument("--json", action="store_true", dest="json_output")
@@ -127,7 +132,7 @@ def main(argv=None):
                     code="invalid_source_configuration",
                     phase="source",
                     message="Source selection or acquisition configuration is invalid",
-                    guidance="Use a canonical Brain UUID and valid local API options with --source-kind local-api; API options require that source kind.",
+                    guidance="Use a canonical Brain UUID and valid local API options with --source-kind local-api; API options require that source kind. Use --help for accepted bounds and address guidance.",
                 ),
             ),
         )
