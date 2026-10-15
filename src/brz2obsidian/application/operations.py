@@ -50,6 +50,7 @@ from brz2obsidian.publication.filesystem import preflight_destination
 # Deliberately static messages: backend Issue.message/evidence can contain authored
 # text, filenames or exception strings. Never project them across this boundary.
 SAFE_ISSUES = {
+    "api_capture_cleanup_failed": "The private inspection capture could not be released. Check temporary storage access before inspecting again.",
     "api_credentials_missing": "Set THE_BRAIN_LOCAL_API_KEY in the launch environment or configure the external credential provider, then try again.",
     "api_authentication_failed": "The local API denied access. Check its current key in TheBrain settings and update the credential provider or THE_BRAIN_LOCAL_API_KEY.",
     "api_transport_failed": "The local API could not be reached. Start TheBrain, enable its local API and check the configured address before retrying.",

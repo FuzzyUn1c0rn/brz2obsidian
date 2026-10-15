@@ -16,6 +16,7 @@ from brz2obsidian.contracts import Counts, Issue, MigrationRefused
 # Never forward source/publisher exception text, evidence or authored guidance.
 # These messages cover safe actions while retaining only explicit path facts.
 _SAFE_FINDINGS = {
+    "api_capture_cleanup_failed": "The private source capture could not be released. Check temporary storage access and the reported publication status before another attempt.",
     "formatting_loss": "Included note formatting needs review: table layout may become responsive, custom icons use visible title fallbacks, or an insert remains unsupported. Review affected notes and declarations in the Migration report and edit the converted Markdown if needed.",
     "review_changed": "The current source or conversion compatibility changed. Inspect the current source before converting.",
     "source_changed": "The source changed during conversion. Inspect the current stable source before converting again.",

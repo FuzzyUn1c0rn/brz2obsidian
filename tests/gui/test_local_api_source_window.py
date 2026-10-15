@@ -328,6 +328,89 @@ def test_advanced_defaults_validation_and_delayed_listing_stay_responsive(monkey
             window.deleteLater()
 
 
+def test_delayed_reviewed_payload_acquisition_keeps_gui_responsive_and_inputs_frozen(
+    tmp_path, monkeypatch
+):
+    from brz2obsidian_ui.window import MainWindow
+    from tests.support.local_api_payloads import (
+        NOTE,
+        RICH_NOTE,
+        RichPayloadApi,
+        assert_published_payloads,
+    )
+
+    monkeypatch.setenv("THE_BRAIN_LOCAL_API_KEY", KEY)
+    app = QApplication.instance() or QApplication([])
+    entered, release = Event(), Event()
+    with api_server(RichPayloadApi(jpeg=True)) as (api, address):
+        window = MainWindow()
+        window.show()
+        try:
+            kind = control(window, QComboBox, "Source kind")
+            kind.setCurrentIndex(1)
+            until(app, lambda: window.snapshot.source_kind == "local-api")
+            address_control = control(window, QLineEdit, "Local API address")
+            address_control.setText(address)
+            until(app, lambda: window.snapshot.api_config.api_url == address)
+            control(window, QPushButton, "Refresh accessible Brains").click()
+            until(app, lambda: window.snapshot.brain_list_status == "ready")
+            brains = control(window, QComboBox, "Accessible Brains")
+            brains.setCurrentIndex(1)
+            until(app, lambda: window.snapshot.source_selection is not None)
+            control(window, QPushButton, "Inspect Brain").click()
+            until(
+                app,
+                lambda: (
+                    window.snapshot.reviewed is not None
+                    and not window.snapshot.busy_operation
+                ),
+            )
+            reviewed = window.snapshot.reviewed
+            window.parent_selected(str(tmp_path))
+            name = control(window, QLineEdit, "Vault name")
+            QTest.keyClicks(name, "Responsive reviewed vault")
+            until(app, lambda: "convert" in window.snapshot.allowed_actions)
+
+            def delayed(_query):
+                entered.set()
+                release.wait(10)
+                return 200, RICH_NOTE
+
+            api.overrides[f"/api/attachments/{BRAIN}/{NOTE}/file-content"] = delayed
+            convert = control(window, QPushButton, "Convert")
+            convert.click()
+            until(
+                app,
+                lambda: (
+                    entered.is_set()
+                    and window.snapshot.busy_operation == "convert_reviewed"
+                ),
+            )
+            assert not any(
+                w.isEnabled() for w in (kind, address_control, brains, name, convert)
+            )
+            assert not (tmp_path / "Responsive reviewed vault").exists()
+            heartbeat = []
+            QTimer.singleShot(0, lambda: heartbeat.append(True))
+            until(app, lambda: heartbeat)
+            assert window.snapshot.reviewed == reviewed
+            release.set()
+            until(
+                app,
+                lambda: (
+                    window.snapshot.publication is not None
+                    and not window.snapshot.busy_operation
+                ),
+            )
+            assert window.snapshot.publication.receipt_verified
+            assert_published_payloads(tmp_path / "Responsive reviewed vault", jpeg=True)
+            assert KEY not in window.snapshot.model_dump_json()
+        finally:
+            release.set()
+            window.shutdown()
+            window.deleteLater()
+
+
 def test_real_worker_gui_publishes_only_after_api_review_and_destination(
     tmp_path, monkeypatch
 ):
