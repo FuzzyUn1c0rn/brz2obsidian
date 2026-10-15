@@ -30,7 +30,9 @@ def main() -> int:
         return 1
     try:
         arguments = request.arguments
-        if request.operation == "inspect":
+        if request.operation == "list_brains":
+            result = operations.list_brains(arguments.config)
+        elif request.operation == "inspect":
             result = operations.inspect(arguments.source_selection)
         elif request.operation == "validate_destination":
             result = operations.validate_destination(

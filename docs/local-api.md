@@ -15,6 +15,37 @@ before a Brain containing them can convert. No partial vault is published.
 An empty non-Home item can remain an intentionally uncreated target under the
 existing planner; the migration record accounts for it.
 
+## GUI
+
+Convert and Inspect offer **BRZ archive** and **TheBrain local API** source
+choices. In API mode, enter the current address from TheBrain settings, select
+**Refresh Brains**, then choose a Brain by its name and full stable ID. Duplicate
+names remain separate choices. Refresh does not select another Brain for you.
+A failed refresh keeps the selected identity and requires a successful retry
+before inspection; a successful list that omits it clears the selection.
+
+**Advanced search limits** exposes the same four search settings and defaults
+listed below. The optional result ceiling is disabled when blank. Invalid
+addresses or bounds disable refresh and inspection, with guidance beside the
+controls. For the local app, supply credentials through the launch environment.
+Python callers can use an external credential provider; the GUI has no key field.
+
+Inspection fully acquires the supported metadata-only content and releases its
+capture. Review its findings and choose a valid destination. Conversion acquires
+again, with the same settings and acquisition cost. A changed source or conversion
+compatibility refuses publication and requires another inspection/review.
+Changing the selected source or acquisition settings also discards the review.
+Acquisition is not atomic: capture verification checks the retained copy and
+cannot prove that the live Brain remained unchanged. Listing and acquisition run
+in workers so the task sheet remains responsive.
+
+The closed GUI worker and review contracts use version 3. API selections carry
+every effective credential-free acquisition setting; older or incomplete wire
+shapes refuse explicitly. API credentials and arbitrary remote errors are never
+forwarded in worker results or diagnostics. Existing destination checks, explicit
+warning authorization, verified publication receipts and recovery apply to both
+source choices. The current metadata-only content restrictions above still apply.
+
 ## CLI
 
 Provide the key externally in `THE_BRAIN_LOCAL_API_KEY`. Do not pass a key in the

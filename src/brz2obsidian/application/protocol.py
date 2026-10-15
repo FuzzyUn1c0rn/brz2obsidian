@@ -82,6 +82,10 @@ def _decode(data, model, maximum):
             }
             if not isinstance(result, dict) or not required.issubset(result):
                 raise ProtocolFailure("Missing minimum safe result content")
+            if result["operation"] == "list_brains":
+                _required_fields(result, {"brains"})
+                for brain in result["brains"]:
+                    _required_fields(brain, {"brain_id", "name"})
             for collection in ("findings", "field_errors"):
                 for finding in result[collection]:
                     _required_fields(
@@ -128,6 +132,7 @@ def rejected_request_response(data: bytes) -> WorkerResponse | None:
                 "validate_destination",
                 "convert_reviewed",
                 "check_vault",
+                "list_brains",
             )
         ):
             return None

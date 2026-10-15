@@ -100,7 +100,7 @@ def test_wire_rejects_untrustworthy_terminal_results(mutation):
     wire = json.dumps(data).encode() + b"\n"
     if mutation == "duplicate":
         wire = wire.replace(
-            b'"schema_version": 2', b'"schema_version": 2, "schema_version": 2', 1
+            b'"schema_version": 3', b'"schema_version": 3, "schema_version": 3', 1
         )
     elif mutation == "extra_json":
         wire += b"{}\n"

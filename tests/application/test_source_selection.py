@@ -43,7 +43,7 @@ def test_typed_archive_request_roundtrips_without_a_legacy_source_field(tmp_path
     assert json.loads(wire)["arguments"] == {
         "source_selection": {"kind": "brz", "path": str(tmp_path / "Été.brz")}
     }
-    assert json.loads(wire)["schema_version"] == 2
+    assert json.loads(wire)["schema_version"] == 3
     assert decode_request(wire).arguments.source_selection == selection
 
 
@@ -54,7 +54,7 @@ def test_session_selects_a_brain_without_inventing_an_archive_or_vault_name():
     assert selected.source_selection == selection
     assert selected.source is None
     assert selected.vault_name == ""
-    assert selected.allowed_actions == ("inspect", "close")
+    assert selected.allowed_actions == ("list_brains", "inspect", "close")
     request = session.dispatch(InspectCommand()).effects[0].request
     assert (
         decode_request(encode_request(request)).arguments.source_selection == selection
@@ -68,7 +68,7 @@ def test_public_operations_keep_typed_brz_inspection_and_reviewed_publication(tm
     result = operations.inspect(selection)
     assert result.status == "inspection_clean"
     assert result.reviewed.source_selection == selection
-    assert result.reviewed.schema_version == 2
+    assert result.reviewed.schema_version == 3
     converted = operations.convert_reviewed(
         selection, tmp_path, "Typed vault", result.reviewed
     )
@@ -76,21 +76,23 @@ def test_public_operations_keep_typed_brz_inspection_and_reviewed_publication(tm
     assert converted.publication.receipt_verified is True
 
 
-def test_local_api_operations_and_real_worker_report_unavailable_without_archive_access(
+def test_local_api_operations_and_real_worker_report_missing_credentials_without_archive_access(
     tmp_path,
+    monkeypatch,
 ):
+    monkeypatch.delenv("THE_BRAIN_LOCAL_API_KEY", raising=False)
     selection = LocalApiSourceSelection(brain_id="1fa60175-c910-4a09-b072-a1d5155c8314")
     operations = Operations()
     result = operations.inspect(selection)
     assert result.status == "inspection_failed"
-    assert result.findings[0].code == "operation_unavailable"
+    assert result.findings[0].code == "api_credentials_missing"
     assert result.reviewed is None
     assert operations.workflow is None
     conversion = operations.convert_reviewed(
         selection, tmp_path, "No publication", None
     )
     assert conversion.publication.state == "not_published"
-    assert conversion.findings[0].code == "operation_unavailable"
+    assert conversion.findings[0].code == "review_required"
     assert not (tmp_path / "No publication").exists()
     request = WorkerRequest(
         request_id=str(uuid4()),
@@ -101,7 +103,7 @@ def test_local_api_operations_and_real_worker_report_unavailable_without_archive
         request
     )
     assert terminal.phase == "completed"
-    assert terminal.response.result.findings[0].code == "operation_unavailable"
+    assert terminal.response.result.findings[0].code == "api_credentials_missing"
     assert terminal.response.result.reviewed is None
 
     source = (Path(__file__).parents[1] / "fixtures/minimal.brz").absolute()
@@ -120,7 +122,7 @@ def test_local_api_operations_and_real_worker_report_unavailable_without_archive
         conversion_request
     )
     assert terminal.phase == "completed"
-    assert terminal.response.result.findings[0].code == "operation_unavailable"
+    assert terminal.response.result.findings[0].code == "review_required"
     assert terminal.response.result.publication.state == "not_published"
     assert not (tmp_path / "No worker publication").exists()
 
@@ -249,4 +251,4 @@ def test_changing_source_kind_discards_an_archive_review_before_another_inspecti
     assert selected.review_required is True
     assert selected.source is None
     assert selected.result is None
-    assert selected.allowed_actions == ("inspect", "close")
+    assert selected.allowed_actions == ("list_brains", "inspect", "close")
