@@ -76,6 +76,44 @@ All control families below require both independent positive and negative cases.
 | `local-api.accounting.v1` Candidate contract; LA-C13 | Every scoped identity/fact/payload/exclusion has one explicit normalized/retained_only/unresolved disposition with evidence references. No dangling included relationship/document/resource; no duplicate conflicting accounting. Unresolved included facts or unqualified rule prevents publication. | Normalized references actual Item/Relationship/Assignment/Document/Asset; retained_only references safe original facts/exclusions/outcomes; unresolved references safe refusal evidence. Refuse `local-api.accounting-refused.v1`. | Existing SourceAccounting contract and parent requirement; independent omission/conflict controls; complete live manifest belongs to #179 |
 | `local-api.note-formatting.v1` Candidate pure-text reuse; LA-C13 | Only qualified scoped raw Markdown enters unchanged fingerprinted adapt_note(text),trace_adapted_references/reference grammar O59/O60. Preserve parser block/literal ownership,exact source/adapted spans/scoped digest; bind against complete API inventories. Apply existing pure literal/insert/table/callout/code/ToC predicates only when exact text inputs match. Helper refusal becomes safe API refusal; no BRZ NoteType/flags/member paths or rendered fallback are fabricated. | Each helper loss maps SourceFinding rule_id=local-api.note-formatting.v1,kind=formatting_loss,warning code=formatting_loss,permits_absent_payload=false. Preserve exact safe declaration/change/TextAdaptation evidence. Core image_presentation_normalized is separately generated from qualified percentage ReferenceSpan,not another SourceFinding. Unsupported grammar: `local-api.note-refused.v1`. | O59/O60 existing pure functions and accepted TextAdaptation/ReferenceSpan contracts; separately authored raw-text/registry controls; no new numeric-flag meaning |
 
+## Search candidate envelopes
+
+Search replies supply candidates for authoritative GETs; their display hints and
+default fields do not establish source ownership, roles or content. The existing
+requested-Brain envelope remains supported. A further finite envelope is qualified
+from retained observations: outer `brainId` is the exact zero UUID and
+`isFromOtherBrain` is the actual boolean `false`. Its nested `sourceThought` must
+have a canonical nonzero ID and the verified requested Brain ID. `sourceLink` must
+be explicitly null. All eight fields below are required, and discriminator values
+must be actual integers, excluding booleans:
+
+| Candidate class | `searchResultType`, `entityType`, `sourceType` | `attachmentId` |
+| --- | --- | --- |
+| Thought | `1`, `2`, `0` | Exact zero UUID; no attachment identity |
+| Attachment | `3`, `4`, `2`, or `4`, `4`, `2` | Canonical nonzero UUID |
+
+The required fields are `brainId`, `isFromOtherBrain`, `sourceThought`,
+`sourceLink`, `searchResultType`, `entityType`, `sourceType` and `attachmentId`.
+Optional `name` and `brainName` are null or strings; other fields are unqualified.
+The thought-class auxiliary zero UUID is also permitted in an otherwise identical
+requested-Brain envelope. It is never an item, attachment or fetched identity.
+Missing/null/contradictory fields, foreign ownership and zero-envelope link or
+mixed candidates refuse. This does not relax authoritative nonzero UUID checks:
+each thought still needs its independently qualified requested-Brain GET, and an
+attachment match seeds only its thought owner.
+
+This is a bounded inference about candidate envelopes, not a vendor-guaranteed
+sentinel meaning or new normalized source role. The schema declares UUID fields
+but does not explain their zero values. Profile, module and capture identifiers
+remain unchanged. Independent qualification for #189 inspected original raw
+CONTROLLED_EXPORT wildcard replies (11 thought matches, SHA256
+`1cb2cdaa705eb1c8e8ffabaa915552db661c4a1c67a6d730ff1a6578a6180083`)
+and the broad Management reply (555 thought and four attachment matches, SHA256
+`92cdee8fb9e531f0dab34981bf55ba7153fc9fbbae915b722203bbb085409192`).
+The latter attachment-owner candidates include the independently known ordinary
+thoughts missed by names-only search. Public ownership/discriminator controls
+exercise the SourceModule and Workflow boundaries; raw responses remain private.
+
 ## Exact zero-tag matcher
 
 Only a failed **GET** `/api/thoughts/{B}/tags`, HTTP400, is eligible. Read within a declared bound and decode strict UTF-8. Remove leading/trailing whitespace only: U+0009-U+000D, U+001C-U+0020, U+0085, U+00A0, U+1680, U+2000-U+200A, U+2028-U+2029, U+202F, U+205F and U+3000 (the assessed Python `str.strip()` set); do not case-fold, collapse internal whitespace, URL-decode, substitute aliases or parse as JSON. The remaining string equals exactly `Could not retrieve list of Tags for brain ` followed by **B**, the already verified requested canonical Brain UUID. A BOM is not whitespace and refuses. The retained filename extension has no bearing on plaintext interpretation.

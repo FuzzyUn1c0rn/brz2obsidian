@@ -31,6 +31,45 @@ from .resources import capture_owner
 from .session import LocalApiSession
 from .transport import timestamp
 
+ZERO_UUID = "00000000-0000-0000-0000-000000000000"
+
+
+def _candidate_shape(hit, brain_id):
+    required = {
+        "brainId",
+        "isFromOtherBrain",
+        "sourceThought",
+        "sourceLink",
+        "searchResultType",
+        "entityType",
+        "sourceType",
+        "attachmentId",
+    }
+    if not required <= hit.keys() or not hit.keys() <= required | {"name", "brainName"}:
+        return None
+    owner = hit["sourceThought"]
+    if (
+        not isinstance(owner, dict)
+        or owner.get("brainId") != brain_id
+        or hit["sourceLink"] is not None
+        or any(
+            hit.get(field) is not None and not isinstance(hit[field], str)
+            for field in ("name", "brainName")
+        )
+    ):
+        return None
+    values = tuple(
+        hit[field] for field in ("searchResultType", "entityType", "sourceType")
+    )
+    if not all(type(value) is int for value in values):
+        return None
+    if values == (1, 2, 0) and hit["attachmentId"] == ZERO_UUID:
+        return "thought"
+    if values in ((3, 4, 2), (4, 4, 2)):
+        uuid(hit["attachmentId"])
+        return "attachment"
+    return None
+
 
 class Acquisition:
     def __init__(
@@ -92,10 +131,17 @@ class Acquisition:
     def candidates(self, hit):
         if (
             not isinstance(hit, dict)
-            or hit.get("brainId") != self.brain_id
+            or hit.get("brainId") not in (self.brain_id, ZERO_UUID)
             or hit.get("isFromOtherBrain") is not False
         ):
             refuse("A wildcard candidate has foreign or invalid ownership")
+        shape = (
+            _candidate_shape(hit, self.brain_id)
+            if hit["brainId"] == ZERO_UUID or hit.get("attachmentId") == ZERO_UUID
+            else None
+        )
+        if hit["brainId"] == ZERO_UUID and shape is None:
+            refuse("A wildcard candidate envelope is not qualified")
         found = False
         node = hit.get("sourceThought")
         if node is not None:
@@ -112,7 +158,11 @@ class Acquisition:
             self.seed(link.get("thoughtIdB"))
             found = True
         if hit.get("attachmentId") is not None:
-            uuid(hit["attachmentId"])
+            if hit["attachmentId"] == ZERO_UUID:
+                if shape != "thought":
+                    refuse("A wildcard attachment identity is not qualified")
+            else:
+                uuid(hit["attachmentId"])
         if not found:
             refuse("A wildcard hit has no resolvable authoritative owner")
 
