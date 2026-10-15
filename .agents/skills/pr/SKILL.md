@@ -18,7 +18,9 @@ Use this template for writing the PR body:
 
 ## Issues
 
-<associated issue references, or "No associated issue">
+Closes #<ticket-number>
+
+<one closing reference per open issue this PR is intended to resolve, or "No associated issue">
 
 ## Evidence
 
@@ -166,9 +168,13 @@ Link the accepted specification and associated tickets. Apply
 for orchestrator-owned publication of one draft after the full implementation is
 assembled, followed by independent review of that PR and repairs on the same PR.
 Writing a PR body does not authorize publication, readiness or merge. Also use
-the shared lifecycle to choose ordinary references or closing references, verify the intended issue
-set, and record the PR URL in each associated issue. If there is no associated
-issue, say so.
+`Closes #<number>` for each open issue the PR is intended to resolve in the
+initial draft PR description. Add these references when creating the draft;
+do not wait for review, readiness or a later handoff. Immediately after creation,
+verify that GitHub's `closingIssuesReferences` matches the intended issue set.
+Use ordinary references for already closed subtasks and issues outside the PR's
+intended resolution scope. Record the PR URL in each associated issue. If there
+is no associated issue, say so.
 
 ### Evidence
 
