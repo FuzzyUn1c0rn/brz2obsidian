@@ -63,6 +63,14 @@ IDENTIFIERS = {
     "profile_version": "1",
     "contract_version": 7,
 }
+
+
+def identifiers(profile_version):
+    if profile_version not in {"1", "2"}:
+        refuse("Select an explicitly reviewed local API profile")
+    return dict(IDENTIFIERS, profile_version=profile_version)
+
+
 SCHEMA_SHA256 = "7eba4646236dbecf2dd4c265d5cd52f782245a9b17f2ab92e90aa2e167a3b318"
 DESKTOP_BUILD = "15.0.640.0"
 
@@ -347,6 +355,31 @@ def validate_source(source):
         )
         uuid(fact["asset_id"])
         uuid(fact["owner_id"])
+        if fact["availability"] == "present":
+            if (
+                type(fact["actual_length"]) is not int
+                or not 0 <= fact["actual_length"] <= 9223372036854775807
+                or not isinstance(fact["actual_sha256"], str)
+                or not re.fullmatch(r"[0-9a-f]{64}", fact["actual_sha256"])
+                or fact["external_uri"] is not None
+            ):
+                refuse("Present payload measurement is not qualified")
+        elif fact["availability"] in {"absent", "external"}:
+            if (
+                fact["actual_length"] is not None
+                or fact["actual_sha256"] is not None
+                or (
+                    fact["availability"] == "absent"
+                    and fact["external_uri"] is not None
+                )
+                or (
+                    fact["availability"] == "external"
+                    and not isinstance(fact["external_uri"], str)
+                )
+            ):
+                refuse("Unavailable or external payload cannot claim measured bytes")
+        else:
+            refuse("Captured payload availability is not qualified")
         if "attachment:" + fact["asset_id"] not in records:
             refuse("A captured payload has no source declaration")
     decisions = source["scope"]["decisions"]
@@ -518,8 +551,8 @@ def validate_binding(source, snapshot, audit):
             or parse_json(evidence.original_json) != source_values[key]
         ):
             refuse("Snapshot originals disagree with scoped source facts")
-    if snapshot.findings or snapshot.source_gaps or snapshot.generated_presentations:
-        refuse("Finding and gap content is not implemented in this stage")
+    if snapshot.source_gaps or snapshot.generated_presentations:
+        refuse("Source gap presentations are not implemented in this stage")
     entries = snapshot.accounting.entries
     allowed_references = (
         set(source_values)
@@ -572,6 +605,9 @@ def validate_binding(source, snapshot, audit):
                 "Normalized item metadata is not bound to authoritative source declarations"
             )
     validate_graph_binding(source, snapshot)
+    from .resources import validate_payload_binding
+
+    validate_payload_binding(source, snapshot)
 
 
 def validate_graph_binding(source, snapshot):

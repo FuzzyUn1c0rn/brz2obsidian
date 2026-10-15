@@ -6,7 +6,8 @@ relationships, tags and thought types into Obsidian links, tags and categories.
 No community plugins are required.
 
 The library, CLI and local Windows app also support a bounded local API source
-with qualified graph, classification and metadata appearance import.
+with qualified graph, classification, authored Markdown and owned resources,
+including explicit and inherited icons.
 See the [local API guide](docs/local-api.md) for Brain UUID selection, external
 credentials, search options and the current content-stage limits. Acquisition
 spans requests and is not an atomic snapshot; conversion reacquires after

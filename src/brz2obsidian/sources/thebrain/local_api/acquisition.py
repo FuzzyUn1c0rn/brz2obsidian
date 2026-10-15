@@ -1,4 +1,4 @@
-"""Complete bounded discovery, followed by this stage's metadata-only gate."""
+"""Complete bounded discovery and qualified source/payload acquisition."""
 
 from urllib.parse import urlencode
 
@@ -13,7 +13,7 @@ from brz2obsidian.contracts import (
     SourceSnapshot,
 )
 
-from .capture import IDENTIFIERS, canonical
+from .capture import canonical, identifiers
 from .declarations import (
     GRAPH_FIELDS,
     NEIGHBORS,
@@ -26,12 +26,22 @@ from .declarations import (
 )
 from .errors import refuse
 from .graph import link_identity, normalize_relationships
+from .notes import bind_documents
+from .resources import capture_owner
 from .session import LocalApiSession
 from .transport import timestamp
 
 
 class Acquisition:
-    def __init__(self, client, config, brain_id, clock):
+    def __init__(
+        self,
+        client,
+        config,
+        brain_id,
+        clock,
+        profile_version="1",
+        capture_directory=None,
+    ):
         self.client, self.config, self.brain_id, self.clock = (
             client,
             config,
@@ -41,6 +51,8 @@ class Acquisition:
         self.ids, self.link_ids = set(), set()
         self.observations, self.thoughts, self.graphs = {}, {}, {}
         self.links = {}
+        self.profile_version = profile_version
+        self.capture_directory = capture_directory
 
     def get(self, operation, path, subject=None, deadline=None):
         return self.client.json(operation, path, subject, deadline=deadline)
@@ -273,7 +285,7 @@ class Acquisition:
                     relationship.key,
                 )
             ):
-                refuse("Link-owned content is not implemented in this stage")
+                refuse("Link-owned content is outside reviewed coverage")
         records, decisions, items = [], [], []
 
         def record(domain, key, owner, value):
@@ -307,6 +319,7 @@ class Acquisition:
                         + ["exclusion:" + node for node in sorted(removed)],
                     }
                 )
+        assets, documents, payloads = [], [], {}
         included = {1: [], 2: [], 4: []}
         observed_forgotten = 0
         for key, value in sorted(self.thoughts.items()):
@@ -340,9 +353,31 @@ class Acquisition:
                     "attachments", "/thoughts/" + b + "/" + key + "/attachments", key
                 )
             )
-            if owned or attachments:
-                refuse("Resource content is not implemented in this stage")
-            note = self.get("note", "/notes/" + b + "/" + key, key)
+            owner_assets, owner_documents, owner_payloads = capture_owner(
+                self.client,
+                self.config,
+                b,
+                key,
+                owned,
+                attachments,
+                record,
+                self.profile_version,
+                {k: self.thoughts[k] for k in excluded},
+                decisions,
+                self.capture_directory,
+            )
+            assets.extend(owner_assets)
+            documents.extend(owner_documents)
+            payloads.update(owner_payloads)
+            graph["attachment_ids"] = sorted(
+                [a.asset_id for a in owner_assets]
+                + [d.key for d in owner_documents if d.original_copy_omitted]
+            )
+            note = (
+                self.get("note", "/notes/" + b + "/" + key, key)
+                if not owner_documents
+                else None
+            )
             expected = {
                 "brainId": b,
                 "sourceId": key,
@@ -352,15 +387,18 @@ class Acquisition:
                 "html": None,
                 "text": None,
             }
-            if (
+            if not owner_documents and (
                 note != expected
                 or not isinstance(note, dict)
                 or type(note.get("sourceType")) is not int
             ):
-                refuse("Authored note content is not implemented in this stage")
+                refuse(
+                    "Authored note absence is not established by the qualified empty state"
+                )
             record("thought", "thought:" + key, b, value)
             record("graph", "graph:" + key, key, graph)
-            record("no_note", "no_note:" + key, key, expected)
+            if not owner_documents:
+                record("no_note", "no_note:" + key, key, expected)
             rule = "local-api.roles-access.v1"
             decisions.append(
                 {
@@ -376,15 +414,23 @@ class Acquisition:
                     key=key,
                     original_identity=key,
                     naming_seed=key.replace("-", ""),
+                    document_ids=tuple(d.key for d in owner_documents),
+                    resource_ids=tuple(
+                        a.asset_id for a in owner_assets if a.role != "note_original"
+                    ),
                     role={1: "ordinary", 2: "definition", 4: "tag"}[value["kind"]],
                     title=value["name"],
                     label=value.get("label"),
                     declared_appearance=DeclaredAppearance(
                         foreground_color=value["foregroundColor"],
                         background_color=value["backgroundColor"],
+                        icon_asset_id=next(
+                            (a.asset_id for a in owner_assets if a.role == "icon"), None
+                        ),
                     )
                     if value["foregroundColor"] is not None
                     or value["backgroundColor"] is not None
+                    or any(a.role == "icon" for a in owner_assets)
                     else None,
                     calendar_dates=CalendarDates(
                         created=source_date(value["creationDateTime"]),
@@ -429,8 +475,14 @@ class Acquisition:
                     ],
                 }
             )
+        documents, findings = bind_documents(
+            documents,
+            assets,
+            set().union(*map(set, included.values())),
+            with_findings=True,
+        )
         source = {
-            "identifiers": IDENTIFIERS,
+            "identifiers": identifiers(self.profile_version),
             "brain": brain,
             "records": records,
             "inventories": {
@@ -442,7 +494,23 @@ class Acquisition:
                 "policy": "public-live-ordinary-type-tag-v1",
                 "decisions": decisions,
             },
-            "payloads": [],
+            "payloads": [
+                {
+                    "asset_id": a.asset_id,
+                    "owner_id": a.owner,
+                    "availability": a.availability,
+                    "actual_length": a.actual_length,
+                    "actual_sha256": a.actual_sha256,
+                    "external_uri": a.external_uri,
+                }
+                for a in assets
+            ],
+        }
+        normalized_records = {
+            **{"thought:" + item.key: (item.key,) for item in items},
+            **{"link:" + r.key: (r.key,) for r in relationships},
+            **{"attachment:" + a.asset_id: (a.asset_id,) for a in assets},
+            **{"note_text:" + d.owner: (d.key,) for d in documents},
         }
         snapshot = SourceSnapshot(
             identity=SourceIdentity(
@@ -456,6 +524,9 @@ class Acquisition:
             collection_title=brain["name"],
             entry_key=brain["homeThoughtId"],
             items=tuple(items),
+            documents=tuple(documents),
+            assets=tuple(assets),
+            findings=tuple(findings),
             relationships=relationships,
             classification_assignments=assignments,
             original_evidence=tuple(
@@ -479,15 +550,9 @@ class Acquisition:
                     AccountingEntry(
                         identity=r["key"],
                         disposition="normalized"
-                        if r["domain"] == "thought"
-                        or r["domain"] == "link"
-                        and r["value"]["id"] in active_links
+                        if r["key"] in normalized_records
                         else "retained_only",
-                        references=(r["value"]["id"],)
-                        if r["domain"] == "thought"
-                        or r["domain"] == "link"
-                        and r["value"]["id"] in active_links
-                        else (r["key"],),
+                        references=normalized_records.get(r["key"], (r["key"],)),
                     )
                     for r in records
                 )
@@ -516,4 +581,11 @@ class Acquisition:
         }
         self.client.ensure_safe(source)
         self.client.ensure_safe(snapshot.model_dump(mode="json"))
-        return LocalApiSession(source=source, snapshot=snapshot, audit=audit)
+        self.capture_directory.verify()
+        return LocalApiSession(
+            source=source,
+            snapshot=snapshot,
+            audit=audit,
+            payloads=payloads,
+            profile_version=self.profile_version,
+        )

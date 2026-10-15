@@ -9,9 +9,11 @@ from dataclasses import dataclass
 from brz2obsidian.contracts import MigrationFailed, MigrationRefused
 
 from .acquisition import Acquisition
+from .capture import identifiers
 from .config import LocalApiConfig, LocalApiSourceRef
 from .errors import failure, refuse
 from .metadata import LocalApiRunMetadata
+from .storage import acquisition_storage
 from .transport import LocalHttp
 
 
@@ -29,7 +31,10 @@ class LocalApiSourceModule:
     Closing releases the capture, so conversion after inspection reacquires it.
     """
 
-    def __init__(self, config=None, *, credentials=None, clock=None):
+    def __init__(
+        self, config=None, *, credentials=None, clock=None, profile_version="1"
+    ):
+        self.profile_version = identifiers(profile_version)["profile_version"]
         self.config = config or LocalApiConfig()
         self.clock = clock or time.monotonic
         self.credentials = credentials or (
@@ -97,9 +102,21 @@ class LocalApiSourceModule:
                     "The local API credential provider is unavailable",
                 )
             client = LocalHttp(self.config, token, source_ref.brain_id, self.clock)
-            session = Acquisition(
-                client, self.config, source_ref.brain_id, self.clock
-            ).acquire()
+            session = None
+            try:
+                with acquisition_storage() as directory:
+                    session = Acquisition(
+                        client,
+                        self.config,
+                        source_ref.brain_id,
+                        self.clock,
+                        self.profile_version,
+                        directory,
+                    ).acquire()
+            except BaseException:
+                if session is not None:
+                    session.close()
+                raise
         except MigrationFailed, MigrationRefused:
             raise
         except Exception:  # noqa: BLE001 - external credential providers must not expose exception text.

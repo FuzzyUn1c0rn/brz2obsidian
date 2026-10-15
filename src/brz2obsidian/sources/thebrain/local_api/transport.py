@@ -55,7 +55,14 @@ class LocalHttp:
             refuse("search_timeout wildcard deadline exhausted", "incomplete_source")
 
     def request(
-        self, operation, path, subject_id=None, *, deadline=None, allow_tag_error=False
+        self,
+        operation,
+        path,
+        subject_id=None,
+        *,
+        deadline=None,
+        allow_tag_error=False,
+        sink=None,
     ):
         self._check(deadline)
         if len(self.requests) >= self.config.max_requests:
@@ -137,11 +144,15 @@ class LocalHttp:
             cap = (
                 self.config.search_max_response_bytes
                 if operation == "search"
+                else self.config.max_payload_bytes
+                if operation == "attachment-content"
                 else self.config.max_response_bytes
             )
             setting = (
                 "search_max_response_bytes"
                 if operation == "search"
+                else "max_payload_bytes"
+                if operation == "attachment-content"
                 else "max_response_bytes"
             )
             encoding = response.getheader("Content-Encoding", "").lower().strip()
@@ -152,6 +163,8 @@ class LocalHttp:
             )
             chunks = []
             total = compressed = 0
+            secret_tail = b""
+            secret = self._token.encode("utf-8")
             while True:
                 remaining = remaining_budget()
                 if response.isclosed():
@@ -192,7 +205,16 @@ class LocalHttp:
                         refuse(
                             setting + " response bound exhausted", "incomplete_source"
                         )
-                    chunks.append(decoded)
+                    if operation == "attachment-content":
+                        if secret in secret_tail + decoded:
+                            refuse(
+                                "Transport credentials cannot be retained as source content"
+                            )
+                        secret_tail = (secret_tail + decoded)[-len(secret) :]
+                    if sink is None:
+                        chunks.append(decoded)
+                    else:
+                        sink.write(decoded)
                     if decoder and decoder.unconsumed_tail:
                         chunk = decoder.unconsumed_tail
                     else:
@@ -201,7 +223,7 @@ class LocalHttp:
                 refuse("Compressed local API response is incomplete or unsupported")
             remaining_budget()
             raw = b"".join(chunks)
-            self._response_bytes += len(raw)
+            self._response_bytes += total
             entry = {
                 "sequence": len(self.requests) + 1,
                 "operation": operation,
@@ -213,7 +235,7 @@ class LocalHttp:
                 else "tag_inventory_zero_exception",
                 "started_at": started,
                 "finished_at": timestamp(),
-                "actual_length": len(raw),
+                "actual_length": total,
             }
             self.requests.append(entry)
             return response.status, raw
