@@ -125,6 +125,17 @@ commits without creating a branch. Serialize ticket and intermediate side-branch
 integration into the feature root. Upstream synchronization preserves that root
 and requires reassessment of affected evidence; it does not deliver to `main`.
 
+### Review and integrate ticket candidates
+
+Before integrating a ticket candidate into the feature root, a different actor
+must assess that exact candidate and incorporated base against all accepted
+requirements and affected behavior. Only a valid independent PASS permits
+serialized root integration, on structured, lightweight and ordinary paths.
+Author self-review or development checks alone do not satisfy this gate. Hand
+off the candidate and evidence for review; retain required checks, fresh evidence
+and applicable [handoff contracts](../../.agents/skills/implement-spec-enhanced/SKILL.md#prepare-and-choose-the-implementation-path).
+Integration repairs follow the applicable candidate/review procedure.
+
 ### Complete internal subtasks
 
 The outer orchestrator owns issue bookkeeping and overall delivery. Implementers,

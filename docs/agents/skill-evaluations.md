@@ -49,6 +49,7 @@ execute remote actions or subagent dispatch.
 | `delivery-repair-and-handoff` | V10-V13: same-PR repairs, revision changes, draft default and applicable authorization. |
 | `implement-explicit-read-only`, `implement-plan-approved-boundary` | V14: actual read-only routing and preservation of settled approvals. |
 | `delivery-ordinary-worker` | V15: ordinary/lightweight worker ownership and completion handoff. |
+| `delivery-ordinary-candidate` | V3-V4, V15: independent ticket PASS before an ordinary candidate may integrate. |
 
 Record each case's setup, trace/answer evidence, actual result, independent rubric
 verdict and limits. Distinguish an agent's observed decision from a scripted

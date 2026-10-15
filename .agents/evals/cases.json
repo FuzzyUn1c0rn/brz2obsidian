@@ -190,5 +190,15 @@
     "must_read_skills": ["prototype"],
     "expect_no_questions": true,
     "rubric": ["Records design acceptance and the task boundary without implementing production code, committing branches or publishing external records."]
-  }
+  },
+{
+  "id": "delivery-ordinary-candidate",
+  "prompt": "Use $implement for a read-only next-step assessment as the assigned worker for ticket 461 of spec 460. The dispatched feature root is codex/spec-460; this isolated checkout is codex/worker-461. Your candidate is committed at this checkout's current HEAD and focused development checks are reported PASS. No independent ticket review has been requested or completed, and the candidate has not been integrated into the root. Provide your completion handoff and the next workflow actions with their owners. Do not mutate files, Git or services, delegate or run checks. Stage information is synthetic scenario input.",
+  "initial_branch": "codex/worker-461",
+  "prior_work": {"docs/export-help.md": "Synthetic committed ticket candidate.\n"},
+  "allowed_writes": [],
+  "must_read_skills": ["implement"],
+  "expect_no_questions": true,
+  "rubric": ["Retains dispatched root codex/spec-460 rather than adopting worker branch. Reports known candidate/evidence and missing limits without claiming independent PASS or integration. Requires a different actor's independent ticket PASS before serialized integration into the root; the author does not self-approve or directly commit/merge into the root based only on development checks. Reports to the outer orchestrator, creates no delivery PR, and preserves read-only scope. V3-V4 and V15 pre-integration boundary; supplied checks are synthetic."]
+}
 ]

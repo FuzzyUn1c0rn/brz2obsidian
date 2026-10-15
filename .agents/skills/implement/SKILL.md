@@ -28,7 +28,12 @@ Record expected scope before final validation; report the receipt path and outco
 Review the actual changes against the accepted requirements and repository
 standards, following the [final review procedure](../implement-spec-enhanced/references/final-review.md).
 
-Commit and integrate work into that recorded root, preserving existing work.
+Commit the checked candidate and hand its identity and evidence to the outer
+orchestrator. For assigned ticket work, follow
+[independent review before integration](../../../docs/agents/issue-tracker.md#review-and-integrate-ticket-candidates):
+a different actor must return valid PASS for that candidate before serialized
+integration into the recorded root. Author self-review is insufficient. Retain
+the applicable handoff path and required checks; repair findings before integration.
 An assigned ticket worker reports to the outer orchestrator and creates no
 delivery PR. Its handoff includes known checked-candidate and integration commit
 IDs, review/receipt pointers and outcomes, and explicit missing evidence or limits.
