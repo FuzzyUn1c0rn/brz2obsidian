@@ -14,16 +14,23 @@ from brz2obsidian.application.contracts import (
     BrainListResult,
     ConfigureApi,
     ConvertArguments,
+    ConvertCommand,
     InspectArguments,
     InspectCommand,
     ListBrainsArguments,
     ListBrainsCommand,
     LocalApiSourceSelection,
     SelectSource,
+    SetDestination,
+    SimpleCommand,
     WorkerRequest,
     WorkerResponse,
 )
-from brz2obsidian.application.operations import ApplicationSession, Operations
+from brz2obsidian.application.operations import (
+    ApplicationSession,
+    Operations,
+    validate_destination,
+)
 from brz2obsidian.application.protocol import (
     ProtocolFailure,
     decode_request,
@@ -76,6 +83,315 @@ def test_resource_review_rejects_cross_profile_compatibility_and_changed_payload
         )
         assert result.publication.receipt_verified
         assert_published_payloads(tmp_path / "reviewed", jpeg=True)
+
+
+def test_api_capture_teardown_after_reviewed_publication_keeps_receipt_and_safe_guidance(
+    tmp_path, monkeypatch
+):
+    import shutil
+
+    from tests.support.local_api_payloads import (
+        RichPayloadApi,
+        assert_published_payloads,
+    )
+
+    captures = tmp_path / "captures"
+    captures.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(captures))
+    remove = shutil.rmtree
+
+    def deny_frozen_capture(path, *args, **kwargs):
+        if (path / "manifest.json").is_file():
+            raise PermissionError("TEARDOWN_SECRET_CANARY SERVICE_TOKEN_CANARY")
+        return remove(path, *args, **kwargs)
+
+    with api_server(RichPayloadApi(jpeg=True)) as (_, address):
+        selection = LocalApiSourceSelection(
+            brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+        )
+        operations = Operations(credentials=lambda: KEY)
+        inspected = operations.inspect(selection)
+        assert inspected.reviewed is not None and not list(captures.iterdir())
+        session = ApplicationSession()
+        session.dispatch(SelectSource(source_selection=selection))
+        effect = session.dispatch(InspectCommand()).effects[0]
+        session.dispatch(
+            ApplyResult(
+                request_id=effect.request.request_id,
+                input_revision=effect.input_revision,
+                result=inspected,
+                process_status=0,
+            )
+        )
+        effect = next(
+            effect
+            for effect in session.dispatch(
+                SetDestination(
+                    parent_or_null=str(tmp_path), vault_name="Published before teardown"
+                )
+            ).effects
+            if effect.effect == "run_operation"
+        )
+        validation = validate_destination(tmp_path, "Published before teardown")
+        assert validation.outcome == "valid"
+        session.dispatch(
+            ApplyResult(
+                request_id=effect.request.request_id,
+                input_revision=effect.input_revision,
+                result=validation,
+                process_status=0,
+            )
+        )
+        conversion_effect = session.dispatch(ConvertCommand()).effects[0]
+        with monkeypatch.context() as boundary:
+            boundary.setattr(shutil, "rmtree", deny_frozen_capture)
+            result = operations.convert_reviewed(
+                selection, tmp_path, "Published before teardown", inspected.reviewed
+            )
+        try:
+            assert result.status == "conversion_created_with_error"
+            assert result.publication.receipt_verified
+            assert_published_payloads(tmp_path / "Published before teardown", jpeg=True)
+            finding = next(
+                f for f in result.findings if f.code == "api_capture_cleanup_failed"
+            )
+            assert "capture" in finding.message.lower()
+            assert "publication status" in finding.message.lower()
+            assert "CANARY" not in result.model_dump_json()
+            done = session.dispatch(
+                ApplyResult(
+                    request_id=conversion_effect.request.request_id,
+                    input_revision=conversion_effect.input_revision,
+                    result=result,
+                    process_status=1,
+                )
+            ).snapshot
+            assert done.publication.receipt_verified
+            assert "start_another_conversion" in done.allowed_actions
+            assert "open_folder" in done.allowed_actions
+            assert (
+                "convert" not in done.allowed_actions
+                and "retry" not in done.allowed_actions
+            )
+            restarted = session.dispatch(
+                SimpleCommand(command="start_another_conversion")
+            ).snapshot
+            assert restarted.reviewed is None and restarted.review_required
+            assert restarted.source_selection == selection
+            assert_published_payloads(tmp_path / "Published before teardown", jpeg=True)
+        finally:
+            for capture in captures.iterdir():
+                remove(capture)
+
+
+def test_inspection_capture_teardown_failure_is_unusable_and_secret_safe(
+    tmp_path, monkeypatch
+):
+    import shutil
+
+    from tests.support.local_api_payloads import RichPayloadApi
+
+    captures = tmp_path / "captures"
+    captures.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(captures))
+    remove = shutil.rmtree
+
+    def deny_frozen_capture(path, *args, **kwargs):
+        if (path / "manifest.json").is_file():
+            raise PermissionError("TEARDOWN_SECRET_CANARY SERVICE_TOKEN_CANARY")
+        return remove(path, *args, **kwargs)
+
+    with api_server(RichPayloadApi(jpeg=True)) as (_, address):
+        selection = LocalApiSourceSelection(
+            brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+        )
+        try:
+            with monkeypatch.context() as boundary:
+                boundary.setattr(shutil, "rmtree", deny_frozen_capture)
+                inspected = Operations(credentials=lambda: KEY).inspect(selection)
+            assert inspected.outcome == "failed" and inspected.reviewed is None
+            finding = next(
+                f for f in inspected.findings if f.code == "api_capture_cleanup_failed"
+            )
+            assert "inspection capture" in finding.message.lower()
+            assert "temporary storage access" in finding.message.lower()
+            assert "CANARY" not in inspected.model_dump_json()
+        finally:
+            for capture in captures.iterdir():
+                remove(capture)
+
+
+def test_changed_included_scope_requires_review_before_any_publication(tmp_path):
+    from tests.support.local_api import thought
+
+    extra = "99999999-9999-4999-8999-999999999999"
+    with api_server() as (api, address):
+        api.thoughts[extra] = thought(extra, "Disconnected active source control")
+        api.search.append(
+            {
+                "brainId": BRAIN,
+                "isFromOtherBrain": False,
+                "sourceThought": {"id": extra, "brainId": BRAIN, "kind": 0},
+                "sourceLink": None,
+            }
+        )
+        selection = LocalApiSourceSelection(
+            brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+        )
+        operations = Operations(credentials=lambda: KEY)
+        reviewed = operations.inspect(selection).reviewed
+        assert reviewed is not None
+        api.thoughts[extra]["forgottenDateTime"] = "2026-10-15T12:00:00Z"
+        changed = operations.convert_reviewed(
+            selection, tmp_path, "Changed scope", reviewed
+        )
+        assert changed.status == "conversion_refused"
+        assert changed.findings[0].code == "review_changed"
+        assert changed.review_required and changed.publication.state == "not_published"
+        assert not (tmp_path / "Changed scope").exists()
+        refreshed = operations.inspect(selection).reviewed
+        assert (
+            refreshed is not None
+            and refreshed.source_identity != reviewed.source_identity
+        )
+
+
+def test_after_capture_live_payload_change_publishes_verified_captured_bytes_only(
+    tmp_path, monkeypatch
+):
+    from tests.support.local_api_payloads import (
+        NOTE,
+        RICH_NOTE,
+        RichPayloadApi,
+        assert_published_payloads,
+    )
+
+    with api_server(RichPayloadApi(jpeg=True)) as (api, address):
+        selection = LocalApiSourceSelection(
+            brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+        )
+        operations = Operations(credentials=lambda: KEY)
+        reviewed = operations.inspect(selection).reviewed
+        assert reviewed is not None
+        make_directory = tempfile.mkdtemp
+
+        def change_live_source_at_output_directory(*args, **kwargs):
+            if kwargs.get("dir") == tmp_path:
+                api.payloads[NOTE] = (
+                    RICH_NOTE + b"Changed after capture and review comparison"
+                )
+            return make_directory(*args, **kwargs)
+
+        with monkeypatch.context() as boundary:
+            boundary.setattr(
+                tempfile, "mkdtemp", change_live_source_at_output_directory
+            )
+            result = operations.convert_reviewed(
+                selection, tmp_path, "captured", reviewed
+            )
+        assert result.publication.receipt_verified
+        assert api.payloads[NOTE] != RICH_NOTE
+        assert_published_payloads(tmp_path / "captured", jpeg=True)
+        record = json.loads((tmp_path / "captured/migration-record.json").read_bytes())
+        assert record["source_identity"] == reviewed.source_identity.model_dump()
+        assert record["run_metadata"]["source_acquisition"]["audit"]["atomic"] is False
+        next_review = operations.inspect(selection).reviewed
+        assert next_review.source_identity != reviewed.source_identity
+
+
+def test_rich_review_identity_survives_reordered_http_ports_and_audit_only_changes(
+    tmp_path,
+):
+    from tests.support.local_api_payloads import (
+        RichPayloadApi,
+        assert_published_payloads,
+    )
+    from tests.support.reviewed_api import ReorderedReviewApi
+
+    operations = Operations(credentials=lambda: KEY)
+    with api_server(RichPayloadApi(jpeg=True)) as (_, address):
+        first = LocalApiSourceSelection(
+            brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+        )
+        reviewed = operations.inspect(first).reviewed
+        assert reviewed is not None
+    with api_server(ReorderedReviewApi(jpeg=True)) as (_, address):
+        second = LocalApiSourceSelection(
+            brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+        )
+        reordered = operations.inspect(second).reviewed
+        assert reordered is not None
+        assert first.config.api_url != second.config.api_url
+        assert reordered.source_identity == reviewed.source_identity
+        old_configuration = operations.convert_reviewed(
+            second, tmp_path, "unreviewed-port", reviewed
+        )
+        assert old_configuration.findings[0].code == "review_required"
+        assert not (tmp_path / "unreviewed-port").exists()
+        result = operations.convert_reviewed(
+            second, tmp_path, "reviewed-order", reordered
+        )
+        assert result.publication.receipt_verified
+        assert_published_payloads(tmp_path / "reviewed-order", jpeg=True)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "converter_version",
+        "profile_id",
+        "profile_version",
+        "source_sha256",
+        "snapshot_digest",
+    ],
+)
+def test_real_worker_rich_review_compatibility_never_publishes_a_mismatched_review(
+    tmp_path, monkeypatch, field
+):
+    from tests.support.local_api_payloads import RichPayloadApi
+
+    monkeypatch.setenv("THE_BRAIN_LOCAL_API_KEY", KEY)
+    worker = Supervisor(Path(sys.executable), Path(__file__).parents[2] / "src")
+    with api_server(RichPayloadApi(jpeg=True)) as (_, address):
+        selection = LocalApiSourceSelection(
+            brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+        )
+        inspected = worker.run(
+            WorkerRequest(
+                request_id=str(uuid4()),
+                operation="inspect",
+                arguments=InspectArguments(source_selection=selection),
+            )
+        ).response.result
+        review = inspected.reviewed
+        assert review is not None
+        if field in {"source_sha256", "snapshot_digest"}:
+            review = review.model_copy(
+                update={
+                    "source_identity": review.source_identity.model_copy(
+                        update={field: "0" * 64}
+                    )
+                }
+            )
+        else:
+            review = review.model_copy(update={field: "previous-review"})
+        result = worker.run(
+            WorkerRequest(
+                request_id=str(uuid4()),
+                operation="convert_reviewed",
+                arguments=ConvertArguments(
+                    source_selection=selection,
+                    parent=str(tmp_path),
+                    vault_name=field,
+                    reviewed=review,
+                    proceed_with_warnings=False,
+                ),
+            )
+        ).response.result
+    assert result.status == "conversion_refused" and result.review_required
+    assert result.findings[0].code == "review_changed"
+    assert result.publication.state == "not_published"
+    assert not (tmp_path / field).exists()
 
 
 def test_every_effective_config_change_invalidates_review_and_blocks_old_publication(
