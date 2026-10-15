@@ -72,10 +72,13 @@ def test_source_options_remain_selectable_by_arrow_button_and_keyboard():
             view = combo.view()
             assert view.isVisible()
             QTest.qWait(QApplication.doubleClickInterval())
+            position = view.visualRect(view.model().index(row, 0)).center()
+            QTest.mouseMove(view.viewport(), position)
+            app.processEvents()
             QTest.mouseClick(
                 view.viewport(),
                 Qt.MouseButton.LeftButton,
-                pos=view.visualRect(view.model().index(row, 0)).center(),
+                pos=position,
             )
             until(app, lambda kind=kind: window.snapshot.source_kind == kind)
             assert combo.currentIndex() == row and not view.isVisible()
