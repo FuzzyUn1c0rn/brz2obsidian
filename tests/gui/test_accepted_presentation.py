@@ -431,7 +431,7 @@ def test_narrow_long_path_and_adjacent_name_error_scroll_without_covering_footer
     [
         ("inspect", "clean", "Inspection completed — ready for review"),
         ("inspect", "warnings", "Inspection completed — source warnings"),
-        ("inspect", "refused", "Archive cannot be used"),
+        ("inspect", "refused", "Source cannot be used"),
         ("inspect", "failed", "Inspection could not complete"),
         ("convert", "refused", "Conversion could not proceed"),
         ("convert", "failed", "Conversion could not complete"),
