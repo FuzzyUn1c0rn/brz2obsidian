@@ -71,6 +71,20 @@ def _candidate_shape(hit, brain_id):
     return None
 
 
+def _sibling_context(link, graph):
+    return (
+        all(
+            type(link.get(field)) is int
+            for field in ("kind", "relation", "meaning", "direction")
+        )
+        and (link["kind"], link["relation"], link["meaning"]) == (1, 1, 1)
+        and link["direction"] in (-1, 1)
+        and link.get("typeId") is None
+        and link.get("thoughtIdA") in graph["parents_ids"]
+        and link.get("thoughtIdB") in graph["sibling_ids"]
+    )
+
+
 class Acquisition:
     def __init__(
         self,
@@ -291,13 +305,17 @@ class Acquisition:
                 [self.observe(graph["type"])] if graph["type"] is not None else []
             )
             links = array(graph["links"])
-            if any(
-                not isinstance(link, dict)
-                or key not in (link.get("thoughtIdA"), link.get("thoughtIdB"))
-                for link in links
-            ):
-                refuse("A graph carries an unrelated relationship")
-            projected["link_ids"] = sorted({self.observe_link(link) for link in links})
+            incident_links = set()
+            for link in links:
+                if not isinstance(link, dict):
+                    refuse("A graph carries an unrelated relationship")
+                incident = key in (link.get("thoughtIdA"), link.get("thoughtIdB"))
+                if not incident and not _sibling_context(link, projected):
+                    refuse("A graph carries an unrelated relationship")
+                observed = self.observe_link(link)
+                if incident:
+                    incident_links.add(observed)
+            projected["link_ids"] = sorted(incident_links)
             attachments = graph["attachments"]
             if attachments is not None and not isinstance(attachments, list):
                 refuse("A graph attachment declaration is malformed")

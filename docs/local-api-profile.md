@@ -76,6 +76,26 @@ All control families below require both independent positive and negative cases.
 | `local-api.accounting.v1` Candidate contract; LA-C13 | Every scoped identity/fact/payload/exclusion has one explicit normalized/retained_only/unresolved disposition with evidence references. No dangling included relationship/document/resource; no duplicate conflicting accounting. Unresolved included facts or unqualified rule prevents publication. | Normalized references actual Item/Relationship/Assignment/Document/Asset; retained_only references safe original facts/exclusions/outcomes; unresolved references safe refusal evidence. Refuse `local-api.accounting-refused.v1`. | Existing SourceAccounting contract and parent requirement; independent omission/conflict controls; complete live manifest belongs to #179 |
 | `local-api.note-formatting.v1` Candidate pure-text reuse; LA-C13 | Only qualified scoped raw Markdown enters unchanged fingerprinted adapt_note(text),trace_adapted_references/reference grammar O59/O60. Preserve parser block/literal ownership,exact source/adapted spans/scoped digest; bind against complete API inventories. Apply existing pure literal/insert/table/callout/code/ToC predicates only when exact text inputs match. Helper refusal becomes safe API refusal; no BRZ NoteType/flags/member paths or rendered fallback are fabricated. | Each helper loss maps SourceFinding rule_id=local-api.note-formatting.v1,kind=formatting_loss,warning code=formatting_loss,permits_absent_payload=false. Preserve exact safe declaration/change/TextAdaptation evidence. Core image_presentation_normalized is separately generated from qualified percentage ReferenceSpan,not another SourceFinding. Unsupported grammar: `local-api.note-refused.v1`. | O59/O60 existing pure functions and accepted TextAdaptation/ReferenceSpan contracts; separately authored raw-text/registry controls; no new numeric-flag meaning |
 
+## Graph sibling context
+
+With `includeSiblings=true`, a graph may also contain the displayed parent's
+hierarchy links to displayed siblings. A nonincident link qualifies only when its
+parent endpoint is in the active graph's `parents`, its child endpoint is in
+`siblings`, and its exact existing tuple is kind1/relation1/meaning1/direction-1
+or1 with null typeId. The same parent-to-active hierarchy must be corroborated by
+the qualified authoritative relationships and graph joins. Both endpoints are
+canonical same-Brain displayed thoughts; all normal ownership, access, role,
+scope, declaration, conflict and link-content checks remain required.
+
+Discover and authoritatively fetch these links and endpoints; preserve each global
+relationship once. The active graph's normalized `link_ids` contains only links
+incident to the active thought, while its observed sibling inventory remains
+separate. Context never invents a direct active-to-sibling relationship. Other
+nonincident tuples, reversed joins, arbitrary displayed endpoints and type/tag
+context are unqualified and refuse. Independent #189 qualification checked the
+retained controlled sibling-walk graphs; this clarifies discovery under existing
+hierarchy meanings and leaves profile/capture identifiers unchanged.
+
 ## Search candidate envelopes
 
 Search replies supply candidates for authoritative GETs; their display hints and
