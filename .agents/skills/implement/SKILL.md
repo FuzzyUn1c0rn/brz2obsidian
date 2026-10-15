@@ -6,6 +6,12 @@ disable-model-invocation: true
 
 Implement the work described by the user in the spec or tickets.
 
+For an explicit read-only review or plan, return that assessment without branch
+setup, claims, implementation or publication. For authorized implementation,
+follow [feature-root setup](../../../docs/agents/issue-tracker.md#establish-the-feature-root)
+before claims or changes: branch from `main`, otherwise retain the current branch.
+Record and preserve that root and existing work throughout the effort.
+
 Apply `tdd` to features and behavior-changing fixes. Use testing boundaries
 specified in the conversation, accepted specification, or ticket, recording
 their decision source. If none is specified, select an established public
@@ -21,7 +27,11 @@ Record expected scope before final validation; report the receipt path and outco
 Review the actual changes against the accepted requirements and repository
 standards, following the [final review procedure](../implement-spec-enhanced/references/final-review.md).
 
-Commit your work to the current branch.
-Follow [PR delivery and issue completion](../../../docs/agents/issue-tracker.md#pr-delivery-and-issue-completion)
-for default draft publication after the first publishable commit and implementation
-issue closure after merge into `main`, respecting explicit publication constraints.
+Commit and integrate work into that recorded root, preserving existing work.
+An assigned ticket worker reports to the outer orchestrator and creates no
+delivery PR. Under [the shared lifecycle](../../../docs/agents/issue-tracker.md#pr-delivery-and-issue-completion),
+internal subtasks complete on the root. The orchestrator creates one draft PR
+only after the full effort's implementation is assembled, then assigns independent
+review of that full PR and repairs it in place. A standalone request is one effort.
+Leave the PR draft by default; later readiness and merge require applicable user
+authorization. Respect explicit publication constraints.

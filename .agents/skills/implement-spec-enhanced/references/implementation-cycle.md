@@ -3,9 +3,11 @@
 Read this when coordinating the structured path. Publication schemas and commands
 remain in the [common contract](handoffs.md) and its stage references.
 
-1. Claim each ready ticket through the issue tracker. Dispatch implementers in
+1. Establish and record the [feature root](../../../../docs/agents/issue-tracker.md#establish-the-feature-root)
+   before claiming or dispatching. Claim each ready ticket through the issue tracker. Dispatch implementers in
    parallel where dependencies, ownership, and available agent slots permit.
-   Give each an isolated worktree based on the integration branch. Preserve
+   Give each an isolated worktree with an explicit base at the feature root's
+   current tip. Preserve
    existing changes when correcting a worktree's starting point.
 
    Implementers read [candidate publication](handoff-candidate.md)
@@ -76,7 +78,9 @@ remain in the [common contract](handoffs.md) and its stage references.
    binds the exact verifier bytes
    and inspected result. Run the standalone integration validator against the
    clean result, including failed outcomes. A passing integration record establishes
-   the local result; it does not close the ticket.
+   the local result; it does not itself close the ticket. The orchestrator records
+   acceptance and integration evidence before closing an internal subtask under
+   the shared lifecycle.
    If integration is held by a temporary check or prerequisite, use a new
    attempt for the unchanged candidate when it becomes available. Reuse the
    passing verification only with explicit still-applicable PASS rationale in the
@@ -87,7 +91,10 @@ remain in the [common contract](handoffs.md) and its stage references.
 
 6. Save the durable conclusion, commits, verification results, evidence-reuse
    rationale, and material limits in the ticket. Update the frontier and dispatch
-   newly unblocked work from actual issue/dependency states. After the first
-   publishable integration commit, follow
-   [PR delivery and issue completion](../../../../docs/agents/issue-tracker.md#pr-delivery-and-issue-completion)
-   for default draft publication and eventual issue closure after merge into `main`.
+   newly unblocked work from actual issue/dependency states and same-root
+   integration evidence. Ticket completion does not trigger a delivery PR.
+   The outer orchestrator follows
+   [PR delivery and issue completion](../../../../docs/agents/issue-tracker.md#pr-delivery-and-issue-completion):
+   after the complete implementation is assembled, create one draft PR, then
+   independently review the full PR and repair it in place. Keep the parent open
+   until actual delivery and its remaining gates pass.

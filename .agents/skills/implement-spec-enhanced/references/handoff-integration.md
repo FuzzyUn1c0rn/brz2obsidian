@@ -20,8 +20,10 @@ the result, verification must pass, and all integration checks must pass or have
 documented evidence reuse. Capture the digest after the verifier finishes;
 the validator rejects changed verdict files. A failed attempt never closes work.
 
-An `integrated` record establishes local integration only. Remote delivery and
-issue closure follow [PR delivery and issue completion](../../../../docs/agents/issue-tracker.md#pr-delivery-and-issue-completion);
+An `integrated` record establishes local integration only. The orchestrator may
+complete an internal subtask after recording all ticket-stage acceptance and
+review evidence under [PR delivery and issue completion](../../../../docs/agents/issue-tracker.md#pr-delivery-and-issue-completion).
+Parent delivery and the single draft PR remain orchestrator responsibilities;
 keep that evidence in the ticket, outside immutable handoff records. The local
 ancestry conditions above do not determine GitHub squash/rebase merge completion.
 

@@ -163,7 +163,10 @@ You may use one of these, you may use several, it is unlikely you will use all o
 
 Link the accepted specification and associated tickets. Apply
 [PR delivery and issue completion](../../../docs/agents/issue-tracker.md#pr-delivery-and-issue-completion)
-to choose ordinary references or closing references, verify the intended issue
+for orchestrator-owned publication of one draft after the full implementation is
+assembled, followed by independent review of that PR and repairs on the same PR.
+Writing a PR body does not authorize publication, readiness or merge. Also use
+the shared lifecycle to choose ordinary references or closing references, verify the intended issue
 set, and record the PR URL in each associated issue. If there is no associated
 issue, say so.
 

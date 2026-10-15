@@ -99,3 +99,36 @@ def test_fixture_has_its_own_git_root_and_metadata_does_not_count_as_artifact_ch
     files = EVALS.snapshot(workspace)
     assert "GLOSSARY.md" in files
     assert not any(name.startswith(".git/") for name in files)
+
+
+def test_fixture_includes_authoritative_shared_lifecycle_guidance(tmp_path):
+    workspace = tmp_path / "fixture"
+    EVALS.prepare(workspace)
+    for name in ("issue-tracker.md", "triage-labels.md"):
+        actual = workspace / "docs" / "agents" / name
+        source = EVALS.ROOT / "docs" / "agents" / name
+        assert actual.read_bytes() == source.read_bytes()
+
+
+def test_fixture_can_start_on_main_or_preserve_committed_feature_work(tmp_path):
+    for branch, prior_work in (
+        ("main", {}),
+        ("codex/existing", {"existing.txt": "Keep this accepted work\n"}),
+    ):
+        workspace = tmp_path / branch.replace("/", "-")
+        EVALS.prepare(workspace, {"initial_branch": branch, "prior_work": prior_work})
+        observed = subprocess.check_output(
+            ["git", "-C", str(workspace), "branch", "--show-current"], text=True
+        ).strip()
+        assert observed == branch
+        status = subprocess.check_output(
+            ["git", "-C", str(workspace), "status", "--porcelain"], text=True
+        )
+        assert status == ""
+        if prior_work:
+            existing = workspace / "existing.txt"
+            assert existing.read_text() == "Keep this accepted work\n"
+            assert subprocess.check_output(
+                ["git", "-C", str(workspace), "diff", "--name-only", "main...HEAD"],
+                text=True,
+            ).splitlines() == ["existing.txt"]

@@ -18,10 +18,10 @@ Use the `gh` CLI from this checkout, or pass
   `--remove-label "..."`. Use the mapping in `triage-labels.md`.
 - Claim: `gh issue edit <number> --add-assignee @me`. Record the working
   session or agent identifier in a comment when sharing a GitHub account.
-- Close: implementation issues use automatic closure on merge when eligible under
-  [PR delivery and issue completion](#pr-delivery-and-issue-completion).
-  Use `gh issue close <number> --reason completed` for manual closure after the
-  applicable completion conditions and recorded results.
+- Close: the orchestrator records evidence and closes internal subtasks after
+  accepted integration into the feature root. Parent specification delivery uses
+  [PR delivery and issue completion](#pr-delivery-and-issue-completion), including
+  automatic closure on merge when eligible.
 
 GitHub issue numbers are repository-wide, shared with pull requests. Use full
 URLs for cross-repository references and distinguish legacy local ticket numbers
@@ -75,6 +75,10 @@ eligible selected leaf, established leaf result, or empty frontier with reasons.
 Eligibility requires open
 `ready-for-agent` work, all blockers closed, and no other claim. A parent with no
 eligible children has an empty frontier; wait for a blocker or claim to resolve.
+For same-spec dependencies, confirm the closed blocker's accepted result is in
+the consuming candidate's feature-root base. A closed subtask records completion
+on its recorded root, not availability on `main`; external or delivery-dependent
+consumers must inspect the required delivery evidence as well.
 Record explicit user authorization for combined work with its scope and affected
 child tickets instead of requiring leaf selection for that scope. Preserve that
 authorization and record child completion individually against acceptance criteria.
@@ -97,45 +101,105 @@ Publish durable scope/authorization decisions in the issue after claiming.
 
 ## PR delivery and issue completion
 
-For authorized repository implementation, publish the integration branch and open
-a draft delivery PR targeting `main` after the first publishable integration
-commit, on structured, lightweight and ordinary implementation paths. Reuse a
-suitable existing open delivery PR instead of duplicating it; preserve an already
-ready status while its readiness evidence remains applicable. Confirm its
-repository, base, branch and head correspond to this implementation effort.
-Respect explicit user publication constraints and read-only
-or planning requests. When publication is unavailable or prohibited, record the
-local result and remaining delivery gate and keep the implementation issue open.
+This lifecycle applies to structured, lightweight and ordinary implementation.
+Read-only reviews and planning perform no branch setup, claims, dispatch or
+publication. Respect explicit user publication constraints.
 
-The PR head must be a branch distinct from `main`. If the work is already
-committed locally on `main`, publish it from a separate integration branch.
-Do not push `main` as a substitute for PR delivery.
+### Establish the feature root
 
-Use the [PR skill](../../.agents/skills/pr/SKILL.md) for the body. Link the accepted
-specification and tickets; record the delivery PR URL in each associated issue.
-Use ordinary issue references while acceptance or review gates remain unresolved.
-For a new PR, use an already published head and an explicit base:
+Before implementation, claims or dispatch, inspect the current branch. On `main`,
+create and switch to a local `codex/<effort>` branch; otherwise continue on the
+current branch. Read-only discovery may precede setup. Record the specification,
+feature-root branch, integration checkout and full starting commit in the existing
+effort record. Retain that root across subtasks, continuations and repairs,
+preserving existing edits and commits. An unresolved branch/root identity must be
+resolved before dependent work; never reset or replace it implicitly.
+
+Every new implementation branch, including one created with a worktree, starts
+from the feature root's current tip. Pass the root or its resolved full commit
+explicitly to worktree creation; tool defaults may start from `main`. Supply root
+identity and captured base in dispatches. Reviewer checkouts may assess exact
+commits without creating a branch. Serialize ticket and intermediate side-branch
+integration into the feature root. Upstream synchronization preserves that root
+and requires reassessment of affected evidence; it does not deliver to `main`.
+
+### Complete internal subtasks
+
+The outer orchestrator owns issue bookkeeping and overall delivery. Implementers,
+independent ticket reviewers and mergers report assigned results; finishing a
+ticket does not authorize them to create, mark ready or merge delivery PRs.
+
+An internal subtask may close after its ticket-stage acceptance gates, independent
+review and actual integration into the recorded feature root all pass. First
+record the specification/root identity, candidate and integration commits,
+criterion outcomes, qualifying checks, review verdict and material limits in the
+ticket. A handoff PASS alone never closes it. Completed same-root subtasks can
+unblock dependent implementation without a PR or merge to `main`.
+
+Keep actual user/native prerequisites, external dependencies and explicit
+delivery-dependent criteria. If a ticket requires post-delivery acceptance yet
+must close before draft publication, report the scope/lifecycle conflict for
+resolution; do not waive the gate or create an intermediate PR. Answer-only,
+research and planning tickets need no delivery PR and close when their own
+accepted criteria and evidence are satisfied.
+
+### Publish one draft after implementation is assembled
+
+The outer orchestrator reconciles the complete accepted scope and subtask graph,
+including nested and newly discovered accepted work. Every implementation subtask
+must be complete and integrated, and required pre-publication checks and gates
+must pass. Held or unreviewed work remains unfinished. With no subtasks, assess
+the accepted implementation scope directly. Record coverage and stage results;
+independent final PR review is still pending, and later-stage gates retain their
+assigned stage.
+
+Only then does the outer orchestrator publish the feature root and create one
+draft delivery PR from it to `main`, linked to the full specification and
+subtasks. Use the [PR skill](../../.agents/skills/pr/SKILL.md) and record the URL
+in the parent and relevant tickets. State that independent final review is pending.
+For a new PR, use an already published head and explicit base:
 
 ```powershell
-gh pr create --repo FuzzyUn1c0rn/brz2obsidian --draft --base main --head <integration-branch> --title "..." --body-file tmp/<effort>/pr-body.md
+gh pr create --repo FuzzyUn1c0rn/brz2obsidian --draft --base main --head <feature-root> --title "..." --body-file tmp/<effort>/pr-body.md
 ```
 
-Local candidate/verification PASS and integration establish stage results.
-GitHub merge is a delivery gate for issue completion, not a prerequisite for
-those local judgments or draft publication. All other assigned acceptance gates
-retain their stage requirements. Mark a delivery PR ready only after required
-checks, independent review, final aggregate review and applicable pre-merge
-user/native gates pass for its current head and scope. PR creation or readiness
-supplies no authorization to merge; a remote merge requires user authorization.
+For continuations or uncertain creation outcomes, inspect the exact specification,
+root and existing delivery state before creating anything. Reuse the matching
+draft and update it for repairs. An already ready, merged, closed or mismatched
+legacy PR needs explicit reconciliation; it does not justify duplicate delivery
+or rewriting history. If publication is unavailable or prohibited, retain the
+root and local evidence and report the remaining gate with the parent open.
 
-Before marking the delivery PR ready, record acceptance and review outcomes and
-material limits in each associated issue. If merge into `main` is the only
-remaining completion condition for an issue, add `Closes #<number>` to the PR
-description, with a separate closing reference for each fully delivered issue.
-Keep ordinary references for partial work, parent issues with unfinished scope,
-and issues with acceptance gates assigned after merge; close those manually only
-after all their completion conditions pass. Closing references must not bypass
-unresolved acceptance gates.
+### Independently review and repair the draft
+
+After creation, the orchestrator assigns an independent reviewer to the entire
+draft PR under [final review](../../.agents/skills/implement-spec-enhanced/references/final-review.md).
+Assess its full change set against the full accepted spec and subtasks, including
+cross-ticket interactions and omissions. Ticket PASS records support this review;
+the orchestrator's assessment does not replace it. Bind the verdict to the actual
+PR base, head and comparison commits.
+
+Coordinate repairs through the applicable candidate review and root integration
+path, then update the same PR. New heads, relevant base changes and accepted scope
+changes require independent reassessment of affected requirements, findings and
+checks, retaining mandatory freshness and evidence-reuse rules. Resolve repair
+tickets only after their gates pass. Preserve earlier findings and verdicts.
+
+The default handoff remains draft, with the current independent verdict and
+remaining gates reported. Agent checks or final PASS do not automatically mark
+it ready or merge it. Later readiness and remote merge follow applicable user
+authorization; reuse existing authorization within its scope without asking again.
+
+### Deliver and close the parent specification
+
+Keep the parent open through draft publication and final review. Parent completion
+requires actual delivery to `main` and every assigned acceptance gate. Use ordinary
+issue references while closure conditions remain unresolved. For a later authorized
+readiness transition, record current acceptance/review outcomes and limits. If
+merge into `main` is an issue's only remaining condition, add `Closes #<number>`
+with one reference per eligible issue. Already completed internal subtasks need no
+deferred auto-closure. Keep ordinary references for partial scope and post-merge
+acceptance; closing keywords must not bypass gates.
 
 Verify that the PR targets `main`, that `main` is the repository's default branch,
 and that `closingIssuesReferences` matches the intended issues before readiness.
@@ -170,15 +234,10 @@ commit together with final criterion/review outcomes and material limits in the
 issue after automatic closure. If automatic closure did not occur, or an issue
 has acceptance gates assigned after merge, record that evidence before manual
 closure and close only when all applicable completion conditions pass.
-Local integration, handoff PASS, readiness, draft/open state, closed-unmerged
-state, merge into another base, or unavailable merge evidence does not establish
-issue completion. Retain the claim and dependency/blocker semantics while
-awaiting delivery; local completion does not unblock a dependency requiring a
-closed issue.
-
-Answer-only, research or planning tickets that change no repository content need
-no delivery PR. Record their answer/evidence and close only when their own
-accepted criteria are satisfied.
+Local integration, handoff PASS, PR readiness or draft/open state, a closed-unmerged
+PR, another target base or missing merge evidence does not establish parent
+delivery. Internal subtask completion follows the separate root-integration rule
+above; never infer delivered-to-main availability from a closed subtask alone.
 
 ## Dependencies and wayfinding
 
@@ -200,7 +259,8 @@ accepted criteria are satisfied.
   with no open blockers and no assignee. Native
   `issue_dependencies_summary.blocked_by` counts open blockers; otherwise
   inspect each issue referenced by the fallback line.
-- Claim: assign the issue as the session's first write before starting work.
+- Claim: assign the issue as the session's first issue-tracker write before
+  implementation; feature-root setup precedes claiming.
 - Resolve: record the answer and evidence; close under the applicable
   [completion conditions](#pr-delivery-and-issue-completion), then append a summary
   and issue link to the map's Decisions-so-far.
