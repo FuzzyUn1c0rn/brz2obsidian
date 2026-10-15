@@ -1,6 +1,7 @@
 """Independent API-bound preservation oracle. No converter modules are imported."""
 
 import hashlib
+from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -25,6 +26,39 @@ def semantic(value):
     if isinstance(value, list):
         return ("array", tuple(map(semantic, value)))
     return (type(value).__name__, value)
+
+
+def attachment_evidence(value, limit):
+    """Apply only the documented position projection to independent raw facts."""
+    if "position" not in value:
+        return value
+    position = value["position"]
+    assert type(position) in (int, Decimal), "attachment position source number"
+    number = Decimal(position)
+    assert number.is_finite(), "finite attachment position"
+    if not number:
+        text = "0"
+    else:
+        sign, digits, exponent = number.as_tuple()
+        digits = list(digits)
+        while digits[-1] == 0:
+            digits.pop()
+            exponent += 1
+        point = len(digits) + exponent
+        length = sign + (
+            point if exponent >= 0 else len(digits) + 1 if point > 0 else 2 - exponent
+        )
+        assert length <= limit, "attachment position cannot fit retained evidence"
+        coefficient = "".join(map(str, digits))
+        if exponent >= 0:
+            text = coefficient + "0" * exponent
+        elif point > 0:
+            text = coefficient[:point] + "." + coefficient[point:]
+        else:
+            text = "0." + "0" * -point + coefficient
+        if sign:
+            text = "-" + text
+    return value | {"position": {"decimal": text}}
 
 
 def uuid(value):
@@ -195,7 +229,7 @@ def source_facts(baseline):
         "baseline thought coverage"
     )
     for key, path in data["graphs"].items():
-        graph = baseline.json(path)
+        graph = read_json(baseline.bytes(path), parse_float=Decimal)
         graphs[key] = graph
         thought = graph["activeThought"]
         assert thought["id"] == key, "baseline thought identity"
@@ -205,7 +239,9 @@ def source_facts(baseline):
             assert key in data.get("attachment_inventories", {}), (
                 "missing authoritative attachment inventory"
             )
-            inventory = baseline.json(data["attachment_inventories"][key])
+            inventory = read_json(
+                baseline.bytes(data["attachment_inventories"][key]), parse_float=Decimal
+            )
         assert type(inventory) is list, "malformed authoritative attachment inventory"
         for attachment in inventory:
             assert attachment["sourceId"] == key and attachment["sourceType"] == 2, (
@@ -469,7 +505,8 @@ def check_api_vault(baseline, vault, *, profile_version="1"):
     audit = audit_baseline(baseline, profile_version=profile_version)
     proofs = audit.get("resource_eligibility", {})
     thoughts, expected, attachments, raw_links = source_facts(baseline)
-    record = read_json((vault / "migration-record.json").read_bytes())
+    record_bytes = (vault / "migration-record.json").read_bytes()
+    record = read_json(record_bytes)
     identity = record["source_identity"]
     assert (
         identity["module_id"],
@@ -497,7 +534,11 @@ def check_api_vault(baseline, vault, *, profile_version="1"):
     originals = {semantic(row) for row in records(record["original_evidence"])}
     assert all(
         semantic(row) in originals
-        for row in [*thoughts.values(), *raw_links.values(), *attachments.values()]
+        for row in [
+            *thoughts.values(),
+            *raw_links.values(),
+            *(attachment_evidence(a, len(record_bytes)) for a in attachments.values()),
+        ]
     ), "raw API metadata/signatures preserved"
     actual = identities(record["relationships"], "key", "relationship")
     assert actual.keys() == expected.keys(), "relationship identities"

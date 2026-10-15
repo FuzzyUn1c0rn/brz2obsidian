@@ -6,13 +6,15 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 
-def read_json(data):
+def read_json(data, *, parse_float=float):
     def unique(pairs):
         result = dict(pairs)
         assert len(result) == len(pairs), "duplicate evidence JSON keys"
         return result
 
-    return json.loads(data.decode("utf-8"), object_pairs_hook=unique)
+    return json.loads(
+        data.decode("utf-8"), object_pairs_hook=unique, parse_float=parse_float
+    )
 
 
 def safe_path(root, name):

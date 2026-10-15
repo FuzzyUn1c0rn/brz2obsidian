@@ -375,6 +375,96 @@ def reseal(baseline):
 
 
 @pytest.mark.parametrize(
+    ("token", "expected"),
+    [
+        ("-1", "-1"),
+        ("-1.0", "-1"),
+        ("1e0", "1"),
+        ("1.2300", "1.23"),
+        ("-0.0", "0"),
+        ("0.000000000000000000000000001", "0.000000000000000000000000001"),
+        ("9007199254740993.25", "9007199254740993.25"),
+        ("12e3", "12000"),
+    ],
+)
+def test_raw_attachment_position_uses_documented_exact_decimal_evidence(
+    tmp_path, token, expected
+):
+    from tests.local_acceptance.api_checker import check_api_vault
+
+    baseline, vault = source_case(tmp_path)
+    graph_path = baseline.manifest_path.parent / baseline.data["graphs"][identity(2)]
+    graph = json.loads(graph_path.read_bytes())
+    graph["attachments"][0]["position"] = "RAW_POSITION_TOKEN"
+    graph_path.write_text(
+        json.dumps(graph).replace('"RAW_POSITION_TOKEN"', token), encoding="utf-8"
+    )
+    record_path = vault / "migration-record.json"
+    record = json.loads(record_path.read_bytes())
+    attachment = next(
+        row
+        for row in record["original_evidence"][0]["records"]
+        if row["id"] == identity(201)
+    )
+    attachment["position"] = {"decimal": expected}
+    write_json(record_path, record)
+    assert check_api_vault(reseal(baseline), vault)["payloads"] == 3
+
+
+@pytest.mark.parametrize(
+    ("source_token", "retained"),
+    [
+        ("-1.0", {"decimal": "-1.0"}),
+        ("-1.0", {"decimal": "-01"}),
+        ("-1.0", {"decimal": "-1e0"}),
+        ("-1.0", {"decimal": "1"}),
+        ("-1.0", {"decimal": "-1", "extra": True}),
+        ("-1.0", {"decimal": -1}),
+        ("-1.0", -1),
+        ("-1.0", None),
+        ("-1.0", "OMIT_POSITION"),
+        (None, None),
+        ("9007199254740993.25", {"decimal": "9007199254740993.2"}),
+        ("true", {"decimal": "1"}),
+        ('"-1"', {"decimal": "-1"}),
+        ('{"decimal":"-1"}', {"decimal": "-1"}),
+        ("null", None),
+        ("NaN", {"decimal": "0"}),
+        ("Infinity", {"decimal": "0"}),
+        ("1e1000000000", {"decimal": "1"}),
+    ],
+)
+def test_attachment_decimal_comparison_rejects_changed_or_invalid_facts(
+    tmp_path, source_token, retained
+):
+    from tests.local_acceptance.api_checker import check_api_vault
+
+    baseline, vault = source_case(tmp_path)
+    graph_path = baseline.manifest_path.parent / baseline.data["graphs"][identity(2)]
+    graph = json.loads(graph_path.read_bytes())
+    if source_token is not None:
+        graph["attachments"][0]["position"] = "RAW_POSITION_TOKEN"
+    graph_path.write_text(
+        json.dumps(graph).replace('"RAW_POSITION_TOKEN"', source_token or "null"),
+        encoding="utf-8",
+    )
+    record_path = vault / "migration-record.json"
+    record = json.loads(record_path.read_bytes())
+    attachment = next(
+        row
+        for row in record["original_evidence"][0]["records"]
+        if row["id"] == identity(201)
+    )
+    if retained == "OMIT_POSITION":
+        attachment.pop("position", None)
+    else:
+        attachment["position"] = retained
+    write_json(record_path, record)
+    with pytest.raises(AssertionError):
+        check_api_vault(reseal(baseline), vault)
+
+
+@pytest.mark.parametrize(
     "damage",
     [
         "visibility",
