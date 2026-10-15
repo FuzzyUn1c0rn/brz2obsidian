@@ -8,7 +8,8 @@ Implement the work described by the user in the spec or tickets.
 
 For an explicit read-only review or plan, return that assessment without branch
 setup, claims, implementation or publication. For authorized implementation,
-follow [feature-root setup](../../../docs/agents/issue-tracker.md#establish-the-feature-root)
+retain the assigned/recorded root or follow
+[initial feature-root setup](../../../docs/agents/issue-tracker.md#establish-the-feature-root)
 before claims or changes: branch from `main`, otherwise retain the current branch.
 Record and preserve that root and existing work throughout the effort.
 

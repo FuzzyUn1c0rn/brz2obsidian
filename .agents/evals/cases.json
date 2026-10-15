@@ -177,11 +177,11 @@
   {
     "id": "delivery-ordinary-worker",
     "prompt": "Use $implement for a read-only status/next-step assessment of this assigned lightweight documentation ticket. The outer orchestrator owns spec 450 on root codex/spec-450. Your ticket 451 has independent review PASS, all ticket-stage gates satisfied and accepted integration PASS at current root HEAD. Other accepted tickets remain unfinished. Report your completion handoff and appropriate issue/PR responsibilities without mutating files, Git or services, delegating or running checks.",
-    "initial_branch": "codex/spec-450",
+    "initial_branch": "codex/worker-451",
     "allowed_writes": [],
     "must_read_skills": ["implement"],
     "expect_no_questions": true,
-    "rubric": ["Assigned worker reports acceptance, reviewed/integrated identities and evidence/limits to the outer orchestrator for evidence-backed closure; does not create a PR or mark ready/merge. Shared lifecycle also applies to ordinary/lightweight work; orchestrator waits for all implementation, creates one draft then assigns full-PR independent review. V15; read-only role assessment."]
+    "rubric": ["Assigned worker retains the dispatched root codex/spec-450 despite checkout branch codex/worker-451; reports acceptance, reviewed/integrated identities and evidence/limits to the outer orchestrator for evidence-backed closure; does not create a PR or mark ready/merge. Shared lifecycle also applies to ordinary/lightweight work; orchestrator waits for all implementation, creates one draft then assigns full-PR independent review. V15; read-only role assessment."]
   },
   {
     "id": "prototype-approved-decision",

@@ -107,9 +107,11 @@ publication. Respect explicit user publication constraints.
 
 ### Establish the feature root
 
-Before implementation, claims or dispatch, inspect the current branch. On `main`,
-create and switch to a local `codex/<effort>` branch; otherwise continue on the
-current branch. Read-only discovery may precede setup. Record the specification,
+For a new effort, the outer orchestrator inspects the current branch before
+implementation, claims or dispatch. On `main`, create and switch to a local
+`codex/<effort>` branch; otherwise continue on the current branch. Assigned workers
+and continuations use the already recorded/dispatched root; a worker's checkout
+branch never replaces it. Read-only discovery may precede setup. Record the specification,
 feature-root branch, integration checkout and full starting commit in the existing
 effort record. Retain that root across subtasks, continuations and repairs,
 preserving existing edits and commits. An unresolved branch/root identity must be

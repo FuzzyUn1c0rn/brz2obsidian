@@ -27,7 +27,8 @@ Read the accepted spec and ticket/index. Complete
 [frontier discovery](../../../docs/agents/issue-tracker.md#discover-the-implementation-frontier)
 before claim or dispatch. Record eligible leaves, an established leaf result, or
 explicitly authorized combined scope. Before implementation, claims or dispatch,
-follow [feature-root setup](../../../docs/agents/issue-tracker.md#establish-the-feature-root):
+retain the assigned/recorded root or follow
+[initial feature-root setup](../../../docs/agents/issue-tracker.md#establish-the-feature-root):
 on `main`, create a local feature branch; otherwise retain the current branch.
 Record and preserve its root identity and full starting commit across the effort.
 
