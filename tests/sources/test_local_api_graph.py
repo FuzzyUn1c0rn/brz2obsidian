@@ -83,6 +83,10 @@ def test_qualified_excluded_endpoint_retains_only_minimal_scope_and_no_authored_
             originals = {
                 e.key: json.loads(e.original_json) for e in s.original_evidence
             }
+            assert all(
+                ALONE not in values and HIERARCHY not in values
+                for values in originals["graph:" + HOME].values()
+            )
             assert originals["exclusion:" + ALONE] == {
                 "id": ALONE,
                 "brainId": BRAIN,
@@ -435,6 +439,136 @@ def test_excluded_definition_removes_assignment_and_inherited_content_only():
                 path == f"/api/thoughts/{BRAIN}/{DEFINITION}/attachments"
                 for path, _, _ in api.requests
             )
+            import json
+
+            graph = next(
+                json.loads(e.original_json)
+                for e in snapshot.original_evidence
+                if e.key == "graph:" + HOME
+            )
+            assert graph["type_ids"] == []
+            assert TYPE_LINK not in graph["link_ids"]
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "parents_ids",
+        "children_ids",
+        "jump_ids",
+        "sibling_ids",
+        "tag_ids",
+        "type_ids",
+        "link_ids",
+    ],
+)
+def test_capture_refuses_reintroduced_excluded_graph_ids_with_recomputed_digests(
+    tmp_path, monkeypatch, field
+):
+    import json
+    import tempfile
+
+    from brz2obsidian.sources.thebrain.local_api import LocalApiSession
+
+    api = GraphApi()
+    api.thoughts[ALONE]["forgottenDateTime"] = "2026-01-01T00:00:00"
+    api.links[HIERARCHY]["meaning"] = 6
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    with api_server(api) as (_, address):
+        module = LocalApiSourceModule(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        )
+        with module.open(LocalApiSourceRef(BRAIN)) as session:
+            capture = next(tmp_path.glob("brz2obsidian-api-*"))
+            source = json.loads((capture / "source.json").read_bytes())
+            audit = json.loads((capture / "audit.json").read_bytes())
+            graph = next(r for r in source["records"] if r["key"] == "graph:" + HOME)
+            # Establish a correctly scoped starting control even on the old
+            # implementation; the mutation must prove acceptance of reintroduced
+            # excluded IDs rather than merely a duplicate or stale-digest error.
+            for name, values in graph["value"].items():
+                graph["value"][name] = [
+                    v for v in values if v not in {ALONE, HIERARCHY}
+                ]
+            identity = session.snapshot.identity.model_copy(
+                update={"source_sha256": "", "snapshot_digest": ""}
+            )
+
+            def corresponding_snapshot():
+                originals = tuple(
+                    e.model_copy(update={"original_json": json.dumps(graph["value"])})
+                    if e.key == graph["key"]
+                    else e
+                    for e in session.snapshot.original_evidence
+                )
+                return session.snapshot.model_copy(
+                    update={"identity": identity, "original_evidence": originals}
+                )
+
+            clean = LocalApiSession(
+                source=source, snapshot=corresponding_snapshot(), audit=audit
+            )
+            clean.verify_consistency()
+            clean.close()
+            graph["value"][field].append(HIERARCHY if field == "link_ids" else ALONE)
+            with pytest.raises(MigrationRefused):
+                LocalApiSession(
+                    source=source, snapshot=corresponding_snapshot(), audit=audit
+                )
+
+
+@pytest.mark.parametrize(
+    "a,b,relation", [(HOME, ALONE, 1), (ALONE, HOME, 1), (HOME, ALONE, 3)]
+)
+def test_acquired_graph_scopes_excluded_parent_child_jump_and_sibling(a, b, relation):
+    import json
+
+    api = GraphApi()
+    api.thoughts[ALONE]["forgottenDateTime"] = "2026-01-01T00:00:00"
+    api.links[HIERARCHY].update(thoughtIdA=a, thoughtIdB=b, relation=relation)
+    path = f"/api/thoughts/{BRAIN}/{HOME}/graph"
+    graph = api.response(path, {})[1]
+    graph["siblings"] = [api.thoughts[ALONE]]
+    api.overrides[path] = 200, graph
+    with api_server(api) as (_, address):
+        module = LocalApiSourceModule(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        )
+        with module.open(LocalApiSourceRef(BRAIN)) as session:
+            scoped = next(
+                json.loads(e.original_json)
+                for e in session.snapshot.original_evidence
+                if e.key == "graph:" + HOME
+            )
+            assert all(values == [] for values in scoped.values())
+            assert session.snapshot.relationships == ()
+            session.verify_consistency()
+
+
+def test_acquired_graph_scopes_excluded_tag_without_removing_other_relationships():
+    import json
+
+    from tests.support.local_api_graph import TAG, TAG_LINK, CompleteGraphApi
+
+    api = CompleteGraphApi()
+    api.thoughts[TAG]["forgottenDateTime"] = "2026-01-01T00:00:00"
+    stats = api.response(f"/api/brains/{BRAIN}/statistics", {})[1]
+    api.overrides[f"/api/brains/{BRAIN}/statistics"] = 200, stats | {"tags": 0}
+    with api_server(api) as (_, address):
+        module = LocalApiSourceModule(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        )
+        with module.open(LocalApiSourceRef(BRAIN)) as session:
+            scoped = next(
+                json.loads(e.original_json)
+                for e in session.snapshot.original_evidence
+                if e.key == "graph:" + HOME
+            )
+            assert scoped["tag_ids"] == []
+            assert TAG_LINK not in scoped["link_ids"]
+            assert HIERARCHY in scoped["link_ids"]
+            assert len(session.snapshot.relationships) == 7
+            session.verify_consistency()
 
 
 @pytest.mark.parametrize(

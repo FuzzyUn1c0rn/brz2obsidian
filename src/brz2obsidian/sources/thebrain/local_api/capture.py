@@ -591,10 +591,25 @@ def validate_graph_binding(source, snapshot):
     }
     for value in declared_links.values():
         link_identity(value, source["brain"]["id"])
+    included_link_ids = {
+        key
+        for key, value in declared_links.items()
+        if {value["thoughtIdA"], value["thoughtIdB"]} <= thoughts.keys()
+    }
     for owner, (graph, _) in graphs.items():
         if (
-            not set(graph["sibling_ids"]) <= thoughts.keys() | excluded
-            or not set(graph["link_ids"]) <= declared_links.keys()
+            any(
+                not set(graph[name]) <= thoughts.keys()
+                for name in (
+                    "parents_ids",
+                    "children_ids",
+                    "jump_ids",
+                    "sibling_ids",
+                    "tag_ids",
+                    "type_ids",
+                )
+            )
+            or not set(graph["link_ids"]) <= included_link_ids
             or any(
                 owner
                 not in (

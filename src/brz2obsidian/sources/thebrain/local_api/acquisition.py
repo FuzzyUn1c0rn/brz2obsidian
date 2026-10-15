@@ -257,6 +257,14 @@ class Acquisition:
             {key: value for key, value in self.thoughts.items() if key not in excluded},
             excluded,
         )
+        # These retained inventories are scoped facts, not raw graph wrappers.
+        # Keep removed identities only in minimal exclusion/scope evidence.
+        for graph, _ in self.graphs.values():
+            for name in (*NEIGHBORS.values(), "type_ids"):
+                graph[name] = [key for key in graph[name] if key not in excluded]
+            graph["link_ids"] = [
+                key for key in graph["link_ids"] if key in active_links
+            ]
         for relationship in relationships:
             if array(
                 self.get(
