@@ -198,6 +198,82 @@ def test_real_worker_gui_publishes_only_after_api_review_and_destination(
             window.deleteLater()
 
 
+def test_real_worker_gui_graph_review_reacquires_and_publishes_literal_facts(
+    tmp_path, monkeypatch
+):
+    from brz2obsidian_ui.window import MainWindow
+    from tests.support.local_api_graph import (
+        ONE_WAY_FORWARD,
+        CompleteGraphApi,
+        assert_published_graph,
+    )
+
+    monkeypatch.setenv("THE_BRAIN_LOCAL_API_KEY", KEY)
+    app = QApplication.instance() or QApplication([])
+    with api_server(CompleteGraphApi()) as (api, address):
+        window = MainWindow()
+        window.show()
+        try:
+            control(window, QComboBox, "Source kind").setCurrentIndex(1)
+            until(app, lambda: window.snapshot.source_kind == "local-api")
+            control(window, QLineEdit, "Local API address").setText(address)
+            until(app, lambda: window.snapshot.api_config.api_url == address)
+            control(window, QPushButton, "Refresh accessible Brains").click()
+            until(app, lambda: window.snapshot.brain_list_status == "ready")
+            control(window, QComboBox, "Accessible Brains").setCurrentIndex(1)
+            until(app, lambda: window.snapshot.source_selection is not None)
+            control(window, QPushButton, "Inspect Brain").click()
+            until(app, lambda: window.snapshot.reviewed is not None)
+            window.parent_selected(str(tmp_path))
+            QTest.keyClicks(control(window, QLineEdit, "Vault name"), "Graph GUI vault")
+            until(app, lambda: "convert" in window.snapshot.allowed_actions)
+            # A qualified arrow change is a real content change, even though its
+            # canonical navigation remains related(A,B). Fresh review is needed.
+            api.links[ONE_WAY_FORWARD]["direction"] = 3
+            control(window, QPushButton, "Convert").click()
+            until(
+                app,
+                lambda: (
+                    window.snapshot.result.status == "conversion_refused"
+                    and not window.snapshot.busy_operation
+                ),
+            )
+            assert window.snapshot.publication.state == "not_published"
+            assert not (tmp_path / "Graph GUI vault").exists()
+            assert "inspect" in window.findings.toPlainText().lower()
+            api.links[ONE_WAY_FORWARD]["direction"] = 5
+            next(
+                button
+                for button in window.findChildren(QPushButton)
+                if button.text() == "Inspect again"
+            ).click()
+            until(
+                app,
+                lambda: (
+                    window.snapshot.reviewed is not None
+                    and not window.snapshot.busy_operation
+                ),
+            )
+            name = control(window, QLineEdit, "Vault name")
+            name.selectAll()
+            QTest.keyClicks(name, "Reviewed graph vault")
+            until(app, lambda: "convert" in window.snapshot.allowed_actions)
+            control(window, QPushButton, "Convert").click()
+            until(
+                app,
+                lambda: (
+                    window.snapshot.publication is not None
+                    and window.snapshot.publication.receipt_verified
+                ),
+            )
+            assert window.snapshot.publication.receipt_verified
+            assert_published_graph(tmp_path / "Reviewed graph vault")
+            assert "CANARY" not in window.snapshot.model_dump_json()
+        finally:
+            window.shutdown()
+            window.deleteLater()
+
+
 def test_failed_api_refresh_shows_safe_guidance_and_retries_same_selection(monkeypatch):
     from brz2obsidian_ui.window import MainWindow
 

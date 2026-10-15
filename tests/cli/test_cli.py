@@ -7,6 +7,73 @@ from pathlib import Path
 from tests.application.test_minimal_workflow import make_archive
 
 
+def test_both_api_cli_entrypoints_preserve_qualified_graph_and_refuse_link_content(
+    tmp_path,
+):
+    from tests.support.local_api import BRAIN, KEY, api_server
+    from tests.support.local_api_graph import (
+        HIERARCHY,
+        CompleteGraphApi,
+        assert_published_graph,
+    )
+
+    environment = dict(os.environ, THE_BRAIN_LOCAL_API_KEY=KEY)
+    console = Path(sys.executable).with_name("brz2obsidian.exe")
+    with api_server(CompleteGraphApi()) as (api, address):
+        for index, command in enumerate(
+            ([str(console)], [sys.executable, "-m", "brz2obsidian"])
+        ):
+            common = ["--source-kind", "local-api", "--api-url", address, "--json"]
+            inspected = subprocess.run(
+                [*command, "inspect", BRAIN, *common],
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert inspected.returncode == 0, inspected.stdout + inspected.stderr
+            assert json.loads(inspected.stdout)["counts"]["source_items"] == 9
+            destination = tmp_path / str(index)
+            converted = subprocess.run(
+                [*command, "convert", BRAIN, str(destination), *common],
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert converted.returncode == 0, converted.stdout + converted.stderr
+            assert json.loads(converted.stdout)["receipt"]["verified"]
+            assert_published_graph(destination)
+            api.overrides[f"/api/links/{BRAIN}/{HIERARCHY}/attachments"] = (
+                200,
+                [{"name": "SECRET_CANARY", "renderedUrl": "SERVICE_TOKEN_CANARY"}],
+            )
+            refused = subprocess.run(
+                [
+                    *command,
+                    "convert",
+                    BRAIN,
+                    str(tmp_path / f"refused{index}"),
+                    *common,
+                ],
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert refused.returncode == 1
+            assert json.loads(refused.stdout)["outcome"] == "refused"
+            assert not (tmp_path / f"refused{index}").exists()
+            assert (
+                "CANARY"
+                not in refused.stdout
+                + refused.stderr
+                + inspected.stdout
+                + converted.stdout
+            )
+            api.overrides.clear()
+
+
 def test_local_api_installed_and_module_inspect_convert_json_and_text(tmp_path):
     from tests.support.local_api import BRAIN, KEY, api_server
 

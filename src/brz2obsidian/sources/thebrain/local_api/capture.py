@@ -14,6 +14,7 @@ from .declarations import (
     uuid,
 )
 from .errors import refuse
+from .graph import link_identity, normalize_relationships
 
 
 def canonical(value):
@@ -548,6 +549,7 @@ def validate_binding(source, snapshot, audit):
         refuse("Snapshot collection or included inventory disagrees with capture")
     for item in snapshot.items:
         declaration = source_values["thought:" + item.key]
+        appearance = item.declared_appearance
         if (
             item.title != declaration["name"]
             or item.label != declaration.get("label")
@@ -556,10 +558,89 @@ def validate_binding(source, snapshot, audit):
             or not item.live
             or item.original_identity != item.key
             or item.naming_seed != item.key.replace("-", "")
+            or (appearance.foreground_color if appearance else None)
+            != declaration["foregroundColor"]
+            or (appearance.background_color if appearance else None)
+            != declaration["backgroundColor"]
+            or item.calendar_dates is None
+            or item.calendar_dates.created
+            != source_date(declaration["creationDateTime"])
+            or item.calendar_dates.updated
+            != source_date(declaration["modificationDateTime"])
         ):
             refuse(
                 "Normalized item metadata is not bound to authoritative source declarations"
             )
+    validate_graph_binding(source, snapshot)
+
+
+def validate_graph_binding(source, snapshot):
+    thoughts, graphs, links, excluded = {}, {}, {}, set()
+    for record in source["records"]:
+        domain, value = record["domain"], record["value"]
+        if domain == "thought":
+            thoughts[value["id"]] = value
+        elif domain == "graph":
+            graphs[record["owner_id"]] = value, None
+        elif domain == "exclusion":
+            excluded.add(value["id"])
+    if graphs.keys() != thoughts.keys():
+        refuse("Captured graph inventories do not cover included thoughts")
+    declared_links = {
+        r["value"]["id"]: r["value"] for r in source["records"] if r["domain"] == "link"
+    }
+    for value in declared_links.values():
+        link_identity(value, source["brain"]["id"])
+    for owner, (graph, _) in graphs.items():
+        if (
+            not set(graph["sibling_ids"]) <= thoughts.keys() | excluded
+            or not set(graph["link_ids"]) <= declared_links.keys()
+            or any(
+                owner
+                not in (
+                    declared_links[key]["thoughtIdA"],
+                    declared_links[key]["thoughtIdB"],
+                )
+                for key in graph["link_ids"]
+            )
+        ):
+            refuse(
+                "Captured graph references are unresolved or have conflicting owners"
+            )
+    for record in source["records"]:
+        if record["domain"] != "link":
+            continue
+        value = record["value"]
+        key = link_identity(value, source["brain"]["id"])
+        endpoints = {value["thoughtIdA"], value["thoughtIdB"]}
+        if not endpoints <= thoughts.keys() | excluded:
+            refuse("A captured relationship has an unresolved endpoint")
+        if endpoints & excluded:
+            if value.keys() != {"id", "brainId", "thoughtIdA", "thoughtIdB"} or not any(
+                decision["outcome"] == "excluded_association"
+                and "link:" + key in decision["subjects"]
+                for decision in source["scope"]["decisions"]
+            ):
+                refuse("Excluded relationship evidence is not minimal and scoped")
+            continue
+        links[key] = value
+    expected, assignments = normalize_relationships(links, graphs, thoughts, excluded)
+    signatures = lambda values: {(r.key, r.kind, r.item_a, r.item_b) for r in values}
+    assignment_signatures = lambda values: {
+        (a.relationship_key, a.definition_key, a.item_key) for a in values
+    }
+    if (
+        signatures(snapshot.relationships) != signatures(expected)
+        or len(snapshot.classification_assignments) != len(assignments)
+        or assignment_signatures(snapshot.classification_assignments)
+        != assignment_signatures(assignments)
+        or any("link:" + r.key not in r.evidence for r in snapshot.relationships)
+        or any(
+            "link:" + a.relationship_key not in a.evidence
+            for a in snapshot.classification_assignments
+        )
+    ):
+        refuse("Normalized graph facts disagree with qualified source relationships")
 
 
 def snapshot_projection(snapshot):

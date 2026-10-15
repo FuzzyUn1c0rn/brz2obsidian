@@ -8,12 +8,23 @@ Brain. Requests are read-only and use a validated local HTTP(S) origin.
 
 The current stage includes public, non-forgotten ordinary thoughts, thought types
 and tags with a valid ordinary Home. Disconnected thoughts are discovered too.
-Known forgotten/system items retain only minimal scope evidence. Encountered
-relationships, assignments, authored notes, resources and non-null appearance
-declarations refuse at this stage. Those content stages must extend the adapter
-before a Brain containing them can convert. No partial vault is published.
+Qualified hierarchy and jump relationships, including reviewed one-way facts,
+are preserved as navigation with scoped originals. Thought types and source tags
+retain exact inventoried membership. Direct colour strings, corresponding type
+defaults and source calendar dates are retained through neutral declarations and
+assignments; labels stay owned. Known forgotten/system items and associations
+retain only minimal scope evidence. Private, custom, conflicting or unresolved
+included declarations refuse. Every included link requires a successful empty
+attachment inventory. Authored notes, resources and resource-dependent explicit
+or inherited icons still refuse until their content stage is implemented. No
+partial vault is published.
 An empty non-Home item can remain an intentionally uncreated target under the
 existing planner; the migration record accounts for it.
+
+All five required starting/ending counters must agree. The observed ordinary-link
+family cross-check is conditional: excluded associations retain minimal evidence
+without inventing their counter contribution. Included endpoints and graph/link
+joins still reconcile exactly; statistics never establish universal completeness.
 
 ## GUI
 

@@ -7,6 +7,72 @@ from brz2obsidian.sources.thebrain.local_api import LocalApiConfig, LocalApiSour
 from tests.support.local_api import ALONE, BRAIN, HOME, KEY, api_server
 
 
+def test_complete_graph_is_published_as_navigation_classification_and_declared_metadata(
+    tmp_path,
+):
+    from tests.support.local_api_graph import (
+        DEFINITION,
+        EXPECTED_RELATIONSHIPS,
+        TAG,
+        TYPE_LINK,
+        CompleteGraphApi,
+    )
+
+    with api_server(CompleteGraphApi()) as (_, address):
+        workflow = local_api_workflow(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        )
+        inspected = workflow.inspect(LocalApiSourceRef(BRAIN))
+        assert inspected.outcome == "clean", inspected.issues
+        assert inspected.counts.source_items == 9
+        result = workflow.convert(LocalApiSourceRef(BRAIN), tmp_path / "vault")
+    assert result.outcome == "clean", result.issues
+    assert result.receipt.verified
+    record = json.loads((tmp_path / "vault/migration-record.json").read_bytes())
+    assert {
+        (r["key"], r["kind"], r["item_a"], r["item_b"]) for r in record["relationships"]
+    } == EXPECTED_RELATIONSHIPS
+    assert [
+        (a["relationship_key"], a["definition_key"], a["item_key"])
+        for a in record["classification_assignments"]
+    ] == [(TYPE_LINK, DEFINITION, HOME)]
+    targets = {t["item_key"]: t for t in record["item_targets"]}
+    assert targets[HOME]["declared_appearance"] == {
+        "foreground_color": "#123AbC",
+        "background_color": None,
+        "icon_asset_id": None,
+    }
+    assert targets[DEFINITION]["declared_appearance"] == {
+        "foreground_color": "#6070ff",
+        "background_color": "#ffe050",
+        "icon_asset_id": None,
+    }
+    assert targets[HOME]["calendar_dates"] == {
+        "created": "2026-01-01",
+        "updated": "2026-12-31",
+    }
+    assert targets[HOME]["icon_snapshot"]["appearance_category_key"] == DEFINITION
+    assert targets[HOME]["icon_snapshot"]["effective_icon_asset_id"] is None
+    note = (tmp_path / "vault/Home — Entry.md").read_text(encoding="utf-8")
+    for expected in (
+        "Categories/Definition",
+        "created: 2026-01-01",
+        "updated: 2026-12-31",
+        "Source-tag",
+        "Alone",
+        "Arrow child",
+        "Forward one way",
+        "Reverse one way",
+        "Plain reverse arrow",
+        "Peer",
+    ):
+        assert expected in note
+    assert any(
+        t["tag_key"] == TAG and t["item_key"] == HOME for t in record["tag_memberships"]
+    )
+    assert "CANARY" not in json.dumps(record)
+
+
 def test_metadata_only_home_and_disconnected_item_use_real_workflow(tmp_path):
     with api_server() as (api, address):
         workflow = local_api_workflow(
