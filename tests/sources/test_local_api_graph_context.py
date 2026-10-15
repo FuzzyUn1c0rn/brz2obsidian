@@ -19,6 +19,122 @@ SIBLING = "44444444-4444-4444-8444-444444444444"
 OTHER_LINK = "55555555-5555-4555-8555-555555555555"
 
 
+def test_forgotten_population_does_not_invent_included_link_count_equation(tmp_path):
+    api = GraphApi()
+    path = f"/api/brains/{BRAIN}/statistics"
+    stats = api.response(path, {})[1] | {"forgottenThoughts": 1, "links": 7}
+    api.overrides[path] = 200, stats
+    with api_server(api) as (_, address):
+        converted = local_api_workflow(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        ).convert(LocalApiSourceRef(BRAIN), tmp_path / "vault")
+    assert converted.outcome == "clean"
+    assert converted.receipt.verified
+    record = json.loads((tmp_path / "vault/migration-record.json").read_bytes())
+    assert {row["item_key"] for row in record["item_targets"]} == {HOME, ALONE}
+    assert {
+        (row["key"], row["kind"], row["item_a"], row["item_b"])
+        for row in record["relationships"]
+    } == {(HIERARCHY, "hierarchy", HOME, ALONE)}
+    originals = {row["key"]: row["records"] for row in record["original_evidence"]}
+    assert (
+        originals["statistics:start"]
+        == originals["statistics:end"]
+        == {
+            "thoughts": 2,
+            "thoughtTypes": 0,
+            "tags": 0,
+            "forgottenThoughts": 1,
+            "links": 7,
+        }
+    )
+    assert not any(key.startswith("exclusion:") for key in originals)
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "missing_join",
+        "missing_endpoint_link",
+        "counter_drift",
+        "forgotten_drift",
+        "zero_forgotten",
+        "wrong_ordinary_count",
+        "wrong_type_count",
+        "wrong_tag_count",
+        "wrong_type_field",
+        "missing_authoritative_link",
+        "boolean_forgotten",
+        "boolean_links",
+        "missing_counter",
+        "foreign_statistics",
+        "forgotten_exceeds_report",
+    ],
+)
+def test_forgotten_population_does_not_excuse_incomplete_facts_or_counters(
+    tmp_path, damage
+):
+    if damage == "wrong_type_field":
+        from tests.support.local_api_graph import CompleteGraphApi
+
+        api = CompleteGraphApi()
+        api.thoughts[HOME]["typeId"] = None
+    else:
+        api = GraphApi()
+    path = f"/api/brains/{BRAIN}/statistics"
+    stats = api.response(path, {})[1] | {"forgottenThoughts": 1, "links": 7}
+    if damage in {"missing_join", "missing_endpoint_link"}:
+        graph_path = f"/api/thoughts/{BRAIN}/{ALONE}/graph"
+        graph = api.response(graph_path, {})[1]
+        graph["parents" if damage == "missing_join" else "links"] = []
+        api.overrides[graph_path] = 200, graph
+    elif damage == "zero_forgotten":
+        stats["forgottenThoughts"] = 0
+    elif damage == "wrong_ordinary_count":
+        stats["thoughts"] = 3
+    elif damage in {"wrong_type_count", "wrong_tag_count"}:
+        stats["thoughtTypes" if damage == "wrong_type_count" else "tags"] = 1
+    elif damage == "missing_authoritative_link":
+        api.overrides[f"/api/links/{BRAIN}/{HIERARCHY}"] = 404, b"not found"
+    elif damage == "boolean_forgotten":
+        stats["forgottenThoughts"] = True
+    elif damage == "boolean_links":
+        stats["links"] = True
+    elif damage == "missing_counter":
+        del stats["links"]
+    elif damage == "foreign_statistics":
+        stats["brainId"] = SIBLING
+    elif damage == "forgotten_exceeds_report":
+        api.thoughts[ALONE]["forgottenDateTime"] = "2026-01-01T00:00:00"
+        stats.update(thoughts=1, forgottenThoughts=0)
+    if damage in {"counter_drift", "forgotten_drift"}:
+        readings = []
+
+        def drifting(query):
+            readings.append(True)
+            field, first, second = (
+                ("links", 7, 8)
+                if damage == "counter_drift"
+                else ("forgottenThoughts", 1, 2)
+            )
+            return 200, stats | {field: first if len(readings) == 1 else second}
+
+        api.overrides[path] = drifting
+    else:
+        api.overrides[path] = 200, stats
+    with api_server(api) as (_, address):
+        converted = local_api_workflow(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        ).convert(LocalApiSourceRef(BRAIN), tmp_path / "vault")
+    assert converted.outcome == (
+        "failed" if damage == "missing_authoritative_link" else "refused"
+    )
+    if damage == "missing_authoritative_link":
+        assert [issue.code for issue in converted.issues] == ["api_request_failed"]
+    assert converted.receipt is None
+    assert not (tmp_path / "vault").exists()
+
+
 def test_type_provider_also_displayed_as_parent_keeps_only_actual_relationships(
     tmp_path,
 ):

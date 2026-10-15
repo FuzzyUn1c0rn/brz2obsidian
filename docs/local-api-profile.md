@@ -76,6 +76,27 @@ All control families below require both independent positive and negative cases.
 | `local-api.accounting.v1` Candidate contract; LA-C13 | Every scoped identity/fact/payload/exclusion has one explicit normalized/retained_only/unresolved disposition with evidence references. No dangling included relationship/document/resource; no duplicate conflicting accounting. Unresolved included facts or unqualified rule prevents publication. | Normalized references actual Item/Relationship/Assignment/Document/Asset; retained_only references safe original facts/exclusions/outcomes; unresolved references safe refusal evidence. Refuse `local-api.accounting-refused.v1`. | Existing SourceAccounting contract and parent requirement; independent omission/conflict controls; complete live manifest belongs to #179 |
 | `local-api.note-formatting.v1` Candidate pure-text reuse; LA-C13 | Only qualified scoped raw Markdown enters unchanged fingerprinted adapt_note(text),trace_adapted_references/reference grammar O59/O60. Preserve parser block/literal ownership,exact source/adapted spans/scoped digest; bind against complete API inventories. Apply existing pure literal/insert/table/callout/code/ToC predicates only when exact text inputs match. Helper refusal becomes safe API refusal; no BRZ NoteType/flags/member paths or rendered fallback are fabricated. | Each helper loss maps SourceFinding rule_id=local-api.note-formatting.v1,kind=formatting_loss,warning code=formatting_loss,permits_absent_payload=false. Preserve exact safe declaration/change/TextAdaptation evidence. Core image_presentation_normalized is separately generated from qualified percentage ReferenceSpan,not another SourceFinding. Unsupported grammar: `local-api.note-refused.v1`. | O59/O60 existing pure functions and accepted TextAdaptation/ReferenceSpan contracts; separately authored raw-text/registry controls; no new numeric-flag meaning |
 
+## Link counter and excluded populations
+
+The retained `links` counter is not a universal equation for included meaning1
+relationships. When qualified stable statistics report a nonzero forgotten
+population, retain and compare the counter across acquisition without equating
+it to the included link inventory, even if no excluded identity or association
+was discovered. The existing observed-excluded-association case likewise has no
+qualified count equation. With zero forgotten population and no observed excluded
+association, retain the existing narrow observed-family equality check.
+
+All five counters still require strict integer types, same-Brain ownership and
+unchanged starting/ending values. Included ordinary/type/tag inventories and every
+authoritative relationship/graph join still reconcile exactly; observed forgotten
+IDs cannot exceed the reported population. No excluded content must be fetched to
+explain a counter, and no unseen identity or relationship is invented. Independent
+#189 review found Management's unchanged counters (`links=410`,
+`forgottenThoughts=16`) alongside389 included meaning1 relationships,330 type
+assignments and one tag relationship. The difference21 has no inferred meaning.
+Source records, profile/capture identifiers and complete preservation expectations
+remain unchanged.
+
 ## Type provider in graph parents
 
 A member's graph may additionally list its qualified type provider in `parents`,

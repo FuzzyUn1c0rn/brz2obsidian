@@ -536,9 +536,10 @@ class Acquisition:
                 "tags": len(included[4]),
                 "forgottenThoughts": end["forgottenThoughts"],
                 # This is a narrow observed ordinary-link family, not a total.
-                # Erased excluded tuples supply no qualified count equation.
+                # Excluded population/tuples supply no qualified count equation.
                 "links": end["links"]
                 if active_links.keys() != self.links.keys()
+                or end["forgottenThoughts"] > 0
                 else sum(v["meaning"] == 1 for v in active_links.values()),
             }
             or observed_forgotten > end["forgottenThoughts"]
