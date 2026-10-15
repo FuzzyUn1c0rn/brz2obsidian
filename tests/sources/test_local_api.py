@@ -236,6 +236,58 @@ def test_closing_capture_revokes_outstanding_stream_and_unknown_access(tmp_path)
     assert list(tmp_path.iterdir()) == []
 
 
+def test_repeated_payload_reads_still_detect_unrequested_same_stat_corruption(
+    tmp_path, monkeypatch
+):
+    import os
+    import tempfile
+
+    from tests.support.local_api import BRAIN, KEY, api_server
+    from tests.support.local_api_payloads import (
+        FILE,
+        NOTE,
+        PNG,
+        RAW_NOTE,
+        FilePayloadApi,
+    )
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    with api_server(FilePayloadApi()) as (_, address):
+        module = LocalApiSourceModule(
+            LocalApiConfig(api_url=address),
+            credentials=lambda: KEY,
+            profile_version="2",
+        )
+        with module.open(LocalApiSourceRef(BRAIN)) as session:
+            identity = session.source_identity
+            for _ in range(2):
+                session.verify_consistency()
+                for asset, expected in ((NOTE, RAW_NOTE), (FILE, PNG)):
+                    with session.open_payload(asset) as stream:
+                        assert stream.read() == expected
+                assert session.source_identity == identity
+            capture = next(tmp_path.glob("brz2obsidian-api-*"))
+            manifest = json.loads((capture / "manifest.json").read_bytes())
+            bindings = {
+                row["asset_id"]: row["storage_key"]
+                for row in manifest["payload_bindings"]
+            }
+            unrequested = capture / bindings[FILE]
+            before = unrequested.stat()
+            raw = unrequested.read_bytes()
+            unrequested.write_bytes(bytes([raw[0] ^ 1]) + raw[1:])
+            os.utime(unrequested, ns=(before.st_atime_ns, before.st_mtime_ns))
+            after = unrequested.stat()
+            assert (after.st_size, after.st_mtime_ns) == (
+                before.st_size,
+                before.st_mtime_ns,
+            )
+            with pytest.raises(MigrationRefused), session.open_payload(NOTE):
+                pytest.fail("An unchanged requested asset cannot hide other corruption")
+            with pytest.raises(MigrationRefused):
+                session.verify_consistency()
+
+
 def test_session_never_cleans_replacement_storage_owned_by_caller(tmp_path):
     import shutil
 

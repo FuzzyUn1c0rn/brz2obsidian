@@ -31,6 +31,59 @@ from .resources import capture_owner
 from .session import LocalApiSession
 from .transport import timestamp
 
+ZERO_UUID = "00000000-0000-0000-0000-000000000000"
+
+
+def _same_observation(left, right):
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict):
+        return left.keys() == right.keys() and all(
+            _same_observation(left[key], right[key]) for key in left
+        )
+    if isinstance(left, list):
+        return len(left) == len(right) and all(
+            _same_observation(a, b) for a, b in zip(left, right)
+        )
+    return left == right
+
+
+def _candidate_shape(hit, brain_id):
+    required = {
+        "brainId",
+        "isFromOtherBrain",
+        "sourceThought",
+        "sourceLink",
+        "searchResultType",
+        "entityType",
+        "sourceType",
+        "attachmentId",
+    }
+    if not required <= hit.keys() or not hit.keys() <= required | {"name", "brainName"}:
+        return None
+    owner = hit["sourceThought"]
+    if (
+        not isinstance(owner, dict)
+        or owner.get("brainId") != brain_id
+        or hit["sourceLink"] is not None
+        or any(
+            hit.get(field) is not None and not isinstance(hit[field], str)
+            for field in ("name", "brainName")
+        )
+    ):
+        return None
+    values = tuple(
+        hit[field] for field in ("searchResultType", "entityType", "sourceType")
+    )
+    if not all(type(value) is int for value in values):
+        return None
+    if values == (1, 2, 0) and hit["attachmentId"] == ZERO_UUID:
+        return "thought"
+    if values in ((3, 4, 2), (4, 4, 2)):
+        uuid(hit["attachmentId"])
+        return "attachment"
+    return None
+
 
 class Acquisition:
     def __init__(
@@ -81,7 +134,7 @@ class Acquisition:
 
     def observe_link(self, value, expected_id=None):
         key = link_identity(value, self.brain_id, expected_id)
-        if key in self.links and self.links[key] != value:
+        if key in self.links and not _same_observation(self.links[key], value):
             refuse("Repeated authoritative relationship observations disagree")
         self.links[key] = value
         self.link_ids.add(key)
@@ -92,10 +145,17 @@ class Acquisition:
     def candidates(self, hit):
         if (
             not isinstance(hit, dict)
-            or hit.get("brainId") != self.brain_id
+            or hit.get("brainId") not in (self.brain_id, ZERO_UUID)
             or hit.get("isFromOtherBrain") is not False
         ):
             refuse("A wildcard candidate has foreign or invalid ownership")
+        shape = (
+            _candidate_shape(hit, self.brain_id)
+            if hit["brainId"] == ZERO_UUID or hit.get("attachmentId") == ZERO_UUID
+            else None
+        )
+        if hit["brainId"] == ZERO_UUID and shape is None:
+            refuse("A wildcard candidate envelope is not qualified")
         found = False
         node = hit.get("sourceThought")
         if node is not None:
@@ -112,7 +172,11 @@ class Acquisition:
             self.seed(link.get("thoughtIdB"))
             found = True
         if hit.get("attachmentId") is not None:
-            uuid(hit["attachmentId"])
+            if hit["attachmentId"] == ZERO_UUID:
+                if shape != "thought":
+                    refuse("A wildcard attachment identity is not qualified")
+            else:
+                uuid(hit["attachmentId"])
         if not found:
             refuse("A wildcard hit has no resolvable authoritative owner")
 
@@ -241,13 +305,19 @@ class Acquisition:
                 [self.observe(graph["type"])] if graph["type"] is not None else []
             )
             links = array(graph["links"])
-            if any(
-                not isinstance(link, dict)
-                or key not in (link.get("thoughtIdA"), link.get("thoughtIdB"))
-                for link in links
-            ):
-                refuse("A graph carries an unrelated relationship")
-            projected["link_ids"] = sorted({self.observe_link(link) for link in links})
+            incident_links = set()
+            for link in links:
+                if not isinstance(link, dict) or link.get("thoughtIdA") == link.get(
+                    "thoughtIdB"
+                ):
+                    refuse("A graph carries a malformed relationship candidate")
+                incident = key in (link.get("thoughtIdA"), link.get("thoughtIdB"))
+                # Discovery is Brain-wide; only complete authoritative endpoint
+                # graphs can qualify a candidate's relationship meaning.
+                observed = self.observe_link(link)
+                if incident:
+                    incident_links.add(observed)
+            projected["link_ids"] = sorted(incident_links)
             attachments = graph["attachments"]
             if attachments is not None and not isinstance(attachments, list):
                 refuse("A graph attachment declaration is malformed")
@@ -451,9 +521,10 @@ class Acquisition:
                 "tags": len(included[4]),
                 "forgottenThoughts": end["forgottenThoughts"],
                 # This is a narrow observed ordinary-link family, not a total.
-                # Erased excluded tuples supply no qualified count equation.
+                # Excluded population/tuples supply no qualified count equation.
                 "links": end["links"]
                 if active_links.keys() != self.links.keys()
+                or end["forgottenThoughts"] > 0
                 else sum(v["meaning"] == 1 for v in active_links.values()),
             }
             or observed_forgotten > end["forgottenThoughts"]

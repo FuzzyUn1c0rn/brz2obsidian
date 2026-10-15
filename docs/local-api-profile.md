@@ -76,6 +76,118 @@ All control families below require both independent positive and negative cases.
 | `local-api.accounting.v1` Candidate contract; LA-C13 | Every scoped identity/fact/payload/exclusion has one explicit normalized/retained_only/unresolved disposition with evidence references. No dangling included relationship/document/resource; no duplicate conflicting accounting. Unresolved included facts or unqualified rule prevents publication. | Normalized references actual Item/Relationship/Assignment/Document/Asset; retained_only references safe original facts/exclusions/outcomes; unresolved references safe refusal evidence. Refuse `local-api.accounting-refused.v1`. | Existing SourceAccounting contract and parent requirement; independent omission/conflict controls; complete live manifest belongs to #179 |
 | `local-api.note-formatting.v1` Candidate pure-text reuse; LA-C13 | Only qualified scoped raw Markdown enters unchanged fingerprinted adapt_note(text),trace_adapted_references/reference grammar O59/O60. Preserve parser block/literal ownership,exact source/adapted spans/scoped digest; bind against complete API inventories. Apply existing pure literal/insert/table/callout/code/ToC predicates only when exact text inputs match. Helper refusal becomes safe API refusal; no BRZ NoteType/flags/member paths or rendered fallback are fabricated. | Each helper loss maps SourceFinding rule_id=local-api.note-formatting.v1,kind=formatting_loss,warning code=formatting_loss,permits_absent_payload=false. Preserve exact safe declaration/change/TextAdaptation evidence. Core image_presentation_normalized is separately generated from qualified percentage ReferenceSpan,not another SourceFinding. Unsupported grammar: `local-api.note-refused.v1`. | O59/O60 existing pure functions and accepted TextAdaptation/ReferenceSpan contracts; separately authored raw-text/registry controls; no new numeric-flag meaning |
 
+## Link counter and excluded populations
+
+The retained `links` counter is not a universal equation for included meaning1
+relationships. When qualified stable statistics report a nonzero forgotten
+population, retain and compare the counter across acquisition without equating
+it to the included link inventory, even if no excluded identity or association
+was discovered. The existing observed-excluded-association case likewise has no
+qualified count equation. With zero forgotten population and no observed excluded
+association, retain the existing narrow observed-family equality check.
+
+All five counters still require strict integer types, same-Brain ownership and
+unchanged starting/ending values. Included ordinary/type/tag inventories and every
+authoritative relationship/graph join still reconcile exactly; observed forgotten
+IDs cannot exceed the reported population. No excluded content must be fetched to
+explain a counter, and no unseen identity or relationship is invented. Independent
+#189 review found Management's unchanged counters (`links=410`,
+`forgottenThoughts=16`) alongside389 included meaning1 relationships,330 type
+assignments and one tag relationship. The difference21 has no inferred meaning.
+Source records, profile/capture identifiers and complete preservation expectations
+remain unchanged.
+
+## Type provider in graph parents
+
+A member's graph may additionally list its qualified type provider in `parents`,
+alongside the same provider in `type`. This overlap is explained only by the
+complete existing type-assignment join: inventoried public live kind2 provider,
+member typeId and graph.type, exact meaning2 relationship, provider.children and
+both endpoint link inventories must agree. Retain the observed parent entry as
+a scoped source fact; produce only the actual classification relationship and
+assignment. The overlap is optional, and no hierarchy link is invented. Other
+unexplained parents, including unassigned definitions or tags, still refuse.
+
+Independent #189 review compared all retained Controlled12 graphs/10 links and
+Management569 graphs/720 links. The only unexplained adjacency under the previous
+implementation was this provider overlap: two Controlled entries and330
+Management entries, covering all classified members. No tag-parent overlap was
+observed or admitted. This clarifies graph evidence under existing classification
+meaning and preserves profile/capture identifiers and all authoritative joins.
+
+## Graph relationship candidates
+
+The accepted scope is the complete public live ordinary/type/tag Brain. A raw
+`ThoughtGraphDto.links` row supplies a discovery candidate, including when neither
+endpoint is the active thought or appears in its displayed neighbor arrays.
+The schema supplies no incident-only or display-role guarantee for this array.
+Every row must be an object with canonical nonzero link and distinct endpoint
+identities and exact requested Brain ownership. Observe every row through the
+conflict registry, fetch its authoritative link and both authoritative endpoints,
+and reconcile all observed values. A displayed role never establishes meaning.
+
+Included relationships still require the existing supported declaration and
+tuple, public endpoint roles, definition inventories, full reciprocal endpoint
+adjacency and incident link inventories, exact type/tag assignments, and
+successful empty link-content inventories. Missing, private, unavailable, foreign,
+conflicting or unsupported facts refuse. Preserve each global relationship and
+assignment once; no context placement invents a relationship to the active owner.
+
+Apply authoritative forgotten/system scope before interpreting an association's
+tuple. An association with a qualified excluded endpoint retains only existing
+minimal exclusion evidence. No raw candidate may be silently discarded, and
+unknown/private endpoints cannot be inferred to be excluded. The active graph's
+normalized `link_ids` contains only its incident included IDs. Preserve separately
+observed scoped neighbor inventories; a nonincident raw row cannot become an
+arbitrary captured graph member.
+
+Independent #189 review qualified this candidate/global-fact distinction from
+whole-Brain scope, the schema and existing authoritative joins. It supersedes the
+earlier displayed-parent-to-sibling admission restriction, without changing
+relationship meanings or profile/capture identifiers. Earlier Controlled sibling
+observations remain valid. A bounded three-graph Management sample matched the
+retained source facts but did not reveal the exact row that triggered the earlier
+refusal; this rule does not claim that row or every vendor display context was
+observed.
+
+## Search candidate envelopes
+
+Search replies supply candidates for authoritative GETs; their display hints and
+default fields do not establish source ownership, roles or content. The existing
+requested-Brain envelope remains supported. A further finite envelope is qualified
+from retained observations: outer `brainId` is the exact zero UUID and
+`isFromOtherBrain` is the actual boolean `false`. Its nested `sourceThought` must
+have a canonical nonzero ID and the verified requested Brain ID. `sourceLink` must
+be explicitly null. All eight fields below are required, and discriminator values
+must be actual integers, excluding booleans:
+
+| Candidate class | `searchResultType`, `entityType`, `sourceType` | `attachmentId` |
+| --- | --- | --- |
+| Thought | `1`, `2`, `0` | Exact zero UUID; no attachment identity |
+| Attachment | `3`, `4`, `2`, or `4`, `4`, `2` | Canonical nonzero UUID |
+
+The required fields are `brainId`, `isFromOtherBrain`, `sourceThought`,
+`sourceLink`, `searchResultType`, `entityType`, `sourceType` and `attachmentId`.
+Optional `name` and `brainName` are null or strings; other fields are unqualified.
+The thought-class auxiliary zero UUID is also permitted in an otherwise identical
+requested-Brain envelope. It is never an item, attachment or fetched identity.
+Missing/null/contradictory fields, foreign ownership and zero-envelope link or
+mixed candidates refuse. This does not relax authoritative nonzero UUID checks:
+each thought still needs its independently qualified requested-Brain GET, and an
+attachment match seeds only its thought owner.
+
+This is a bounded inference about candidate envelopes, not a vendor-guaranteed
+sentinel meaning or new normalized source role. The schema declares UUID fields
+but does not explain their zero values. Profile, module and capture identifiers
+remain unchanged. Independent qualification for #189 inspected original raw
+CONTROLLED_EXPORT wildcard replies (11 thought matches, SHA256
+`1cb2cdaa705eb1c8e8ffabaa915552db661c4a1c67a6d730ff1a6578a6180083`)
+and the broad Management reply (555 thought and four attachment matches, SHA256
+`92cdee8fb9e531f0dab34981bf55ba7153fc9fbbae915b722203bbb085409192`).
+The latter attachment-owner candidates include the independently known ordinary
+thoughts missed by names-only search. Public ownership/discriminator controls
+exercise the SourceModule and Workflow boundaries; raw responses remain private.
+
 ## Exact zero-tag matcher
 
 Only a failed **GET** `/api/thoughts/{B}/tags`, HTTP400, is eligible. Read within a declared bound and decode strict UTF-8. Remove leading/trailing whitespace only: U+0009-U+000D, U+001C-U+0020, U+0085, U+00A0, U+1680, U+2000-U+200A, U+2028-U+2029, U+202F, U+205F and U+3000 (the assessed Python `str.strip()` set); do not case-fold, collapse internal whitespace, URL-decode, substitute aliases or parse as JSON. The remaining string equals exactly `Could not retrieve list of Tags for brain ` followed by **B**, the already verified requested canonical Brain UUID. A BOM is not whitespace and refuses. The retained filename extension has no bearing on plaintext interpretation.

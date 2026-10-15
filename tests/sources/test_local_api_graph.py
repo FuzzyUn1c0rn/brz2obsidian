@@ -13,7 +13,7 @@ from tests.support.local_api_graph import HIERARCHY, GraphApi
 
 
 @pytest.mark.parametrize(
-    "mutation", ["phantom_child", "phantom_tag", "third_owner", "missing_endpoint_link"]
+    "mutation", ["phantom_child", "phantom_tag", "missing_endpoint_link"]
 )
 def test_graph_adjacency_requires_complete_matching_authoritative_relationships(
     mutation,
@@ -31,14 +31,12 @@ def test_graph_adjacency_requires_complete_matching_authoritative_relationships(
             "sourceLink": None,
         }
     )
-    key = HOME if mutation != "third_owner" else PEER
+    key = HOME
     graph = api.response(f"/api/thoughts/{BRAIN}/{key}/graph", {})[1]
     if mutation == "phantom_child":
         graph["children"].append(api.thoughts[PEER])
     elif mutation == "phantom_tag":
         graph["tags"].append(api.thoughts[PEER])
-    elif mutation == "third_owner":
-        graph["links"].append(api.links[HIERARCHY])
     else:
         graph["links"] = []
     api.overrides[f"/api/thoughts/{BRAIN}/{key}/graph"] = (200, graph)

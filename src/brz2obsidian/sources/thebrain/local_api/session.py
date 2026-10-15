@@ -86,6 +86,7 @@ class LocalApiSession:
         self._directory = None
         self._closed = False
         self._streams = []
+        self._metadata_proof = None
         try:
             self._audit = AcquisitionAudit.model_validate_json(canonical(audit))
             source = source_projection(source)
@@ -342,9 +343,30 @@ class LocalApiSession:
                         "metadata.json",
                         "audit.json",
                     }:
-                        documents[key] = path.read_bytes()
+                        raw = path.read_bytes()
+                        if (
+                            len(raw) != entry["actual_length"]
+                            or hashlib.sha256(raw).hexdigest() != entry["actual_sha256"]
+                        ):
+                            refuse("Captured source bytes or metadata changed")
+                        documents[key] = raw
             if found != set(expected) | {"manifest.json"}:
                 refuse("Captured source files are missing")
+            context = (
+                self.source_identity,
+                self._audit,
+                self._identifiers,
+                self._root,
+                self._bindings,
+                self._manifest,
+            )
+            if self._metadata_proof is not None:
+                proven_documents, proven_context = self._metadata_proof
+                if documents != proven_documents or context != proven_context:
+                    refuse("The pinned capture metadata association changed")
+                # Every file was fully measured above. Identical retained bytes
+                # and frozen associations reuse the initial semantic proof.
+                return
             parsed = {
                 key: parse_json(raw.decode("utf-8")) for key, raw in documents.items()
             }
@@ -394,6 +416,17 @@ class LocalApiSession:
                 != self._root
             ):
                 refuse("The pinned capture association changed")
+            self._metadata_proof = (
+                documents,
+                (
+                    self.source_identity,
+                    self._audit,
+                    dict(self._identifiers),
+                    self._root,
+                    dict(self._bindings),
+                    parsed["manifest.json"],
+                ),
+            )
         except OSError, ValueError, KeyError, TypeError, RecursionError:
             raise failure(
                 "api_capture_read_failed",
