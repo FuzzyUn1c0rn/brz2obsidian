@@ -5,7 +5,8 @@ The converter creates Markdown notes, copies attachments, and turns supported
 relationships, tags and thought types into Obsidian links, tags and categories.
 No community plugins are required.
 
-The library, CLI and local Windows app also support a bounded metadata-only local API source.
+The library, CLI and local Windows app also support a bounded local API source
+with qualified graph, classification and metadata appearance import.
 See the [local API guide](docs/local-api.md) for Brain UUID selection, external
 credentials, search options and the current content-stage limits. Acquisition
 spans requests and is not an atomic snapshot; conversion reacquires after

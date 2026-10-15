@@ -5,6 +5,7 @@ from urllib.parse import urlencode
 from brz2obsidian.contracts import (
     AccountingEntry,
     CalendarDates,
+    DeclaredAppearance,
     Item,
     OriginalEvidence,
     SourceAccounting,
@@ -24,6 +25,7 @@ from .declarations import (
     uuid,
 )
 from .errors import refuse
+from .graph import link_identity, normalize_relationships
 from .session import LocalApiSession
 from .transport import timestamp
 
@@ -38,6 +40,7 @@ class Acquisition:
         )
         self.ids, self.link_ids = set(), set()
         self.observations, self.thoughts, self.graphs = {}, {}, {}
+        self.links = {}
 
     def get(self, operation, path, subject=None, deadline=None):
         return self.client.json(operation, path, subject, deadline=deadline)
@@ -62,6 +65,16 @@ class Acquisition:
             refuse("Repeated authoritative thought observations disagree")
         self.observations[key] = value
         self.seed(key)
+        return key
+
+    def observe_link(self, value, expected_id=None):
+        key = link_identity(value, self.brain_id, expected_id)
+        if key in self.links and self.links[key] != value:
+            refuse("Repeated authoritative relationship observations disagree")
+        self.links[key] = value
+        self.link_ids.add(key)
+        self.seed(value["thoughtIdA"])
+        self.seed(value["thoughtIdB"])
         return key
 
     def candidates(self, hit):
@@ -179,14 +192,7 @@ class Acquisition:
             if self.link_ids - resolved_links:
                 link_id = min(self.link_ids - resolved_links)
                 link = self.get("link", "/links/" + b + "/" + link_id, link_id)
-                if (
-                    not isinstance(link, dict)
-                    or link.get("id") != link_id
-                    or link.get("brainId") != b
-                ):
-                    refuse("An authoritative link has foreign or conflicting ownership")
-                self.seed(link.get("thoughtIdA"))
-                self.seed(link.get("thoughtIdB"))
+                self.observe_link(link, link_id)
                 resolved_links.add(link_id)
                 continue
             key = min(self.ids - self.thoughts.keys())
@@ -223,35 +229,51 @@ class Acquisition:
                 [self.observe(graph["type"])] if graph["type"] is not None else []
             )
             links = array(graph["links"])
-            projected["link_ids"] = [
-                uuid(link.get("id")) for link in links if isinstance(link, dict)
-            ]
-            if len(projected["link_ids"]) != len(links):
-                refuse("A graph link is malformed")
-            self.link_ids.update(projected["link_ids"])
+            if any(
+                not isinstance(link, dict)
+                or key not in (link.get("thoughtIdA"), link.get("thoughtIdB"))
+                for link in links
+            ):
+                refuse("A graph carries an unrelated relationship")
+            projected["link_ids"] = sorted({self.observe_link(link) for link in links})
             attachments = graph["attachments"]
             if attachments is not None and not isinstance(attachments, list):
                 refuse("A graph attachment declaration is malformed")
             projected["attachment_ids"] = []
             self.graphs[key] = projected, attachments
-        # Included relationship normalization belongs to the next stage. Authoritative
-        # endpoint acquisition still happens before this refusal.
-        if self.link_ids or any(
-            any(
-                graph[name]
-                for name in (
-                    "parents_ids",
-                    "children_ids",
-                    "jump_ids",
-                    "tag_ids",
-                    "type_ids",
+        excluded = {
+            key
+            for key, value in self.thoughts.items()
+            if value["kind"] == 5 or value["forgottenDateTime"] is not None
+        }
+        active_links = {
+            key: value
+            for key, value in self.links.items()
+            if not {value["thoughtIdA"], value["thoughtIdB"]} & excluded
+        }
+        relationships, assignments = normalize_relationships(
+            active_links,
+            self.graphs,
+            {key: value for key, value in self.thoughts.items() if key not in excluded},
+            excluded,
+        )
+        # These retained inventories are scoped facts, not raw graph wrappers.
+        # Keep removed identities only in minimal exclusion/scope evidence.
+        for graph, _ in self.graphs.values():
+            for name in (*NEIGHBORS.values(), "type_ids"):
+                graph[name] = [key for key in graph[name] if key not in excluded]
+            graph["link_ids"] = [
+                key for key in graph["link_ids"] if key in active_links
+            ]
+        for relationship in relationships:
+            if array(
+                self.get(
+                    "attachments",
+                    "/links/" + b + "/" + relationship.key + "/attachments",
+                    relationship.key,
                 )
-            )
-            for graph, _ in self.graphs.values()
-        ):
-            refuse(
-                "Relationship or classification content is not implemented in this stage"
-            )
+            ):
+                refuse("Link-owned content is not implemented in this stage")
         records, decisions, items = [], [], []
 
         def record(domain, key, owner, value):
@@ -260,6 +282,31 @@ class Acquisition:
             )
 
         record("brain", "brain:" + b, b, brain)
+        for key, value in sorted(self.links.items()):
+            if key in active_links:
+                record("link", "link:" + key, b, value)
+            else:
+                minimal = {
+                    name: value[name]
+                    for name in ("id", "brainId", "thoughtIdA", "thoughtIdB")
+                }
+                record("link", "link:" + key, b, minimal)
+                endpoints = {value["thoughtIdA"], value["thoughtIdB"]}
+                removed = endpoints & excluded
+                system = any(self.thoughts[node]["kind"] == 5 for node in removed)
+                decisions.append(
+                    {
+                        "key": "scope:association:" + key,
+                        "rule_id": "local-api.system.v1"
+                        if system
+                        else "local-api.forgotten.v1",
+                        "outcome": "excluded_association",
+                        "subjects": ["link:" + key]
+                        + ["thought:" + node for node in sorted(endpoints)],
+                        "evidence": ["link:" + key]
+                        + ["exclusion:" + node for node in sorted(removed)],
+                    }
+                )
         included = {1: [], 2: [], 4: []}
         observed_forgotten = 0
         for key, value in sorted(self.thoughts.items()):
@@ -287,14 +334,6 @@ class Acquisition:
                 )
                 continue
             included[value["kind"]].append(key)
-            if (
-                value["typeId"] is not None
-                or value["foregroundColor"] is not None
-                or value["backgroundColor"] is not None
-            ):
-                refuse(
-                    "Classification or appearance content is not implemented in this stage"
-                )
             graph, attachments = self.graphs[key]
             owned = array(
                 self.get(
@@ -340,6 +379,13 @@ class Acquisition:
                     role={1: "ordinary", 2: "definition", 4: "tag"}[value["kind"]],
                     title=value["name"],
                     label=value.get("label"),
+                    declared_appearance=DeclaredAppearance(
+                        foreground_color=value["foregroundColor"],
+                        background_color=value["backgroundColor"],
+                    )
+                    if value["foregroundColor"] is not None
+                    or value["backgroundColor"] is not None
+                    else None,
                     calendar_dates=CalendarDates(
                         created=source_date(value["creationDateTime"]),
                         updated=source_date(value["modificationDateTime"]),
@@ -358,7 +404,11 @@ class Acquisition:
                 "thoughtTypes": len(included[2]),
                 "tags": len(included[4]),
                 "forgottenThoughts": end["forgottenThoughts"],
-                "links": 0,
+                # This is a narrow observed ordinary-link family, not a total.
+                # Erased excluded tuples supply no qualified count equation.
+                "links": end["links"]
+                if active_links.keys() != self.links.keys()
+                else sum(v["meaning"] == 1 for v in active_links.values()),
             }
             or observed_forgotten > end["forgottenThoughts"]
         ):
@@ -406,6 +456,8 @@ class Acquisition:
             collection_title=brain["name"],
             entry_key=brain["homeThoughtId"],
             items=tuple(items),
+            relationships=relationships,
+            classification_assignments=assignments,
             original_evidence=tuple(
                 OriginalEvidence(
                     key=r["key"],
@@ -428,9 +480,13 @@ class Acquisition:
                         identity=r["key"],
                         disposition="normalized"
                         if r["domain"] == "thought"
+                        or r["domain"] == "link"
+                        and r["value"]["id"] in active_links
                         else "retained_only",
                         references=(r["value"]["id"],)
                         if r["domain"] == "thought"
+                        or r["domain"] == "link"
+                        and r["value"]["id"] in active_links
                         else (r["key"],),
                     )
                     for r in records

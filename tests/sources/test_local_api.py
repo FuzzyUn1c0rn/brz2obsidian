@@ -569,7 +569,7 @@ def test_known_forgotten_and_system_items_retain_only_minimal_scope_evidence():
     )
 
 
-def test_link_search_candidate_resolves_authoritative_endpoints_then_refuses_later_content():
+def test_link_search_candidate_resolves_endpoints_then_refuses_incomplete_declaration():
     from tests.support.local_api import ALONE, BRAIN, HOME, KEY, MetadataApi, api_server
 
     api = MetadataApi()
@@ -590,7 +590,7 @@ def test_link_search_candidate_resolves_authoritative_endpoints_then_refuses_lat
     api.overrides[f"/api/links/{BRAIN}/{link}"] = 200, api.search[0]["sourceLink"]
     with (
         api_server(api) as (_, address),
-        pytest.raises(MigrationRefused, match="not implemented"),
+        pytest.raises(MigrationRefused, match="incomplete or unsupported"),
         LocalApiSourceModule(
             LocalApiConfig(api_url=address), credentials=lambda: KEY
         ).open(LocalApiSourceRef(BRAIN)),
@@ -938,7 +938,7 @@ def test_incomplete_or_unimplemented_source_never_publishes_or_echoes_transport_
             [{"location": "SERVICE_TOKEN_CANARY"}],
         )
     elif mutation == "appearance":
-        api.thoughts[HOME]["foregroundColor"] = "#ffffff"
+        api.thoughts[HOME]["foregroundColor"] = "#ffff"
     elif mutation == "stats_boolean":
         api.overrides[f"/api/brains/{BRAIN}/statistics"] = (
             200,
