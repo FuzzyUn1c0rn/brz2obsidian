@@ -123,6 +123,17 @@ Omit exactly integrity_sha256, leaving all other manifest fields. Manifest does 
 
 A session is yielded only when these checks are satisfiable and everything is frozen. Unknown/unavailable/closed-session payload access refuses; closing revokes streams and cleans only the owned capture. Existing staged payload verification/publication and teardown receipt semantics remain required in later implementation.
 
+The first retained-document verification performs all canonical, content-digest,
+binding and pinned-root checks. Later calls may reuse that same-session semantic
+proof only after checking the complete storage inventory, ownership/aliases,
+pinned manifest and every file's full measured length/hash, including unrequested
+payloads. The exact checked metadata bytes and trusted identity/audit/profile/root/
+associations must match the initial proof. This avoids reparsing unchanged
+documents on every payload open; it never trusts timestamps, skips payload hashes,
+refreshes expected hashes or adopts changed metadata. Bytes used for comparison
+or parsing must themselves have been measured and checked. Encoding and identity
+rules remain unchanged; repeated whole-capture hashing still has a cost.
+
 ## Secret and provenance boundary
 
 Use allowlisted semantic projections before any write, exception rendering or diagnostic. Do not retain API keys, authorization/cookie/other header values, service-issued transport tokens, rendered-note wrappers/URLs, request URLs, raw response/error text, raw exception reprs in any file, embedded JSON, source evidence, manifest, audit, result, log, worker message or vault output. Configured origins/ports are excluded from retained capture documents; validated credential-free connection configuration remains available to outer acquisition/UI/worker wiring as required by the parent specification. Hashing a file does not make retaining its unsafe contents acceptable. Request identity is symbolic operation plus validated Brain/subject ID. Failures use a safe finite classification and counts, not arbitrary remote/system text. Partial/failure artifacts obey the same boundary.
