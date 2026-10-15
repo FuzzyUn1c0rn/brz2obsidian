@@ -35,6 +35,49 @@ from brz2obsidian.application.transport import Supervisor
 from tests.support.local_api import BRAIN, HOME, KEY, api_server
 
 
+def test_resource_review_rejects_cross_profile_compatibility_and_changed_payload(
+    tmp_path, monkeypatch
+):
+    from tests.support.local_api_payloads import (
+        NOTE,
+        RichPayloadApi,
+        assert_published_payloads,
+    )
+
+    monkeypatch.setenv("THE_BRAIN_LOCAL_API_KEY", KEY)
+    with api_server(RichPayloadApi(jpeg=True)) as (api, address):
+        selection = LocalApiSourceSelection(
+            brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+        )
+        operations = Operations()
+        inspected = operations.inspect(selection)
+        assert inspected.reviewed is not None
+        assert inspected.reviewed.profile_version == "2"
+        previous_profile = inspected.reviewed.model_copy(
+            update={"profile_version": "1"}
+        )
+        refused = operations.convert_reviewed(
+            selection, tmp_path, "old-profile", previous_profile
+        )
+        assert refused.status == "conversion_refused"
+        assert not (tmp_path / "old-profile").exists()
+        api.payloads[NOTE] += b"Changed source bytes"
+        changed = operations.convert_reviewed(
+            selection, tmp_path, "changed", inspected.reviewed
+        )
+        assert changed.status == "conversion_refused"
+        assert not (tmp_path / "changed").exists()
+        inspected = operations.inspect(selection)
+        assert inspected.reviewed is not None
+        api.payloads[NOTE] = api.payloads[NOTE].removesuffix(b"Changed source bytes")
+        inspected = operations.inspect(selection)
+        result = operations.convert_reviewed(
+            selection, tmp_path, "reviewed", inspected.reviewed
+        )
+        assert result.publication.receipt_verified
+        assert_published_payloads(tmp_path / "reviewed", jpeg=True)
+
+
 def test_every_effective_config_change_invalidates_review_and_blocks_old_publication(
     tmp_path, monkeypatch
 ):

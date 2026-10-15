@@ -1,6 +1,6 @@
 # Local API import
 
-The library and CLI can inspect and publish a supported metadata-only Brain from
+The library, both CLI entry points and local Windows app can inspect and publish a supported Brain from
 the running TheBrain desktop application. Enable the local API in TheBrain's
 settings and copy its current address and API key. The default address is
 `http://127.0.0.1:11522/api`; the converter does not scan ports or open/navigate a
@@ -15,9 +15,27 @@ defaults and source calendar dates are retained through neutral declarations and
 assignments; labels stay owned. Known forgotten/system items and associations
 retain only minimal scope evidence. Private, custom, conflicting or unresolved
 included declarations refuse. Every included link requires a successful empty
-attachment inventory. Authored notes, resources and resource-dependent explicit
-or inherited icons still refuse until their content stage is implemented. No
-partial vault is published.
+attachment inventory. Qualified raw UTF-8 Markdown, note images, owned files,
+external HTTP(S) resource destinations and explicit/inherited icons are preserved.
+Required unavailable payloads and unqualified gaps, including TXT404, currently
+refuse. No partial vault is published.
+
+Raw note bytes come from the qualified `Notes.md` attachment, with exact original
+bytes retained when safe. Supported references bind only after the complete
+included inventory is known. Known forgotten/system note references are removed
+as complete Markdown spans; their unsafe original copy is omitted. Unsupported
+references or rendered-only authored content refuse. Rendered notes are never a
+fallback and external destinations are never fetched. Pure Markdown adaptations
+retain exact scoped edit evidence; reviewed formatting losses produce warnings.
+
+Profile 2 adds the specifically qualified generic PNG/ZIP files, PNG note image
+and JPEG `Icon.png` alternatives to profile 1. Raw roles determine file/image/icon
+meaning. PNG/JPEG/WebP decoders and ZIP directories are checked where the profile
+requires them; bytes are never transcoded or ZIP members extracted. A JPEG icon
+keeps its declared `Icon.png` name and actual JPEG bytes. Missing required type
+icons also refuse when an ordinary item inherits them; direct icons override the
+corresponding type default without dropping the type-owned resource.
+
 An empty non-Home item can remain an intentionally uncreated target under the
 existing planner; the migration record accounts for it.
 
@@ -41,7 +59,7 @@ addresses or bounds disable refresh and inspection, with guidance beside the
 controls. For the local app, supply credentials through the launch environment.
 Python callers can use an external credential provider; the GUI has no key field.
 
-Inspection fully acquires the supported metadata-only content and releases its
+Inspection fully acquires the supported content and releases its
 capture. Review its findings and choose a valid destination. Conversion acquires
 again, with the same settings and acquisition cost. A changed source or conversion
 compatibility refuses publication and requires another inspection/review.
@@ -55,7 +73,7 @@ every effective credential-free acquisition setting; older or incomplete wire
 shapes refuse explicitly. API credentials and arbitrary remote errors are never
 forwarded in worker results or diagnostics. Existing destination checks, explicit
 warning authorization, verified publication receipts and recovery apply to both
-source choices. The current metadata-only content restrictions above still apply.
+source choices. The current content restrictions above still apply.
 
 ## CLI
 
@@ -105,7 +123,13 @@ result = workflow.inspect(reference)
 
 `LocalApiSourceModule(config, credentials=provider)` accepts a zero-argument
 provider returning the key at acquisition time. `local_api_workflow` accepts the
-same provider. References/configuration contain no credential field. The module
+same provider. References/configuration contain no credential field. The outer `local_api_workflow` explicitly pairs reviewed profile 2 with the
+module. Direct `LocalApiSourceModule` construction defaults to profile 1, which
+refuses the additional profile 2 shapes; explicit `profile_version="2"` requires
+its matching `LOCAL_API_POLICY_V2` when composing a workflow. There is no automatic
+fallback or additional GUI/CLI setting. Custom source/policy bindings remain
+caller-owned composition; the factory supplies the reviewed pair. Existing config
+and worker shapes remain unchanged. The module
 implements `SourceModule.open`; its frozen session supplies `snapshot`,
 `source_identity`, `open_payload` and `verify_consistency`. Direct session
 construction accepts already qualified scoped facts plus the normalized snapshot,
@@ -114,12 +138,19 @@ evidence, storage associations and fixed capture compatibility before freezing.
 It grants no additional live content support.
 
 Additional Python bounds are request timeout 30 seconds, non-search response
-16000000 bytes, 100000 requests, 100000 discovered thought/link identities,
+16000000 bytes per metadata reply, 100000 requests, 100000 discovered thought/link identities,
 1000000000 total capture bytes and 256000000 bytes per payload. The total capture
 limit also bounds aggregate post-decompression response bytes before freezing.
 All limits are positive finite values; timeouts use whole milliseconds and are at
 most one day. Storage is private and generated; session close revokes streams and
-cleans only its own capture. Integrity checks never reread the live Brain.
+cleans only its own capture. Acquisition also streams into a separately owned
+staging directory using generated keys; complete bytes are measured and copied
+into the frozen capture before staging is released. Raw notes stay in bounded
+private memory until scope qualification; only eligible original bytes are then
+streamed to disk, so excluded originals cannot remain after a cleanup failure. Each lifetime checks storage
+identity before cleanup and preserves an unowned replacement on refusal. Temporary
+staging and freezing can briefly hold two bounded copies. Integrity checks stream
+captured files and never reread the live Brain.
 
 The [capture contract](local-api-capture.md) defines CJSON1 bytes, both content
 digests and a separate pinned integrity digest covering all metadata, audit,

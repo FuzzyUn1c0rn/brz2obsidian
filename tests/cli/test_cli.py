@@ -7,6 +7,112 @@ from pathlib import Path
 from tests.application.test_minimal_workflow import make_archive
 
 
+def test_both_api_cli_entrypoints_publish_captured_payloads_and_refuse_required_icon(
+    tmp_path,
+):
+    from tests.support.local_api import BRAIN, KEY, api_server
+    from tests.support.local_api_payloads import (
+        TYPE_ICON,
+        RichPayloadApi,
+        assert_published_payloads,
+    )
+
+    environment = dict(os.environ, THE_BRAIN_LOCAL_API_KEY=KEY)
+    console = Path(sys.executable).with_name("brz2obsidian.exe")
+    with api_server(RichPayloadApi(explicit=True, jpeg=True)) as (api, address):
+        for index, command in enumerate(
+            ([str(console)], [sys.executable, "-m", "brz2obsidian"])
+        ):
+            common = ["--source-kind", "local-api", "--api-url", address, "--json"]
+            inspected = subprocess.run(
+                [*command, "inspect", BRAIN, *common],
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert inspected.returncode == 0, inspected.stdout + inspected.stderr
+            assert json.loads(inspected.stdout)["counts"]["source_references"] == 2
+            destination = tmp_path / f"payload{index}"
+            converted = subprocess.run(
+                [*command, "convert", BRAIN, str(destination), *common],
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert converted.returncode == 0, converted.stdout + converted.stderr
+            assert json.loads(converted.stdout)["receipt"]["verified"]
+            assert_published_payloads(destination, explicit=True, jpeg=True)
+            api.overrides[f"/api/attachments/{BRAIN}/{TYPE_ICON}/file-content"] = (
+                404,
+                b"HEADER_CANARY SERVICE_TOKEN_CANARY",
+            )
+            refused = subprocess.run(
+                [
+                    *command,
+                    "convert",
+                    BRAIN,
+                    str(tmp_path / f"refused-payload{index}"),
+                    *common,
+                ],
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert refused.returncode == 1
+            assert json.loads(refused.stdout)["outcome"] in {"failed", "refused"}
+            assert "CANARY" not in refused.stdout + refused.stderr
+            assert not (tmp_path / f"refused-payload{index}").exists()
+            api.overrides.clear()
+
+
+def test_both_api_cli_entrypoints_report_reviewed_note_formatting_warning(tmp_path):
+    from tests.support.local_api import BRAIN, KEY, api_server
+    from tests.support.local_api_payloads import NOTE, PayloadApi
+
+    api = PayloadApi()
+    raw = "> [!tip|icon:😂]\n> Authored body\n".encode()
+    api.payloads[NOTE] = raw
+    environment = dict(os.environ, THE_BRAIN_LOCAL_API_KEY=KEY)
+    with api_server(api) as (_, address):
+        for index, command in enumerate(
+            (
+                [str(Path(sys.executable).with_name("brz2obsidian.exe"))],
+                [sys.executable, "-m", "brz2obsidian"],
+            )
+        ):
+            common = ["--source-kind", "local-api", "--api-url", address, "--json"]
+            inspected = subprocess.run(
+                [*command, "inspect", BRAIN, *common],
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert inspected.returncode == 2, inspected.stdout + inspected.stderr
+            assert {i["code"] for i in json.loads(inspected.stdout)["issues"]} == {
+                "formatting_loss"
+            }
+            destination = tmp_path / f"warning{index}"
+            converted = subprocess.run(
+                [*command, "convert", BRAIN, str(destination), *common],
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert converted.returncode == 2, converted.stdout + converted.stderr
+            assert json.loads(converted.stdout)["receipt"]["verified"]
+            assert (
+                destination / "Attachments/22222222/Notes.md.original"
+            ).read_bytes() == raw
+            assert "exact source bytes" in (
+                destination / "Migration report.md"
+            ).read_text(encoding="utf-8")
+
+
 def test_both_api_cli_entrypoints_preserve_qualified_graph_and_refuse_link_content(
     tmp_path,
 ):

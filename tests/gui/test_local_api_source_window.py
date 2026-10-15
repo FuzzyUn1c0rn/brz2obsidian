@@ -37,6 +37,172 @@ def control(window, kind, name):
     return next(w for w in window.findChildren(kind) if w.accessibleName() == name)
 
 
+@pytest.mark.parametrize("explicit", [False, True])
+def test_real_worker_gui_payload_review_icon_refusal_and_fresh_conversion(
+    tmp_path, monkeypatch, explicit
+):
+    from brz2obsidian_ui.window import MainWindow
+    from tests.support.local_api_payloads import (
+        NOTE,
+        TYPE_ICON,
+        RichPayloadApi,
+        assert_published_payloads,
+    )
+
+    monkeypatch.setenv("THE_BRAIN_LOCAL_API_KEY", KEY)
+    app = QApplication.instance() or QApplication([])
+    with api_server(RichPayloadApi(explicit=explicit, jpeg=True)) as (api, address):
+        window = MainWindow()
+        window.show()
+        try:
+            control(window, QComboBox, "Source kind").setCurrentIndex(1)
+            until(app, lambda: window.snapshot.source_kind == "local-api")
+            control(window, QLineEdit, "Local API address").setText(address)
+            until(app, lambda: window.snapshot.api_config.api_url == address)
+            control(window, QPushButton, "Refresh accessible Brains").click()
+            until(app, lambda: window.snapshot.brain_list_status == "ready")
+            control(window, QComboBox, "Accessible Brains").setCurrentIndex(1)
+            until(app, lambda: window.snapshot.source_selection is not None)
+            icon_path = f"/api/attachments/{BRAIN}/{TYPE_ICON}/file-content"
+            api.overrides[icon_path] = (404, b"HEADER_CANARY SERVICE_TOKEN_CANARY")
+            control(window, QPushButton, "Inspect Brain").click()
+            until(
+                app,
+                lambda: (
+                    window.snapshot.result is not None
+                    and not window.snapshot.busy_operation
+                ),
+            )
+            assert window.snapshot.reviewed is None
+            assert (
+                "CANARY"
+                not in window.findings.toPlainText() + window.snapshot.model_dump_json()
+            )
+            del api.overrides[icon_path]
+            next(
+                b
+                for b in window.findChildren(QPushButton)
+                if b.text() == "Inspect again"
+            ).click()
+            until(
+                app,
+                lambda: (
+                    window.snapshot.reviewed is not None
+                    and not window.snapshot.busy_operation
+                ),
+            )
+            assert window.snapshot.reviewed.profile_version == "2"
+            assert window.snapshot.result.counts.source_references == 2
+            window.parent_selected(str(tmp_path))
+            QTest.keyClicks(
+                control(window, QLineEdit, "Vault name"), "Payload GUI vault"
+            )
+            until(app, lambda: "convert" in window.snapshot.allowed_actions)
+            api.payloads[NOTE] += b"Changed since inspection"
+            control(window, QPushButton, "Convert").click()
+            until(
+                app,
+                lambda: (
+                    window.snapshot.result.status == "conversion_refused"
+                    and not window.snapshot.busy_operation
+                ),
+            )
+            assert not (tmp_path / "Payload GUI vault").exists()
+            api.payloads[NOTE] = api.payloads[NOTE].removesuffix(
+                b"Changed since inspection"
+            )
+            next(
+                b
+                for b in window.findChildren(QPushButton)
+                if b.text() == "Inspect again"
+            ).click()
+            until(
+                app,
+                lambda: (
+                    window.snapshot.reviewed is not None
+                    and not window.snapshot.busy_operation
+                ),
+            )
+            name = control(window, QLineEdit, "Vault name")
+            name.selectAll()
+            QTest.keyClicks(name, "Reviewed payload vault")
+            until(app, lambda: "convert" in window.snapshot.allowed_actions)
+            control(window, QPushButton, "Convert").click()
+            until(
+                app,
+                lambda: (
+                    window.snapshot.publication is not None
+                    and window.snapshot.publication.receipt_verified
+                ),
+            )
+            assert_published_payloads(
+                tmp_path / "Reviewed payload vault", explicit=explicit, jpeg=True
+            )
+            assert "CANARY" not in window.snapshot.model_dump_json()
+        finally:
+            window.shutdown()
+            window.deleteLater()
+
+
+def test_real_worker_gui_api_note_formatting_requires_explicit_warning_action(
+    tmp_path, monkeypatch
+):
+    from brz2obsidian_ui.window import MainWindow
+    from tests.support.local_api_payloads import NOTE, PayloadApi
+
+    api = PayloadApi()
+    raw = "> [!tip|icon:😂]\n> Authored body\n".encode()
+    api.payloads[NOTE] = raw
+    monkeypatch.setenv("THE_BRAIN_LOCAL_API_KEY", KEY)
+    app = QApplication.instance() or QApplication([])
+    with api_server(api) as (_, address):
+        window = MainWindow()
+        window.show()
+        try:
+            control(window, QComboBox, "Source kind").setCurrentIndex(1)
+            until(app, lambda: window.snapshot.source_kind == "local-api")
+            control(window, QLineEdit, "Local API address").setText(address)
+            until(app, lambda: window.snapshot.api_config.api_url == address)
+            control(window, QPushButton, "Refresh accessible Brains").click()
+            until(app, lambda: window.snapshot.brain_list_status == "ready")
+            control(window, QComboBox, "Accessible Brains").setCurrentIndex(1)
+            until(app, lambda: window.snapshot.source_selection is not None)
+            control(window, QPushButton, "Inspect Brain").click()
+            until(
+                app,
+                lambda: (
+                    window.snapshot.reviewed is not None
+                    and not window.snapshot.busy_operation
+                ),
+            )
+            assert window.snapshot.reviewed.outcome == "warnings"
+            assert {f.code for f in window.snapshot.result.findings} == {
+                "formatting_loss"
+            }
+            button = control(window, QPushButton, "Convert with warnings")
+            assert not button.isEnabled()
+            window.parent_selected(str(tmp_path))
+            QTest.keyClicks(
+                control(window, QLineEdit, "Vault name"), "API warning vault"
+            )
+            until(app, button.isEnabled)
+            button.click()
+            until(
+                app,
+                lambda: (
+                    window.snapshot.publication is not None
+                    and window.snapshot.publication.receipt_verified
+                ),
+            )
+            assert window.snapshot.result.status == "conversion_created_with_warnings"
+            assert (
+                tmp_path / "API warning vault/Attachments/22222222/Notes.md.original"
+            ).read_bytes() == raw
+        finally:
+            window.shutdown()
+            window.deleteLater()
+
+
 def test_source_choices_refresh_and_inspect_an_explicit_brain_with_real_worker(
     monkeypatch,
 ):

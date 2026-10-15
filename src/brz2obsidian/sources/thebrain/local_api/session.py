@@ -6,6 +6,7 @@ import shutil
 import stat
 import tempfile
 from contextlib import contextmanager
+from io import BytesIO
 from pathlib import Path
 
 from brz2obsidian.contracts import SourceSnapshot
@@ -15,6 +16,7 @@ from .capture import (
     IDENTIFIERS,
     SCHEMA_SHA256,
     canonical,
+    identifiers,
     parse_json,
     snapshot_projection,
     source_projection,
@@ -77,14 +79,16 @@ class LocalApiSession:
         payloads=None,
         capture_parent=None,
         storage_keys=None,
+        profile_version="1",
     ):
+        self._identifiers = identifiers(profile_version)
         self._directory = None
         self._closed = False
         self._streams = []
         try:
             self._audit = AcquisitionAudit.model_validate_json(canonical(audit))
             source = source_projection(source)
-            if source["identifiers"] != IDENTIFIERS:
+            if source["identifiers"] != self._identifiers:
                 refuse("Capture identifiers do not match the reviewed profile")
             source_hash = digest("source", source)
             projected = snapshot_projection(snapshot)
@@ -143,35 +147,87 @@ class LocalApiSession:
                 "audit.json": canonical(audit),
             }
             self._bindings = {}
+            payload_entries = []
+            attachment_values = {
+                r["value"]["id"]: r["value"]
+                for r in source["records"]
+                if r["domain"] == "attachment"
+            }
             for index, asset_id in enumerate(present, 1):
                 key = keys.get(asset_id, f"payload/{index:016x}.bin")
-                if not re.fullmatch(r"payload/[0-9a-f]{16}\.bin", key) or key in values:
-                    refuse("Captured payload storage identity is invalid")
-                raw = bytes(payloads[asset_id])
-                asset = assets[asset_id]
                 if (
-                    len(raw) != asset.actual_length
-                    or hashlib.sha256(raw).hexdigest() != asset.actual_sha256
+                    not re.fullmatch(r"payload/[0-9a-f]{16}\.bin", key)
+                    or key in values
+                    or key in self._bindings.values()
+                ):
+                    refuse("Captured payload storage identity is invalid")
+                asset = assets[asset_id]
+                target = self._directory / key
+                target.parent.mkdir(exist_ok=True)
+                supplied = payloads[asset_id]
+                stream = (
+                    supplied.open("rb")
+                    if isinstance(supplied, Path)
+                    else BytesIO(bytes(supplied))
+                )
+                length, measured = 0, hashlib.sha256()
+                with stream, target.open("wb") as destination:
+                    while chunk := stream.read(65536):
+                        length += len(chunk)
+                        if length > audit["limits"]["max_payload_bytes"]:
+                            refuse(
+                                "max_payload_bytes storage limit exhausted",
+                                "incomplete_source",
+                            )
+                        if (
+                            sum(e["actual_length"] for e in payload_entries)
+                            + length
+                            + sum(map(len, values.values()))
+                            > audit["limits"]["max_total_capture_bytes"]
+                        ):
+                            refuse(
+                                "max_total_capture_bytes storage limit exhausted",
+                                "incomplete_source",
+                            )
+                        measured.update(chunk)
+                        destination.write(chunk)
+                if (
+                    length != asset.actual_length
+                    or measured.hexdigest() != asset.actual_sha256
                 ):
                     refuse(
                         "Captured payload bytes disagree with measured source evidence"
                     )
-                values[key] = raw
+                from .resources import validate_bytes
+
+                validate_bytes(attachment_values[asset_id], target, profile_version)
+                payload_entries.append(
+                    {
+                        "role": "payload",
+                        "storage_key": key,
+                        "actual_length": length,
+                        "actual_sha256": measured.hexdigest(),
+                    }
+                )
                 self._bindings[asset_id] = key
             self._manifest = {
                 "format_id": IDENTIFIERS["format_id"],
                 "format_version": "1",
                 "source_sha256": source_hash,
                 "snapshot_digest": snapshot_hash,
-                "files": [
-                    {
-                        "role": "payload" if name.startswith("payload/") else name[:-5],
-                        "storage_key": name,
-                        "actual_length": len(raw),
-                        "actual_sha256": hashlib.sha256(raw).hexdigest(),
-                    }
-                    for name, raw in sorted(values.items())
-                ],
+                "files": sorted(
+                    [
+                        {
+                            "role": name[:-5],
+                            "storage_key": name,
+                            "actual_length": len(raw),
+                            "actual_sha256": hashlib.sha256(raw).hexdigest(),
+                        }
+                        for name, raw in values.items()
+                    ]
+                    + payload_entries,
+                    key=lambda entry: entry["storage_key"],
+                ),
                 "payload_bindings": [
                     {
                         "asset_id": asset_id,
@@ -187,17 +243,13 @@ class LocalApiSession:
             values["manifest.json"] = self._manifest_bytes
             if (
                 sum(len(raw) for raw in values.values())
+                + sum(e["actual_length"] for e in payload_entries)
                 > audit["limits"]["max_total_capture_bytes"]
             ):
                 refuse(
                     "max_total_capture_bytes storage limit exhausted",
                     "incomplete_source",
                 )
-            if any(
-                len(payloads[key]) > audit["limits"]["max_payload_bytes"]
-                for key in payloads
-            ):
-                refuse("max_payload_bytes storage limit exhausted", "incomplete_source")
             for name, raw in values.items():
                 target = self._directory / name
                 target.parent.mkdir(exist_ok=True)
@@ -270,11 +322,17 @@ class LocalApiSession:
                 elif key not in expected:
                     refuse("Captured storage contains an unexpected file")
                 else:
-                    raw = path.read_bytes()
                     entry = expected[key]
+                    length, measured = 0, hashlib.sha256()
+                    with path.open("rb") as stream:
+                        while chunk := stream.read(65536):
+                            length += len(chunk)
+                            if length > entry["actual_length"]:
+                                refuse("Captured source bytes or metadata changed")
+                            measured.update(chunk)
                     if (
-                        len(raw) != entry["actual_length"]
-                        or hashlib.sha256(raw).hexdigest() != entry["actual_sha256"]
+                        length != entry["actual_length"]
+                        or measured.hexdigest() != entry["actual_sha256"]
                     ):
                         refuse("Captured source bytes or metadata changed")
                     if key in {
@@ -283,7 +341,7 @@ class LocalApiSession:
                         "metadata.json",
                         "audit.json",
                     }:
-                        documents[key] = raw
+                        documents[key] = path.read_bytes()
             if found != set(expected) | {"manifest.json"}:
                 refuse("Captured source files are missing")
             parsed = {
@@ -293,7 +351,7 @@ class LocalApiSession:
                 refuse("Captured metadata is not canonical UTF-8")
             source = source_projection(parsed["source.json"])
             if (
-                source["identifiers"] != IDENTIFIERS
+                source["identifiers"] != self._identifiers
                 or canonical(source) != documents["source.json"]
             ):
                 refuse("Captured source compatibility or canonical ordering changed")
@@ -319,7 +377,7 @@ class LocalApiSession:
                 refuse("Captured acquisition audit changed")
             validate_binding(source, snapshot, audit)
             metadata = {
-                "identifiers": IDENTIFIERS,
+                "identifiers": self._identifiers,
                 "identity": self.source_identity.model_dump(mode="json"),
                 "schema_sha256": SCHEMA_SHA256,
                 "desktop_build": DESKTOP_BUILD,

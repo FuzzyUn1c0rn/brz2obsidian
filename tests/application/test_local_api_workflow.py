@@ -132,7 +132,10 @@ def test_metadata_only_home_and_disconnected_item_use_real_workflow(tmp_path):
     )
 
 
-def test_published_receipt_survives_safe_capture_cleanup_failure(tmp_path, monkeypatch):
+@pytest.mark.parametrize("with_payload", [False, True])
+def test_published_receipt_survives_safe_capture_cleanup_failure(
+    tmp_path, monkeypatch, with_payload
+):
     import shutil
     import tempfile
 
@@ -142,16 +145,25 @@ def test_published_receipt_survives_safe_capture_cleanup_failure(tmp_path, monke
     original = shutil.rmtree
 
     def cannot_remove_capture(path, *args, **kwargs):
-        if path.name.startswith("brz2obsidian-api-"):
+        # Fail the frozen capture teardown after publication; acquisition
+        # staging is a separate earlier lifetime and has no manifest.
+        if (path / "manifest.json").is_file():
             raise OSError("HEADER_CANARY SERVICE_TOKEN_CANARY")
         return original(path, *args, **kwargs)
 
     monkeypatch.setattr(shutil, "rmtree", cannot_remove_capture)
-    with api_server() as (_, address):
+    from tests.support.local_api import MetadataApi
+    from tests.support.local_api_payloads import RAW_NOTE, PayloadApi
+
+    with api_server(PayloadApi() if with_payload else MetadataApi()) as (_, address):
         workflow = local_api_workflow(
             LocalApiConfig(api_url=address), credentials=lambda: KEY
         )
         result = workflow.convert(LocalApiSourceRef(BRAIN), tmp_path / "vault")
+    if with_payload:
+        assert (
+            tmp_path / "vault/Attachments/22222222/Notes.md.original"
+        ).read_bytes() == RAW_NOTE
     assert result.outcome == "failed"
     assert result.receipt.published and result.receipt.verified
     assert (tmp_path / "vault/migration-record.json").is_file()
