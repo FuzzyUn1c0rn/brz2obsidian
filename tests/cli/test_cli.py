@@ -339,3 +339,52 @@ def test_installed_cli_arguments_and_destination_failure_match_library(tmp_path)
     assert envelope == json.loads(expected.model_dump_json(by_alias=True))
     assert sentinel.read_bytes() == b"keep caller content"
     assert list(tmp_path.glob(".brz2obsidian-*")) == []
+
+
+def test_both_api_cli_entrypoints_publish_exact_txt_pdf_gap_with_warning_exit(tmp_path):
+    from tests.support.local_api import BRAIN, KEY, api_server
+    from tests.support.local_api_payloads import (
+        TXT,
+        MissingTxtPdfApi,
+        assert_published_txt_pdf_gap,
+    )
+
+    environment = dict(os.environ, THE_BRAIN_LOCAL_API_KEY=KEY)
+    with api_server(MissingTxtPdfApi()) as (_, address):
+        for index, command in enumerate(
+            (
+                [str(Path(sys.executable).with_name("brz2obsidian.exe"))],
+                [sys.executable, "-m", "brz2obsidian"],
+            )
+        ):
+            common = ["--source-kind", "local-api", "--api-url", address, "--json"]
+            inspected = subprocess.run(
+                [*command, "inspect", BRAIN, *common],
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert inspected.returncode == 2, inspected.stdout + inspected.stderr
+            inspection = json.loads(inspected.stdout)
+            assert inspection["outcome"] == "warnings"
+            assert inspection["issues"][0]["code"] == "approved_source_gap"
+            assert inspection["issues"][0]["affected"] == [TXT]
+            destination = tmp_path / f"gap{index}"
+            converted = subprocess.run(
+                [*command, "convert", BRAIN, str(destination), *common],
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert converted.returncode == 2, converted.stdout + converted.stderr
+            assert json.loads(converted.stdout)["receipt"]["verified"]
+            assert_published_txt_pdf_gap(destination)
+            assert (
+                "CANARY"
+                not in inspected.stdout
+                + inspected.stderr
+                + converted.stdout
+                + converted.stderr
+            )

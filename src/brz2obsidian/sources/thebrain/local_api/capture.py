@@ -400,6 +400,7 @@ def validate_source(source):
                 "local-api.forgotten.v1",
                 "local-api.system.v1",
                 "local-api.tag400.v1",
+                "local-api.missing-txt-pdf.v1",
             }
             or decision["outcome"]
             not in {
@@ -418,6 +419,7 @@ def validate_source(source):
             "excluded_system": {"local-api.system.v1"},
             "excluded_association": {"local-api.forgotten.v1", "local-api.system.v1"},
             "tag400_zero": {"local-api.tag400.v1"},
+            "missing_txt404": {"local-api.missing-txt-pdf.v1"},
         }
         if decision["rule_id"] not in qualified_rules.get(decision["outcome"], set()):
             refuse("A captured scope outcome does not match its reviewed rule")
@@ -607,7 +609,7 @@ def validate_binding(source, snapshot, audit):
     validate_graph_binding(source, snapshot)
     from .resources import validate_payload_binding
 
-    validate_payload_binding(source, snapshot)
+    validate_payload_binding(source, snapshot, audit)
 
 
 def validate_graph_binding(source, snapshot):

@@ -17,7 +17,11 @@ retain only minimal scope evidence. Private, custom, conflicting or unresolved
 included declarations refuse. Every included link requires a successful empty
 attachment inventory. Qualified raw UTF-8 Markdown, note images, owned files,
 external HTTP(S) resource destinations and explicit/inherited icons are preserved.
-Required unavailable payloads and unqualified gaps, including TXT404, currently
+Only the reviewed non-note TXT payload HTTP404 case can warn: its complete
+metadata/list/graph predicates must qualify and an independently identified
+same-owner PDF must be successfully downloaded, measured and preserved. The TXT
+retains safe metadata and null byte measurements. No empty substitute or PDF
+equivalence is claimed. Other required unavailable payloads and unqualified gaps
 refuse. No partial vault is published.
 
 Raw note bytes come from the qualified `Notes.md` attachment, with exact original
@@ -73,7 +77,9 @@ every effective credential-free acquisition setting; older or incomplete wire
 shapes refuse explicitly. API credentials and arbitrary remote errors are never
 forwarded in worker results or diagnostics. Existing destination checks, explicit
 warning authorization, verified publication receipts and recovery apply to both
-source choices. The current content restrictions above still apply.
+source choices. A qualified TXT404 warning requires **Convert with warnings**;
+conversion without that authorization refuses. The current content restrictions
+above still apply.
 
 ## CLI
 
@@ -90,7 +96,9 @@ brz2obsidian convert 11111111-1111-4111-8111-111111111111 new-vault --source-kin
 with the Brain's exact lowercase, hyphenated, nonzero UUID. The positional source
 remains an archive path when `--source-kind` is omitted or is `brz`. API options
 require `--source-kind local-api`. Existing text/JSON result envelopes and exit
-codes apply; JSON emits one result object. Invalid configuration and remote or
+codes apply; JSON emits one result object. Qualified TXT404 inspection and direct
+CLI conversion return warning exit code 2; conversion publishes the preserved PDF
+with its absence notice and verified receipt, without another approval option. Invalid configuration and remote or
 filesystem failures use safe classified issues without echoing remote bodies,
 credentials, request URLs or arbitrary exception text.
 

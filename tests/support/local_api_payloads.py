@@ -132,3 +132,44 @@ def assert_published_payloads(destination, *, explicit=False, jpeg=False):
     assert "![[Attachments/22222222/generic.png" not in text
     assert URI in text
     assert "CANARY" not in json.dumps(record)
+
+
+TXT = "a7777777-7777-4777-8777-777777777777"
+PDF = "a8888888-8888-4888-8888-888888888888"
+PDF_BYTES = b"%PDF-1.7\r\nIndependent preserved PDF control.\r\n%%EOF\r\n"
+
+
+class MissingTxtPdfApi(PayloadApi):
+    def __init__(self):
+        super().__init__()
+        self.attachments[TXT] = attachment(TXT, HOME, 15, "authored.txt", length=987)
+        self.attachments[PDF] = attachment(
+            PDF, HOME, 1, "different-purpose.pdf", length=len(PDF_BYTES)
+        )
+        self.payloads[PDF] = PDF_BYTES
+        self.overrides[f"/api/attachments/{BRAIN}/{TXT}/file-content"] = (
+            404,
+            b"REMOTE_ERROR_BODY_CANARY " + b"SERVICE_TOKEN_CANARY",
+        )
+
+
+def assert_published_txt_pdf_gap(destination):
+    assert (
+        destination / "Attachments/22222222/different-purpose.pdf"
+    ).read_bytes() == PDF_BYTES
+    assert not list(destination.rglob("*.txt"))
+    note = (destination / "Home — Entry.md").read_text(encoding="utf-8")
+    assert "Absent source file: authored.txt" in note
+    assert "[[Attachments/22222222/different-purpose.pdf" in note
+    assert "authored.txt|" not in note
+    report = (destination / "MIGRATION REPORT.md").read_text(encoding="utf-8")
+    assert "Conversion used captured source material only." in report
+    assert "convert the updated source into a fresh vault" in report
+    assert TXT in report and PDF in report
+    record = json.loads((destination / "migration-record.json").read_bytes())
+    absent = next(a for a in record["asset_targets"] if a["asset_id"] == TXT)
+    assert absent["owner"] == HOME and absent["availability"] == "absent"
+    assert absent["relative_path"] is absent["resource_link"] is None
+    assert absent["actual_length"] is absent["actual_sha256"] is None
+    assert absent["source_findings"][0]["rule_id"] == "local-api.missing-txt-pdf.v1"
+    assert "CANARY" not in note + report + json.dumps(record)
