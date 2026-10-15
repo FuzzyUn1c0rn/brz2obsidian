@@ -306,6 +306,7 @@ def test_profile3_fresh_capture_rejects_semantic_resource_corruption(
         )
         fresh.close()
 
+
 @pytest.mark.parametrize(
     "field,value",
     [
