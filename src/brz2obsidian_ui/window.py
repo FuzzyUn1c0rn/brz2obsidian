@@ -115,14 +115,21 @@ QPlainTextEdit { background: #f4f6f2; border: 1px solid #e0e5de; font-family: Co
 QPlainTextEdit:focus { border: 2px solid #315b4c; }
 QLabel:focus { background: #e8f0e8; }
 QLineEdit, QComboBox { background: white; border: 1px solid #cbd3cb; border-radius: 4px; padding: 8px; }
+QComboBox { padding-right: 32px; }
+QComboBox:hover { border-color: #789283; }
 QLineEdit:focus, QComboBox:focus { border: 2px solid #315b4c; }
+QComboBox:disabled { color: #8a938d; background: #f1f3ef; }
+QComboBox::drop-down { border: none; width: 32px; }
+QComboBox::down-arrow { image: url("COMBO_CHEVRON"); width: 12px; height: 8px; }
 QLabel#fieldError { color: #984b3e; }
 QTabBar::tab { padding: 12px 13px; border-bottom: 3px solid transparent; color: #68776e; }
 QTabBar, QTabBar::tab { background: #f8faf7; }
 QTabBar:focus { border: 1px solid #315b4c; }
 QTabBar::tab:selected { border-bottom: 3px solid #315b4c; color: #254b3d; }
 QScrollArea { border: none; background: white; }
-"""
+""".replace(
+    "COMBO_CHEVRON", (Path(__file__).parent / "assets" / "chevron-down.svg").as_posix()
+)
 
 
 def label(text="", name=None):
