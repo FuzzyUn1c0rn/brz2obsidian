@@ -30,7 +30,10 @@ standards, following the [final review procedure](../implement-spec-enhanced/ref
 
 Commit and integrate work into that recorded root, preserving existing work.
 An assigned ticket worker reports to the outer orchestrator and creates no
-delivery PR. Under [the shared lifecycle](../../../docs/agents/issue-tracker.md#pr-delivery-and-issue-completion),
+delivery PR. Its handoff includes known checked-candidate and integration commit
+IDs, review/receipt pointers and outcomes, and explicit missing evidence or limits.
+Do not infer commit identities or qualifying evidence from a reported stage PASS.
+Under [the shared lifecycle](../../../docs/agents/issue-tracker.md#pr-delivery-and-issue-completion),
 internal subtasks complete on the root. The orchestrator creates one draft PR
 only after the full effort's implementation is assembled, then assigns independent
 review of that full PR and repairs it in place. A standalone request is one effort.
