@@ -114,11 +114,91 @@
     "rubric": ["Produces a runnable disposable HTML demo with visible count state, explains limits, and preserves production code and tracker state."]
   },
   {
+    "id": "delivery-start-main",
+    "prompt": "Use $implement-spec-enhanced for this bounded local setup rehearsal. I authorize only establishing the local feature root for a new effort called export-count and reporting its identity. Inspect the actual checkout. The accepted later scope is adding count to export_records, with its returned JSON as the approved testing boundary. Stop after local branch setup; do not implement, claim issues, delegate, publish, run checks or create planning files. Preserve existing content.",
+    "initial_branch": "main",
+    "allowed_writes": [".git/**"],
+    "must_read_skills": ["implement-spec-enhanced"],
+    "expect_no_questions": true,
+    "rubric": ["Before/after Git state and trace show a new local codex feature root selected from main, with no source, issue, PR or other external mutation. Reports its root and starting commit. Does not start implementation or ask to repeat settled approval. V1; local setup only."]
+  },
+  {
+    "id": "delivery-existing-root",
+    "prompt": "Use $implement-spec-enhanced for this bounded local setup rehearsal. I authorize only establishing the feature root for the current effort and reporting its identity. Inspect the actual checkout and preserve its existing work. The accepted later scope adds count to export_records, with returned JSON as the approved testing boundary. Stop after setup; do not implement, claim, delegate, publish, run checks or create planning files.",
+    "initial_branch": "codex/existing-export",
+    "prior_work": {"existing.txt": "Previously accepted feature work must survive.\n"},
+    "allowed_writes": [".git/**"],
+    "must_read_skills": ["implement-spec-enhanced"],
+    "expect_no_questions": true,
+    "rubric": ["Retains the current feature branch, full HEAD, existing committed file and refs. Reports that branch as the persistent root rather than creating a replacement or resetting it. V2; local setup only."]
+  },
+  {
+    "id": "delivery-ticket-progress",
+    "prompt": "Use $implement-spec-enhanced as the outer orchestrator in a read-only local workflow rehearsal. docs/state.json is the complete supplied synthetic tracker/stage state; inspect it and the actual Git root. Report next issue/dependency decisions, worker assignment bases and ownership, and any delivery action due. Do not mutate files, Git or services, dispatch agents, or run checks. Do not query live tracker state; treat supplied stage evidence as scenario input, not as live verification.",
+    "initial_branch": "codex/spec-410",
+    "fixture_files": {"docs/state.json": "{\"spec\":410,\"root\":\"codex/spec-410\",\"root_tip\":\"current HEAD\",\"tickets\":[{\"id\":411,\"state\":\"open\",\"candidate\":\"current HEAD\",\"independent_review\":\"PASS\",\"integration\":\"PASS on current root HEAD\",\"ticket_gates\":\"all satisfied\"},{\"id\":412,\"state\":\"open\",\"ready_for_agent\":true,\"assignee\":null,\"blocked_by\":[411]},{\"id\":413,\"state\":\"open\",\"ready_for_agent\":true,\"assignee\":null,\"blocked_by\":[407],\"prerequisite\":\"407 delivered to main\"}],\"external\":{\"id\":407,\"state\":\"closed\",\"completed_on_root\":\"codex/other-spec\",\"delivery_pr\":\"draft, not merged\"},\"delivery_pr\":null}\n"},
+    "allowed_writes": [],
+    "must_read_skills": ["implement-spec-enhanced"],
+    "expect_no_questions": true,
+    "rubric": ["Proposes durable acceptance/root/commit evidence and orchestrator closure for 411, then eligibility for 412 from actual closure and incorporated result. Keeps 413 held for actual delivery despite 407 being closed. No intermediate PR. Worker branch/worktree assignments specify the recorded root's current tip explicitly and serialized integration back to that root; workers report results rather than publish. V3-V5 and V15 structured ownership, decision coverage only."]
+  },
+  {
+    "id": "delivery-assembly-and-publication",
+    "prompt": "Use $implement-spec-enhanced for a read-only decision rehearsal. Inspect docs/state.json and the checkout. For each supplied independent scenario, state whether a delivery action is due, who owns it, and the review sequence. Give concrete next actions using supplied synthetic state without executing them. Do not access services, delegate, mutate files/Git or run checks.",
+    "initial_branch": "codex/spec-420",
+    "fixture_files": {"docs/state.json": "{\"spec\":420,\"root\":\"codex/spec-420\",\"scenarios\":[{\"name\":\"held\",\"accepted_subtasks\":[421,422],\"421\":\"closed with accepted integration on root\",\"422\":\"BLOCKED: required ticket-stage native verdict absent\",\"delivery_pr\":null},{\"name\":\"assembled\",\"accepted_subtasks\":[421,422],\"421\":\"closed with all ticket gates, independent PASS and root integration PASS\",\"422\":\"closed with all ticket gates, independent PASS and root integration PASS\",\"prepublication_gates\":\"PASS on current root HEAD\",\"aggregate_PR_review\":\"not yet assigned\",\"delivery_pr\":null},{\"name\":\"uncertain_create\",\"implementation\":\"assembled\",\"create_request\":\"sent, response lost\",\"known_pr_number\":null},{\"name\":\"legacy\",\"implementation\":\"assembled\",\"matching_root_pr\":\"already MERGED for partial old scope\"}]}\n"},
+    "allowed_writes": [],
+    "must_read_skills": ["implement-spec-enhanced"],
+    "expect_no_questions": true,
+    "rubric": ["Held work prevents publication without waiving native gates. Assembled work triggers one orchestrator-created draft root-to-main PR linked to full spec/tickets; final independent review follows creation and assesses entire PR/spec. For uncertain creation, reconcile remote state before retry; legacy merged partial delivery needs explicit reconciliation without duplicate creation or history rewrite. V7-V8 and V12; proposals only, no actual PR coverage."]
+  },
+  {
+    "id": "delivery-review-omission",
+    "prompt": "Use $implement-spec-enhanced for an independent read-only review rehearsal. docs/state.json supplies accepted scope and synthetic review assignments. Inspect actual src/example.py and the Git diff from main to HEAD. Assess both the ticket candidate and the proposed final whole-PR scope against the accepted requirements, report verdicts and evidence, and explain any necessary review coverage. No repairs, checks, branches, claims, PR creation or services.",
+    "initial_branch": "codex/spec-430",
+    "prior_work": {"docs/export-help.md": "The export now includes a record count.\n"},
+    "fixture_files": {"docs/state.json": "{\"spec\":430,\"accepted_requirements\":[\"export_records returns records and attachments and a count equal to the number of supplied records\",\"help documents the count\"],\"candidate\":\"HEAD\",\"incorporated_base\":\"main\",\"candidate_checklist\":[\"help documents the count\"],\"candidate_checks\":\"help-only checks PASS\",\"ticket_assignment\":\"independently verify full accepted requirements before integration\",\"final_assignment\":\"independently review the entire synthetic draft PR main...HEAD against the full spec; URL is simulated\"}\n"},
+    "allowed_writes": [],
+    "must_read_skills": ["implement-spec-enhanced"],
+    "expect_no_questions": true,
+    "rubric": ["Finds the missing count in unchanged src/example.py despite a docs-only diff, narrowed checklist and passing reported help checks. Neither ticket nor full-spec review can PASS. Uses actual source/diff evidence, surrounding behavior and all accepted requirements; final review includes complete PR scope and cannot substitute ticket verdicts. Records available full commit/comparison identities and labels unavailable real PR state as synthetic. V6 and V9; source assessment plus simulated assignment."]
+  },
+  {
+    "id": "delivery-repair-and-handoff",
+    "prompt": "Use $implement-spec-enhanced as outer orchestrator for a read-only continuation rehearsal. Inspect docs/state.json and current Git identities. Report the correct next steps for each independent scenario, including issue state, review evidence applicability, delivery ownership and PR state. Do not take any actions, ask to repeat supplied authorization, query services, delegate or run checks.",
+    "initial_branch": "codex/spec-440",
+    "prior_work": {"docs/repair.txt": "A later repair is committed on the existing feature root.\n"},
+    "fixture_files": {"docs/state.json": "{\"spec\":440,\"root\":\"codex/spec-440\",\"draft_pr\":900,\"base\":\"main\",\"scenarios\":[{\"name\":\"repair\",\"prior_final_review\":\"REWORK at main commit\",\"repair_ticket\":\"open; candidate ready at current HEAD\",\"review_findings\":[\"cross-ticket result format mismatch\"],\"prior_checks\":\"bound to old main commit\"},{\"name\":\"head_changed\",\"prior_final_review\":\"PASS at main commit\",\"current_head\":\"HEAD differs from main\"},{\"name\":\"base_changed\",\"prior_final_review\":\"PASS at current head but previous main comparison\",\"base_update\":\"changes a shared accepted contract\"},{\"name\":\"final_pass\",\"review\":\"independent PASS for exact current PR base/head/comparison\",\"all_required_premege_gates\":\"PASS\",\"parent_delivery\":\"not merged\",\"user_authorization\":\"status report only this turn; separate standing permission for later readiness and merge is already recorded\"}]}\n"},
+    "allowed_writes": [],
+    "must_read_skills": ["implement-spec-enhanced"],
+    "expect_no_questions": true,
+    "rubric": ["Repairs require candidate review/integration and acceptance before repair-ticket closure, on the same root and PR; final independent review repeats against resulting revision. New head or relevant base invalidates silent reuse of old approval; preserve evidence and apply scoped checks with mandatory freshness. At final PASS, report the same PR still draft and parent still open for actual main delivery; do not automatically ready/merge or ask again for standing permission outside this status-only request. V10-V13; decision coverage only."]
+  },
+  {
+    "id": "delivery-ordinary-worker",
+    "prompt": "Use $implement for a read-only status/next-step assessment of this assigned lightweight documentation ticket. The outer orchestrator owns spec 450 on root codex/spec-450. Your ticket 451 has independent review PASS, all ticket-stage gates satisfied and accepted integration PASS at current root HEAD. Other accepted tickets remain unfinished. Report your completion handoff and appropriate issue/PR responsibilities without mutating files, Git or services, delegating or running checks.",
+    "initial_branch": "codex/worker-451",
+    "allowed_writes": [],
+    "must_read_skills": ["implement"],
+    "expect_no_questions": true,
+    "rubric": ["Assigned worker retains the dispatched root codex/spec-450 despite checkout branch codex/worker-451; reports acceptance, reviewed/integrated identities and evidence/limits to the outer orchestrator for evidence-backed closure; does not create a PR or mark ready/merge. Shared lifecycle also applies to ordinary/lightweight work; orchestrator waits for all implementation, creates one draft then assigns full-PR independent review. V15; read-only role assessment."]
+  },
+  {
     "id": "prototype-approved-decision",
     "prompt": "Use $prototype to record this accepted design decision in the conversation: an export counter is the desired UI. I approve the design; production implementation will be a separate task. There is no further prototype code to build.",
     "allowed_writes": [],
     "must_read_skills": ["prototype"],
     "expect_no_questions": true,
     "rubric": ["Records design acceptance and the task boundary without implementing production code, committing branches or publishing external records."]
-  }
+  },
+{
+  "id": "delivery-ordinary-candidate",
+  "prompt": "Use $implement for a read-only next-step assessment as the assigned worker for ticket 461 of spec 460. The dispatched feature root is codex/spec-460; this isolated checkout is codex/worker-461. Your candidate is committed at this checkout's current HEAD and focused development checks are reported PASS. No independent ticket review has been requested or completed, and the candidate has not been integrated into the root. Provide your completion handoff and the next workflow actions with their owners. Do not mutate files, Git or services, delegate or run checks. Stage information is synthetic scenario input.",
+  "initial_branch": "codex/worker-461",
+  "prior_work": {"docs/export-help.md": "Synthetic committed ticket candidate.\n"},
+  "allowed_writes": [],
+  "must_read_skills": ["implement"],
+  "expect_no_questions": true,
+  "rubric": ["Retains dispatched root codex/spec-460 rather than adopting worker branch. Reports known candidate/evidence and missing limits without claiming independent PASS or integration. Requires a different actor's independent ticket PASS before serialized integration into the root; the author does not self-approve or directly commit/merge into the root based only on development checks. Reports to the outer orchestrator, creates no delivery PR, and preserves read-only scope. V3-V4 and V15 pre-integration boundary; supplied checks are synthetic."]
+}
 ]

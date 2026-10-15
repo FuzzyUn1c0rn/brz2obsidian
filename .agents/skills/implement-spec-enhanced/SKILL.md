@@ -5,9 +5,9 @@ description: Implement an accepted specification or ticket graph with scoped che
 
 # Implement Spec Enhanced
 
-Implement the accepted scope on one integration branch, preserving its acceptance
-criteria and existing work. This is the repository's implementation workflow for
-specifications and ticket graphs.
+Implement the complete accepted specification on one feature root. Independently
+review tickets before integration; the outer orchestrator creates one draft PR
+after implementation is assembled, then assigns independent review of that PR.
 
 ## Route the request
 
@@ -26,8 +26,11 @@ For authorized implementation, continue below.
 Read the accepted spec and ticket/index. Complete
 [frontier discovery](../../../docs/agents/issue-tracker.md#discover-the-implementation-frontier)
 before claim or dispatch. Record eligible leaves, an established leaf result, or
-explicitly authorized combined scope. Reuse a suitable integration branch or
-create one; record the full starting commit for final review.
+explicitly authorized combined scope. Before implementation, claims or dispatch,
+retain the assigned/recorded root or follow
+[initial feature-root setup](../../../docs/agents/issue-tracker.md#establish-the-feature-root):
+on `main`, create a local feature branch; otherwise retain the current branch.
+Record and preserve its root identity and full starting commit across the effort.
 
 Define completion from the accepted requirements, required checks, independent
 review and any actual-user/native gate. Reuse already approved scope and
@@ -57,7 +60,8 @@ gates. The ticket remains authoritative for scope, ownership and durable status.
 Use available general-purpose agents with stable implementer, verifier and merger
 responsibilities. Parallelize independent ready tickets when dependencies,
 ownership and available slots permit; serialize integration. On the structured
-path, give implementers isolated worktrees based on the integration branch;
+path, give implementers isolated worktrees with the feature root's current tip
+passed explicitly as their base;
 lightweight work follows its frozen-checkout and serialization safeguards.
 Preserve others' edits and existing work when correcting a starting point.
 Delegate exploration only for a
@@ -95,15 +99,20 @@ on completion, rework or a meaningful state change. Use completion events or
 bounded waits; update the user on meaningful progress, blockers and decisions.
 Save temporary notes under `tmp/<effort>/` and durable conclusions in the ticket.
 
-After the first publishable integration commit, follow
-[PR delivery and issue completion](../../../docs/agents/issue-tracker.md#pr-delivery-and-issue-completion)
-for default draft publication and eventual closure after merge into `main` on
-both handoff paths. Respect explicit publication constraints.
+Complete verified internal subtasks on the feature root under
+[the shared lifecycle](../../../docs/agents/issue-tracker.md#pr-delivery-and-issue-completion),
+so same-root dependencies can advance. Ticket workers report results to the
+orchestrator; they do not publish delivery PRs.
 
-After integration, perform [final review](references/final-review.md) against the
-recorded starting commit and accepted scope. Reassess the path and checks for
-each repair, retaining independent review and any required user verdict.
-Report the integration branch, delivery state and remaining gates. Retain durable
+The outer orchestrator reconciles the full scope and subtask graph. Once all
+implementation is complete and integrated and pre-publication gates pass, it
+creates the single draft PR from the feature root to `main`, linked to the spec.
+Then assign an independent reviewer to the entire PR using
+[final review](references/final-review.md). Repair findings on the same root/PR
+with renewed independent review. The default handoff remains draft, even after
+PASS; later readiness and merge follow applicable user authorization.
+
+Report the feature root, PR revision, verdict and remaining gates. Retain durable
 results before
 archiving managed worktrees and retiring disposable evidence under
 [workspace housekeeping](../../../docs/workspace.md).

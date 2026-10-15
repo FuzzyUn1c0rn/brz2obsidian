@@ -41,3 +41,8 @@ invalid inputs, concurrency, interruption and partial-attempt recovery. Record
 material limits explicitly: synthetic roles do not demonstrate live multi-agent
 execution, independent evidence judgment, native/user acceptance, remote PRs,
 or managed-worktree lifecycle behavior.
+For delivery timing/ownership decisions, pair protocol checks with observed
+agent responses/traces and independent rubrics under
+[skill behavior evaluations](../../../../docs/agents/skill-evaluations.md#delivery-lifecycle-coverage).
+Scripted actions and authored verdicts remain simulated inputs, not evidence of
+independent agent judgment.

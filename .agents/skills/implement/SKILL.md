@@ -6,6 +6,13 @@ disable-model-invocation: true
 
 Implement the work described by the user in the spec or tickets.
 
+For an explicit read-only review or plan, return that assessment without branch
+setup, claims, implementation or publication. For authorized implementation,
+retain the assigned/recorded root or follow
+[initial feature-root setup](../../../docs/agents/issue-tracker.md#establish-the-feature-root)
+before claims or changes: branch from `main`, otherwise retain the current branch.
+Record and preserve that root and existing work throughout the effort.
+
 Apply `tdd` to features and behavior-changing fixes. Use testing boundaries
 specified in the conversation, accepted specification, or ticket, recording
 their decision source. If none is specified, select an established public
@@ -21,7 +28,19 @@ Record expected scope before final validation; report the receipt path and outco
 Review the actual changes against the accepted requirements and repository
 standards, following the [final review procedure](../implement-spec-enhanced/references/final-review.md).
 
-Commit your work to the current branch.
-Follow [PR delivery and issue completion](../../../docs/agents/issue-tracker.md#pr-delivery-and-issue-completion)
-for default draft publication after the first publishable commit and implementation
-issue closure after merge into `main`, respecting explicit publication constraints.
+Commit the checked candidate and hand its identity and evidence to the outer
+orchestrator. For assigned ticket work, follow
+[independent review before integration](../../../docs/agents/issue-tracker.md#review-and-integrate-ticket-candidates):
+a different actor must return valid PASS for that candidate before serialized
+integration into the recorded root. Author self-review is insufficient. Retain
+the applicable handoff path and required checks; repair findings before integration.
+An assigned ticket worker reports to the outer orchestrator and creates no
+delivery PR. Its handoff includes known checked-candidate and integration commit
+IDs, review/receipt pointers and outcomes, and explicit missing evidence or limits.
+Do not infer commit identities or qualifying evidence from a reported stage PASS.
+Under [the shared lifecycle](../../../docs/agents/issue-tracker.md#pr-delivery-and-issue-completion),
+internal subtasks complete on the root. The orchestrator creates one draft PR
+only after the full effort's implementation is assembled, then assigns independent
+review of that full PR and repairs it in place. A standalone request is one effort.
+Leave the PR draft by default; later readiness and merge require applicable user
+authorization. Respect explicit publication constraints.

@@ -21,6 +21,12 @@ prerequisite or check is unavailable. User/native acceptance required by this
 ticket remains unverified until its actual verdict exists. Check coverage against the ticket,
 not merely the candidate's list: omitted requirements invalidate approval.
 
+Review the diff from the candidate's incorporated integration base to its exact
+commit against every accepted ticket requirement. Inspect affected callers,
+consumers and surrounding behavior where needed; an omitted requirement can fail
+even when no changed line represents it. This verdict permits ticket integration,
+not approval of the whole specification's delivery PR.
+
 Review the actual diff's impact and the coordinator's scope/reuse rationale under
 [check selection](check-scope.md). Independently execute each check assigned as
 fresh; other checks may use qualifying evidence under the requirements contract.

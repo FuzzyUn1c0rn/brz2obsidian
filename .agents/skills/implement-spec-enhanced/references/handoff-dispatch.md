@@ -12,8 +12,11 @@ documentation/report work uses [lightweight handoffs](lightweight-handoff.md).
 Include the independently selected scope/freshness rationale with the requirements
 pointer, and confirm it against the candidate diff before completion checks.
 
-Initial implementer dispatch supplies ownership, integration branch, assessed
-checkout, and a reserved candidate-input path. At integration synchronization,
+Initial implementer dispatch supplies ownership, recorded feature-root identity,
+its explicit current base, assessed checkout, and a reserved candidate-input path.
+New worker branches/worktrees start from that root tip, never a tool's implicit
+default. Ticket workers report stage results; only the outer orchestrator owns
+the specification's delivery PR. At integration synchronization,
 capture the full incorporated tip as `base_ref`. Finish focused development checks
 and known findings, commit stable source, then run required completion checks under
 the [stable-candidate checkpoint](../../../../docs/testing.md#stable-candidate-checkpoint).

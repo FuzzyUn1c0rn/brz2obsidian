@@ -95,7 +95,8 @@ def grade(case, before, after, events, answer, exit_code):
     }
 
 
-def prepare(workspace):
+def prepare(workspace, case=None):
+    case = case or {}
     workspace.mkdir(parents=True)
     shutil.copytree(
         ROOT / ".agents" / "skills",
@@ -112,6 +113,7 @@ def prepare(workspace):
         "The public boundary is export_records. XML export is unsupported.\n",
         "GLOSSARY.md": "# Glossary\n\n## Record\nA single exported item.\n",
         "src/example.py": 'def export_records(records):\n    return {"records": records, "attachments": []}\n',
+        **case.get("fixture_files", {}),
     }
     for name, content in files.items():
         path = workspace / name
@@ -119,9 +121,10 @@ def prepare(workspace):
         path.write_text(content, encoding="utf-8")
     for name in ("workspace.md", "testing.md"):
         shutil.copyfile(ROOT / "docs" / name, workspace / "docs" / name)
+    shutil.copytree(ROOT / "docs" / "agents", workspace / "docs" / "agents")
     # A fixture under tmp must never discover or mutate the parent checkout's Git state.
     for args in (
-        ["init", "-b", "fixture"],
+        ["init", "-b", "main" if "initial_branch" in case else "fixture"],
         ["config", "user.name", "Skill Evaluation"],
         ["config", "user.email", "evaluation@example.invalid"],
         ["config", "commit.gpgsign", "false"],
@@ -132,14 +135,48 @@ def prepare(workspace):
         subprocess.run(
             ["git", "-C", str(workspace), *args], capture_output=True, check=True
         )
+    branch = case.get("initial_branch", "fixture")
+    if "initial_branch" in case and branch != "main":
+        subprocess.run(
+            ["git", "-C", str(workspace), "switch", "-c", branch],
+            capture_output=True,
+            check=True,
+        )
+    prior_work = case.get("prior_work", {})
+    if prior_work:
+        for name, content in prior_work.items():
+            path = workspace / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        for args in (["add", "--all"], ["commit", "-m", "Existing feature work"]):
+            subprocess.run(
+                ["git", "-C", str(workspace), *args], capture_output=True, check=True
+            )
+
+
+def git_state(workspace):
+    return {
+        name: subprocess.check_output(
+            ["git", "-C", str(workspace), *args], text=True, encoding="utf-8"
+        ).strip()
+        for name, args in {
+            "branch": ["branch", "--show-current"],
+            "head": ["rev-parse", "HEAD"],
+            "refs": ["show-ref", "--heads"],
+            "status": ["status", "--porcelain"],
+        }.items()
+    }
 
 
 def run_case(case, destination, executable, timeout):
     destination.mkdir(parents=True)
     workspace = destination / "workspace"
-    prepare(workspace)
+    prepare(workspace, case)
     before = snapshot(workspace)
     (destination / "before.json").write_text(json.dumps(before), encoding="utf-8")
+    (destination / "before-git.json").write_text(
+        json.dumps(git_state(workspace), indent=2), encoding="utf-8"
+    )
     schema = destination / "response.schema.json"
     schema.write_text(json.dumps(RESPONSE_SCHEMA), encoding="utf-8")
     prompt = (
@@ -192,6 +229,9 @@ def run_case(case, destination, executable, timeout):
         except subprocess.TimeoutExpired:
             exit_code = 124
     metadata["exit_code"] = exit_code
+    (destination / "after-git.json").write_text(
+        json.dumps(git_state(workspace), indent=2), encoding="utf-8"
+    )
     (destination / "run.json").write_text(
         json.dumps(metadata, indent=2), encoding="utf-8"
     )
