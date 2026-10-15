@@ -1,11 +1,7 @@
 name: Checks
 
 on:
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened]
-  push:
-    branches: [main]
+  # Manual runs only to preserve the GitHub Actions minutes allowance.
   workflow_dispatch:
 
 permissions:

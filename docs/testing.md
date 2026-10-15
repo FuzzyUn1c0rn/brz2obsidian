@@ -136,8 +136,11 @@ qualifying completion evidence through the runner and validate it. Package
 installation/builds, private acceptance drivers and native observations use
 their own routes.
 
-CI in `.github/workflows/checks.yml` runs full Windows base and GUI checks and
-retains runner receipts/logs. Both job results and receipts validated against
+The manual-only workflow in `.github/workflows/checks.yml` runs full Windows
+base and GUI checks and retains runner receipts/logs. Automatic pull request
+and push triggers are disabled to preserve the GitHub Actions minutes allowance.
+The workflow is also disabled in GitHub; re-enable it before requesting a manual
+run. Both job results and receipts validated against
 independent requirements establish hosted acceptance. Offscreen GUI success
 leaves actual Windows appearance, native dialogs and pointer usability unverified;
 private preservation and user acceptance retain their separate gates.
