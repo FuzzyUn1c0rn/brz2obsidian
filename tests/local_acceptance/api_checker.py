@@ -395,12 +395,11 @@ def qualify_image_joins(baseline, attachments, graphs):
             and type(outcome.get("status")) is int
             and outcome["status"] == 200
         ), "image authoritative metadata outcome"
-        assert semantic(baseline.json(outcome["path"])) == semantic(row), (
-            "image metadata disagreement"
-        )
+        metadata = read_json(baseline.bytes(outcome["path"]), parse_float=Decimal)
+        assert semantic(metadata) == semantic(row), "image metadata disagreement"
         inventory_path = baseline.data.get("attachment_inventories", {}).get(owner)
         assert inventory_path, "image authoritative list observation"
-        rows = baseline.json(inventory_path)
+        rows = read_json(baseline.bytes(inventory_path), parse_float=Decimal)
         assert type(rows) is list, "image authoritative list shape"
         indexed = identities(rows, "id", "image list")
         expected = {k: a for k, a in attachments.items() if a["sourceId"] == owner}

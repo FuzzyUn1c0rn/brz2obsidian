@@ -1135,3 +1135,30 @@ def test_expected_image_prose_hidden_in_inactive_text_cannot_prove_display(
     path.write_text(note.replace("bleu", "wrong") + hidden, encoding="utf-8")
     with pytest.raises(AssertionError):
         check_api_vault(baseline, vault, profile_version="3")
+
+
+def test_image_metadata_joins_keep_exact_fractional_source_positions(tmp_path):
+    baseline, vault = bound_case(tmp_path)
+    root = baseline.manifest_path.parent
+    manifest = baseline.data
+    paths = [
+        manifest["graphs"][identity(2)],
+        manifest["attachment_inventories"][identity(2)],
+        manifest["attachment_metadata"][identity(202)]["path"],
+    ]
+    for index, name in enumerate(paths):
+        path = root / name
+        value = json.loads(path.read_bytes())
+        rows = value["attachments"] if index == 0 else value if index == 1 else [value]
+        next(row for row in rows if row["id"] == identity(202))["position"] = 1.25
+        write_json(path, value)
+    baseline = reseal(baseline)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    next(
+        row
+        for row in record["original_evidence"][0]["records"]
+        if row["id"] == identity(202)
+    )["position"] = {"decimal": "1.25"}
+    write_json(path, record)
+    assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 6
