@@ -332,3 +332,238 @@ def test_missing_api_txt_warns_and_publishes_preserved_pdf_with_neutral_notice(
         assert "physical absence" not in report
         assert TXT in report and PDF in report
         assert "CANARY" not in result.model_dump_json() + report + note
+
+
+@pytest.mark.parametrize("case", ["tags", "zero-tags"])
+def test_standard_workflow_preserves_mixed_scope_baseline(tmp_path, case):
+    from tests.local_acceptance.api_checker import audit_baseline, check_api_vault
+    from tests.local_acceptance.api_scope_inputs import (
+        mixed_expectations,
+        mixed_source_packet,
+    )
+    from tests.local_acceptance.test_api_scope_v3 import scope_baseline
+    from tests.support.local_api_packet import RawPacketApi
+
+    baseline = scope_baseline(tmp_path / "independent-source", case)
+    audited = audit_baseline(baseline, profile_version="3")
+    literal = mixed_expectations()
+    packet = mixed_source_packet(case)
+    api = RawPacketApi.from_source_packet(packet)
+    reference = LocalApiSourceRef(baseline.json(baseline.data["brain"])["id"])
+    destination = tmp_path / "actual-vault"
+    with api_server(api) as (_, address):
+        workflow = local_api_workflow(
+            LocalApiConfig(api_url=address, include_pins=False), credentials=lambda: KEY
+        )
+        inspected = workflow.inspect(reference)
+        assert inspected.outcome == "warnings", inspected.issues
+        converted = workflow.convert(reference, destination)
+    assert converted.outcome == "warnings", converted.issues
+    assert converted.receipt.published and converted.receipt.verified
+    baseline.verify()
+    check_api_vault(baseline, destination, profile_version="3")
+    record = json.loads((destination / "migration-record.json").read_bytes())
+    targets = {row["item_key"]: row for row in record["item_targets"]}
+    assert set(targets) == set(baseline.data["scope"]["thought_ids"])
+    for key, row in targets.items():
+        assert row["created"] is literal["created"][key]
+    documents = {
+        doc["key"]: (row, doc)
+        for row in record["item_targets"]
+        for doc in row["documents"]
+    }
+    assert "documents" not in record
+    for key in audited["retention"]["omitted_original_ids"]:
+        row, document = documents[key]
+        assert document["original_copy_omitted"] is True
+        assert document["original_asset_id"] is None
+        assert document["owner_target"] == row["relative_path"]
+        if not row["created"]:
+            assert not (destination / row["relative_path"]).exists()
+    for path in destination.rglob("*"):
+        if path.is_file():
+            assert all(c.encode() not in path.read_bytes() for c in literal["canaries"])
+    ledger = json.loads(packet["files"]["endpoints.json"])
+    assert not api.unexpected_requests
+    assert {row["path"] for row in api.served}.isdisjoint(ledger["forbidden_routes"])
+
+
+@pytest.mark.parametrize("excluded", [True, False], ids=["scoped", "identity"])
+@pytest.mark.parametrize(
+    "profile,image_format", [("1", "webp"), ("2", "png"), ("3", "png")]
+)
+def test_qualified_raster_workflow_preserves_scope_and_document_obligations(
+    tmp_path, monkeypatch, excluded, profile, image_format
+):
+    import tempfile
+
+    from brz2obsidian.application.workflow import SourceModuleBinding, Workflow
+    from brz2obsidian.obsidian import ObsidianRenderer
+    from brz2obsidian.publication import FilesystemPublisher
+    from brz2obsidian.sources.thebrain.local_api import (
+        LOCAL_API_POLICY,
+        LOCAL_API_POLICY_V2,
+        LocalApiSourceModule,
+    )
+    from tests.local_acceptance.api_checker import audit_baseline, check_api_vault
+    from tests.local_acceptance.api_scope_inputs import (
+        identity,
+        mixed_expectations,
+        raster_scope_packet,
+    )
+    from tests.local_acceptance.test_api_scope_v3 import raster_scope_baseline
+    from tests.support.local_api_packet import RawPacketApi
+
+    baseline = raster_scope_baseline(
+        tmp_path / "independent-source",
+        excluded=excluded,
+        profile_version=profile,
+        image_format=image_format,
+    )
+    audited = audit_baseline(baseline, profile_version=profile)
+    packet = raster_scope_packet(
+        excluded=excluded, profile_version=profile, image_format=image_format
+    )
+    api = RawPacketApi.from_source_packet(packet)
+    reference = LocalApiSourceRef(baseline.json(baseline.data["brain"])["id"])
+    captures = tmp_path / "product-captures"
+    captures.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(captures))
+    destination = tmp_path / "actual-vault"
+    with api_server(api) as (_, address):
+        config = LocalApiConfig(api_url=address, include_pins=False)
+        if profile == "3":
+            workflow = local_api_workflow(config, credentials=lambda: KEY)
+        else:
+            module = LocalApiSourceModule(
+                config, credentials=lambda: KEY, profile_version=profile
+            )
+            policy = {"1": LOCAL_API_POLICY, "2": LOCAL_API_POLICY_V2}[profile]
+            workflow = Workflow(
+                SourceModuleBinding(module, policy),
+                ObsidianRenderer(),
+                FilesystemPublisher(),
+            )
+            metadata_factory = workflow.metadata_factory
+            workflow.metadata_factory = lambda: module.run_metadata(metadata_factory())
+        inspected = workflow.inspect(reference)
+        assert inspected.outcome == "clean", inspected.issues
+        assert inspected.profile_version == profile
+        assert inspected.receipt is None
+        assert not tuple(captures.iterdir())
+        assert not destination.exists()
+        converted = workflow.convert(reference, destination)
+    assert converted.outcome == "clean", converted.issues
+    assert converted.profile_version == profile
+    assert converted.receipt.published and converted.receipt.verified
+    assert not tuple(captures.iterdir())
+    baseline.verify()
+    check_api_vault(baseline, destination, profile_version=profile)
+    record = json.loads((destination / "migration-record.json").read_bytes())
+    assert "documents" not in record
+    targets = {row["item_key"]: row for row in record["item_targets"]}
+    home = baseline.json(baseline.data["brain"])["homeThoughtId"]
+    assert set(targets) == set(baseline.data["scope"]["thought_ids"])
+    for key, row in targets.items():
+        assert row["created"] is (key == home)
+        if not row["created"]:
+            assert not (destination / row["relative_path"]).exists()
+    documents = {
+        document["key"]: document
+        for row in targets.values()
+        for document in row["documents"]
+    }
+    assert set(documents) == {identity(201)}
+    assert targets[identity(3)]["documents"] == []
+    original = documents[identity(201)]
+    assert original["original_copy_omitted"] is excluded
+    assert original["original_asset_id"] == (None if excluded else identity(201))
+    assert (
+        original["text_digest"]
+        == {
+            "png": "e1b8fdf01bd2fa1e0f4f9335360c0c824fdc583f11c2abd6e296035d8bd68522",
+            "webp": "5a79c03399a9275e91909e1d510691b25733f23467eababff24ded5dec529772",
+        }[image_format]
+    )
+    assert (
+        sorted(row["asset_id"] for row in record["asset_targets"])
+        == audited["retention"]["retained_asset_ids"]
+    )
+    diagnostics = inspected.model_dump_json() + converted.model_dump_json()
+    canaries = [*mixed_expectations()["canaries"], KEY]
+    assert all(c not in diagnostics for c in canaries)
+    for path in destination.rglob("*"):
+        if path.is_file():
+            assert all(c.encode("utf-8") not in path.read_bytes() for c in canaries)
+    assert set(tmp_path.iterdir()) == {
+        baseline.manifest_path.parent,
+        captures,
+        destination,
+    }
+    ledger = json.loads(packet["files"]["endpoints.json"])
+    assert not api.unexpected_requests
+    requested = {row["path"] for row in api.served}
+    assert requested.isdisjoint(ledger["forbidden_routes"])
+    assert not any(
+        row["optional"] and row["route"] in requested for row in ledger["routes"]
+    )
+
+
+@pytest.mark.parametrize(
+    "case,expected_code",
+    [
+        ("forgotten-invalid-calendar", None),
+        ("relationship-contradictory-repeat", None),
+        ("resource-unsupported-type", "api_resource_shape_unsupported"),
+        ("external-traversal", "api_resource_shape_unsupported"),
+        ("note-unresolved-thought", None),
+        ("jpeg-premature-entropy", None),
+    ],
+)
+def test_independent_negative_workflow_refuses_without_publication(
+    tmp_path, monkeypatch, case, expected_code
+):
+    import tempfile
+
+    from tests.local_acceptance.api_scope_inputs import (
+        mixed_expectations,
+        negative_mixed_source_packet,
+    )
+    from tests.support.local_api_packet import RawPacketApi
+
+    packet = negative_mixed_source_packet(case)
+    ledger = json.loads(packet["files"]["endpoints.json"])
+    brain = json.loads(packet["files"][packet["baseline_inputs"]["brain"]])["id"]
+    api = RawPacketApi.from_source_packet(packet)
+    destination = tmp_path / "actual-vault"
+    captures = tmp_path / "product-captures"
+    captures.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(captures))
+    with api_server(api) as (_, address):
+        workflow = local_api_workflow(
+            LocalApiConfig(api_url=address, include_pins=False), credentials=lambda: KEY
+        )
+        reference = LocalApiSourceRef(brain)
+        inspected = workflow.inspect(reference)
+        assert inspected.outcome == "refused", inspected.issues
+        assert inspected.receipt is None
+        assert not tuple(captures.iterdir())
+        assert not destination.exists()
+        assert set(tmp_path.iterdir()) == {captures}
+        converted = workflow.convert(reference, destination)
+    assert converted.outcome == "refused", converted.issues
+    assert converted.receipt is None
+    assert not destination.exists()
+    assert not tuple(captures.iterdir())
+    assert set(tmp_path.iterdir()) == {captures}
+    if expected_code is not None:
+        for result in (inspected, converted):
+            assert expected_code in {issue.code for issue in result.issues}
+    diagnostic = inspected.model_dump_json() + converted.model_dump_json()
+    assert all(c not in diagnostic for c in [*mixed_expectations()["canaries"], KEY])
+    assert not api.unexpected_requests
+    requested = {row["path"] for row in api.served}
+    assert requested.isdisjoint(ledger["forbidden_routes"])
+    assert not any(
+        row["optional"] and row["route"] in requested for row in ledger["routes"]
+    )

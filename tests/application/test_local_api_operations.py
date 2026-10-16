@@ -1136,3 +1136,105 @@ def test_valid_unreferenced_svg_change_requires_fresh_review(tmp_path, change):
         assert (
             tmp_path / "new-review" / asset["relative_path"]
         ).read_bytes() == expected
+
+
+@pytest.mark.parametrize("execution", ["operations", "worker"])
+def test_mixed_scope_review_requires_warning_authorization_and_fresh_changed_source(
+    tmp_path, monkeypatch, execution
+):
+    from tests.local_acceptance.api_checker import audit_baseline, check_api_vault
+    from tests.local_acceptance.api_scope_inputs import (
+        mixed_expectations,
+        mixed_source_packet,
+    )
+    from tests.local_acceptance.test_api_scope_v3 import scope_baseline
+    from tests.support.local_api_packet import RawPacketApi
+
+    baseline = scope_baseline(tmp_path / "independent-source", "tags")
+    changed_baseline = scope_baseline(
+        tmp_path / "changed-independent-source", "changed-svg"
+    )
+    audit_baseline(baseline, profile_version="3")
+    audit_baseline(changed_baseline, profile_version="3")
+    packet = mixed_source_packet("tags")
+    api = RawPacketApi.from_source_packet(packet)
+    monkeypatch.setenv("THE_BRAIN_LOCAL_API_KEY", KEY)
+    brain = baseline.json(baseline.data["brain"])["id"]
+    operations = Operations(credentials=lambda: KEY)
+    worker = Supervisor(Path(sys.executable), Path(__file__).parents[2] / "src")
+    with api_server(api) as (_, address):
+        selection = LocalApiSourceSelection(
+            brain_id=brain,
+            config=ApiAcquisitionConfig(api_url=address, include_pins=False),
+        )
+
+        def inspect():
+            if execution == "operations":
+                return operations.inspect(selection)
+            return worker.run(
+                WorkerRequest(
+                    request_id=str(uuid4()),
+                    operation="inspect",
+                    arguments=InspectArguments(source_selection=selection),
+                )
+            ).response.result
+
+        def convert(name, reviewed, authorized):
+            if execution == "operations":
+                return operations.convert_reviewed(
+                    selection,
+                    tmp_path,
+                    name,
+                    reviewed,
+                    proceed_with_warnings=authorized,
+                )
+            return worker.run(
+                WorkerRequest(
+                    request_id=str(uuid4()),
+                    operation="convert_reviewed",
+                    arguments=ConvertArguments(
+                        source_selection=selection,
+                        parent=str(tmp_path),
+                        vault_name=name,
+                        reviewed=reviewed,
+                        proceed_with_warnings=authorized,
+                    ),
+                )
+            ).response.result
+
+        original = inspect()
+        assert original.reviewed is not None and original.reviewed.outcome == "warnings"
+        refused = convert("unauthorized", original.reviewed, False)
+        assert refused.status == "conversion_refused"
+        assert "warning_authorization_required" in {f.code for f in refused.findings}
+        assert not (tmp_path / "unauthorized").exists()
+        api.use_packet(
+            {
+                "files": (changed := mixed_source_packet("changed-svg"))["files"],
+                "ledger": changed["files"]["endpoints.json"],
+            }
+        )
+        stale = convert("stale-review", original.reviewed, True)
+        assert stale.status == "conversion_refused"
+        assert "review_changed" in {f.code for f in stale.findings}
+        assert not (tmp_path / "stale-review").exists()
+        fresh = inspect()
+        assert fresh.reviewed is not None
+        assert fresh.reviewed.source_identity != original.reviewed.source_identity
+        published = convert("fresh-reviewed", fresh.reviewed, True)
+    assert published.publication.receipt_verified
+    assert published.status == "conversion_created_with_warnings"
+    baseline.verify()
+    changed_baseline.verify()
+    check_api_vault(changed_baseline, tmp_path / "fresh-reviewed", profile_version="3")
+    with pytest.raises(AssertionError):
+        check_api_vault(baseline, tmp_path / "fresh-reviewed", profile_version="3")
+    assert not api.unexpected_requests
+    ledger = json.loads(packet["files"]["endpoints.json"])
+    assert {row["path"] for row in api.served}.isdisjoint(ledger["forbidden_routes"])
+    text = (
+        original.model_dump_json()
+        + stale.model_dump_json()
+        + published.model_dump_json()
+    )
+    assert all(c not in text for c in mixed_expectations()["canaries"])

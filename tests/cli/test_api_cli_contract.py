@@ -389,3 +389,50 @@ def test_standard_cli_preserves_static_svg_with_truthful_profile(
     asset = next(row for row in record["asset_targets"] if row["asset_id"] == IMAGE)
     assert asset["role"] == "image"
     assert (tmp_path / "vault" / asset["relative_path"]).read_bytes() == SVG
+
+
+@pytest.mark.parametrize("case", ["tags", "zero-tags"])
+@pytest.mark.parametrize("as_json", [False, True])
+def test_standard_cli_preserves_mixed_scope_and_safe_diagnostics(
+    tmp_path, monkeypatch, capsys, case, as_json
+):
+    from tests.local_acceptance.api_checker import audit_baseline, check_api_vault
+    from tests.local_acceptance.api_scope_inputs import (
+        mixed_expectations,
+        mixed_source_packet,
+    )
+    from tests.local_acceptance.test_api_scope_v3 import scope_baseline
+    from tests.support.local_api import KEY, api_server
+    from tests.support.local_api_packet import RawPacketApi
+
+    baseline = scope_baseline(tmp_path / "independent-source", case)
+    audit_baseline(baseline, profile_version="3")
+    packet = mixed_source_packet(case)
+    api = RawPacketApi.from_source_packet(packet)
+    brain = baseline.json(baseline.data["brain"])["id"]
+    monkeypatch.setenv("THE_BRAIN_LOCAL_API_KEY", KEY)
+    with api_server(api) as (_, address):
+        source = ["--source-kind", "local-api", "--api-url", address]
+        output = ["--json"] if as_json else []
+        assert main(["inspect", brain, *source, *output]) == 2
+        inspected = capsys.readouterr()
+        assert inspected.err == ""
+        assert (
+            main(["convert", brain, str(tmp_path / "actual-vault"), *source, *output])
+            == 2
+        )
+        converted = capsys.readouterr()
+        assert converted.err == ""
+    if as_json:
+        assert json.loads(inspected.out)["outcome"] == "warnings"
+        result = json.loads(converted.out)
+        assert result["outcome"] == "warnings"
+        assert result["receipt"]["published"] and result["receipt"]["verified"]
+    baseline.verify()
+    check_api_vault(baseline, tmp_path / "actual-vault", profile_version="3")
+    assert not api.unexpected_requests
+    ledger = json.loads(packet["files"]["endpoints.json"])
+    assert {row["path"] for row in api.served}.isdisjoint(ledger["forbidden_routes"])
+    text = inspected.out + converted.out
+    assert KEY not in text
+    assert all(c not in text for c in mixed_expectations()["canaries"])

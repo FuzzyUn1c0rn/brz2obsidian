@@ -778,3 +778,74 @@ def test_real_worker_gui_stage_diagnostic_copy_and_save(tmp_path, monkeypatch, s
         finally:
             window.shutdown()
             window.deleteLater()
+
+
+@pytest.mark.parametrize("case", ["tags", "zero-tags"])
+def test_real_worker_gui_preserves_mixed_scope_after_explicit_warning_review(
+    tmp_path, monkeypatch, case
+):
+    import json
+
+    from brz2obsidian_ui.window import MainWindow
+    from tests.local_acceptance.api_checker import audit_baseline, check_api_vault
+    from tests.local_acceptance.api_scope_inputs import (
+        mixed_expectations,
+        mixed_source_packet,
+    )
+    from tests.local_acceptance.test_api_scope_v3 import scope_baseline
+    from tests.support.local_api_packet import RawPacketApi
+
+    baseline = scope_baseline(tmp_path / "independent-source", case)
+    audit_baseline(baseline, profile_version="3")
+    packet = mixed_source_packet(case)
+    api = RawPacketApi.from_source_packet(packet)
+    monkeypatch.setenv("THE_BRAIN_LOCAL_API_KEY", KEY)
+    app = QApplication.instance() or QApplication([])
+    with api_server(api) as (_, address):
+        window = MainWindow()
+        window.show()
+        try:
+            control(window, QComboBox, "Source kind").setCurrentIndex(1)
+            until(app, lambda: window.snapshot.source_kind == "local-api")
+            control(window, QLineEdit, "Local API address").setText(address)
+            until(app, lambda: window.snapshot.api_config.api_url == address)
+            control(window, QPushButton, "Refresh accessible Brains").click()
+            until(app, lambda: window.snapshot.brain_list_status == "ready")
+            control(window, QComboBox, "Accessible Brains").setCurrentIndex(1)
+            until(app, lambda: window.snapshot.source_selection is not None)
+            control(window, QPushButton, "Inspect Brain").click()
+            until(
+                app,
+                lambda: (
+                    window.snapshot.reviewed is not None
+                    and not window.snapshot.busy_operation
+                ),
+            )
+            assert window.snapshot.reviewed.outcome == "warnings"
+            assert window.snapshot.reviewed.profile_version == "3"
+            button = control(window, QPushButton, "Convert with warnings")
+            assert not button.isEnabled()
+            window.parent_selected(str(tmp_path))
+            QTest.keyClicks(
+                control(window, QLineEdit, "Vault name"), "Mixed scope vault"
+            )
+            until(app, button.isEnabled)
+            button.click()
+            until(
+                app,
+                lambda: (
+                    window.snapshot.publication is not None
+                    and window.snapshot.publication.receipt_verified
+                ),
+            )
+            assert window.snapshot.result.status == "conversion_created_with_warnings"
+            text = window.findings.toPlainText() + window.snapshot.model_dump_json()
+            assert all(c not in text for c in mixed_expectations()["canaries"])
+        finally:
+            window.shutdown()
+            window.deleteLater()
+    baseline.verify()
+    check_api_vault(baseline, tmp_path / "Mixed scope vault", profile_version="3")
+    assert not api.unexpected_requests
+    ledger = json.loads(packet["files"]["endpoints.json"])
+    assert {row["path"] for row in api.served}.isdisjoint(ledger["forbidden_routes"])

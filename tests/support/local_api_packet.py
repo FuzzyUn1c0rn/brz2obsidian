@@ -6,15 +6,24 @@ import json
 
 class RawPacketApi:
     def __init__(self, packet):
+        self.requests = []
+        self.response_chunks = {}
+        self.served = []
+        self.unexpected_requests = []
+        self.use_packet(packet)
+
+    @classmethod
+    def from_source_packet(cls, packet):
+        return cls(
+            {"files": packet["files"], "ledger": packet["files"]["endpoints.json"]}
+        )
+
+    def use_packet(self, packet):
         self.files = packet["files"]
         ledger = json.loads(packet["ledger"])
         self.routes = {row["route"]: row for row in ledger["routes"]}
         self.pair = ledger["consistency_pair"]
-        self.requests = []
-        self.response_chunks = {}
         self.response_counts = {}
-        self.served = []
-        self.unexpected_requests = []
 
     def response(self, path, query):
         if path not in self.routes:
