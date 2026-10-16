@@ -258,3 +258,25 @@ profiles1/2 and their controls remain available. Capture format1, module1,
 contract7 and worker/review schema3 are unchanged. Every new source-family
 predicate requires matching live and frozen implementation under its assigned
 slice; raw capture or profile selection never expands the finite qualification.
+
+Profile3 implements the finite static SVG predicate in accepted
+[S7](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/210). The API-local parser
+accepts only strict UTF-8 without BOM, the optional XML1.0/UTF-8 declaration,
+the default SVG namespace, an exact width/height/viewBox root and direct rect/line
+children with the specified closed attributes. Character data is XML whitespace
+only. Entity references, DTD/entity declarations, comments, other processing
+instructions,
+foreign namespaces and dependency/active syntax refuse before interpretation.
+The inclusive limits are 1 MiB, 4096 elements including root, depth2, root dimensions
+32768 and general numeric magnitude1000000. Decimal lexemes are at most64 ASCII
+characters; coefficient/exponent comparisons preserve arbitrarily tiny positives
+without floating-point underflow or exponent expansion. Rectangle dimensions and
+both shape stroke widths are positive; omitted attributes keep SVG defaults.
+
+Every owned SVG receives the same structural validation, including unreferenced
+images and each distinct identity with equal bytes. Validation preserves the
+complete original; no rewriting, rasterization or dependency resolution occurs.
+Profiles1/2 retain refusals. Known excluded owners keep the existing no-fetch
+scope boundary; previous external URL/file roles retain their own predicates.
+The actual-source sixteen-image identity/artwork investigation, complete audit
+and native presentation gates remain separate from this synthetic eligibility.

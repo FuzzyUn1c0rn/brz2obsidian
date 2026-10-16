@@ -213,3 +213,31 @@ def test_profile3_stage_diagnostics_reach_cli_without_source_hints(
         assert result["receipt"] is None
         assert result["issues"][0]["message"] == SHAPE_MESSAGES[stage]
     assert not (tmp_path / "refused").exists()
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+def test_standard_cli_preserves_static_svg_with_truthful_profile(
+    tmp_path, monkeypatch, capsys, as_json
+):
+    from tests.sources.test_local_api_svg_v3 import SVG, SvgApi
+    from tests.support.local_api import BRAIN, KEY, api_server
+    from tests.support.local_api_payloads import IMAGE
+
+    monkeypatch.setenv("THE_BRAIN_LOCAL_API_KEY", KEY)
+    with api_server(SvgApi()) as (_, address):
+        source = ["--source-kind", "local-api", "--api-url", address]
+        output = ["--json"] if as_json else []
+        assert main(["inspect", BRAIN, *source, *output]) == 0
+        inspected = capsys.readouterr()
+        assert inspected.err == ""
+        if as_json:
+            assert json.loads(inspected.out)["outcome"] == "clean"
+        assert main(["convert", BRAIN, str(tmp_path / "vault"), *source, *output]) == 0
+        converted = capsys.readouterr()
+        assert converted.err == ""
+        assert "CANARY" not in inspected.out + converted.out
+    record = json.loads((tmp_path / "vault/migration-record.json").read_bytes())
+    assert record["profile_version"] == "3"
+    asset = next(row for row in record["asset_targets"] if row["asset_id"] == IMAGE)
+    assert asset["role"] == "image"
+    assert (tmp_path / "vault" / asset["relative_path"]).read_bytes() == SVG

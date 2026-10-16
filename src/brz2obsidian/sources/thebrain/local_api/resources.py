@@ -15,6 +15,7 @@ from brz2obsidian.contracts import Asset, Document
 from .declarations import source_date, uuid
 from .errors import refuse, unsupported_shape
 from .notes import scope_text
+from .svg import validate_svg
 
 ATTACHMENT_FIELDS = {
     "id",
@@ -129,6 +130,7 @@ def role(value, profile_version):
         and location
         in {value["id"] + ".webp"}
         | ({value["id"] + ".png"} if profile_version in {"2", "3"} else set())
+        | ({value["id"] + ".svg"} if profile_version == "3" else set())
     ):
         return "image"
     if kind in {1, 15}:
@@ -186,6 +188,9 @@ def validate_bytes(value, raw, profile_version):
                 archive.infolist()
         except BadZipFile, ValueError, OSError:
             refuse("Required ZIP bytes have no valid central directory")
+        return selected
+    if selected == "image" and suffix == "svg" and profile_version == "3":
+        validate_svg(raw)
         return selected
     expected = None
     if prefix.startswith(b"\x89PNG\r\n\x1a\n") and (

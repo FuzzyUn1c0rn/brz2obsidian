@@ -909,3 +909,56 @@ def test_valid_replacement_image_has_new_identity_and_needs_new_review(tmp_path)
         assert (
             tmp_path / f"new-review/Attachments/22222222/{IMAGE}.png"
         ).read_bytes() == replacement
+
+
+@pytest.mark.parametrize("change", ["drawing", "identity"])
+def test_valid_unreferenced_svg_change_requires_fresh_review(tmp_path, change):
+    from tests.sources.test_local_api_svg_v3 import SECOND, SVG, DualSvgApi
+
+    with api_server(DualSvgApi()) as (api, address):
+        selection = LocalApiSourceSelection(
+            brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+        )
+        operations = Operations(credentials=lambda: KEY)
+        original = operations.inspect(selection)
+        assert original.reviewed is not None and not original.findings
+        identity = SECOND
+        expected = SVG
+        if change == "drawing":
+            expected = SVG.replace(b'fill="#aBc"', b'fill="#dEf"')
+            api.payloads[SECOND] = expected
+        else:
+            identity = "a3333333-3333-4333-8333-333333333335"
+            api.attachments[identity] = api.attachments.pop(SECOND) | {
+                "id": identity,
+                "location": identity + ".svg",
+            }
+            api.payloads[identity] = api.payloads.pop(SECOND)
+        current = operations.inspect(selection)
+        assert current.reviewed is not None
+        assert (
+            current.reviewed.source_identity.source_sha256
+            != original.reviewed.source_identity.source_sha256
+        )
+        assert (
+            current.reviewed.source_identity.snapshot_digest
+            != original.reviewed.source_identity.snapshot_digest
+        )
+        refused = operations.convert_reviewed(
+            selection, tmp_path, "old-review", original.reviewed
+        )
+        assert refused.findings[0].code == "review_changed"
+        assert not (tmp_path / "old-review").exists()
+        accepted = operations.convert_reviewed(
+            selection, tmp_path, "new-review", current.reviewed
+        )
+        assert accepted.publication.receipt_verified
+        record = json.loads(
+            (tmp_path / "new-review/migration-record.json").read_bytes()
+        )
+        asset = next(
+            row for row in record["asset_targets"] if row["asset_id"] == identity
+        )
+        assert (
+            tmp_path / "new-review" / asset["relative_path"]
+        ).read_bytes() == expected

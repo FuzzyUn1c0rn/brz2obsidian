@@ -182,3 +182,15 @@ locations and their derived URI/display facts remain content-bound. Pinned
 mutations refuse even with recomputed untrusted manifests. A fresh valid capture
 with valid changed content receives a different identity and needs a new review;
 independent original-source preservation is established by baseline comparison.
+
+Profile3 static SVG images use the existing owned-image payload domain. Live
+acquisition, fresh session construction, sealing and reopened verification apply
+the same exact declaration/owner/role/reference bindings and finite XML grammar
+to every payload. Distinct source IDs with identical bytes remain distinct assets
+and owned files. Regenerating hashes cannot authorize an invalid drawing, changed
+ownership/role/filename/reference or falsely included excluded owner. A valid
+changed drawing or equal-byte identity change yields different content identity
+and needs fresh review; mutation of an already pinned unrequested image refuses
+even when length/mtime and a recomputed untrusted manifest appear consistent.
+Capture1, CJSON1 and the existing digest domains remain unchanged. Structural
+capture validation retains the independent original-source fidelity requirement.

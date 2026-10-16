@@ -211,3 +211,13 @@ source meanings are qualified in [the profile-3 table](local-api-profile3-qualif
 and are implemented in their assigned source-family slices. Qualification alone
 never makes unsupported source content importable. Profile changes require a
 fresh compatible inspection; the worker/review schema remains version 3.
+
+Profile 3 preserves thought-owned static SVG note images declared as the canonical
+attachment UUID plus lowercase `.svg`, type 12, isNotes=false and explicit null
+name. Each image, including unreferenced attachments, must satisfy the bounded
+rectangle/line drawing grammar in
+[the profile qualification](local-api-profile3-qualification.md#q6-finite-static-svg-note-image).
+Original UTF-8 bytes, separate attachment identities, filenames, ownership and
+authored image placement remain intact. The existing note sizing adaptations
+apply. Structural acceptance establishes eligibility; exact-source artwork
+fidelity and native presentation retain their recorded acceptance gates.
