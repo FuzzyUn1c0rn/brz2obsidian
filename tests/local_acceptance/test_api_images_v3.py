@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import struct
 from pathlib import Path
 
@@ -216,8 +217,20 @@ def test_each_advertised_ico_entry_and_dib_field_is_finite(
     elif field in {"short_colour", "short_mask", "tail_minus"}:
         position = offset + 40 if field == "short_colour" else offset + length - 1
         del raw[position]
+        struct.pack_into("<I", raw, entry + 8, length - 1)
+        for following in range(index + 1, struct.unpack_from("<H", raw, 4)[0]):
+            start = 6 + 16 * following + 12
+            struct.pack_into(
+                "<I", raw, start, struct.unpack_from("<I", raw, start)[0] - 1
+            )
     else:
         raw.insert(offset + length, 0)
+        struct.pack_into("<I", raw, entry + 8, length + 1)
+        for following in range(index + 1, struct.unpack_from("<H", raw, 4)[0]):
+            start = 6 + 16 * following + 12
+            struct.pack_into(
+                "<I", raw, start, struct.unpack_from("<I", raw, start)[0] + 1
+            )
     baseline = put_payload(baseline, raw)
     with pytest.raises(AssertionError):
         expected_asset(baseline, image, "3")
@@ -718,9 +731,12 @@ def test_trusted_source_pin_rejects_even_equal_length_nondefault_or_unreferenced
     path = (
         baseline.manifest_path.parent / baseline.data["payloads"][identity(key)]["path"]
     )
+    stamp = path.stat()
     raw = bytearray(path.read_bytes())
     raw[4400 if key == 206 else 1200 if key == 207 else 300] ^= 1
     path.write_bytes(raw)
+    os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    assert path.stat().st_mtime_ns == stamp.st_mtime_ns
     with pytest.raises(AssertionError, match="baseline evidence changed"):
         audit_baseline(baseline, profile_version="3")
     with pytest.raises(AssertionError, match="baseline evidence changed"):
@@ -1162,3 +1178,19 @@ def test_image_metadata_joins_keep_exact_fractional_source_positions(tmp_path):
     )["position"] = {"decimal": "1.25"}
     write_json(path, record)
     assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 6
+
+
+@pytest.mark.parametrize("key", [202, 205, 206, 207])
+@pytest.mark.parametrize("status", [404, 408, 503, 200.0, True])
+def test_every_new_image_requires_an_actual_complete_200_response(
+    tmp_path, key, status
+):
+    baseline, vault = bound_case(tmp_path)
+    manifest = json.loads(baseline.manifest_path.read_bytes())
+    manifest["payloads"][identity(key)]["status"] = status
+    write_json(baseline.manifest_path, manifest)
+    baseline = reseal(baseline)
+    with pytest.raises(AssertionError):
+        audit_baseline(baseline, profile_version="3")
+    with pytest.raises(AssertionError):
+        check_api_vault(baseline, vault, profile_version="3")

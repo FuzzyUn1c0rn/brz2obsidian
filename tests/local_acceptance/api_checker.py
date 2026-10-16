@@ -610,6 +610,8 @@ def expected_asset(baseline, attachment, profile_version="1", proofs=None):
             assert display is None, "profile2 resource explicit null name"
         role = "file"
     outcome = baseline.data["payloads"][attachment["id"]]
+    if profile_version == "3":
+        assert type(outcome["status"]) is int, "actual HTTP payload status"
     if outcome["status"] == 404:
         assert kind == 15 and not note, "unqualified missing payload"
         return role, "absent", None
