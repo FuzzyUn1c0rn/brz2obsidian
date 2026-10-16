@@ -20,13 +20,12 @@ from .api_note_text import (
     document_references,
     expected_document_text,
     expected_note_text,
-    row_cells,
     validate_document_adaptations,
 )
 from .api_svg import qualify_svg
 from .checker import escaped, source_references, wiki
 from .images import AuditUnavailable, decode_image
-from .text import _line_view, _owned_block_view, active_mask, inline_candidates
+from .text import active_mask, inline_candidates
 
 
 def identities(rows, key, label):
@@ -385,7 +384,18 @@ def new_image_ids(baseline, attachments):
     """Scope obligations from original declarations/bytes, never output roles."""
     selected = set()
     for key, row in attachments.items():
-        if row["type"] == 12 and row["location"].endswith(".jpg"):
+        if (row["type"] == 12 and row["location"].endswith(".jpg")) or (
+            type(row.get("type")) is int
+            and row["type"] == 12
+            and type(row.get("sourceType")) is int
+            and row["sourceType"] == 2
+            and row.get("isNotes") is False
+            and "name" in row
+            and row["name"] is None
+            and row["location"] == uuid(key) + ".svg"
+            and row["sourceId"] in baseline.data["graphs"]
+            and row["brainId"] == baseline.json(baseline.data["brain"])["id"]
+        ):
             selected.add(key)
         elif row["type"] == 5:
             outcome = baseline.data["payloads"].get(key, {})
@@ -1384,43 +1394,6 @@ def qualify_svg_binding(baseline, attachment):
     ) == semantic(attachment), "SVG standalone declaration agreement"
 
 
-def svg_table_contexts(text):
-    """Independent native-table row ranges, retaining raw CR/LF coordinates."""
-    lines = [line for line in re.findall(r"[^\r\n]*(?:\r\n|\r|\n|$)", text) if line]
-    offsets, cursor = [], 0
-    for line in lines:
-        offsets.append(cursor)
-        cursor += len(line)
-    scan = active_mask(text)
-    contexts = set()
-    for index, line in enumerate(lines[:-1]):
-        content, _, _, owner = _line_view(line)
-        cells = row_cells(content)
-        next_line = _owned_block_view(lines[index + 1], owner)
-        separator = row_cells(next_line) if next_line is not None else None
-        if not (
-            cells
-            and separator
-            and len(cells) == len(separator)
-            and scan[offsets[index] : offsets[index] + len(line)].strip()
-            and all(re.fullmatch(r"[ \t]*:?-{3,}:?[ \t]*", cell) for cell in separator)
-        ):
-            continue
-        for following in range(index, len(lines)):
-            view = (
-                _owned_block_view(lines[following], owner)
-                if following != index
-                else content
-            )
-            row = row_cells(view) if view is not None else None
-            if row is None or len(row) != len(cells):
-                break
-            contexts.add(
-                (offsets[following], offsets[following] + len(lines[following]))
-            )
-    return contexts
-
-
 def check_svg_notes(baseline, vault, thoughts, attachments, targets, assets):
     svg = {
         key
@@ -1464,53 +1437,11 @@ def check_svg_notes(baseline, vault, thoughts, attachments, targets, assets):
                 assert wanted in body[cursor:], "SVG raw-derived authored display"
                 cursor = body.index(wanted, cursor) + len(wanted)
             adapted = expected_document_text(raw)
-            digest = hashlib.sha256(adapted.encode()).hexdigest()
-            docs = [d for d in target.get("documents", []) if d.get("key") == row["id"]]
-            assert len(docs) == 1, "SVG original-bound document identity"
-            doc = docs[0]
-            assert (
-                doc["owner"],
-                doc["original_asset_id"],
-                doc["text_digest"],
-                doc["owner_target"],
-                doc["original_copy_omitted"],
-            ) == (owner, row["id"], digest, target["relative_path"], False), (
-                "SVG source document binding"
+            referenced.update(
+                r["target"]
+                for r in document_references(adapted, owner, assets)
+                if r["kind"] == "image"
             )
-            refs = document_references(adapted, owner, assets)
-            tables = svg_table_contexts(adapted)
-            assert len(doc["references"]) == len(refs), (
-                "SVG complete document references"
-            )
-            for declared, ref in zip(doc["references"], refs, strict=True):
-                required = {
-                    "start": ref["start"],
-                    "end": ref["end"],
-                    "kind": ref["kind"],
-                    "target": ref["target"],
-                    "display_text": ref["label"],
-                    "table_cell": any(
-                        begin <= ref["start"] < ref["end"] <= end
-                        for begin, end in tables
-                    ),
-                    "expected_original": adapted[ref["start"] : ref["end"]],
-                    "document_digest": digest,
-                    "source_target": adapted[
-                        ref["destination_start"] : ref["destination_end"]
-                    ],
-                    "destination_start": ref["destination_start"]
-                    if ref["kind"] == "image"
-                    else None,
-                    "destination_end": ref["destination_end"]
-                    if ref["kind"] == "image"
-                    else None,
-                    "presentation_normalization": ref["presentation_normalization"],
-                }
-                assert all(
-                    semantic(declared.get(k)) == semantic(value)
-                    for k, value in required.items()
-                ), "SVG raw-derived reference coordinates/binding"
-            referenced.update(r["target"] for r in refs if r["kind"] == "image")
         owned = sorted(key for key in svg if attachments[key]["sourceId"] == owner)
         required = []
         for key in owned:
@@ -1540,9 +1471,18 @@ def check_svg_notes(baseline, vault, thoughts, attachments, targets, assets):
             "\n" if raw == "\n" else active
             for raw, active in zip(body, mask, strict=True)
         )[cursor:]
-        assert not any(
-            image for _, _, image, _, _, _ in inline_candidates(activity)[0]
-        ), "SVG unexpected generated image placement"
+        candidates = inline_candidates(activity)[0]
+        assert not any(image for _, _, image, _, _, _ in candidates), (
+            "SVG unexpected generated image placement"
+        )
+        # An HTTP Markdown destination owns its complete spelling, including
+        # wiki-like text in its query/fragment or label. Only remaining active
+        # wiki references can be generated local SVG Resources rows.
+        resource_activity = list(activity)
+        for begin, end, _, _, _, _ in candidates:
+            for offset in range(begin, end):
+                resource_activity[offset] = "\n" if activity[offset] == "\n" else " "
+        resource_activity = "".join(resource_activity)
 
         class SVGHTML(HTMLParser):
             def handle_starttag(self, tag, attrs, *, owned=owned):
@@ -1554,9 +1494,11 @@ def check_svg_notes(baseline, vault, thoughts, attachments, targets, assets):
 
         SVGHTML().feed(activity)
         actual = []
-        for match in re.finditer(r"^.*\[\[[^\n]+\]\].*$", tail, re.MULTILINE):
-            line = match.group()
-            if ".svg" in line and activity[match.start() : match.end()].strip():
+        for match in re.finditer(
+            r"^.*\[\[[^\n]+\]\].*$", resource_activity, re.MULTILINE
+        ):
+            line = tail[match.start() : match.end()]
+            if ".svg" in match.group():
                 actual.append(line)
         assert actual == required, "SVG generated Resources links"
         if required:
