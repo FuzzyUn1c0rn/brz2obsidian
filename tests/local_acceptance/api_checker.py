@@ -3,6 +3,7 @@
 import hashlib
 import re
 from decimal import Decimal
+from html.parser import HTMLParser
 from io import BytesIO
 from itertools import pairwise
 from pathlib import Path
@@ -14,7 +15,7 @@ from .api_manifest import read_json, safe_path
 from .api_note_text import expected_note_text
 from .checker import escaped, source_references, wiki
 from .images import AuditUnavailable, decode_image
-from .text import active_mask
+from .text import active_mask, inline_candidates
 
 
 def identities(rows, key, label):
@@ -818,6 +819,21 @@ def check_external_resources(
     baseline, vault, thoughts, attachments, targets, assets, profile_version
 ):
     """Bind generated Resources references to their independently qualified owner."""
+
+    class FileHTML(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.file_target = False
+
+        def handle_starttag(self, tag, attrs):
+            if tag in {"a", "iframe", "img", "object", "embed"}:
+                self.file_target |= any(
+                    name in {"href", "src", "data"}
+                    and value is not None
+                    and value.lstrip().lower().startswith("file:")
+                    for name, value in attrs
+                )
+
     owners = {a["sourceId"] for a in attachments.values() if a["type"] in {2, 8}}
     for owner in owners:
         target = targets[owner]
@@ -848,14 +864,31 @@ def check_external_resources(
                         assets,
                     )
                 )
-        for text in authored:
+        metadata_span = None
+        for index, text in enumerate(authored):
             text = text.replace("\r\n", "\n").replace("\r", "\n")
             if text:
                 position = body.find(text, cursor)
                 assert position >= 0, "external resource authored content unavailable"
+                if index == 0 and thoughts[owner].get("label"):
+                    metadata_span = (position, position + len(text))
                 cursor = position + len(text)
+        syntax = list(body)
+        if metadata_span is not None:
+            begin, end = metadata_span
+            # Thought labels are metadata. Closed declarations retain their raw
+            # output but are opaque to the stricter authored-note HTML policy.
+            # Comments and trailing code/comment guards keep their ownership.
+            for token in re.finditer(
+                r"<!--.*?(?:-->|$)|<![A-Za-z][^>]*>", body[begin:end], re.DOTALL
+            ):
+                if token[0].startswith("<!--"):
+                    continue
+                for offset in range(begin + token.start(), begin + token.end()):
+                    syntax[offset] = "\n" if body[offset] == "\n" else " "
+        syntax = "".join(syntax)
         tail = body[cursor:]
-        mask = active_mask(body, autolinks=False)
+        mask = active_mask(syntax, autolinks=False)
         activity = "".join(
             "\n" if raw == "\n" else active
             for raw, active in zip(body, mask, strict=True)
@@ -873,14 +906,33 @@ def check_external_resources(
         section_start = headings[0].end()
         following = re.search(r"^## ", activity[section_start:], re.MULTILINE)
         section_end = section_start + following.start() if following else len(tail)
-        file_target = re.compile(
-            r"\]\([ \t]*<?file:"
-            r"|^[ \t]*(?:-[ \t]+)?(?:<file:|\[\[file:)"
-            r"|^[ \t]*<(?:a|iframe|img|object|embed)\b[^\n>]*"
-            r"\b(?:src|href|data)[ \t]*=[ \t]*[\"']?file:"
+        file_rows = {}
+        remainder = list(activity)
+
+        def retain_row(position, *, body=body, cursor=cursor, file_rows=file_rows):
+            begin = body.rfind("\n", 0, position) + 1
+            end = body.find("\n", position)
+            if end < 0:
+                end = len(body)
+            file_rows[begin - cursor] = body[begin:end]
+
+        for begin, end, _, _, destination, finish in inline_candidates(syntax)[0]:
+            if begin >= cursor and body[destination:finish].lower().startswith("file:"):
+                retain_row(begin)
+            for offset in range(max(begin, cursor), end):
+                remainder[offset - cursor] = "\n" if body[offset] == "\n" else " "
+        remainder = "".join(remainder)
+        extra_target = re.compile(
+            r"\]\([ \t]*<?file:|<file:[^<>\s]*>"
+            r"|\[\[file:[^\n\]]+\]\]"
             r"|^ {0,3}\[[^\]]+\]:[ \t]*<?file:",
-            re.IGNORECASE,
+            re.IGNORECASE | re.MULTILINE,
         )
+        for match in extra_target.finditer(remainder):
+            retain_row(cursor + match.start())
+        html = FileHTML()
+        html.feed(remainder)
+        assert not html.file_target, "unexpected external HTML activation"
 
         required = []
         for key in sorted(attachments):
@@ -892,26 +944,11 @@ def check_external_resources(
             label = re.sub(r"([\\`*_{}<>])", r"\\\1", label)
             required.append("- [" + label + "](<" + uri + ">)")
 
-        def observed_file_rows(raw_text, active_text, pattern):
-            return [
-                raw
-                for raw, active in zip(
-                    raw_text.split("\n"),
-                    active_text.split("\n"),
-                    strict=True,
-                )
-                if pattern.search(active)
-            ]
-
-        assert (
-            observed_file_rows(
-                tail[section_start:section_end],
-                activity[section_start:section_end],
-                file_target,
-            )
-            == required
-        ), "external generated Resources links"
-        assert observed_file_rows(tail, activity, file_target) == required, (
+        rows = sorted(file_rows.items())
+        assert [
+            row for offset, row in rows if section_start <= offset < section_end
+        ] == required, "external generated Resources links"
+        assert [row for _, row in rows] == required, (
             "unexpected external reference outside Resources"
         )
 

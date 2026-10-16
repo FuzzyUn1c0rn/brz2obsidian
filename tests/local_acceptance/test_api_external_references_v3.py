@@ -830,6 +830,8 @@ def test_external_source_join_retains_accepted_reverse_hierarchy_profile(
     [
         ("file: guide", "https://example.invalid/guide.svg"),
         ("Guide", "https://example.invalid/guide.svg?next=file:read"),
+        ("Guide", "https://example.invalid/guide.svg?text=](file:guide)"),
+        ("Guide", "https://example.invalid/guide.svg#](file:guide)"),
     ],
 )
 @pytest.mark.parametrize("damage", [None, "extra-file-link"])
@@ -921,3 +923,60 @@ def test_generated_resource_boundary_exits_open_authored_construct(
             check_api_vault(baseline, vault, profile_version="3")
     else:
         assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 4
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        "More <file:///C:/forged>\n",
+        'More <a href="file:///C:/forged">Wrong</a>\n',
+        '<a\nhref="file:///C:/forged">Wrong</a>\n',
+        "More [[file:///C:/forged]]\n",
+        "More [Wrong](<file:///C:/forged>)\n",
+        '<img\nsrc="file:///C:/forged">\n',
+        "[Wrong]: <file:///C:/forged>\n",
+    ],
+)
+def test_extra_active_file_targets_in_any_generated_position_refuse(tmp_path, extra):
+    baseline, vault, _ = external_case(tmp_path)
+    path = vault / "External.md"
+    path.write_text(path.read_text(encoding="utf-8") + extra, encoding="utf-8")
+    with pytest.raises(AssertionError):
+        check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize(
+    "label,guard",
+    [
+        ("<!A>", ""),
+        ("<!A\nopaque>", ""),
+        ("<!-- Keep <!A> -->\n<!B>", ""),
+        ("```\n<!A>\n```", ""),
+        ("```\n<!A>\n", "\n\n```\n"),
+        ("<!--\n<!A>\n", "\n\n-->\n"),
+    ],
+)
+@pytest.mark.parametrize("omitted", [False, True])
+def test_metadata_label_is_preserved_outside_owned_note_grammar(
+    tmp_path, label, guard, omitted
+):
+    baseline, vault, _ = external_case(tmp_path)
+    root = baseline.manifest_path.parent
+    graph = json.loads((root / "external-graph.json").read_bytes())
+    graph["activeThought"]["label"] = label
+    write_json(root / "external-graph.json", graph)
+    baseline = reseal(baseline)
+    record_path = vault / "migration-record.json"
+    record = json.loads(record_path.read_bytes())
+    record["original_evidence"][0]["records"][-2] = graph["activeThought"]
+    write_json(record_path, record)
+    generated = "## Resources\n\n- [café  v2 .pdf](<" + FILE[3] + ">)\n"
+    body = (
+        "# External only\n\n" + ("" if omitted else label + "\n\n") + guard + generated
+    )
+    (vault / "External.md").write_text(body, encoding="utf-8")
+    if omitted:
+        with pytest.raises(AssertionError):
+            check_api_vault(baseline, vault, profile_version="3")
+    else:
+        assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 3
