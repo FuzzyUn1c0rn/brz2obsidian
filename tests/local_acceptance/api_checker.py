@@ -14,6 +14,7 @@ from .api_manifest import read_json, safe_path
 from .api_note_text import expected_note_text
 from .checker import escaped, source_references, wiki
 from .images import AuditUnavailable, decode_image
+from .text import active_mask
 
 
 def identities(rows, key, label):
@@ -381,7 +382,9 @@ def external_projection(baseline, attachment, profile_version):
         type(attachment.get("sourceType")) is int and attachment["sourceType"] == 2
     ), "external owner type"
     key, owner = uuid(attachment["id"]), uuid(attachment["sourceId"])
-    thoughts, _, attachments, _ = source_facts(baseline)
+    thoughts, _, attachments, _ = source_facts(
+        baseline, profile_version=profile_version
+    )
     assert (
         owner in thoughts
         and key in attachments
@@ -524,6 +527,7 @@ def expected_asset(baseline, attachment, profile_version="1", proofs=None):
         else:
             assert payload.startswith(b"%PDF-"), "raw PDF signature"
     return role, "present", payload
+
 
 def qualify_v2_bytes(payload, format_name, asset_id, proofs):
     digest = hashlib.sha256(payload).hexdigest()
@@ -851,31 +855,33 @@ def check_external_resources(
                 assert position >= 0, "external resource authored content unavailable"
                 cursor = position + len(text)
         tail = body[cursor:]
+        mask = active_mask(body, autolinks=False)
+        activity = "".join(
+            "\n" if raw == "\n" else active
+            for raw, active in zip(body, mask, strict=True)
+        )[cursor:]
         headings = list(
             re.finditer(
                 r"^ {0,3}#{1,6}[ \t]+Resources\b[^\n]*",
-                tail,
+                activity,
                 re.MULTILINE | re.IGNORECASE,
             )
         )
         assert len(headings) == 1 and headings[0].group() == "## Resources", (
             "external generated Resources section"
         )
-        section = tail[headings[0].end() :]
-        headings = list(
-            re.finditer(
-                r"^ {0,3}#{1,6}[ \t]+Resources\b[^\n]*",
-                tail,
-                re.MULTILINE | re.IGNORECASE,
-            )
+        section_start = headings[0].end()
+        following = re.search(r"^## ", activity[section_start:], re.MULTILINE)
+        section_end = section_start + following.start() if following else len(tail)
+        file_target = re.compile(
+            r"\]\([ \t]*<?file:"
+            r"|^[ \t]*(?:-[ \t]+)?(?:<file:|\[\[file:)"
+            r"|^[ \t]*<(?:a|iframe|img|object|embed)\b[^\n>]*"
+            r"\b(?:src|href|data)[ \t]*=[ \t]*[\"']?file:"
+            r"|^ {0,3}\[[^\]]+\]:[ \t]*<?file:",
+            re.IGNORECASE,
         )
-        assert len(headings) == 1 and headings[0].group() == "## Resources", (
-            "external generated Resources section"
-        )
-        section = tail[headings[0].end() :]
-        following = re.search(r"^## ", section, re.MULTILINE)
-        if following:
-            section = section[: following.start()]
+
         required = []
         for key in sorted(attachments):
             attachment = attachments[key]
@@ -885,25 +891,28 @@ def check_external_resources(
             label = re.sub(r"[\[\]|\r\n]", " ", display).strip() or "Resource"
             label = re.sub(r"([\\`*_{}<>])", r"\\\1", label)
             required.append("- [" + label + "](<" + uri + ">)")
-        observed = [line for line in section.split("\n") if "file:" in line.lower()]
-        assert observed == required, "external generated Resources links"
-        assert [
-            line for line in tail.split("\n") if "file:" in line.lower()
-        ] == required, "unexpected external reference outside Resources"
-        assert all(
-            tail.split("\n").count(line) == required.count(line) for line in required
-        ), "external duplicate Resources reference"
-        assert not re.search(r"(?:!\[|<iframe|<a\b)[^\n]*file:", tail, re.IGNORECASE), (
-            "external reference must not embed or launch"
-        )
-        assert [
-            line for line in tail.split("\n") if "file:" in line.lower()
-        ] == required, "unexpected external reference outside Resources"
-        assert all(
-            tail.split("\n").count(line) == required.count(line) for line in required
-        ), "external duplicate Resources reference"
-        assert not re.search(r"(?:!\[|<iframe|<a\b)[^\n]*file:", tail, re.IGNORECASE), (
-            "external reference must not embed or launch"
+
+        def observed_file_rows(raw_text, active_text, pattern):
+            return [
+                raw
+                for raw, active in zip(
+                    raw_text.split("\n"),
+                    active_text.split("\n"),
+                    strict=True,
+                )
+                if pattern.search(active)
+            ]
+
+        assert (
+            observed_file_rows(
+                tail[section_start:section_end],
+                activity[section_start:section_end],
+                file_target,
+            )
+            == required
+        ), "external generated Resources links"
+        assert observed_file_rows(tail, activity, file_target) == required, (
+            "unexpected external reference outside Resources"
         )
 
 

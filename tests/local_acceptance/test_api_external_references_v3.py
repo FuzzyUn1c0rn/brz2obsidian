@@ -33,10 +33,10 @@ DIRECTORY = (
 )
 
 
-def external_case(tmp_path, example=FILE):
+def external_case(tmp_path, example=FILE, *, source_factory=source_case):
     """Literal graph/list/metadata join and external-only materialized owner."""
     kind, location, display, uri, label = example
-    baseline, vault = source_case(tmp_path)
+    baseline, vault = source_factory(tmp_path)
     root = baseline.manifest_path.parent
     manifest = json.loads(baseline.manifest_path.read_bytes())
     owner = {
@@ -343,9 +343,10 @@ def test_external_authoritative_scalar_predicates_refuse(
         assert_public_accepts(entrypoint, baseline, vault, attachment)
 
 
+@pytest.mark.parametrize("example", [FILE, DIRECTORY])
 @pytest.mark.parametrize("entrypoint", ENTRYPOINTS)
-def test_external_name_must_be_explicitly_null(tmp_path, entrypoint):
-    baseline, vault, _ = external_case(tmp_path)
+def test_external_name_must_be_explicitly_null(tmp_path, entrypoint, example):
+    baseline, vault, _ = external_case(tmp_path, example)
     baseline, attachment = replace_declaration(baseline, vault, {}, omitted=("name",))
     with pytest.raises(AssertionError):
         assert_public_accepts(entrypoint, baseline, vault, attachment)
@@ -644,11 +645,15 @@ def test_authored_resource_heading_does_not_supply_generated_reference(
 
 @pytest.mark.parametrize("same_uri", [False, True])
 @pytest.mark.parametrize("damage", [None, "omit", "swap-order"])
-def test_multiple_reference_identities_preserve_basename_and_raw_spelling(tmp_path, same_uri, damage):
+def test_multiple_reference_identities_preserve_basename_and_raw_spelling(
+    tmp_path, same_uri, damage
+):
     baseline, vault, first = external_case(tmp_path)
     root = baseline.manifest_path.parent
     manifest = json.loads(baseline.manifest_path.read_bytes())
-    location = "C:/Research/R&D #1/café [v2].pdf" if same_uri else "D:/Archive/café [v2].pdf"
+    location = (
+        "C:/Research/R&D #1/café [v2].pdf" if same_uri else "D:/Archive/café [v2].pdf"
+    )
     uri = FILE[3] if same_uri else "file:///D:/Archive/caf%C3%A9%20%5Bv2%5D.pdf"
     second = dict(first, id=identity(206), location=location)
     graph = json.loads((root / "external-graph.json").read_bytes())
@@ -656,22 +661,40 @@ def test_multiple_reference_identities_preserve_basename_and_raw_spelling(tmp_pa
     write_json(root / "external-graph.json", graph)
     write_json(root / "external-list.json", [first, second])
     write_json(root / "second-metadata.json", second)
-    manifest["files"]["second-metadata.json"] = fingerprint(root / "second-metadata.json")
-    manifest["attachment_metadata"][identity(206)] = {"status": 200, "path": "second-metadata.json"}
+    manifest["files"]["second-metadata.json"] = fingerprint(
+        root / "second-metadata.json"
+    )
+    manifest["attachment_metadata"][identity(206)] = {
+        "status": 200,
+        "path": "second-metadata.json",
+    }
     manifest["scope"]["attachment_ids"].append(identity(206))
     write_json(baseline.manifest_path, manifest)
     baseline = reseal(baseline)
     path = vault / "migration-record.json"
     record = json.loads(path.read_bytes())
-    record["asset_targets"].append(dict(record["asset_targets"][-1], asset_id=identity(206), original_name=location, external_uri=uri, resource_link=uri))
+    record["asset_targets"].append(
+        dict(
+            record["asset_targets"][-1],
+            asset_id=identity(206),
+            original_name=location,
+            external_uri=uri,
+            resource_link=uri,
+        )
+    )
     record["original_evidence"][0]["records"].append(second)
     write_json(path, record)
-    lines = ["- [café  v2 .pdf](<" + FILE[3] + ">)\n", "- [café  v2 .pdf](<" + uri + ">)\n"]
+    lines = [
+        "- [café  v2 .pdf](<" + FILE[3] + ">)\n",
+        "- [café  v2 .pdf](<" + uri + ">)\n",
+    ]
     if damage == "omit":
         lines.pop()
     elif damage == "swap-order":
         lines.reverse()
-    (vault / "External.md").write_text("# External only\n\n## Resources\n\n" + "".join(lines), encoding="utf-8")
+    (vault / "External.md").write_text(
+        "# External only\n\n## Resources\n\n" + "".join(lines), encoding="utf-8"
+    )
     if damage is None or same_uri and damage == "swap-order":
         assert expected_asset(baseline, second, "3") == ("file", "external", None)
         assert audit_baseline(baseline, profile_version="3")["attachments"] == 6
@@ -682,9 +705,219 @@ def test_multiple_reference_identities_preserve_basename_and_raw_spelling(tmp_pa
 
 
 @pytest.mark.parametrize("entrypoint", ENTRYPOINTS)
-@pytest.mark.parametrize("field,value", [("location", "D:relative"), ("location", "D:/NUL.ext"), ("name", "Directory"), ("isNotes", True), ("sourceType", 2.0)])
-def test_directory_near_misses_cannot_bypass_either_census(tmp_path, entrypoint, field, value):
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("location", "D:relative"),
+        ("location", "D:/NUL.ext"),
+        ("name", "Directory"),
+        ("isNotes", True),
+        ("sourceType", 2.0),
+        ("type", 8.0),
+        ("type", "8"),
+        ("isNotes", 0),
+    ],
+)
+def test_directory_near_misses_cannot_bypass_either_census(
+    tmp_path, entrypoint, field, value
+):
     baseline, vault, _ = external_case(tmp_path, DIRECTORY)
     baseline, attachment = replace_declaration(baseline, vault, {field: value})
     with pytest.raises(AssertionError):
         assert_public_accepts(entrypoint, baseline, vault, attachment)
+
+
+def mixed_note_case(tmp_path, form="callout"):
+    """Literal raw original and existing icon-callout adaptation, independently authored."""
+    import hashlib
+
+    baseline, vault, attachment = external_case(tmp_path)
+    root = baseline.manifest_path.parent
+    manifest = json.loads(baseline.manifest_path.read_bytes())
+    raw = "> [!tip|icon:😂]\n> Authored body.\n\n## Resources\n\nAuthored prose.\n"
+    displayed = "> [!tip] 😂 Tip\n> Authored body.\n\n## Resources\n\nAuthored prose.\n"
+    guard = ""
+    if form == "fence":
+        raw = displayed = "```\nAuthored body.\n"
+        guard = "\n\n```\n"
+    elif form == "comment":
+        raw = displayed = "<!--\nAuthored body.\n"
+        guard = "\n\n-->\n"
+    note = dict(
+        attachment,
+        id=identity(206),
+        type=1,
+        isNotes=True,
+        location="Notes.md",
+        dataLength=len(raw.encode("utf-8")),
+    )
+    (root / "206.bin").write_bytes(raw.encode("utf-8"))
+    manifest["files"]["206.bin"] = fingerprint(root / "206.bin")
+    manifest["payloads"][identity(206)] = {"status": 200, "path": "206.bin"}
+    manifest["scope"]["attachment_ids"].append(identity(206))
+    manifest["no_notes"].pop(identity(6))
+    graph = json.loads((root / "external-graph.json").read_bytes())
+    graph["attachments"].append(note)
+    write_json(root / "external-graph.json", graph)
+    write_json(root / "external-list.json", [attachment, note])
+    write_json(baseline.manifest_path, manifest)
+    baseline = reseal(baseline)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    record["asset_targets"].append(
+        {
+            "asset_id": identity(206),
+            "owner": identity(6),
+            "role": "note_original",
+            "availability": "present",
+            "relative_path": "206.bin",
+            "original_name": "Notes.md",
+            "display_name": None,
+            "actual_length": len(raw.encode("utf-8")),
+            "actual_sha256": hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+        }
+    )
+    record["original_evidence"][0]["records"].append(note)
+    write_json(path, record)
+    (vault / "206.bin").write_bytes(raw.encode("utf-8"))
+    generated = "## Resources\n\n- [café  v2 .pdf](<" + FILE[3] + ">)\n"
+    (vault / "External.md").write_text(
+        "# External only\n\n" + displayed + "\n" + guard + generated, encoding="utf-8"
+    )
+    return baseline, vault, attachment, raw, displayed, generated
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [None, "omitted-body", "mutated-body", "omitted-generated", "mutated-original"],
+)
+def test_external_resources_follow_transformed_source_owned_body(tmp_path, damage):
+    baseline, vault, attachment, raw, displayed, generated = mixed_note_case(tmp_path)
+    assert expected_asset(baseline, attachment, "3") == ("file", "external", None)
+    assert audit_baseline(baseline, profile_version="3")["payloads"] == 4
+    path = vault / "External.md"
+    body = path.read_text(encoding="utf-8")
+    if damage == "omitted-body":
+        body = body.replace(displayed, "")
+    elif damage == "mutated-body":
+        body = body.replace("Authored body.", "Forged body.")
+    elif damage == "omitted-generated":
+        body = body.replace(generated, "")
+    elif damage == "mutated-original":
+        (vault / "206.bin").write_bytes(
+            raw.replace("Authored body.", "Forged body.").encode("utf-8")
+        )
+    path.write_text(body, encoding="utf-8")
+    if damage is None:
+        assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 4
+    else:
+        with pytest.raises(AssertionError):
+            check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize("entrypoint", ENTRYPOINTS)
+def test_external_source_join_retains_accepted_reverse_hierarchy_profile(
+    tmp_path, entrypoint
+):
+    from tests.local_acceptance.test_api_relationships_v3 import reverse_case
+
+    baseline, vault, attachment = external_case(tmp_path, source_factory=reverse_case)
+    assert_public_accepts(entrypoint, baseline, vault, attachment)
+
+
+@pytest.mark.parametrize(
+    "name,uri",
+    [
+        ("file: guide", "https://example.invalid/guide.svg"),
+        ("Guide", "https://example.invalid/guide.svg?next=file:read"),
+    ],
+)
+@pytest.mark.parametrize("damage", [None, "extra-file-link"])
+def test_mixed_type3_url_metadata_cannot_be_misclassified_as_file_reference(
+    tmp_path, name, uri, damage
+):
+    baseline, vault, external = external_case(tmp_path)
+    root = baseline.manifest_path.parent
+    manifest = json.loads(baseline.manifest_path.read_bytes())
+    url = dict(external, id=identity(206), type=3, name=name, location=uri)
+    graph = json.loads((root / "external-graph.json").read_bytes())
+    graph["attachments"].append(url)
+    write_json(root / "external-graph.json", graph)
+    write_json(root / "external-list.json", [external, url])
+    manifest["scope"]["attachment_ids"].append(identity(206))
+    write_json(baseline.manifest_path, manifest)
+    baseline = reseal(baseline)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    record["asset_targets"].append(
+        dict(
+            record["asset_targets"][-1],
+            asset_id=identity(206),
+            role="url",
+            original_name=name,
+            display_name=name,
+            external_uri=uri,
+            resource_link=uri,
+        )
+    )
+    record["original_evidence"][0]["records"].append(url)
+    write_json(path, record)
+    body = (
+        "# External only\n\n## Resources\n\n- [café  v2 .pdf](<"
+        + FILE[3]
+        + ">)\n- ["
+        + name
+        + "](<"
+        + uri
+        + ">)\n"
+    )
+    if damage:
+        body += "- [Wrong](<file:///C:/forged>)\n"
+    (vault / "External.md").write_text(body, encoding="utf-8")
+    assert expected_asset(baseline, url, "3") == ("url", "external", None)
+    assert audit_baseline(baseline, profile_version="3")["attachments"] == 6
+    if damage:
+        with pytest.raises(AssertionError):
+            check_api_vault(baseline, vault, profile_version="3")
+    else:
+        assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 3
+
+
+@pytest.mark.parametrize(
+    "container", ["whole-fence", "link-fence", "link-comment", "inline-code"]
+)
+def test_inactive_required_resources_line_cannot_supply_clickable_reference(
+    tmp_path, container
+):
+    baseline, vault, _ = external_case(tmp_path)
+    path = vault / "External.md"
+    body = path.read_text(encoding="utf-8")
+    line = "- [café  v2 .pdf](<" + FILE[3] + ">)\n"
+    if container == "whole-fence":
+        body = body.replace("## Resources", "```\n## Resources") + "```\n"
+    elif container == "link-fence":
+        body = body.replace(line, "```\n" + line + "```\n")
+    elif container == "link-comment":
+        body = body.replace(line, "<!--\n" + line + "-->\n")
+    else:
+        body = body.replace(line, "`" + line.rstrip("\n") + "`\n")
+    path.write_text(body, encoding="utf-8")
+    with pytest.raises(AssertionError):
+        check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize("form", ["fence", "comment"])
+@pytest.mark.parametrize("missing_guard", [False, True])
+def test_generated_resource_boundary_exits_open_authored_construct(
+    tmp_path, form, missing_guard
+):
+    baseline, vault, _, _, _, _ = mixed_note_case(tmp_path, form)
+    path = vault / "External.md"
+    if missing_guard:
+        body = path.read_text(encoding="utf-8")
+        boundary = "\n\n```\n" if form == "fence" else "\n\n-->\n"
+        path.write_text(body.replace(boundary, "", 1), encoding="utf-8")
+        with pytest.raises(AssertionError):
+            check_api_vault(baseline, vault, profile_version="3")
+    else:
+        assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 4
