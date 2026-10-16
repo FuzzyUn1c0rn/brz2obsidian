@@ -1440,3 +1440,81 @@ def test_strict_jpeg_keeps_qualified_lossless_sampling_and_ycck_classes(
     asset = next(row for row in record["asset_targets"] if row["asset_id"] == IMAGE)
     assert asset["actual_sha256"] == expected["sha256"]
     assert (tmp_path / "vault" / asset["relative_path"]).read_bytes() == raw
+
+
+class IndependentImageBaselineApi:
+    """Serve only response bytes pinned by the independent source author."""
+
+    def __init__(self, baseline):
+        baseline.verify()
+        self.baseline = baseline
+        self.requests = []
+        self.response_chunks = {}
+        self.response_counts = {}
+        self.unexpected_requests = []
+
+    def response(self, path, query):
+        responses = self.baseline.data["http_responses"]
+        if path not in responses:
+            self.unexpected_requests.append(path)
+            return 404, b"Unbound source endpoint"
+        response = responses[path]
+        if isinstance(response, list):
+            count = self.response_counts.get(path, 0)
+            self.response_counts[path] = count + 1
+            response = response[count % len(response)]
+        return response["status"], self.baseline.bytes(response["path"])
+
+
+def assert_independent_image_source_converts_and_audits(baseline, destination):
+    from tests.local_acceptance.api_checker import check_api_vault
+
+    brain = baseline.json(baseline.data["brain"])["id"]
+    source_ref = LocalApiSourceRef(brain)
+    api = IndependentImageBaselineApi(baseline)
+    with api_server(api) as (_, address):
+        config = LocalApiConfig(api_url=address)
+        with LocalApiSourceModule(
+            config, credentials=lambda: KEY, profile_version="3"
+        ).open(source_ref) as session:
+            session.verify_consistency()
+            for key, payload in baseline.data["payloads"].items():
+                if payload["status"] == 200:
+                    with session.open_payload(key) as stream:
+                        assert stream.read() == baseline.bytes(payload["path"])
+        workflow = local_api_workflow(config, credentials=lambda: KEY)
+        inspected = workflow.inspect(source_ref)
+        assert not api.unexpected_requests
+        assert inspected.outcome in {"clean", "warnings"}, inspected.issues
+        converted = workflow.convert(source_ref, destination)
+    assert not api.unexpected_requests
+    assert converted.outcome in {"clean", "warnings"}, converted.issues
+    assert converted.receipt.verified and converted.receipt.published
+    baseline.verify()
+    record = json.loads((destination / "migration-record.json").read_bytes())
+    assert "documents" not in record
+    assert any(row["documents"] for row in record["item_targets"])
+    check_api_vault(baseline, destination, profile_version="3")
+
+
+@pytest.mark.parametrize(
+    "scenario,source_pin",
+    [
+        ("plain", "fee3b92c5825ad3c0226e01e147279141078304e114c80463f7686ff816e78c2"),
+        ("adapted", "92f959f1a9ae7fbca935fbac0de0593aadf519a88e213fc39097c9c13941a511"),
+    ],
+)
+def test_independent_source_checker_audits_actual_workflow_jpeg_and_ico(
+    tmp_path, scenario, source_pin
+):
+    from tests.local_acceptance.test_api_images_v3 import image_source_case
+
+    baseline = (
+        image_source_case(tmp_path)
+        if scenario == "plain"
+        else image_source_case(tmp_path, scenario="adapted")
+    )
+    assert baseline.fingerprint == source_pin
+    assert_independent_image_source_converts_and_audits(
+        baseline, tmp_path / "actual-workflow-vault"
+    )
