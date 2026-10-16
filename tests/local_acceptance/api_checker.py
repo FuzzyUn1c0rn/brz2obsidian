@@ -4,6 +4,9 @@ import hashlib
 import json
 import posixpath
 import re
+import unicodedata
+from collections import defaultdict
+from datetime import date, datetime
 from decimal import Decimal
 from html.parser import HTMLParser
 from io import BytesIO
@@ -23,8 +26,9 @@ from .api_note_text import (
     expected_note_text,
     validate_document_adaptations,
 )
+from .api_scope import qualify_scope, strict
 from .api_svg import qualify_svg
-from .checker import escaped, source_references, wiki
+from .checker import contender_keys, escaped, source_references, wiki
 from .images import AuditUnavailable, decode_image
 from .text import active_mask, inline_candidates
 
@@ -300,10 +304,21 @@ def qualify_reverse_joins(baseline, row, thoughts, links, graphs):
         ), "reverse graph type declaration"
 
 
+def scoped_note_text(baseline, key, *, profile_version="3"):
+    if baseline.data["schema"] == "brz2obsidian.api-acceptance/2":
+        return (
+            qualify_scope(baseline, profile_version=profile_version)
+            .safe_notes[key]
+            .scoped_text
+        )
+    return baseline.bytes(baseline.data["payloads"][key]["path"]).decode("utf-8")
+
+
 def source_facts(baseline, *, profile_version="1"):
     assert profile_version in {"1", "2", "3"}, "unsupported API profile version"
     baseline.verify()
     data = baseline.data
+    scoped = qualify_scope(baseline, profile_version=profile_version)
     for values in data["scope"].values():
         assert len(values) == len(set(values)), "duplicate independent scoped identity"
         for value in values:
@@ -312,8 +327,9 @@ def source_facts(baseline, *, profile_version="1"):
     assert set(data["graphs"]) == set(data["scope"]["thought_ids"]), (
         "baseline thought coverage"
     )
-    for key, path in data["graphs"].items():
-        graph = read_json(baseline.bytes(path), parse_float=Decimal)
+    scoped_graphs = scoped.graphs
+    for key in data["graphs"]:
+        graph = scoped_graphs[key]
         graphs[key] = graph
         thought = graph["activeThought"]
         assert thought["id"] == key, "baseline thought identity"
@@ -521,12 +537,21 @@ def check_new_image_preservation(
     bindings = {}
     materialized = {baseline.json(baseline.data["brain"])["homeThoughtId"]}
     materialized.update(key for key, row in thoughts.items() if row["kind"] == 2)
+    scoped = qualify_scope(baseline, profile_version="3")
     for key, row in attachments.items():
+        if row["isNotes"]:
+            text = scoped_note_text(baseline, key)
+            if (
+                expected_document_text(text)
+                if baseline.data["schema"] == "brz2obsidian.api-acceptance/2"
+                else text
+            ).strip():
+                materialized.add(row["sourceId"])
+            if key in scoped.omitted_ids:
+                continue
         role, availability, payload = expected_asset(baseline, row, "3", proofs)
-        if (
-            (row["isNotes"] and payload.decode("utf-8").strip())
-            or (availability == "external" and role in {"file", "url", "directory"})
-            or (availability == "present" and role in {"file", "image"} and payload)
+        if (availability == "external" and role in {"file", "url", "directory"}) or (
+            availability == "present" and role in {"file", "image"} and payload
         ):
             materialized.add(row["sourceId"])
         bindings[key] = {
@@ -610,19 +635,17 @@ def check_new_image_preservation(
         key: [row["label"]] if row.get("label") else [] for key, row in thoughts.items()
     }
     for key, row in authored.items():
-        original = baseline.bytes(baseline.data["payloads"][key]["path"]).decode(
-            "utf-8"
-        )
+        original = scoped_note_text(baseline, key)
         body = expected_document_text(original)
         digest = hashlib.sha256(body.encode()).hexdigest()
         document = documents[key]
         expected_metadata = {
             "key": key,
             "owner": row["sourceId"],
-            "original_asset_id": key,
+            "original_asset_id": None if key in scoped.omitted_ids else key,
             "text_digest": digest,
             "owner_target": names[row["sourceId"]],
-            "original_copy_omitted": False,
+            "original_copy_omitted": key in scoped.omitted_ids,
             "evidence": ["attachment:" + key],
         }
         assert semantic({k: document[k] for k in expected_metadata}) == semantic(
@@ -827,6 +850,14 @@ def expected_asset(baseline, attachment, profile_version="1", proofs=None):
             "attachment collection"
         )
         assert owner in baseline.data["graphs"], "included attachment owner"
+    if baseline.data["schema"] == "brz2obsidian.api-acceptance/2":
+        scoped = qualify_scope(baseline, profile_version=profile_version)
+        assert attachment["id"] in scoped.declarations and strict(attachment) == strict(
+            scoped.declarations[attachment["id"]]
+        ), "scoped original declaration agreement"
+        assert attachment["id"] not in scoped.omitted_ids, (
+            "scoped original has no retained Asset"
+        )
     kind, note = attachment["type"], attachment["isNotes"]
     assert type(kind) is int and type(note) is bool, "raw attachment role"
     if kind in {2, 8}:
@@ -916,6 +947,11 @@ def expected_asset(baseline, attachment, profile_version="1", proofs=None):
             assert payload[:4] == b"RIFF" and payload[8:12] == b"WEBP", (
                 "raw image signature"
             )
+            if (
+                profile_version == "3"
+                and baseline.data["schema"] == "brz2obsidian.api-acceptance/2"
+            ):
+                qualify_v2_bytes(payload, "WEBP", attachment["id"], proofs)
     elif kind == 5:
         if profile_version == "3" and payload.startswith(b"\x00\x00\x01\x00"):
             proof = ico_proof(payload)
@@ -925,6 +961,11 @@ def expected_asset(baseline, attachment, profile_version="1", proofs=None):
             qualify_v2_bytes(payload, "JPEG", attachment["id"], proofs)
         else:
             assert payload.startswith(b"\x89PNG\r\n\x1a\n"), "raw icon signature"
+            if (
+                profile_version == "3"
+                and baseline.data["schema"] == "brz2obsidian.api-acceptance/2"
+            ):
+                qualify_v2_bytes(payload, "PNG", attachment["id"], proofs)
     else:
         if name.lower().endswith(".png"):
             qualify_v2_bytes(payload, "PNG", attachment["id"], proofs)
@@ -969,7 +1010,10 @@ def qualify_v2_bytes(payload, format_name, asset_id, proofs):
                 payload.startswith(b"\xff\xd8\xff") and payload.rfind(b"\xff\xd9") >= 3
             ), "profile2 JPEG completeness"
         proof = decode_image(
-            payload, "measured.png" if format_name == "PNG" else "measured.jpg"
+            payload,
+            {"PNG": "measured.png", "JPEG": "measured.jpg", "WEBP": "measured.webp"}[
+                format_name
+            ],
         )
         assert proof["format"] == format_name and proof["source_sha256"] == digest, (
             "profile2 measured decoder classification"
@@ -1004,15 +1048,14 @@ def audit_baseline(baseline, *, profile_version="1"):
         baseline, profile_version=profile_version
     )
     assert profile_version in {"1", "2", "3"}, "unsupported API profile version"
-    local = {
-        key
-        for key, a in attachments.items()
-        if a["type"] not in {2, 3, 8}
-        or expected_asset(baseline, a, profile_version)[1] != "external"
-    }
+    scoped = qualify_scope(baseline, profile_version=profile_version)
+    local = {key for key, a in attachments.items() if a["type"] not in {2, 3, 8}}
     assert set(baseline.data["payloads"]) == local, "baseline payload coverage"
     present, absent, proofs, bindings = 0, 0, {}, {}
+    openable = []
     for attachment in attachments.values():
+        if attachment["id"] in scoped.omitted_ids:
+            continue
         role, availability, _ = expected_asset(
             baseline, attachment, profile_version, proofs
         )
@@ -1023,6 +1066,8 @@ def audit_baseline(baseline, *, profile_version="1"):
             "original_name": attachment["location"],
         }
         present += availability == "present"
+        if availability == "present":
+            openable.append(attachment["id"])
         absent += availability == "absent"
         if availability == "absent":
             assert has_measured_pdf(
@@ -1033,9 +1078,9 @@ def audit_baseline(baseline, *, profile_version="1"):
     # flags, path maps, absent-note interpretation or archive scope is reused.
     for attachment in attachments.values():
         if attachment["isNotes"]:
-            body = baseline.bytes(
-                baseline.data["payloads"][attachment["id"]]["path"]
-            ).decode("utf-8")
+            body = scoped_note_text(
+                baseline, attachment["id"], profile_version=profile_version
+            )
             if profile_version == "3":
                 # Validate authored grammar before protecting generated code.
                 body = expected_document_text(body)
@@ -1082,6 +1127,12 @@ def audit_baseline(baseline, *, profile_version="1"):
     }
     if profile_version in {"2", "3"}:
         summary["resource_eligibility"] = proofs
+    if baseline.data["schema"] == "brz2obsidian.api-acceptance/2":
+        summary["retention"] = {
+            "omitted_original_ids": sorted(scoped.omitted_ids),
+            "retained_asset_ids": sorted(scoped.retained_ids),
+            "openable_payload_ids": sorted(openable),
+        }
     return summary
 
 
@@ -1108,10 +1159,12 @@ def check_reverse_navigation(
     )
     for key, attachment in attachments.items():
         if attachment["isNotes"]:
-            text = baseline.bytes(baseline.data["payloads"][key]["path"]).decode(
-                "utf-8"
-            )
-            if text.strip():
+            text = scoped_note_text(baseline, key)
+            if (
+                expected_document_text(text)
+                if baseline.data["schema"] == "brz2obsidian.api-acceptance/2"
+                else text
+            ).strip():
                 selected.add(attachment["sourceId"])
         else:
             asset = assets[
@@ -1165,9 +1218,7 @@ def check_reverse_navigation(
         names = {key: value.get("relative_path") for key, value in targets.items()}
         for attachment in attachments.values():
             if attachment["sourceId"] == owner and attachment["isNotes"]:
-                note = baseline.bytes(
-                    baseline.data["payloads"][attachment["id"]]["path"]
-                ).decode("utf-8")
+                note = scoped_note_text(baseline, attachment["id"])
                 authored.append(
                     expected_note_text(
                         note, owner, target["relative_path"], names, assets
@@ -1263,9 +1314,7 @@ def check_external_resources(
         authored = [thoughts[owner]["label"]] if thoughts[owner].get("label") else []
         for attachment in attachments.values():
             if attachment["sourceId"] == owner and attachment["isNotes"]:
-                raw = baseline.bytes(
-                    baseline.data["payloads"][attachment["id"]]["path"]
-                ).decode("utf-8")
+                raw = scoped_note_text(baseline, attachment["id"])
                 authored.append(
                     expected_note_text(
                         raw,
@@ -1401,6 +1450,15 @@ def check_svg_notes(baseline, vault, thoughts, attachments, targets, assets):
         for key, row in attachments.items()
         if row["type"] == 12 and row["location"].endswith(".svg")
     }
+    mixed = baseline.data["schema"] == "brz2obsidian.api-acceptance/2"
+    if mixed:
+        svg.update(
+            key
+            for key, row in attachments.items()
+            if not row["isNotes"]
+            and assets[key]["availability"] == "present"
+            and assets[key]["role"] in {"image", "file"}
+        )
     names = {key: row.get("relative_path") for key, row in targets.items()}
     for owner in {attachments[key]["sourceId"] for key in svg}:
         target = targets[owner]
@@ -1426,9 +1484,7 @@ def check_svg_notes(baseline, vault, thoughts, attachments, targets, assets):
         for row in attachments.values():
             if row["sourceId"] != owner or not row["isNotes"]:
                 continue
-            raw = baseline.bytes(baseline.data["payloads"][row["id"]]["path"]).decode(
-                "utf-8"
-            )
+            raw = scoped_note_text(baseline, row["id"])
             wanted = (
                 expected_note_text(raw, owner, target["relative_path"], names, assets)
                 .replace("\r\n", "\n")
@@ -1454,7 +1510,16 @@ def check_svg_notes(baseline, vault, thoughts, attachments, targets, assets):
                 None if key in referenced else relative
             ), "SVG source-derived resource disposition"
             if key not in referenced:
-                required.append("- " + wiki(relative, attachments[key]["location"]))
+                label = (
+                    re.sub(
+                        r"[\[\]|\r\n]",
+                        " ",
+                        attachments[key]["name"]
+                        or posixpath.basename(attachments[key]["location"]),
+                    ).strip()
+                    or "Resource"
+                )
+                required.append("- " + wiki(relative, label))
         tail = body[cursor:]
         # Retain full block context, while only generated suffix supplies targets.
         syntax = list(body)
@@ -1490,7 +1555,12 @@ def check_svg_notes(baseline, vault, thoughts, attachments, targets, assets):
             )
             if posixpath.dirname(local) in {
                 posixpath.dirname(path) for path in owned_paths
-            } and local.lower().endswith(".svg"):
+            } and (
+                local.lower().endswith(".svg")
+                or mixed
+                and posixpath.splitext(local)[1].lower()
+                in {posixpath.splitext(path)[1].lower() for path in owned_paths}
+            ):
                 assert local in owned_paths, (
                     "SVG generated target lacks source identity"
                 )
@@ -1549,9 +1619,356 @@ def check_svg_notes(baseline, vault, thoughts, attachments, targets, assets):
                 r"^ {0,3}#{1,2}[ \t]+", resource_activity[section_start:], re.MULTILINE
             )
             section_end = section_start + following.start() if following else len(tail)
+            if mixed:
+                expected_missing = []
+                for key, row in sorted(attachments.items()):
+                    if (
+                        row["sourceId"] == owner
+                        and assets.get(key, {}).get("availability") == "absent"
+                        and not row["isNotes"]
+                    ):
+                        label = (
+                            re.sub(
+                                r"([\\`*_{}\[\]<>#])",
+                                r"\\\1",
+                                posixpath.basename(row["location"]),
+                            )
+                            .replace("\r", " ")
+                            .replace("\n", " ")
+                        )
+                        expected_missing.append(
+                            "- Absent source file: "
+                            + label
+                            + " (metadata retained; bytes absent from the source)."
+                        )
+                observed_missing = [
+                    (m.start(), tail[m.start() : m.end()])
+                    for m in re.finditer(
+                        r"^- Absent source file:[^\n]*", resource_activity, re.MULTILINE
+                    )
+                ]
+                assert [
+                    line for offset, line in observed_missing
+                ] == expected_missing and all(
+                    section_start <= offset < section_end
+                    for offset, line in observed_missing
+                ), "source-bound missing file Resource descriptions"
             assert [
                 line for offset, line in actual if section_start <= offset < section_end
             ] == required, "SVG Resources section owns complete inventory"
+
+
+def check_scope_records(baseline, record, scoped, attachments, raw_links):
+    """Bind scoped records, decisions and accounting to independent raw evidence."""
+    brain = baseline.json(baseline.data["brain"])
+    collection = brain["id"]
+    expected = {"brain:" + collection: brain}
+    normalized = {}
+    graphs = scoped.graphs
+
+    def decision(key, rule, outcome, subjects, evidence):
+        expected[key] = {
+            "key": key,
+            "rule_id": rule,
+            "outcome": outcome,
+            "subjects": subjects,
+            "evidence": evidence,
+        }
+
+    for owner, graph in graphs.items():
+        # Retain original wire metadata even if an excluded type is unassigned.
+        expected["thought:" + owner] = baseline.json(baseline.data["graphs"][owner])[
+            "activeThought"
+        ]
+        normalized["thought:" + owner] = [owner]
+        fields = {
+            "parents": "parents_ids",
+            "children": "children_ids",
+            "jumps": "jump_ids",
+            "siblings": "sibling_ids",
+            "tags": "tag_ids",
+        }
+        projected = {
+            target: sorted({row["id"] for row in graph[field]})
+            for field, target in fields.items()
+        }
+        projected["type_ids"] = (
+            [graph["type"]["id"]] if graph["type"] is not None else []
+        )
+        projected["link_ids"] = sorted(
+            {
+                row["id"]
+                for row in graph["links"]
+                if owner in (row["thoughtIdA"], row["thoughtIdB"])
+            }
+        )
+        projected["attachment_ids"] = sorted(
+            key for key, row in attachments.items() if row["sourceId"] == owner
+        )
+        expected["graph:" + owner] = projected
+        decision(
+            "scope:included:" + owner,
+            "local-api.roles-access.v1",
+            "included",
+            ["thought:" + owner],
+            ["thought:" + owner],
+        )
+    for key, row in raw_links.items():
+        expected["link:" + key] = row
+        normalized["link:" + key] = [key]
+    excluded = scoped.excluded_thoughts
+    for key, row in excluded.items():
+        expected["exclusion:" + key] = row
+        system = row["kind"] == 5
+        decision(
+            "scope:excluded:" + key,
+            "local-api.system.v1" if system else "local-api.forgotten.v1",
+            "excluded_system" if system else "excluded_forgotten",
+            ["thought:" + key],
+            ["exclusion:" + key],
+        )
+    for key, row in scoped.excluded_relationships.items():
+        expected["link:" + key] = row
+        endpoints = sorted({row["thoughtIdA"], row["thoughtIdB"]})
+        omitted = sorted(set(endpoints) & excluded.keys())
+        decision(
+            "scope:association:" + key,
+            "local-api.system.v1"
+            if any(excluded[node]["kind"] == 5 for node in omitted)
+            else "local-api.forgotten.v1",
+            "excluded_association",
+            ["link:" + key] + ["thought:" + node for node in endpoints],
+            ["link:" + key] + ["exclusion:" + node for node in omitted],
+        )
+    for key, row in attachments.items():
+        expected["attachment:" + key] = attachment_evidence(
+            row, len(json.dumps(record))
+        )
+        if key in scoped.retained_ids:
+            normalized["attachment:" + key] = [key]
+    for key, note in scoped.safe_notes.items():
+        pointer = "note_text:" + note.owner
+        assert pointer not in expected, "one authored scoped Document per owner"
+        expected[pointer] = {"text": note.scoped_text}
+        normalized[pointer] = [key]
+        if note.removed_thought_ids:
+            removed = sorted(note.removed_thought_ids)
+            decision(
+                "scope:note:" + key,
+                "local-api.system.v1"
+                if any(excluded[node]["kind"] == 5 for node in removed)
+                else "local-api.forgotten.v1",
+                "excluded_association",
+                ["thought:" + note.owner] + ["thought:" + node for node in removed],
+                [pointer] + ["exclusion:" + node for node in removed],
+            )
+    for owner, path in baseline.data["no_notes"].items():
+        expected["no_note:" + owner] = baseline.json(path)
+    for position, path in zip(
+        ("start", "end"), baseline.data["statistics"], strict=True
+    ):
+        stats = baseline.json(path)
+        expected["statistics:" + position] = {
+            field: stats[field]
+            for field in (
+                "thoughts",
+                "thoughtTypes",
+                "tags",
+                "forgottenThoughts",
+                "links",
+            )
+        }
+    if baseline.data["tags"]["status"] == 400:
+        decision(
+            "scope:tag400-zero:" + collection,
+            "local-api.tag400.v1",
+            "tag400_zero",
+            ["brain:" + collection],
+            ["inventory:tag_ids", "statistics:end", "statistics:start"],
+        )
+    for key, outcome in baseline.data["payloads"].items():
+        if outcome["status"] != 404:
+            continue
+        owner = attachments[key]["sourceId"]
+        pdfs = sorted(
+            k
+            for k, row in attachments.items()
+            if row["sourceId"] == owner
+            and row["type"] == 1
+            and not row["isNotes"]
+            and row["location"].lower().endswith(".pdf")
+            and baseline.data["payloads"][k]["status"] == 200
+        )
+        subjects = sorted("attachment:" + node for node in [key, *pdfs])
+        decision(
+            "scope:missing-txt404:" + key,
+            "local-api.missing-txt-pdf.v1",
+            "missing_txt404",
+            subjects,
+            sorted(subjects + ["payload:" + node for node in [key, *pdfs]]),
+        )
+    evidence = identities(record["original_evidence"], "key", "scope original evidence")
+    assert evidence.keys() == expected.keys(), (
+        "closed complete scoped source record census"
+    )
+    for key, row in evidence.items():
+        assert set(row) == {"key", "kind", "records"} and row["kind"] == "records", (
+            "scoped original evidence fields"
+        )
+        assert semantic(row["records"]) == semantic(expected[key]), (
+            "scoped original source record/decision"
+        )
+    assert set(record["source_accounting"]) == {"entries"}, "scoped accounting fields"
+    entries = identities(
+        record["source_accounting"]["entries"], "identity", "scoped accounting"
+    )
+    assert entries.keys() == expected.keys(), "complete scoped source accounting census"
+    for key, entry in entries.items():
+        assert semantic(entry) == semantic(
+            {
+                "identity": key,
+                "disposition": "normalized" if key in normalized else "retained_only",
+                "references": normalized.get(key, [key]),
+            }
+        ), "scoped source accounting disposition/references"
+
+
+def check_scope_memberships(baseline, vault, record, thoughts, relationships, targets):
+    """Bind API classifications, native tags and properties to source identities."""
+    names = {}
+    for key, row in thoughts.items():
+        if row["kind"] == 4:
+            stem = (
+                re.sub(r"[\W_]+", "-", unicodedata.normalize("NFC", row["name"])).strip(
+                    "-"
+                )
+                or "source-tag"
+            )
+            names[key] = "tag-" + stem if stem.isnumeric() else stem
+    widths = dict.fromkeys(names, 0)
+    while True:
+        tokens = {}
+        for key, base in names.items():
+            suffix = "-" + key.replace("-", "")[: widths[key]] if widths[key] else ""
+            stem = base[: 120 - len(suffix)].rstrip("-")
+            if stem.isnumeric():
+                stem = "tag-" + stem[: 116 - len(suffix)]
+            tokens[key] = stem + suffix
+        groups = defaultdict(list)
+        for key, token in tokens.items():
+            groups[token.casefold()].append(key)
+        clashes = contender_keys(
+            groups, widths, {k: k.replace("-", "") for k in tokens}
+        )
+        if not clashes:
+            break
+        for key in clashes:
+            assert widths[key] < 32, "distinct API tag seeds"
+            widths[key] = widths[key] + 4 if widths[key] else 8
+    classifications = {}
+    tags = {}
+    for key, relation in relationships.items():
+        a, b = relation["item_a"], relation["item_b"]
+        if relation["kind"] == "classification":
+            classifications[key] = {
+                "relationship_key": key,
+                "definition_key": a,
+                "item_key": b,
+                "evidence": ["link:" + key, "thought:" + a, "thought:" + b],
+                "definition_target": targets[a]["relative_path"],
+                "item_target": targets[b]["relative_path"],
+            }
+        elif relation["kind"] == "tag":
+            native = targets[b]["created"]
+            assert type(native) is bool, "native tag materialization type"
+            tags[key] = {
+                "relationship_key": key,
+                "tag_key": a,
+                "item_key": b,
+                "native": native,
+                "tag_name": thoughts[a]["name"],
+                "token": tokens[a],
+                "tag_original_identity": a,
+                "tag_target": targets[a]["relative_path"],
+                "item_target": targets[b]["relative_path"],
+                "evidence": ["link:" + key],
+                "listing_path": None if native else "Tag memberships.md",
+            }
+    assert strict(
+        identities(
+            record["classification_assignments"], "relationship_key", "classification"
+        )
+    ) == strict(classifications), "source-bound classification metadata"
+    assert strict(
+        identities(record["tag_memberships"], "relationship_key", "tag membership")
+    ) == strict(tags), "source-bound native tag metadata"
+    brain = baseline.json(baseline.data["brain"])["id"]
+    icons = {
+        row["sourceId"]: key
+        for key, row in qualify_scope(
+            baseline, profile_version="3"
+        ).declarations.items()
+        if row["type"] == 5
+    }
+    for key, target in targets.items():
+        appearance = {
+            "foreground_color": thoughts[key]["foregroundColor"],
+            "background_color": thoughts[key]["backgroundColor"],
+            "icon_asset_id": icons.get(key),
+        }
+        assert strict(target.get("declared_appearance")) == strict(
+            appearance
+            if any(value is not None for value in appearance.values())
+            else None
+        ), "source-bound declared appearance"
+        if not target["created"]:
+            continue
+        note = safe_path(vault, target["relative_path"])
+        assert note.is_file(), "required materialized imported note"
+        text = note.read_text(encoding="utf8")
+        assert text.startswith("---\n") and "\n---\n" in text[4:], (
+            "imported properties block"
+        )
+        header = text[4:].split("\n---\n", 1)[0]
+        node = yaml.compose(header)
+        assert isinstance(node, yaml.MappingNode), "imported properties mapping"
+        keys = [k.value for k, v in node.value]
+        assert len(keys) == len(set(keys)), "unique imported property names"
+        properties = yaml.safe_load(header)
+        for field in ("created", "updated"):
+            if type(properties.get(field)) is date:
+                properties[field] = properties[field].isoformat()
+        categories = [
+            "[[" + row["definition_target"] + "]]"
+            for k, row in sorted(classifications.items())
+            if row["item_key"] == key
+        ]
+        native = {
+            row["token"]
+            for row in tags.values()
+            if row["item_key"] == key and row["native"]
+        }
+        if thoughts[key]["kind"] == 2:
+            native.add("categories")
+        expected = {
+            "categories": categories,
+            "appearance_category": categories[0] if categories else None,
+            "tags": sorted(native, key=str.casefold),
+            "aliases": [],
+            "source_collection_id": brain,
+            "source_item_id": key,
+        }
+        for field, source in (
+            ("created", "creationDateTime"),
+            ("updated", "modificationDateTime"),
+        ):
+            value = thoughts[key][source]
+            expected[field] = (
+                datetime.fromisoformat(value).date().isoformat() if value else None
+            )
+        assert all(
+            strict(properties.get(k)) == strict(v) for k, v in expected.items()
+        ), "source-bound imported properties"
 
 
 def check_api_vault(baseline, vault, *, profile_version="1"):
@@ -1589,6 +2006,32 @@ def check_api_vault(baseline, vault, *, profile_version="1"):
                 yield from records(child)
 
     originals = {semantic(row) for row in records(record["original_evidence"])}
+    scoped = qualify_scope(baseline, profile_version=profile_version)
+    if baseline.data["schema"] == "brz2obsidian.api-acceptance/2":
+        minimal = scoped.excluded_thoughts | scoped.excluded_relationships
+        assert all(semantic(row) in originals for row in minimal.values()), (
+            "minimal source exclusions preserved"
+        )
+        for row in records(record):
+            key = row.get("id")
+            if type(key) is str and key in minimal:
+                assert semantic(row) == semantic(minimal[key]), (
+                    "excluded metadata exceeds minimal projection"
+                )
+        unsafe = {
+            baseline.bytes(baseline.data["payloads"][key]["path"])
+            for key in scoped.omitted_ids
+        }
+        for path in vault.rglob("*"):
+            if path.is_file():
+                assert (
+                    path.resolve().is_relative_to(vault.resolve())
+                    and not path.is_symlink()
+                ), "scope output storage ownership"
+                assert path.read_bytes() not in unsafe, (
+                    "unsafe original copied into output"
+                )
+
     assert all(
         semantic(row) in originals
         for row in [
@@ -1622,8 +2065,9 @@ def check_api_vault(baseline, vault, *, profile_version="1"):
             required[key]["item_a"],
             required[key]["item_b"],
         ), "classification endpoints"
+    scoped = qualify_scope(baseline, profile_version=profile_version)
     assets = identities(record["asset_targets"], "asset_id", "attachment")
-    assert assets.keys() == attachments.keys(), "attachment identities"
+    assert assets.keys() == scoped.retained_ids, "attachment identities"
     expected_gaps = {
         key
         for key, outcome in baseline.data["payloads"].items()
@@ -1640,15 +2084,12 @@ def check_api_vault(baseline, vault, *, profile_version="1"):
     assert len(warned) == len(set(warned)) and set(warned) == expected_gaps, (
         "reviewed gap warnings"
     )
-    local = {
-        key
-        for key, a in attachments.items()
-        if a["type"] not in {2, 3, 8}
-        or expected_asset(baseline, a, profile_version)[1] != "external"
-    }
+    local = {key for key, a in attachments.items() if a["type"] not in {2, 3, 8}}
     assert set(baseline.data["payloads"]) == local, "baseline payload coverage"
     payload_count = 0
     for key, attachment in attachments.items():
+        if key in scoped.omitted_ids:
+            continue
         target = assets[key]
         role, availability, payload = expected_asset(
             baseline, attachment, profile_version, proofs
@@ -1702,6 +2143,9 @@ def check_api_vault(baseline, vault, *, profile_version="1"):
                     profile_version,
                     proofs,
                 ), "missing TXT lacks measured same-owner PDF"
+    if baseline.data["schema"] == "brz2obsidian.api-acceptance/2":
+        check_scope_records(baseline, record, scoped, attachments, raw_links)
+        check_scope_memberships(baseline, vault, record, thoughts, expected, targets)
     if profile_version == "3":
         check_new_image_preservation(
             baseline, vault, record, thoughts, attachments, targets, assets, proofs
