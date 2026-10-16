@@ -12,7 +12,11 @@ from zipfile import BadZipFile, ZipFile
 
 from .api_image_proofs import ico_proof, jpeg_headers
 from .api_manifest import read_json, safe_path
-from .api_note_text import expected_note_text
+from .api_note_text import (
+    document_references,
+    expected_document_text,
+    expected_note_text,
+)
 from .checker import escaped, source_references, wiki
 from .images import AuditUnavailable, decode_image
 from .text import active_mask
@@ -442,7 +446,10 @@ def check_new_image_preservation(
     assert set(documents) == set(authored), "all image-bearing source documents"
     names = {key: row["relative_path"] for key, row in targets.items()}
     for key, row in authored.items():
-        body = baseline.bytes(baseline.data["payloads"][key]["path"]).decode("utf-8")
+        original = baseline.bytes(baseline.data["payloads"][key]["path"]).decode(
+            "utf-8"
+        )
+        body = expected_document_text(original)
         digest = hashlib.sha256(body.encode()).hexdigest()
         document = documents[key]
         assert (
@@ -453,7 +460,7 @@ def check_new_image_preservation(
         ) == (row["sourceId"], key, digest, names[row["sourceId"]]), (
             "image document source binding"
         )
-        expected = source_references(body, row["sourceId"], bindings)
+        expected = document_references(body, row["sourceId"], bindings)
         references = document["references"]
         assert len(references) == len(expected), "all source image references"
         for emitted, source in zip(references, expected, strict=True):
@@ -482,7 +489,9 @@ def check_new_image_preservation(
             ), "image source destination"
         owner = row["sourceId"]
         assert targets[owner]["created"] is True, "owned note materialization"
-        expected_text = expected_note_text(body, owner, names[owner], names, bindings)
+        expected_text = expected_note_text(
+            original, owner, names[owner], names, bindings
+        )
         generated = safe_path(vault, names[owner]).read_text(encoding="utf-8")
         expected_activity = active_mask(expected_text)
         actual_activity = active_mask(generated)
@@ -744,7 +753,10 @@ def audit_baseline(baseline, *, profile_version="1"):
             body = baseline.bytes(
                 baseline.data["payloads"][attachment["id"]]["path"]
             ).decode("utf-8")
-            references = source_references(body, attachment["sourceId"], bindings)
+            scanner = (
+                document_references if profile_version == "3" else source_references
+            )
+            references = scanner(body, attachment["sourceId"], bindings)
             assert all(
                 r["target"] in thoughts for r in references if r["kind"] == "item"
             ), "included API note reference target"

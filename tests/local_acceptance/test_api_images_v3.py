@@ -1194,3 +1194,266 @@ def test_every_new_image_requires_an_actual_complete_200_response(
         audit_baseline(baseline, profile_version="3")
     with pytest.raises(AssertionError):
         check_api_vault(baseline, vault, profile_version="3")
+
+
+ADAPTED_IMAGE_NOTES = [
+    pytest.param(
+        'Préface 🐈 <Enter>.\n\n> [!tip|icon:🐈]\n> ![bleu]({image}#$width=75p$ "Titre")\n',
+        'Préface 🐈 \\<Enter>.{eol}{eol}> [!tip] 🐈 Tip{eol}> ![bleu]({image}#$width=75p$ "Titre"){eol}',
+        id="callout-literal",
+    ),
+    pytest.param(
+        '|Image|Other|:(table="column-widths:-1,0,84;justification:default"):\n|![bleu]({image})|value|\n',
+        "|Image|Other|\n|---|---|{eol}|![bleu]({image})|value|{eol}",
+        id="table",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# Heading\n![bleu]({image})\n",
+        "- [Heading](#^brz-toc-heading-1){eol}{eol}# Heading ^brz-toc-heading-1{eol}![bleu]({image}){eol}",
+        id="toc",
+    ),
+    pytest.param(
+        "`![false]({image})`\n\n<!-- ![false]({image}) -->\n\n> [!info|icon:🐈]\n> ![bleu]({image}#$width=50p$)\n",
+        "`![false]({image})`{eol}{eol}<!-- ![false]({image}) -->{eol}{eol}> [!info] 🐈 Info{eol}> ![bleu]({image}#$width=50p$){eol}",
+        id="protected",
+    ),
+    pytest.param(
+        'Préface <Enter>.\n\n[/toc/]\n\n# Images\n|Image|Other|:(table="column-widths:-1,0,84;justification:default"):\n|![bleu]({image}#$width=50p$)|value|\n\n> [!tip|icon:🐈]\n> ![deux]({image} "Titre")\n',
+        'Préface \\<Enter>.{eol}{eol}- [Images](#^brz-toc-heading-1){eol}{eol}# Images ^brz-toc-heading-1{eol}|Image|Other|\n|---|---|{eol}|![bleu]({image}#$width=50p$)|value|{eol}{eol}> [!tip] 🐈 Tip{eol}> ![deux]({image} "Titre"){eol}',
+        id="combined",
+    ),
+]
+
+
+ADAPTED_IMAGE_NOTES += [
+    pytest.param(
+        "Préface 🐈 <Enter>.\n\n![bleu]({image})\n",
+        "Préface 🐈 \\<Enter>.{eol}{eol}![bleu]({image}){eol}",
+        id="literal-only",
+    ),
+    pytest.param(
+        "Préface 🐈\n\n![bleu]({image})\n",
+        "Préface 🐈{eol}{eol}![bleu]({image}){eol}",
+        id="unchanged",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# First\nText\n\n## Second\n![bleu]({image})\n",
+        "- [First](#^brz-toc-heading-1)\n  - [Second](#^brz-toc-heading-2){eol}{eol}# First ^brz-toc-heading-1{eol}Text{eol}{eol}## Second ^brz-toc-heading-2{eol}![bleu]({image}){eol}",
+        id="toc-multiple",
+    ),
+    pytest.param(
+        "[/toc/]\n\nMulti\nline\n====\n![bleu]({image})\n",
+        "- [Multi line](#^brz-toc-heading-1){eol}{eol}# Multi line ^brz-toc-heading-1{eol}![bleu]({image}){eol}",
+        id="toc-setext",
+    ),
+    pytest.param(
+        "> `begin\nlazy ![false]({image})\n> end`\n\n> [!info|icon:🐈]\n> ![bleu]({image}#$width=50p$)\n",
+        "> `begin{eol}lazy ![false]({image}){eol}> end`{eol}{eol}> [!info] 🐈 Info{eol}> ![bleu]({image}#$width=50p$){eol}",
+        id="protected-lazy",
+    ),
+]
+
+
+ADAPTED_IMAGE_NOTES += [
+    pytest.param(
+        '|Code|Image|:(table="column-widths:-1,0,84;justification:default"):\n|`![false](.data/md-images/missing.jpg)|x`|![bleu]({image})|\n',
+        "|Code|Image|\n|---|---|{eol}|<code>![false](.data/md-images/missing.jpg)&#124;x</code>|![bleu]({image})|{eol}",
+        id="table-code-false-target",
+    ),
+    pytest.param(
+        "> `begin\nlazy ![false](.data/md-images/missing.jpg)\n> end`\n\n> [!info|icon:🐈]\n> ![bleu]({image}#$width=50p$)\n",
+        "> `begin{eol}lazy ![false](.data/md-images/missing.jpg){eol}> end`{eol}{eol}> [!info] 🐈 Info{eol}> ![bleu]({image}#$width=50p$){eol}",
+        id="lazy-false-target",
+    ),
+]
+
+
+def adapted_note_case(tmp_path, raw_template, adapted_template, ending="\n"):
+    baseline, vault = bound_case(tmp_path)
+    url = ".data/md-images/" + identity(202) + ".jpg"
+    raw = raw_template.format(image=url).replace("\n", ending)
+    adapted = adapted_template.format(image=url, eol=ending)
+    root = baseline.manifest_path.parent
+    (root / "201.bin").write_bytes(raw.encode())
+    baseline = reseal(baseline)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    original = next(
+        a for a in record["asset_targets"] if a["asset_id"] == identity(201)
+    )
+    (vault / original["relative_path"]).write_bytes(raw.encode())
+    original.update(
+        actual_length=len(raw.encode()),
+        actual_sha256=hashlib.sha256(raw.encode()).hexdigest(),
+    )
+    digest = hashlib.sha256(adapted.encode()).hexdigest()
+    references = []
+    for label in ("bleu", "deux"):
+        phrase = "![" + label + "]"
+        if phrase not in adapted:
+            continue
+        start = adapted.index(phrase)
+        end = adapted.index(")", start) + 1
+        dest_start = adapted.index(url, start)
+        dest_end = min(
+            end - 1,
+            adapted.find(" ", dest_start)
+            if " " in adapted[dest_start : end - 1]
+            else end - 1,
+        )
+        source_target = adapted[dest_start:dest_end]
+        normalization = None
+        if "#" in source_target:
+            begin = dest_start + source_target.index("#")
+            normalization = {
+                "declaration": adapted[begin:dest_end],
+                "start": begin,
+                "end": dest_end,
+                "document_digest": digest,
+                "basis": "document.text/unicode_codepoints",
+                "presentation": "responsive",
+            }
+        references.append(
+            {
+                "start": start,
+                "end": end,
+                "expected_original": adapted[start:end],
+                "kind": "image",
+                "target": identity(202),
+                "display_text": label,
+                "document_digest": digest,
+                "source_target": source_target,
+                "destination_start": dest_start,
+                "destination_end": dest_end,
+                "presentation_normalization": normalization,
+            }
+        )
+    record["documents"][0].update(text_digest=digest, references=references)
+    displayed = adapted
+    actual = next(a for a in record["asset_targets"] if a["asset_id"] == identity(202))[
+        "relative_path"
+    ]
+    for ref in sorted(references, key=lambda r: r["destination_start"], reverse=True):
+        displayed = (
+            displayed[: ref["destination_start"]]
+            + actual
+            + displayed[ref["destination_end"] :]
+        )
+    displayed = displayed.replace("\r\n", "\n").replace("\r", "\n")
+    (vault / "Home.md").write_text("# Home\n\n" + displayed, encoding="utf-8")
+    write_json(path, record)
+    return baseline, vault, adapted
+
+
+@pytest.mark.parametrize("raw,adapted", ADAPTED_IMAGE_NOTES)
+@pytest.mark.parametrize("ending", ["\n", "\r\n", "\r"])
+def test_image_documents_bind_to_independently_expected_adapted_text(
+    tmp_path, raw, adapted, ending
+):
+    baseline, vault, text = adapted_note_case(tmp_path, raw, adapted, ending)
+    assert audit_baseline(baseline, profile_version="3")["payloads"] == 6
+    assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 6
+    record = json.loads((vault / "migration-record.json").read_bytes())
+    assert (
+        record["documents"][0]["text_digest"]
+        == hashlib.sha256(text.encode()).hexdigest()
+    )
+    assert (baseline.manifest_path.parent / "201.bin").read_bytes() == raw.format(
+        image=".data/md-images/" + identity(202) + ".jpg"
+    ).replace("\n", ending).encode()
+
+
+@pytest.mark.parametrize(
+    "raw,adapted", [ADAPTED_IMAGE_NOTES[0], ADAPTED_IMAGE_NOTES[4]]
+)
+@pytest.mark.parametrize("ending", ["\r\n", "\r"])
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "document_digest",
+        "reference_digest",
+        "start",
+        "destination",
+        "source_target",
+        "expected_original",
+        "presentation",
+    ],
+)
+def test_adapted_image_document_metadata_cannot_be_forged(
+    tmp_path, raw, adapted, ending, damage
+):
+    baseline, vault, _ = adapted_note_case(tmp_path, raw, adapted, ending)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    document = record["documents"][0]
+    reference = document["references"][0]
+    if damage == "document_digest":
+        document["text_digest"] = "0" * 64
+    elif damage == "reference_digest":
+        reference["document_digest"] = "0" * 64
+    elif damage == "start":
+        reference["start"] += 1
+    elif damage == "destination":
+        reference["destination_start"] += 1
+    elif damage == "source_target":
+        reference["source_target"] = ".data/md-images/" + identity(205) + ".jpg"
+    elif damage == "expected_original":
+        reference["expected_original"] = reference["expected_original"].replace(
+            "bleu", "wrong"
+        )
+    else:
+        reference["presentation_normalization"] = {
+            "declaration": "#$width=12p$",
+            "start": 0,
+            "end": 1,
+            "document_digest": document["text_digest"],
+            "basis": "document.text/unicode_codepoints",
+            "presentation": "responsive",
+        }
+    write_json(path, record)
+    with pytest.raises(AssertionError):
+        check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize("ending", ["\n", "\r\n", "\r"])
+def test_raw_note_digest_cannot_replace_the_final_adapted_document_digest(
+    tmp_path, ending
+):
+    raw, adapted = ADAPTED_IMAGE_NOTES[0].values
+    baseline, vault, _ = adapted_note_case(tmp_path, raw, adapted, ending)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    record["documents"][0]["text_digest"] = hashlib.sha256(
+        (baseline.manifest_path.parent / "201.bin").read_bytes()
+    ).hexdigest()
+    write_json(path, record)
+    with pytest.raises(AssertionError, match="image document source binding"):
+        check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize("family", ["protected", "protected-lazy"])
+def test_protected_image_examples_cannot_be_promoted_to_document_references(
+    tmp_path, family
+):
+    case = next(case for case in ADAPTED_IMAGE_NOTES if case.id == family)
+    baseline, vault, adapted = adapted_note_case(tmp_path, *case.values, "\r\n")
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    reference = dict(record["documents"][0]["references"][0])
+    start = adapted.index("![false]")
+    end = adapted.index(")", start) + 1
+    destination = adapted.index(".data/md-images/", start)
+    reference.update(
+        start=start,
+        end=end,
+        expected_original=adapted[start:end],
+        display_text="false",
+        destination_start=destination,
+        destination_end=end - 1,
+        source_target=adapted[destination : end - 1],
+        presentation_normalization=None,
+    )
+    record["documents"][0]["references"].insert(0, reference)
+    write_json(path, record)
+    with pytest.raises(AssertionError, match="all source image references"):
+        check_api_vault(baseline, vault, profile_version="3")
