@@ -79,9 +79,16 @@ def insert_activity(text):
     return "".join(mask)
 
 
-def callouts(text, operations=None):
+def callouts(text, operations=None, ownership=None):
     mask = insert_activity(text)
     output, opened, offset = [], set(), 0
+    containers = []
+
+    def close_container(stop):
+        start, _, changed = containers.pop()
+        if ownership is not None and changed:
+            ownership.append((start, stop))
+
     for line in markdown_lines(text):
         original, first, begin = line, len(output), offset
         scan = mask[offset : offset + len(line)]
@@ -97,6 +104,12 @@ def callouts(text, operations=None):
             and scan[len(marker[1]) : len(marker[1]) + 2] == "[!"
             and marker[2].lower() in KINDS
         )
+        while containers and (
+            depth < containers[-1][1] or active and depth <= containers[-1][1]
+        ):
+            close_container(begin)
+        if active:
+            containers.append([begin, depth, False])
         blank = not line.strip(" >\r\n\t")
         previous_blank = not output or not output[-1].strip(" >\r\n\t")
         if active:
@@ -137,8 +150,12 @@ def callouts(text, operations=None):
             opened.clear()
         output.append(line)
         replacement = "".join(output[first:])
+        if active and replacement != original:
+            containers[-1][2] = True
         if operations is not None and replacement != original:
             operations.append((begin, begin + len(original), replacement))
+    while containers:
+        close_container(len(text))
     return "".join(output)
 
 
@@ -168,7 +185,7 @@ def row_cells(line):
     return cells + [stripped[start:-1]]
 
 
-def tables(text, operations=None):
+def tables(text, operations=None, ownership=None):
     lines = markdown_lines(text)
     scan = insert_activity(text)
     offsets, cursor = [], 0
@@ -230,6 +247,8 @@ def tables(text, operations=None):
             rows.append(following)
         if not rows:
             continue
+        if ownership is not None:
+            ownership.append((offsets[index], offsets[rows[-1]] + len(lines[rows[-1]])))
         separator = all(
             re.fullmatch(r"\s*:?-{3,}:?\s*", cell) for cell in row_cells(lines[rows[0]])
         )
@@ -387,7 +406,7 @@ def label_text(value):
     )
 
 
-def contents(text, operations=None):
+def contents(text, operations=None, ownership=None):
     lines = markdown_lines(text)
     mask = insert_activity(text)
     offsets, cursor = [], 0
@@ -460,6 +479,11 @@ def contents(text, operations=None):
             for marker in markers
         )
     ]
+    if ownership is not None:
+        ownership.extend(
+            (offsets[h["start"]], offsets[h["end"]] + len(lines[h["end"]]))
+            for h in headings
+        )
     used = set(re.findall(r"(?<!\S)\^([A-Za-z0-9-]+)(?=\s*$)", mask, re.MULTILINE))
     claimed, replacements = set(), {}
     for number, heading in enumerate(headings, 1):
@@ -633,9 +657,10 @@ def expected_note_text(raw, owner, path, names, assets):
 def adaptation_activity(raw):
     """Raw ownership of independently recognized literal and insert operations.
 
-    Origins propagate through composition. Markdown operations own the source
-    lines whose independently established transform changes; unrelated lines
-    cannot be relabeled as an insert by a large emitted edit.
+    Origins propagate through composition. Recognized tables own their rows,
+    adapted callouts own their quoted container, and ToC operations own their
+    consumed headings even when those rows/headings need no string replacement.
+    Unrelated source gaps cannot be relabeled by a large emitted edit.
     """
     _, literal = literal_edits(protect_cross_container_code(raw))
     activity = {
@@ -649,8 +674,13 @@ def adaptation_activity(raw):
         text = text[:start] + edit["after"] + text[end:]
         origins[start:end] = [(start, end)] * len(edit["after"])
     for transform in (tables, callouts, contents):
-        operations = []
-        after = transform(text, operations)
+        operations, ownership = [], []
+        after = transform(text, operations, ownership)
+        for start, end in ownership:
+            owned = origins[start:end]
+            activity["markdown_insert"].append(
+                (min(v[0] for v in owned), max(v[1] for v in owned))
+            )
         mapped, cursor = [], 0
         for start, end, replacement in operations:
             mapped.extend(origins[cursor:start])

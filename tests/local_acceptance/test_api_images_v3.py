@@ -2758,3 +2758,249 @@ def test_markdown_edit_provenance_accepts_alternate_toc_segmentation(tmp_path):
     ]
     write_json(path, record)
     assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 6
+
+
+@pytest.mark.parametrize("ending", ["\n", "\r\n", "\r"])
+@pytest.mark.parametrize("segmentation", ["whole-table", "separate"])
+def test_genuine_table_owns_literal_changes_in_unchanged_rows(
+    tmp_path, ending, segmentation
+):
+    raw = '|Literal|Image|:(table="column-widths:-1,0,84;justification:default"):\n|<Enter>|![bleu]({image})|\n'
+    adapted = "|Literal|Image|\n|---|---|{eol}|\\<Enter>|![bleu]({image})|{eol}"
+    baseline, vault, _ = adapted_note_case(tmp_path, raw, adapted, ending)
+    if segmentation == "separate":
+        path = vault / "migration-record.json"
+        record = json.loads(path.read_bytes())
+        doc = first_document(record)
+        original = baseline.bytes(
+            baseline.data["payloads"][identity(201)]["path"]
+        ).decode()
+        stop = original.index(ending) + len(ending)
+        replacement = "|Literal|Image|\n|---|---|" + ending
+        base = doc["text_adaptations"][0]
+        start = original.index("<Enter>")
+        shift = len(replacement) - stop
+        doc["text_adaptations"] = [
+            base
+            | {
+                "start": 0,
+                "end": stop,
+                "before": original[:stop],
+                "after": replacement,
+                "adapted_start": 0,
+                "adapted_end": len(replacement),
+            },
+            base
+            | {
+                "kind": "literal_text",
+                "start": start,
+                "end": start + 7,
+                "before": "<Enter>",
+                "after": "\\<Enter>",
+                "adapted_start": start + shift,
+                "adapted_end": start + shift + 8,
+            },
+        ]
+        write_json(path, record)
+    assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 6
+
+
+@pytest.mark.parametrize("where", ["before", "after", "protected"])
+def test_table_ownership_cannot_launder_unrelated_or_protected_literals(
+    tmp_path, where
+):
+    table = '|Literal|Image|:(table="column-widths:-1,0,84;justification:default"):\n|<Enter>|![bleu]({image})|\n'
+    displayed = "|Literal|Image|\n|---|---|{eol}|\\<Enter>|![bleu]({image})|{eol}"
+    prefix = "Outside <Escape>.\n\n" if where == "before" else ""
+    suffix = (
+        "\nOutside <After>.\n"
+        if where == "after"
+        else "\n`<Protected>`\n"
+        if where == "protected"
+        else ""
+    )
+    expected_prefix = "Outside \\<Escape>.{eol}{eol}" if prefix else ""
+    expected_suffix = (
+        "{eol}Outside \\<After>.{eol}"
+        if where == "after"
+        else "{eol}`<Protected>`{eol}"
+        if where == "protected"
+        else ""
+    )
+    baseline, vault, text = adapted_note_case(
+        tmp_path, prefix + table + suffix, expected_prefix + displayed + expected_suffix
+    )
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    doc = first_document(record)
+    original = baseline.bytes(baseline.data["payloads"][identity(201)]["path"]).decode()
+    replacement = (
+        text.replace("`<Protected>`", "`\\<Protected>`")
+        if where == "protected"
+        else text
+    )
+    doc["text_adaptations"] = [
+        doc["text_adaptations"][0]
+        | {
+            "kind": "markdown_insert",
+            "start": 0,
+            "end": len(original),
+            "before": original,
+            "after": replacement,
+            "adapted_start": 0,
+            "adapted_end": len(replacement),
+        }
+    ]
+    write_json(path, record)
+    with pytest.raises(AssertionError, match="adaptation"):
+        check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize("ending", ["\n", "\r\n", "\r"])
+@pytest.mark.parametrize("segmentation", ["composite", "separate"])
+@pytest.mark.parametrize("unit", ["callout", "toc"])
+def test_genuine_callout_and_consumed_toc_heading_own_contained_literals(
+    tmp_path, ending, unit, segmentation
+):
+    if unit == "callout":
+        raw = "> [!tip|icon:🐈]\n> Press <Enter>.\n> ![bleu]({image})\n"
+        adapted = "> [!tip] 🐈 Tip{eol}> Press \\<Enter>.{eol}> ![bleu]({image}){eol}"
+    else:
+        raw = "[/toc/]\n\n# Press <Enter> ^keep\n![bleu]({image})\n"
+        adapted = "- [Press \\<Enter\\>](#^keep){eol}{eol}# Press \\<Enter> ^keep{eol}![bleu]({image}){eol}"
+    baseline, vault, text = adapted_note_case(tmp_path, raw, adapted, ending)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    doc = first_document(record)
+    original = baseline.bytes(baseline.data["payloads"][identity(201)]["path"]).decode()
+    base = doc["text_adaptations"][0]
+    if segmentation == "composite":
+        doc["text_adaptations"] = [
+            base
+            | {
+                "kind": "markdown_insert",
+                "start": 0,
+                "end": len(original),
+                "before": original,
+                "after": text,
+                "adapted_start": 0,
+                "adapted_end": len(text),
+            }
+        ]
+    elif unit == "toc":
+        doc["text_adaptations"][1]["kind"] = "literal_text"
+    else:
+        stop = original.index(ending) + len(ending)
+        replacement = "> [!tip] 🐈 Tip" + ending
+        start = original.index("<Enter>")
+        shift = len(replacement) - stop
+        doc["text_adaptations"] = [
+            base
+            | {
+                "start": 0,
+                "end": stop,
+                "before": original[:stop],
+                "after": replacement,
+                "adapted_start": 0,
+                "adapted_end": len(replacement),
+            },
+            base
+            | {
+                "kind": "literal_text",
+                "start": start,
+                "end": start + 7,
+                "before": "<Enter>",
+                "after": "\\<Enter>",
+                "adapted_start": start + shift,
+                "adapted_end": start + shift + 8,
+            },
+        ]
+    write_json(path, record)
+    assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 6
+
+
+@pytest.mark.parametrize("unit", ["callout", "toc"])
+@pytest.mark.parametrize("where", ["before", "after", "protected"])
+def test_container_and_toc_ownership_cannot_launder_unrelated_literals(
+    tmp_path, unit, where
+):
+    if unit == "callout":
+        raw = "> [!tip|icon:🐈]\n> Press <Enter>.\n> ![bleu]({image})\n"
+        adapted = "> [!tip] 🐈 Tip{eol}> Press \\<Enter>.{eol}> ![bleu]({image}){eol}"
+    else:
+        raw = "[/toc/]\n\n# Press <Enter> ^keep\n![bleu]({image})\n"
+        adapted = "- [Press \\<Enter\\>](#^keep){eol}{eol}# Press \\<Enter> ^keep{eol}![bleu]({image}){eol}"
+    prefix = "Outside <Escape>.\n\n" if where == "before" else ""
+    suffix = (
+        "\nOutside <After>.\n"
+        if where == "after"
+        else "\n`<Protected>`\n"
+        if where == "protected"
+        else ""
+    )
+    expected_prefix = "Outside \\<Escape>.{eol}{eol}" if prefix else ""
+    expected_suffix = (
+        "{eol}Outside \\<After>.{eol}"
+        if where == "after"
+        else "{eol}`<Protected>`{eol}"
+        if where == "protected"
+        else ""
+    )
+    baseline, vault, text = adapted_note_case(
+        tmp_path, prefix + raw + suffix, expected_prefix + adapted + expected_suffix
+    )
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    doc = first_document(record)
+    original = baseline.bytes(baseline.data["payloads"][identity(201)]["path"]).decode()
+    replacement = (
+        text.replace("`<Protected>`", "`\\<Protected>`")
+        if where == "protected"
+        else text
+    )
+    doc["text_adaptations"] = [
+        doc["text_adaptations"][0]
+        | {
+            "kind": "markdown_insert",
+            "start": 0,
+            "end": len(original),
+            "before": original,
+            "after": replacement,
+            "adapted_start": 0,
+            "adapted_end": len(replacement),
+        }
+    ]
+    write_json(path, record)
+    with pytest.raises(AssertionError, match="adaptation"):
+        check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize("unit", ["table", "callout", "toc"])
+def test_unrecognized_insert_declaration_cannot_own_literal_changes(tmp_path, unit):
+    if unit == "table":
+        raw = '|Literal|Image|:(table="column-widths:-1,-2,84;justification:default"):\n|<Enter>|![bleu]({image})|\n'
+    elif unit == "callout":
+        raw = "> [!unknown|icon:🐈]\n> Press <Enter>.\n> ![bleu]({image})\n"
+    else:
+        raw = "\\[/toc/]\n\n# Press <Enter> ^keep\n![bleu]({image})\n"
+    adapted = raw.replace("<Enter>", "\\<Enter>").replace("\n", "{eol}")
+    baseline, vault, text = adapted_note_case(tmp_path, raw, adapted)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    doc = first_document(record)
+    original = baseline.bytes(baseline.data["payloads"][identity(201)]["path"]).decode()
+    doc["text_adaptations"] = [
+        doc["text_adaptations"][0]
+        | {
+            "kind": "markdown_insert",
+            "start": 0,
+            "end": len(original),
+            "before": original,
+            "after": text,
+            "adapted_start": 0,
+            "adapted_end": len(text),
+        }
+    ]
+    write_json(path, record)
+    with pytest.raises(AssertionError, match="adaptation"):
+        check_api_vault(baseline, vault, profile_version="3")
