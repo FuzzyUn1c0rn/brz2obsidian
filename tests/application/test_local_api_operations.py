@@ -985,3 +985,101 @@ def test_changed_external_path_spelling_requires_fresh_review_without_target_acc
     note = (tmp_path / "new-review/Notes/External owner.md").read_text(encoding="utf-8")
     assert "- [Document](<file:///C:/Source/Document>)" in note
     assert not any(path.endswith("/file-content") for path, _, _ in api.requests)
+
+
+@pytest.mark.parametrize("family", ["jpeg", "inert-a.ico", "inert-b.ico"])
+def test_valid_new_image_pixels_change_identity_and_require_fresh_review(
+    tmp_path, family
+):
+    from tests.sources.test_local_api_images_v3 import (
+        BLUE_JPEG,
+        ICON,
+        INPUTS,
+        IcoIconApi,
+        JpegImageApi,
+        changed_valid_icon,
+    )
+    from tests.support.local_api_payloads import IMAGE
+
+    api = (
+        JpegImageApi()
+        if family == "jpeg"
+        else IcoIconApi((INPUTS / family).read_bytes())
+    )
+    key = IMAGE if family == "jpeg" else ICON
+    replacement = BLUE_JPEG if family == "jpeg" else changed_valid_icon(family)
+    with api_server(api) as (_, address):
+        selection = LocalApiSourceSelection(
+            brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+        )
+        operations = Operations(credentials=lambda: KEY)
+        original = operations.inspect(selection)
+        assert original.reviewed is not None
+        api.payloads[key] = replacement
+        api.attachments[key]["dataLength"] = len(replacement)
+        current = operations.inspect(selection)
+        assert current.reviewed is not None
+        assert (
+            current.reviewed.source_identity.source_sha256
+            != original.reviewed.source_identity.source_sha256
+        )
+        assert (
+            current.reviewed.source_identity.snapshot_digest
+            != original.reviewed.source_identity.snapshot_digest
+        )
+        refused = operations.convert_reviewed(
+            selection, tmp_path, "old-review", original.reviewed
+        )
+        assert refused.findings[0].code == "review_changed"
+        assert not (tmp_path / "old-review").exists()
+        accepted = operations.convert_reviewed(
+            selection, tmp_path, "new-review", current.reviewed
+        )
+        assert accepted.publication.receipt_verified
+    record = json.loads((tmp_path / "new-review/migration-record.json").read_bytes())
+    asset = next(row for row in record["asset_targets"] if row["asset_id"] == key)
+    assert (
+        tmp_path / "new-review" / asset["relative_path"]
+    ).read_bytes() == replacement
+
+
+def test_corrupt_new_jpeg_refuses_inspection_and_reviewed_publication_safely(tmp_path):
+    import struct
+
+    from tests.sources.test_local_api_images_v3 import INPUTS, JpegImageApi
+    from tests.support.local_api_payloads import IMAGE
+
+    raw = (INPUTS / "inert-blue.jpg").read_bytes()
+    marker = raw.index(b"\xff\xda")
+    start = marker + 2 + struct.unpack_from(">H", raw, marker + 2)[0]
+    damaged = raw[: start + 6] + b"\xff\xd9"
+    with api_server(JpegImageApi()) as (api, address):
+        selection = LocalApiSourceSelection(
+            brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+        )
+        operations = Operations(credentials=lambda: KEY)
+        original = operations.inspect(selection)
+        assert original.reviewed is not None
+        api.payloads[IMAGE] = damaged
+        api.attachments[IMAGE]["dataLength"] = len(damaged)
+        api.thoughts[HOME]["name"] = "PRIVATE_JPEG_TITLE_CANARY"
+        inspected = operations.inspect(selection)
+        converted = operations.convert_reviewed(
+            selection, tmp_path, "bad-jpeg", original.reviewed
+        )
+    for result, message in (
+        (
+            inspected,
+            "The selected source is not supported or consistent. Correct the source and inspect again.",
+        ),
+        (
+            converted,
+            "The source or prepared output is inconsistent. Review the source and inspect again.",
+        ),
+    ):
+        assert result.outcome == "refused"
+        assert result.findings[0].code == "invalid_source"
+        assert result.findings[0].message == message
+        assert "CANARY" not in result.diagnostic_text
+    assert not converted.publication.receipt_verified
+    assert not (tmp_path / "bad-jpeg").exists()

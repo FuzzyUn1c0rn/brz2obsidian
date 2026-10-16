@@ -15,6 +15,8 @@ from brz2obsidian.contracts import Asset, Document
 from ..external_files import external_file_uri
 from .declarations import source_date, uuid
 from .errors import refuse, unsupported_shape
+from .ico import validate_ico
+from .jpeg import validate_jpeg
 from .notes import scope_text
 
 ATTACHMENT_FIELDS = {
@@ -140,6 +142,7 @@ def role(value, profile_version):
         and location
         in {value["id"] + ".webp"}
         | ({value["id"] + ".png"} if profile_version in {"2", "3"} else set())
+        | ({value["id"] + ".jpg"} if profile_version == "3" else set())
     ):
         return "image"
     if kind in {1, 15}:
@@ -203,10 +206,12 @@ def validate_bytes(value, raw, profile_version):
         selected == "icon" or suffix == "png"
     ):
         expected = "PNG"
-    elif (
+    elif prefix.startswith(b"\xff\xd8\xff") and (
         selected == "icon"
         and profile_version in {"2", "3"}
-        and prefix.startswith(b"\xff\xd8\xff")
+        or selected == "image"
+        and profile_version == "3"
+        and suffix == "jpg"
     ):
         expected = "JPEG"
     elif (
@@ -216,23 +221,37 @@ def validate_bytes(value, raw, profile_version):
         and prefix[8:12] == b"WEBP"
     ):
         expected = "WEBP"
+    if (
+        selected == "icon"
+        and profile_version == "3"
+        and prefix[:4] == b"\x00\x00\x01\x00"
+    ):
+        validate_ico(raw)
+        return selected
     if expected is None:
         refuse("Required image/icon bytes do not match the qualified signature")
+    strict_jpeg = selected == "image" and profile_version == "3" and suffix == "jpg"
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             with Image.open(
                 raw if isinstance(raw, Path) else BytesIO(raw), formats=(expected,)
             ) as image:
+                if selected == "image" and suffix == "jpg" and image.format != "JPEG":
+                    raise ValueError
                 image.verify()
             with Image.open(
                 raw if isinstance(raw, Path) else BytesIO(raw), formats=(expected,)
             ) as image:
+                if selected == "image" and suffix == "jpg" and image.format != "JPEG":
+                    raise ValueError
                 if min(image.size) <= 0:
                     raise ValueError
                 for index in range(getattr(image, "n_frames", 1)):
                     image.seek(index)
                     image.load()
+                if strict_jpeg:
+                    verified_jpeg = image.size, image.mode
     except (
         OSError,
         ValueError,
@@ -242,6 +261,8 @@ def validate_bytes(value, raw, profile_version):
         Image.DecompressionBombWarning,
     ):
         refuse("Required image/icon bytes are not fully decodable")
+    if strict_jpeg:
+        validate_jpeg(raw, *verified_jpeg)
     return selected
 
 
