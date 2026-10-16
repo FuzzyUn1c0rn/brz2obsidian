@@ -212,6 +212,21 @@ and are implemented in their assigned source-family slices. Qualification alone
 never makes unsupported source content importable. Profile changes require a
 fresh compatible inspection; the worker/review schema remains version 3.
 
+
+Profile 3 discovers relationships from the qualified zero-Brain search envelope
+and legacy requested-Brain link candidates by canonical link ID. Search endpoint
+hints supply no content or traversal seeds; the authoritative link response
+supplies both endpoints. Unique pending IDs count immediately toward the traversal
+bound. Explicit profiles 1/2 retain their earlier hint requirements.
+
+The exact ordinary reverse-arrow hierarchy tuple `(kind, relation, meaning,
+direction, typeId) = (1, 1, 1, 3, null)` is supported under profile 3. A remains the
+parent and B the child. Both endpoint inventories, reciprocal parent/child graph
+adjacency and an empty relationship attachment inventory must agree. Original
+arrow facts remain in the migration record. These rules apply to live acquisition
+and frozen captures; older profiles refuse the additional tuple.
+
+
 Profile 3 adds thought-owned JPEG note images declared as the canonical attachment
 UUID plus lowercase `.jpg`, with type 12, isNotes=false and explicit null name.
 Complete JPEG verification and pixel decoding precede byte-preserving capture;

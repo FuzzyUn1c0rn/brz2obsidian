@@ -1,15 +1,18 @@
 """Independent API-bound preservation oracle. No converter modules are imported."""
 
 import hashlib
+import re
 from decimal import Decimal
 from io import BytesIO
+from itertools import pairwise
 from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import UUID
 from zipfile import BadZipFile, ZipFile
 
 from .api_manifest import read_json, safe_path
-from .checker import source_references
+from .api_note_text import expected_note_text
+from .checker import escaped, source_references, wiki
 from .images import AuditUnavailable, decode_image
 
 
@@ -72,7 +75,9 @@ def neighbor(graph, field, key):
     return any(row["id"] == key for row in graph[field] or [])
 
 
-def qualify_source(baseline, thoughts, links, attachments, graphs):
+def qualify_source(
+    baseline, thoughts, links, attachments, graphs, *, profile_version="1"
+):
     data = baseline.data
     brain = baseline.json(data["brain"])
     collection = uuid(brain["id"])
@@ -136,6 +141,9 @@ def qualify_source(baseline, thoughts, links, attachments, graphs):
         assert row["brainId"] == collection, "relationship collection"
         a, b = row["thoughtIdA"], row["thoughtIdB"]
         kind = row["meaning"]
+        signature = tuple(row[k] for k in ("kind", "relation", "meaning", "direction"))
+        if profile_version == "3" and signature == (1, 1, 1, 3):
+            qualify_reverse_joins(baseline, row, thoughts, links, graphs)
         if kind in {2, 5}:
             assert neighbor(graphs[a], "children", b), (
                 "classification source graph join"
@@ -217,7 +225,70 @@ def qualify_source(baseline, thoughts, links, attachments, graphs):
     ), "unbound independent qualification"
 
 
-def source_facts(baseline):
+def qualify_reverse_joins(baseline, row, thoughts, links, graphs):
+    """Independent complete source observations for the new finite hierarchy."""
+    data = baseline.data
+    key = row["id"]
+    outcome = data.get("relationship_metadata", {}).get(key)
+    assert isinstance(outcome, dict) and type(outcome.get("status")) is int, (
+        "reverse hierarchy metadata outcome"
+    )
+    assert outcome["status"] == 200, "reverse hierarchy metadata outcome"
+    metadata = read_json(baseline.bytes(outcome["path"]), parse_float=Decimal)
+    assert semantic(metadata) == semantic(row), (
+        "reverse hierarchy metadata disagreement"
+    )
+    status = data.get("link_attachment_outcomes", {}).get(key)
+    assert type(status) is int and status == 200, "reverse hierarchy content outcome"
+    for owner in (row["thoughtIdA"], row["thoughtIdB"]):
+        graph = graphs[owner]
+        incident = [
+            r["id"]
+            for r in graph["links"]
+            if owner in (r["thoughtIdA"], r["thoughtIdB"])
+        ]
+        required = {
+            r["id"]
+            for r in links.values()
+            if owner in (r["thoughtIdA"], r["thoughtIdB"])
+        }
+        assert len(incident) == len(set(incident)) and set(incident) == required, (
+            "reverse hierarchy endpoint relationship inventory"
+        )
+        expected = {"parents": set(), "children": set(), "jumps": set(), "tags": set()}
+        for link in links.values():
+            a, b = link["thoughtIdA"], link["thoughtIdB"]
+            if link["meaning"] == 1 and link["relation"] == 1:
+                if a == owner:
+                    expected["children"].add(b)
+                if b == owner:
+                    expected["parents"].add(a)
+            elif link["meaning"] == 1 and link["relation"] == 3 and owner in {a, b}:
+                expected["jumps"].add(b if owner == a else a)
+            elif link["meaning"] == 5 and b == owner:
+                expected["tags"].add(a)
+        for field in (*expected, "siblings"):
+            assert type(graph.get(field)) is list, "required reverse graph array"
+        for field, wanted in expected.items():
+            observed = graph[field]
+            keys = [n["id"] for n in observed]
+            assert len(keys) == len(set(keys)), "duplicate reverse graph neighbor"
+            assert all(
+                n["id"] in thoughts and semantic(n) == semantic(thoughts[n["id"]])
+                for n in observed
+            ), "reverse graph neighbor metadata disagreement"
+            provider = thoughts[owner]["typeId"]
+            if field == "parents" and provider and provider in keys:
+                wanted.add(provider)
+            assert set(keys) == wanted, "unexplained reverse graph adjacency"
+        provider = thoughts[owner]["typeId"]
+        assert semantic(graph["type"]) == semantic(
+            thoughts[provider] if provider else None
+        ), "reverse graph type declaration"
+
+
+def source_facts(baseline, *, profile_version="1"):
+    assert profile_version in {"1", "2", "3"}, "unsupported API profile version"
     baseline.verify()
     data = baseline.data
     for values in data["scope"].values():
@@ -249,9 +320,12 @@ def source_facts(baseline):
             )
             assert attachment["id"] not in attachments, "raw attachment identities"
             attachments[attachment["id"]] = attachment
-        for row in graph["links"] or []:
+        assert type(graph["links"]) is list, "required graph relationship array"
+        for row in graph["links"]:
             if row["id"] in links:
-                assert links[row["id"]] == row, "conflicting raw relationship"
+                assert semantic(links[row["id"]]) == semantic(row), (
+                    "conflicting raw relationship"
+                )
             links[row["id"]] = row
     assert set(links) == set(data["scope"]["relationship_ids"]), (
         "baseline relationship coverage"
@@ -264,6 +338,11 @@ def source_facts(baseline):
         assert all(type(v) is int for v in signature), "raw relationship integers"
         assert row["typeId"] is None, "unsupported custom relationship type"
         if signature in {(1, 1, 1, -1), (1, 1, 1, 1)}:
+            kind = "hierarchy"
+        elif profile_version == "3" and signature == (1, 1, 1, 3):
+            assert (thoughts[a]["kind"], thoughts[b]["kind"]) == (1, 1), (
+                "reverse hierarchy requires ordinary endpoints"
+            )
             kind = "hierarchy"
         elif signature in {(1, 3, 1, -1), (1, 3, 1, 3), (1, 3, 1, 5), (1, 3, 1, 7)}:
             kind = "related"
@@ -281,7 +360,9 @@ def source_facts(baseline):
     assert set(attachments) == set(data["scope"]["attachment_ids"]), (
         "baseline attachment coverage"
     )
-    qualify_source(baseline, thoughts, links, attachments, graphs)
+    qualify_source(
+        baseline, thoughts, links, attachments, graphs, profile_version=profile_version
+    )
     return thoughts, expected, attachments, links
 
 
@@ -429,7 +510,9 @@ def has_measured_pdf(baseline, attachments, owner, profile_version, proofs):
 
 def audit_baseline(baseline, *, profile_version="1"):
     """Qualify every scoped raw fact/outcome before any conversion takes place."""
-    thoughts, relationships, attachments, _ = source_facts(baseline)
+    thoughts, relationships, attachments, _ = source_facts(
+        baseline, profile_version=profile_version
+    )
     assert profile_version in {"1", "2", "3"}, "unsupported API profile version"
     local = {key for key, a in attachments.items() if a["type"] != 3}
     assert set(baseline.data["payloads"]) == local, "baseline payload coverage"
@@ -501,12 +584,155 @@ def audit_baseline(baseline, *, profile_version="1"):
     return summary
 
 
+def check_reverse_navigation(
+    baseline, vault, thoughts, expected, raw_links, attachments, targets, assets
+):
+    """Audit every generated navigation section after the trusted authored region."""
+    owners = {
+        owner
+        for row in raw_links.values()
+        if tuple(row[k] for k in ("kind", "relation", "meaning", "direction"))
+        == (1, 1, 1, 3)
+        for owner in (row["thoughtIdA"], row["thoughtIdB"])
+    }
+    if not owners:
+        return
+    # Source facts establish mandatory notes before deterministic edge coverage.
+    # This audit remains scoped to new reverse endpoints; all hierarchy edges
+    # participate because another edge can determine which empty parent is chosen.
+    selected = {baseline.json(baseline.data["brain"])["homeThoughtId"]}
+    selected.update(key for key, row in thoughts.items() if row["kind"] == 2)
+    selected.update(
+        row["item_b"] for row in expected.values() if row["kind"] == "classification"
+    )
+    for key, attachment in attachments.items():
+        if attachment["isNotes"]:
+            text = baseline.bytes(baseline.data["payloads"][key]["path"]).decode(
+                "utf-8"
+            )
+            if text.strip():
+                selected.add(attachment["sourceId"])
+        else:
+            asset = assets[
+                key
+            ]  # independently checked against the raw declaration/bytes
+            if (
+                asset["availability"] == "external"
+                and asset["role"] in {"file", "url", "directory"}
+            ) or (
+                asset["availability"] == "present"
+                and asset["role"] in {"file", "image"}
+                and asset["actual_length"] > 0
+            ):
+                selected.add(attachment["sourceId"])
+    edges = [
+        (row["item_a"], row["item_b"])
+        for row in expected.values()
+        if row["kind"] == "hierarchy"
+    ]
+    pending = [(a, b) for a, b in edges if a not in selected and b not in selected]
+    while pending:
+        # Most uncovered incident edges first, then canonical parent identity.
+        counts = {
+            parent: sum(parent in {a, b} for a, b in pending)
+            for parent in {a for a, b in pending}
+        }
+        selected.add(min(counts, key=lambda key: (-counts[key], key)))
+        pending = [(a, b) for a, b in edges if a not in selected and b not in selected]
+    pattern = re.compile(
+        r"^## (Parents|Children|Related)\n\n((?:- \[\[[^\n]+\]\]\n)+)", re.MULTILINE
+    )
+    for owner in owners:
+        target = targets[owner]
+        assert type(target.get("created")) is bool and target["created"] == (
+            owner in selected
+        ), "reverse hierarchy note materialization"
+        path = safe_path(vault, target["relative_path"])
+        if owner not in selected:
+            assert not path.exists(), "uncreated reverse hierarchy note exists"
+            continue
+        assert path.is_file(), "reverse hierarchy generated note unavailable"
+        body = path.read_text(encoding="utf-8")
+        title = "# " + escaped(thoughts[owner]["name"]) + "\n"
+        title = title.replace("\r\n", "\n").replace("\r", "\n")
+        start = body.find(title)
+        assert start >= 0, "reverse hierarchy generated note title unavailable"
+        cursor = start + len(title)
+        authored = []
+        if thoughts[owner].get("label"):
+            authored.append(thoughts[owner]["label"])
+        names = {key: value.get("relative_path") for key, value in targets.items()}
+        for attachment in attachments.values():
+            if attachment["sourceId"] == owner and attachment["isNotes"]:
+                note = baseline.bytes(
+                    baseline.data["payloads"][attachment["id"]]["path"]
+                ).decode("utf-8")
+                authored.append(
+                    expected_note_text(
+                        note, owner, target["relative_path"], names, assets
+                    )
+                )
+        for source in authored:
+            text = source.replace("\r\n", "\n").replace("\r", "\n")
+            if text:
+                position = body.find(text, cursor)
+                assert position >= 0, "reverse hierarchy authored content unavailable"
+                cursor = position + len(text)
+        # Authored labels/prose/headings cannot stand in for generated links.
+        body = body[cursor:]
+        footer = "## Categories\n\n[[Categories.md|Browse categories]]"
+        if owner == baseline.json(baseline.data["brain"])[
+            "homeThoughtId"
+        ] and body.rstrip().endswith(footer):
+            body = body.rstrip()[: -len(footer)] + "\n"
+        matches = list(pattern.finditer(body))
+        assert matches and not body[matches[-1].end() :].strip(), (
+            "reverse hierarchy generated navigation unavailable"
+        )
+        headings = list(
+            re.finditer(
+                r"^ {0,3}#{1,6}[ \t]+(?:Parents|Children|Related)\b[^\n]*",
+                body,
+                re.MULTILINE | re.IGNORECASE,
+            )
+        )
+        assert len(headings) == len(matches) and all(
+            heading.start() == match.start()
+            for heading, match in zip(headings, matches)
+        ), "unestablished generated relationship section"
+        assert all(
+            not body[left.end() : right.start()].strip()
+            for left, right in pairwise(matches)
+        ), "unexpected prose between generated relationship sections"
+        sections = {}
+        for match in matches:
+            heading = match.group(1)
+            assert heading not in sections, "duplicate generated relationship section"
+            sections[heading] = match.group(2)
+        for heading in ("Parents", "Children"):
+            wanted = {
+                r["item_a"] if heading == "Parents" else r["item_b"]
+                for r in expected.values()
+                if r["kind"] == "hierarchy"
+                and r["item_b" if heading == "Parents" else "item_a"] == owner
+            }
+            required = "".join(
+                "- " + wiki(targets[key]["relative_path"], thoughts[key]["name"]) + "\n"
+                for key in sorted(wanted)
+            )
+            assert sections.get(heading, "") == required, (
+                "reverse hierarchy generated Parents/Children navigation"
+            )
+
+
 def check_api_vault(baseline, vault, *, profile_version="1"):
     """Audit actual assignments/bytes; the record never supplies expectations."""
     vault = Path(vault)
     audit = audit_baseline(baseline, profile_version=profile_version)
     proofs = audit.get("resource_eligibility", {})
-    thoughts, expected, attachments, raw_links = source_facts(baseline)
+    thoughts, expected, attachments, raw_links = source_facts(
+        baseline, profile_version=profile_version
+    )
     record_bytes = (vault / "migration-record.json").read_bytes()
     record = read_json(record_bytes)
     identity = record["source_identity"]
@@ -632,6 +858,9 @@ def check_api_vault(baseline, vault, *, profile_version="1"):
                     profile_version,
                     proofs,
                 ), "missing TXT lacks measured same-owner PDF"
+    check_reverse_navigation(
+        baseline, vault, thoughts, expected, raw_links, attachments, targets, assets
+    )
     baseline.verify()
     return {
         "thoughts": len(thoughts),

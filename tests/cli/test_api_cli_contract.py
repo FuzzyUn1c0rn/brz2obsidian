@@ -215,6 +215,42 @@ def test_profile3_stage_diagnostics_reach_cli_without_source_hints(
     assert not (tmp_path / "refused").exists()
 
 
+@pytest.mark.parametrize("as_json", [False, True])
+def test_cli_discovers_reverse_hierarchy_from_relationship_only_search(
+    tmp_path, monkeypatch, capsys, as_json
+):
+    from tests.sources.test_local_api_relationship_candidates import (
+        CHILD,
+        LINK,
+        PARENT,
+        LinkCandidateApi,
+    )
+    from tests.support.local_api import BRAIN, KEY, api_server
+
+    monkeypatch.setenv("THE_BRAIN_LOCAL_API_KEY", KEY)
+    destination = tmp_path / "vault"
+    with api_server(LinkCandidateApi(direction=3)) as (_, address):
+        options = ["--source-kind", "local-api", "--api-url", address]
+        if as_json:
+            options.append("--json")
+        assert main(["inspect", BRAIN, *options]) == 0
+        inspected = capsys.readouterr()
+        assert main(["convert", BRAIN, str(destination), *options]) == 0
+    converted = capsys.readouterr()
+    assert inspected.err == converted.err == ""
+    assert "CANARY" not in inspected.out + converted.out
+    if as_json:
+        assert json.loads(inspected.out)["outcome"] == "clean"
+        assert json.loads(converted.out)["outcome"] == "clean"
+    record = json.loads((destination / "migration-record.json").read_bytes())
+    assert [
+        (r["key"], r["kind"], r["item_a"], r["item_b"]) for r in record["relationships"]
+    ] == [(LINK, "hierarchy", PARENT, CHILD)]
+    parent = (destination / "Notes/Parent.md").read_text(encoding="utf-8")
+    assert "## Children\n\n- [[Notes/Child.md|Child]]" in parent
+    assert "## Parents" not in parent
+
+
 @pytest.mark.parametrize("family", ["jpeg", "inert-a.ico", "inert-b.ico"])
 @pytest.mark.parametrize("as_json", [False, True])
 def test_cli_preserves_new_jpeg_and_finite_ico_bytes(

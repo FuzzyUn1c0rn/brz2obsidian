@@ -911,6 +911,42 @@ def test_valid_replacement_image_has_new_identity_and_needs_new_review(tmp_path)
         ).read_bytes() == replacement
 
 
+def test_valid_reverse_arrow_change_requires_a_fresh_review(tmp_path):
+    from tests.sources.test_local_api_relationship_candidates import (
+        LINK,
+        LinkCandidateApi,
+    )
+
+    api = LinkCandidateApi()
+    with api_server(api) as (_, address):
+        selection = LocalApiSourceSelection(
+            brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+        )
+        operations = Operations(credentials=lambda: KEY)
+        original = operations.inspect(selection)
+        assert original.reviewed is not None
+        api.links[LINK]["direction"] = 3
+        current = operations.inspect(selection)
+        assert current.reviewed is not None
+        assert (
+            current.reviewed.source_identity.source_sha256
+            != original.reviewed.source_identity.source_sha256
+        )
+        assert (
+            current.reviewed.source_identity.snapshot_digest
+            != original.reviewed.source_identity.snapshot_digest
+        )
+        refused = operations.convert_reviewed(
+            selection, tmp_path, "old-review", original.reviewed
+        )
+        assert refused.findings[0].code == "review_changed"
+        assert not (tmp_path / "old-review").exists()
+        accepted = operations.convert_reviewed(
+            selection, tmp_path, "new-review", current.reviewed
+        )
+        assert accepted.publication.receipt_verified
+
+
 @pytest.mark.parametrize("family", ["jpeg", "inert-a.ico", "inert-b.ico"])
 def test_valid_new_image_pixels_change_identity_and_require_fresh_review(
     tmp_path, family
