@@ -1,5 +1,6 @@
 """Independent API-bound preservation oracle. No converter modules are imported."""
 
+import base64
 import hashlib
 import json
 import posixpath
@@ -520,10 +521,19 @@ def check_image_icon_markup(
 
 
 def check_new_image_preservation(
-    baseline, vault, record, thoughts, attachments, targets, assets, proofs
+    baseline,
+    vault,
+    record,
+    thoughts,
+    attachments,
+    targets,
+    assets,
+    proofs,
+    *,
+    profile_version="3",
 ):
-    selected = new_image_ids(baseline, attachments)
-    if not selected:
+    selected = new_image_ids(baseline, attachments) if profile_version == "3" else set()
+    if not selected and baseline.data["schema"] != "brz2obsidian.api-acceptance/2":
         return
     for key in selected:
         assert (
@@ -537,10 +547,10 @@ def check_new_image_preservation(
     bindings = {}
     materialized = {baseline.json(baseline.data["brain"])["homeThoughtId"]}
     materialized.update(key for key, row in thoughts.items() if row["kind"] == 2)
-    scoped = qualify_scope(baseline, profile_version="3")
+    scoped = qualify_scope(baseline, profile_version=profile_version)
     for key, row in attachments.items():
         if row["isNotes"]:
-            text = scoped_note_text(baseline, key)
+            text = scoped_note_text(baseline, key, profile_version=profile_version)
             if (
                 expected_document_text(text)
                 if baseline.data["schema"] == "brz2obsidian.api-acceptance/2"
@@ -549,7 +559,9 @@ def check_new_image_preservation(
                 materialized.add(row["sourceId"])
             if key in scoped.omitted_ids:
                 continue
-        role, availability, payload = expected_asset(baseline, row, "3", proofs)
+        role, availability, payload = expected_asset(
+            baseline, row, profile_version, proofs
+        )
         if (availability == "external" and role in {"file", "url", "directory"}) or (
             availability == "present" and role in {"file", "image"} and payload
         ):
@@ -561,7 +573,7 @@ def check_new_image_preservation(
             "original_name": row["location"],
             "relative_path": assets[key]["relative_path"],
         }
-    _, relations, _, _ = source_facts(baseline, profile_version="3")
+    _, relations, _, _ = source_facts(baseline, profile_version=profile_version)
     materialized.update(
         row["item_b"] for row in relations.values() if row["kind"] == "classification"
     )
@@ -635,7 +647,7 @@ def check_new_image_preservation(
         key: [row["label"]] if row.get("label") else [] for key, row in thoughts.items()
     }
     for key, row in authored.items():
-        original = scoped_note_text(baseline, key)
+        original = scoped_note_text(baseline, key, profile_version=profile_version)
         body = expected_document_text(original)
         digest = hashlib.sha256(body.encode()).hexdigest()
         document = documents[key]
@@ -1671,8 +1683,8 @@ def check_scope_records(baseline, record, scoped, attachments, raw_links):
             "key": key,
             "rule_id": rule,
             "outcome": outcome,
-            "subjects": subjects,
-            "evidence": evidence,
+            "subjects": sorted(set(subjects)),
+            "evidence": sorted(set(evidence)),
         }
 
     for owner, graph in graphs.items():
@@ -1833,7 +1845,9 @@ def check_scope_records(baseline, record, scoped, attachments, raw_links):
         ), "scoped source accounting disposition/references"
 
 
-def check_scope_memberships(baseline, vault, record, thoughts, relationships, targets):
+def check_scope_memberships(
+    baseline, vault, record, thoughts, relationships, targets, profile_version
+):
     """Bind API classifications, native tags and properties to source identities."""
     names = {}
     for key, row in thoughts.items():
@@ -1874,7 +1888,7 @@ def check_scope_memberships(baseline, vault, record, thoughts, relationships, ta
                 "relationship_key": key,
                 "definition_key": a,
                 "item_key": b,
-                "evidence": ["link:" + key, "thought:" + a, "thought:" + b],
+                "evidence": sorted(["link:" + key, "thought:" + a, "thought:" + b]),
                 "definition_target": targets[a]["relative_path"],
                 "item_target": targets[b]["relative_path"],
             }
@@ -1906,7 +1920,7 @@ def check_scope_memberships(baseline, vault, record, thoughts, relationships, ta
     icons = {
         row["sourceId"]: key
         for key, row in qualify_scope(
-            baseline, profile_version="3"
+            baseline, profile_version=profile_version
         ).declarations.items()
         if row["type"] == 5
     }
@@ -1971,6 +1985,311 @@ def check_scope_memberships(baseline, vault, record, thoughts, relationships, ta
         ), "source-bound imported properties"
 
 
+def check_scoped_output_content(
+    baseline,
+    vault,
+    record,
+    scoped,
+    thoughts,
+    attachments,
+    targets,
+    assets,
+    relationships,
+    profile_version,
+):
+    """Inspect unaccounted output regions, after their source-bound peers qualify.
+
+    A matching scalar does not by itself establish excluded provenance. Closed
+    source records, Document fields and exact rendered source spans have their
+    own independently checked locations. The same spelling in an extra field,
+    file or unaccounted note span is still inspected. Unsafe original bodies
+    are forbidden everywhere, including decoded JSON strings.
+    """
+
+    def strings(value):
+        if type(value) is str:
+            yield value
+        elif isinstance(value, dict):
+            for item in value.values():
+                yield from strings(item)
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                yield from strings(item)
+
+    fields = ("name", "label", "aliases", "cleanedUpName")
+    forbidden = set()
+    excluded = baseline.data["scope_inputs"]["excluded_thoughts"]
+    prefixes = {
+        "brain://" + base64.urlsafe_b64encode(UUID(key).bytes_le).decode().rstrip("=")
+        for key in excluded
+    }
+    for outcome in excluded.values():
+        row = baseline.json(outcome["path"])
+        for field in fields:
+            forbidden.update(strings(row.get(field)))
+
+    def label_fragments(label):
+        mask = list(label)
+        for begin, end, _, nested, start, finish in inline_candidates(
+            label, inline_only=True
+        )[0]:
+            forbidden.add(label[start:finish])
+            label_fragments(nested)
+            mask[begin:end] = " " * (end - begin)
+        forbidden.update(
+            piece.strip() for piece in re.split(r"\s{2,}|[\r\n]", "".join(mask))
+        )
+
+    unsafe = set()
+    for key in scoped.omitted_ids:
+        raw = baseline.bytes(baseline.data["payloads"][key]["path"])
+        unsafe.add(raw)
+        text = raw.decode("utf8")
+        for begin, end, _, label, start, finish in inline_candidates(text)[0]:
+            destination = text[start:finish]
+            if any(
+                destination == prefix or destination.startswith(prefix + "/")
+                for prefix in prefixes
+            ):
+                forbidden.update((text[begin:end], destination))
+                label_fragments(label)
+    forbidden.discard("")
+
+    def inspect_strings(value):
+        assert not any(term in text for text in strings(value) for term in forbidden), (
+            "excluded authored content in output"
+        )
+
+    def extras(row, established):
+        # Established fields have already passed their location-specific audit.
+        # Unknown fields (including their names) receive no such allowance.
+        for field, value in row.items():
+            if field not in established:
+                inspect_strings([field, value])
+
+    closed = {
+        "original_evidence",
+        "source_accounting",
+        "classification_assignments",
+        "tag_memberships",
+    }
+    item_fields = {
+        "item_key",
+        "original_identity",
+        "original_title",
+        "relative_path",
+        "created",
+        "documents",
+        "declared_appearance",
+        "icon_snapshot",
+    }
+    asset_fields = {
+        "asset_id",
+        "owner",
+        "role",
+        "availability",
+        "relative_path",
+        "resource_link",
+        "original_name",
+        "display_name",
+        "actual_length",
+        "actual_sha256",
+        "external_uri",
+        "retained_documents",
+    }
+    # Keys are protocol vocabulary, not authored metadata. Values outside the
+    # fully audited projections remain subject to the exclusion check.
+    envelope = {
+        "schema",
+        "schema_version",
+        "converter_version",
+        "renderer_version",
+        "source_identity",
+        "profile_id",
+        "profile_version",
+        "run_metadata",
+        "original_evidence",
+        "item_targets",
+        "asset_targets",
+        "relationships",
+        "tag_memberships",
+        "classification_assignments",
+        "source_gaps",
+        "generated_presentations",
+        "support_artifacts",
+        "reserved_support_paths",
+        "adaptations",
+        "source_accounting",
+        "issues",
+        "counts",
+        "obsidian_configuration",
+    }
+    extras(record, envelope)
+    for field, value in record.items():
+        if field in closed or field not in envelope:
+            continue
+        if field == "item_targets":
+            for row in value:
+                extras(row, item_fields)
+        elif field == "asset_targets":
+            for row in value:
+                extras(row, asset_fields)
+        elif field == "relationships":
+            for row in value:
+                extras(row, {"key", "item_a", "item_b", "kind"})
+        elif field == "issues":
+            # The closed registry defines these protocol scalars. Authored
+            # metadata sharing their spelling does not own this occurrence.
+            codes = {
+                "local-api.missing-txt-pdf.v1": "approved_source_gap",
+                "local-api.note-formatting.v1": "formatting_loss",
+            }
+            for issue in value:
+                established = set()
+                rule = issue.get("rule_id")
+                if rule in codes:
+                    established.add("rule_id")
+                    if issue.get("code") == codes[rule]:
+                        established.add("code")
+                    if issue.get("severity") == "warning":
+                        established.add("severity")
+                extras(issue, established)
+        elif field == "source_identity":
+            extras(
+                value, {"module_id", "module_version", "format_version", "source_id"}
+            )
+        elif field == "schema":
+            if value != "brz2obsidian.migration":
+                inspect_strings(value)
+        elif field not in {"profile_id", "profile_version"}:
+            inspect_strings(value)
+
+    names = {key: row["relative_path"] for key, row in targets.items()}
+    notes = {
+        row["relative_path"]: key for key, row in targets.items() if row["created"]
+    }
+    copies = {
+        row["relative_path"]
+        for row in assets.values()
+        if row["availability"] == "present"
+    }
+
+    def unaccounted_note(text, owner):
+        if text.startswith("---\n") and "\n---\n" in text[4:]:
+            header, text = text[4:].split("\n---\n", 1)
+            properties = yaml.safe_load(header)
+            extras(
+                properties,
+                {
+                    "categories",
+                    "appearance_category",
+                    "tags",
+                    "aliases",
+                    "created",
+                    "updated",
+                    "source_collection_id",
+                    "source_item_id",
+                    "icon",
+                    "icon_provider",
+                    "color",
+                    "background_color",
+                    "foreground_color",
+                },
+            )
+        chunks = ["# " + escaped(thoughts[owner]["name"]) + "\n"]
+        if thoughts[owner].get("label"):
+            chunks.append(thoughts[owner]["label"])
+        for key, row in attachments.items():
+            if row["sourceId"] != owner:
+                continue
+            if row["isNotes"]:
+                chunks.append(
+                    expected_note_text(
+                        scoped_note_text(
+                            baseline, key, profile_version=profile_version
+                        ),
+                        owner,
+                        names[owner],
+                        names,
+                        assets,
+                    )
+                )
+            elif row["type"] in {2, 8} or row["type"] == 3:
+                display = (
+                    external_projection(baseline, row, profile_version)[1]
+                    if row["type"] in {2, 8}
+                    else row["name"] or row["location"]
+                )
+                label = re.sub(r"[\[\]|\r\n]", " ", display).strip() or "Resource"
+                chunks.append(
+                    "- [" + label + "](<" + assets[key]["external_uri"] + ">)"
+                )
+            elif assets[key]["resource_link"]:
+                chunks.append(
+                    "- "
+                    + wiki(assets[key]["resource_link"], row["name"] or row["location"])
+                )
+            elif assets[key]["availability"] == "absent":
+                chunks.append(
+                    "- Absent source file: "
+                    + (row["name"] or row["location"])
+                    + " (metadata retained; bytes absent from the source)."
+                )
+        for relation in relationships.values():
+            a, b = relation["item_a"], relation["item_b"]
+            if owner in {a, b}:
+                other = b if a == owner else a
+                chunks.append("- " + wiki(names[other], thoughts[other]["name"]))
+        chunks.extend(
+            "## " + heading + "\n"
+            for heading in ("Parents", "Children", "Related", "Resources", "Categories")
+        )
+        chunks.append("[[Categories.md|Browse categories]]")
+        for chunk in chunks:
+            chunk = chunk.replace("\r\n", "\n").replace("\r", "\n")
+            if chunk:
+                text = text.replace(chunk, "", 1)
+        return text
+
+    for path in vault.rglob("*"):
+        if not path.is_file():
+            continue
+        assert (
+            path.resolve().is_relative_to(vault.resolve()) and not path.is_symlink()
+        ), "scope output storage ownership"
+        raw = path.read_bytes()
+        assert not any(value in raw for value in unsafe), (
+            "unsafe original copied into output"
+        )
+        try:
+            text = raw.decode("utf8")
+        except UnicodeError:
+            assert not any(value.encode() in raw for value in forbidden), (
+                "excluded authored content in output"
+            )
+            continue
+        try:
+            value = json.loads(text, object_pairs_hook=list)
+        except ValueError:
+            value = None
+        if value is not None:
+            assert not any(
+                original.decode("utf8") in item
+                for item in strings(value)
+                for original in unsafe
+            ), "unsafe original copied into output"
+        relative = path.relative_to(vault).as_posix()
+        if relative == "migration-record.json" or relative in copies:
+            continue
+        if relative in notes:
+            text = unaccounted_note(
+                text.replace("\r\n", "\n").replace("\r", "\n"), notes[relative]
+            )
+            inspect_strings(text)
+        else:
+            inspect_strings(value if value is not None else text)
+
+
 def check_api_vault(baseline, vault, *, profile_version="1"):
     """Audit actual assignments/bytes; the record never supplies expectations."""
     vault = Path(vault)
@@ -2017,19 +2336,6 @@ def check_api_vault(baseline, vault, *, profile_version="1"):
             if type(key) is str and key in minimal:
                 assert semantic(row) == semantic(minimal[key]), (
                     "excluded metadata exceeds minimal projection"
-                )
-        unsafe = {
-            baseline.bytes(baseline.data["payloads"][key]["path"])
-            for key in scoped.omitted_ids
-        }
-        for path in vault.rglob("*"):
-            if path.is_file():
-                assert (
-                    path.resolve().is_relative_to(vault.resolve())
-                    and not path.is_symlink()
-                ), "scope output storage ownership"
-                assert path.read_bytes() not in unsafe, (
-                    "unsafe original copied into output"
                 )
 
     assert all(
@@ -2145,10 +2451,23 @@ def check_api_vault(baseline, vault, *, profile_version="1"):
                 ), "missing TXT lacks measured same-owner PDF"
     if baseline.data["schema"] == "brz2obsidian.api-acceptance/2":
         check_scope_records(baseline, record, scoped, attachments, raw_links)
-        check_scope_memberships(baseline, vault, record, thoughts, expected, targets)
-    if profile_version == "3":
+        check_scope_memberships(
+            baseline, vault, record, thoughts, expected, targets, profile_version
+        )
+    if (
+        profile_version == "3"
+        or baseline.data["schema"] == "brz2obsidian.api-acceptance/2"
+    ):
         check_new_image_preservation(
-            baseline, vault, record, thoughts, attachments, targets, assets, proofs
+            baseline,
+            vault,
+            record,
+            thoughts,
+            attachments,
+            targets,
+            assets,
+            proofs,
+            profile_version=profile_version,
         )
 
     check_external_resources(
@@ -2158,6 +2477,19 @@ def check_api_vault(baseline, vault, *, profile_version="1"):
         baseline, vault, thoughts, expected, raw_links, attachments, targets, assets
     )
     check_svg_notes(baseline, vault, thoughts, attachments, targets, assets)
+    if baseline.data["schema"] == "brz2obsidian.api-acceptance/2":
+        check_scoped_output_content(
+            baseline,
+            vault,
+            record,
+            scoped,
+            thoughts,
+            attachments,
+            targets,
+            assets,
+            expected,
+            profile_version,
+        )
     baseline.verify()
     return {
         "thoughts": len(thoughts),

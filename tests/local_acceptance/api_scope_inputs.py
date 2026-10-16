@@ -618,3 +618,300 @@ def mixed_literal_documents():
         "references": references,
         "text_adaptations": adaptations,
     }
+
+
+def raster_scope_packet(*, excluded=True, profile_version="3", image_format="png"):
+    """Independent small /2 source: PNG, Home/Child, and no new image family.
+
+    Reuse only our qualified inert PNG and the previously authored 5/7 source
+    visibility declaration. Every DTO below is a literal source fact. The empty
+    exclusion-map case is the same complete source without the excluded owner,
+    association, or removed phrase; it retains its safe original Notes bytes.
+    """
+    assert profile_version in {"1", "2", "3"}
+    assert image_format in {"png", "webp"}
+    source = mixed_source_packet()
+    brain, home, child, forgotten = map(identity, (1, 2, 3, 91))
+    safe = (
+        "Kept Ω.\r\n![Pixel](.data/md-images/"
+        + identity(202)
+        + "."
+        + image_format
+        + ")\r\n"
+    )
+    raw = (EXCLUDED_PHRASE if excluded else "") + safe
+    created, modified = "2026-09-13T11:12:13Z", "2026-10-02T16:17:18+02:00"
+    thoughts = {
+        identity(key): {
+            "id": identity(key),
+            "brainId": brain,
+            "creationDateTime": created,
+            "modificationDateTime": modified,
+            "name": name,
+            "typeId": None,
+            "forgottenDateTime": "2026-09-20T01:02:03Z" if key == 91 else None,
+            "acType": 0,
+            "kind": 1,
+            "foregroundColor": None,
+            "backgroundColor": None,
+            "label": None,
+            "aliases": [],
+        }
+        for key, name in ((2, "Home"), (3, "Child"), (91, "FORGOTTEN-METADATA-CANARY"))
+        if key != 91 or excluded
+    }
+    links = {
+        identity(key): {
+            "id": identity(key),
+            "brainId": brain,
+            "thoughtIdA": home,
+            "thoughtIdB": forgotten if key == 191 else child,
+            "kind": 1,
+            "relation": 1 if key == 101 else 9 if key == 191 else 3,
+            "meaning": 88 if key == 191 else 1,
+            "direction": {
+                101: 3 if profile_version == "3" else -1,
+                102: 5,
+                103: 7,
+                191: 55,
+            }[key],
+            "typeId": None,
+            "name": None,
+            "color": None,
+            "thickness": -1,
+            "creationDateTime": created,
+            "modificationDateTime": modified,
+        }
+        for key in (101, 102, 103, 191)
+        if key != 191 or excluded
+    }
+    pixels = source["files"][
+        source["baseline_inputs"]["payloads"][
+            identity(202 if image_format == "png" else 203)
+        ]["path"]
+    ]
+    attachments = [
+        {
+            "id": identity(key),
+            "brainId": brain,
+            "sourceId": home,
+            "sourceType": 2,
+            "type": kind,
+            "isNotes": note,
+            "location": location,
+            "name": None,
+            "position": position,
+            "dataLength": len(payload),
+        }
+        for key, kind, note, location, position, payload in (
+            (201, 1, True, "Notes.md", 0, raw.encode()),
+            (202, 12, False, identity(202) + "." + image_format, 1, pixels),
+        )
+    ]
+    files, routes = {}, []
+
+    def endpoint(route, path, value, status=200, optional=False):
+        files[path] = value if isinstance(value, bytes) else json_bytes(value)
+        routes.append(
+            {
+                "method": "GET",
+                "route": "/api" + route,
+                "status": status,
+                "body_path": path,
+                "optional": optional,
+            }
+        )
+        return path
+
+    base = "/" + brain
+    brain_row = {
+        "id": brain,
+        "name": "Independent raster scope control",
+        "homeThoughtId": home,
+    }
+    brain_path = endpoint("/brains" + base, "responses/brain.json", brain_row)
+    endpoint("/brains", "responses/brains.json", [brain_row])
+    stats = {
+        "brainId": brain,
+        "thoughts": 2,
+        "thoughtTypes": 0,
+        "tags": 0,
+        "forgottenThoughts": int(excluded),
+        "links": 4 if excluded else 3,
+    }
+    before = endpoint(
+        "/brains" + base + "/statistics", "responses/statistics-start.json", stats
+    )
+    after = "responses/statistics-end.json"
+    files[after] = json_bytes(stats)
+    types = endpoint("/thoughts" + base + "/types", "responses/types.json", [])
+    tags = endpoint(
+        "/thoughts" + base + "/tags",
+        "responses/tags.json",
+        ("Could not retrieve list of Tags for brain " + brain).encode(),
+        400,
+    )
+    endpoint("/thoughts" + base + "/pins", "responses/pins.json", [], optional=True)
+    endpoint(
+        "/search" + base,
+        "responses/search.json",
+        [
+            {
+                "brainId": brain,
+                "isFromOtherBrain": False,
+                "sourceThought": {
+                    "id": key,
+                    "brainId": brain,
+                    "kind": 0 if profile_version == "3" else 1,
+                },
+                "sourceLink": None,
+            }
+            for key in thoughts
+        ],
+    )
+    graphs, inventories, excluded_thoughts = {}, {}, {}
+    for key, row in thoughts.items():
+        path = endpoint(
+            "/thoughts" + base + "/" + key, "responses/thoughts/" + key + ".json", row
+        )
+        if key == forgotten:
+            excluded_thoughts[key] = {"status": 200, "path": path}
+            continue
+        owned = attachments if key == home else []
+        graph = {
+            "activeThought": row,
+            "parents": [thoughts[home]] if key == child else [],
+            "children": [thoughts[child]] + ([thoughts[forgotten]] if excluded else [])
+            if key == home
+            else [],
+            "jumps": [thoughts[child if key == home else home]],
+            "siblings": [],
+            "tags": [],
+            "type": None,
+            "links": [
+                r for r in links.values() if key in (r["thoughtIdA"], r["thoughtIdB"])
+            ],
+            "attachments": owned,
+        }
+        graphs[key] = endpoint(
+            "/thoughts" + base + "/" + key + "/graph",
+            "responses/graphs/" + key + ".json",
+            graph,
+        )
+        inventories[key] = endpoint(
+            "/thoughts" + base + "/" + key + "/attachments",
+            "responses/owner-attachments/" + key + ".json",
+            owned,
+        )
+    no_note = endpoint(
+        "/notes" + base + "/" + child,
+        "responses/no-notes/" + child + ".json",
+        {
+            "brainId": brain,
+            "sourceId": child,
+            "sourceType": 2,
+            "modificationDateTime": "0001-01-01T00:00:00",
+            "markdown": "",
+            "html": None,
+            "text": None,
+        },
+    )
+    metadata, excluded_links, link_attachments = {}, {}, {}
+    for key, row in links.items():
+        path = endpoint(
+            "/links" + base + "/" + key, "responses/links/" + key + ".json", row
+        )
+        if key == identity(191):
+            excluded_links[key] = {"status": 200, "path": path}
+        else:
+            metadata[key] = {"status": 200, "path": path}
+            link_attachments[key] = endpoint(
+                "/links" + base + "/" + key + "/attachments",
+                "responses/link-attachments/" + key + ".json",
+                [],
+            )
+    attachment_metadata, payloads = {}, {}
+    for row, payload in zip(attachments, (raw.encode(), pixels), strict=True):
+        key = row["id"]
+        path = endpoint(
+            "/attachments" + base + "/" + key + "/metadata",
+            "responses/attachment-metadata/" + key + ".json",
+            row,
+        )
+        attachment_metadata[key] = {"status": 200, "path": path}
+        path = endpoint(
+            "/attachments" + base + "/" + key + "/file-content",
+            "payloads/" + key + ".bin",
+            payload,
+        )
+        payloads[key] = {"status": 200, "path": path}
+    files["input-provenance.json"] = json_bytes(
+        {
+            "actor": "/root/baseline_owner",
+            "kind": "independent source-only regression variant",
+            "basis": "literal DTOs and source Markdown; exact original qualified "
+            + ("red-pixel.png" if image_format == "png" else "red-green.webp")
+            + "; no converter output",
+        }
+    )
+    files["one-way-source-control.json"] = source["files"][
+        "one-way-source-control.json"
+    ]
+    ledger = {
+        "schema": "independent.inert-local-api-response-packet/1",
+        "method": "GET",
+        "routes": routes,
+        "configuration": {"profile_version": profile_version, "include_pins": False},
+        "consistency_pair": {
+            "route": "/api/brains" + base + "/statistics",
+            "starting_body": before,
+            "ending_body": after,
+        },
+        "forbidden_routes": [
+            "/api/thoughts" + base + "/" + forgotten + suffix
+            for suffix in ("/graph", "/attachments")
+        ]
+        + ["/api/notes" + base + "/" + forgotten]
+        if excluded
+        else [],
+        "unexpected_route_policy": "refuse; no default DTO or external I/O",
+    }
+    files["endpoints.json"] = json_bytes(ledger)
+    mappings = {
+        "brain": brain_path,
+        "scope": {
+            "thought_ids": [home, child],
+            "relationship_ids": list(metadata),
+            "attachment_ids": [identity(201), identity(202)],
+        },
+        "graphs": graphs,
+        "types": types,
+        "tags": {"status": 400, "path": tags},
+        "statistics": [before, after],
+        "link_attachments": link_attachments,
+        "link_attachment_outcomes": dict.fromkeys(metadata, 200),
+        "relationship_metadata": metadata,
+        "no_notes": {child: no_note},
+        "payloads": payloads,
+        "attachment_inventories": inventories,
+        "attachment_metadata": attachment_metadata,
+        "scope_inputs": {
+            "excluded_thoughts": excluded_thoughts,
+            "excluded_relationships": excluded_links,
+        },
+        "qualification": ["input-provenance.json", "one-way-source-control.json"],
+        "archive_matches": [],
+        "one_way_controls": source["baseline_inputs"]["one_way_controls"],
+        "source_packet_ledger": "endpoints.json",
+    }
+    return {
+        "files": files,
+        "ledger": ledger,
+        "baseline_inputs": mappings,
+        "case": ("raster-scoped" if excluded else "raster-identity")
+        + (
+            ""
+            if profile_version == "3" and image_format == "png"
+            else "-profile" + profile_version + "-" + image_format
+        ),
+    }

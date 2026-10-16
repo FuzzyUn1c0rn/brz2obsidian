@@ -436,8 +436,8 @@ def mixed_vault(directory, baseline):
     record["classification_assignments"][0].update(
         evidence=[
             "link:" + identity(104),
-            "thought:" + identity(4),
             "thought:" + identity(3),
+            "thought:" + identity(4),
         ],
         definition_target=names[identity(4)],
         item_target=names[identity(3)],
@@ -1113,6 +1113,12 @@ def complete_scope_record(baseline, record):
             "subjects": ["brain:" + identity(1)],
             "evidence": ["inventory:tag_ids", "statistics:end", "statistics:start"],
         }
+    # Source scope decisions use canonical unique logical-key sets; authored
+    # arrays, Document references and edit sequences retain their own order.
+    for key, value in expected.items():
+        if key.startswith("scope:"):
+            for field in ("subjects", "evidence"):
+                value[field] = sorted(set(value[field]))
     record["original_evidence"] = [
         {"key": key, "kind": "records", "records": value}
         for key, value in sorted(expected.items())
@@ -1574,3 +1580,568 @@ def test_qualified_source_factory_preserves_provenance_across_checkout_eols(
         == "3535182dccc9a298c27d163afc12a006b8aa6aeac553168981374c851ba4ed81"
     )
     assert audit_baseline(baseline, profile_version="3")["payloads"] == 11
+
+
+def raster_scope_case(directory, *, excluded=True, profile="3", image_format="png"):
+    """Independent literal inherited-PNG source and output, without runtime imports."""
+    import json
+
+    from .api_scope_inputs import raster_scope_packet
+
+    packet = raster_scope_packet(
+        excluded=excluded, profile_version=profile, image_format=image_format
+    )
+    source = directory / "source"
+    source.mkdir(parents=True)
+    files = {}
+    for name, raw in packet["files"].items():
+        path = source / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(raw)
+        files[name] = {"length": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
+    data = {
+        "schema": "brz2obsidian.api-acceptance/2",
+        "files": files,
+        **packet["baseline_inputs"],
+    }
+    manifest = source / "manifest.json"
+    manifest.write_bytes(json_bytes(data))
+    baseline = load_baseline(
+        manifest, hashlib.sha256(manifest.read_bytes()).hexdigest()
+    )
+    vault = directory / "vault"
+    vault.mkdir()
+    home, child, note, image = map(identity, (2, 3, 201, 202))
+    safe = "Kept Ω.\r\n![Pixel](.data/md-images/" + image + "." + image_format + ")\r\n"
+    phrase, destination = (
+        "![Pixel](.data/md-images/" + image + "." + image_format + ")",
+        ".data/md-images/" + image + "." + image_format,
+    )
+    begin, start = safe.index(phrase), safe.index(destination)
+    digest = hashlib.sha256(safe.encode()).hexdigest()
+    document = {
+        "key": note,
+        "owner": home,
+        "text_digest": digest,
+        "original_asset_id": None if excluded else note,
+        "original_copy_omitted": excluded,
+        "owner_target": "Home.md",
+        "text_adaptations": [],
+        "evidence": ["attachment:" + note],
+        "references": [
+            {
+                "start": begin,
+                "end": begin + len(phrase),
+                "expected_original": phrase,
+                "kind": "image",
+                "target": image,
+                "display_text": "Pixel",
+                "table_cell": False,
+                "document_digest": digest,
+                "source_target": destination,
+                "destination_start": start,
+                "destination_end": start + len(destination),
+                "presentation_normalization": None,
+            }
+        ],
+    }
+    targets = [
+        {
+            "item_key": key,
+            "original_identity": key,
+            "original_title": title,
+            "relative_path": name,
+            "created": key == home,
+            "documents": [document] if key == home else [],
+            "declared_appearance": None,
+            "icon_snapshot": {
+                "item_key": home,
+                "explicit_icon_asset_id": None,
+                "appearance_category_key": None,
+                "effective_icon_asset_id": None,
+            }
+            if key == home
+            else None,
+        }
+        for key, title, name in (
+            (home, "Home", "Home.md"),
+            (child, "Child", "Notes/Child.md"),
+        )
+    ]
+    assets = []
+    for key, role, location in (
+        (note, "note_original", "Notes.md"),
+        (image, "image", image + "." + image_format),
+    ):
+        if excluded and key == note:
+            continue
+        raw = baseline.bytes(data["payloads"][key]["path"])
+        path = "Attachments/" + (note + "/Notes.md" if key == note else location)
+        target = vault / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(raw)
+        assets.append(
+            {
+                "asset_id": key,
+                "owner": home,
+                "role": role,
+                "availability": "present",
+                "relative_path": path,
+                "resource_link": None,
+                "original_name": location,
+                "display_name": None,
+                "actual_length": len(raw),
+                "actual_sha256": hashlib.sha256(raw).hexdigest(),
+                "external_uri": None,
+                "retained_documents": [],
+            }
+        )
+    evidence, accounting = [], []
+
+    def retain(key, value, references=None):
+        evidence.append({"key": key, "kind": "records", "records": value})
+        accounting.append(
+            {
+                "identity": key,
+                "disposition": "normalized" if references else "retained_only",
+                "references": references or [key],
+            }
+        )
+
+    def decision(key, rule, outcome, subjects, pointers):
+        retain(
+            key,
+            {
+                "key": key,
+                "rule_id": rule,
+                "outcome": outcome,
+                "subjects": sorted(set(subjects)),
+                "evidence": sorted(set(pointers)),
+            },
+        )
+
+    retain("brain:" + identity(1), baseline.json(data["brain"]))
+    for key, path in data["graphs"].items():
+        retain("thought:" + key, baseline.json(path)["activeThought"], [key])
+        retain(
+            "graph:" + key,
+            {
+                "parents_ids": [home] if key == child else [],
+                "children_ids": [child] if key == home else [],
+                "jump_ids": [child if key == home else home],
+                "sibling_ids": [],
+                "tag_ids": [],
+                "type_ids": [],
+                "link_ids": [identity(i) for i in (101, 102, 103)],
+                "attachment_ids": [note, image] if key == home else [],
+            },
+        )
+        decision(
+            "scope:included:" + key,
+            "local-api.roles-access.v1",
+            "included",
+            ["thought:" + key],
+            ["thought:" + key],
+        )
+    for key, value in data["relationship_metadata"].items():
+        retain("link:" + key, baseline.json(value["path"]), [key])
+    for key, value in data["attachment_metadata"].items():
+        row = baseline.json(value["path"])
+        retain(
+            "attachment:" + key,
+            dict(row, position={"decimal": str(row["position"])}),
+            None if excluded and key == note else [key],
+        )
+    retain("note_text:" + home, {"text": safe}, [note])
+    retain("no_note:" + child, baseline.json(data["no_notes"][child]))
+    for when, path in zip(("start", "end"), data["statistics"], strict=True):
+        retain(
+            "statistics:" + when,
+            {k: v for k, v in baseline.json(path).items() if k != "brainId"},
+        )
+    decision(
+        "scope:tag400-zero:" + identity(1),
+        "local-api.tag400.v1",
+        "tag400_zero",
+        ["brain:" + identity(1)],
+        ["inventory:tag_ids", "statistics:end", "statistics:start"],
+    )
+    if excluded:
+        key, link = identity(91), identity(191)
+        row = baseline.json(data["scope_inputs"]["excluded_thoughts"][key]["path"])
+        retain(
+            "exclusion:" + key,
+            {
+                field: row[field]
+                for field in ("id", "brainId", "kind", "acType", "forgottenDateTime")
+            },
+        )
+        decision(
+            "scope:excluded:" + key,
+            "local-api.forgotten.v1",
+            "excluded_forgotten",
+            ["thought:" + key],
+            ["exclusion:" + key],
+        )
+        retain(
+            "link:" + link,
+            {"id": link, "brainId": identity(1), "thoughtIdA": home, "thoughtIdB": key},
+        )
+        decision(
+            "scope:association:" + link,
+            "local-api.forgotten.v1",
+            "excluded_association",
+            ["link:" + link, "thought:" + home, "thought:" + key],
+            ["link:" + link, "exclusion:" + key],
+        )
+        decision(
+            "scope:note:" + note,
+            "local-api.forgotten.v1",
+            "excluded_association",
+            ["thought:" + home, "thought:" + key],
+            ["note_text:" + home, "exclusion:" + key],
+        )
+    record = {
+        "source_identity": {
+            "module_id": "thebrain-local-api",
+            "module_version": "1",
+            "format_version": "1",
+            "source_id": identity(1),
+        },
+        "profile_id": "thebrain-local-api-reviewed",
+        "profile_version": profile,
+        "item_targets": targets,
+        "asset_targets": assets,
+        "relationships": [
+            {"key": identity(i), "item_a": home, "item_b": child, "kind": kind}
+            for i, kind in ((101, "hierarchy"), (102, "related"), (103, "related"))
+        ],
+        "classification_assignments": [],
+        "tag_memberships": [],
+        "issues": [],
+        "original_evidence": evidence,
+        "source_accounting": {"entries": accounting},
+    }
+    (vault / "migration-record.json").write_bytes(json_bytes(record))
+    properties = {
+        "categories": [],
+        "icon": None,
+        "appearance_category": None,
+        "tags": [],
+        "aliases": [],
+        "created": "2026-09-13",
+        "updated": "2026-10-02",
+        "source_collection_id": identity(1),
+        "source_item_id": home,
+    }
+    text = (
+        "---\n"
+        + "".join(
+            k + ":" + (" " + json.dumps(v) if v is not None else "") + "\n"
+            for k, v in properties.items()
+        )
+        + "---\n\n# Home\n\n"
+    )
+    text += (
+        "Kept Ω.\n![Pixel](Attachments/"
+        + image
+        + "."
+        + image_format
+        + ")\n\n## Children\n\n- [[Notes/Child.md|Child]]\n\n## Related\n\n- [[Notes/Child.md|Child]]\n"
+    )
+    (vault / "Home.md").write_text(text, encoding="utf8")
+    return baseline, vault
+
+
+@pytest.mark.parametrize("excluded", [False, True])
+@pytest.mark.parametrize(
+    "profile,image_format", [("1", "webp"), ("2", "png"), ("3", "png")]
+)
+@pytest.mark.parametrize(
+    "damage",
+    [
+        None,
+        "digest",
+        "original",
+        "reference",
+        "omit-document",
+        "original-id",
+        "created-child",
+        "hide-home",
+    ],
+)
+def test_inherited_raster_only_scope_still_requires_complete_documents(
+    tmp_path, excluded, damage, profile, image_format
+):
+    import json
+
+    from .api_checker import check_api_vault
+
+    baseline, vault = raster_scope_case(
+        tmp_path, excluded=excluded, profile=profile, image_format=image_format
+    )
+    audit = audit_baseline(baseline, profile_version=profile)
+    assert audit["retention"] == {
+        "omitted_original_ids": [identity(201)] if excluded else [],
+        "retained_asset_ids": [identity(202)]
+        if excluded
+        else [identity(201), identity(202)],
+        "openable_payload_ids": [identity(202)]
+        if excluded
+        else [identity(201), identity(202)],
+    }
+    note = baseline.json(baseline.data["attachment_metadata"][identity(201)]["path"])
+    if excluded:
+        with pytest.raises(AssertionError, match="no retained Asset"):
+            expected_asset(baseline, note, profile)
+    else:
+        assert expected_asset(baseline, note, profile)[0:2] == (
+            "note_original",
+            "present",
+        )
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    document = record["item_targets"][0]["documents"][0]
+    if damage == "digest":
+        document["text_digest"] = "0" * 64
+    elif damage == "original":
+        document["original_copy_omitted"] = not excluded
+    elif damage == "reference":
+        document["references"][0]["start"] += 1
+    elif damage == "omit-document":
+        record["item_targets"][0]["documents"] = []
+    elif damage == "original-id":
+        document["original_asset_id"] = identity(202)
+    elif damage == "created-child":
+        record["item_targets"][1]["created"] = True
+    elif damage == "hide-home":
+        record["item_targets"][0]["created"] = False
+    path.write_bytes(json_bytes(record))
+    if damage is not None:
+        with pytest.raises(AssertionError):
+            check_api_vault(baseline, vault, profile_version=profile)
+    else:
+        assert check_api_vault(baseline, vault, profile_version=profile) == {
+            "thoughts": 2,
+            "relationships": 3,
+            "payloads": 1 if excluded else 2,
+        }
+
+
+@pytest.mark.parametrize(
+    "leak",
+    [
+        "original-newline",
+        "canary-only",
+        "record-original",
+        "record-canary",
+        "metadata-only",
+    ],
+)
+def test_scope_output_refuses_source_owned_excluded_text_in_larger_containers(
+    tmp_path, leak
+):
+    import json
+
+    from .api_checker import check_api_vault
+
+    baseline = scope_baseline(tmp_path / "source")
+    vault = mixed_vault(tmp_path / "vault", baseline)
+    original = baseline.bytes(baseline.data["payloads"][identity(201)]["path"])
+    if leak == "original-newline":
+        (vault / "extra.md").write_bytes(original + b"\n")
+    elif leak in {"canary-only", "metadata-only"}:
+        (vault / "extra.md").write_text(
+            "FORGOTTEN-CANARY"
+            if leak == "canary-only"
+            else "FORGOTTEN-METADATA-CANARY",
+            encoding="utf8",
+        )
+    else:
+        path = vault / "migration-record.json"
+        record = json.loads(path.read_bytes())
+        record["extra_string"] = (
+            "Prefix "
+            + (original.decode() if leak == "record-original" else "FORGOTTEN-CANARY")
+            + " suffix"
+        )
+        path.write_bytes(json_bytes(record))
+    with pytest.raises(
+        AssertionError, match="excluded authored content|unsafe original"
+    ):
+        check_api_vault(baseline, vault, profile_version="3")
+
+
+def test_excluded_metadata_text_can_also_be_legitimate_included_source_text(tmp_path):
+    from .api_checker import check_api_vault
+
+    baseline, vault = raster_scope_case(tmp_path)
+    for name in baseline.data["files"]:
+        if not name.startswith("responses/") or not name.endswith(".json"):
+            continue
+        try:
+            value = baseline.json(name)
+        except ValueError:
+            continue
+
+        def rename(row):
+            if isinstance(row, dict):
+                if row.get("id") == identity(91):
+                    row["name"] = "Home"
+                for child in row.values():
+                    rename(child)
+            elif isinstance(row, list):
+                for child in row:
+                    rename(child)
+
+        rename(value)
+        (baseline.manifest_path.parent / name).write_bytes(json_bytes(value))
+    baseline = repin(baseline)
+    assert check_api_vault(baseline, vault, profile_version="3") == {
+        "thoughts": 2,
+        "relationships": 3,
+        "payloads": 1,
+    }
+
+
+@pytest.mark.parametrize("entry", ["asset", "baseline", "vault"])
+def test_scope_representation_does_not_grant_profile1_png(tmp_path, entry):
+    from .api_checker import check_api_vault
+
+    baseline, vault = raster_scope_case(tmp_path, profile="1")
+    image = baseline.json(baseline.data["attachment_metadata"][identity(202)]["path"])
+    with pytest.raises(AssertionError, match="raw image role"):
+        if entry == "asset":
+            expected_asset(baseline, image, "1")
+        elif entry == "baseline":
+            audit_baseline(baseline, profile_version="1")
+        else:
+            check_api_vault(baseline, vault, profile_version="1")
+
+
+@pytest.mark.parametrize(
+    "damage", [None, "order", "duplicate", "subject-order", "subject-duplicate"]
+)
+def test_scope_decision_evidence_is_a_canonical_unique_logical_key_set(
+    tmp_path, damage
+):
+    import json
+
+    from .api_checker import check_api_vault
+
+    baseline, vault = raster_scope_case(tmp_path)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    for row in record["original_evidence"]:
+        if row["key"].startswith("scope:"):
+            for field in ("subjects", "evidence"):
+                row["records"][field] = sorted(set(row["records"][field]))
+    association = next(
+        row["records"]
+        for row in record["original_evidence"]
+        if row["key"] == "scope:association:" + identity(191)
+    )
+    if damage == "order":
+        association["evidence"].reverse()
+    elif damage == "duplicate":
+        association["evidence"].append(association["evidence"][0])
+    elif damage == "subject-order":
+        association["subjects"].reverse()
+    elif damage == "subject-duplicate":
+        association["subjects"].append(association["subjects"][0])
+    path.write_bytes(json_bytes(record))
+    if damage is None:
+        assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 1
+    else:
+        with pytest.raises(
+            AssertionError, match="scoped original source record/decision"
+        ):
+            check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize("damage", [None, "order", "duplicate"])
+def test_mixed_classification_evidence_is_canonical(tmp_path, damage):
+    import json
+
+    from .api_checker import check_api_vault
+
+    baseline = scope_baseline(tmp_path / "source")
+    vault = mixed_vault(tmp_path / "vault", baseline)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    assignment = record["classification_assignments"][0]
+    assignment["evidence"] = [
+        "link:" + identity(104),
+        "thought:" + identity(3),
+        "thought:" + identity(4),
+    ]
+    if damage == "order":
+        assignment["evidence"].reverse()
+    elif damage == "duplicate":
+        assignment["evidence"].append("thought:" + identity(4))
+    path.write_bytes(json_bytes(record))
+    if damage is None:
+        assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 11
+    else:
+        with pytest.raises(
+            AssertionError, match="source-bound classification metadata"
+        ):
+            check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize(
+    "overlap", ["minimal-uuid", "link-name", "attachment-name", "schema-word"]
+)
+@pytest.mark.parametrize("extra", [None, "file", "record", "note"])
+def test_excluded_scalar_provenance_is_specific_to_its_output_location(
+    tmp_path, overlap, extra
+):
+    import json
+
+    from .api_checker import check_api_vault
+
+    baseline = scope_baseline(tmp_path / "source")
+    value = {
+        "minimal-uuid": identity(91),
+        "link-name": "Included relationship label",
+        "attachment-name": "file: guide",
+        "schema-word": "source",
+    }[overlap]
+
+    def change(row):
+        if isinstance(row, dict):
+            if row.get("id") == identity(91):
+                row["name"] = value
+            if overlap == "link-name" and row.get("id") == identity(101):
+                row["name"] = value
+            for child in row.values():
+                change(child)
+        elif isinstance(row, list):
+            for child in row:
+                change(child)
+
+    for name in baseline.data["files"]:
+        if name.startswith("responses/") and name.endswith(".json"):
+            row = baseline.json(name)
+            change(row)
+            (baseline.manifest_path.parent / name).write_bytes(json_bytes(row))
+    baseline = repin(baseline)
+    vault = mixed_vault(tmp_path / "vault", baseline)
+    if extra == "file":
+        (vault / "extra.txt").write_text(value, encoding="utf8")
+    elif extra == "note":
+        with (vault / "Home.md").open("a", encoding="utf8") as stream:
+            stream.write("\n" + value + "\n")
+    elif extra == "record":
+        path = vault / "migration-record.json"
+        record = json.loads(path.read_bytes())
+        record["extra_string"] = value
+        path.write_bytes(json_bytes(record))
+    if extra is None:
+        assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 11
+    else:
+        with pytest.raises(
+            AssertionError,
+            match="excluded authored content|reverse hierarchy",
+        ):
+            check_api_vault(baseline, vault, profile_version="3")
