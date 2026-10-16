@@ -11,7 +11,8 @@ from uuid import UUID
 from zipfile import BadZipFile, ZipFile
 
 from .api_manifest import read_json, safe_path
-from .checker import adapt_body, escaped, source_references, wiki
+from .api_note_text import expected_note_text
+from .checker import escaped, source_references, wiki
 from .images import AuditUnavailable, decode_image
 
 
@@ -667,7 +668,9 @@ def check_reverse_navigation(
                     baseline.data["payloads"][attachment["id"]]["path"]
                 ).decode("utf-8")
                 authored.append(
-                    adapt_body(note, owner, target["relative_path"], names, assets)
+                    expected_note_text(
+                        note, owner, target["relative_path"], names, assets
+                    )
                 )
         for source in authored:
             text = source.replace("\r\n", "\n").replace("\r", "\n")

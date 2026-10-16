@@ -1011,3 +1011,333 @@ def test_old_tag_hierarchy_context_does_not_seed_a_contentless_tag(
         assert (
             check_api_vault(baseline, vault, profile_version="3")["relationships"] == 5
         )
+
+
+def formatting_reverse_case(tmp_path, raw, displayed):
+    """Bind literal authored bytes independently of expected rendered body."""
+    baseline, vault = reverse_case(tmp_path)
+    root = baseline.manifest_path.parent
+    (root / "201.bin").write_bytes(raw.encode("utf-8"))
+    baseline = reseal(baseline)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    asset = next(
+        row for row in record["asset_targets"] if row["asset_id"] == identity(201)
+    )
+    (vault / asset["relative_path"]).write_bytes(raw.encode("utf-8"))
+    measured = fingerprint(root / "201.bin")
+    asset.update(actual_length=measured["length"], actual_sha256=measured["sha256"])
+    write_json(path, record)
+    (vault / "Home.md").write_text(
+        "# Home\n\n" + displayed + "\n## Children\n\n- [[Child.md|Child]]\n",
+        encoding="utf-8",
+    )
+    return baseline, vault
+
+
+@pytest.mark.parametrize("damage", [None, "omit", "mutate"])
+def test_admitted_api_callout_keeps_raw_original_and_source_derived_body(
+    tmp_path, damage
+):
+    raw = "> [!tip|icon:\U0001f602]\n> Authored body\n"
+    displayed = "> [!tip] \U0001f602 Tip\n> Authored body\n"
+    body = (
+        ""
+        if damage == "omit"
+        else displayed.replace("Authored", "Forged")
+        if damage
+        else displayed
+    )
+    baseline, vault = formatting_reverse_case(tmp_path, raw, body)
+    assert audit_baseline(baseline, profile_version="3")["relationships"] == 5
+    if damage:
+        with pytest.raises(AssertionError, match="authored content unavailable"):
+            check_api_vault(baseline, vault, profile_version="3")
+    else:
+        assert (
+            check_api_vault(baseline, vault, profile_version="3")["relationships"] == 5
+        )
+    assert (baseline.manifest_path.parent / "201.bin").read_bytes() == raw.encode()
+
+
+NOTE_FORMAT_EXAMPLES = [
+    pytest.param(
+        "<Value> [Child](brain://AAAAAAAAAECAAAAAAAAAAw/title)\n\nAuthored body.\n",
+        "\\<Value> [[Child.md|Child]]\n\nAuthored body.\n",
+        id="literal-ref",
+    ),
+    pytest.param(
+        "`<Value> [/toc/]`\n\n```md\n> [!tip|icon:😂]\n[/toc/]\n<Value>\n```\n<!-- <Value> [/toc/] -->\n\\<Value> <br>\n\nAuthored body.\n",
+        "`<Value> [/toc/]`\n\n```md\n> [!tip|icon:😂]\n[/toc/]\n<Value>\n```\n<!-- <Value> [/toc/] -->\n\\<Value> <br>\n\nAuthored body.\n",
+        id="protected",
+    ),
+    pytest.param(
+        "> [!note]\n> One\n> [!tip|icon:😂]- Custom\n> Two\n\nAuthored body.\n",
+        "> [!note]\n> One\n\n> [!tip]- 😂 Custom\n> Two\n\nAuthored body.\n",
+        id="callout-siblings",
+    ),
+    pytest.param(
+        "> [!note] Parent\n> > [!tip] Child\n> > One\n> > [!question] Sibling\n> > Two\n> Parent tail\n\nAuthored body.\n",
+        "> [!note] Parent\n> > [!tip] Child\n> > One\n> \n> > [!question] Sibling\n> > Two\n> \n> Parent tail\n\nAuthored body.\n",
+        id="callout-nested",
+    ),
+    pytest.param(
+        "> [!tip] One\n> Body\n\nOutside\n\n> [!note] Two\n> Body\n\nAuthored body.\n",
+        "> [!tip] One\n> Body\n\nOutside\n\n> [!note] Two\n> Body\n\nAuthored body.\n",
+        id="callout-exit",
+    ),
+    pytest.param(
+        "> [!tip|icon:unknown]- Title\n> Body\n> [!note|icon:😂|extra:x]\n> Next\n\nAuthored body.\n",
+        "> [!tip]- Title — |icon:unknown\n> Body\n\n> [!note] Note — |icon:😂|extra:x\n> Next\n\nAuthored body.\n",
+        id="callout-unsupported",
+    ),
+    pytest.param(
+        '|One|Two|:(table="column-widths:-1,0,84;justification:default"):\n|`x|y`|2|\n\nAuthored body.\n',
+        "|One|Two|\n|---|---|\n|<code>x&#124;y</code>|2|\n\nAuthored body.\n",
+        id="table-code",
+    ),
+    pytest.param(
+        '|One|Two|:(table="column-widths:-1,0,84;justification:default"):\n|:---|---:|\n|a\\|b|keep|\n\nAuthored body.\n',
+        "|One|Two|\n|:---|---:|\n|a\\|b|keep|\n\nAuthored body.\n",
+        id="table-separator",
+    ),
+    pytest.param(
+        '|Code|Other|:(table="column-widths:-1,0,84;justification:default"):\n|`<a>|&</a>`|value|\n\nAuthored body.\n',
+        "|Code|Other|\n|---|---|\n|<code>&lt;a&gt;&#124;&amp;&lt;/a&gt;</code>|value|\n\nAuthored body.\n",
+        id="table-code-html",
+    ),
+    pytest.param(
+        '|One|Two|:(table="column-widths:1,2;justification:default"):\n|1|2|\n\nAuthored body.\n',
+        '|One|Two|:(table="column-widths:1,2;justification:default"):\n|1|2|\n\nAuthored body.\n',
+        id="table-unsupported",
+    ),
+    pytest.param(
+        '|One|Two|\\:(table="column-widths:-1,0,84;justification:default"):\n|1|2|\n\nAuthored body.\n',
+        '|One|Two|\\:(table="column-widths:-1,0,84;justification:default"):\n|1|2|\n\nAuthored body.\n',
+        id="table-protected",
+    ),
+    pytest.param(
+        '|One|Two|:(table="column-widths:-1,0,84;justification:default"):\n|<!-- `x\\|y` -->|value|\n\nAuthored body.\n',
+        "|One|Two|\n|---|---|\n|<!-- `x\\|y` -->|value|\n\nAuthored body.\n",
+        id="table-comment",
+    ),
+    pytest.param(
+        '|One|Two|:(table="column-widths:-1,0,84;justification:default"):\n|<!-- `x|y` -->|value|\n\nAuthored body.\n',
+        '|One|Two|:(table="column-widths:-1,0,84;justification:default"):\n|<!-- `x|y` -->|value|\n\nAuthored body.\n',
+        id="table-ambiguous-comment",
+    ),
+    pytest.param(
+        '|Thought|Image|:(table="column-widths:-1,0,174;justification:default"):\n|[Child](brain://AAAAAAAAAECAAAAAAAAAAw/title)|![Alt](.data/md-images/00000000-0000-4000-8000-000000000202.webp#$width=50p$)|\n\nAuthored body.\n',
+        "|Thought|Image|\n|---|---|\n|[[Child.md\\|Child]]|![Alt](00000000-0000-4000-8000-000000000202.bin)|\n\nAuthored body.\n",
+        id="table-refs",
+    ),
+    pytest.param(
+        "### Contents\n[/toc/]\n\n# Target\nBody\n\nAuthored body.\n",
+        "### Contents\n- [Target](#^brz-toc-heading-1)\n\n# Target ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-simple",
+    ),
+    pytest.param(
+        "### Contents\n[/toc/]\n\n# First ^keep\nBody\n\n## Second\nBody\n\nReserved ^brz-toc-heading-2\n\nAuthored body.\n",
+        "### Contents\n- [First](#^keep)\n  - [Second](#^brz-toc-heading-2-generated)\n\n# First ^keep\nBody\n\n## Second ^brz-toc-heading-2-generated\nBody\n\nReserved ^brz-toc-heading-2\n\nAuthored body.\n",
+        id="toc-id-collision",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# First ^same\nBody\n\n# Second ^same\nBody\n\nAuthored body.\n",
+        "- [First](#^same)\n- [Second](#^brz-toc-heading-2)\n\n# First ^same\nBody\n\n# Second ^brz-toc-heading-2\nBody\n\nAuthored body.\n",
+        id="toc-duplicate-id",
+    ),
+    pytest.param(
+        "Contents\n--------\n[/toc/]\n\nMulti\nline heading\n============\nBody\n\nAuthored body.\n",
+        "Contents\n--------\n- [Multi line heading](#^brz-toc-heading-1)\n\n# Multi line heading ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-setext",
+    ),
+    pytest.param(
+        "> ### Contents\n> [/toc/]\n\n> ## Target\n> Body\n\nAuthored body.\n",
+        "> ### Contents\n> - [Target](#^brz-toc-heading-1)\n\n> ## Target ^brz-toc-heading-1\n> Body\n\nAuthored body.\n",
+        id="toc-quoted",
+    ),
+    pytest.param(
+        "[/toc/]\nPlain body\n\nAuthored body.\n",
+        "No authored headings.\nPlain body\n\nAuthored body.\n",
+        id="toc-no-headings",
+    ),
+    pytest.param(
+        "[/toc/]\n\n#\nEmpty heading\n\nAuthored body.\n",
+        "- [Heading](#^brz-toc-heading-1)\n\n# ^brz-toc-heading-1\nEmpty heading\n\nAuthored body.\n",
+        id="toc-empty-heading",
+    ),
+    pytest.param(
+        "[/toc/]\n\n### Closed ^literal ###\nBody\n\nAuthored body.\n",
+        "- [Closed \\^literal](#^brz-toc-heading-1)\n\n### Closed ^literal ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-closed",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# Power $x^2$ and literal \\^suffix\nBody\n\nAuthored body.\n",
+        "- [Power $x^2$ and literal \\^suffix](#^brz-toc-heading-1)\n\n# Power $x^2$ and literal \\^suffix ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-math",
+    ),
+    pytest.param(
+        "[/toc depth=2]\n\n# Kept\nBody\n\nAuthored body.\n",
+        "[/toc depth=2]\n\n# Kept\nBody\n\nAuthored body.\n",
+        id="toc-unsupported",
+    ),
+    pytest.param(
+        "$$c = \\sqrt{a^2+b^2}$$\n\nAuthored body.\n",
+        "$$c = \\sqrt{a^2+b^2}$$\n\nAuthored body.\n",
+        id="math-unchanged",
+    ),
+    pytest.param(
+        '### Contents\n[/toc/]\n\n### Table <Value>\n|Thought|Image|:(table="column-widths:-1,0,174;justification:default"):\n|[Child](brain://AAAAAAAAAECAAAAAAAAAAw/title)|![Alt](.data/md-images/00000000-0000-4000-8000-000000000202.webp#$width=50p$)|\n\n> [!note]\n> [Child](brain://AAAAAAAAAECAAAAAAAAAAw/title)\n> [!tip|icon:😂]\n> Press <Enter>.\n\nAuthored body.\n',
+        "### Contents\n- [Table \\<Value>](#^brz-toc-heading-1)\n\n### Table \\<Value> ^brz-toc-heading-1\n|Thought|Image|\n|---|---|\n|[[Child.md\\|Child]]|![Alt](00000000-0000-4000-8000-000000000202.bin)|\n\n> [!note]\n> [[Child.md|Child]]\n\n> [!tip] 😂 Tip\n> Press \\<Enter>.\n\nAuthored body.\n",
+        id="composition",
+    ),
+    pytest.param(
+        "> [!TIP|icon:é]\n> Body\n\nAuthored body.\n",
+        "> [!tip] é Tip\n> Body\n\nAuthored body.\n",
+        id="icon-non-symbol",
+    ),
+    pytest.param(
+        "> [!tip|icon:😂*]\n> Body\n\nAuthored body.\n",
+        "> [!tip] Tip — |icon:😂\\*\n> Body\n\nAuthored body.\n",
+        id="icon-forbidden-ascii",
+    ),
+    pytest.param(
+        "> [!TIP|icon:😂:]\n> Body\n\nAuthored body.\n",
+        "> [!tip] Tip — |icon:😂:\n> Body\n\nAuthored body.\n",
+        id="icon-forbidden-colon",
+    ),
+    pytest.param(
+        "`begin\n[/toc/]\nend`\n\n> [!tip|icon:😂]\n> Body\n\nProse <!-- begin\n[/toc/]\nend -->\n\nAuthored body.\n",
+        "`begin\n[/toc/]\nend`\n\n> [!tip] 😂 Tip\n> Body\n\nProse <!-- begin\n[/toc/]\nend -->\n\nAuthored body.\n",
+        id="multiline-protected",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# ![Café *emphasis* `code` [square] & ^literal](.data/md-images/00000000-0000-4000-8000-000000000202.webp)\nBody\n\nAuthored body.\n",
+        "- [Café emphasis code \\[square\\] & \\^literal](#^brz-toc-heading-1)\n\n# ![Café *emphasis* `code` [square] & ^literal](00000000-0000-4000-8000-000000000202.bin) ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-image-label",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# [**Child**](brain://AAAAAAAAAECAAAAAAAAAAw/title)\nBody\n\nAuthored body.\n",
+        "- [Child](#^brz-toc-heading-1)\n\n# [[Child.md|Child]] ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-link-label",
+    ),
+    pytest.param(
+        '|Code|Other|:(table="column-widths:-1,0,84;justification:default"):\n|`[**Child**](brain://AAAAAAAAAECAAAAAAAAAAw/title)|x`|value|\n\nAuthored body.\n',
+        "|Code|Other|\n|---|---|\n|<code>[**Child**](brain://AAAAAAAAAECAAAAAAAAAAw/title)&#124;x</code>|value|\n\nAuthored body.\n",
+        id="table-code-reference",
+    ),
+    pytest.param(
+        "|[**Child**](brain://AAAAAAAAAECAAAAAAAAAAw/title)|value|\n\nAuthored body.\n",
+        "|[[Child.md|Child]]|value|\n\nAuthored body.\n",
+        id="table-nonnative-reference",
+    ),
+    pytest.param(
+        '|One|Two|:(table="column-widths:-1,0,-2;justification:default"):\n|1|2|\n\nAuthored body.\n',
+        '|One|Two|:(table="column-widths:-1,0,-2;justification:default"):\n|1|2|\n\nAuthored body.\n',
+        id="table-negative-width",
+    ),
+    pytest.param(
+        '|One|Two|:(table="column-widths:-1,0,00;justification:default"):\n|1|2|\n\nAuthored body.\n',
+        '|One|Two|:(table="column-widths:-1,0,00;justification:default"):\n|1|2|\n\nAuthored body.\n',
+        id="table-leading-zero-width",
+    ),
+    pytest.param(
+        '|One :(table="ambiguous"):|Two|:(table="column-widths:-1,0,84;justification:default"):\n|1|2|\n\nAuthored body.\n',
+        '|One :(table="ambiguous"):|Two|:(table="column-widths:-1,0,84;justification:default"):\n|1|2|\n\nAuthored body.\n',
+        id="table-multiple-declarations",
+    ),
+    pytest.param(
+        '`literal beginning\n|literal`|Other|:(table="column-widths:-1,0,84;justification:default"):\n|1|2|\n\nAuthored body.\n',
+        '`literal beginning\n|literal`|Other|:(table="column-widths:-1,0,84;justification:default"):\n|1|2|\n\nAuthored body.\n',
+        id="table-protected-boundary",
+    ),
+    pytest.param(
+        '|One|Two|:(table="column-widths:-1,0,84;justification:default"):\n|1|2|\n|incomplete\n\nAuthored body.\n',
+        '|One|Two|:(table="column-widths:-1,0,84;justification:default"):\n|1|2|\n|incomplete\n\nAuthored body.\n',
+        id="table-incomplete-row",
+    ),
+    pytest.param(
+        "### Contents\n\n[/toc/]\n\n# Target\nBody\n\nAuthored body.\n",
+        "### Contents\n\n- [Target](#^brz-toc-heading-1)\n\n# Target ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-label-blank",
+    ),
+    pytest.param(
+        "Plain\u2028> [!tip|icon:😂]\u2028> Body\n\nAuthored body.\n",
+        "Plain\u2028> [!tip|icon:😂]\u2028> Body\n\nAuthored body.\n",
+        id="unicode-inline-separator",
+    ),
+]
+
+
+@pytest.mark.parametrize("raw,displayed", NOTE_FORMAT_EXAMPLES)
+@pytest.mark.parametrize("damage", [None, "omit", "mutate"])
+def test_admitted_api_note_transformations_remain_source_bound(
+    tmp_path, raw, displayed, damage
+):
+    body = (
+        ""
+        if damage == "omit"
+        else displayed.replace("Authored body.", "Forged body.")
+        if damage
+        else displayed
+    )
+    baseline, vault = formatting_reverse_case(tmp_path, raw, body)
+    assert audit_baseline(baseline, profile_version="3")["relationships"] == 5
+    if damage:
+        with pytest.raises(AssertionError, match="authored content unavailable"):
+            check_api_vault(baseline, vault, profile_version="3")
+    else:
+        assert (
+            check_api_vault(baseline, vault, profile_version="3")["relationships"] == 5
+        )
+    assert (baseline.manifest_path.parent / "201.bin").read_bytes() == raw.encode()
+
+
+@pytest.mark.parametrize(
+    "family,before,after",
+    [
+        ("literal-ref", "\\<Value>", "<Changed>"),
+        ("table-code", "<code>x&#124;y</code>", "<code>FORGED</code>"),
+        ("toc-simple", "(#^brz-toc-heading-1)", "(#^wrong-target)"),
+        ("toc-simple", "# Target ^brz-toc-heading-1", "# Forged ^brz-toc-heading-1"),
+        ("toc-image-label", "Café emphasis", "Forged label"),
+        ("composition", "[[Child.md\\|Child]]", "[[Home.md\\|Child]]"),
+    ],
+)
+def test_transformed_source_spans_cannot_be_forged(tmp_path, family, before, after):
+    case = next(case for case in NOTE_FORMAT_EXAMPLES if case.id == family)
+    raw, displayed = case.values
+    assert before in displayed
+    baseline, vault = formatting_reverse_case(
+        tmp_path, raw, displayed.replace(before, after)
+    )
+    with pytest.raises(AssertionError, match="authored content unavailable"):
+        check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize("damage", ["omit", "swap"])
+def test_composed_note_still_requires_exact_generated_hierarchy_navigation(
+    tmp_path, damage
+):
+    case = next(case for case in NOTE_FORMAT_EXAMPLES if case.id == "composition")
+    baseline, vault = formatting_reverse_case(tmp_path, *case.values)
+    path = vault / "Home.md"
+    body = path.read_text(encoding="utf-8")
+    body = body.replace(
+        "## Children\n\n- [[Child.md|Child]]\n",
+        "" if damage == "omit" else "## Parents\n\n- [[Child.md|Child]]\n",
+    )
+    path.write_text(body, encoding="utf-8")
+    with pytest.raises(AssertionError):
+        check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize("family", ["composition", "toc-setext", "callout-nested"])
+@pytest.mark.parametrize("ending", ["\r\n", "\r"])
+def test_formatted_note_newlines_preserve_exact_raw_bytes(tmp_path, family, ending):
+    case = next(case for case in NOTE_FORMAT_EXAMPLES if case.id == family)
+    raw, displayed = case.values
+    raw = raw.replace("\n", ending)
+    baseline, vault = formatting_reverse_case(tmp_path, raw, displayed)
+    assert check_api_vault(baseline, vault, profile_version="3")["relationships"] == 5
+    assert (baseline.manifest_path.parent / "201.bin").read_bytes() == raw.encode()
