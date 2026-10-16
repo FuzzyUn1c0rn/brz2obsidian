@@ -2458,3 +2458,57 @@ def nonhome_svg_case(tmp_path):
         child_note.read_text(encoding="utf-8") + authored, encoding="utf-8"
     )
     return baseline, vault
+
+
+SVG_ENCODING_ROOT = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1" viewBox="0 0 1 1"/>'
+)
+SVG_ENCODING_CASES = [
+    ("utf8", SVG_ENCODING_ROOT.encode("utf-8"), True),
+    ("utf16le-no-bom", SVG_ENCODING_ROOT.encode("utf-16-le"), False),
+    ("utf16be-no-bom", SVG_ENCODING_ROOT.encode("utf-16-be"), False),
+    ("utf32le-no-bom", SVG_ENCODING_ROOT.encode("utf-32-le"), False),
+    ("utf32be-no-bom", SVG_ENCODING_ROOT.encode("utf-32-be"), False),
+    (
+        "nul-character-data",
+        SVG_ENCODING_ROOT.replace("/>", "><![CDATA[\x00]]></svg>").encode("utf-8"),
+        False,
+    ),
+    (
+        "xml-whitespace-cdata",
+        SVG_ENCODING_ROOT.replace("/>", "><![CDATA[ \t\r\n]]></svg>").encode("utf-8"),
+        True,
+    ),
+]
+
+
+@pytest.mark.parametrize("entry", ["asset", "baseline", "vault"])
+@pytest.mark.parametrize(
+    "label,payload,eligible",
+    SVG_ENCODING_CASES,
+    ids=[case[0] for case in SVG_ENCODING_CASES],
+)
+def test_svg_public_eligibility_cannot_reinterpret_non_utf8_or_nul_source(
+    tmp_path, entry, label, payload, eligible
+):
+    baseline, vault = svg_case(tmp_path, drawing=payload)
+
+    def audit():
+        if entry == "asset":
+            assert expected_asset(baseline, attachment(baseline), "3") == (
+                "image",
+                "present",
+                payload,
+            )
+        elif entry == "baseline":
+            assert audit_baseline(baseline, profile_version="3")["payloads"] == 4
+        else:
+            assert (
+                check_api_vault(baseline, vault, profile_version="3")["payloads"] == 4
+            )
+
+    if eligible:
+        audit()
+    else:
+        with pytest.raises(AssertionError):
+            audit()

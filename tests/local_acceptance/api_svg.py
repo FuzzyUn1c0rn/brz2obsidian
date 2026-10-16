@@ -43,6 +43,8 @@ def qualify_svg(payload):
         text = payload.decode("utf-8", errors="strict")
     except UnicodeError as exc:
         raise AssertionError("SVG strict UTF8") from exc
+    # XML1.0 forbids NUL; reject it before the parser can reinterpret UTF16 bytes.
+    assert "\x00" not in text, "SVG forbidden XML NUL character"
     # Reject references lexically, including predefined/numeric whitespace forms.
     assert "&" not in text, "SVG entity reference"
     assert not any(token in text for token in ("<!DOCTYPE", "<!ENTITY", "<!--")), (
