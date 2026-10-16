@@ -22,6 +22,7 @@ def reverse_case(tmp_path):
     for name in manifest["graphs"].values():
         path = root / name
         graph = json.loads(path.read_bytes())
+        graph.setdefault("siblings", [])
         for link in graph["links"]:
             if link["id"] == identity(101):
                 link["direction"] = 3
@@ -532,3 +533,420 @@ def test_reverse_navigation_uses_canonical_identity_order_and_visible_labels(
         assert (
             check_api_vault(baseline, vault, profile_version="3")["relationships"] == 6
         )
+
+
+@pytest.mark.parametrize("owner,heading", [("Home", "Children"), ("Child", "Parents")])
+@pytest.mark.parametrize(
+    "damage", ["incorrect", "duplicate", "prose-only", "empty", "noncanonical"]
+)
+def test_separated_extra_generated_navigation_cannot_hide_before_correct_tail(
+    tmp_path, owner, heading, damage
+):
+    baseline, vault = reverse_case(tmp_path)
+    expected = "- [[Child.md|Child]]\n" if owner == "Home" else "- [[Home.md|Home]]\n"
+    if damage == "incorrect":
+        extra = f"## {heading}\n\n- [[{owner}.md|{owner}]]\n"
+    elif damage == "duplicate":
+        extra = f"## {heading}\n\n" + expected
+    elif damage == "prose-only":
+        extra = f"## {heading}\n\nUnexplained generated relationship prose.\n"
+    elif damage == "noncanonical":
+        extra = f"### {heading.lower()}\n\n" + expected
+    else:
+        extra = f"## {heading}\n\n"
+    prefix = "# Home\n\nOriginal note.\n\n" if owner == "Home" else "# Child\n\n"
+    (vault / (owner + ".md")).write_text(
+        prefix
+        + extra
+        + "\nUnexpected generated separator.\n\n"
+        + f"## {heading}\n\n"
+        + expected,
+        encoding="utf-8",
+    )
+    with pytest.raises(AssertionError):
+        check_api_vault(baseline, vault, profile_version="3")
+
+
+def test_reverse_navigation_keeps_resources_before_relationships_and_home_footer(
+    tmp_path,
+):
+    baseline, vault = reverse_case(tmp_path)
+    (vault / "Home.md").write_text(
+        "# Home\n\nOriginal note.\n\n## Resources\n\n"
+        "- [[00000000-0000-4000-8000-000000000203.bin|manual.pdf]]\n\n"
+        "## Children\n\n- [[Child.md|Child]]\n\n"
+        "## Categories\n\n[[Categories.md|Browse categories]]\n",
+        encoding="utf-8",
+    )
+    assert check_api_vault(baseline, vault, profile_version="3")["relationships"] == 5
+
+
+@pytest.mark.parametrize("owner", [2, 3])
+@pytest.mark.parametrize("newline", ["\r\n", "\r"])
+def test_reverse_endpoint_heading_preserves_newline_titles_without_false_refusal(
+    tmp_path, owner, newline
+):
+    baseline, vault = reverse_case(tmp_path)
+    titles = {identity(2): "Home", identity(3): "Child"}
+    titles[identity(owner)] += newline + "Entry"
+
+    def change(manifest, graphs):
+        for graph in graphs.values():
+            rows = [
+                graph["activeThought"],
+                *(graph["parents"] or []),
+                *(graph["children"] or []),
+                *(graph["jumps"] or []),
+                *(graph["tags"] or []),
+            ]
+            for row in rows:
+                if row["id"] == identity(owner):
+                    row["name"] = titles[identity(owner)]
+
+    baseline = mutate_source(baseline, change)
+    record_path = vault / "migration-record.json"
+    record = json.loads(record_path.read_bytes())
+    next(
+        r
+        for r in record["original_evidence"][0]["records"]
+        if r["id"] == identity(owner)
+    )["name"] = titles[identity(owner)]
+    next(t for t in record["item_targets"] if t["item_key"] == identity(owner))[
+        "original_title"
+    ] = titles[identity(owner)]
+    write_json(record_path, record)
+    parent_label = "Home Entry" if owner == 2 else "Home"
+    child_label = "Child Entry" if owner == 3 else "Child"
+    (vault / "Home.md").write_bytes(
+        (
+            "# "
+            + titles[identity(2)]
+            + "\n\nOriginal note.\n\n## Children\n\n"
+            + "- [[Child.md|"
+            + child_label
+            + "]]\n"
+        ).encode()
+    )
+    (vault / "Child.md").write_bytes(
+        (
+            "# "
+            + titles[identity(3)]
+            + "\n\n## Parents\n\n"
+            + "- [[Home.md|"
+            + parent_label
+            + "]]\n"
+        ).encode()
+    )
+    assert check_api_vault(baseline, vault, profile_version="3")["relationships"] == 5
+
+
+@pytest.mark.parametrize(
+    "owner,field",
+    [(2, "parents"), (2, "tags"), (2, "siblings"), (3, "children"), (4, "links")],
+)
+@pytest.mark.parametrize("value", [None, False, 0, "", {}])
+def test_required_reverse_graph_arrays_refuse_falsey_nonlists(
+    tmp_path, owner, field, value
+):
+    baseline, _ = reverse_case(tmp_path)
+
+    def change(manifest, graphs):
+        graphs[identity(owner)][field] = value
+
+    baseline = mutate_source(baseline, change)
+    with pytest.raises(AssertionError):
+        audit_baseline(baseline, profile_version="3")
+
+
+def test_reverse_graph_nullable_attachments_keep_authoritative_list_fallback(tmp_path):
+    baseline, vault = reverse_case(tmp_path)
+    root = baseline.manifest_path.parent
+
+    def change(manifest, graphs):
+        name = "home-attachment-inventory.json"
+        write_json(root / name, graphs[identity(2)]["attachments"])
+        manifest["files"][name] = fingerprint(root / name)
+        manifest["attachment_inventories"] = {identity(2): name}
+        graphs[identity(2)]["attachments"] = None
+
+    baseline = mutate_source(baseline, change)
+    assert check_api_vault(baseline, vault, profile_version="3")["relationships"] == 5
+
+
+def empty_reverse_leaf_case(tmp_path):
+    """Home covers an ordinary, unclassified, contentless child."""
+    baseline, vault = reverse_case(tmp_path)
+
+    def change(manifest, graphs):
+        for graph in graphs.values():
+            graph["links"] = [r for r in graph["links"] if r["id"] != identity(104)]
+            for row in [
+                graph["activeThought"],
+                *graph["parents"],
+                *graph["children"],
+                *graph["jumps"],
+                *graph["tags"],
+            ]:
+                if row["id"] == identity(3):
+                    row["typeId"] = None
+        graphs[identity(3)]["type"] = None
+        graphs[identity(4)]["children"] = []
+        manifest["scope"]["relationship_ids"].remove(identity(104))
+        del manifest["link_attachments"][identity(104)]
+
+    baseline = mutate_source(baseline, change)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    record["relationships"] = [
+        r for r in record["relationships"] if r["key"] != identity(104)
+    ]
+    record["classification_assignments"] = []
+    record["original_evidence"][0]["records"] = [
+        r for r in record["original_evidence"][0]["records"] if r["id"] != identity(104)
+    ]
+    next(
+        r for r in record["original_evidence"][0]["records"] if r["id"] == identity(3)
+    )["typeId"] = None
+    next(t for t in record["item_targets"] if t["item_key"] == identity(3)).update(
+        created=False, creation_reasons=[]
+    )
+    write_json(path, record)
+    (vault / "Child.md").unlink()
+    return baseline, vault
+
+
+def test_empty_unclassified_reverse_leaf_stays_uncreated_with_parent_link(tmp_path):
+    baseline, vault = empty_reverse_leaf_case(tmp_path)
+    assert check_api_vault(baseline, vault, profile_version="3")["relationships"] == 4
+    assert not (vault / "Child.md").exists()
+    assert "- [[Child.md|Child]]" in (vault / "Home.md").read_text()
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "unexpected-note",
+        "missing-parent-link",
+        "unneeded-child-created",
+        "nonboolean-created",
+    ],
+)
+def test_empty_reverse_leaf_materialization_and_navigation_are_source_bound(
+    tmp_path, damage
+):
+    baseline, vault = empty_reverse_leaf_case(tmp_path)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    child = next(t for t in record["item_targets"] if t["item_key"] == identity(3))
+    if damage == "unexpected-note":
+        (vault / "Child.md").write_text("# Child\n")
+    elif damage == "missing-parent-link":
+        (vault / "Home.md").write_text("# Home\n\nOriginal note.\n")
+    elif damage == "nonboolean-created":
+        child["created"] = 0
+    else:
+        child["created"] = True
+        (vault / "Child.md").write_text("# Child\n\n## Parents\n\n- [[Home.md|Home]]\n")
+    write_json(path, record)
+    with pytest.raises(AssertionError):
+        check_api_vault(baseline, vault, profile_version="3")
+
+
+def two_empty_reverse_endpoints_case(tmp_path):
+    """An uncovered Child->Leaf edge deterministically selects Child, the parent."""
+    baseline, vault = empty_reverse_leaf_case(tmp_path)
+    root = baseline.manifest_path.parent
+    leaf = {
+        "id": identity(6),
+        "brainId": identity(1),
+        "kind": 1,
+        "acType": 0,
+        "forgottenDateTime": None,
+        "name": "Leaf",
+        "typeId": None,
+    }
+    link = {
+        "id": identity(106),
+        "brainId": identity(1),
+        "thoughtIdA": identity(3),
+        "thoughtIdB": identity(6),
+        "kind": 1,
+        "relation": 1,
+        "meaning": 1,
+        "direction": 3,
+        "typeId": None,
+    }
+
+    def change(manifest, graphs):
+        parent = graphs[identity(3)]["activeThought"]
+        graphs[identity(3)]["links"].append(link)
+        graphs[identity(3)]["children"].append(leaf)
+        graphs[identity(6)] = {
+            "activeThought": leaf,
+            "links": [link],
+            "parents": [parent],
+            "children": [],
+            "jumps": [],
+            "tags": [],
+            "siblings": [],
+            "type": None,
+            "attachments": [],
+        }
+        manifest["graphs"][identity(6)] = "leaf-graph.json"
+        write_json(root / "leaf-graph.json", graphs[identity(6)])
+        manifest["files"]["leaf-graph.json"] = fingerprint(root / "leaf-graph.json")
+        manifest["scope"]["thought_ids"].append(identity(6))
+        manifest["scope"]["relationship_ids"].append(identity(106))
+        for name, value in (
+            ("leaf-link.json", link),
+            ("leaf-link-content.json", []),
+            (
+                "leaf-no-note.json",
+                {
+                    "brainId": identity(1),
+                    "sourceId": identity(6),
+                    "sourceType": 2,
+                    "markdown": "",
+                    "html": None,
+                    "text": None,
+                    "modificationDateTime": "0001-01-01T00:00:00",
+                },
+            ),
+        ):
+            write_json(root / name, value)
+            manifest["files"][name] = fingerprint(root / name)
+        manifest["relationship_metadata"][identity(106)] = {
+            "status": 200,
+            "path": "leaf-link.json",
+        }
+        manifest["link_attachment_outcomes"][identity(106)] = 200
+        manifest["link_attachments"][identity(106)] = "leaf-link-content.json"
+        manifest["no_notes"][identity(6)] = "leaf-no-note.json"
+        for name in manifest["statistics"]:
+            stats = json.loads((root / name).read_bytes())
+            stats.update(thoughts=3, links=4)
+            write_json(root / name, stats)
+
+    baseline = mutate_source(baseline, change)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    record["original_evidence"][0]["records"].extend([leaf, link])
+    record["relationships"].append(
+        {
+            "key": identity(106),
+            "kind": "hierarchy",
+            "item_a": identity(3),
+            "item_b": identity(6),
+        }
+    )
+    next(t for t in record["item_targets"] if t["item_key"] == identity(3)).update(
+        created=True, creation_reasons=["hierarchy"]
+    )
+    record["item_targets"].append(
+        {
+            "item_key": identity(6),
+            "original_identity": identity(6),
+            "original_title": "Leaf",
+            "relative_path": "Leaf.md",
+            "created": False,
+            "creation_reasons": [],
+        }
+    )
+    write_json(path, record)
+    (vault / "Child.md").write_text(
+        "# Child\n\n## Parents\n\n- [[Home.md|Home]]\n\n## Children\n\n- [[Leaf.md|Leaf]]\n"
+    )
+    return baseline, vault
+
+
+@pytest.mark.parametrize("swap", [False, True])
+def test_empty_reverse_edge_requires_deterministic_selected_parent(tmp_path, swap):
+    baseline, vault = two_empty_reverse_endpoints_case(tmp_path)
+    if swap:
+        path = vault / "migration-record.json"
+        record = json.loads(path.read_bytes())
+        for target in record["item_targets"]:
+            if target["item_key"] in {identity(3), identity(6)}:
+                target["created"] = target["item_key"] == identity(6)
+        write_json(path, record)
+        (vault / "Child.md").unlink()
+        (vault / "Leaf.md").write_text("# Leaf\n\n## Parents\n\n- [[Child.md|Child]]\n")
+        with pytest.raises(AssertionError):
+            check_api_vault(baseline, vault, profile_version="3")
+    else:
+        assert (
+            check_api_vault(baseline, vault, profile_version="3")["relationships"] == 5
+        )
+
+
+@pytest.mark.parametrize("content", ["note", "url"])
+def test_source_content_cannot_be_hidden_by_uncreated_reverse_target(tmp_path, content):
+    baseline, vault = empty_reverse_leaf_case(tmp_path)
+    root = baseline.manifest_path.parent
+    attachment = {
+        "id": identity(205),
+        "brainId": identity(1),
+        "sourceId": identity(3),
+        "sourceType": 2,
+        "type": 1 if content == "note" else 3,
+        "isNotes": content == "note",
+        "location": "Notes.md"
+        if content == "note"
+        else "https://example.invalid/source",
+        "name": None,
+        "dataLength": 20,
+    }
+    payload = b"Required child content.\n"
+
+    def change(manifest, graphs):
+        graphs[identity(3)]["attachments"].append(attachment)
+        manifest["scope"]["attachment_ids"].append(identity(205))
+        if content == "note":
+            (root / "child-note.bin").write_bytes(payload)
+            manifest["files"]["child-note.bin"] = fingerprint(root / "child-note.bin")
+            manifest["payloads"][identity(205)] = {
+                "status": 200,
+                "path": "child-note.bin",
+            }
+            del manifest["no_notes"][identity(3)]
+
+    baseline = mutate_source(baseline, change)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    record["original_evidence"][0]["records"].append(attachment)
+    target = {
+        "asset_id": identity(205),
+        "owner": identity(3),
+        "role": "note_original" if content == "note" else "url",
+        "availability": "present" if content == "note" else "external",
+        "original_name": attachment["location"],
+        "display_name": None,
+        "relative_path": "child-note.bin" if content == "note" else None,
+        "actual_length": len(payload) if content == "note" else None,
+        "actual_sha256": fingerprint(root / "child-note.bin")["sha256"]
+        if content == "note"
+        else None,
+    }
+    if content == "note":
+        (vault / "child-note.bin").write_bytes(payload)
+    else:
+        target["external_uri"] = attachment["location"]
+    record["asset_targets"].append(target)
+    write_json(path, record)
+    with pytest.raises(AssertionError, match="reverse hierarchy note materialization"):
+        check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize("owner", [2, 3])
+def test_home_and_classified_reverse_endpoints_cannot_be_falsely_uncreated(
+    tmp_path, owner
+):
+    baseline, vault = reverse_case(tmp_path)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    target = next(t for t in record["item_targets"] if t["item_key"] == identity(owner))
+    target["created"] = False
+    (vault / target["relative_path"]).unlink()
+    write_json(path, record)
+    with pytest.raises(AssertionError, match="reverse hierarchy note materialization"):
+        check_api_vault(baseline, vault, profile_version="3")
