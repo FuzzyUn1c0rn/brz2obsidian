@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import struct
+from difflib import SequenceMatcher
 from pathlib import Path
 
 import pytest
@@ -354,9 +355,15 @@ def image_note_prefix(name, explicit_owner=None, provider=None, effective_owner=
     return result
 
 
-def bound_case(tmp_path):
-    """Raw API facts and an independently authored vault, with no converter call."""
-    baseline, vault, image = image_case(tmp_path)
+def first_document(record):
+    return next(t for t in record["item_targets"] if t["item_key"] == identity(2))[
+        "documents"
+    ][0]
+
+
+def image_source_case(tmp_path, scenario="basic"):
+    """Return raw independently authored API observations, never output expectations."""
+    baseline, _, image = image_case(tmp_path)
     root = baseline.manifest_path.parent
     manifest = json.loads(baseline.manifest_path.read_bytes())
     graphs = {key: baseline.json(path) for key, path in manifest["graphs"].items()}
@@ -386,7 +393,68 @@ def bound_case(tmp_path):
         + identity(202)
         + ".jpg#$width=75p$)\n"
     )
+    assert scenario in {"basic", "adapted"}, "literal source scenario"
+    if scenario == "adapted":
+        authored = (
+            "Préface 🐈 <Enter>.\r\n\r\n"
+            '|Item|Image|:(table="column-widths:-1,0,84;justification:default"):\r\n'
+            "|[Child](brain://AAAAAAAAAECAAAAAAAAAAw/title)|![bleu](.data/md-images/"
+            + identity(202)
+            + '.jpg#$width=75p$ "Titre")|\r\n\r\n'
+            + "> [!tip|icon:🐈]\r\n> ![deux](.data/md-images/"
+            + identity(202)
+            + ".jpg)\r\n"
+        )
     (root / "201.bin").write_bytes(authored.encode())
+    # Explicit inert wire observations; no provider or normalizer supplies defaults.
+    thought_rows = {
+        key: graph["activeThought"]
+        | {
+            "creationDateTime": "2024-01-02T03:04:05Z",
+            "modificationDateTime": "2024-02-03T04:05:06Z",
+            "foregroundColor": None,
+            "backgroundColor": None,
+        }
+        for key, graph in graphs.items()
+    }
+    link_rows = {
+        row["id"]: row
+        | {
+            "name": None,
+            "color": None,
+            "thickness": 1,
+            "creationDateTime": "2024-01-02T03:04:05Z",
+            "modificationDateTime": "2024-02-03T04:05:06Z",
+        }
+        for graph in graphs.values()
+        for row in graph["links"]
+    }
+    attachment_rows = {
+        row["id"]: row | {"position": 0}
+        for graph in graphs.values()
+        for row in graph["attachments"]
+    }
+
+    def canonical(value):
+        if isinstance(value, list):
+            return [canonical(v) for v in value]
+        if isinstance(value, dict):
+            key = value.get("id")
+            if key in thought_rows:
+                return thought_rows[key]
+            if key in link_rows:
+                return link_rows[key]
+            if key in attachment_rows:
+                return attachment_rows[key]
+            return {k: canonical(v) for k, v in value.items()}
+        return value
+
+    graphs = {key: canonical(graph) | {"siblings": []} for key, graph in graphs.items()}
+    write_json(root / manifest["types"], canonical(baseline.json(manifest["types"])))
+    write_json(
+        root / manifest["tags"]["path"],
+        canonical(baseline.json(manifest["tags"]["path"])),
+    )
     manifest["attachment_metadata"] = {}
     manifest["attachment_inventories"] = {}
     for owner, graph in graphs.items():
@@ -400,21 +468,117 @@ def bound_case(tmp_path):
             write_json(root / path, row)
             manifest["files"][path] = fingerprint(root / path)
             manifest["attachment_metadata"][row["id"]] = {"status": 200, "path": path}
+
+    def source_file(name, value):
+        write_json(root / name, value)
+        manifest["files"][name] = fingerprint(root / name)
+        return name
+
+    manifest["accessible_brains"] = source_file(
+        "accessible-brains.json", [baseline.json(manifest["brain"])]
+    )
+    manifest["search"] = source_file(
+        "search.json",
+        [
+            {
+                "brainId": identity(1),
+                "isFromOtherBrain": False,
+                "sourceThought": {"id": key, "brainId": identity(1), "kind": 0},
+                "sourceLink": None,
+            }
+            for key in sorted(thought_rows)
+        ],
+    )
+    manifest["search_query"] = {
+        "queryText": "*",
+        "maxResults": "5000",
+        "onlySearchThoughtNames": "false",
+    }
+    manifest["graph_query"] = {"includeSiblings": "true"}
+    manifest["authoritative_thoughts"] = {
+        key: source_file(key + "-thought.json", row)
+        for key, row in thought_rows.items()
+    }
+    manifest["authoritative_links"] = {
+        key: source_file(key + "-link.json", row) for key, row in link_rows.items()
+    }
+    brain = identity(1)
+    http = {
+        "/api/brains": {"status": 200, "path": manifest["accessible_brains"]},
+        "/api/brains/" + brain: {"status": 200, "path": manifest["brain"]},
+        "/api/brains/" + brain + "/statistics": [
+            {"status": 200, "path": path} for path in manifest["statistics"]
+        ],
+        "/api/search/" + brain: {"status": 200, "path": manifest["search"]},
+        "/api/thoughts/" + brain + "/types": {"status": 200, "path": manifest["types"]},
+        "/api/thoughts/" + brain + "/tags": manifest["tags"],
+    }
+    for key in thought_rows:
+        http["/api/thoughts/" + brain + "/" + key] = {
+            "status": 200,
+            "path": manifest["authoritative_thoughts"][key],
+        }
+        http["/api/thoughts/" + brain + "/" + key + "/graph"] = {
+            "status": 200,
+            "path": manifest["graphs"][key],
+        }
+        http["/api/thoughts/" + brain + "/" + key + "/attachments"] = {
+            "status": 200,
+            "path": manifest["attachment_inventories"][key],
+        }
+        if key in manifest["no_notes"]:
+            http["/api/notes/" + brain + "/" + key] = {
+                "status": 200,
+                "path": manifest["no_notes"][key],
+            }
+    for key in link_rows:
+        http["/api/links/" + brain + "/" + key] = {
+            "status": 200,
+            "path": manifest["authoritative_links"][key],
+        }
+        http["/api/links/" + brain + "/" + key + "/attachments"] = {
+            "status": 200,
+            "path": manifest["link_attachments"][key],
+        }
+    (root / "missing-404.bin").write_bytes(b"not found")
+    manifest["files"]["missing-404.bin"] = fingerprint(root / "missing-404.bin")
+    for key, outcome in manifest["payloads"].items():
+        http["/api/attachments/" + brain + "/" + key + "/metadata"] = manifest[
+            "attachment_metadata"
+        ][key]
+        http["/api/attachments/" + brain + "/" + key + "/file-content"] = (
+            outcome
+            if outcome["status"] == 200
+            else {"status": 404, "path": "missing-404.bin"}
+        )
+    manifest["http_responses"] = http
     # Child now owns an unreferenced image, so its no-note wrapper stays required.
     write_json(baseline.manifest_path, manifest)
     baseline = reseal(baseline)
+    return baseline
+
+
+def bound_case(tmp_path):
+    """Independently authored expected vault for the source-only observation set."""
+    baseline = image_source_case(tmp_path)
+    vault = tmp_path / "vault"
+    manifest = baseline.data
+    graphs = {key: baseline.json(path) for key, path in manifest["graphs"].items()}
+    authored = baseline.bytes(manifest["payloads"][identity(201)]["path"]).decode(
+        "utf-8"
+    )
     record_path = vault / "migration-record.json"
     record = json.loads(record_path.read_bytes())
     record["profile_version"] = "3"
     all_rows = [row for graph in graphs.values() for row in graph["attachments"]]
     record["original_evidence"][0]["records"] = (
-        [
-            row
-            for row in record["original_evidence"][0]["records"]
-            if row["id"] != identity(202)
-        ]
-        + [image]
-        + new
+        [graph["activeThought"] for graph in graphs.values()]
+        + list(
+            {
+                row["id"]: row for graph in graphs.values() for row in graph["links"]
+            }.values()
+        )
+        + [row | {"position": {"decimal": "0"}} for row in all_rows]
     )
     for row in all_rows:
         key = row["id"]
@@ -463,6 +627,7 @@ def bound_case(tmp_path):
         )
         provider = identity(4) if key == identity(3) else None
         target.update(
+            documents=[],
             relative_path={
                 identity(2): "Home.md",
                 identity(3): "Child.md",
@@ -513,6 +678,7 @@ def bound_case(tmp_path):
                 "end": end,
                 "expected_original": authored[start:end],
                 "kind": "image",
+                "table_cell": False,
                 "target": identity(202),
                 "display_text": label,
                 "document_digest": digest,
@@ -522,11 +688,16 @@ def bound_case(tmp_path):
                 "presentation_normalization": norm,
             }
         )
-    record["documents"] = [
+    next(t for t in record["item_targets"] if t["item_key"] == identity(2))[
+        "documents"
+    ] = [
         {
             "key": identity(201),
             "owner": identity(2),
             "original_asset_id": identity(201),
+            "original_copy_omitted": False,
+            "text_adaptations": [],
+            "evidence": ["attachment:" + identity(201)],
             "text_digest": digest,
             "owner_target": "Home.md",
             "references": references,
@@ -551,6 +722,8 @@ def bound_case(tmp_path):
         image_note_prefix("Child", provider=4, effective_owner=4), encoding="utf-8"
     )
     (vault / "Type.md").write_text(image_note_prefix("Type", 4), encoding="utf-8")
+    for asset in record["asset_targets"]:
+        asset["retained_documents"] = []
     write_json(record_path, record)
     return baseline, vault
 
@@ -671,7 +844,9 @@ def test_source_bound_image_vault_rejects_independent_loss_controls(tmp_path, da
             "sha": "0" * 64,
         }[damage]
     elif damage == "omitted_document":
-        record["documents"] = []
+        next(t for t in record["item_targets"] if t["item_key"] == identity(2))[
+            "documents"
+        ] = []
     elif damage.startswith("generated_"):
         note = (vault / "Home.md").read_text(encoding="utf-8")
         if damage == "generated_alt":
@@ -694,7 +869,7 @@ def test_source_bound_image_vault_rejects_independent_loss_controls(tmp_path, da
         else:
             target["created"] = False
     else:
-        references = record["documents"][0]["references"]
+        references = first_document(record)["references"]
         if damage == "reference_order":
             references.reverse()
         else:
@@ -970,6 +1145,7 @@ def add_empty_owner(baseline, vault, role):
         {
             "asset_id": key,
             "owner": owner,
+            "retained_documents": [],
             "role": role,
             "availability": "present",
             "relative_path": "Assets/" + owner + "/" + attachment["location"],
@@ -985,6 +1161,7 @@ def add_empty_owner(baseline, vault, role):
     record["item_targets"].append(
         {
             "item_key": owner,
+            "documents": [],
             "original_identity": owner,
             "original_title": "Empty",
             "relative_path": "Empty.md",
@@ -1255,7 +1432,6 @@ ADAPTED_IMAGE_NOTES = [
     ),
 ]
 
-
 ADAPTED_IMAGE_NOTES += [
     pytest.param(
         "Préface 🐈 <Enter>.\n\n![bleu]({image})\n",
@@ -1297,6 +1473,57 @@ ADAPTED_IMAGE_NOTES += [
         id="lazy-false-target",
     ),
 ]
+
+
+def fixture_adaptations(raw, adapted):
+    """Literal template pairs supply valid noncanonical line edit segmentation."""
+    before, after = raw.splitlines(keepends=True), adapted.splitlines(keepends=True)
+    regions = []
+    for tag, a, b, c, d in SequenceMatcher(
+        None, before, after, autojunk=False
+    ).get_opcodes():
+        if tag == "equal":
+            continue
+        if a == b:
+            if b < len(before):
+                b += 1
+                d += 1
+            else:
+                a -= 1
+                c -= 1
+        if regions and a <= regions[-1][1] and c <= regions[-1][3]:
+            old = regions.pop()
+            a, c = old[0], old[2]
+        regions.append((a, b, c, d))
+    edits = []
+    for a, b, c, d in regions:
+        original, replacement = "".join(before[a:b]), "".join(after[c:d])
+        insert = (
+            any(token in original for token in (":(table=", "[/toc/]", "> [!"))
+            or (
+                "[/toc/]" in raw
+                and any(
+                    line.lstrip().startswith(("#", "=", "-")) for line in before[a:b]
+                )
+            )
+            or (":(table=" in raw and "`" in original)
+            or ("> [!" in raw and original.lstrip().startswith(">"))
+        )
+        edits.append(
+            {
+                "kind": "markdown_insert" if insert else "literal_text",
+                "start": len("".join(before[:a])),
+                "end": len("".join(before[:b])),
+                "before": original,
+                "after": replacement,
+                "adapted_start": len("".join(after[:c])),
+                "adapted_end": len("".join(after[:d])),
+                "source_digest": hashlib.sha256(raw.encode()).hexdigest(),
+                "source_basis": "scoped_source_text/unicode_codepoints",
+                "adapted_basis": "document.text/unicode_codepoints",
+            }
+        )
+    return edits
 
 
 def adapted_note_case(tmp_path, raw_template, adapted_template, ending="\n"):
@@ -1350,6 +1577,12 @@ def adapted_note_case(tmp_path, raw_template, adapted_template, ending="\n"):
                 "end": end,
                 "expected_original": adapted[start:end],
                 "kind": "image",
+                "table_cell": adapted[
+                    max(adapted.rfind("\n", 0, start), adapted.rfind("\r", 0, start))
+                    + 1 : start
+                ]
+                .lstrip()
+                .startswith("|"),
                 "target": identity(202),
                 "display_text": label,
                 "document_digest": digest,
@@ -1359,7 +1592,11 @@ def adapted_note_case(tmp_path, raw_template, adapted_template, ending="\n"):
                 "presentation_normalization": normalization,
             }
         )
-    record["documents"][0].update(text_digest=digest, references=references)
+    first_document(record).update(
+        text_digest=digest,
+        references=references,
+        text_adaptations=fixture_adaptations(raw, adapted),
+    )
     displayed = adapted
     actual = next(a for a in record["asset_targets"] if a["asset_id"] == identity(202))[
         "relative_path"
@@ -1388,7 +1625,7 @@ def test_image_documents_bind_to_independently_expected_adapted_text(
     assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 6
     record = json.loads((vault / "migration-record.json").read_bytes())
     assert (
-        record["documents"][0]["text_digest"]
+        first_document(record)["text_digest"]
         == hashlib.sha256(text.encode()).hexdigest()
     )
     assert (baseline.manifest_path.parent / "201.bin").read_bytes() == raw.format(
@@ -1418,7 +1655,7 @@ def test_adapted_image_document_metadata_cannot_be_forged(
     baseline, vault, _ = adapted_note_case(tmp_path, raw, adapted, ending)
     path = vault / "migration-record.json"
     record = json.loads(path.read_bytes())
-    document = record["documents"][0]
+    document = first_document(record)
     reference = document["references"][0]
     if damage == "document_digest":
         document["text_digest"] = "0" * 64
@@ -1456,7 +1693,7 @@ def test_raw_note_digest_cannot_replace_the_final_adapted_document_digest(
     baseline, vault, _ = adapted_note_case(tmp_path, raw, adapted, ending)
     path = vault / "migration-record.json"
     record = json.loads(path.read_bytes())
-    record["documents"][0]["text_digest"] = hashlib.sha256(
+    first_document(record)["text_digest"] = hashlib.sha256(
         (baseline.manifest_path.parent / "201.bin").read_bytes()
     ).hexdigest()
     write_json(path, record)
@@ -1472,7 +1709,7 @@ def test_protected_image_examples_cannot_be_promoted_to_document_references(
     baseline, vault, adapted = adapted_note_case(tmp_path, *case.values, "\r\n")
     path = vault / "migration-record.json"
     record = json.loads(path.read_bytes())
-    reference = dict(record["documents"][0]["references"][0])
+    reference = dict(first_document(record)["references"][0])
     start = adapted.index("![false]")
     end = adapted.index(")", start) + 1
     destination = adapted.index(".data/md-images/", start)
@@ -1486,7 +1723,7 @@ def test_protected_image_examples_cannot_be_promoted_to_document_references(
         source_target=adapted[destination : end - 1],
         presentation_normalization=None,
     )
-    record["documents"][0]["references"].insert(0, reference)
+    first_document(record)["references"].insert(0, reference)
     write_json(path, record)
     with pytest.raises(AssertionError, match="all source image references"):
         check_api_vault(baseline, vault, profile_version="3")
@@ -2034,3 +2271,736 @@ def test_qualified_lossless_sampling_ycck_classes_keep_source_and_full_pixels(
     assert audit["resource_eligibility"][identity(202)]["frames"] == measured["frames"]
     assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 6
     assert (vault / target["relative_path"]).read_bytes() == raw
+
+
+@pytest.mark.parametrize("shadow", [False, True])
+def test_published_nested_document_record_has_no_top_level_collection(tmp_path, shadow):
+    baseline, vault = bound_case(tmp_path)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    if shadow:
+        record["documents"] = [json.loads(json.dumps(first_document(record)))]
+        write_json(path, record)
+        with pytest.raises(AssertionError, match="document"):
+            check_api_vault(baseline, vault, profile_version="3")
+    else:
+        assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 6
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "omitted",
+        "wrong-owner-container",
+        "asset-container",
+        "duplicate",
+        "digest",
+        "copy-flag",
+        "evidence",
+        "table-flag",
+    ],
+)
+def test_top_level_shadow_cannot_supply_nested_document_proof(tmp_path, damage):
+    baseline, vault = bound_case(tmp_path)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    document = first_document(record)
+    record["documents"] = [json.loads(json.dumps(document))]
+    home = next(t for t in record["item_targets"] if t["item_key"] == identity(2))
+    child = next(t for t in record["item_targets"] if t["item_key"] == identity(3))
+    if damage == "omitted":
+        home["documents"] = []
+    elif damage == "wrong-owner-container":
+        home["documents"] = []
+        child["documents"] = [document]
+    elif damage == "asset-container":
+        home["documents"] = []
+        record["asset_targets"][0]["retained_documents"] = [document]
+    elif damage == "duplicate":
+        child["documents"] = [document]
+    elif damage == "digest":
+        document["text_digest"] = "0" * 64
+    elif damage == "copy-flag":
+        document["original_copy_omitted"] = True
+    elif damage == "evidence":
+        document["evidence"] = ["attachment:forged"]
+    else:
+        document["references"][0]["table_cell"] = True
+    write_json(path, record)
+    with pytest.raises(AssertionError, match="document"):
+        check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "copy-true",
+        "copy-number",
+        "copy-missing",
+        "evidence",
+        "evidence-missing",
+        "adaptations-bogus",
+        "adaptations-missing",
+        "table-true",
+        "table-number",
+        "source-target",
+        "owner-target",
+        "key",
+        "unexpected-field",
+    ],
+)
+def test_nested_document_complete_metadata_cannot_be_forged(tmp_path, damage):
+    baseline, vault = bound_case(tmp_path)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    document = first_document(record)
+    if damage == "copy-true":
+        document["original_copy_omitted"] = True
+    elif damage == "copy-number":
+        document["original_copy_omitted"] = 0
+    elif damage == "copy-missing":
+        del document["original_copy_omitted"]
+    elif damage == "evidence":
+        document["evidence"] = ["attachment:forged"]
+    elif damage == "evidence-missing":
+        del document["evidence"]
+    elif damage == "adaptations-bogus":
+        document["text_adaptations"] = [{"kind": "markdown_insert"}]
+    elif damage == "adaptations-missing":
+        del document["text_adaptations"]
+    elif damage == "table-true":
+        document["references"][0]["table_cell"] = True
+    elif damage == "table-number":
+        document["references"][0]["table_cell"] = 0
+    elif damage == "source-target":
+        document["references"][0]["source_target"] = "forged.jpg"
+    elif damage == "owner-target":
+        document["owner_target"] = "Child.md"
+    elif damage == "key":
+        document["key"] = identity(205)
+    else:
+        document["text"] = "invented text"
+    write_json(path, record)
+    with pytest.raises(AssertionError, match="document|reference|adaptation"):
+        check_api_vault(baseline, vault, profile_version="3")
+
+
+def mixed_reference_case(tmp_path):
+    uri = "brain://AAAAAAAAAECAAAAAAAAAAw/title"
+    raw = (
+        "[Child]("
+        + uri
+        + ")\r\n\r\n|Item|Image|\r\n|---|---|\r\n|[Child]("
+        + uri
+        + ")|![bleu]({image})|\r\n"
+    )
+    baseline, vault, text = adapted_note_case(tmp_path, raw, raw)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    doc = first_document(record)
+    doc["references"][0]["table_cell"] = True
+    phrase = "[Child](" + uri + ")"
+    for start in [text.index(phrase), text.index(phrase, text.index(phrase) + 1)]:
+        doc["references"].append(
+            {
+                "start": start,
+                "end": start + len(phrase),
+                "expected_original": phrase,
+                "kind": "item",
+                "target": identity(3),
+                "display_text": "Child",
+                "table_cell": start > text.index("|---|---|"),
+                "document_digest": hashlib.sha256(text.encode()).hexdigest(),
+                "source_target": uri,
+                "destination_start": None,
+                "destination_end": None,
+                "presentation_normalization": None,
+            }
+        )
+    doc["references"].sort(key=lambda row: row["start"])
+    write_json(path, record)
+    image_path = "Assets/" + identity(2) + "/" + identity(202) + ".jpg"
+    display = text.replace(
+        "![bleu](.data/md-images/" + identity(202) + ".jpg)",
+        "![bleu](" + image_path + ")",
+    )
+    display = display.replace(phrase, "[[Child.md|Child]]", 1).replace(
+        phrase, "[[Child.md\\|Child]]"
+    )
+    (vault / "Home.md").write_text(
+        image_note_prefix("Home", 2, effective_owner=2) + display.replace("\r\n", "\n"),
+        encoding="utf-8",
+    )
+    return baseline, vault
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        None,
+        "item-destination",
+        "item-source",
+        "item-table",
+        "image-table",
+        "ref-extra",
+        "ref-start-bool",
+    ],
+)
+def test_nested_mixed_item_image_and_table_reference_contract(tmp_path, damage):
+    baseline, vault = mixed_reference_case(tmp_path)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    refs = first_document(record)["references"]
+    if damage == "item-destination":
+        refs[0]["destination_start"] = 8
+        refs[0]["destination_end"] = 48
+    elif damage == "item-source":
+        refs[0]["source_target"] = "brain://forged"
+    elif damage == "item-table":
+        refs[1]["table_cell"] = False
+    elif damage == "image-table":
+        refs[2]["table_cell"] = False
+    elif damage == "ref-extra":
+        refs[0]["extra"] = True
+    elif damage == "ref-start-bool":
+        refs[0]["start"] = False
+    write_json(path, record)
+    if damage:
+        with pytest.raises(AssertionError, match="reference|document"):
+            check_api_vault(baseline, vault, profile_version="3")
+    else:
+        assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 6
+
+
+@pytest.mark.parametrize("damage", [None, "omitted", "created", "owner-target"])
+def test_empty_original_document_is_owned_even_when_note_is_uncreated(tmp_path, damage):
+    baseline, vault = bound_case(tmp_path)
+    baseline = add_empty_owner(baseline, vault, "icon")
+    root = baseline.manifest_path.parent
+    manifest = json.loads(baseline.manifest_path.read_bytes())
+    row = {
+        "id": identity(209),
+        "brainId": identity(1),
+        "sourceId": identity(6),
+        "sourceType": 2,
+        "type": 1,
+        "isNotes": True,
+        "name": None,
+        "location": "Notes.md",
+    }
+    graph = baseline.json(manifest["graphs"][identity(6)])
+    graph["attachments"].append(row)
+    write_json(root / manifest["graphs"][identity(6)], graph)
+    write_json(
+        root / manifest["attachment_inventories"][identity(6)], graph["attachments"]
+    )
+    write_json(root / "209-metadata.json", row)
+    (root / "209.bin").write_bytes(b"")
+    for name in ("209-metadata.json", "209.bin"):
+        manifest["files"][name] = fingerprint(root / name)
+    manifest["scope"]["attachment_ids"].append(identity(209))
+    manifest["payloads"][identity(209)] = {"status": 200, "path": "209.bin"}
+    manifest["attachment_metadata"][identity(209)] = {
+        "status": 200,
+        "path": "209-metadata.json",
+    }
+    del manifest["no_notes"][identity(6)]
+    write_json(baseline.manifest_path, manifest)
+    baseline = reseal(baseline)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    record["original_evidence"][0]["records"].append(row)
+    asset = next(
+        a for a in record["asset_targets"] if a["asset_id"] == identity(201)
+    ) | {
+        "asset_id": identity(209),
+        "owner": identity(6),
+        "relative_path": "209.bin",
+        "actual_length": 0,
+        "actual_sha256": hashlib.sha256(b"").hexdigest(),
+    }
+    record["asset_targets"].append(asset)
+    (vault / "209.bin").write_bytes(b"")
+    target = next(t for t in record["item_targets"] if t["item_key"] == identity(6))
+    target["documents"] = [
+        {
+            "key": identity(209),
+            "owner": identity(6),
+            "text_digest": hashlib.sha256(b"").hexdigest(),
+            "original_asset_id": identity(209),
+            "original_copy_omitted": False,
+            "references": [],
+            "text_adaptations": [],
+            "evidence": ["attachment:" + identity(209)],
+            "owner_target": "Empty.md",
+        }
+    ]
+    if damage == "omitted":
+        target["documents"] = []
+    elif damage == "created":
+        target["created"] = True
+    elif damage == "owner-target":
+        target["documents"][0]["owner_target"] = "Home.md"
+    write_json(path, record)
+    if damage:
+        with pytest.raises(AssertionError, match="document|materialization"):
+            check_api_vault(baseline, vault, profile_version="3")
+    else:
+        assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 8
+        assert not (vault / "Empty.md").exists()
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        None,
+        "omitted",
+        "digest",
+        "source-basis",
+        "adapted-basis",
+        "before",
+        "after",
+        "start",
+        "end",
+        "adapted-start",
+        "adapted-end",
+        "order",
+        "overlap",
+        "kind",
+        "kind-launder",
+        "literal-launder",
+        "bool-coordinate",
+        "extra",
+        "zero-span",
+        "no-op",
+    ],
+)
+def test_document_edit_provenance_is_source_owned_and_replayable(tmp_path, damage):
+    raw_template, adapted_template = ADAPTED_IMAGE_NOTES[0].values
+    baseline, vault, text = adapted_note_case(
+        tmp_path, raw_template, adapted_template, "\r\n"
+    )
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    doc = first_document(record)
+    edits = doc["text_adaptations"]
+    raw = baseline.bytes(baseline.data["payloads"][identity(201)]["path"]).decode()
+    if damage == "omitted":
+        doc["text_adaptations"] = []
+    elif damage == "digest":
+        edits[0]["source_digest"] = "0" * 64
+    elif damage == "source-basis":
+        edits[0]["source_basis"] = "document.text/unicode_codepoints"
+    elif damage == "adapted-basis":
+        edits[0]["adapted_basis"] = "scoped_source_text/unicode_codepoints"
+    elif damage == "before":
+        edits[0]["before"] = "forged"
+    elif damage == "after":
+        edits[0]["after"] = "forged"
+    elif damage == "start":
+        edits[0]["start"] += 1
+    elif damage == "end":
+        edits[0]["end"] -= 1
+    elif damage == "adapted-start":
+        edits[0]["adapted_start"] += 1
+    elif damage == "adapted-end":
+        edits[0]["adapted_end"] -= 1
+    elif damage == "order":
+        edits.reverse()
+    elif damage == "overlap":
+        edits.insert(1, edits[0].copy())
+    elif damage == "kind":
+        edits[0]["kind"] = "unknown"
+    elif damage in {"kind-launder", "literal-launder"}:
+        doc["text_adaptations"] = [
+            edits[0]
+            | {
+                "kind": "markdown_insert"
+                if damage == "kind-launder"
+                else "literal_text",
+                "start": 0,
+                "end": len(raw),
+                "before": raw,
+                "after": text,
+                "adapted_start": 0,
+                "adapted_end": len(text),
+            }
+        ]
+    elif damage == "bool-coordinate":
+        edits[0]["start"] = False
+    elif damage == "extra":
+        edits[0]["extra"] = False
+    elif damage == "zero-span":
+        edits[0].update(end=edits[0]["start"], before="")
+    elif damage == "no-op":
+        edits[0].update(after=edits[0]["before"])
+    write_json(path, record)
+    if damage:
+        with pytest.raises(AssertionError, match="adaptation"):
+            check_api_vault(baseline, vault, profile_version="3")
+    else:
+        assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 6
+
+
+def test_literal_edit_provenance_accepts_alternate_valid_source_segmentation(tmp_path):
+    raw = "Prefix <Enter>.\n\n![bleu]({image})\n"
+    adapted = "Prefix \\<Enter>.{eol}{eol}![bleu]({image}){eol}"
+    baseline, vault, text = adapted_note_case(tmp_path, raw, adapted)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    doc = first_document(record)
+    original = baseline.bytes(baseline.data["payloads"][identity(201)]["path"]).decode()
+    # The original line edit and this whole-source edit both replay exactly;
+    # only the genuine literal token changes, so no atomic span is prescribed.
+    doc["text_adaptations"] = [
+        doc["text_adaptations"][0]
+        | {
+            "start": 0,
+            "end": len(original),
+            "before": original,
+            "after": text,
+            "adapted_start": 0,
+            "adapted_end": len(text),
+        }
+    ]
+    write_json(path, record)
+    assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 6
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "missing-collection",
+        "wrong-collection-type",
+        "omitted",
+        "wrong-owner",
+        "asset-container",
+        "duplicate",
+        "extra",
+        "original-id",
+        "missing-owner",
+        "missing-key",
+        "missing-retained",
+        "wrong-retained-type",
+    ],
+)
+def test_nested_document_census_and_container_ownership_are_source_bound(
+    tmp_path, damage
+):
+    baseline, vault = bound_case(tmp_path)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    home = next(t for t in record["item_targets"] if t["item_key"] == identity(2))
+    child = next(t for t in record["item_targets"] if t["item_key"] == identity(3))
+    document = home["documents"][0]
+    if damage == "missing-collection":
+        del home["documents"]
+    elif damage == "wrong-collection-type":
+        home["documents"] = {}
+    elif damage == "omitted":
+        home["documents"] = []
+    elif damage == "wrong-owner":
+        home["documents"] = []
+        child["documents"] = [document]
+    elif damage == "asset-container":
+        home["documents"] = []
+        record["asset_targets"][0]["retained_documents"] = [document]
+    elif damage == "duplicate":
+        home["documents"].append(document.copy())
+    elif damage == "extra":
+        child["documents"] = [document | {"key": identity(999), "owner": identity(3)}]
+    elif damage == "original-id":
+        document["original_asset_id"] = identity(202)
+    elif damage == "missing-owner":
+        del document["owner"]
+    elif damage == "missing-key":
+        del document["key"]
+    elif damage == "missing-retained":
+        del record["asset_targets"][0]["retained_documents"]
+    else:
+        record["asset_targets"][0]["retained_documents"] = {}
+    write_json(path, record)
+    with pytest.raises(AssertionError, match="document"):
+        check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize(
+    "scenario,pin",
+    [
+        ("basic", "fee3b92c5825ad3c0226e01e147279141078304e114c80463f7686ff816e78c2"),
+        ("adapted", "92f959f1a9ae7fbca935fbac0de0593aadf519a88e213fc39097c9c13941a511"),
+    ],
+)
+def test_public_bridge_source_scenarios_are_exactly_sealed(tmp_path, scenario, pin):
+    baseline = image_source_case(tmp_path, scenario=scenario)
+    assert baseline.fingerprint == pin
+    assert len(baseline.data["http_responses"]) == 45
+    assert audit_baseline(baseline, profile_version="3")["payloads"] == 6
+
+
+def test_markdown_edit_provenance_accepts_alternate_toc_segmentation(tmp_path):
+    raw, adapted = ADAPTED_IMAGE_NOTES[8].values
+    baseline, vault, text = adapted_note_case(tmp_path, raw, adapted, "\r\n")
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    doc = first_document(record)
+    original = baseline.bytes(baseline.data["payloads"][identity(201)]["path"]).decode()
+    doc["text_adaptations"] = [
+        doc["text_adaptations"][0]
+        | {
+            "start": 0,
+            "end": len(original),
+            "before": original,
+            "after": text,
+            "adapted_start": 0,
+            "adapted_end": len(text),
+        }
+    ]
+    write_json(path, record)
+    assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 6
+
+
+@pytest.mark.parametrize("ending", ["\n", "\r\n", "\r"])
+@pytest.mark.parametrize("segmentation", ["whole-table", "separate"])
+def test_genuine_table_owns_literal_changes_in_unchanged_rows(
+    tmp_path, ending, segmentation
+):
+    raw = '|Literal|Image|:(table="column-widths:-1,0,84;justification:default"):\n|<Enter>|![bleu]({image})|\n'
+    adapted = "|Literal|Image|\n|---|---|{eol}|\\<Enter>|![bleu]({image})|{eol}"
+    baseline, vault, _ = adapted_note_case(tmp_path, raw, adapted, ending)
+    if segmentation == "separate":
+        path = vault / "migration-record.json"
+        record = json.loads(path.read_bytes())
+        doc = first_document(record)
+        original = baseline.bytes(
+            baseline.data["payloads"][identity(201)]["path"]
+        ).decode()
+        stop = original.index(ending) + len(ending)
+        replacement = "|Literal|Image|\n|---|---|" + ending
+        base = doc["text_adaptations"][0]
+        start = original.index("<Enter>")
+        shift = len(replacement) - stop
+        doc["text_adaptations"] = [
+            base
+            | {
+                "start": 0,
+                "end": stop,
+                "before": original[:stop],
+                "after": replacement,
+                "adapted_start": 0,
+                "adapted_end": len(replacement),
+            },
+            base
+            | {
+                "kind": "literal_text",
+                "start": start,
+                "end": start + 7,
+                "before": "<Enter>",
+                "after": "\\<Enter>",
+                "adapted_start": start + shift,
+                "adapted_end": start + shift + 8,
+            },
+        ]
+        write_json(path, record)
+    assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 6
+
+
+@pytest.mark.parametrize("where", ["before", "after", "protected"])
+def test_table_ownership_cannot_launder_unrelated_or_protected_literals(
+    tmp_path, where
+):
+    table = '|Literal|Image|:(table="column-widths:-1,0,84;justification:default"):\n|<Enter>|![bleu]({image})|\n'
+    displayed = "|Literal|Image|\n|---|---|{eol}|\\<Enter>|![bleu]({image})|{eol}"
+    prefix = "Outside <Escape>.\n\n" if where == "before" else ""
+    suffix = (
+        "\nOutside <After>.\n"
+        if where == "after"
+        else "\n`<Protected>`\n"
+        if where == "protected"
+        else ""
+    )
+    expected_prefix = "Outside \\<Escape>.{eol}{eol}" if prefix else ""
+    expected_suffix = (
+        "{eol}Outside \\<After>.{eol}"
+        if where == "after"
+        else "{eol}`<Protected>`{eol}"
+        if where == "protected"
+        else ""
+    )
+    baseline, vault, text = adapted_note_case(
+        tmp_path, prefix + table + suffix, expected_prefix + displayed + expected_suffix
+    )
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    doc = first_document(record)
+    original = baseline.bytes(baseline.data["payloads"][identity(201)]["path"]).decode()
+    replacement = (
+        text.replace("`<Protected>`", "`\\<Protected>`")
+        if where == "protected"
+        else text
+    )
+    doc["text_adaptations"] = [
+        doc["text_adaptations"][0]
+        | {
+            "kind": "markdown_insert",
+            "start": 0,
+            "end": len(original),
+            "before": original,
+            "after": replacement,
+            "adapted_start": 0,
+            "adapted_end": len(replacement),
+        }
+    ]
+    write_json(path, record)
+    with pytest.raises(AssertionError, match="adaptation"):
+        check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize("ending", ["\n", "\r\n", "\r"])
+@pytest.mark.parametrize("segmentation", ["composite", "separate"])
+@pytest.mark.parametrize("unit", ["callout", "toc"])
+def test_genuine_callout_and_consumed_toc_heading_own_contained_literals(
+    tmp_path, ending, unit, segmentation
+):
+    if unit == "callout":
+        raw = "> [!tip|icon:🐈]\n> Press <Enter>.\n> ![bleu]({image})\n"
+        adapted = "> [!tip] 🐈 Tip{eol}> Press \\<Enter>.{eol}> ![bleu]({image}){eol}"
+    else:
+        raw = "[/toc/]\n\n# Press <Enter> ^keep\n![bleu]({image})\n"
+        adapted = "- [Press \\<Enter\\>](#^keep){eol}{eol}# Press \\<Enter> ^keep{eol}![bleu]({image}){eol}"
+    baseline, vault, text = adapted_note_case(tmp_path, raw, adapted, ending)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    doc = first_document(record)
+    original = baseline.bytes(baseline.data["payloads"][identity(201)]["path"]).decode()
+    base = doc["text_adaptations"][0]
+    if segmentation == "composite":
+        doc["text_adaptations"] = [
+            base
+            | {
+                "kind": "markdown_insert",
+                "start": 0,
+                "end": len(original),
+                "before": original,
+                "after": text,
+                "adapted_start": 0,
+                "adapted_end": len(text),
+            }
+        ]
+    elif unit == "toc":
+        doc["text_adaptations"][1]["kind"] = "literal_text"
+    else:
+        stop = original.index(ending) + len(ending)
+        replacement = "> [!tip] 🐈 Tip" + ending
+        start = original.index("<Enter>")
+        shift = len(replacement) - stop
+        doc["text_adaptations"] = [
+            base
+            | {
+                "start": 0,
+                "end": stop,
+                "before": original[:stop],
+                "after": replacement,
+                "adapted_start": 0,
+                "adapted_end": len(replacement),
+            },
+            base
+            | {
+                "kind": "literal_text",
+                "start": start,
+                "end": start + 7,
+                "before": "<Enter>",
+                "after": "\\<Enter>",
+                "adapted_start": start + shift,
+                "adapted_end": start + shift + 8,
+            },
+        ]
+    write_json(path, record)
+    assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 6
+
+
+@pytest.mark.parametrize("unit", ["callout", "toc"])
+@pytest.mark.parametrize("where", ["before", "after", "protected"])
+def test_container_and_toc_ownership_cannot_launder_unrelated_literals(
+    tmp_path, unit, where
+):
+    if unit == "callout":
+        raw = "> [!tip|icon:🐈]\n> Press <Enter>.\n> ![bleu]({image})\n"
+        adapted = "> [!tip] 🐈 Tip{eol}> Press \\<Enter>.{eol}> ![bleu]({image}){eol}"
+    else:
+        raw = "[/toc/]\n\n# Press <Enter> ^keep\n![bleu]({image})\n"
+        adapted = "- [Press \\<Enter\\>](#^keep){eol}{eol}# Press \\<Enter> ^keep{eol}![bleu]({image}){eol}"
+    prefix = "Outside <Escape>.\n\n" if where == "before" else ""
+    suffix = (
+        "\nOutside <After>.\n"
+        if where == "after"
+        else "\n`<Protected>`\n"
+        if where == "protected"
+        else ""
+    )
+    expected_prefix = "Outside \\<Escape>.{eol}{eol}" if prefix else ""
+    expected_suffix = (
+        "{eol}Outside \\<After>.{eol}"
+        if where == "after"
+        else "{eol}`<Protected>`{eol}"
+        if where == "protected"
+        else ""
+    )
+    baseline, vault, text = adapted_note_case(
+        tmp_path, prefix + raw + suffix, expected_prefix + adapted + expected_suffix
+    )
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    doc = first_document(record)
+    original = baseline.bytes(baseline.data["payloads"][identity(201)]["path"]).decode()
+    replacement = (
+        text.replace("`<Protected>`", "`\\<Protected>`")
+        if where == "protected"
+        else text
+    )
+    doc["text_adaptations"] = [
+        doc["text_adaptations"][0]
+        | {
+            "kind": "markdown_insert",
+            "start": 0,
+            "end": len(original),
+            "before": original,
+            "after": replacement,
+            "adapted_start": 0,
+            "adapted_end": len(replacement),
+        }
+    ]
+    write_json(path, record)
+    with pytest.raises(AssertionError, match="adaptation"):
+        check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize("unit", ["table", "callout", "toc"])
+def test_unrecognized_insert_declaration_cannot_own_literal_changes(tmp_path, unit):
+    if unit == "table":
+        raw = '|Literal|Image|:(table="column-widths:-1,-2,84;justification:default"):\n|<Enter>|![bleu]({image})|\n'
+    elif unit == "callout":
+        raw = "> [!unknown|icon:🐈]\n> Press <Enter>.\n> ![bleu]({image})\n"
+    else:
+        raw = "\\[/toc/]\n\n# Press <Enter> ^keep\n![bleu]({image})\n"
+    adapted = raw.replace("<Enter>", "\\<Enter>").replace("\n", "{eol}")
+    baseline, vault, text = adapted_note_case(tmp_path, raw, adapted)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    doc = first_document(record)
+    original = baseline.bytes(baseline.data["payloads"][identity(201)]["path"]).decode()
+    doc["text_adaptations"] = [
+        doc["text_adaptations"][0]
+        | {
+            "kind": "markdown_insert",
+            "start": 0,
+            "end": len(original),
+            "before": original,
+            "after": text,
+            "adapted_start": 0,
+            "adapted_end": len(text),
+        }
+    ]
+    write_json(path, record)
+    with pytest.raises(AssertionError, match="adaptation"):
+        check_api_vault(baseline, vault, profile_version="3")
