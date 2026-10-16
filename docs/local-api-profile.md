@@ -258,3 +258,24 @@ profiles1/2 and their controls remain available. Capture format1, module1,
 contract7 and worker/review schema3 are unchanged. Every new source-family
 predicate requires matching live and frozen implementation under its assigned
 slice; raw capture or profile selection never expands the finite qualification.
+
+Profile3 implements the exact JPEG note-image predicate in
+[Q5](local-api-profile3-qualification.md#q5-jpeg-note-image) and the accepted
+[S10 finite ICO alternative](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/210).
+JPEG images require UUID.jpg/type 12 and full JPEG classification/verification/
+pixel decoding. ICO is icon-only under the existing type 5/Icon.png/null-name
+declaration. Ordered square variants are exactly 32/16 or 16/32/48, with 32-bit
+BI_RGB 40-byte headers, exact contiguous body extents and all advertised variants
+fully decoded. Bodies have length 40+4*w*h+4*ceil(w/32)*h+z; z is 0 for both first
+signature entries and 0/128/192 for the second. The second signature's 32/48 masks
+and tails are zero; other qualified masks remain unrestricted. No generic ICO
+fallback or BRZ parser expansion is granted.
+
+The [inert public inputs](../tests/fixtures/local_api_images_v3/source-facts.json)
+were independently authored by /root and qualified by /root/reviewer under input
+pin f11bc1e4c3144b4f1c37c7bde333909f914169fdbc887f5597c95b52cbdb4fe5, including
+all five variant structures/full RGBA hashes/samples and the second JPEG. Binary
+fixture bytes stay exact; the two JSON fact containers have Git LF normalization
+relative to their raw CRLF source containers, with unchanged literal values. This
+source-input qualification does not replace independent checker, complete real
+source or native presentation acceptance.

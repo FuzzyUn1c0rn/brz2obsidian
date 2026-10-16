@@ -182,3 +182,14 @@ locations and their derived URI/display facts remain content-bound. Pinned
 mutations refuse even with recomputed untrusted manifests. A fresh valid capture
 with valid changed content receives a different identity and needs a new review;
 independent original-source preservation is established by baseline comparison.
+
+Profile3 JPEG note images and the finite ICO icon alternative reuse the existing
+owned-payload domains and measurements. Sealing/revalidation applies identical
+declaration/owner/role/reference/appearance and full byte eligibility, including
+every ICO variant and its exact masks/tails. Original `Icon.png` remains the
+authored filename for actual ICO bytes; no actual_format field or PNG claim is
+introduced. Complete containers and distinct source identities remain intact.
+Profiles 1/2 retain ICO/JPEG-image refusals. Recreated hashes cannot authorize
+invalid shapes or falsely included excluded-owner icons. Valid changed pixels
+receive new content identities and require fresh review; trusted-pin mutations
+of even an unrequested variant refuse.

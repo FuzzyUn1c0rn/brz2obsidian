@@ -909,3 +909,59 @@ def test_valid_replacement_image_has_new_identity_and_needs_new_review(tmp_path)
         assert (
             tmp_path / f"new-review/Attachments/22222222/{IMAGE}.png"
         ).read_bytes() == replacement
+
+
+@pytest.mark.parametrize("family", ["jpeg", "inert-a.ico", "inert-b.ico"])
+def test_valid_new_image_pixels_change_identity_and_require_fresh_review(
+    tmp_path, family
+):
+    from tests.sources.test_local_api_images_v3 import (
+        BLUE_JPEG,
+        ICON,
+        INPUTS,
+        IcoIconApi,
+        JpegImageApi,
+        changed_valid_icon,
+    )
+    from tests.support.local_api_payloads import IMAGE
+
+    api = (
+        JpegImageApi()
+        if family == "jpeg"
+        else IcoIconApi((INPUTS / family).read_bytes())
+    )
+    key = IMAGE if family == "jpeg" else ICON
+    replacement = BLUE_JPEG if family == "jpeg" else changed_valid_icon(family)
+    with api_server(api) as (_, address):
+        selection = LocalApiSourceSelection(
+            brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+        )
+        operations = Operations(credentials=lambda: KEY)
+        original = operations.inspect(selection)
+        assert original.reviewed is not None
+        api.payloads[key] = replacement
+        api.attachments[key]["dataLength"] = len(replacement)
+        current = operations.inspect(selection)
+        assert current.reviewed is not None
+        assert (
+            current.reviewed.source_identity.source_sha256
+            != original.reviewed.source_identity.source_sha256
+        )
+        assert (
+            current.reviewed.source_identity.snapshot_digest
+            != original.reviewed.source_identity.snapshot_digest
+        )
+        refused = operations.convert_reviewed(
+            selection, tmp_path, "old-review", original.reviewed
+        )
+        assert refused.findings[0].code == "review_changed"
+        assert not (tmp_path / "old-review").exists()
+        accepted = operations.convert_reviewed(
+            selection, tmp_path, "new-review", current.reviewed
+        )
+        assert accepted.publication.receipt_verified
+    record = json.loads((tmp_path / "new-review/migration-record.json").read_bytes())
+    asset = next(row for row in record["asset_targets"] if row["asset_id"] == key)
+    assert (
+        tmp_path / "new-review" / asset["relative_path"]
+    ).read_bytes() == replacement

@@ -92,6 +92,8 @@ def test_jpeg_note_image_preserves_bytes_role_reference_and_output(tmp_path):
         "truncated",
         "png_bytes",
         "unreferenced_corrupt",
+        "cross_owner",
+        "duplicate_location",
     ],
 )
 def test_jpeg_image_requires_exact_declaration_joins_and_complete_owned_bytes(
@@ -130,6 +132,12 @@ def test_jpeg_image_requires_exact_declaration_joins_and_complete_owned_bytes(
             "noncanonical_uuid": IMAGE.replace("-", "") + ".jpg",
             "traversal": "../" + IMAGE + ".jpg",
         }[mutation]
+    elif mutation == "cross_owner":
+        value["sourceId"] = ALONE
+    elif mutation == "duplicate_location":
+        extra = "a3333333-3333-4333-8333-333333333334"
+        api.attachments[extra] = attachment(extra, HOME, 12, IMAGE + ".jpg")
+        api.payloads[extra] = JPEG
     elif mutation == "foreign_brain":
         value["brainId"] = NOTE
     elif mutation == "foreign_owner":
@@ -902,3 +910,303 @@ def test_explicit_older_profiles_refuse_finite_ico(version, filename):
         )
         with pytest.raises(MigrationRefused), module.open(LocalApiSourceRef(BRAIN)):
             pytest.fail("The older profile must not accept ICO bytes")
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "type_float",
+        "type_bool",
+        "source_float",
+        "source_bool",
+        "notes_zero",
+        "notes_true",
+        "name_absent",
+        "name_empty",
+        "name_authored",
+        "location",
+        "image_role",
+        "generic_ico",
+        "generic_png",
+        "foreign_brain",
+        "foreign_owner",
+        "private_owner",
+        "custom_owner",
+        "duplicate_icon",
+        "metadata_conflict",
+        "graph_conflict",
+        "missing",
+        "interrupted",
+    ],
+)
+def test_ico_declaration_ownership_inventory_and_retrieval_are_exact(
+    tmp_path, mutation
+):
+    raw = (INPUTS / "inert-a.ico").read_bytes()
+    api = IcoIconApi(raw)
+    value = api.attachments[ICON]
+    if mutation.startswith("type_"):
+        value["type"] = 5.0 if mutation == "type_float" else True
+    elif mutation.startswith("source_"):
+        value["sourceType"] = 2.0 if mutation == "source_float" else True
+    elif mutation.startswith("notes_"):
+        value["isNotes"] = 0 if mutation == "notes_zero" else True
+    elif mutation.startswith("name_"):
+        if mutation == "name_absent":
+            del value["name"]
+        else:
+            value["name"] = "" if mutation == "name_empty" else "AUTHOR_CANARY"
+    elif mutation == "location":
+        value["location"] = "Icon.ico"
+    elif mutation == "image_role":
+        value.update(type=12, location=ICON + ".ico")
+    elif mutation.startswith("generic_"):
+        value.update(
+            type=1, location="icon.ico" if mutation == "generic_ico" else "icon.png"
+        )
+    elif mutation == "foreign_brain":
+        value["brainId"] = NOTE
+    elif mutation == "foreign_owner":
+        value["sourceId"] = BRAIN
+        api.overrides[f"/api/thoughts/{BRAIN}/{HOME}/attachments"] = (
+            200,
+            [api.attachments[NOTE], value],
+        )
+    elif mutation in {"private_owner", "custom_owner"}:
+        api.thoughts[ALONE]["acType" if mutation == "private_owner" else "kind"] = (
+            1 if mutation == "private_owner" else 3
+        )
+    elif mutation == "duplicate_icon":
+        extra = "a5555555-5555-4555-8555-555555555556"
+        api.attachments[extra] = attachment(extra, HOME, 5, "Icon.png")
+        api.payloads[extra] = raw
+    elif mutation == "metadata_conflict":
+        api.overrides[f"/api/attachments/{BRAIN}/{ICON}/metadata"] = (
+            200,
+            value | {"name": "CONFLICT_CANARY"},
+        )
+    elif mutation == "graph_conflict":
+        graph = api.response(f"/api/thoughts/{BRAIN}/{HOME}/graph", {})[1]
+        graph["attachments"] = [api.attachments[NOTE]]
+        api.overrides[f"/api/thoughts/{BRAIN}/{HOME}/graph"] = (200, graph)
+    else:
+        api.overrides[f"/api/attachments/{BRAIN}/{ICON}/file-content"] = (
+            (404, b"PRIVATE_CANARY")
+            if mutation == "missing"
+            else (200, raw[:20], {"Content-Length": str(len(raw))})
+        )
+    with api_server(api) as (_, address):
+        result = local_api_workflow(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        ).convert(LocalApiSourceRef(BRAIN), tmp_path / "vault")
+    assert result.outcome in {"refused", "failed"}
+    assert result.receipt is None and not (tmp_path / "vault").exists()
+    assert "CANARY" not in result.model_dump_json()
+
+
+@pytest.mark.parametrize("filename", ["inert-a.ico", "inert-b.ico"])
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "role",
+        "owner",
+        "name",
+        "appearance",
+        "length",
+        "nondefault_body",
+        "excluded_system",
+        "excluded_forgotten",
+        "profile1",
+        "profile2",
+    ],
+)
+def test_fresh_ico_capture_rejects_invalid_claims_after_hashes_are_recomputed(
+    tmp_path, monkeypatch, filename, mutation
+):
+    import struct
+
+    from brz2obsidian.contracts import SourceSnapshot
+    from brz2obsidian.sources.thebrain.local_api import LocalApiSession
+
+    source, audit, snapshot, payloads = captured_inputs(
+        IcoIconApi((INPUTS / filename).read_bytes(), owner=ALONE), tmp_path, monkeypatch
+    )
+    clean = LocalApiSession(
+        source=source,
+        snapshot=SourceSnapshot.model_validate_json(json.dumps(snapshot)),
+        audit=audit,
+        payloads=payloads,
+        profile_version="3",
+    )
+    clean.verify_consistency()
+    clean.close()
+    asset = next(row for row in snapshot["assets"] if row["asset_id"] == ICON)
+    fact = next(row for row in source["payloads"] if row["asset_id"] == ICON)
+    version = "3"
+    if mutation == "role":
+        asset["role"] = "file"
+    elif mutation == "owner":
+        asset["owner"] = HOME
+    elif mutation == "name":
+        asset["original_name"] = "Icon.ico"
+    elif mutation == "appearance":
+        next(item for item in snapshot["items"] if item["key"] == ALONE)[
+            "declared_appearance"
+        ]["icon_asset_id"] = None
+    elif mutation == "length":
+        asset["actual_length"] = fact["actual_length"] = len(payloads[ICON]) - 1
+    elif mutation == "nondefault_body":
+        info = next(row for row in ICO_FACTS["payloads"] if row["file"] == filename)
+        changed = bytearray(payloads[ICON])
+        struct.pack_into("<I", changed, info["directory_order"][1]["offset"] + 20, 1)
+        payloads[ICON] = bytes(changed)
+        asset["actual_sha256"] = fact["actual_sha256"] = hashlib.sha256(
+            changed
+        ).hexdigest()
+    elif mutation.startswith("excluded_"):
+        thought = next(
+            row for row in source["records"] if row["key"] == "thought:" + ALONE
+        )
+        thought["value"]["kind"] = 5 if mutation == "excluded_system" else 1
+        thought["value"]["forgottenDateTime"] = (
+            "2026-01-01T00:00:00" if mutation == "excluded_forgotten" else None
+        )
+        next(
+            row for row in snapshot["original_evidence"] if row["key"] == thought["key"]
+        )["original_json"] = json.dumps(thought["value"])
+    else:
+        version = mutation[-1]
+        source["identifiers"]["profile_version"] = version
+    snapshot["identity"].update(source_sha256="", snapshot_digest="")
+    with pytest.raises(MigrationRefused):
+        fresh = LocalApiSession(
+            source=source,
+            snapshot=SourceSnapshot.model_validate_json(json.dumps(snapshot)),
+            audit=audit,
+            payloads=payloads,
+            profile_version=version,
+        )
+        fresh.close()
+
+
+@pytest.mark.parametrize("filename", ["inert-a.ico", "inert-b.ico"])
+def test_trusted_pin_covers_nondefault_ico_variant_and_recomputed_untrusted_manifest(
+    tmp_path, monkeypatch, filename
+):
+    import os
+    import tempfile
+
+    info = next(row for row in ICO_FACTS["payloads"] if row["file"] == filename)
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    with (
+        api_server(IcoIconApi((INPUTS / filename).read_bytes())) as (_, address),
+        LocalApiSourceModule(
+            LocalApiConfig(api_url=address),
+            credentials=lambda: KEY,
+            profile_version="3",
+        ).open(LocalApiSourceRef(BRAIN)) as session,
+    ):
+        directory = next(tmp_path.glob("brz2obsidian-api-*"))
+        manifest = json.loads((directory / "manifest.json").read_bytes())
+        binding = next(
+            row for row in manifest["payload_bindings"] if row["asset_id"] == ICON
+        )
+        target = directory / binding["storage_key"]
+        before = target.stat()
+        changed = bytearray(target.read_bytes())
+        position = info["directory_order"][1]["offset"] + 44
+        changed[position] ^= 1
+        target.write_bytes(changed)
+        os.utime(target, ns=(before.st_atime_ns, before.st_mtime_ns))
+        next(
+            row
+            for row in manifest["files"]
+            if row["storage_key"] == binding["storage_key"]
+        )["actual_sha256"] = hashlib.sha256(changed).hexdigest()
+        manifest.pop("integrity_sha256")
+        preimage = json.dumps(
+            manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+        manifest["integrity_sha256"] = hashlib.sha256(
+            b"brz2obsidian.local-api.integrity.v1\n" + preimage
+        ).hexdigest()
+        (directory / "manifest.json").write_text(
+            json.dumps(
+                manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ),
+            encoding="utf-8",
+        )
+        with pytest.raises(MigrationRefused):
+            session.verify_consistency()
+
+
+def changed_valid_icon(filename):
+    info = next(row for row in ICO_FACTS["payloads"] if row["file"] == filename)
+    raw = bytearray((INPUTS / filename).read_bytes())
+    raw[info["directory_order"][1]["offset"] + 44] ^= 1
+    return bytes(raw)
+
+
+@pytest.mark.parametrize("family", ["jpeg", "inert-a.ico", "inert-b.ico"])
+def test_new_image_payloads_keep_existing_measured_byte_bound(family):
+    raw = JPEG if family == "jpeg" else (INPUTS / family).read_bytes()
+    api = JpegImageApi() if family == "jpeg" else IcoIconApi(raw)
+    with api_server(api) as (_, address):
+        module = LocalApiSourceModule(
+            LocalApiConfig(api_url=address, max_payload_bytes=len(raw) - 1),
+            credentials=lambda: KEY,
+            profile_version="3",
+        )
+        with (
+            pytest.raises(MigrationRefused) as failure,
+            module.open(LocalApiSourceRef(BRAIN)),
+        ):
+            pytest.fail("A complete new image cannot exceed the existing payload bound")
+    assert failure.value.issues[0].code == "incomplete_source"
+
+
+@pytest.mark.parametrize("family", ["jpeg", "inert-a.ico", "inert-b.ico"])
+def test_new_image_decoders_keep_existing_memory_bound(tmp_path, monkeypatch, family):
+    from PIL import Image
+
+    raw = JPEG if family == "jpeg" else (INPUTS / family).read_bytes()
+    api = JpegImageApi() if family == "jpeg" else IcoIconApi(raw)
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 0)
+    with api_server(api) as (_, address):
+        result = local_api_workflow(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        ).convert(LocalApiSourceRef(BRAIN), tmp_path / "vault")
+    assert result.outcome == "refused" and result.receipt is None
+    assert not (tmp_path / "vault").exists()
+
+
+@pytest.mark.parametrize("filename", ["inert-a.ico", "inert-b.ico"])
+def test_ico_rejects_reordered_bodies_even_when_default_variant_decodes(
+    tmp_path, filename
+):
+    import io
+    import struct
+
+    from PIL import Image
+
+    info = next(row for row in ICO_FACTS["payloads"] if row["file"] == filename)
+    original = (INPUTS / filename).read_bytes()
+    entries = info["directory_order"]
+    directory_length = 6 + 16 * len(entries)
+    changed = bytearray(original[:directory_length])
+    for index in reversed(range(len(entries))):
+        entry = entries[index]
+        struct.pack_into("<I", changed, 6 + 16 * index + 12, len(changed))
+        changed.extend(
+            original[entry["offset"] : entry["offset"] + entry["body_length"]]
+        )
+    assert len(changed) == len(original)
+    with Image.open(io.BytesIO(changed)) as default:
+        default.load()
+        assert default.size == ((32, 32) if filename == "inert-a.ico" else (48, 48))
+    with api_server(IcoIconApi(bytes(changed))) as (_, address):
+        result = local_api_workflow(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        ).convert(LocalApiSourceRef(BRAIN), tmp_path / "vault")
+    assert result.outcome == "refused" and result.receipt is None
+    assert not (tmp_path / "vault").exists()

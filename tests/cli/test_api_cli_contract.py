@@ -213,3 +213,43 @@ def test_profile3_stage_diagnostics_reach_cli_without_source_hints(
         assert result["receipt"] is None
         assert result["issues"][0]["message"] == SHAPE_MESSAGES[stage]
     assert not (tmp_path / "refused").exists()
+
+
+@pytest.mark.parametrize("family", ["jpeg", "inert-a.ico", "inert-b.ico"])
+@pytest.mark.parametrize("as_json", [False, True])
+def test_cli_preserves_new_jpeg_and_finite_ico_bytes(
+    tmp_path, monkeypatch, capsys, family, as_json
+):
+    from tests.sources.test_local_api_images_v3 import (
+        ICON,
+        INPUTS,
+        IcoIconApi,
+        JpegImageApi,
+    )
+    from tests.support.local_api import BRAIN, KEY, api_server
+    from tests.support.local_api_payloads import IMAGE, JPEG
+
+    monkeypatch.setenv("THE_BRAIN_LOCAL_API_KEY", KEY)
+    raw = JPEG if family == "jpeg" else (INPUTS / family).read_bytes()
+    api = JpegImageApi() if family == "jpeg" else IcoIconApi(raw)
+    destination = tmp_path / "vault"
+    with api_server(api) as (_, address):
+        options = ["--source-kind", "local-api", "--api-url", address]
+        if as_json:
+            options.append("--json")
+        assert main(["inspect", BRAIN, *options]) == 0
+        inspected = capsys.readouterr()
+        assert main(["convert", BRAIN, str(destination), *options]) == 0
+    converted = capsys.readouterr()
+    assert inspected.err == converted.err == ""
+    if as_json:
+        assert json.loads(inspected.out)["outcome"] == "clean"
+        assert json.loads(converted.out)["outcome"] == "clean"
+    record = json.loads((destination / "migration-record.json").read_bytes())
+    asset = next(
+        row
+        for row in record["asset_targets"]
+        if row["asset_id"] == (IMAGE if family == "jpeg" else ICON)
+    )
+    assert (destination / asset["relative_path"]).read_bytes() == raw
+    assert asset["role"] == ("image" if family == "jpeg" else "icon")

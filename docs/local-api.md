@@ -211,3 +211,17 @@ source meanings are qualified in [the profile-3 table](local-api-profile3-qualif
 and are implemented in their assigned source-family slices. Qualification alone
 never makes unsupported source content importable. Profile changes require a
 fresh compatible inspection; the worker/review schema remains version 3.
+
+Profile 3 adds thought-owned JPEG note images declared as the canonical attachment
+UUID plus lowercase `.jpg`, with type 12, isNotes=false and explicit null name.
+Complete JPEG verification and pixel decoding precede byte-preserving capture;
+existing image references, alt/title/order and audited width adaptation apply.
+
+The accepted finite ICO icon alternative keeps role=icon and the authored
+`Icon.png` filename while preserving the complete actual ICO container. Only
+ordered 32/16 or 16/32/48 square 32-bit BI_RGB variants with the exact qualified
+directory/DIB/mask/tail pattern are admitted; every variant fully decodes. Direct
+and inherited icon precedence and decorative item selection remain unchanged.
+PNG/JPEG icons retain their existing predicates. No transcoding or preferred-frame
+extraction occurs. Native fidelity of ICO under the authored PNG-style filename
+remains a separate source/output acceptance gate.
