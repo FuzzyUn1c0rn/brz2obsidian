@@ -1,0 +1,384 @@
+{
+  "source_author": "/root/reviewer",
+  "raw_qualifier": "/root",
+  "verdict": "PASS",
+  "purpose": "Inert JPEG classes for preservation and valid-decoder-neighbor controls.",
+  "lossless_predictor_reference": "https://raw.githubusercontent.com/libjpeg-turbo/libjpeg-turbo/3.1.2/src/jdlossls.c",
+  "inputs": {
+    "literal-lossless-gray.jpg": {
+      "length": 50,
+      "sha256": "cc40fb73412549a0041f405e22ef176ef5a9bb81f5bd7c2579de872e488dccba",
+      "literal_source_facts": {
+        "frame": "SOF3",
+        "precision": 8,
+        "size": [
+          1,
+          1
+        ],
+        "component_ids": [
+          1
+        ],
+        "sampling": [
+          [
+            1,
+            1
+          ]
+        ],
+        "predictor": 1,
+        "point_transform": 0,
+        "dc_differences": [
+          0
+        ],
+        "literal_reconstructed_component_samples": [
+          128
+        ],
+        "derivation": "Initial predictor 2^(8-0-1)=128 plus zero differences."
+      },
+      "pillow_measurement": {
+        "version": "12.3.0",
+        "format": "JPEG",
+        "mode": "L",
+        "size": [
+          1,
+          1
+        ],
+        "native_component_pixels": [
+          128
+        ],
+        "rgba_sha256": "79dfad351f79ef0e65a11fff0a9ed44bf628f9390ff06b92ee4ee5e2477616ea"
+      },
+      "native_wic_measurement": {
+        "status": "complete-pixel-decode",
+        "source_sha256": "cc40fb73412549a0041f405e22ef176ef5a9bb81f5bd7c2579de872e488dccba",
+        "format": "JPEG",
+        "width": 1,
+        "height": 1,
+        "codec": {
+          "clsid": "9456a480-e88b-43ea-9e73-0b2d9b71b1ca",
+          "name": "JPEG Decoder",
+          "version": "1.0.0.0"
+        },
+        "frames": [
+          {
+            "width": 1,
+            "height": 1,
+            "decoded_bytes": 4,
+            "pixel_sha256": "79dfad351f79ef0e65a11fff0a9ed44bf628f9390ff06b92ee4ee5e2477616ea"
+          }
+        ]
+      },
+      "interpretation": "Decoded measurements are codec-specific. Original bytes and literal encoded facts are authoritative; conversion appearance is a separate native acceptance gate."
+    },
+    "literal-lossless-rgb.jpg": {
+      "length": 60,
+      "sha256": "11ca6dc105a36f46f67bfd7bc6052cbc6a1005f06bcf8316480522c7176ed700",
+      "literal_source_facts": {
+        "frame": "SOF3",
+        "precision": 8,
+        "size": [
+          1,
+          1
+        ],
+        "component_ids": [
+          82,
+          71,
+          66
+        ],
+        "sampling": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "predictor": 1,
+        "point_transform": 0,
+        "dc_differences": [
+          0,
+          0,
+          0
+        ],
+        "literal_reconstructed_component_samples": [
+          128,
+          128,
+          128
+        ],
+        "derivation": "Initial predictor 2^(8-0-1)=128 plus zero differences."
+      },
+      "pillow_measurement": {
+        "version": "12.3.0",
+        "format": "JPEG",
+        "mode": "RGB",
+        "size": [
+          1,
+          1
+        ],
+        "native_component_pixels": [
+          [
+            128,
+            128,
+            128
+          ]
+        ],
+        "rgba_sha256": "79dfad351f79ef0e65a11fff0a9ed44bf628f9390ff06b92ee4ee5e2477616ea"
+      },
+      "native_wic_measurement": {
+        "status": "complete-pixel-decode",
+        "source_sha256": "11ca6dc105a36f46f67bfd7bc6052cbc6a1005f06bcf8316480522c7176ed700",
+        "format": "JPEG",
+        "width": 1,
+        "height": 1,
+        "codec": {
+          "clsid": "9456a480-e88b-43ea-9e73-0b2d9b71b1ca",
+          "name": "JPEG Decoder",
+          "version": "1.0.0.0"
+        },
+        "frames": [
+          {
+            "width": 1,
+            "height": 1,
+            "decoded_bytes": 4,
+            "pixel_sha256": "79dfad351f79ef0e65a11fff0a9ed44bf628f9390ff06b92ee4ee5e2477616ea"
+          }
+        ]
+      },
+      "interpretation": "Decoded measurements are codec-specific. Original bytes and literal encoded facts are authoritative; conversion appearance is a separate native acceptance gate."
+    },
+    "literal-lossless-cmyk.jpg": {
+      "length": 65,
+      "sha256": "5fae1762cc6acf14816cc9ae00cf877745821b31d00bac73806dd4c16c404b19",
+      "literal_source_facts": {
+        "frame": "SOF3",
+        "precision": 8,
+        "size": [
+          1,
+          1
+        ],
+        "component_ids": [
+          67,
+          77,
+          89,
+          75
+        ],
+        "sampling": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "predictor": 1,
+        "point_transform": 0,
+        "dc_differences": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "literal_reconstructed_component_samples": [
+          128,
+          128,
+          128,
+          128
+        ],
+        "derivation": "Initial predictor 2^(8-0-1)=128 plus zero differences."
+      },
+      "pillow_measurement": {
+        "version": "12.3.0",
+        "format": "JPEG",
+        "mode": "CMYK",
+        "size": [
+          1,
+          1
+        ],
+        "native_component_pixels": [
+          [
+            127,
+            127,
+            127,
+            127
+          ]
+        ],
+        "rgba_sha256": "9628e815241cc05d54f579e472f651b255ff42ad8da0bf3b2a265818555169aa"
+      },
+      "native_wic_measurement": {
+        "status": "complete-pixel-decode",
+        "source_sha256": "5fae1762cc6acf14816cc9ae00cf877745821b31d00bac73806dd4c16c404b19",
+        "format": "JPEG",
+        "width": 1,
+        "height": 1,
+        "codec": {
+          "clsid": "9456a480-e88b-43ea-9e73-0b2d9b71b1ca",
+          "name": "JPEG Decoder",
+          "version": "1.0.0.0"
+        },
+        "frames": [
+          {
+            "width": 1,
+            "height": 1,
+            "decoded_bytes": 4,
+            "pixel_sha256": "53a67121cbf328ffd021b917d1108d38ac8df78b26e0574f83b7c21e01dff788"
+          }
+        ]
+      },
+      "interpretation": "Decoded measurements are codec-specific. Original bytes and literal encoded facts are authoritative; conversion appearance is a separate native acceptance gate."
+    },
+    "literal-441.jpg": {
+      "length": 148,
+      "sha256": "125a5391605b543a2892615207cfe5d0fdf3d8f3cc2b5a669d2d974183d2a721",
+      "literal_source_facts": {
+        "frame": "SOF0",
+        "precision": 8,
+        "size": [
+          1,
+          1
+        ],
+        "component_ids": [
+          1,
+          2,
+          3
+        ],
+        "sampling": [
+          [
+            1,
+            4
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "quantization": 1,
+        "six_block_dc": 0,
+        "six_block_ac": "EOB",
+        "literal_reconstructed_component_samples": [
+          128,
+          128,
+          128
+        ]
+      },
+      "pillow_measurement": {
+        "version": "12.3.0",
+        "format": "JPEG",
+        "mode": "RGB",
+        "size": [
+          1,
+          1
+        ],
+        "native_component_pixels": [
+          [
+            128,
+            128,
+            128
+          ]
+        ],
+        "rgba_sha256": "79dfad351f79ef0e65a11fff0a9ed44bf628f9390ff06b92ee4ee5e2477616ea"
+      },
+      "native_wic_measurement": {
+        "status": "complete-pixel-decode",
+        "source_sha256": "125a5391605b543a2892615207cfe5d0fdf3d8f3cc2b5a669d2d974183d2a721",
+        "format": "JPEG",
+        "width": 1,
+        "height": 1,
+        "codec": {
+          "clsid": "9456a480-e88b-43ea-9e73-0b2d9b71b1ca",
+          "name": "JPEG Decoder",
+          "version": "1.0.0.0"
+        },
+        "frames": [
+          {
+            "width": 1,
+            "height": 1,
+            "decoded_bytes": 4,
+            "pixel_sha256": "79dfad351f79ef0e65a11fff0a9ed44bf628f9390ff06b92ee4ee5e2477616ea"
+          }
+        ]
+      },
+      "interpretation": "Decoded measurements are codec-specific. Original bytes and literal encoded facts are authoritative; conversion appearance is a separate native acceptance gate."
+    },
+    "literal-ycck.jpg": {
+      "length": 352,
+      "sha256": "ba3fa6b001af55c360708523ea8ba696677e93f2e7320c98c3d0244a3beb3dec",
+      "literal_source_facts": {
+        "frame": "SOF0",
+        "precision": 8,
+        "size": [
+          2,
+          1
+        ],
+        "components": 4,
+        "adobe_app14_transform": 2,
+        "original_qualified_cmyk_sha256": "b0e774feb32f6e32d5bed985c0ff52f1cda2663aabfc86ea80d247b9e4cb5a4d",
+        "single_changed_byte_offset": 17,
+        "interpretation": "YCCK declaration; no universal RGB pixel value is asserted."
+      },
+      "pillow_measurement": {
+        "version": "12.3.0",
+        "format": "JPEG",
+        "mode": "CMYK",
+        "size": [
+          2,
+          1
+        ],
+        "native_component_pixels": [
+          [
+            178,
+            0,
+            0,
+            0
+          ],
+          [
+            178,
+            0,
+            0,
+            0
+          ]
+        ],
+        "rgba_sha256": "5528d263f7a2a9bfdb3ff23dad90d1bfc706617a6242ca4f9d93286a90ae2fa7"
+      },
+      "native_wic_measurement": {
+        "status": "complete-pixel-decode",
+        "source_sha256": "ba3fa6b001af55c360708523ea8ba696677e93f2e7320c98c3d0244a3beb3dec",
+        "format": "JPEG",
+        "width": 2,
+        "height": 1,
+        "codec": {
+          "clsid": "9456a480-e88b-43ea-9e73-0b2d9b71b1ca",
+          "name": "JPEG Decoder",
+          "version": "1.0.0.0"
+        },
+        "frames": [
+          {
+            "width": 2,
+            "height": 1,
+            "decoded_bytes": 8,
+            "pixel_sha256": "d08d0ce33812c22126825f4b6df5ee10c65f49ee5fedc0eff10341faac507405"
+          }
+        ]
+      },
+      "interpretation": "Decoded measurements are codec-specific. Original bytes and literal encoded facts are authoritative; conversion appearance is a separate native acceptance gate."
+    }
+  }
+}

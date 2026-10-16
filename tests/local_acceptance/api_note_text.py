@@ -4,6 +4,7 @@ No converter/parser imports; source activity comes from the independent scanner.
 This helper preserves the original source separately and never reads record text.
 """
 
+import hashlib
 import html
 import posixpath
 import re
@@ -33,7 +34,7 @@ KINDS = frozenset(
 
 def markdown_lines(text):
     """CommonMark lines split at CR/LF only; caller normalized those bytes."""
-    return [line for line in re.findall(r"[^\n]*(?:\n|$)", text) if line]
+    return [line for line in re.findall(r"[^\r\n]*(?:\r\n|\r|\n|$)", text) if line]
 
 
 def cross_container_code(text):
@@ -52,9 +53,12 @@ def cross_container_code(text):
         ):
             end = opening.end() + closing.end()
             between = text[opening.end() : end - len(opening[0])]
-            if re.search(r"\n[ \t]*(?:> ?)*\n", between):
+            if re.search(
+                r"(?:\r\n|\r(?!\n)|(?<!\r)\n)[ \t]*(?:> ?)*(?:\r\n|\r(?!\n)|(?<!\r)\n)",
+                between,
+            ):
                 break
-            if "\n" in between:
+            if "\n" in between or "\r" in between:
                 ranges.append((opening.start(), end))
             cursor = end
             break
@@ -170,7 +174,7 @@ def tables(text):
     edits = {}
     for index, line in enumerate(lines):
         suffix = re.search(
-            r':\(table="column-widths:([-0-9,]+);justification:default"\):(?:\n|$)',
+            r':\(table="column-widths:([-0-9,]+);justification:default"\):(?:\r\n|\r|\n|$)',
             line,
         )
         if (
@@ -225,10 +229,11 @@ def tables(text):
         separator = all(
             re.fullmatch(r"\s*:?-{3,}:?\s*", cell) for cell in row_cells(lines[rows[0]])
         )
+        ending = re.search(r"(?:\r\n|\r|\n)$", line)
         edits[index] = (
             header
-            + "\n"
-            + ("" if separator else "|" + "|".join("---" for _ in cells) + "|\n")
+            + ("" if separator else "\n|" + "|".join("---" for _ in cells) + "|")
+            + (ending[0] if ending else "")
         )
         for following in [index, *rows]:
             original = edits.get(following, lines[following])
@@ -492,7 +497,11 @@ def contents(text):
                 + (" " + name if name else "")
                 + " ^"
                 + destination
-                + "\n"
+                + (
+                    re.search(r"(?:\r\n|\r|\n)$", lines[heading["end"]])[0]
+                    if re.search(r"(?:\r\n|\r|\n)$", lines[heading["end"]])
+                    else ""
+                )
             )
             for i in range(heading["start"] + 1, heading["end"] + 1):
                 replacements[i] = ""
@@ -506,15 +515,31 @@ def contents(text):
             + heading["label"]
             + "](#^"
             + heading["destination"]
-            + ")\n"
+            + ")"
         )
         hierarchy.append(heading["level"])
     for index, prefix in markers.items():
+        ending = re.search(r"(?:\r\n|\r|\n)$", lines[index])
         replacements[index] = (
-            "".join(prefix + entry for entry in entries)
-            or prefix + "No authored headings.\n"
-        )
+            "\n".join(prefix + entry for entry in entries)
+            or prefix + "No authored headings."
+        ) + (ending[0] if ending else "")
     return "".join(replacements.get(i, line) for i, line in enumerate(lines))
+
+
+def document_references(text, owner, assets):
+    """Reference coordinates from active adapted text, with its exact digest."""
+    masked = re.sub(
+        r"<code>[^<]*</code>",
+        lambda match: "".join(char if char in "\r\n" else " " for char in match[0]),
+        protect_cross_container_code(text),
+    )
+    references = source_references(masked, owner, assets)
+    digest = hashlib.sha256(text.encode()).hexdigest()
+    for reference in references:
+        if reference["presentation_normalization"] is not None:
+            reference["presentation_normalization"]["document_digest"] = digest
+    return references
 
 
 def render_references(text, owner, path, names, assets):
@@ -564,11 +589,16 @@ def render_references(text, owner, path, names, assets):
     return result
 
 
-def expected_note_text(raw, owner, path, names, assets):
-    normalized = raw.replace("\r\n", "\n").replace("\r", "\n")
-    _, edits = literal_edits(protect_cross_container_code(normalized))
-    text = normalized
+def expected_document_text(raw):
+    """Independent adapted document facts; untouched source EOLs stay exact."""
+    _, edits = literal_edits(protect_cross_container_code(raw))
+    text = raw
     for edit in reversed(edits):
         text = text[: edit["start"]] + edit["after"] + text[edit["end"] :]
-    text = contents(callouts(tables(text)))
+    return contents(callouts(tables(text)))
+
+
+def expected_note_text(raw, owner, path, names, assets):
+    normalized = raw.replace("\r\n", "\n").replace("\r", "\n")
+    text = expected_document_text(normalized)
     return render_references(text, owner, path, names, assets)

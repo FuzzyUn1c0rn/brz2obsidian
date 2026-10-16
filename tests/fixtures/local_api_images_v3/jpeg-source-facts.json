@@ -1,0 +1,40 @@
+{
+  "author": "/root",
+  "file": "inert-blue.jpg",
+  "format": "JPEG",
+  "length": 632,
+  "sha256": "e3a2954fee014acf9f0b399791f49458604d6592ab22844bcebecc0e666be5ed",
+  "dimensions": [
+    2,
+    1
+  ],
+  "intended_preencoding_rgb": [
+    [
+      0,
+      0,
+      255
+    ],
+    [
+      0,
+      0,
+      255
+    ]
+  ],
+  "measured_decoded_rgba": [
+    [
+      0,
+      0,
+      254,
+      255
+    ],
+    [
+      0,
+      0,
+      254,
+      255
+    ]
+  ],
+  "rgba_sha256": "b23b857e1c1dbdd69c6ef9bcabba8147deac6b201229e417507edde00265887b",
+  "source_measurement": "Pillow full original-byte decode; no converter/oracle import",
+  "pillow_version": "12.3.0"
+}

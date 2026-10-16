@@ -1,6 +1,7 @@
 """Independent API-bound preservation oracle. No converter modules are imported."""
 
 import hashlib
+import json
 import re
 from decimal import Decimal
 from html.parser import HTMLParser
@@ -11,25 +12,20 @@ from urllib.parse import quote, urlsplit
 from uuid import UUID
 from zipfile import BadZipFile, ZipFile
 
+import yaml
+
+from .api_image_proofs import ico_proof, jpeg_headers, jpeg_proof
 from .api_manifest import read_json, safe_path
 from .api_note_text import (
-    callouts,
-    contents,
+    document_references,
+    expected_document_text,
     expected_note_text,
-    protect_cross_container_code,
     row_cells,
-    tables,
 )
 from .api_svg import qualify_svg
 from .checker import escaped, source_references, wiki
 from .images import AuditUnavailable, decode_image
-from .text import (
-    _line_view,
-    _owned_block_view,
-    active_mask,
-    inline_candidates,
-    literal_edits,
-)
+from .text import _line_view, _owned_block_view, active_mask, inline_candidates
 
 
 def identities(rows, key, label):
@@ -379,7 +375,311 @@ def source_facts(baseline, *, profile_version="1"):
     qualify_source(
         baseline, thoughts, links, attachments, graphs, profile_version=profile_version
     )
+    if profile_version == "3":
+        qualify_image_joins(baseline, attachments, graphs)
     return thoughts, expected, attachments, links
+
+
+def new_image_ids(baseline, attachments):
+    """Scope obligations from original declarations/bytes, never output roles."""
+    selected = set()
+    for key, row in attachments.items():
+        if row["type"] == 12 and row["location"].endswith(".jpg"):
+            selected.add(key)
+        elif row["type"] == 5:
+            outcome = baseline.data["payloads"].get(key, {})
+            if outcome.get("status") == 200 and baseline.bytes(
+                outcome["path"]
+            ).startswith(b"\x00\x00\x01\x00"):
+                selected.add(key)
+    return selected
+
+
+def qualify_image_joins(baseline, attachments, graphs):
+    for key in new_image_ids(baseline, attachments):
+        row = attachments[key]
+        owner = row["sourceId"]
+        outcome = baseline.data.get("attachment_metadata", {}).get(key)
+        assert (
+            isinstance(outcome, dict)
+            and type(outcome.get("status")) is int
+            and outcome["status"] == 200
+        ), "image authoritative metadata outcome"
+        metadata = read_json(baseline.bytes(outcome["path"]), parse_float=Decimal)
+        assert semantic(metadata) == semantic(row), "image metadata disagreement"
+        inventory_path = baseline.data.get("attachment_inventories", {}).get(owner)
+        assert inventory_path, "image authoritative list observation"
+        rows = read_json(baseline.bytes(inventory_path), parse_float=Decimal)
+        assert type(rows) is list, "image authoritative list shape"
+        indexed = identities(rows, "id", "image list")
+        expected = {k: a for k, a in attachments.items() if a["sourceId"] == owner}
+        assert semantic(indexed) == semantic(expected), "image list disagreement"
+        if graphs[owner]["attachments"] is not None:
+            assert semantic(
+                identities(graphs[owner]["attachments"], "id", "image graph")
+            ) == semantic(expected), "image graph/list disagreement"
+        icons = [a for a in expected.values() if a["type"] == 5]
+        assert len(icons) <= 1, "unique source icon declaration"
+
+
+def check_image_icon_markup(
+    generated, thought, explicit, provider, effective, names, bindings, authored
+):
+    """Bind source-owned properties and introduction before any authored text."""
+    assert generated.startswith("---\n"), "icon frontmatter unavailable"
+    end = generated.find("\n---\n", 4)
+    assert end >= 0, "icon frontmatter unavailable"
+    properties = generated[4:end].splitlines()
+    try:
+        mapping = yaml.compose(generated[4:end], Loader=yaml.SafeLoader)
+    except yaml.YAMLError as error:
+        raise AssertionError("invalid source icon frontmatter") from error
+    assert isinstance(mapping, yaml.MappingNode), "source icon frontmatter mapping"
+    keys = [key.value for key, _ in mapping.value if isinstance(key, yaml.ScalarNode)]
+    for name, value in (
+        (
+            "icon",
+            "[[" + bindings[explicit]["relative_path"] + "]]" if explicit else None,
+        ),
+        ("appearance_category", "[[" + names[provider] + "]]" if provider else None),
+    ):
+        assert keys.count(name) == 1, "unique semantic source icon property"
+        expected = (
+            name + ":" + (" " + json.dumps(value, ensure_ascii=False) if value else "")
+        )
+        assert [
+            line for line in properties if re.match(r"\s*" + name + r"\s*:", line)
+        ] == [expected], "source icon property ownership"
+    body = generated[end + len("\n---\n") :]
+    title = (
+        ("\n# " + escaped(thought["name"]) + "\n\n")
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+    )
+    assert body.startswith(title), "source icon introduction title"
+    body = body[len(title) :]
+    if effective and thought["kind"] != 2:
+        introduction = "![[" + bindings[effective]["relative_path"] + "]]\n\n"
+        assert body.startswith(introduction), "source effective icon introduction"
+        body = body[len(introduction) :]
+    # Exact source-owned label/body occurrences belong after the introduction;
+    # a literal copy of its syntax there cannot replace generated presentation.
+    mask = list(active_mask(body))
+    cursor = 0
+    for text in authored:
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        if not text:
+            continue
+        start = body.find(text, cursor)
+        assert start >= 0, "source icon introduction precedes authored content"
+        stop = start + len(text)
+        mask[start:stop] = " " * (stop - start)
+        cursor = stop
+    active = "".join(mask)
+    icon_paths = {
+        row["relative_path"] for row in bindings.values() if row["role"] == "icon"
+    }
+    for match in re.finditer(r"!\[\[([^\]\n]+)\]\]", active):
+        target = match[1].split("|", 1)[0]
+        assert target not in icon_paths and not target.endswith("/Icon.png"), (
+            "unexpected generated icon introduction"
+        )
+    for _, _, image, _, begin, finish in inline_candidates(active)[0]:
+        target = active[begin:finish]
+        assert (
+            not image or target not in icon_paths and not target.endswith("/Icon.png")
+        ), "unexpected generated Markdown icon introduction"
+
+
+def check_new_image_preservation(
+    baseline, vault, record, thoughts, attachments, targets, assets, proofs
+):
+    selected = new_image_ids(baseline, attachments)
+    if not selected:
+        return
+    for key in selected:
+        assert (
+            safe_path(vault, assets[key]["relative_path"]).name
+            == attachments[key]["location"]
+        ), "source image/icon actual filename"
+    paths = [assets[key]["relative_path"].casefold() for key in selected]
+    assert len(paths) == len(set(paths)), "distinct image/icon storage identities"
+    # Raw declarations determine all binding roles. Assigned paths are checked
+    # separately for source bytes before they are used to locate rendered text.
+    bindings = {}
+    materialized = {baseline.json(baseline.data["brain"])["homeThoughtId"]}
+    materialized.update(key for key, row in thoughts.items() if row["kind"] == 2)
+    for key, row in attachments.items():
+        role, availability, payload = expected_asset(baseline, row, "3", proofs)
+        if (
+            (row["isNotes"] and payload.decode("utf-8").strip())
+            or (availability == "external" and role in {"file", "url", "directory"})
+            or (availability == "present" and role in {"file", "image"} and payload)
+        ):
+            materialized.add(row["sourceId"])
+        bindings[key] = {
+            "asset_id": key,
+            "owner": row["sourceId"],
+            "role": role,
+            "original_name": row["location"],
+            "relative_path": assets[key]["relative_path"],
+        }
+    _, relations, _, _ = source_facts(baseline, profile_version="3")
+    materialized.update(
+        row["item_b"] for row in relations.values() if row["kind"] == "classification"
+    )
+    edges = [
+        (row["item_a"], row["item_b"])
+        for row in relations.values()
+        if row["kind"] == "hierarchy"
+    ]
+    pending = [
+        (a, b) for a, b in edges if a not in materialized and b not in materialized
+    ]
+    while pending:
+        parents = {a for a, _ in pending}
+        materialized.add(
+            min(parents, key=lambda key: (-sum(key in {a, b} for a, b in pending), key))
+        )
+        pending = [
+            (a, b) for a, b in edges if a not in materialized and b not in materialized
+        ]
+    for owner, target in targets.items():
+        assert type(target.get("created")) is bool and target["created"] == (
+            owner in materialized
+        ), "source image/icon note materialization"
+        assert safe_path(vault, target["relative_path"]).is_file() == (
+            owner in materialized
+        ), "source image/icon note materialization"
+        if owner not in materialized:
+            assert "icon_snapshot" in target and target["icon_snapshot"] is None, (
+                "uncreated source icon snapshot"
+            )
+    documents = identities(record.get("documents", []), "key", "image document")
+    authored = {k: row for k, row in attachments.items() if row["isNotes"]}
+    assert set(documents) == set(authored), "all image-bearing source documents"
+    names = {key: row["relative_path"] for key, row in targets.items()}
+    authored_texts = {
+        key: [row["label"]] if row.get("label") else [] for key, row in thoughts.items()
+    }
+    for key, row in authored.items():
+        original = baseline.bytes(baseline.data["payloads"][key]["path"]).decode(
+            "utf-8"
+        )
+        body = expected_document_text(original)
+        digest = hashlib.sha256(body.encode()).hexdigest()
+        document = documents[key]
+        assert (
+            document["owner"],
+            document["original_asset_id"],
+            document["text_digest"],
+            document["owner_target"],
+        ) == (row["sourceId"], key, digest, names[row["sourceId"]]), (
+            "image document source binding"
+        )
+        expected = document_references(body, row["sourceId"], bindings)
+        references = document["references"]
+        assert len(references) == len(expected), "all source image references"
+        for emitted, source in zip(references, expected, strict=True):
+            for field in (
+                "start",
+                "end",
+                "kind",
+                "target",
+                "destination_start",
+                "destination_end",
+                "presentation_normalization",
+            ):
+                assert emitted[field] == source[field], (
+                    "image reference spans/target/presentation"
+                )
+            assert emitted["display_text"] == source["label"], (
+                "image reference alt text"
+            )
+            assert (
+                emitted["expected_original"] == body[source["start"] : source["end"]]
+                and emitted["document_digest"] == digest
+            ), "image reference source text"
+            assert (
+                emitted["source_target"]
+                == body[source["destination_start"] : source["destination_end"]]
+            ), "image source destination"
+        owner = row["sourceId"]
+        assert targets[owner]["created"] is True, "owned note materialization"
+        expected_text = expected_note_text(
+            original, owner, names[owner], names, bindings
+        )
+        authored_texts[owner].append(expected_text)
+        generated = safe_path(vault, names[owner]).read_text(encoding="utf-8")
+        expected_activity = active_mask(expected_text)
+        actual_activity = active_mask(generated)
+        positions = [
+            match.start() for match in re.finditer(re.escape(expected_text), generated)
+        ]
+        assert any(
+            all(
+                actual_activity[start + index] == char
+                for index, char in enumerate(expected_activity)
+                if not char.isspace()
+            )
+            for start in positions
+        ), "complete active generated image prose/order/alt/title/sizing"
+    icons = {
+        row["sourceId"]: key for key, row in attachments.items() if row["type"] == 5
+    }
+    image_owners = {
+        attachments[key]["sourceId"]
+        for key in selected
+        if attachments[key]["type"] == 12
+    }
+    for owner in image_owners:
+        assert (
+            targets[owner]["created"] is True
+            and safe_path(vault, names[owner]).is_file()
+        ), "owned unreferenced image materialization"
+    for owner, thought in thoughts.items():
+        explicit = icons.get(owner)
+        provider = thought["typeId"]
+        effective = explicit or icons.get(provider)
+        graph = baseline.json(baseline.data["graphs"][owner])
+        owned = [a for a in bindings.values() if a["owner"] == owner]
+        isolated_icon = (
+            thought["kind"] == 1
+            and owner != baseline.json(baseline.data["brain"])["homeThoughtId"]
+            and not provider
+            and owned
+            and all(a["role"] == "icon" for a in owned)
+            and not any(
+                r["relation"] == 1 and r["meaning"] == 1 for r in graph["links"]
+            )
+        )
+        if isolated_icon:
+            assert (
+                targets[owner]["created"] is False
+                and not safe_path(vault, names[owner]).exists()
+            ), "decorative-only owner remains uncreated"
+        declaration = targets[owner].get("declared_appearance")
+        assert (declaration or {}).get("icon_asset_id") == explicit, (
+            "source declared icon ownership"
+        )
+        if targets[owner]["created"]:
+            snapshot = targets[owner].get("icon_snapshot")
+            assert snapshot == {
+                "item_key": owner,
+                "explicit_icon_asset_id": explicit,
+                "appearance_category_key": provider,
+                "effective_icon_asset_id": effective,
+            }, "source effective explicit/inherited icon"
+            check_image_icon_markup(
+                safe_path(vault, names[owner]).read_text(encoding="utf-8"),
+                thought,
+                explicit,
+                provider,
+                effective,
+                names,
+                bindings,
+                authored_texts[owner],
+            )
 
 
 def external_projection(baseline, attachment, profile_version):
@@ -464,6 +764,17 @@ def external_projection(baseline, attachment, profile_version):
 
 def expected_asset(baseline, attachment, profile_version="1", proofs=None):
     assert profile_version in {"1", "2", "3"}, "unsupported API profile version"
+    if profile_version == "3":
+        assert (
+            type(attachment["sourceType"]) is int and attachment["sourceType"] == 2
+        ), "raw attachment source type"
+        uuid(attachment["id"])
+        collection = uuid(attachment["brainId"])
+        owner = uuid(attachment["sourceId"])
+        assert collection == baseline.json(baseline.data["brain"])["id"], (
+            "attachment collection"
+        )
+        assert owner in baseline.data["graphs"], "included attachment owner"
     kind, note = attachment["type"], attachment["isNotes"]
     assert type(kind) is int and type(note) is bool, "raw attachment role"
     if kind in {2, 8}:
@@ -497,6 +808,8 @@ def expected_asset(baseline, attachment, profile_version="1", proofs=None):
             or profile_version in {"2", "3"}
             and name == attachment["id"] + ".png"
             or profile_version == "3"
+            and name == uuid(attachment["id"]) + ".jpg"
+            or profile_version == "3"
             and name == attachment["id"] + ".svg"
         ) and display is None, "raw image role"
         role = "image"
@@ -517,6 +830,8 @@ def expected_asset(baseline, attachment, profile_version="1", proofs=None):
             assert display is None, "profile2 resource explicit null name"
         role = "file"
     outcome = baseline.data["payloads"][attachment["id"]]
+    if profile_version == "3":
+        assert type(outcome["status"]) is int, "actual HTTP payload status"
     if outcome["status"] == 404:
         assert kind == 15 and not note, "unqualified missing payload"
         return role, "absent", None
@@ -532,12 +847,29 @@ def expected_asset(baseline, attachment, profile_version="1", proofs=None):
                 proofs[attachment["id"]] = proof
         elif name.endswith(".png"):
             qualify_v2_bytes(payload, "PNG", attachment["id"], proofs)
+        elif name.endswith(".jpg"):
+            jpeg_headers(payload)
+            if proofs is not None and attachment["id"] in proofs:
+                proof = proofs[attachment["id"]]
+                assert (
+                    proof["source_sha256"] == hashlib.sha256(payload).hexdigest()
+                    and proof["format"] == "JPEG"
+                    and proof.get("corrupt_data_diagnostic_capability")
+                ), "JPEG source-bound strict eligibility changed"
+            else:
+                proof = jpeg_proof(payload)
+                if proofs is not None:
+                    proofs[attachment["id"]] = proof
         else:
             assert payload[:4] == b"RIFF" and payload[8:12] == b"WEBP", (
                 "raw image signature"
             )
     elif kind == 5:
-        if profile_version in {"2", "3"} and payload.startswith(b"\xff\xd8\xff"):
+        if profile_version == "3" and payload.startswith(b"\x00\x00\x01\x00"):
+            proof = ico_proof(payload)
+            if proofs is not None:
+                proofs[attachment["id"]] = proof
+        elif profile_version in {"2", "3"} and payload.startswith(b"\xff\xd8\xff"):
             qualify_v2_bytes(payload, "JPEG", attachment["id"], proofs)
         else:
             assert payload.startswith(b"\x89PNG\r\n\x1a\n"), "raw icon signature"
@@ -652,7 +984,13 @@ def audit_baseline(baseline, *, profile_version="1"):
             body = baseline.bytes(
                 baseline.data["payloads"][attachment["id"]]["path"]
             ).decode("utf-8")
-            references = source_references(body, attachment["sourceId"], bindings)
+            if profile_version == "3":
+                # Validate authored grammar before protecting generated code.
+                body = expected_document_text(body)
+            scanner = (
+                document_references if profile_version == "3" else source_references
+            )
+            references = scanner(body, attachment["sourceId"], bindings)
             assert all(
                 r["target"] in thoughts for r in references if r["kind"] == "item"
             ), "included API note reference target"
@@ -1004,15 +1342,6 @@ def qualify_svg_binding(baseline, attachment):
         read_json(baseline.bytes(outcome["path"]), parse_float=Decimal)
     ) == semantic(attachment), "SVG standalone declaration agreement"
 
-def svg_document_text(raw):
-    # Independent already-admitted adaptation primitives; raw original is audited
-    # separately. The accepted shared document helper will supply EOL ownership.
-    _, edits = literal_edits(protect_cross_container_code(raw))
-    text = raw
-    for edit in reversed(edits):
-        text = text[: edit["start"]] + edit["after"] + text[edit["end"] :]
-    return contents(callouts(tables(text)))
-
 def svg_table_contexts(text):
     """Independent native-table row ranges, retaining raw CR/LF coordinates."""
     lines = [line for line in re.findall(r"[^\r\n]*(?:\r\n|\r|\n|$)", text) if line]
@@ -1091,7 +1420,7 @@ def check_svg_notes(baseline, vault, thoughts, attachments, targets, assets):
             if wanted:
                 assert wanted in body[cursor:], "SVG raw-derived authored display"
                 cursor = body.index(wanted, cursor) + len(wanted)
-            adapted = svg_document_text(raw)
+            adapted = expected_document_text(raw)
             digest = hashlib.sha256(adapted.encode()).hexdigest()
             docs = [d for d in target.get("documents", []) if d.get("key") == row["id"]]
             assert len(docs) == 1, "SVG original-bound document identity"
@@ -1105,7 +1434,7 @@ def check_svg_notes(baseline, vault, thoughts, attachments, targets, assets):
             ) == (owner, row["id"], digest, target["relative_path"], False), (
                 "SVG source document binding"
             )
-            refs = source_references(adapted, owner, assets)
+            refs = document_references(adapted, owner, assets)
             tables = svg_table_contexts(adapted)
             assert len(doc["references"]) == len(refs), (
                 "SVG complete document references"
@@ -1342,6 +1671,11 @@ def check_api_vault(baseline, vault, *, profile_version="1"):
                     profile_version,
                     proofs,
                 ), "missing TXT lacks measured same-owner PDF"
+    if profile_version == "3":
+        check_new_image_preservation(
+            baseline, vault, record, thoughts, attachments, targets, assets, proofs
+        )
+
     check_external_resources(
         baseline, vault, thoughts, attachments, targets, assets, profile_version
     )
