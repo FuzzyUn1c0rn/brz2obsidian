@@ -258,3 +258,15 @@ profiles1/2 and their controls remain available. Capture format1, module1,
 contract7 and worker/review schema3 are unchanged. Every new source-family
 predicate requires matching live and frozen implementation under its assigned
 slice; raw capture or profile selection never expands the finite qualification.
+
+
+Profile3 external file/directory references are implemented under the exact
+[Q4 predicate](local-api-profile3-qualification.md): type2/type8, thought-owned,
+sourceType2, actual isNotes=false and explicitly null name, with graph/list/metadata
+agreement. Both roles reuse the existing pure absolute Windows drive-path helper,
+including its precise reserved-device and character boundaries. Exact raw source
+location remains original_name and identity-bound evidence; the final Windows
+segment is derived display_name. The escaped file URI, external file/directory
+role, null actual measurements and absent local payload are revalidated in frozen
+captures. Shared Resources escaping/materialization rules apply. No destination
+I/O or additional missing-payload warning is introduced.

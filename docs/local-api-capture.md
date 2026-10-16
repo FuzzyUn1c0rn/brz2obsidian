@@ -182,3 +182,14 @@ locations and their derived URI/display facts remain content-bound. Pinned
 mutations refuse even with recomputed untrusted manifests. A fresh valid capture
 with valid changed content receives a different identity and needs a new review;
 independent original-source preservation is established by baseline comparison.
+
+
+Profile3 external references retain their exact type/location/null authored name
+and declaration joins. Normalized external file/directory assets bind their
+original_name to that raw path, display_name to its final Windows segment and
+external_uri to the established pure Windows URI helper. Availability is external,
+actual length/hash are null and no payload binding or local storage is permitted.
+These conditions apply during construction, sealing and verification, including
+when untrusted hashes are recreated. Raw separator spelling remains content-bound
+even if two paths derive the same URI; a valid path change needs a fresh review.
+No capture domain or encoding/framing change is required.

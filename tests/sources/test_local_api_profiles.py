@@ -144,8 +144,6 @@ def test_profile3_stage_messages_do_not_reclassify_other_source_failures(fault):
     [
         "link_search",
         "reverse_hierarchy",
-        "external_file",
-        "external_directory",
         "jpeg_image",
         "svg_image",
     ],
@@ -175,8 +173,6 @@ def test_profile3_does_not_enable_later_source_families_before_their_slice(famil
     else:
         api = PayloadApi()
         kind, location = {
-            "external_file": (2, "C:\\Source\\document.pdf"),
-            "external_directory": (8, "D:\\Source\\Folder"),
             "jpeg_image": (12, FILE + ".jpg"),
             "svg_image": (12, FILE + ".svg"),
         }[family]

@@ -211,3 +211,13 @@ source meanings are qualified in [the profile-3 table](local-api-profile3-qualif
 and are implemented in their assigned source-family slices. Qualification alone
 never makes unsupported source content importable. Profile changes require a
 fresh compatible inspection; the worker/review schema remains version 3.
+
+
+Profile 3 supports thought-owned external file and directory references with
+explicitly null authored names and the qualified absolute Windows drive-path
+grammar. Resources links keep the final path segment as their display label and
+encode the destination as a file URI. Original source spelling remains in the
+migration record. Actual length/hash stay null; declared lengths remain evidence.
+External-only owners receive ordinary notes with Resources sections. Targets are
+never checked, opened, fetched or copied; unavailable targets add no source-gap
+warning. Explicit profiles 1/2 continue to refuse these additional declarations.

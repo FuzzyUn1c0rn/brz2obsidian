@@ -909,3 +909,43 @@ def test_valid_replacement_image_has_new_identity_and_needs_new_review(tmp_path)
         assert (
             tmp_path / f"new-review/Attachments/22222222/{IMAGE}.png"
         ).read_bytes() == replacement
+
+
+@pytest.mark.parametrize("kind", [2, 8])
+def test_changed_external_path_spelling_requires_fresh_review_without_target_access(
+    tmp_path, monkeypatch, kind
+):
+    from tests.sources.test_local_api_external_references import (
+        FILE,
+        ExternalReferenceApi,
+        forbid_external_target_io,
+    )
+    from tests.support.local_api import ALONE
+    from tests.support.local_api_payloads import attachment
+
+    api = ExternalReferenceApi()
+    api.attachments = {FILE: attachment(FILE, ALONE, kind, "C:\\Source\\Document")}
+    forbid_external_target_io(monkeypatch)
+    with api_server(api) as (_, address):
+        selection = LocalApiSourceSelection(
+            brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+        )
+        operations = Operations(credentials=lambda: KEY)
+        original = operations.inspect(selection)
+        assert original.reviewed is not None
+        api.attachments[FILE]["location"] = "C:/Source/Document"
+        current = operations.inspect(selection)
+        assert current.reviewed is not None
+        assert current.reviewed.source_identity != original.reviewed.source_identity
+        refused = operations.convert_reviewed(
+            selection, tmp_path, "old-review", original.reviewed
+        )
+        assert refused.findings[0].code == "review_changed"
+        assert not (tmp_path / "old-review").exists()
+        accepted = operations.convert_reviewed(
+            selection, tmp_path, "new-review", current.reviewed
+        )
+        assert accepted.publication.receipt_verified
+    note = (tmp_path / "new-review/Notes/External owner.md").read_text(encoding="utf-8")
+    assert "- [Document](<file:///C:/Source/Document>)" in note
+    assert not any(path.endswith("/file-content") for path, _, _ in api.requests)
