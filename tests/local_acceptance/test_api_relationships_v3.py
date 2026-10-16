@@ -950,3 +950,64 @@ def test_home_and_classified_reverse_endpoints_cannot_be_falsely_uncreated(
     write_json(path, record)
     with pytest.raises(AssertionError, match="reverse hierarchy note materialization"):
         check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize("hide_parent", [False, True])
+def test_old_tag_hierarchy_context_does_not_seed_a_contentless_tag(
+    tmp_path, hide_parent
+):
+    baseline, vault = two_empty_reverse_endpoints_case(tmp_path)
+    root = baseline.manifest_path.parent
+
+    def change(manifest, graphs):
+        for graph in graphs.values():
+            for row in [
+                graph["activeThought"],
+                *graph["parents"],
+                *graph["children"],
+                *graph["jumps"],
+                *graph["tags"],
+            ]:
+                if row["id"] == identity(6):
+                    row["kind"] = 4
+            for row in graph["links"]:
+                if row["id"] == identity(106):
+                    row["direction"] = -1
+        tags_path = root / manifest["tags"]["path"]
+        tags = json.loads(tags_path.read_bytes())
+        tags.append(graphs[identity(6)]["activeThought"])
+        write_json(tags_path, tags)
+        metadata_path = root / manifest["relationship_metadata"][identity(106)]["path"]
+        metadata = json.loads(metadata_path.read_bytes())
+        metadata["direction"] = -1
+        write_json(metadata_path, metadata)
+        for name in manifest["statistics"]:
+            stats = json.loads((root / name).read_bytes())
+            stats.update(thoughts=2, tags=2)
+            write_json(root / name, stats)
+
+    baseline = mutate_source(baseline, change)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    for row in record["original_evidence"][0]["records"]:
+        if row["id"] == identity(6):
+            row["kind"] = 4
+        elif row["id"] == identity(106):
+            row["direction"] = -1
+    if hide_parent:
+        for target in record["item_targets"]:
+            if target["item_key"] in {identity(3), identity(6)}:
+                target["created"] = target["item_key"] == identity(6)
+        (vault / "Child.md").unlink()
+        (vault / "Leaf.md").write_text("# Leaf\n\n## Parents\n\n- [[Child.md|Child]]\n")
+    write_json(path, record)
+    assert audit_baseline(baseline, profile_version="3")["relationships"] == 5
+    if hide_parent:
+        with pytest.raises(
+            AssertionError, match="reverse hierarchy note materialization"
+        ):
+            check_api_vault(baseline, vault, profile_version="3")
+    else:
+        assert (
+            check_api_vault(baseline, vault, profile_version="3")["relationships"] == 5
+        )

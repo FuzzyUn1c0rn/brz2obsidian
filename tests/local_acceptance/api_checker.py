@@ -600,7 +600,7 @@ def check_reverse_navigation(
     # This audit remains scoped to new reverse endpoints; all hierarchy edges
     # participate because another edge can determine which empty parent is chosen.
     selected = {baseline.json(baseline.data["brain"])["homeThoughtId"]}
-    selected.update(key for key, row in thoughts.items() if row["kind"] in {2, 4})
+    selected.update(key for key, row in thoughts.items() if row["kind"] == 2)
     selected.update(
         row["item_b"] for row in expected.values() if row["kind"] == "classification"
     )
