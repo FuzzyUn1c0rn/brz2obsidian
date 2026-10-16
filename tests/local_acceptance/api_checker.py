@@ -3,10 +3,11 @@
 import hashlib
 import re
 from decimal import Decimal
+from html.parser import HTMLParser
 from io import BytesIO
 from itertools import pairwise
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 from uuid import UUID
 from zipfile import BadZipFile, ZipFile
 
@@ -19,7 +20,7 @@ from .api_note_text import (
 )
 from .checker import escaped, source_references, wiki
 from .images import AuditUnavailable, decode_image
-from .text import active_mask
+from .text import active_mask, inline_candidates
 
 
 def identities(rows, key, label):
@@ -556,6 +557,86 @@ def check_new_image_preservation(
             }, "source effective explicit/inherited icon"
 
 
+def external_projection(baseline, attachment, profile_version):
+    """Qualify raw source joins and derive a URI without touching its target."""
+    assert profile_version == "3", "external family profile"
+    assert type(attachment["type"]) is int and attachment["type"] in {2, 8}, (
+        "external type"
+    )
+    assert (
+        attachment.get("isNotes") is False
+        and "name" in attachment
+        and attachment["name"] is None
+    ), "external declaration"
+    assert (
+        type(attachment.get("sourceType")) is int and attachment["sourceType"] == 2
+    ), "external owner type"
+    key, owner = uuid(attachment["id"]), uuid(attachment["sourceId"])
+    thoughts, _, attachments, _ = source_facts(
+        baseline, profile_version=profile_version
+    )
+    assert (
+        owner in thoughts
+        and key in attachments
+        and semantic(attachment) == semantic(attachments[key])
+    ), "external scoped declaration"
+    inventories = baseline.data.get("attachment_inventories", {})
+    assert owner in inventories, "external authoritative owner inventory"
+    rows = read_json(baseline.bytes(inventories[owner]), parse_float=Decimal)
+    assert type(rows) is list, "external owner inventory shape"
+    graph = read_json(
+        baseline.bytes(baseline.data["graphs"][owner]), parse_float=Decimal
+    )
+    observed = graph["attachments"]
+    assert len({row["id"] for row in rows}) == len(rows), (
+        "external inventory duplicate identity"
+    )
+    if observed is not None:
+        assert type(observed) is list and {
+            row["id"]: semantic(row) for row in rows
+        } == {row["id"]: semantic(row) for row in observed}, (
+            "external graph/list inventory agreement"
+        )
+    matches = [row for row in rows if row["id"] == key]
+    assert len(matches) == 1 and semantic(matches[0]) == semantic(attachment), (
+        "external list agreement"
+    )
+    outcome = baseline.data.get("attachment_metadata", {}).get(key)
+    assert outcome and type(outcome["status"]) is int and outcome["status"] == 200, (
+        "external metadata outcome"
+    )
+    metadata = read_json(baseline.bytes(outcome["path"]), parse_float=Decimal)
+    assert semantic(metadata) == semantic(attachment), "external metadata agreement"
+    assert key not in baseline.data["payloads"], "external must have no payload outcome"
+    location = attachment["location"]
+    assert type(location) is str and re.match(r"^[A-Za-z]:[\\/]", location), (
+        "external absolute drive path"
+    )
+    parts = re.split(r"[\\/]", location[3:])
+    assert parts and all(parts), "external nonempty path segments"
+    for part in parts:
+        assert part not in {".", ".."} and not part.endswith((" ", ".")), (
+            "external segment ending"
+        )
+        assert not any(ord(c) < 32 or c in '<>:"|?*' for c in part), (
+            "external path characters"
+        )
+        assert not re.fullmatch(
+            r"(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?", part, re.IGNORECASE
+        ), "external reserved segment"
+        assert part not in {".", ".."} and not part.endswith((" ", ".")), (
+            "external segment ending"
+        )
+        assert not any(ord(c) < 32 or c in '<>:"|?*' for c in part), (
+            "external path characters"
+        )
+        assert not re.fullmatch(
+            r"(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?", part, re.IGNORECASE
+        ), "external reserved segment"
+    uri = "file:///" + quote(location[:2] + "/" + "/".join(parts), safe="/:")
+    return ("file" if attachment["type"] == 2 else "directory"), parts[-1], uri
+
+
 def expected_asset(baseline, attachment, profile_version="1", proofs=None):
     assert profile_version in {"1", "2", "3"}, "unsupported API profile version"
     if profile_version == "3":
@@ -571,6 +652,9 @@ def expected_asset(baseline, attachment, profile_version="1", proofs=None):
         assert owner in baseline.data["graphs"], "included attachment owner"
     kind, note = attachment["type"], attachment["isNotes"]
     assert type(kind) is int and type(note) is bool, "raw attachment role"
+    if kind in {2, 8}:
+        role, _, _ = external_projection(baseline, attachment, profile_version)
+        return role, "external", None
     name = attachment["location"]
     display = attachment["name"]
     assert display is None or type(display) is str and display, (
@@ -726,7 +810,12 @@ def audit_baseline(baseline, *, profile_version="1"):
         baseline, profile_version=profile_version
     )
     assert profile_version in {"1", "2", "3"}, "unsupported API profile version"
-    local = {key for key, a in attachments.items() if a["type"] != 3}
+    local = {
+        key
+        for key, a in attachments.items()
+        if a["type"] not in {2, 3, 8}
+        or expected_asset(baseline, a, profile_version)[1] != "external"
+    }
     assert set(baseline.data["payloads"]) == local, "baseline payload coverage"
     present, absent, proofs, bindings = 0, 0, {}, {}
     for attachment in attachments.values():
@@ -943,6 +1032,146 @@ def check_reverse_navigation(
             )
 
 
+def check_external_resources(
+    baseline, vault, thoughts, attachments, targets, assets, profile_version
+):
+    """Bind generated Resources references to their independently qualified owner."""
+
+    class FileHTML(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.file_target = False
+
+        def handle_starttag(self, tag, attrs):
+            if tag in {"a", "iframe", "img", "object", "embed"}:
+                self.file_target |= any(
+                    name in {"href", "src", "data"}
+                    and value is not None
+                    and value.lstrip().lower().startswith("file:")
+                    for name, value in attrs
+                )
+
+    owners = {a["sourceId"] for a in attachments.values() if a["type"] in {2, 8}}
+    for owner in owners:
+        target = targets[owner]
+        assert target.get("created") is True, "external resource owner must materialize"
+        path = safe_path(vault, target["relative_path"])
+        assert path.is_file(), "external resource note unavailable"
+        body = path.read_text(encoding="utf-8")
+        title = (
+            ("# " + escaped(thoughts[owner]["name"]) + "\n")
+            .replace("\r\n", "\n")
+            .replace("\r", "\n")
+        )
+        start = body.find(title)
+        assert start >= 0, "external resource note title"
+        cursor = start + len(title)
+        authored = [thoughts[owner]["label"]] if thoughts[owner].get("label") else []
+        for attachment in attachments.values():
+            if attachment["sourceId"] == owner and attachment["isNotes"]:
+                raw = baseline.bytes(
+                    baseline.data["payloads"][attachment["id"]]["path"]
+                ).decode("utf-8")
+                authored.append(
+                    expected_note_text(
+                        raw,
+                        owner,
+                        target["relative_path"],
+                        {key: row.get("relative_path") for key, row in targets.items()},
+                        assets,
+                    )
+                )
+        metadata_span = None
+        for index, text in enumerate(authored):
+            text = text.replace("\r\n", "\n").replace("\r", "\n")
+            if text:
+                position = body.find(text, cursor)
+                assert position >= 0, "external resource authored content unavailable"
+                if index == 0 and thoughts[owner].get("label"):
+                    metadata_span = (position, position + len(text))
+                cursor = position + len(text)
+        syntax = list(body)
+        if metadata_span is not None:
+            begin, end = metadata_span
+            # Thought labels are metadata. Closed declarations retain their raw
+            # output but are opaque to the stricter authored-note HTML policy.
+            # Comments and trailing code/comment guards keep their ownership.
+            for token in re.finditer(
+                r"<!--.*?(?:-->|$)|<![A-Za-z][^>]*>", body[begin:end], re.DOTALL
+            ):
+                if token[0].startswith("<!--"):
+                    continue
+                for offset in range(begin + token.start(), begin + token.end()):
+                    syntax[offset] = "\n" if body[offset] == "\n" else " "
+        syntax = "".join(syntax)
+        tail = body[cursor:]
+        mask = active_mask(syntax, autolinks=False)
+        activity = "".join(
+            "\n" if raw == "\n" else active
+            for raw, active in zip(body, mask, strict=True)
+        )[cursor:]
+        headings = list(
+            re.finditer(
+                r"^ {0,3}#{1,6}[ \t]+Resources\b[^\n]*",
+                activity,
+                re.MULTILINE | re.IGNORECASE,
+            )
+        )
+        assert len(headings) == 1 and headings[0].group() == "## Resources", (
+            "external generated Resources section"
+        )
+        section_start = headings[0].end()
+        following = re.search(r"^## ", activity[section_start:], re.MULTILINE)
+        section_end = section_start + following.start() if following else len(tail)
+        file_rows = {}
+        remainder = list(activity)
+
+        def retain_row(position, *, body=body, cursor=cursor, file_rows=file_rows):
+            begin = body.rfind("\n", 0, position) + 1
+            end = body.find("\n", position)
+            if end < 0:
+                end = len(body)
+            file_rows[begin - cursor] = body[begin:end]
+
+        # Full-note activity carries authored guard state. Only the generated
+        # region enters the reference grammar; trusted metadata stays opaque.
+        for begin, end, _, _, destination, finish in inline_candidates(activity)[0]:
+            if body[cursor + destination : cursor + finish].lower().startswith("file:"):
+                retain_row(cursor + begin)
+            for offset in range(begin, end):
+                remainder[offset] = "\n" if tail[offset] == "\n" else " "
+        remainder = "".join(remainder)
+        extra_target = re.compile(
+            r"\]\([ \t]*<?file:|<file:[^<>\s]*>"
+            r"|\[\[file:[^\n\]]+\]\]"
+            r"|^ {0,3}\[[^\]]+\]:[ \t]*<?file:",
+            re.IGNORECASE | re.MULTILINE,
+        )
+        for match in extra_target.finditer(remainder):
+            retain_row(cursor + match.start())
+        html = FileHTML()
+        html.feed(remainder)
+        assert not html.file_target, "unexpected external HTML activation"
+
+        required = []
+        for key in sorted(attachments):
+            attachment = attachments[key]
+            if attachment["sourceId"] != owner or attachment["type"] not in {2, 8}:
+                continue
+            _, display, uri = external_projection(baseline, attachment, profile_version)
+            label = re.sub(r"[\[\]|\r\n]", " ", display).strip() or "Resource"
+            label = re.sub(r"([\\`*_{}<>])", r"\\\1", label)
+            required.append("- [" + label + "](<" + uri + ">)")
+
+        rows = sorted(file_rows.items())
+        assert [
+            row for offset, row in rows if section_start <= offset < section_end
+        ] == required, "external generated Resources links"
+        assert [row for _, row in rows] == required, (
+            "unexpected external reference outside Resources"
+        )
+
+
 def check_api_vault(baseline, vault, *, profile_version="1"):
     """Audit actual assignments/bytes; the record never supplies expectations."""
     vault = Path(vault)
@@ -1029,7 +1258,12 @@ def check_api_vault(baseline, vault, *, profile_version="1"):
     assert len(warned) == len(set(warned)) and set(warned) == expected_gaps, (
         "reviewed gap warnings"
     )
-    local = {key for key, a in attachments.items() if a["type"] != 3}
+    local = {
+        key
+        for key, a in attachments.items()
+        if a["type"] not in {2, 3, 8}
+        or expected_asset(baseline, a, profile_version)[1] != "external"
+    }
     assert set(baseline.data["payloads"]) == local, "baseline payload coverage"
     payload_count = 0
     for key, attachment in attachments.items():
@@ -1047,7 +1281,12 @@ def check_api_vault(baseline, vault, *, profile_version="1"):
             if role == "url"
             else attachment["location"]
         ), "attachment original name"
-        assert target["display_name"] == attachment["name"], "attachment display name"
+        display = (
+            external_projection(baseline, attachment, profile_version)[1]
+            if attachment["type"] in {2, 8}
+            else attachment["name"]
+        )
+        assert target["display_name"] == display, "attachment display name"
         if availability == "present":
             assert target["relative_path"] is not None, "required payload file"
             path = safe_path(vault, target["relative_path"])
@@ -1065,9 +1304,14 @@ def check_api_vault(baseline, vault, *, profile_version="1"):
                 and target["actual_sha256"] is None
             ), "nonpresent payload must not fabricate bytes"
             if availability == "external":
-                assert target["external_uri"] == attachment["location"], (
-                    "authored external URI"
+                uri = (
+                    external_projection(baseline, attachment, profile_version)[2]
+                    if attachment["type"] in {2, 8}
+                    else attachment["location"]
                 )
+                assert target["external_uri"] == uri, "authored external URI"
+                if attachment["type"] in {2, 8}:
+                    assert target["resource_link"] == uri, "external resource link"
             else:
                 assert has_measured_pdf(
                     baseline,
@@ -1080,6 +1324,10 @@ def check_api_vault(baseline, vault, *, profile_version="1"):
         check_new_image_preservation(
             baseline, vault, record, thoughts, attachments, targets, assets
         )
+
+    check_external_resources(
+        baseline, vault, thoughts, attachments, targets, assets, profile_version
+    )
     check_reverse_navigation(
         baseline, vault, thoughts, expected, raw_links, attachments, targets, assets
     )
