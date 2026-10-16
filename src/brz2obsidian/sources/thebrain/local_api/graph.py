@@ -98,7 +98,15 @@ def normalize_relationships(
             if thoughts[a]["kind"] != 4:
                 refuse("A tag association requires an inventoried source tag")
             kind, left, right = "tag", "children_ids", "tag_ids"
-        elif value["meaning"] == 1 and pair in {(1, -1), (1, 1)}:
+        elif value["meaning"] == 1 and (
+            pair in {(1, -1), (1, 1)}
+            or (
+                profile_version == "3"
+                and pair == (1, 3)
+                and thoughts[a]["kind"] == 1
+                and thoughts[b]["kind"] == 1
+            )
+        ):
             kind, left, right = "hierarchy", "children_ids", "parents_ids"
         elif value["meaning"] == 1 and pair in {(3, -1), (3, 3), (3, 5), (3, 7)}:
             kind, left, right = "related", "jump_ids", "jump_ids"

@@ -182,3 +182,12 @@ locations and their derived URI/display facts remain content-bound. Pinned
 mutations refuse even with recomputed untrusted manifests. A fresh valid capture
 with valid changed content receives a different identity and needs a new review;
 independent original-source preservation is established by baseline comparison.
+
+
+Profile3 relationship discovery retains authoritative link/endpoint facts, not
+search envelopes or optional hints. Equivalent admitted search envelopes therefore
+produce the same content identity when authoritative facts agree. The added
+ordinary reverse-arrow hierarchy `(1,1,1,3,null)` is checked again against both
+endpoint graphs and normalized parent/child orientation during sealing and
+verification. Recreating hashes under profile1/2 cannot authorize that tuple.
+No capture domain, canonical encoding or digest framing changes.

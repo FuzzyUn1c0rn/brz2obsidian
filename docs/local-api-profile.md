@@ -258,3 +258,16 @@ profiles1/2 and their controls remain available. Capture format1, module1,
 contract7 and worker/review schema3 are unchanged. Every new source-family
 predicate requires matching live and frozen implementation under its assigned
 slice; raw capture or profile selection never expands the finite qualification.
+
+
+The relationship discovery and reverse-arrow hierarchy slice is implemented for
+profile3. The exact [Q1--Q3 predicates](local-api-profile3-qualification.md) apply:
+the new zero-Brain envelope has a closed keyset and actual integer discriminators;
+legacy requested-Brain candidates keep their auxiliary/mixed-thought rules and
+ignored unknown fields. Both paths queue only canonical relationship IDs, ignore
+all endpoint hints and require authoritative endpoint discovery within immediate
+unique-ID bounds. Only the added ordinary/ordinary `(1,1,1,3,null)` hierarchy tuple
+is admitted. Parent A/child B, full incident/adjacency joins, empty link-content
+inventory, original evidence and frozen profile gating are mandatory. Explicit
+profiles1/2 preserve their prior search/relationship behavior. Resource additions
+remain governed by their separately assigned implementation slices.

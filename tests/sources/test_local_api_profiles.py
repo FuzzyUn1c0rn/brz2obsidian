@@ -142,8 +142,6 @@ def test_profile3_stage_messages_do_not_reclassify_other_source_failures(fault):
 @pytest.mark.parametrize(
     "family",
     [
-        "link_search",
-        "reverse_hierarchy",
         "external_file",
         "external_directory",
         "jpeg_image",
@@ -152,46 +150,25 @@ def test_profile3_stage_messages_do_not_reclassify_other_source_failures(fault):
 )
 def test_profile3_does_not_enable_later_source_families_before_their_slice(family):
     from tests.support.local_api import HOME
-    from tests.support.local_api_graph import HIERARCHY, GraphApi
     from tests.support.local_api_payloads import FILE, PayloadApi, attachment
 
-    if family in {"link_search", "reverse_hierarchy"}:
-        api = GraphApi()
-        if family == "reverse_hierarchy":
-            api.links[HIERARCHY]["direction"] = 3
-        else:
-            api.search = [
-                {
-                    "brainId": "00000000-0000-0000-0000-000000000000",
-                    "isFromOtherBrain": False,
-                    "sourceThought": None,
-                    "sourceLink": {"id": HIERARCHY, "brainId": BRAIN},
-                    "searchResultType": 1,
-                    "entityType": 3,
-                    "sourceType": 0,
-                    "attachmentId": "00000000-0000-0000-0000-000000000000",
-                }
-            ]
-    else:
-        api = PayloadApi()
-        kind, location = {
-            "external_file": (2, "C:\\Source\\document.pdf"),
-            "external_directory": (8, "D:\\Source\\Folder"),
-            "jpeg_image": (12, FILE + ".jpg"),
-            "svg_image": (12, FILE + ".svg"),
-        }[family]
-        api.attachments[FILE] = attachment(FILE, HOME, kind, location)
+    api = PayloadApi()
+    kind, location = {
+        "external_file": (2, "C:\\Source\\document.pdf"),
+        "external_directory": (8, "D:\\Source\\Folder"),
+        "jpeg_image": (12, FILE + ".jpg"),
+        "svg_image": (12, FILE + ".svg"),
+    }[family]
+    api.attachments[FILE] = attachment(FILE, HOME, kind, location)
     with api_server(api) as (_, address):
         result = local_api_workflow(
             LocalApiConfig(api_url=address), credentials=lambda: KEY
         ).inspect(LocalApiSourceRef(BRAIN))
     assert result.outcome == "refused"
     assert result.receipt is None
-    if family not in {"link_search", "reverse_hierarchy"}:
-        assert not any(
-            FILE in path and path.endswith("/file-content")
-            for path, _, _ in api.requests
-        )
+    assert not any(
+        FILE in path and path.endswith("/file-content") for path, _, _ in api.requests
+    )
 
 
 @pytest.mark.parametrize("version", ["2", "3"])
