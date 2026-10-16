@@ -1,6 +1,7 @@
 """Independent API-bound preservation oracle. No converter modules are imported."""
 
 import hashlib
+import json
 import re
 from decimal import Decimal
 from html.parser import HTMLParser
@@ -11,7 +12,9 @@ from urllib.parse import quote, urlsplit
 from uuid import UUID
 from zipfile import BadZipFile, ZipFile
 
-from .api_image_proofs import ico_proof, jpeg_headers
+import yaml
+
+from .api_image_proofs import ico_proof, jpeg_headers, jpeg_proof
 from .api_manifest import read_json, safe_path
 from .api_note_text import (
     document_references,
@@ -417,8 +420,77 @@ def qualify_image_joins(baseline, attachments, graphs):
         assert len(icons) <= 1, "unique source icon declaration"
 
 
+def check_image_icon_markup(
+    generated, thought, explicit, provider, effective, names, bindings, authored
+):
+    """Bind source-owned properties and introduction before any authored text."""
+    assert generated.startswith("---\n"), "icon frontmatter unavailable"
+    end = generated.find("\n---\n", 4)
+    assert end >= 0, "icon frontmatter unavailable"
+    properties = generated[4:end].splitlines()
+    try:
+        mapping = yaml.compose(generated[4:end], Loader=yaml.SafeLoader)
+    except yaml.YAMLError as error:
+        raise AssertionError("invalid source icon frontmatter") from error
+    assert isinstance(mapping, yaml.MappingNode), "source icon frontmatter mapping"
+    keys = [key.value for key, _ in mapping.value if isinstance(key, yaml.ScalarNode)]
+    for name, value in (
+        (
+            "icon",
+            "[[" + bindings[explicit]["relative_path"] + "]]" if explicit else None,
+        ),
+        ("appearance_category", "[[" + names[provider] + "]]" if provider else None),
+    ):
+        assert keys.count(name) == 1, "unique semantic source icon property"
+        expected = (
+            name + ":" + (" " + json.dumps(value, ensure_ascii=False) if value else "")
+        )
+        assert [
+            line for line in properties if re.match(r"\s*" + name + r"\s*:", line)
+        ] == [expected], "source icon property ownership"
+    body = generated[end + len("\n---\n") :]
+    title = (
+        ("\n# " + escaped(thought["name"]) + "\n\n")
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+    )
+    assert body.startswith(title), "source icon introduction title"
+    body = body[len(title) :]
+    if effective and thought["kind"] != 2:
+        introduction = "![[" + bindings[effective]["relative_path"] + "]]\n\n"
+        assert body.startswith(introduction), "source effective icon introduction"
+        body = body[len(introduction) :]
+    # Exact source-owned label/body occurrences belong after the introduction;
+    # a literal copy of its syntax there cannot replace generated presentation.
+    mask = list(active_mask(body))
+    cursor = 0
+    for text in authored:
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        if not text:
+            continue
+        start = body.find(text, cursor)
+        assert start >= 0, "source icon introduction precedes authored content"
+        stop = start + len(text)
+        mask[start:stop] = " " * (stop - start)
+        cursor = stop
+    active = "".join(mask)
+    icon_paths = {
+        row["relative_path"] for row in bindings.values() if row["role"] == "icon"
+    }
+    for match in re.finditer(r"!\[\[([^\]\n]+)\]\]", active):
+        target = match[1].split("|", 1)[0]
+        assert target not in icon_paths and not target.endswith("/Icon.png"), (
+            "unexpected generated icon introduction"
+        )
+    for _, _, image, _, begin, finish in inline_candidates(active)[0]:
+        target = active[begin:finish]
+        assert (
+            not image or target not in icon_paths and not target.endswith("/Icon.png")
+        ), "unexpected generated Markdown icon introduction"
+
+
 def check_new_image_preservation(
-    baseline, vault, record, thoughts, attachments, targets, assets
+    baseline, vault, record, thoughts, attachments, targets, assets, proofs
 ):
     selected = new_image_ids(baseline, attachments)
     if not selected:
@@ -433,8 +505,16 @@ def check_new_image_preservation(
     # Raw declarations determine all binding roles. Assigned paths are checked
     # separately for source bytes before they are used to locate rendered text.
     bindings = {}
+    materialized = {baseline.json(baseline.data["brain"])["homeThoughtId"]}
+    materialized.update(key for key, row in thoughts.items() if row["kind"] == 2)
     for key, row in attachments.items():
-        role, _, _ = expected_asset(baseline, row, "3")
+        role, availability, payload = expected_asset(baseline, row, "3", proofs)
+        if (
+            (row["isNotes"] and payload.decode("utf-8").strip())
+            or (availability == "external" and role in {"file", "url", "directory"})
+            or (availability == "present" and role in {"file", "image"} and payload)
+        ):
+            materialized.add(row["sourceId"])
         bindings[key] = {
             "asset_id": key,
             "owner": row["sourceId"],
@@ -442,10 +522,44 @@ def check_new_image_preservation(
             "original_name": row["location"],
             "relative_path": assets[key]["relative_path"],
         }
+    _, relations, _, _ = source_facts(baseline, profile_version="3")
+    materialized.update(
+        row["item_b"] for row in relations.values() if row["kind"] == "classification"
+    )
+    edges = [
+        (row["item_a"], row["item_b"])
+        for row in relations.values()
+        if row["kind"] == "hierarchy"
+    ]
+    pending = [
+        (a, b) for a, b in edges if a not in materialized and b not in materialized
+    ]
+    while pending:
+        parents = {a for a, _ in pending}
+        materialized.add(
+            min(parents, key=lambda key: (-sum(key in {a, b} for a, b in pending), key))
+        )
+        pending = [
+            (a, b) for a, b in edges if a not in materialized and b not in materialized
+        ]
+    for owner, target in targets.items():
+        assert type(target.get("created")) is bool and target["created"] == (
+            owner in materialized
+        ), "source image/icon note materialization"
+        assert safe_path(vault, target["relative_path"]).is_file() == (
+            owner in materialized
+        ), "source image/icon note materialization"
+        if owner not in materialized:
+            assert "icon_snapshot" in target and target["icon_snapshot"] is None, (
+                "uncreated source icon snapshot"
+            )
     documents = identities(record.get("documents", []), "key", "image document")
     authored = {k: row for k, row in attachments.items() if row["isNotes"]}
     assert set(documents) == set(authored), "all image-bearing source documents"
     names = {key: row["relative_path"] for key, row in targets.items()}
+    authored_texts = {
+        key: [row["label"]] if row.get("label") else [] for key, row in thoughts.items()
+    }
     for key, row in authored.items():
         original = baseline.bytes(baseline.data["payloads"][key]["path"]).decode(
             "utf-8"
@@ -493,6 +607,7 @@ def check_new_image_preservation(
         expected_text = expected_note_text(
             original, owner, names[owner], names, bindings
         )
+        authored_texts[owner].append(expected_text)
         generated = safe_path(vault, names[owner]).read_text(encoding="utf-8")
         expected_activity = active_mask(expected_text)
         actual_activity = active_mask(generated)
@@ -524,8 +639,6 @@ def check_new_image_preservation(
         explicit = icons.get(owner)
         provider = thought["typeId"]
         effective = explicit or icons.get(provider)
-        if not (explicit or effective):
-            continue
         graph = baseline.json(baseline.data["graphs"][owner])
         owned = [a for a in bindings.values() if a["owner"] == owner]
         isolated_icon = (
@@ -555,6 +668,16 @@ def check_new_image_preservation(
                 "appearance_category_key": provider,
                 "effective_icon_asset_id": effective,
             }, "source effective explicit/inherited icon"
+            check_image_icon_markup(
+                safe_path(vault, names[owner]).read_text(encoding="utf-8"),
+                thought,
+                explicit,
+                provider,
+                effective,
+                names,
+                bindings,
+                authored_texts[owner],
+            )
 
 
 def external_projection(baseline, attachment, profile_version):
@@ -717,7 +840,17 @@ def expected_asset(baseline, attachment, profile_version="1", proofs=None):
             qualify_v2_bytes(payload, "PNG", attachment["id"], proofs)
         elif name.endswith(".jpg"):
             jpeg_headers(payload)
-            qualify_v2_bytes(payload, "JPEG", attachment["id"], proofs)
+            if proofs is not None and attachment["id"] in proofs:
+                proof = proofs[attachment["id"]]
+                assert (
+                    proof["source_sha256"] == hashlib.sha256(payload).hexdigest()
+                    and proof["format"] == "JPEG"
+                    and proof.get("corrupt_data_diagnostic_capability")
+                ), "JPEG source-bound strict eligibility changed"
+            else:
+                proof = jpeg_proof(payload)
+                if proofs is not None:
+                    proofs[attachment["id"]] = proof
         else:
             assert payload[:4] == b"RIFF" and payload[8:12] == b"WEBP", (
                 "raw image signature"
@@ -1322,7 +1455,7 @@ def check_api_vault(baseline, vault, *, profile_version="1"):
                 ), "missing TXT lacks measured same-owner PDF"
     if profile_version == "3":
         check_new_image_preservation(
-            baseline, vault, record, thoughts, attachments, targets, assets
+            baseline, vault, record, thoughts, attachments, targets, assets, proofs
         )
 
     check_external_resources(

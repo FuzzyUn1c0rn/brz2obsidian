@@ -338,6 +338,22 @@ def test_jpeg_declaration_factors_refuse_independently(tmp_path, field, value):
         expected_asset(baseline, image, "3")
 
 
+def image_note_prefix(name, explicit_owner=None, provider=None, effective_owner=None):
+    """Literal presentation contract, independent of the checker predicate."""
+    icon = (
+        'icon: "[[Assets/' + identity(explicit_owner) + '/Icon.png]]"'
+        if explicit_owner
+        else "icon:"
+    )
+    category = (
+        'appearance_category: "[[Type.md]]"' if provider else "appearance_category:"
+    )
+    result = "---\n" + icon + "\n" + category + "\n---\n\n# " + name + "\n\n"
+    if effective_owner is not None:
+        result += "![[Assets/" + identity(effective_owner) + "/Icon.png]]\n\n"
+    return result
+
+
 def bound_case(tmp_path):
     """Raw API facts and an independently authored vault, with no converter call."""
     baseline, vault, image = image_case(tmp_path)
@@ -517,7 +533,8 @@ def bound_case(tmp_path):
         }
     ]
     (vault / "Home.md").write_text(
-        "# Home\n\nPréface 🐈\n\n![bleu]("
+        image_note_prefix("Home", 2, effective_owner=2)
+        + "Préface 🐈\n\n![bleu]("
         + "Assets/"
         + identity(2)
         + "/"
@@ -530,8 +547,10 @@ def bound_case(tmp_path):
         + ".jpg)\n",
         encoding="utf-8",
     )
-    (vault / "Child.md").write_text("# Child\n", encoding="utf-8")
-    (vault / "Type.md").write_text("# Type\n", encoding="utf-8")
+    (vault / "Child.md").write_text(
+        image_note_prefix("Child", provider=4, effective_owner=4), encoding="utf-8"
+    )
+    (vault / "Type.md").write_text(image_note_prefix("Type", 4), encoding="utf-8")
     write_json(record_path, record)
     return baseline, vault
 
@@ -988,7 +1007,7 @@ def add_empty_owner(baseline, vault, role):
         }
     )
     if role == "image":
-        (vault / "Empty.md").write_text("# Empty\n", encoding="utf-8")
+        (vault / "Empty.md").write_text(image_note_prefix("Empty"), encoding="utf-8")
     write_json(path, record)
     return baseline
 
@@ -1034,16 +1053,15 @@ def test_every_new_owned_image_and_icon_is_audited_even_when_unreferenced(
         check_api_vault(baseline, vault, profile_version="3")
 
 
-def test_direct_ico_takes_precedence_over_distinct_type_ico(tmp_path):
-    baseline, vault = bound_case(tmp_path)
+def add_ico_to_owner(baseline, vault, owner, name, provider=None):
     root = baseline.manifest_path.parent
     manifest = json.loads(baseline.manifest_path.read_bytes())
-    path = root / manifest["graphs"][identity(3)]
+    path = root / manifest["graphs"][identity(owner)]
     graph = json.loads(path.read_bytes())
     row = {
         "id": identity(209),
         "brainId": identity(1),
-        "sourceId": identity(3),
+        "sourceId": identity(owner),
         "sourceType": 2,
         "type": 5,
         "isNotes": False,
@@ -1053,7 +1071,7 @@ def test_direct_ico_takes_precedence_over_distinct_type_ico(tmp_path):
     graph["attachments"].append(row)
     write_json(path, graph)
     write_json(
-        root / manifest["attachment_inventories"][identity(3)], graph["attachments"]
+        root / manifest["attachment_inventories"][identity(owner)], graph["attachments"]
     )
     write_json(root / "209-metadata.json", row)
     manifest["files"]["209-metadata.json"] = fingerprint(root / "209-metadata.json")
@@ -1073,14 +1091,14 @@ def test_direct_ico_takes_precedence_over_distinct_type_ico(tmp_path):
         direct
         | {
             "asset_id": identity(209),
-            "owner": identity(3),
-            "relative_path": "Assets/" + identity(3) + "/Icon.png",
+            "owner": identity(owner),
+            "relative_path": "Assets/" + identity(owner) + "/Icon.png",
         }
     )
-    copied = vault / ("Assets/" + identity(3) + "/Icon.png")
+    copied = vault / ("Assets/" + identity(owner) + "/Icon.png")
     copied.parent.mkdir(parents=True, exist_ok=True)
     copied.write_bytes((FIXTURES / "inert-a.ico").read_bytes())
-    child = next(t for t in record["item_targets"] if t["item_key"] == identity(3))
+    child = next(t for t in record["item_targets"] if t["item_key"] == identity(owner))
     child["declared_appearance"] = {
         "icon_asset_id": identity(209),
         "foreground_color": None,
@@ -1090,6 +1108,19 @@ def test_direct_ico_takes_precedence_over_distinct_type_ico(tmp_path):
         explicit_icon_asset_id=identity(209), effective_icon_asset_id=identity(209)
     )
     write_json(path, record)
+    (vault / (name + ".md")).write_text(
+        image_note_prefix(name, owner, provider=provider, effective_owner=owner),
+        encoding="utf-8",
+    )
+    return baseline
+
+
+def test_direct_ico_takes_precedence_over_distinct_type_ico(tmp_path):
+    baseline, vault = bound_case(tmp_path)
+    baseline = add_ico_to_owner(baseline, vault, 3, "Child", provider=4)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    child = next(t for t in record["item_targets"] if t["item_key"] == identity(3))
     assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 7
     child["icon_snapshot"]["effective_icon_asset_id"] = identity(207)
     write_json(path, record)
@@ -1340,7 +1371,9 @@ def adapted_note_case(tmp_path, raw_template, adapted_template, ending="\n"):
             + displayed[ref["destination_end"] :]
         )
     displayed = displayed.replace("\r\n", "\n").replace("\r", "\n")
-    (vault / "Home.md").write_text("# Home\n\n" + displayed, encoding="utf-8")
+    (vault / "Home.md").write_text(
+        image_note_prefix("Home", 2, effective_owner=2) + displayed, encoding="utf-8"
+    )
     write_json(path, record)
     return baseline, vault, adapted
 
@@ -1485,3 +1518,519 @@ def test_literal_source_code_html_and_generated_table_code_keep_distinct_eligibi
     baseline, vault, _ = adapted_note_case(tmp_path, raw, adapted, ending)
     assert audit_baseline(baseline, profile_version="3")["payloads"] == 6
     assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 6
+
+
+@pytest.mark.parametrize("name,owner", [("Home", 2), ("Child", 4)])
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "missing",
+        "wrong",
+        "duplicate",
+        "comment",
+        "fence",
+        "escaped",
+        "inline-code",
+        "late",
+    ],
+)
+def test_actual_selected_icon_introduction_cannot_be_omitted_or_forged(
+    tmp_path, name, owner, damage
+):
+    baseline, vault = bound_case(tmp_path)
+    path = vault / (name + ".md")
+    text = path.read_text(encoding="utf-8")
+    embed = "![[Assets/" + identity(owner) + "/Icon.png]]"
+    wrong = "![[Assets/" + identity(4 if owner == 2 else 2) + "/Icon.png]]"
+    replacement = {
+        "missing": "",
+        "wrong": wrong,
+        "duplicate": embed + "\n\n" + embed,
+        "comment": "<!-- " + embed + " -->",
+        "fence": "```\n" + embed + "\n```",
+        "escaped": "\\" + embed,
+        "inline-code": "`" + embed + "`",
+        "late": "Prose first.\n\n" + embed,
+    }[damage]
+    path.write_text(text.replace(embed, replacement, 1), encoding="utf-8")
+    with pytest.raises(AssertionError, match="icon"):
+        check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize("name,explicit", [("Home", 2), ("Child", None), ("Type", 4)])
+@pytest.mark.parametrize("damage", ["missing", "wrong", "null", "duplicate"])
+def test_actual_icon_property_binds_explicit_ownership_only(
+    tmp_path, name, explicit, damage
+):
+    baseline, vault = bound_case(tmp_path)
+    path = vault / (name + ".md")
+    text = path.read_text(encoding="utf-8")
+    original = (
+        ('icon: "[[Assets/' + identity(explicit) + '/Icon.png]]"')
+        if explicit
+        else "icon:"
+    )
+    wrong = 'icon: "[[Assets/' + identity(4 if explicit != 4 else 2) + '/Icon.png]]"'
+    replacement = {
+        "missing": "",
+        "wrong": wrong,
+        "null": "icon: null",
+        "duplicate": original + "\n" + original,
+    }[damage]
+    path.write_text(text.replace(original, replacement, 1), encoding="utf-8")
+    with pytest.raises(AssertionError, match="icon"):
+        check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize("name", ["Home", "Child", "Type"])
+@pytest.mark.parametrize("damage", ["missing", "wrong", "duplicate"])
+def test_actual_icon_provider_property_binds_source_type(tmp_path, name, damage):
+    baseline, vault = bound_case(tmp_path)
+    path = vault / (name + ".md")
+    text = path.read_text(encoding="utf-8")
+    original = (
+        'appearance_category: "[[Type.md]]"'
+        if name == "Child"
+        else "appearance_category:"
+    )
+    replacement = {
+        "missing": "",
+        "wrong": 'appearance_category: "[[Home.md]]"',
+        "duplicate": original + "\n" + original,
+    }[damage]
+    path.write_text(text.replace(original, replacement, 1), encoding="utf-8")
+    with pytest.raises(AssertionError, match="icon"):
+        check_api_vault(baseline, vault, profile_version="3")
+
+
+def test_definition_uses_property_without_generated_body_icon(tmp_path):
+    baseline, vault = bound_case(tmp_path)
+    path = vault / "Type.md"
+    path.write_text(
+        path.read_text(encoding="utf-8") + "![[Assets/" + identity(4) + "/Icon.png]]\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(AssertionError, match="icon"):
+        check_api_vault(baseline, vault, profile_version="3")
+
+
+def test_source_definition_cannot_be_hidden_by_record_selection(tmp_path):
+    baseline, vault = bound_case(tmp_path)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    target = next(t for t in record["item_targets"] if t["item_key"] == identity(4))
+    target.update(created=False, icon_snapshot=None)
+    write_json(path, record)
+    (vault / "Type.md").unlink()
+    with pytest.raises(AssertionError, match="materialization"):
+        check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize("damage", ["forged", "omitted"])
+def test_uncreated_decorative_owner_cannot_fabricate_icon_snapshot(tmp_path, damage):
+    baseline, vault = bound_case(tmp_path)
+    baseline = add_empty_owner(baseline, vault, "icon")
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    record["item_targets"][-1]["icon_snapshot"] = {
+        "item_key": identity(6),
+        "explicit_icon_asset_id": identity(208),
+        "appearance_category_key": None,
+        "effective_icon_asset_id": identity(208),
+    }
+    if damage == "omitted":
+        del record["item_targets"][-1]["icon_snapshot"]
+    write_json(path, record)
+    with pytest.raises(AssertionError, match="icon"):
+        check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize("entropy_bytes", [0, 1, 3, 6])
+@pytest.mark.parametrize("entrypoint", ["asset", "audit", "vault"])
+def test_jpeg_premature_entropy_recovery_is_not_complete_validity(
+    tmp_path, entropy_bytes, entrypoint
+):
+    baseline, vault = bound_case(tmp_path)
+    raw = (FIXTURES / "inert-blue.jpg").read_bytes()
+    assert raw[609:611] == b"\xff\xda" and raw[630:] == b"\xff\xd9"
+    damaged = raw[: 623 + entropy_bytes] + b"\xff\xd9"
+    baseline = put_payload(baseline, damaged)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    target = next(a for a in record["asset_targets"] if a["asset_id"] == identity(202))
+    (vault / target["relative_path"]).write_bytes(damaged)
+    target.update(
+        actual_length=len(damaged), actual_sha256=hashlib.sha256(damaged).hexdigest()
+    )
+    write_json(path, record)
+    image = next(
+        a
+        for a in record["original_evidence"][0]["records"]
+        if a.get("id") == identity(202)
+    )
+    with pytest.raises(AssertionError, match="JPEG.*premature"):
+        if entrypoint == "asset":
+            expected_asset(baseline, image, "3")
+        elif entrypoint == "audit":
+            audit_baseline(baseline, profile_version="3")
+        else:
+            check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize("name", ["inert-progressive.jpg", "inert-trailer.jpg"])
+def test_complete_jpeg_progressive_multiscan_and_inert_trailer_remain_admitted(
+    tmp_path, name
+):
+    fixtures = FIXTURES.parent / "local_api_jpeg_neighbors_v3"
+    facts = json.loads((fixtures / "source-facts.json").read_bytes())
+    raw = (fixtures / name).read_bytes()
+    literal = facts["inputs"][name]
+    assert (len(raw), hashlib.sha256(raw).hexdigest()) == (
+        literal["length"],
+        literal["sha256"],
+    )
+    assert raw.count(b"\xff\xda") == literal["sos_markers"]
+    assert raw.count(b"\xff\xc2") == literal["sof2_markers"]
+    baseline, vault = bound_case(tmp_path)
+    baseline = put_payload(baseline, raw)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    target = next(a for a in record["asset_targets"] if a["asset_id"] == identity(202))
+    (vault / target["relative_path"]).write_bytes(raw)
+    target.update(actual_length=len(raw), actual_sha256=hashlib.sha256(raw).hexdigest())
+    write_json(path, record)
+    proof = audit_baseline(baseline, profile_version="3")["resource_eligibility"][
+        identity(202)
+    ]
+    assert proof["format"] == "JPEG" and proof["source_sha256"] == literal["sha256"]
+    assert (proof["width"], proof["height"], proof["frames"][0]["decoded_bytes"]) == (
+        2,
+        1,
+        8,
+    )
+    rgba = facts["expected_decoded"]["pixels"]
+    bgra = bytes(v for r, g, b, a in rgba for v in (b, g, r, a))
+    assert proof["frames"][0]["pixel_sha256"] == hashlib.sha256(bgra).hexdigest()
+    assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 6
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [None, "provider-body", "provider-property", "both-body", "blank-property"],
+)
+def test_actual_direct_icon_precedence_is_source_bound(tmp_path, damage):
+    baseline, vault = bound_case(tmp_path)
+    baseline = add_ico_to_owner(baseline, vault, 3, "Child", provider=4)
+    path = vault / "Child.md"
+    text = path.read_text(encoding="utf-8")
+    direct = "Assets/" + identity(3) + "/Icon.png"
+    inherited = "Assets/" + identity(4) + "/Icon.png"
+    if damage == "provider-body":
+        text = text.replace("![[" + direct + "]]", "![[" + inherited + "]]")
+    elif damage == "provider-property":
+        text = text.replace(
+            'icon: "[[' + direct + ']]"', 'icon: "[[' + inherited + ']]"'
+        )
+    elif damage == "both-body":
+        text += "![[" + inherited + "]]\n"
+    elif damage == "blank-property":
+        text = text.replace('icon: "[[' + direct + ']]"', "icon:")
+    path.write_text(text, encoding="utf-8")
+    if damage:
+        with pytest.raises(AssertionError, match="icon"):
+            check_api_vault(baseline, vault, profile_version="3")
+    else:
+        assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 7
+
+
+@pytest.mark.parametrize("damage", [None, "missing-body", "missing-property"])
+def test_materialized_tag_has_source_owned_explicit_icon_presentation(tmp_path, damage):
+    baseline, vault = bound_case(tmp_path)
+    baseline = add_empty_owner(baseline, vault, "image")
+    root = baseline.manifest_path.parent
+    graph_path = root / baseline.data["graphs"][identity(6)]
+    graph = json.loads(graph_path.read_bytes())
+    graph["activeThought"]["kind"] = 4
+    write_json(graph_path, graph)
+    tags_path = root / baseline.data["tags"]["path"]
+    write_json(tags_path, json.loads(tags_path.read_bytes()) + [graph["activeThought"]])
+    for path in baseline.data["statistics"]:
+        statistics = json.loads((root / path).read_bytes())
+        statistics["thoughts"] -= 1
+        statistics["tags"] += 1
+        write_json(root / path, statistics)
+    baseline = reseal(baseline)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    next(
+        row
+        for row in record["original_evidence"][0]["records"]
+        if row.get("id") == identity(6)
+    )["kind"] = 4
+    write_json(path, record)
+    baseline = add_ico_to_owner(baseline, vault, 6, "Empty")
+    path = vault / "Empty.md"
+    text = path.read_text(encoding="utf-8")
+    if damage == "missing-body":
+        text = text.replace("![[Assets/" + identity(6) + "/Icon.png]]", "")
+    elif damage == "missing-property":
+        text = text.replace('icon: "[[Assets/' + identity(6) + '/Icon.png]]"', "icon:")
+    path.write_text(text, encoding="utf-8")
+    if damage:
+        with pytest.raises(AssertionError, match="icon"):
+            check_api_vault(baseline, vault, profile_version="3")
+    else:
+        assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 8
+
+
+@pytest.mark.parametrize("source", ["label", "body"])
+@pytest.mark.parametrize("damage", [None, "missing-generated"])
+def test_authored_icon_syntax_cannot_substitute_for_generated_introduction(
+    tmp_path, source, damage
+):
+    embed = "![[Assets/" + identity(2) + "/Icon.png]]"
+    if source == "body":
+        raw = "```\n" + embed + "\n```\n\n![bleu]({image})\n"
+        baseline, vault, _ = adapted_note_case(
+            tmp_path, raw, raw.replace("\n", "{eol}")
+        )
+    else:
+        baseline, vault = bound_case(tmp_path)
+        root = baseline.manifest_path.parent
+        graph_path = root / baseline.data["graphs"][identity(2)]
+        graph = json.loads(graph_path.read_bytes())
+        label = embed + "\n\nAuthored label."
+        graph["activeThought"]["label"] = label
+        write_json(graph_path, graph)
+        baseline = reseal(baseline)
+        record_path = vault / "migration-record.json"
+        record = json.loads(record_path.read_bytes())
+        next(
+            row
+            for row in record["original_evidence"][0]["records"]
+            if row.get("id") == identity(2)
+        )["label"] = label
+        write_json(record_path, record)
+        path = vault / "Home.md"
+        text = path.read_text(encoding="utf-8")
+        prefix = image_note_prefix("Home", 2, effective_owner=2)
+        path.write_text(prefix + label + "\n\n" + text[len(prefix) :], encoding="utf-8")
+    path = vault / "Home.md"
+    if damage:
+        text = path.read_text(encoding="utf-8")
+        path.write_text(text.replace(embed + "\n\n", "", 1), encoding="utf-8")
+        with pytest.raises(AssertionError, match="icon"):
+            check_api_vault(baseline, vault, profile_version="3")
+    else:
+        assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 6
+
+
+@pytest.mark.parametrize("diagnostic", [b"", b"Warning: harmless codec note\n"])
+def test_silent_jpeg_recovery_backend_remains_unverified(
+    tmp_path, monkeypatch, diagnostic
+):
+    from tests.local_acceptance import api_image_proofs
+    from tests.local_acceptance.images import AuditUnavailable
+
+    baseline, _, image = image_case(tmp_path)
+    api_image_proofs.jpeg_diagnostic_capability.cache_clear()
+    real = api_image_proofs.isolated_jpeg_decode
+
+    def suppress(raw):
+        proof, _ = real(raw)
+        return proof, diagnostic
+
+    monkeypatch.setattr(api_image_proofs, "isolated_jpeg_decode", suppress)
+    try:
+        with pytest.raises(
+            AuditUnavailable, match="corrupt-data diagnostic unavailable"
+        ):
+            expected_asset(baseline, image, "3")
+    finally:
+        api_image_proofs.jpeg_diagnostic_capability.cache_clear()
+
+
+def test_unclassified_native_jpeg_diagnostic_is_unverified_not_invalid(
+    tmp_path, monkeypatch
+):
+    from tests.local_acceptance import api_image_proofs
+    from tests.local_acceptance.images import AuditUnavailable
+
+    baseline, _, image = image_case(tmp_path)
+    api_image_proofs.jpeg_diagnostic_capability()
+    real = api_image_proofs.isolated_jpeg_decode
+
+    def warning(raw):
+        proof, diagnostics = real(raw)
+        return proof, diagnostics + b"Warning: unclassified codec diagnostic\n"
+
+    monkeypatch.setattr(api_image_proofs, "isolated_jpeg_decode", warning)
+    with pytest.raises(AuditUnavailable, match="unclassified.*diagnostic"):
+        expected_asset(baseline, image, "3")
+
+
+@pytest.mark.parametrize("syntax", ["wiki", "markdown"])
+@pytest.mark.parametrize("name,owner", [("Home", 2), ("Child", 4), ("Type", 4)])
+def test_unexpected_additional_active_icon_cannot_escape_intro_ownership(
+    tmp_path, syntax, name, owner
+):
+    baseline, vault = bound_case(tmp_path)
+    path = vault / (name + ".md")
+    target = "Assets/" + identity(owner) + "/Icon.png"
+    extra = "![[" + target + "]]" if syntax == "wiki" else "![extra](" + target + ")"
+    path.write_text(
+        path.read_text(encoding="utf-8") + "\n\n" + extra + "\n", encoding="utf-8"
+    )
+    with pytest.raises(AssertionError, match="icon"):
+        check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize("name", ["Home", "Child", "Type"])
+@pytest.mark.parametrize("property", ["icon", "appearance_category"])
+@pytest.mark.parametrize("syntax", ["quoted", "explicit-key"])
+def test_yaml_semantic_duplicate_icon_properties_cannot_override_literal_line(
+    tmp_path, name, property, syntax
+):
+    baseline, vault = bound_case(tmp_path)
+    path = vault / (name + ".md")
+    text = path.read_text(encoding="utf-8")
+    extra = (
+        '"' + property + '": null'
+        if syntax == "quoted"
+        else "? " + property + "\n: null"
+    )
+    path.write_text(
+        text.replace("\n---\n", "\n" + extra + "\n---\n", 1), encoding="utf-8"
+    )
+    with pytest.raises(AssertionError, match="icon"):
+        check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize("offset", [20, 158, 177, 609])
+@pytest.mark.parametrize("entrypoint", ["asset", "audit", "vault"])
+def test_jpeg_definite_extraneous_data_recovery_cannot_be_accepted(
+    tmp_path, offset, entrypoint
+):
+    baseline, vault = bound_case(tmp_path)
+    raw = (FIXTURES / "inert-blue.jpg").read_bytes()
+    assert raw[offset] == 255
+    damaged = raw[:offset] + b"junk" + raw[offset:]
+    baseline = put_payload(baseline, damaged)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    target = next(a for a in record["asset_targets"] if a["asset_id"] == identity(202))
+    (vault / target["relative_path"]).write_bytes(damaged)
+    target.update(
+        actual_length=len(damaged), actual_sha256=hashlib.sha256(damaged).hexdigest()
+    )
+    write_json(path, record)
+    image = next(
+        a
+        for a in record["original_evidence"][0]["records"]
+        if a.get("id") == identity(202)
+    )
+    with pytest.raises(AssertionError, match="JPEG.*corrupt"):
+        if entrypoint == "asset":
+            expected_asset(baseline, image, "3")
+        elif entrypoint == "audit":
+            audit_baseline(baseline, profile_version="3")
+        else:
+            check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize("name", ["inert-gray.jpg", "inert-cmyk.jpg"])
+def test_existing_jpeg_color_classes_keep_full_bytes_and_codec_bound_pixel_proofs(
+    tmp_path, name
+):
+    fixtures = FIXTURES.parent / "local_api_jpeg_neighbors_v3"
+    facts = json.loads((fixtures / "extended-source-facts.json").read_bytes())[
+        "inputs"
+    ][name]
+    raw = (fixtures / name).read_bytes()
+    assert (len(raw), hashlib.sha256(raw).hexdigest()) == (
+        facts["length"],
+        facts["sha256"],
+    )
+    baseline, vault = bound_case(tmp_path)
+    baseline = put_payload(baseline, raw)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    target = next(a for a in record["asset_targets"] if a["asset_id"] == identity(202))
+    (vault / target["relative_path"]).write_bytes(raw)
+    target.update(actual_length=len(raw), actual_sha256=hashlib.sha256(raw).hexdigest())
+    write_json(path, record)
+    proof = audit_baseline(baseline, profile_version="3")["resource_eligibility"][
+        identity(202)
+    ]
+    assert (
+        proof["format"],
+        proof["width"],
+        proof["height"],
+        proof["frames"][0]["decoded_bytes"],
+    ) == ("JPEG", 2, 1, 8)
+    measurement = facts["independent_wic_measurement"]
+    assert proof["codec"]["name"] == measurement["codec"]
+    # This assertion binds the separately qualified current WIC measurement;
+    # CMYK-to-RGBA color is not asserted as universal source artwork truth.
+    rgba = measurement["rgba_pixels"]
+    bgra = bytes(
+        v
+        for i in range(0, len(rgba), 4)
+        for v in (rgba[i + 2], rgba[i + 1], rgba[i], rgba[i + 3])
+    )
+    assert proof["frames"][0]["pixel_sha256"] == hashlib.sha256(bgra).hexdigest()
+    assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 6
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "literal-lossless-gray.jpg",
+        "literal-lossless-rgb.jpg",
+        "literal-lossless-cmyk.jpg",
+        "literal-441.jpg",
+        "literal-ycck.jpg",
+    ],
+)
+def test_qualified_lossless_sampling_ycck_classes_keep_source_and_full_pixels(
+    tmp_path, name
+):
+    fixtures = FIXTURES.parent / "local_api_jpeg_classes_v3"
+    facts = json.loads((fixtures / "class-source-facts.json").read_bytes())["inputs"][
+        name
+    ]
+    raw = (fixtures / name).read_bytes()
+    assert (len(raw), hashlib.sha256(raw).hexdigest()) == (
+        facts["length"],
+        facts["sha256"],
+    )
+    assert (
+        b"\xff\xc3" if facts["literal_source_facts"]["frame"] == "SOF3" else b"\xff\xc0"
+    ) in raw
+    baseline, vault = bound_case(tmp_path)
+    baseline = put_payload(baseline, raw)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    target = next(a for a in record["asset_targets"] if a["asset_id"] == identity(202))
+    (vault / target["relative_path"]).write_bytes(raw)
+    target.update(actual_length=len(raw), actual_sha256=hashlib.sha256(raw).hexdigest())
+    write_json(path, record)
+    image = next(
+        a
+        for a in record["original_evidence"][0]["records"]
+        if a.get("id") == identity(202)
+    )
+    proofs = {}
+    assert expected_asset(baseline, image, "3", proofs) == ("image", "present", raw)
+    # These are independently qualified WIC measurements for this codec, not
+    # universal CMYK/YCCK conversion truth or converter-output expectations.
+    measured = facts["native_wic_measurement"]
+    proof = proofs[identity(202)]
+    assert proof["source_sha256"] == facts["sha256"] and proof["format"] == "JPEG"
+    assert proof["codec"] == measured["codec"]
+    assert proof["frames"] == measured["frames"]
+    assert proof["native_diagnostics"] == ""
+    audit = audit_baseline(baseline, profile_version="3")
+    assert audit["resource_eligibility"][identity(202)]["frames"] == measured["frames"]
+    assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 6
+    assert (vault / target["relative_path"]).read_bytes() == raw

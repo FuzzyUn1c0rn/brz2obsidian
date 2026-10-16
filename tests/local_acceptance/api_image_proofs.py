@@ -1,4 +1,4 @@
-"""API-local finite ICO proof from source bytes; no production imports.
+"""API-local JPEG/finite ICO proof from source bytes; no production imports.
 
 Native WIC invocation follows the separately qualified source-input measurement;
 finite structure and byte bindings are independently enforced before decoding.
@@ -6,8 +6,13 @@ finite structure and byte bindings are independently enforced before decoding.
 
 import ctypes as c
 import hashlib
+import json
 import os
 import struct
+import subprocess
+import sys
+from functools import lru_cache
+from pathlib import Path
 
 from .images import GUID, AuditUnavailable, guid
 
@@ -253,3 +258,115 @@ def jpeg_headers(raw):
         any(bytes((255, marker)) in raw for marker in frame_markers)
         and b"\xff\xda" in raw
     ), "JPEG required image/scan segments"
+
+
+_JPEG_CORRUPT = b"Corrupt JPEG data:"
+_JPEG_PREMATURE = b"Corrupt JPEG data: premature end of data segment"
+_WIC_JPEG_WORKER = """import json, sys
+from tests.local_acceptance.images import AuditUnavailable, decode_image
+try:
+    proof = decode_image(sys.stdin.buffer.read(), "measured.jpg")
+    result = {"status": "decoded", "proof": proof}
+except AuditUnavailable as error:
+    result = {"status": "unavailable", "message": str(error)}
+except AssertionError as error:
+    result = {"status": "invalid", "message": str(error)}
+print(json.dumps(result))
+"""
+
+
+def isolated_jpeg_decode(raw):
+    """Retain native stderr; HRESULT success alone may conceal recovery."""
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", _WIC_JPEG_WORKER],
+            input=raw,
+            capture_output=True,
+            timeout=60,
+            check=False,
+            cwd=Path(__file__).resolve().parents[2],
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+    except (OSError, subprocess.TimeoutExpired, MemoryError) as error:
+        raise AuditUnavailable(
+            "isolated WIC JPEG diagnostic capability unavailable"
+        ) from error
+    if result.returncode:
+        raise AuditUnavailable("isolated WIC JPEG diagnostic process failed")
+    try:
+        response = json.loads(result.stdout)
+    except (ValueError, UnicodeError) as error:
+        raise AuditUnavailable(
+            "isolated WIC JPEG diagnostic response unavailable"
+        ) from error
+    if response["status"] == "unavailable":
+        raise AuditUnavailable(response["message"])
+    assert response["status"] == "decoded", "invalid full JPEG decode: " + response.get(
+        "message", ""
+    )
+    proof = response["proof"]
+    assert (
+        proof["format"] == "JPEG"
+        and proof["source_sha256"] == hashlib.sha256(raw).hexdigest()
+    ), "isolated JPEG source-bound classification"
+    return proof, result.stderr
+
+
+@lru_cache(maxsize=1)
+def jpeg_diagnostic_capability():
+    """A known source-pinned corrupt challenge guards against silent codecs."""
+    try:
+        raw = (
+            Path(__file__).parents[1] / "fixtures/local_api_images_v3/inert-blue.jpg"
+        ).read_bytes()
+    except OSError as error:
+        raise AuditUnavailable("JPEG diagnostic challenge unavailable") from error
+    if (
+        hashlib.sha256(raw).hexdigest()
+        != "e3a2954fee014acf9f0b399791f49458604d6592ab22844bcebecc0e666be5ed"
+    ):
+        raise AuditUnavailable("JPEG diagnostic challenge source pin differs")
+    # Independent literal source facts: entropy623:630, EOI630:632. Removing
+    # its final entropy byte retains all headers and still triggers recovery.
+    codec = None
+    for challenge, expected in (
+        (raw[:629] + b"\xff\xd9", _JPEG_PREMATURE),
+        (
+            raw[:20] + b"junk" + raw[20:],
+            b"Corrupt JPEG data: 4 extraneous bytes before marker",
+        ),
+    ):
+        proof, diagnostics = isolated_jpeg_decode(challenge)
+        if expected not in diagnostics:
+            raise AuditUnavailable(
+                "WIC JPEG strict corrupt-data diagnostic unavailable"
+            )
+        if codec is not None and proof["codec"] != codec:
+            raise AuditUnavailable("WIC JPEG challenge codecs disagree")
+        codec = proof["codec"]
+    return codec
+
+
+def jpeg_proof(raw):
+    """Complete native pixels plus definite native corrupt-data recovery refusal."""
+    jpeg_headers(raw)
+    codec = jpeg_diagnostic_capability()
+    proof, diagnostics = isolated_jpeg_decode(raw)
+    if proof["codec"] != codec:
+        raise AuditUnavailable(
+            "WIC JPEG diagnostic codec differs from capability challenge"
+        )
+    assert _JPEG_CORRUPT not in diagnostics, (
+        "JPEG definite corrupt data recovery: "
+        + diagnostics.decode("utf-8", errors="replace")
+    )
+    # Unknown diagnostics cannot establish either valid or invalid content.
+    # A benign allowance requires independent qualification of its context.
+    if diagnostics.strip():
+        raise AuditUnavailable(
+            "unclassified WIC JPEG native diagnostic: "
+            + diagnostics.decode("utf-8", errors="replace")
+        )
+    proof["native_diagnostics"] = diagnostics.decode("utf-8", errors="replace")
+    proof["corrupt_data_diagnostic_capability"] = codec
+    return proof
