@@ -640,3 +640,51 @@ def test_authored_resource_heading_does_not_supply_generated_reference(
     else:
         with pytest.raises(AssertionError):
             check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize("same_uri", [False, True])
+@pytest.mark.parametrize("damage", [None, "omit", "swap-order"])
+def test_multiple_reference_identities_preserve_basename_and_raw_spelling(tmp_path, same_uri, damage):
+    baseline, vault, first = external_case(tmp_path)
+    root = baseline.manifest_path.parent
+    manifest = json.loads(baseline.manifest_path.read_bytes())
+    location = "C:/Research/R&D #1/café [v2].pdf" if same_uri else "D:/Archive/café [v2].pdf"
+    uri = FILE[3] if same_uri else "file:///D:/Archive/caf%C3%A9%20%5Bv2%5D.pdf"
+    second = dict(first, id=identity(206), location=location)
+    graph = json.loads((root / "external-graph.json").read_bytes())
+    graph["attachments"].append(second)
+    write_json(root / "external-graph.json", graph)
+    write_json(root / "external-list.json", [first, second])
+    write_json(root / "second-metadata.json", second)
+    manifest["files"]["second-metadata.json"] = fingerprint(root / "second-metadata.json")
+    manifest["attachment_metadata"][identity(206)] = {"status": 200, "path": "second-metadata.json"}
+    manifest["scope"]["attachment_ids"].append(identity(206))
+    write_json(baseline.manifest_path, manifest)
+    baseline = reseal(baseline)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    record["asset_targets"].append(dict(record["asset_targets"][-1], asset_id=identity(206), original_name=location, external_uri=uri, resource_link=uri))
+    record["original_evidence"][0]["records"].append(second)
+    write_json(path, record)
+    lines = ["- [café  v2 .pdf](<" + FILE[3] + ">)\n", "- [café  v2 .pdf](<" + uri + ">)\n"]
+    if damage == "omit":
+        lines.pop()
+    elif damage == "swap-order":
+        lines.reverse()
+    (vault / "External.md").write_text("# External only\n\n## Resources\n\n" + "".join(lines), encoding="utf-8")
+    if damage is None or same_uri and damage == "swap-order":
+        assert expected_asset(baseline, second, "3") == ("file", "external", None)
+        assert audit_baseline(baseline, profile_version="3")["attachments"] == 6
+        assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 3
+    else:
+        with pytest.raises(AssertionError):
+            check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize("entrypoint", ENTRYPOINTS)
+@pytest.mark.parametrize("field,value", [("location", "D:relative"), ("location", "D:/NUL.ext"), ("name", "Directory"), ("isNotes", True), ("sourceType", 2.0)])
+def test_directory_near_misses_cannot_bypass_either_census(tmp_path, entrypoint, field, value):
+    baseline, vault, _ = external_case(tmp_path, DIRECTORY)
+    baseline, attachment = replace_declaration(baseline, vault, {field: value})
+    with pytest.raises(AssertionError):
+        assert_public_accepts(entrypoint, baseline, vault, attachment)
