@@ -79,10 +79,18 @@ def insert_activity(text):
     return "".join(mask)
 
 
-def callouts(text):
+def callouts(text, operations=None, ownership=None):
     mask = insert_activity(text)
     output, opened, offset = [], set(), 0
+    containers = []
+
+    def close_container(stop):
+        start, _, changed = containers.pop()
+        if ownership is not None and changed:
+            ownership.append((start, stop))
+
     for line in markdown_lines(text):
+        original, first, begin = line, len(output), offset
         scan = mask[offset : offset + len(line)]
         offset += len(line)
         prefix = re.match(r"^( {0,3}(?:> ?)+)", line)
@@ -96,6 +104,12 @@ def callouts(text):
             and scan[len(marker[1]) : len(marker[1]) + 2] == "[!"
             and marker[2].lower() in KINDS
         )
+        while containers and (
+            depth < containers[-1][1] or active and depth <= containers[-1][1]
+        ):
+            close_container(begin)
+        if active:
+            containers.append([begin, depth, False])
         blank = not line.strip(" >\r\n\t")
         previous_blank = not output or not output[-1].strip(" >\r\n\t")
         if active:
@@ -135,6 +149,13 @@ def callouts(text):
         elif not depth and (blank or line.startswith(("```", "~~~"))):
             opened.clear()
         output.append(line)
+        replacement = "".join(output[first:])
+        if active and replacement != original:
+            containers[-1][2] = True
+        if operations is not None and replacement != original:
+            operations.append((begin, begin + len(original), replacement))
+    while containers:
+        close_container(len(text))
     return "".join(output)
 
 
@@ -164,7 +185,7 @@ def row_cells(line):
     return cells + [stripped[start:-1]]
 
 
-def tables(text):
+def tables(text, operations=None, ownership=None):
     lines = markdown_lines(text)
     scan = insert_activity(text)
     offsets, cursor = [], 0
@@ -226,6 +247,8 @@ def tables(text):
             rows.append(following)
         if not rows:
             continue
+        if ownership is not None:
+            ownership.append((offsets[index], offsets[rows[-1]] + len(lines[rows[-1]])))
         separator = all(
             re.fullmatch(r"\s*:?-{3,}:?\s*", cell) for cell in row_cells(lines[rows[0]])
         )
@@ -264,6 +287,12 @@ def tables(text):
                 )
 
             edits[following] = re.sub(r"(?<!`)(`+)(?!`)(.*?)\1(?!`)", code, original)
+    if operations is not None:
+        operations.extend(
+            (offsets[i], offsets[i] + len(lines[i]), replacement)
+            for i, replacement in sorted(edits.items())
+            if replacement != lines[i]
+        )
     return "".join(edits.get(i, line) for i, line in enumerate(lines))
 
 
@@ -377,7 +406,7 @@ def label_text(value):
     )
 
 
-def contents(text):
+def contents(text, operations=None, ownership=None):
     lines = markdown_lines(text)
     mask = insert_activity(text)
     offsets, cursor = [], 0
@@ -450,6 +479,11 @@ def contents(text):
             for marker in markers
         )
     ]
+    if ownership is not None:
+        ownership.extend(
+            (offsets[h["start"]], offsets[h["end"]] + len(lines[h["end"]]))
+            for h in headings
+        )
     used = set(re.findall(r"(?<!\S)\^([A-Za-z0-9-]+)(?=\s*$)", mask, re.MULTILINE))
     claimed, replacements = set(), {}
     for number, heading in enumerate(headings, 1):
@@ -524,26 +558,16 @@ def contents(text):
             "\n".join(prefix + entry for entry in entries)
             or prefix + "No authored headings."
         ) + (ending[0] if ending else "")
+    if operations is not None:
+        operations.extend(
+            (offsets[i], offsets[i] + len(lines[i]), replacement)
+            for i, replacement in sorted(replacements.items())
+            if replacement != lines[i]
+        )
     return "".join(replacements.get(i, line) for i, line in enumerate(lines))
 
 
-def document_references(text, owner, assets):
-    """Reference coordinates from active adapted text, with its exact digest."""
-    masked = re.sub(
-        r"<code>[^<]*</code>",
-        lambda match: "".join(char if char in "\r\n" else " " for char in match[0]),
-        protect_cross_container_code(text),
-    )
-    references = source_references(masked, owner, assets)
-    digest = hashlib.sha256(text.encode()).hexdigest()
-    for reference in references:
-        if reference["presentation_normalization"] is not None:
-            reference["presentation_normalization"]["document_digest"] = digest
-    return references
-
-
-def render_references(text, owner, path, names, assets):
-    result = text
+def table_contexts(text):
     lines = markdown_lines(text)
     table_rows, offset = set(), 0
     for index, line in enumerate(lines[:-1]):
@@ -565,6 +589,32 @@ def render_references(text, owner, path, names, assets):
         if index in table_rows:
             contexts.append((offset, offset + len(line)))
         offset += len(line)
+    return contexts
+
+
+def document_references(text, owner, assets):
+    """Reference coordinates from active adapted text, with its exact digest."""
+    masked = re.sub(
+        r"<code>[^<]*</code>",
+        lambda match: "".join(char if char in "\r\n" else " " for char in match[0]),
+        protect_cross_container_code(text),
+    )
+    references = source_references(masked, owner, assets)
+    digest = hashlib.sha256(text.encode()).hexdigest()
+    contexts = table_contexts(masked)
+    for reference in references:
+        reference["table_cell"] = any(
+            start <= reference["start"] < reference["end"] <= end
+            for start, end in contexts
+        )
+        if reference["presentation_normalization"] is not None:
+            reference["presentation_normalization"]["document_digest"] = digest
+    return references
+
+
+def render_references(text, owner, path, names, assets):
+    result = text
+    contexts = table_contexts(text)
     masked = re.sub(
         r"<code>[^<]*</code>",
         lambda match: " " * len(match[0]),
@@ -602,3 +652,144 @@ def expected_note_text(raw, owner, path, names, assets):
     normalized = raw.replace("\r\n", "\n").replace("\r", "\n")
     text = expected_document_text(normalized)
     return render_references(text, owner, path, names, assets)
+
+
+def adaptation_activity(raw):
+    """Raw ownership of independently recognized literal and insert operations.
+
+    Origins propagate through composition. Recognized tables own their rows,
+    adapted callouts own their quoted container, and ToC operations own their
+    consumed headings even when those rows/headings need no string replacement.
+    Unrelated source gaps cannot be relabeled by a large emitted edit.
+    """
+    _, literal = literal_edits(protect_cross_container_code(raw))
+    activity = {
+        "literal_text": [(e["start"], e["end"]) for e in literal],
+        "markdown_insert": [],
+    }
+    text = raw
+    origins = [(i, i + 1) for i in range(len(raw))]
+    for edit in reversed(literal):
+        start, end = edit["start"], edit["end"]
+        text = text[:start] + edit["after"] + text[end:]
+        origins[start:end] = [(start, end)] * len(edit["after"])
+    for transform in (tables, callouts, contents):
+        operations, ownership = [], []
+        after = transform(text, operations, ownership)
+        for start, end in ownership:
+            owned = origins[start:end]
+            activity["markdown_insert"].append(
+                (min(v[0] for v in owned), max(v[1] for v in owned))
+            )
+        mapped, cursor = [], 0
+        for start, end, replacement in operations:
+            mapped.extend(origins[cursor:start])
+            owned = origins[start:end]
+            span = (min(v[0] for v in owned), max(v[1] for v in owned))
+            activity["markdown_insert"].append(span)
+            mapped.extend([span] * len(replacement))
+            cursor = end
+        mapped.extend(origins[cursor:])
+        text, origins = after, mapped
+    for kind, intervals in activity.items():
+        merged = []
+        for start, end in sorted(intervals):
+            if merged and start <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
+            else:
+                merged.append((start, end))
+        activity[kind] = merged
+    return activity
+
+
+def owned_replacement(raw, start, end, replacement, intervals):
+    """Existence of kind-owned changes, with all outside source gaps exact.
+
+    A greedy search for each interior unchanged gap leaves the most room for
+    later gaps. Prefix/suffix anchors keep boundaries exact. No preferred
+    character-diff alignment or emitted atomic segmentation is imposed.
+    """
+    owned = [
+        (max(start, left), min(end, right))
+        for left, right in intervals
+        if left <= end and start <= right
+    ]
+    if not owned:
+        return replacement == raw[start:end]
+    gaps, cursor = [], start
+    for left, right in owned:
+        gaps.append(raw[cursor:left])
+        cursor = right
+    gaps.append(raw[cursor:end])
+    if not replacement.startswith(gaps[0]) or not replacement.endswith(gaps[-1]):
+        return False
+    cursor = len(gaps[0])
+    for gap in gaps[1:-1]:
+        found = replacement.find(gap, cursor)
+        if found < 0:
+            return False
+        cursor = found + len(gap)
+    return cursor <= len(replacement) - len(gaps[-1])
+
+
+def validate_document_adaptations(raw, adapted, edits):
+    """Validate serialized provenance without prescribing one edit segmentation."""
+    assert type(edits) is list, "document adaptation collection"
+    fields = {
+        "kind",
+        "start",
+        "end",
+        "before",
+        "after",
+        "adapted_start",
+        "adapted_end",
+        "source_digest",
+        "source_basis",
+        "adapted_basis",
+    }
+    activity = adaptation_activity(raw)
+    digest = hashlib.sha256(raw.encode()).hexdigest()
+    source_cursor = adapted_cursor = 0
+    replay = []
+    for edit in edits:
+        assert type(edit) is dict and set(edit) == fields, "document adaptation fields"
+        assert all(
+            type(edit[k]) is int
+            for k in ("start", "end", "adapted_start", "adapted_end")
+        ), "document adaptation scalar coordinates"
+        assert all(
+            type(edit[k]) is str
+            for k in fields - {"start", "end", "adapted_start", "adapted_end"}
+        ), "document adaptation scalar text"
+        kind = edit["kind"]
+        assert kind in activity, "document adaptation kind"
+        start, end = edit["start"], edit["end"]
+        assert source_cursor <= start < end <= len(raw), (
+            "document adaptation source spans"
+        )
+        assert edit["before"] == raw[start:end] and edit["before"] != edit["after"], (
+            "document adaptation source before"
+        )
+        assert (
+            edit["source_digest"] == digest
+            and edit["source_basis"] == "scoped_source_text/unicode_codepoints"
+            and edit["adapted_basis"] == "document.text/unicode_codepoints"
+        ), "document adaptation digest/bases"
+        gap = raw[source_cursor:start]
+        adapted_start = adapted_cursor + len(gap)
+        adapted_end = adapted_start + len(edit["after"])
+        assert (edit["adapted_start"], edit["adapted_end"]) == (
+            adapted_start,
+            adapted_end,
+        ), "document adaptation delta spans"
+        assert (
+            adapted[adapted_cursor:adapted_start] == gap
+            and adapted[adapted_start:adapted_end] == edit["after"]
+        ), "document adaptation unchanged gaps/replacement"
+        assert owned_replacement(raw, start, end, edit["after"], activity[kind]), (
+            "document adaptation source activity kind"
+        )
+        replay.extend((gap, edit["after"]))
+        source_cursor, adapted_cursor = end, adapted_end
+    replay.append(raw[source_cursor:])
+    assert "".join(replay) == adapted, "document adaptation complete replay"

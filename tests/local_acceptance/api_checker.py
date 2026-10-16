@@ -21,6 +21,7 @@ from .api_note_text import (
     expected_document_text,
     expected_note_text,
     row_cells,
+    validate_document_adaptations,
 )
 from .api_svg import qualify_svg
 from .checker import escaped, source_references, wiki
@@ -555,7 +556,42 @@ def check_new_image_preservation(
             assert "icon_snapshot" in target and target["icon_snapshot"] is None, (
                 "uncreated source icon snapshot"
             )
-    documents = identities(record.get("documents", []), "key", "image document")
+    assert "documents" not in record, "unpublished top-level document collection"
+    nested = []
+    document_fields = {
+        "key",
+        "owner",
+        "text_digest",
+        "original_asset_id",
+        "original_copy_omitted",
+        "references",
+        "text_adaptations",
+        "evidence",
+        "owner_target",
+    }
+    for owner, target in targets.items():
+        assert type(target.get("documents")) is list, "item document collection"
+        for document in target["documents"]:
+            assert type(document) is dict and set(document) == document_fields, (
+                "image document serialized fields"
+            )
+            assert document["owner"] == owner, "item document container ownership"
+            nested.append(document)
+    for key, asset in assets.items():
+        assert type(asset.get("retained_documents")) is list, (
+            "retained document collection"
+        )
+        for document in asset["retained_documents"]:
+            assert type(document) is dict and set(document) == document_fields, (
+                "image document serialized fields"
+            )
+            assert (
+                document["owner"] not in targets
+                and document["original_asset_id"] == key
+                and document["owner"] == asset["owner"]
+            ), "retained document container association"
+            nested.append(document)
+    documents = identities(nested, "key", "image document")
     authored = {k: row for k, row in attachments.items() if row["isNotes"]}
     assert set(documents) == set(authored), "all image-bearing source documents"
     names = {key: row["relative_path"] for key, row in targets.items()}
@@ -569,43 +605,48 @@ def check_new_image_preservation(
         body = expected_document_text(original)
         digest = hashlib.sha256(body.encode()).hexdigest()
         document = documents[key]
-        assert (
-            document["owner"],
-            document["original_asset_id"],
-            document["text_digest"],
-            document["owner_target"],
-        ) == (row["sourceId"], key, digest, names[row["sourceId"]]), (
-            "image document source binding"
-        )
+        expected_metadata = {
+            "key": key,
+            "owner": row["sourceId"],
+            "original_asset_id": key,
+            "text_digest": digest,
+            "owner_target": names[row["sourceId"]],
+            "original_copy_omitted": False,
+            "evidence": ["attachment:" + key],
+        }
+        assert semantic({k: document[k] for k in expected_metadata}) == semantic(
+            expected_metadata
+        ), "image document source binding/evidence/copy flag"
+        validate_document_adaptations(original, body, document["text_adaptations"])
         expected = document_references(body, row["sourceId"], bindings)
         references = document["references"]
-        assert len(references) == len(expected), "all source image references"
+        assert type(references) is list and len(references) == len(expected), (
+            "all source image references"
+        )
         for emitted, source in zip(references, expected, strict=True):
-            for field in (
-                "start",
-                "end",
-                "kind",
-                "target",
-                "destination_start",
-                "destination_end",
-                "presentation_normalization",
-            ):
-                assert emitted[field] == source[field], (
-                    "image reference spans/target/presentation"
-                )
-            assert emitted["display_text"] == source["label"], (
-                "image reference alt text"
+            item = source["kind"] == "item"
+            expected_reference = {
+                "start": source["start"],
+                "end": source["end"],
+                "expected_original": body[source["start"] : source["end"]],
+                "kind": source["kind"],
+                "target": source["target"],
+                "display_text": source["label"],
+                "table_cell": source["table_cell"],
+                "document_digest": digest,
+                "source_target": body[
+                    source["destination_start"] : source["destination_end"]
+                ],
+                "destination_start": None if item else source["destination_start"],
+                "destination_end": None if item else source["destination_end"],
+                "presentation_normalization": source["presentation_normalization"],
+            }
+            assert semantic(emitted) == semantic(expected_reference), (
+                "image reference complete source binding"
             )
-            assert (
-                emitted["expected_original"] == body[source["start"] : source["end"]]
-                and emitted["document_digest"] == digest
-            ), "image reference source text"
-            assert (
-                emitted["source_target"]
-                == body[source["destination_start"] : source["destination_end"]]
-            ), "image source destination"
         owner = row["sourceId"]
-        assert targets[owner]["created"] is True, "owned note materialization"
+        if not targets[owner]["created"]:
+            continue
         expected_text = expected_note_text(
             original, owner, names[owner], names, bindings
         )
