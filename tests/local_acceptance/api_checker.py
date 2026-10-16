@@ -753,6 +753,9 @@ def audit_baseline(baseline, *, profile_version="1"):
             body = baseline.bytes(
                 baseline.data["payloads"][attachment["id"]]["path"]
             ).decode("utf-8")
+            if profile_version == "3":
+                # Validate authored grammar before protecting generated code.
+                body = expected_document_text(body)
             scanner = (
                 document_references if profile_version == "3" else source_references
             )

@@ -1457,3 +1457,31 @@ def test_protected_image_examples_cannot_be_promoted_to_document_references(
     write_json(path, record)
     with pytest.raises(AssertionError, match="all source image references"):
         check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize("ending", ["\n", "\r\n", "\r"])
+def test_raw_active_code_does_not_gain_generated_table_code_protection(
+    tmp_path, ending
+):
+    baseline, _ = bound_case(tmp_path)
+    raw = (
+        "<code>![false](.data/md-images/missing.jpg)</code>\n\n"
+        + "![bleu](.data/md-images/"
+        + identity(202)
+        + ".jpg)\n"
+    ).replace("\n", ending)
+    (baseline.manifest_path.parent / "201.bin").write_bytes(raw.encode())
+    baseline = reseal(baseline)
+    with pytest.raises(AssertionError, match="active HTML"):
+        audit_baseline(baseline, profile_version="3")
+
+
+@pytest.mark.parametrize("ending", ["\n", "\r\n", "\r"])
+def test_literal_source_code_html_and_generated_table_code_keep_distinct_eligibility(
+    tmp_path, ending
+):
+    raw = "`<code>![false](.data/md-images/missing.jpg)</code>`\n\n![bleu]({image})\n"
+    adapted = "`<code>![false](.data/md-images/missing.jpg)</code>`{eol}{eol}![bleu]({image}){eol}"
+    baseline, vault, _ = adapted_note_case(tmp_path, raw, adapted, ending)
+    assert audit_baseline(baseline, profile_version="3")["payloads"] == 6
+    assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 6
