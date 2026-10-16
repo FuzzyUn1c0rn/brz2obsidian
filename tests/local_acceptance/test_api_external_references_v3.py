@@ -954,6 +954,10 @@ def test_extra_active_file_targets_in_any_generated_position_refuse(tmp_path, ex
         ("```\n<!A>\n```", ""),
         ("```\n<!A>\n", "\n\n```\n"),
         ("<!--\n<!A>\n", "\n\n-->\n"),
+        ("<brain://metadata>", ""),
+        ("Prefix <brain://metadata>\n\n## Resources\n\nAuthored metadata.", ""),
+        ("<brain://metadata>\n```\n", "\n\n```\n"),
+        ("<brain://metadata>\n<!--\n", "\n\n-->\n"),
     ],
 )
 @pytest.mark.parametrize("omitted", [False, True])

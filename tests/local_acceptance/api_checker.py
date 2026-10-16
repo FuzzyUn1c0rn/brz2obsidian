@@ -916,11 +916,13 @@ def check_external_resources(
                 end = len(body)
             file_rows[begin - cursor] = body[begin:end]
 
-        for begin, end, _, _, destination, finish in inline_candidates(syntax)[0]:
-            if begin >= cursor and body[destination:finish].lower().startswith("file:"):
-                retain_row(begin)
-            for offset in range(max(begin, cursor), end):
-                remainder[offset - cursor] = "\n" if body[offset] == "\n" else " "
+        # Full-note activity carries authored guard state. Only the generated
+        # region enters the reference grammar; trusted metadata stays opaque.
+        for begin, end, _, _, destination, finish in inline_candidates(activity)[0]:
+            if body[cursor + destination : cursor + finish].lower().startswith("file:"):
+                retain_row(cursor + begin)
+            for offset in range(begin, end):
+                remainder[offset] = "\n" if tail[offset] == "\n" else " "
         remainder = "".join(remainder)
         extra_target = re.compile(
             r"\]\([ \t]*<?file:|<file:[^<>\s]*>"
