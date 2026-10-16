@@ -972,9 +972,7 @@ def test_qualified_external_file_ending_svg_remains_reference_without_target_io(
         Path, "open", lambda path, *a, **kw: guarded_call(actual_open, path, *a, **kw)
     )
     api = SvgApi()
-    api.attachments[WEBSITE] = attachment(
-        WEBSITE, HOME, 2, "C:\\Source\\External.svg"
-    )
+    api.attachments[WEBSITE] = attachment(WEBSITE, HOME, 2, "C:\\Source\\External.svg")
     with api_server(api) as (_, address):
         result = local_api_workflow(
             LocalApiConfig(api_url=address), credentials=lambda: KEY
