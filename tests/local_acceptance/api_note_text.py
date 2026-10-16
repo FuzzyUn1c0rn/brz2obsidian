@@ -276,7 +276,7 @@ def label_text(value):
         protected.append(match[0])
         return placeholder + "M" + str(len(protected) - 1) + placeholder
 
-    value = re.sub(r"(?<!\\)\$[^$\n]+\$", math, value)
+    value = re.sub(r"(?<!\\)\$[^$\n\[\]<>]+\$", math, value)
     for begin, end, image, label, _, _ in reversed(
         inline_candidates(value, inline_only=True)[0]
     ):
@@ -405,7 +405,9 @@ def contents(text):
             destination = old
         else:
             destination = f"brz-toc-heading-{number}"
-            while destination in used or "^" + destination in text:
+            while destination in used or re.search(
+                r"\^" + re.escape(destination) + r"\b", text
+            ):
                 destination += "-generated"
             used.add(destination)
         claimed.add(destination)

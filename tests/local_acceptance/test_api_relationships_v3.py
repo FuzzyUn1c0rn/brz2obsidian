@@ -1296,6 +1296,26 @@ NOTE_FORMAT_EXAMPLES = [
         "- [Mixed Image ^literal Code \\^literal](#^authored-mixed)\n\n# Mixed ![Image ^literal](00000000-0000-4000-8000-000000000202.bin) `Code ^literal` ^authored-mixed\nBody\n\nAuthored body.\n",
         id="toc-mixed-caret",
     ),
+    pytest.param(
+        "[/toc/]\n\n# Target\nBody\n\n`^brz-toc-heading-10`\n\nAuthored body.\n",
+        "- [Target](#^brz-toc-heading-1)\n\n# Target ^brz-toc-heading-1\nBody\n\n`^brz-toc-heading-10`\n\nAuthored body.\n",
+        id="toc-id-prefix-nearmiss",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# $a<b$\nBody\n\nAuthored body.\n",
+        "- [\\$a\\<b\\$](#^brz-toc-heading-1)\n\n# $a<b$ ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-math-angle",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# $a[b]$\nBody\n\nAuthored body.\n",
+        "- [\\$a\\[b\\]\\$](#^brz-toc-heading-1)\n\n# $a[b]$ ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-math-square",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# $a>b$\nBody\n\nAuthored body.\n",
+        "- [\\$a\\>b\\$](#^brz-toc-heading-1)\n\n# $a>b$ ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-math-greater",
+    ),
 ]
 
 
@@ -1329,6 +1349,12 @@ def test_admitted_api_note_transformations_remain_source_bound(
         ("literal-ref", "\\<Value>", "<Changed>"),
         ("table-code", "<code>x&#124;y</code>", "<code>FORGED</code>"),
         ("toc-simple", "(#^brz-toc-heading-1)", "(#^wrong-target)"),
+        (
+            "toc-id-prefix-nearmiss",
+            "(#^brz-toc-heading-1)",
+            "(#^brz-toc-heading-1-generated)",
+        ),
+        ("toc-math-angle", "\\$a\\<b\\$", "$a<b$"),
         ("toc-simple", "# Target ^brz-toc-heading-1", "# Forged ^brz-toc-heading-1"),
         ("toc-image-label", "Café emphasis", "Forged label"),
         ("composition", "[[Child.md\\|Child]]", "[[Home.md\\|Child]]"),
