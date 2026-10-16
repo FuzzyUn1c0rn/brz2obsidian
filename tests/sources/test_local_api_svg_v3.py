@@ -946,3 +946,50 @@ def test_svg_uses_existing_width_adaptation_and_keeps_original_note(tmp_path):
     published = next((tmp_path / "vault").glob("Home*.md")).read_text(encoding="utf-8")
     assert "![図](Attachments/22222222/" + IMAGE + ".svg)" in published
     assert (tmp_path / f"vault/Attachments/22222222/{IMAGE}.svg").read_bytes() == SVG
+
+
+def test_qualified_external_file_ending_svg_remains_reference_without_target_io(
+    tmp_path, monkeypatch
+):
+    from pathlib import Path
+
+    from tests.support.local_api_payloads import WEBSITE
+
+    actual_stat = Path.stat
+    actual_open = Path.open
+    target_calls = []
+
+    def guarded_call(operation, path, *args, **kwargs):
+        if str(path).replace("/", "\\").lower().startswith("c:\\source\\"):
+            target_calls.append(str(path))
+            pytest.fail("An external .svg reference must never access its target")
+        return operation(path, *args, **kwargs)
+
+    monkeypatch.setattr(
+        Path, "stat", lambda path, *a, **kw: guarded_call(actual_stat, path, *a, **kw)
+    )
+    monkeypatch.setattr(
+        Path, "open", lambda path, *a, **kw: guarded_call(actual_open, path, *a, **kw)
+    )
+    api = SvgApi()
+    api.attachments[WEBSITE] = attachment(
+        WEBSITE, HOME, 2, "C:\\Source\\External.svg"
+    )
+    with api_server(api) as (_, address):
+        result = local_api_workflow(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        ).convert(LocalApiSourceRef(BRAIN), tmp_path / "vault")
+    assert result.outcome == "clean", result.issues
+    assert target_calls == []
+    assert not any(
+        path == f"/api/attachments/{BRAIN}/{WEBSITE}/file-content"
+        for path, _, _ in api.requests
+    )
+    record = json.loads((tmp_path / "vault/migration-record.json").read_bytes())
+    asset = next(row for row in record["asset_targets"] if row["asset_id"] == WEBSITE)
+    assert asset["role"] == "file" and asset["availability"] == "external"
+    assert asset["external_uri"] == "file:///C:/Source/External.svg"
+    assert asset["actual_length"] is asset["actual_sha256"] is None
+    assert asset["relative_path"] is None
+    note = next((tmp_path / "vault").glob("Home*.md")).read_text(encoding="utf-8")
+    assert "[External.svg](<file:///C:/Source/External.svg>)" in note

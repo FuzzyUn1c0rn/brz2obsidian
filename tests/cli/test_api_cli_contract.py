@@ -252,6 +252,37 @@ def test_cli_discovers_reverse_hierarchy_from_relationship_only_search(
 
 
 @pytest.mark.parametrize("as_json", [False, True])
+def test_cli_external_only_owner_keeps_reference_links_without_target_access(
+    tmp_path, monkeypatch, capsys, as_json
+):
+    from tests.sources.test_local_api_external_references import (
+        ExternalReferenceApi,
+        forbid_external_target_io,
+    )
+    from tests.support.local_api import BRAIN, KEY, api_server
+
+    monkeypatch.setenv("THE_BRAIN_LOCAL_API_KEY", KEY)
+    forbid_external_target_io(monkeypatch)
+    destination = tmp_path / "vault"
+    with api_server(ExternalReferenceApi()) as (api, address):
+        options = ["--source-kind", "local-api", "--api-url", address]
+        if as_json:
+            options.append("--json")
+        assert main(["inspect", BRAIN, *options]) == 0
+        inspected = capsys.readouterr()
+        assert main(["convert", BRAIN, str(destination), *options]) == 0
+    converted = capsys.readouterr()
+    assert inspected.err == converted.err == ""
+    if as_json:
+        assert json.loads(inspected.out)["outcome"] == "clean"
+        assert json.loads(converted.out)["outcome"] == "clean"
+    note = (destination / "Notes/External owner.md").read_text(encoding="utf-8")
+    assert "file:///C:/Source/caf%C3%A9%20%25%23.pdf" in note
+    assert "file:///D:/Projects/Folder%20Name" in note
+    assert not any(path.endswith("/file-content") for path, _, _ in api.requests)
+
+
+@pytest.mark.parametrize("as_json", [False, True])
 def test_standard_cli_preserves_static_svg_with_truthful_profile(
     tmp_path, monkeypatch, capsys, as_json
 ):
