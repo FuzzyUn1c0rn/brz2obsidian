@@ -48,7 +48,7 @@ def _same_observation(left, right):
     return left == right
 
 
-def _candidate_shape(hit, brain_id):
+def _candidate_shape(hit, brain_id, profile_version="1"):
     required = {
         "brainId",
         "isFromOtherBrain",
@@ -61,21 +61,55 @@ def _candidate_shape(hit, brain_id):
     }
     if not required <= hit.keys() or not hit.keys() <= required | {"name", "brainName"}:
         return None
-    owner = hit["sourceThought"]
-    if (
-        not isinstance(owner, dict)
-        or owner.get("brainId") != brain_id
-        or hit["sourceLink"] is not None
-        or any(
-            hit.get(field) is not None and not isinstance(hit[field], str)
-            for field in ("name", "brainName")
-        )
+    if any(
+        hit.get(field) is not None and not isinstance(hit[field], str)
+        for field in ("name", "brainName")
     ):
         return None
     values = tuple(
         hit[field] for field in ("searchResultType", "entityType", "sourceType")
     )
     if not all(type(value) is int for value in values):
+        return None
+    if (
+        profile_version == "3"
+        and hit["brainId"] == ZERO_UUID
+        and values == (1, 3, 0)
+        and hit["sourceThought"] is None
+        and hit["attachmentId"] == ZERO_UUID
+    ):
+        link = hit["sourceLink"]
+        allowed = {
+            "id",
+            "brainId",
+            "thoughtIdA",
+            "thoughtIdB",
+            "kind",
+            "relation",
+            "direction",
+            "meaning",
+            "typeId",
+            "name",
+            "cleanedUpName",
+            "color",
+            "thickness",
+            "creationDateTime",
+            "modificationDateTime",
+        }
+        if (
+            not isinstance(link, dict)
+            or not {"id", "brainId"} <= link.keys() <= allowed
+            or link["brainId"] != brain_id
+        ):
+            return None
+        uuid(link["id"])
+        return "link"
+    owner = hit["sourceThought"]
+    if (
+        not isinstance(owner, dict)
+        or owner.get("brainId") != brain_id
+        or hit["sourceLink"] is not None
+    ):
         return None
     if values == (1, 2, 0) and hit["attachmentId"] == ZERO_UUID:
         return "thought"
@@ -123,6 +157,13 @@ class Acquisition:
                 "max_traversal_items acquisition limit exhausted", "incomplete_source"
             )
 
+    def queue_link(self, key):
+        self.link_ids.add(uuid(key))
+        if len(self.ids) + len(self.link_ids) > self.config.max_traversal_items:
+            refuse(
+                "max_traversal_items acquisition limit exhausted", "incomplete_source"
+            )
+
     def observe(self, value):
         value = thought(value, self.brain_id)
         key = value["id"]
@@ -137,7 +178,10 @@ class Acquisition:
         if key in self.links and not _same_observation(self.links[key], value):
             refuse("Repeated authoritative relationship observations disagree")
         self.links[key] = value
-        self.link_ids.add(key)
+        if self.profile_version == "3":
+            self.queue_link(key)
+        else:
+            self.link_ids.add(key)
         self.seed(value["thoughtIdA"])
         self.seed(value["thoughtIdB"])
         return key
@@ -156,7 +200,7 @@ class Acquisition:
         ):
             refuse("A wildcard candidate has foreign or invalid ownership")
         shape = (
-            _candidate_shape(hit, self.brain_id)
+            _candidate_shape(hit, self.brain_id, self.profile_version)
             if hit["brainId"] == ZERO_UUID or hit.get("attachmentId") == ZERO_UUID
             else None
         )
@@ -177,13 +221,16 @@ class Acquisition:
         if link is not None:
             if not isinstance(link, dict) or link.get("brainId") != self.brain_id:
                 refuse("A wildcard link has foreign or invalid ownership")
-            self.link_ids.add(uuid(link.get("id")))
-            self.seed(link.get("thoughtIdA"))
-            self.seed(link.get("thoughtIdB"))
+            if self.profile_version == "3":
+                self.queue_link(link.get("id"))
+            else:
+                self.link_ids.add(uuid(link.get("id")))
+                self.seed(link.get("thoughtIdA"))
+                self.seed(link.get("thoughtIdB"))
             found = True
         if hit.get("attachmentId") is not None:
             if hit["attachmentId"] == ZERO_UUID:
-                if shape != "thought":
+                if shape not in {"thought", "link"}:
                     unsupported_shape(
                         self.profile_version,
                         "search",
