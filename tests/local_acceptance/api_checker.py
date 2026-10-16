@@ -19,6 +19,7 @@ from zipfile import BadZipFile, ZipFile
 
 import yaml
 
+from .api_generated import check_complete_shape, checked_generated_regions
 from .api_image_proofs import ico_proof, jpeg_headers, jpeg_proof
 from .api_manifest import read_json, safe_path
 from .api_note_text import (
@@ -31,6 +32,7 @@ from .api_scope import qualify_scope, strict
 from .api_svg import qualify_svg
 from .checker import contender_keys, escaped, source_references, wiki
 from .images import AuditUnavailable, decode_image
+from .support import CATEGORY_VIEWS
 from .text import active_mask, inline_candidates
 
 
@@ -1996,6 +1998,7 @@ def check_scoped_output_content(
     assets,
     relationships,
     profile_version,
+    complete_output,
 ):
     """Inspect unaccounted output regions, after their source-bound peers qualify.
 
@@ -2005,6 +2008,18 @@ def check_scoped_output_content(
     file or unaccounted note span is still inspected. Unsafe original bodies
     are forbidden everywhere, including decoded JSON strings.
     """
+    generated_fields, generated_files, projection_fields = checked_generated_regions(
+        baseline,
+        vault,
+        record,
+        scoped,
+        thoughts,
+        relationships,
+        targets,
+        assets,
+        attachments,
+        require_complete=complete_output,
+    )
 
     def strings(value):
         if type(value) is str:
@@ -2097,6 +2112,8 @@ def check_scoped_output_content(
         "external_uri",
         "retained_documents",
     }
+    item_fields |= projection_fields[0]
+    asset_fields |= projection_fields[1]
     # Keys are protocol vocabulary, not authored metadata. Values outside the
     # fully audited projections remain subject to the exclusion check.
     envelope = {
@@ -2123,10 +2140,10 @@ def check_scoped_output_content(
         "issues",
         "counts",
         "obsidian_configuration",
-    }
+    } | generated_fields
     extras(record, envelope)
     for field, value in record.items():
-        if field in closed or field not in envelope:
+        if field in closed | generated_fields or field not in envelope:
             continue
         if field == "item_targets":
             for row in value:
@@ -2136,7 +2153,7 @@ def check_scoped_output_content(
                 extras(row, asset_fields)
         elif field == "relationships":
             for row in value:
-                extras(row, {"key", "item_a", "item_b", "kind"})
+                extras(row, {"key", "item_a", "item_b", "kind"} | projection_fields[2])
         elif field == "issues":
             # The closed registry defines these protocol scalars. Authored
             # metadata sharing their spelling does not own this occurrence.
@@ -2156,12 +2173,27 @@ def check_scoped_output_content(
                 extras(issue, established)
         elif field == "source_identity":
             extras(
-                value, {"module_id", "module_version", "format_version", "source_id"}
+                value,
+                {
+                    "module_id",
+                    "module_version",
+                    "format_version",
+                    "source_id",
+                    "source_sha256",
+                    "snapshot_digest",
+                },
             )
         elif field == "schema":
             if value != "brz2obsidian.migration":
                 inspect_strings(value)
-        elif field not in {"profile_id", "profile_version"}:
+        elif field not in {
+            "profile_id",
+            "profile_version",
+            "schema_version",
+            "converter_version",
+            "renderer_version",
+            "run_metadata",
+        }:
             inspect_strings(value)
 
     names = {key: row["relative_path"] for key, row in targets.items()}
@@ -2199,6 +2231,29 @@ def check_scoped_output_content(
         chunks = ["# " + escaped(thoughts[owner]["name"]) + "\n"]
         if thoughts[owner].get("label"):
             chunks.append(thoughts[owner]["label"])
+        if thoughts[owner]["kind"] == 2:
+            if complete_output:
+                assert text.count(CATEGORY_VIEWS) == 1, (
+                    "complete category dashboard protocol spans"
+                )
+            chunks.append(CATEGORY_VIEWS)
+        else:
+            icons = {
+                row["sourceId"]: key
+                for key, row in attachments.items()
+                if row["type"] == 5
+            }
+            provider = next(
+                (
+                    row["item_a"]
+                    for row in relationships.values()
+                    if row["kind"] == "classification" and row["item_b"] == owner
+                ),
+                None,
+            )
+            effective = icons.get(owner) or icons.get(provider)
+            if effective:
+                chunks.append("![[" + assets[effective]["relative_path"] + "]]")
         for key, row in attachments.items():
             if row["sourceId"] != owner:
                 continue
@@ -2261,9 +2316,15 @@ def check_scoped_output_content(
         assert not any(value in raw for value in unsafe), (
             "unsafe original copied into output"
         )
+        relative = path.relative_to(vault).as_posix()
         try:
             text = raw.decode("utf8")
         except UnicodeError:
+            if relative in copies:
+                # The complete bytes already matched an independently qualified
+                # included source payload. Accidental binary byte overlap does
+                # not identify excluded authored text at this proved location.
+                continue
             assert not any(value.encode() in raw for value in forbidden), (
                 "excluded authored content in output"
             )
@@ -2278,8 +2339,7 @@ def check_scoped_output_content(
                 for item in strings(value)
                 for original in unsafe
             ), "unsafe original copied into output"
-        relative = path.relative_to(vault).as_posix()
-        if relative == "migration-record.json" or relative in copies:
+        if relative == "migration-record.json" or relative in copies | generated_files:
             continue
         if relative in notes:
             text = unaccounted_note(
@@ -2288,9 +2348,32 @@ def check_scoped_output_content(
             inspect_strings(text)
         else:
             inspect_strings(value if value is not None else text)
+    if not generated_fields:
+        actual_files = {
+            path.relative_to(vault).as_posix()
+            for path in vault.rglob("*")
+            if path.is_file()
+        }
+        assert actual_files == {"migration-record.json"} | set(notes) | copies, (
+            "complete component source file census"
+        )
 
 
 def check_api_vault(baseline, vault, *, profile_version="1"):
+    """Audit complete source-bound output, including mandatory /2 support proof."""
+    return _check_api_vault(
+        baseline, vault, profile_version=profile_version, complete_output=True
+    )
+
+
+def check_api_component_vault(baseline, vault, *, profile_version="1"):
+    """Exercise source-preservation components; does not establish full-vault PASS."""
+    return _check_api_vault(
+        baseline, vault, profile_version=profile_version, complete_output=False
+    )
+
+
+def _check_api_vault(baseline, vault, *, profile_version, complete_output):
     """Audit actual assignments/bytes; the record never supplies expectations."""
     vault = Path(vault)
     audit = audit_baseline(baseline, profile_version=profile_version)
@@ -2300,6 +2383,8 @@ def check_api_vault(baseline, vault, *, profile_version="1"):
     )
     record_bytes = (vault / "migration-record.json").read_bytes()
     record = read_json(record_bytes)
+    if complete_output and baseline.data["schema"] == "brz2obsidian.api-acceptance/2":
+        check_complete_shape(record)
     identity = record["source_identity"]
     assert (
         identity["module_id"],
@@ -2489,6 +2574,7 @@ def check_api_vault(baseline, vault, *, profile_version="1"):
             assets,
             expected,
             profile_version,
+            complete_output,
         )
     baseline.verify()
     return {

@@ -5,6 +5,7 @@ Existing inert binary inputs retain contributor provenance beside their bytes.
 """
 
 import base64
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -915,3 +916,100 @@ def raster_scope_packet(*, excluded=True, profile_version="3", image_format="png
             else "-profile" + profile_version + "-" + image_format
         ),
     }
+
+
+# Author: /root/negative_source; separately qualified RAW04 source-only constructor.
+# Original construction-companion.py SHA256: 7448f2e541b6cd29b9d663c2d4001a6b53ad855e7e5900df6f10da7fb1ba3226
+def negative_mixed_source_packet(case):
+    """Change exactly one semantic source factor from qualified tags RAW01."""
+    assert case in {
+        "forgotten-invalid-calendar",
+        "relationship-contradictory-repeat",
+        "resource-unsupported-type",
+        "external-traversal",
+        "note-unresolved-thought",
+        "jpeg-premature-entropy",
+    }, "unknown negative mixed source packet"
+    packet = copy.deepcopy(mixed_source_packet("tags"))
+    files = packet["files"]
+
+    def change_rows(value, key, field, replacement):
+        changed = 0
+        if isinstance(value, dict):
+            if value.get("id") == key and field in value:
+                value[field] = replacement
+                changed += 1
+            for child in value.values():
+                changed += change_rows(child, key, field, replacement)
+        elif isinstance(value, list):
+            for child in value:
+                changed += change_rows(child, key, field, replacement)
+        return changed
+
+    if case == "relationship-contradictory-repeat":
+        path = "responses/links/" + identity(101) + ".json"
+        row = json.loads(files[path])
+        assert row["thoughtIdB"] == identity(3)
+        row["thoughtIdB"] = identity(7)
+        files[path] = json_bytes(row)
+    elif case == "jpeg-premature-entropy":
+        path = "payloads/" + identity(204) + ".bin"
+        raw = files[path]
+        assert len(raw) == 632
+        assert raw[609:613] == b"\xff\xda\x00\x0c"
+        assert raw[630:] == b"\xff\xd9"
+        # SOS ends at 623. No entropy-coded data survives before this early EOI.
+        # Zero padding preserves exact declared/HTTP length, isolating invalid bytes.
+        files[path] = raw[:623] + b"\xff\xd9" + b"\x00" * 7
+        assert len(files[path]) == len(raw)
+    else:
+        if case == "forgotten-invalid-calendar":
+            key, field, replacement = (
+                identity(91),
+                "forgottenDateTime",
+                "2026-02-30T12:00:00Z",
+            )
+        elif case == "resource-unsupported-type":
+            key, field, replacement = identity(204), "type", 11
+        elif case == "external-traversal":
+            key, field, replacement = (
+                identity(209),
+                "location",
+                "C:\\Research\\..\\secret.pdf",
+            )
+        else:
+            assert case == "note-unresolved-thought"
+            path = "payloads/" + identity(201) + ".bin"
+            files[path] += (
+                "[Missing](brain://" + compact(999) + "/Missing)\r\n"
+            ).encode("utf-8")
+            key, field, replacement = identity(201), "dataLength", len(files[path])
+            path = "responses/thoughts/" + identity(999) + ".json"
+            assert path not in files
+            files[path] = b"Missing thought"
+            packet["ledger"]["routes"].append(
+                {
+                    "method": "GET",
+                    "route": "/api/thoughts/" + identity(1) + "/" + identity(999),
+                    "status": 404,
+                    "body_path": path,
+                    "optional": False,
+                }
+            )
+            files["endpoints.json"] = json_bytes(packet["ledger"])
+        changed = 0
+        for path, raw in list(files.items()):
+            if not (path.startswith("responses/") and path.endswith(".json")):
+                continue
+            # The explicitly bound 404 body above is plaintext, never a wire DTO.
+            if path == "responses/thoughts/" + identity(999) + ".json":
+                continue
+            value = json.loads(raw)
+            count = change_rows(value, key, field, replacement)
+            if count:
+                files[path] = json_bytes(value)
+                changed += count
+        assert changed == (2 if case == "forgotten-invalid-calendar" else 3)
+    assert json.loads(files["endpoints.json"]) == packet["ledger"]
+    packet["case"] = case
+    return packet

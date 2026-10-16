@@ -1,4 +1,8 @@
-"""Independent mixed-source scope preservation at the three public API seams."""
+"""Independent source/scope component controls and separate complete-vault controls.
+
+Older partial vault fixtures use the explicit component-check seam. Only complete
+generated fixtures call check_api_vault and can establish full-vault coverage.
+"""
 
 import hashlib
 
@@ -11,13 +15,33 @@ from .api_scope_inputs import (
     json_bytes,
     mixed_expectations,
     mixed_source_packet,
+    negative_mixed_source_packet,
+    raster_scope_packet,
 )
 
 
 def scope_baseline(directory, case="tags"):
     """Deliver self-contained raw source facts, without a manufactured safe view."""
+    return packet_baseline(directory, mixed_source_packet(case))
+
+
+def raster_scope_baseline(
+    directory, *, excluded=True, profile_version="3", image_format="png"
+):
+    """Install qualified raster wire facts without constructing generated output."""
+    return packet_baseline(
+        directory,
+        raster_scope_packet(
+            excluded=excluded,
+            profile_version=profile_version,
+            image_format=image_format,
+        ),
+    )
+
+
+def packet_baseline(directory, packet):
+    """Install a source-only packet and bind its complete independent file map."""
     directory.mkdir(parents=True)
-    packet = mixed_source_packet(case)
     files = {}
     for name, raw in packet["files"].items():
         path = directory / name
@@ -33,6 +57,23 @@ def scope_baseline(directory, case="tags"):
     raw = json_bytes(data)
     path.write_bytes(raw)
     return load_baseline(path, hashlib.sha256(raw).hexdigest())
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "forgotten-invalid-calendar",
+        "relationship-contradictory-repeat",
+        "resource-unsupported-type",
+        "external-traversal",
+        "note-unresolved-thought",
+        "jpeg-premature-entropy",
+    ],
+)
+def test_qualified_negative_mixed_source_refuses_at_public_audit(tmp_path, case):
+    baseline = packet_baseline(tmp_path / "source", negative_mixed_source_packet(case))
+    with pytest.raises(AssertionError):
+        audit_baseline(baseline, profile_version="3")
 
 
 @pytest.mark.parametrize("key", [201, 601])
@@ -448,7 +489,7 @@ def mixed_vault(directory, baseline):
 
 
 def test_scoped_mixed_vault_preserves_safe_nested_documents_and_empty_policy(tmp_path):
-    from .api_checker import check_api_vault
+    from .api_checker import check_api_component_vault as check_api_vault
 
     baseline = scope_baseline(tmp_path / "source")
     vault = mixed_vault(tmp_path / "vault", baseline)
@@ -482,7 +523,7 @@ def test_scope_authority_is_explicit_complete_and_type_sensitive(
 ):
     import json
 
-    from .api_checker import check_api_vault
+    from .api_checker import check_api_component_vault as check_api_vault
 
     baseline = scope_baseline(tmp_path / "source")
     vault = mixed_vault(tmp_path / "vault", baseline)
@@ -543,7 +584,7 @@ def test_scoped_output_cannot_retain_original_or_excluded_authored_metadata(
 ):
     import json
 
-    from .api_checker import check_api_vault
+    from .api_checker import check_api_component_vault as check_api_vault
 
     baseline = scope_baseline(tmp_path / "source")
     vault = mixed_vault(tmp_path / "vault", baseline)
@@ -593,7 +634,7 @@ def test_mixed_scope_output_requires_source_bound_documents_selection_and_resour
 ):
     import json
 
-    from .api_checker import check_api_vault
+    from .api_checker import check_api_component_vault as check_api_vault
 
     baseline = scope_baseline(tmp_path / "source")
     vault = mixed_vault(tmp_path / "vault", baseline)
@@ -769,7 +810,7 @@ def test_every_mixed_ico_variant_has_semantic_integrity_and_output_obligations(
     import os
     import struct
 
-    from .api_checker import check_api_vault
+    from .api_checker import check_api_component_vault as check_api_vault
 
     baseline = scope_baseline(tmp_path / "source")
     vault = mixed_vault(tmp_path / "vault", baseline)
@@ -899,7 +940,7 @@ def test_each_mixed_ico_variant_requires_its_own_complete_native_result(
     import struct
 
     from . import api_image_proofs
-    from .api_checker import check_api_vault
+    from .api_checker import check_api_component_vault as check_api_vault
 
     baseline = scope_baseline(tmp_path / "source")
     vault = mixed_vault(tmp_path / "vault", baseline)
@@ -1161,7 +1202,7 @@ def test_mixed_scope_evidence_and_accounting_are_independently_source_bound(
 ):
     import json
 
-    from .api_checker import check_api_vault
+    from .api_checker import check_api_component_vault as check_api_vault
 
     baseline = scope_baseline(tmp_path / "source")
     vault = mixed_vault(tmp_path / "vault", baseline)
@@ -1192,7 +1233,7 @@ def test_mixed_scope_evidence_and_accounting_are_independently_source_bound(
 def test_qualified_toc_fallback_materializes_owner_from_final_safe_text(tmp_path):
     import json
 
-    from .api_checker import check_api_vault
+    from .api_checker import check_api_component_vault as check_api_vault
 
     baseline = scope_baseline(tmp_path / "source")
     root = baseline.manifest_path.parent
@@ -1275,7 +1316,7 @@ def test_mixed_classification_and_native_tag_metadata_are_source_bound(
 ):
     import json
 
-    from .api_checker import check_api_vault
+    from .api_checker import check_api_component_vault as check_api_vault
 
     baseline = scope_baseline(tmp_path / "source")
     vault = mixed_vault(tmp_path / "vault", baseline)
@@ -1322,7 +1363,7 @@ def test_included_wire_scalars_cannot_be_hidden_by_consistent_repeats(
 ):
     import json
 
-    from .api_checker import check_api_vault
+    from .api_checker import check_api_component_vault as check_api_vault
 
     baseline = scope_baseline(tmp_path / "source")
     vault = mixed_vault(tmp_path / "vault", baseline)
@@ -1362,7 +1403,7 @@ def test_included_wire_scalars_cannot_be_hidden_by_consistent_repeats(
 
 @pytest.mark.parametrize("case", ["zero-tags", "changed-svg"])
 def test_independent_mixed_variants_preserve_their_own_source_identity(tmp_path, case):
-    from .api_checker import check_api_vault
+    from .api_checker import check_api_component_vault as check_api_vault
 
     baseline = scope_baseline(tmp_path / "source", case)
     vault = mixed_vault(tmp_path / "vault", baseline)
@@ -1373,7 +1414,7 @@ def test_independent_mixed_variants_preserve_their_own_source_identity(tmp_path,
     "damage", ["omitted", "inactive", "outside-resources", "gap-description"]
 )
 def test_mixed_pdf_resource_requires_active_generated_section(tmp_path, damage):
-    from .api_checker import check_api_vault
+    from .api_checker import check_api_component_vault as check_api_vault
 
     baseline = scope_baseline(tmp_path / "source")
     vault = mixed_vault(tmp_path / "vault", baseline)
@@ -1402,7 +1443,7 @@ def test_mixed_pdf_resource_requires_active_generated_section(tmp_path, damage):
 def test_mixed_scoped_document_allows_source_owned_composite_edits(tmp_path, damage):
     import json
 
-    from .api_checker import check_api_vault
+    from .api_checker import check_api_component_vault as check_api_vault
     from .api_scope_inputs import mixed_literal_documents
 
     baseline = scope_baseline(tmp_path / "source")
@@ -1431,7 +1472,7 @@ def test_mixed_scoped_document_allows_source_owned_composite_edits(tmp_path, dam
 
 
 def test_mixed_imported_calendar_properties_accept_yaml_date_scalars(tmp_path):
-    from .api_checker import check_api_vault
+    from .api_checker import check_api_component_vault as check_api_vault
 
     baseline = scope_baseline(tmp_path / "source")
     vault = mixed_vault(tmp_path / "vault", baseline)
@@ -1456,7 +1497,7 @@ def test_mixed_imported_calendar_properties_accept_yaml_date_scalars(tmp_path):
 def test_mixed_definition_declared_colors_are_source_bound(tmp_path, field, value):
     import json
 
-    from .api_checker import check_api_vault
+    from .api_checker import check_api_component_vault as check_api_vault
 
     baseline = scope_baseline(tmp_path / "source")
     vault = mixed_vault(tmp_path / "vault", baseline)
@@ -1473,7 +1514,7 @@ def test_mixed_definition_declared_colors_are_source_bound(tmp_path, field, valu
 @pytest.mark.parametrize("entry", ["asset", "baseline", "vault"])
 @pytest.mark.parametrize("profile", [None, "1", "2", "unknown"])
 def test_mixed_scope_container_does_not_grant_a_profile(entry, profile, tmp_path):
-    from .api_checker import check_api_vault
+    from .api_checker import check_api_component_vault as check_api_vault
 
     baseline = scope_baseline(tmp_path / "source")
     options = {} if profile is None else {"profile_version": profile}
@@ -1506,7 +1547,7 @@ def test_scope_authority_is_not_an_implicit_legacy_container_grant(tmp_path, sch
 
 
 def test_valid_changed_mixed_source_needs_new_pin_and_new_output_bytes(tmp_path):
-    from .api_checker import check_api_vault
+    from .api_checker import check_api_component_vault as check_api_vault
 
     old = scope_baseline(tmp_path / "old")
     vault = mixed_vault(tmp_path / "old-vault", old)
@@ -1534,7 +1575,7 @@ def test_valid_changed_mixed_source_needs_new_pin_and_new_output_bytes(tmp_path)
 def test_unremoved_scope_associations_refuse_even_in_protected_text(
     tmp_path, entry, source
 ):
-    from .api_checker import check_api_vault
+    from .api_checker import check_api_component_vault as check_api_vault
 
     baseline = scope_baseline(tmp_path / "source")
     path = (
@@ -1582,37 +1623,69 @@ def test_qualified_source_factory_preserves_provenance_across_checkout_eols(
     assert audit_baseline(baseline, profile_version="3")["payloads"] == 11
 
 
-def raster_scope_case(directory, *, excluded=True, profile="3", image_format="png"):
+def raster_scope_case(
+    directory,
+    *,
+    excluded=True,
+    profile="3",
+    image_format="png",
+    source_prefix=None,
+    display_prefix=None,
+):
     """Independent literal inherited-PNG source and output, without runtime imports."""
     import json
 
-    from .api_scope_inputs import raster_scope_packet
+    baseline = raster_scope_baseline(
+        directory / "source",
+        excluded=excluded,
+        profile_version=profile,
+        image_format=image_format,
+    )
+    if source_prefix is not None:
+        note_id = identity(201)
+        payload = baseline.data["payloads"][note_id]["path"]
+        raw = baseline.bytes(payload).replace(
+            "Kept Ω.".encode(), source_prefix.encode("utf8"), 1
+        )
+        (baseline.manifest_path.parent / payload).write_bytes(raw)
 
-    packet = raster_scope_packet(
-        excluded=excluded, profile_version=profile, image_format=image_format
-    )
-    source = directory / "source"
-    source.mkdir(parents=True)
-    files = {}
-    for name, raw in packet["files"].items():
-        path = source / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(raw)
-        files[name] = {"length": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
-    data = {
-        "schema": "brz2obsidian.api-acceptance/2",
-        "files": files,
-        **packet["baseline_inputs"],
-    }
-    manifest = source / "manifest.json"
-    manifest.write_bytes(json_bytes(data))
-    baseline = load_baseline(
-        manifest, hashlib.sha256(manifest.read_bytes()).hexdigest()
-    )
+        def update(row):
+            if isinstance(row, dict):
+                if row.get("id") == note_id and "dataLength" in row:
+                    row["dataLength"] = len(raw)
+                for child in row.values():
+                    update(child)
+            elif isinstance(row, list):
+                for child in row:
+                    update(child)
+
+        for relative in baseline.data["files"]:
+            if (
+                relative.startswith("responses/")
+                and relative.endswith(".json")
+                and relative != baseline.data["tags"]["path"]
+            ):
+                row = baseline.json(relative)
+                update(row)
+                (baseline.manifest_path.parent / relative).write_bytes(json_bytes(row))
+        baseline = repin(baseline)
+    data = baseline.data
     vault = directory / "vault"
     vault.mkdir()
     home, child, note, image = map(identity, (2, 3, 201, 202))
-    safe = "Kept Ω.\r\n![Pixel](.data/md-images/" + image + "." + image_format + ")\r\n"
+    prose = "Kept Ω." if source_prefix is None else source_prefix
+    original_safe = (
+        prose + "\r\n![Pixel](.data/md-images/" + image + "." + image_format + ")\r\n"
+    )
+    displayed = prose if display_prefix is None else display_prefix
+    safe = (
+        displayed
+        + "\r\n![Pixel](.data/md-images/"
+        + image
+        + "."
+        + image_format
+        + ")\r\n"
+    )
     phrase, destination = (
         "![Pixel](.data/md-images/" + image + "." + image_format + ")",
         ".data/md-images/" + image + "." + image_format,
@@ -1645,6 +1718,21 @@ def raster_scope_case(directory, *, excluded=True, profile="3", image_format="pn
             }
         ],
     }
+    if display_prefix is not None:
+        document["text_adaptations"] = [
+            {
+                "kind": "markdown_insert",
+                "start": 0,
+                "end": len(prose),
+                "before": prose,
+                "after": display_prefix,
+                "adapted_start": 0,
+                "adapted_end": len(display_prefix),
+                "source_digest": hashlib.sha256(original_safe.encode()).hexdigest(),
+                "source_basis": "scoped_source_text/unicode_codepoints",
+                "adapted_basis": "document.text/unicode_codepoints",
+            }
+        ]
     targets = [
         {
             "item_key": key,
@@ -1752,7 +1840,7 @@ def raster_scope_case(directory, *, excluded=True, profile="3", image_format="pn
             dict(row, position={"decimal": str(row["position"])}),
             None if excluded and key == note else [key],
         )
-    retain("note_text:" + home, {"text": safe}, [note])
+    retain("note_text:" + home, {"text": original_safe}, [note])
     retain("no_note:" + child, baseline.json(data["no_notes"][child]))
     for when, path in zip(("start", "end"), data["statistics"], strict=True):
         retain(
@@ -1843,7 +1931,8 @@ def raster_scope_case(directory, *, excluded=True, profile="3", image_format="pn
         + "---\n\n# Home\n\n"
     )
     text += (
-        "Kept Ω.\n![Pixel](Attachments/"
+        displayed.replace("\r\n", "\n").replace("\r", "\n")
+        + "\n![Pixel](Attachments/"
         + image
         + "."
         + image_format
@@ -1875,7 +1964,7 @@ def test_inherited_raster_only_scope_still_requires_complete_documents(
 ):
     import json
 
-    from .api_checker import check_api_vault
+    from .api_checker import check_api_component_vault as check_api_vault
 
     baseline, vault = raster_scope_case(
         tmp_path, excluded=excluded, profile=profile, image_format=image_format
@@ -1943,7 +2032,7 @@ def test_scope_output_refuses_source_owned_excluded_text_in_larger_containers(
 ):
     import json
 
-    from .api_checker import check_api_vault
+    from .api_checker import check_api_component_vault as check_api_vault
 
     baseline = scope_baseline(tmp_path / "source")
     vault = mixed_vault(tmp_path / "vault", baseline)
@@ -1973,7 +2062,7 @@ def test_scope_output_refuses_source_owned_excluded_text_in_larger_containers(
 
 
 def test_excluded_metadata_text_can_also_be_legitimate_included_source_text(tmp_path):
-    from .api_checker import check_api_vault
+    from .api_checker import check_api_component_vault as check_api_vault
 
     baseline, vault = raster_scope_case(tmp_path)
     for name in baseline.data["files"]:
@@ -2006,7 +2095,7 @@ def test_excluded_metadata_text_can_also_be_legitimate_included_source_text(tmp_
 
 @pytest.mark.parametrize("entry", ["asset", "baseline", "vault"])
 def test_scope_representation_does_not_grant_profile1_png(tmp_path, entry):
-    from .api_checker import check_api_vault
+    from .api_checker import check_api_component_vault as check_api_vault
 
     baseline, vault = raster_scope_case(tmp_path, profile="1")
     image = baseline.json(baseline.data["attachment_metadata"][identity(202)]["path"])
@@ -2027,7 +2116,7 @@ def test_scope_decision_evidence_is_a_canonical_unique_logical_key_set(
 ):
     import json
 
-    from .api_checker import check_api_vault
+    from .api_checker import check_api_component_vault as check_api_vault
 
     baseline, vault = raster_scope_case(tmp_path)
     path = vault / "migration-record.json"
@@ -2063,7 +2152,7 @@ def test_scope_decision_evidence_is_a_canonical_unique_logical_key_set(
 def test_mixed_classification_evidence_is_canonical(tmp_path, damage):
     import json
 
-    from .api_checker import check_api_vault
+    from .api_checker import check_api_component_vault as check_api_vault
 
     baseline = scope_baseline(tmp_path / "source")
     vault = mixed_vault(tmp_path / "vault", baseline)
@@ -2098,7 +2187,7 @@ def test_excluded_scalar_provenance_is_specific_to_its_output_location(
 ):
     import json
 
-    from .api_checker import check_api_vault
+    from .api_checker import check_api_component_vault as check_api_vault
 
     baseline = scope_baseline(tmp_path / "source")
     value = {
@@ -2145,3 +2234,689 @@ def test_excluded_scalar_provenance_is_specific_to_its_output_location(
             match="excluded authored content|reverse hierarchy",
         ):
             check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize(
+    "damage", [None, "extra", "bad-uuid", "bad-digest", "bad-date", "unknown"]
+)
+def test_generated_protocol_provenance_has_closed_typed_locations(tmp_path, damage):
+    import json
+
+    from .api_checker import check_api_component_vault as check_api_vault
+
+    baseline = scope_baseline(tmp_path / "source")
+
+    def change(row):
+        if isinstance(row, dict):
+            if row.get("id") == identity(91):
+                row["name"] = "aaaa"
+            for child in row.values():
+                change(child)
+        elif isinstance(row, list):
+            for child in row:
+                change(child)
+
+    for name in baseline.data["files"]:
+        if name.startswith("responses/") and name.endswith(".json"):
+            row = baseline.json(name)
+            change(row)
+            (baseline.manifest_path.parent / name).write_bytes(json_bytes(row))
+    baseline = repin(baseline)
+    vault = mixed_vault(tmp_path / "vault", baseline)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    record.update(
+        schema="brz2obsidian.migration",
+        schema_version=7,
+        converter_version="0.1.0",
+        renderer_version="7",
+    )
+    record["source_identity"].update(source_sha256="a" * 64, snapshot_digest="b" * 64)
+    record["run_metadata"] = {
+        "converter_version": "0.1.0",
+        "renderer_version": "7",
+        "run_id": "aaaaaaaa-0000-4000-8000-000000000001",
+        "run_time": "2026-10-16T12:00:00+00:00",
+        "obsidian_version": "1.9.12",
+        "bookmark_time": 1792152000000,
+    }
+    if damage == "extra":
+        record["extra"] = "aaaa"
+    elif damage == "bad-uuid":
+        record["run_metadata"]["run_id"] = "aaaa"
+    elif damage == "bad-digest":
+        record["source_identity"]["source_sha256"] = "aaaa"
+    elif damage == "bad-date":
+        record["run_metadata"]["run_time"] = "2026-99-16T12:00:00+00:00"
+    elif damage == "unknown":
+        record["run_metadata"]["extra"] = "aaaa"
+    path.write_bytes(json_bytes(record))
+    if damage is None:
+        assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 11
+    else:
+        with pytest.raises(AssertionError):
+            check_api_vault(baseline, vault, profile_version="3")
+
+
+def test_generated_support_requires_source_derived_complete_census(tmp_path):
+    import json
+
+    from .api_checker import check_api_vault
+
+    baseline = scope_baseline(tmp_path / "source")
+    vault = mixed_vault(tmp_path / "vault", baseline)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    record["support_artifacts"] = []
+    record["reserved_support_paths"] = []
+    path.write_bytes(json_bytes(record))
+    with pytest.raises(AssertionError, match="support"):
+        check_api_vault(baseline, vault, profile_version="3")
+
+
+def complete_raster_support(baseline, vault):
+    """Independent full support input: one Home, one image, no optional listing.
+
+    Stock input prose is the separately qualified source-free GP05 reference.
+    Source cardinalities below are worked literals for RAW02 scoped PNG.
+    No checker/generated-proof function constructs this checked object.
+    """
+    import json
+
+    from .api_generated import STATIC
+    from .support import CATEGORY_VIEWS, image_formula, template
+
+    files = {}
+    for role in ("members", "gallery", "categories"):
+        if role == "categories":
+            formulas = {
+                "local_icon": image_formula("icon"),
+                "picture": "if(formula.local_icon, image(formula.local_icon.asFile()), null)",
+            }
+            head = 'filters:\n  and:\n    - file.ext == "md"\n    - file.inFolder("Categories")\n    - list(tags).contains("categories")\n'
+            properties = "properties:\n  formula.picture:\n    displayName: Icon\n  file.name:\n    displayName: Category\n"
+            view = "views:\n  - type: table\n    name: Categories\n    order:\n      - formula.picture\n      - file.name\n"
+        else:
+            formulas = {
+                "provider": 'if(appearance_category.isEmpty(), null, if(appearance_category.isType("link") && list(categories).contains(appearance_category) && appearance_category.asFile() && appearance_category.asFile().ext == "md" && appearance_category.asFile().inFolder("Categories") && list(appearance_category.asFile().properties.tags).contains("categories"), appearance_category.asFile(), null))',
+                "explicit_icon": image_formula("icon"),
+                "provider_icon": "if(formula.provider, formula.provider.properties.icon, null)",
+                "inherited_icon": image_formula("formula.provider_icon"),
+                "effective_icon": "if(formula.explicit_icon, formula.explicit_icon, formula.inherited_icon)",
+                "picture": "if(formula.effective_icon, image(formula.effective_icon.asFile()), null)",
+                "provider_status": 'if(appearance_category.isEmpty(), "No inheritance", if(formula.provider, "Category defaults", "Invalid provider"))',
+            }
+            head = 'filters:\n  and:\n    - file.ext == "md"\n    - \'!file.inFolder("Templates")\'\n    - \'!file.inFolder("Attachments")\'\n    - list(categories).contains(this)\n'
+            properties = "properties:\n  formula.picture:\n    displayName: Icon\n  file.name:\n    displayName: Note\n  formula.provider_status:\n    displayName: Inheritance\n"
+            view = (
+                "views:\n  - type: cards\n    name: Gallery\n    image: formula.effective_icon\n    imageFit: contain\n    imageAspectRatio: 0.4\n    cardSize: 230\n    order:\n      - file.name\n      - formula.provider_status\n"
+                if role == "gallery"
+                else "views:\n  - type: table\n    name: Members\n    order:\n      - formula.picture\n      - file.name\n      - formula.provider_status\n      - note.categories\n      - note.created\n      - note.updated\n"
+            )
+        content = (
+            head
+            + "formulas:\n"
+            + "".join(
+                "  " + key + ": '" + value + "'\n" for key, value in formulas.items()
+            )
+            + properties
+            + view
+            + "    sort:\n      - property: file.name\n        direction: ASC\n"
+        )
+        files["Templates/Bases/" + role.title() + ".base"] = content
+    files["Templates/Bases/Starter.base"] = files["Templates/Bases/Members.base"]
+    files["Templates/New note.md"] = template()
+    files["Templates/Category starter.md"] = (
+        template(role_tag=True) + "\n" + CATEGORY_VIEWS
+    )
+    files["Templates/Member template starter.md"] = (
+        template()
+        + "\n<!-- Duplicate this as a full template, then set categories and appearance_category to your existing category. Keep the date/title variables for insertion into a new note. See Vault guide. -->\n"
+    )
+    files["Categories.md"] = "# Categories\n\n![[Templates/Bases/Categories.base]]\n"
+    files["Vault guide.md"] = (
+        STATIC["GP05-GUIDE-00"] + STATIC["GP05-GUIDE-02"] + STATIC["GP05-GUIDE-03"]
+    )
+    files["MIGRATION REPORT.md"] = (
+        STATIC["GP05-REPORT-00"]
+        + "Created 1 thought notes; preserved 1 present payloads.\n\n"
+        + STATIC["GP05-REPORT-01"]
+        + STATIC["GP05-REPORT-02"]
+        + STATIC["GP05-REPORT-03"]
+        + STATIC["GP05-REPORT-12"]
+    )
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    record.update(
+        schema="brz2obsidian.migration",
+        schema_version=7,
+        converter_version="0.1.0",
+        renderer_version="7",
+    )
+    record["run_metadata"] = {
+        "converter_version": "0.1.0",
+        "renderer_version": "7",
+        "run_id": "aaaaaaaa-0000-4000-8000-000000000001",
+        "run_time": "2026-10-16T12:00:00+00:00",
+        "obsidian_version": "1.13.7",
+        "bookmark_time": 1792152000000,
+    }
+    record["run_metadata"]["source_acquisition"] = {
+        "integrity_sha256": "a" * 64,
+        "audit": {
+            "atomic": False,
+            "method": "bounded-read-only-local-api",
+            "started_at": "2026-10-16T11:59:00.000000Z",
+            "finished_at": "2026-10-16T11:59:01.000000Z",
+            "limits": {
+                "initial_search_results": 5000,
+                "search_budget_ms": 300000,
+                "search_max_response_bytes": 128000000,
+                "max_search_results": None,
+                "request_timeout_ms": 30000,
+                "max_response_bytes": 16000000,
+                "max_total_capture_bytes": 1000000000,
+                "max_requests": 100000,
+                "max_traversal_items": 100000,
+                "max_payload_bytes": 256000000,
+            },
+            "requests": [
+                {
+                    "sequence": 1,
+                    "operation": "brain",
+                    "brain_id": identity(1),
+                    "subject_id": identity(1),
+                    "status": 200,
+                    "outcome": "success",
+                    "started_at": "2026-10-16T11:59:00.100000Z",
+                    "finished_at": "2026-10-16T11:59:00.200000Z",
+                    "actual_length": len(baseline.bytes(baseline.data["brain"])),
+                }
+            ],
+            "consistency_limits": [
+                "non-atomic-multi-request",
+                "captured-copy-integrity-only",
+                "empirical-discovery-no-completeness-guarantee",
+            ],
+        },
+    }
+    record["source_identity"].update(source_sha256="a" * 64, snapshot_digest="b" * 64)
+    configs = {
+        ".obsidian/app.json": (
+            "obsidian_configuration",
+            {
+                "showInlineTitle": False,
+                "defaultViewMode": "preview",
+                "newFileLocation": "folder",
+                "newFileFolderPath": "Notes",
+                "useMarkdownLinks": False,
+                "newLinkFormat": "absolute",
+                "openBehavior": "file:Home.md",
+                "alwaysUpdateLinks": True,
+                "attachmentFolderPath": "Attachments",
+            },
+        ),
+        ".obsidian/core-plugins.json": (
+            "obsidian_core_plugins_configuration",
+            dict.fromkeys(
+                (
+                    "file-explorer",
+                    "global-search",
+                    "switcher",
+                    "graph",
+                    "backlink",
+                    "tag-pane",
+                    "page-preview",
+                    "command-palette",
+                    "bookmarks",
+                    "properties",
+                    "bases",
+                    "templates",
+                ),
+                True,
+            ),
+        ),
+        ".obsidian/templates.json": (
+            "obsidian_templates_configuration",
+            {"folder": "Templates", "dateFormat": "YYYY-MM-DD"},
+        ),
+        ".obsidian/types.json": (
+            "obsidian_property_types_configuration",
+            {
+                "types": {
+                    "categories": "multitext",
+                    "appearance_category": "text",
+                    "icon": "text",
+                    "created": "date",
+                    "updated": "date",
+                    "tags": "tags",
+                    "aliases": "aliases",
+                    "source_collection_id": "text",
+                    "source_item_id": "text",
+                }
+            },
+        ),
+    }
+    for name, (field, value) in configs.items():
+        files[name] = json.dumps(value) + "\n"
+        record[field] = value
+    files[".obsidian/bookmarks.json"] = (
+        json.dumps(
+            {
+                "items": [
+                    {
+                        "type": "file",
+                        "ctime": 1792152000000,
+                        "path": "Home.md",
+                        "title": "Home",
+                    }
+                ]
+            }
+        )
+        + "\n"
+    )
+    purposes = {
+        name: "configuration"
+        if name.startswith(".obsidian/")
+        else "report"
+        if name == "MIGRATION REPORT.md"
+        else "overview"
+        if name == "Categories.md"
+        else "guide"
+        if name == "Vault guide.md"
+        else "starter"
+        if "starter" in name.lower()
+        else "base"
+        if name.endswith(".base")
+        else "template"
+        for name in files
+    }
+    purposes["migration-record.json"] = "migration_record"
+    record["support_artifacts"] = [
+        {"relative_path": name, "purpose": purpose}
+        for name, purpose in purposes.items()
+    ]
+    record["reserved_support_paths"] = ["Uncreated targets.md", "Tag memberships.md"]
+    record["source_gaps"] = []
+    record["generated_presentations"] = []
+    for target in record["item_targets"]:
+        key = target["item_key"]
+        target.update(
+            creation_reasons=["content", "home"] if key == identity(2) else [],
+            calendar_dates={"created": "2026-09-13", "updated": "2026-10-02"},
+            metadata_evidence=["thought:" + key],
+            vault_tag_token=None,
+        )
+    for asset in record["asset_targets"]:
+        asset.update(
+            naming_seed=asset["asset_id"].replace("-", ""),
+            evidence=["attachment:" + asset["asset_id"]],
+            video_presentation=None,
+            source_findings=[],
+        )
+    for relation in record["relationships"]:
+        relation.update(
+            target_a="Home.md",
+            target_b="Notes/Child.md",
+            evidence=["link:" + relation["key"]],
+            presentation="Parents/Children"
+            if relation["kind"] == "hierarchy"
+            else "Related",
+        )
+    record["adaptations"] = []
+    for kind, affected, description in (
+        (
+            "native_templates_configuration",
+            ".obsidian/templates.json",
+            STATIC["GP07-DESCRIPTION-19"],
+        ),
+        ("vault_maintenance_guide", "Vault guide.md", STATIC["GP07-DESCRIPTION-20"]),
+        ("categories_overview", identity(2), STATIC["GP07-DESCRIPTION-21"]),
+        (
+            "native_bases_configuration",
+            ".obsidian/core-plugins.json",
+            STATIC["GP07-DESCRIPTION-22"],
+        ),
+        ("canonical_properties", identity(2), STATIC["GP07-DESCRIPTION-16"]),
+        ("source_calendar_dates", identity(2), STATIC["GP07-DESCRIPTION-14"]),
+        (
+            "image_reference",
+            "reference:" + identity(201) + ":0",
+            "Inline source reference resolves to canonical "
+            + identity(202)
+            + "; original display and syntax remain in document evidence.",
+        ),
+        *(
+            (
+                "relationship_presentation",
+                identity(key),
+                "Simple "
+                + label
+                + " links; original source arrow and visibility details remain in evidence.",
+            )
+            for key, label in (
+                (101, "Parents/Children"),
+                (102, "Related"),
+                (103, "Related"),
+            )
+        ),
+    ):
+        record["adaptations"].append(
+            {
+                "kind": kind,
+                "affected": affected,
+                "description": description,
+                "document_key": None,
+                "owner": None,
+                "evidence": [],
+                "text_edit": None,
+            }
+        )
+    record["counts"] = {
+        "image_presentation_normalizations": 0,
+        "text_adaptations": 0,
+        "source_gaps": 0,
+        "generated_presentations": 0,
+        "planned_generated_embeds": 0,
+        "actual_generated_embeds": 0,
+        "source_items": 2,
+        "source_relationships": 3,
+        "source_references": 1,
+        "present_assets": 1,
+        "planned_notes": 1,
+        "planned_assets": 1,
+        "planned_references": 1,
+        "actual_notes": None,
+        "actual_assets": None,
+        "actual_files": None,
+        "actual_references": 1,
+        "source_tags": 0,
+        "tag_memberships": 0,
+        "native_tag_memberships": 0,
+        "uncreated_tag_memberships": 0,
+        "created_tag_items": 0,
+        "uncreated_tag_items": 0,
+        "source_definitions": 0,
+        "classification_assignments": 0,
+        "typed_members": 0,
+        "planned_category_notes": 0,
+        "actual_category_notes": None,
+        "planned_support_files": 16,
+        "actual_support_files": None,
+    }
+    for name, text in files.items():
+        output = vault / name
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(text, encoding="utf8", newline="\n")
+    path.write_bytes(json_bytes(record))
+    return baseline, vault
+
+
+@pytest.mark.parametrize("name", ["a", "source"])
+@pytest.mark.parametrize(
+    "damage",
+    [
+        None,
+        "guide-append",
+        "report-append",
+        "both-envelopes",
+        "protocol",
+        "whole-support",
+        "unknown-file",
+        "unknown-field",
+        "note",
+        "wrong-count",
+        "missing-count",
+        "duplicate-support",
+        "wrong-config",
+        "wrong-base",
+        "wrong-template",
+        "wrong-adaptation",
+        "unknown-acquisition",
+        "bad-acquisition-time",
+        "missing-item",
+        "missing-asset",
+        "missing-relationship",
+        "benign-record",
+        "benign-child",
+    ],
+)
+def test_complete_generated_raster_provenance_is_location_specific(
+    tmp_path, name, damage
+):
+    import json
+
+    from .api_checker import check_api_vault
+
+    baseline, vault = raster_scope_case(tmp_path)
+    for relative in baseline.data["files"]:
+        if relative.startswith("responses/") and relative.endswith(".json"):
+            if (
+                baseline.data["tags"]["status"] == 400
+                and relative == baseline.data["tags"]["path"]
+            ):
+                continue
+            value = baseline.json(relative)
+
+            def change(row):
+                if isinstance(row, dict):
+                    if row.get("id") == identity(91):
+                        row["name"] = name
+                    for child in row.values():
+                        change(child)
+                elif isinstance(row, list):
+                    for child in row:
+                        change(child)
+
+            change(value)
+            (baseline.manifest_path.parent / relative).write_bytes(json_bytes(value))
+    baseline = repin(baseline)
+    complete_raster_support(baseline, vault)
+    record_path = vault / "migration-record.json"
+    record = json.loads(record_path.read_bytes())
+    if damage in {"guide-append", "report-append", "note"}:
+        output = (
+            vault
+            / {
+                "guide-append": "Vault guide.md",
+                "report-append": "MIGRATION REPORT.md",
+                "note": "Home.md",
+            }[damage]
+        )
+        output.write_bytes(output.read_bytes() + ("\n" + name).encode())
+    elif damage == "both-envelopes":
+        del record["support_artifacts"], record["reserved_support_paths"]
+    elif damage == "protocol":
+        for field in (
+            "schema",
+            "schema_version",
+            "converter_version",
+            "renderer_version",
+            "run_metadata",
+        ):
+            del record[field]
+    elif damage == "whole-support":
+        for row in record["support_artifacts"]:
+            if row["relative_path"] != "migration-record.json":
+                (vault / row["relative_path"]).unlink()
+        for output in sorted(
+            vault.rglob("*"), key=lambda path: len(path.parts), reverse=True
+        ):
+            if output.is_dir() and not any(output.iterdir()):
+                output.rmdir()
+        for field in (
+            "support_artifacts",
+            "reserved_support_paths",
+            "schema",
+            "schema_version",
+            "converter_version",
+            "renderer_version",
+            "run_metadata",
+        ):
+            del record[field]
+    elif damage == "unknown-file":
+        (vault / "unknown.txt").write_text("unrelated extra", encoding="utf8")
+    elif damage == "unknown-field":
+        record["unknown"] = name
+    elif damage == "wrong-count":
+        record["counts"]["planned_notes"] = 2
+    elif damage == "missing-count":
+        del record["counts"]["source_items"]
+    elif damage == "duplicate-support":
+        record["support_artifacts"].append(record["support_artifacts"][0])
+    elif damage == "wrong-config":
+        output = vault / ".obsidian/app.json"
+        value = json.loads(output.read_bytes())
+        value["alwaysUpdateLinks"] = False
+        output.write_bytes(json_bytes(value))
+    elif damage == "wrong-base":
+        (vault / "Templates/Bases/Members.base").write_text("wrong", encoding="utf8")
+    elif damage == "wrong-template":
+        (vault / "Templates/New note.md").write_text("wrong", encoding="utf8")
+    elif damage == "wrong-adaptation":
+        record["adaptations"][0]["description"] += " " + name
+    elif damage == "unknown-acquisition":
+        record["run_metadata"]["source_acquisition"]["extra"] = name
+    elif damage == "bad-acquisition-time":
+        record["run_metadata"]["source_acquisition"]["audit"]["requests"][0][
+            "finished_at"
+        ] = "2026-10-16T11:58:00.200000Z"
+    elif damage == "missing-item":
+        del record["item_targets"][0]["creation_reasons"]
+    elif damage == "missing-asset":
+        del record["asset_targets"][0]["evidence"]
+    elif damage == "missing-relationship":
+        del record["relationships"][0]["presentation"]
+    elif damage == "benign-record":
+        record["unexpected"] = "benign"
+    elif damage == "benign-child":
+        record["item_targets"][0]["unexpected"] = "benign"
+    record_path.write_bytes(json_bytes(record))
+    if damage is None:
+        assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 1
+    else:
+        with pytest.raises(AssertionError):
+            check_api_vault(baseline, vault, profile_version="3")
+
+
+def test_partial_component_refuses_undeclared_file_without_excluded_text(tmp_path):
+    from .api_checker import check_api_component_vault
+
+    baseline, vault = raster_scope_case(tmp_path)
+    (vault / "extra.txt").write_text("unrelated", encoding="utf8")
+    with pytest.raises(AssertionError, match="component source file census"):
+        check_api_component_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize(
+    "prefix,warning",
+    [
+        ('Text :(table="column-widths:-1,0;justification:default"):', "table"),
+        ('`Text :(table="column-widths:-1,0;justification:default"):`', None),
+        ('<!-- Text :(table="column-widths:-1,0;justification:default"): -->', None),
+        (
+            '| `:(table=x)` |:(table="column-widths:-1,0;justification:default"):\r\n| cell |',
+            "responsive-table",
+        ),
+        ("[/toc/bad]", "table_of_contents"),
+        ("[/tocBroken", None),
+        ("[/toc/bad] trailing", None),
+        ("> [/toc/bad]", None),
+        ("`[/toc/bad]`", None),
+        ("<!-- [/toc/bad] -->", None),
+    ],
+)
+def test_complete_warning_grammar_retains_plain_and_protected_neighbors(
+    tmp_path, prefix, warning
+):
+    import json
+
+    from .api_checker import check_api_vault
+    from .api_generated import STATIC
+    from .checker import escaped
+
+    display = (
+        "| `:(table=x)` |\n|---|\r\n| cell |" if warning == "responsive-table" else None
+    )
+    baseline, vault = raster_scope_case(
+        tmp_path, source_prefix=prefix, display_prefix=display
+    )
+    complete_raster_support(baseline, vault)
+    if warning:
+        table = warning in {"table", "responsive-table"}
+        declaration = (
+            prefix[prefix.index(':(table="') :].split("\r\n")[0] if table else prefix
+        )
+        change = (
+            STATIC["GP07-LOSS-01"]
+            if warning == "responsive-table"
+            else STATIC["GP07-LOSS-08"]
+            if table
+            else STATIC["GP07-LOSS-10"]
+        )
+        observed = json.dumps(
+            {
+                "feature": "table" if table else warning,
+                "declaration": declaration,
+                "change": change,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        issue = {
+            "code": "formatting_loss",
+            "severity": "warning",
+            "phase": "analysis",
+            "message": STATIC["GP05-WARNING-02"] + " Observed: " + observed,
+            "guidance": STATIC["GP05-WARNING-03"],
+            "affected": [identity(2), identity(201)],
+            "evidence": ["attachment:" + identity(201)],
+            "rule_id": "local-api.note-formatting.v1",
+            "leftover_path": None,
+        }
+        path = vault / "migration-record.json"
+        record = json.loads(path.read_bytes())
+        record["issues"] = [issue]
+        if display is not None:
+            edit = record["item_targets"][0]["documents"][0]["text_adaptations"][0]
+            record["adaptations"].append(
+                {
+                    "kind": "markdown_insert",
+                    "affected": "text:" + identity(201) + ":0",
+                    "description": STATIC["GP07-DESCRIPTION-27"],
+                    "document_key": identity(201),
+                    "owner": identity(2),
+                    "evidence": ["attachment:" + identity(201)],
+                    "text_edit": edit,
+                }
+            )
+            record["counts"]["text_adaptations"] = 1
+        path.write_bytes(json_bytes(record))
+        report = vault / "MIGRATION REPORT.md"
+        text = report.read_text(encoding="utf8")
+        if display is not None:
+            intro = "Created 1 thought notes; preserved 1 present payloads.\n\n"
+            text = text.replace(
+                intro,
+                intro
+                + STATIC["GP05-REPORT-15"]
+                + "1"
+                + STATIC["GP05-REPORT-16"]
+                + "- [[Home.md|Home]]\n\n",
+                1,
+            )
+        row = (
+            "- [[Home.md|Home]] — formatting_loss (local-api.note-formatting.v1): "
+            + escaped(issue["message"])
+            + " "
+            + issue["guidance"]
+            + "\n"
+        )
+        text = text.replace(
+            STATIC["GP05-REPORT-12"],
+            STATIC["GP05-REPORT-11"] + row + STATIC["GP05-REPORT-12"],
+            1,
+        )
+        report.write_text(text, encoding="utf8", newline="\n")
+    assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 1
