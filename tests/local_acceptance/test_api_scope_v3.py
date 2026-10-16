@@ -2818,6 +2818,13 @@ def test_partial_component_refuses_undeclared_file_without_excluded_text(tmp_pat
             '| `:(table=x)` |:(table="column-widths:-1,0;justification:default"):\r\n| cell |',
             "responsive-table",
         ),
+        (
+            (
+                '| C |:(table="column-widths:-1,0;justification:default"):\r\n'
+                "| Text :(table=bad) `a|b` |"
+            ),
+            "responsive-and-malformed-body",
+        ),
         ("[/toc/bad]", "table_of_contents"),
         ("[/tocBroken", None),
         ("[/toc/bad] trailing", None),
@@ -2835,21 +2842,28 @@ def test_complete_warning_grammar_retains_plain_and_protected_neighbors(
     from .api_generated import STATIC
     from .checker import escaped
 
-    display = (
-        "| `:(table=x)` |\n|---|\r\n| cell |" if warning == "responsive-table" else None
-    )
+    display = {
+        "responsive-table": "| `:(table=x)` |\n|---|\r\n| cell |",
+        "responsive-and-malformed-body": (
+            "| C |\n|---|\r\n| Text :(table=bad) <code>a&#124;b</code> |"
+        ),
+    }.get(warning)
     baseline, vault = raster_scope_case(
         tmp_path, source_prefix=prefix, display_prefix=display
     )
     complete_raster_support(baseline, vault)
     if warning:
-        table = warning in {"table", "responsive-table"}
+        table = warning in {
+            "table",
+            "responsive-table",
+            "responsive-and-malformed-body",
+        }
         declaration = (
             prefix[prefix.index(':(table="') :].split("\r\n")[0] if table else prefix
         )
         change = (
             STATIC["GP07-LOSS-01"]
-            if warning == "responsive-table"
+            if display is not None
             else STATIC["GP07-LOSS-08"]
             if table
             else STATIC["GP07-LOSS-10"]
@@ -2877,7 +2891,26 @@ def test_complete_warning_grammar_retains_plain_and_protected_neighbors(
         }
         path = vault / "migration-record.json"
         record = json.loads(path.read_bytes())
-        record["issues"] = [issue]
+        issues = [issue]
+        if warning == "responsive-and-malformed-body":
+            malformed = dict(issue)
+            body_observed = json.dumps(
+                {
+                    "feature": "table",
+                    "declaration": ":(table=bad) `a|b` |",
+                    "change": STATIC["GP07-LOSS-08"],
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            malformed["message"] = (
+                STATIC["GP05-WARNING-02"] + " Observed: " + body_observed
+            )
+            # Canonical source-finding order compares the qualified change text:
+            # responsive Column precedes Malformed for otherwise equal subjects.
+            issues.append(malformed)
+        record["issues"] = issues
         if display is not None:
             edit = record["item_targets"][0]["documents"][0]["text_adaptations"][0]
             record["adaptations"].append(
@@ -2906,12 +2939,13 @@ def test_complete_warning_grammar_retains_plain_and_protected_neighbors(
                 + "- [[Home.md|Home]]\n\n",
                 1,
             )
-        row = (
+        row = "".join(
             "- [[Home.md|Home]] — formatting_loss (local-api.note-formatting.v1): "
-            + escaped(issue["message"])
+            + escaped(value["message"])
             + " "
-            + issue["guidance"]
+            + value["guidance"]
             + "\n"
+            for value in issues
         )
         text = text.replace(
             STATIC["GP05-REPORT-12"],

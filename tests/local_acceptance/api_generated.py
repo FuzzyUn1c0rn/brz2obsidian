@@ -277,8 +277,9 @@ def formatting_observations(raw):
             }
         )
 
-    table_operations = []
-    table_text = tables(text, table_operations)
+    table_ownership = []
+    table_text = tables(text, ownership=table_ownership)
+    table_headers = {begin for begin, _ in table_ownership}
     for line in markdown_lines(text):
         body = line.rstrip("\r\n")
         active = mask[offset : offset + len(body)]
@@ -314,15 +315,10 @@ def formatting_observations(raw):
         ]
         if starts:
             declaration = body[starts[0] :]
-            # A successful header operation owns this exact source line and
-            # removes its terminal declaration. Sheltered spellings elsewhere
-            # in the header are source content, not another active declaration.
-            valid = any(
-                begin == offset
-                and end == offset + len(line)
-                and not replacement.rstrip("\r\n").endswith(declaration)
-                for begin, end, replacement in table_operations
-            )
+            # Only accepted table ownership starts identify headers. A body
+            # operation may independently convert code pipes while preserving
+            # an active malformed declaration on that same source line.
+            valid = offset in table_headers
             add("table", body[starts[0] :], "01" if valid else "08")
         declaration = body.strip()
         if (
