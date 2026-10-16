@@ -2347,3 +2347,114 @@ def test_svg_resources_classify_owned_destination_separately_from_child_label(tm
         encoding="utf-8",
     )
     assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 4
+
+
+@pytest.mark.parametrize(
+    "tag,attribute,prefix",
+    [
+        ("img", "src", "Attachments/"),
+        ("img", "src", "./Attachments/"),
+        ("img", "src", "Attachments%2F"),
+        ("a", "href", "./Attachments/"),
+        ("object", "data", "./Attachments/"),
+    ],
+)
+@pytest.mark.parametrize("protected", [False, True])
+def test_svg_active_html_uses_equivalent_owned_destination_identity(
+    tmp_path, tag, attribute, prefix, protected
+):
+    baseline, vault = svg_case(tmp_path)
+    markup = f'<{tag} {attribute}="{prefix}{identity(206)}.svg"></{tag}>'
+    if protected:
+        markup = "`" + markup + "`"
+    note = vault / "Home.md"
+    note.write_text(
+        note.read_text(encoding="utf-8") + "\n" + markup + "\n", encoding="utf-8"
+    )
+    if protected:
+        assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 4
+    else:
+        with pytest.raises(AssertionError):
+            check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize(
+    "damage", [None, "omit", "forged", "extra-markdown", "extra-html"]
+)
+def test_nonhome_svg_owner_keeps_wiki_vault_base_and_url_note_base(tmp_path, damage):
+    baseline, vault = nonhome_svg_case(tmp_path)
+    assert audit_baseline(baseline, profile_version="3")["attachments"] == 4
+    note = vault / "Notes/Child.md"
+    text = note.read_text(encoding="utf-8")
+    row = f"- [[Attachments/{identity(206)}.svg|{identity(206)}.svg]]\n"
+    if damage == "omit":
+        text = text.replace(row, "")
+    elif damage == "forged":
+        text = text.replace(row, "- [[Attachments/forged.svg|forged.svg]]\n")
+    elif damage == "extra-markdown":
+        text += f"- [Forged](../Attachments/{identity(206)}.svg)\n"
+    elif damage == "extra-html":
+        text += f'<img src="../Attachments/{identity(206)}.svg">\n'
+    note.write_text(text, encoding="utf-8")
+    if damage:
+        with pytest.raises(AssertionError):
+            check_api_vault(baseline, vault, profile_version="3")
+    else:
+        assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 4
+
+
+def nonhome_svg_case(tmp_path):
+    baseline, vault = svg_case(tmp_path)
+    root = baseline.manifest_path.parent
+    manifest = json.loads(baseline.manifest_path.read_bytes())
+    home, child = identity(2), identity(3)
+    home_graph_path, child_graph_path = (
+        root / manifest["graphs"][key] for key in (home, child)
+    )
+    home_graph, child_graph = (
+        json.loads(path.read_bytes()) for path in (home_graph_path, child_graph_path)
+    )
+    rows = home_graph["attachments"]
+    for row in rows:
+        row["sourceId"] = child
+        write_json(root / manifest["attachment_metadata"][row["id"]]["path"], row)
+    home_graph["attachments"] = []
+    child_graph["attachments"] = rows
+    write_json(home_graph_path, home_graph)
+    write_json(child_graph_path, child_graph)
+    write_json(root / manifest["attachment_inventories"][home], [])
+    inventory = "child-attachments.json"
+    write_json(root / inventory, rows)
+    manifest["files"][inventory] = fingerprint(root / inventory)
+    manifest["attachment_inventories"][child] = inventory
+    old_no_note = manifest["no_notes"].pop(child)
+    no_note = json.loads((root / old_no_note).read_bytes())
+    no_note["sourceId"] = home
+    write_json(root / "home-no-note.json", no_note)
+    manifest["files"]["home-no-note.json"] = fingerprint(root / "home-no-note.json")
+    manifest["no_notes"][home] = "home-no-note.json"
+    write_json(baseline.manifest_path, manifest)
+    baseline = reseal(baseline)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    ids = {row["id"] for row in rows}
+    for row in record["original_evidence"][0]["records"]:
+        if row.get("id") in ids:
+            row["sourceId"] = child
+    for asset in record["asset_targets"]:
+        asset["owner"] = child
+    targets = {row["item_key"]: row for row in record["item_targets"]}
+    targets[child]["documents"] = targets[home]["documents"]
+    targets[home]["documents"] = []
+    for doc in targets[child]["documents"]:
+        doc["owner"] = child
+        doc["owner_target"] = "Notes/Child.md"
+    write_json(path, record)
+    home_note, child_note = vault / "Home.md", vault / "Notes/Child.md"
+    header, authored = home_note.read_text(encoding="utf-8").split("# Home\n\n", 1)
+    home_note.write_text(header + "# Home\n\n", encoding="utf-8")
+    authored = authored.replace("(Attachments/", "(../Attachments/")
+    child_note.write_text(
+        child_note.read_text(encoding="utf-8") + authored, encoding="utf-8"
+    )
+    return baseline, vault

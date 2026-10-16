@@ -1474,13 +1474,18 @@ def check_svg_notes(baseline, vault, thoughts, attachments, targets, assets):
         )[cursor:]
         owned_paths = {assets[key]["relative_path"] for key in owned}
 
-        def owned_destination(destination, *, owned_paths=owned_paths, target=target):
+        def owned_destination(
+            destination, *, vault_relative=False, owned_paths=owned_paths, target=target
+        ):
             parsed = urlsplit(destination)
             if parsed.scheme or parsed.netloc:
                 return False
             local = posixpath.normpath(
                 posixpath.join(
-                    posixpath.dirname(target["relative_path"]), unquote(parsed.path)
+                    ""
+                    if vault_relative
+                    else posixpath.dirname(target["relative_path"]),
+                    unquote(parsed.path),
                 )
             )
             if posixpath.dirname(local) in {
@@ -1508,10 +1513,11 @@ def check_svg_notes(baseline, vault, thoughts, attachments, targets, assets):
         resource_activity = "".join(resource_activity)
 
         class SVGHTML(HTMLParser):
-            def handle_starttag(self, tag, attrs, *, owned=owned):
+            def handle_starttag(self, tag, attrs, *, resolve=owned_destination):
                 assert not any(
                     name in {"src", "href", "data"}
-                    and value in {assets[key]["relative_path"] for key in owned}
+                    and value is not None
+                    and resolve(value)
                     for name, value in attrs
                 ), "SVG unexpected generated HTML placement"
 
@@ -1520,7 +1526,7 @@ def check_svg_notes(baseline, vault, thoughts, attachments, targets, assets):
         for match in re.finditer(
             r"\[\[([^\n|\]]+)(?:\|[^\n\]]*)?\]\]", resource_activity
         ):
-            if owned_destination(match[1]):
+            if owned_destination(match[1], vault_relative=True):
                 begin = tail.rfind("\n", 0, match.start()) + 1
                 end = tail.find("\n", match.end())
                 if end < 0:
