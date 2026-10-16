@@ -36,8 +36,47 @@ def markdown_lines(text):
     return [line for line in re.findall(r"[^\n]*(?:\n|$)", text) if line]
 
 
+def cross_container_code(text):
+    """Supplement scanner regions for admitted lazy multiline quote code spans.
+
+    Prefix depth alone cannot terminate inline code. A blank paragraph does;
+    balanced equal backtick runs preserve every raw character between them.
+    Existing scanner-owned fences/comments/ordinary code remain authoritative.
+    """
+    scan, ranges, cursor = active_mask(text), [], 0
+    for opening in re.finditer(r"(?<![\\`])`+(?!`)", text):
+        if opening.start() < cursor or scan[opening.start() : opening.end()].isspace():
+            continue
+        for closing in re.finditer(
+            r"(?<!`)" + re.escape(opening[0]) + r"(?!`)", text[opening.end() :]
+        ):
+            end = opening.end() + closing.end()
+            between = text[opening.end() : end - len(opening[0])]
+            if re.search(r"\n[ \t]*(?:> ?)*\n", between):
+                break
+            if "\n" in between:
+                ranges.append((opening.start(), end))
+            cursor = end
+            break
+    return ranges
+
+
+def protect_cross_container_code(text):
+    masked = list(text)
+    for start, end in cross_container_code(text):
+        masked[start:end] = ["\n" if char == "\n" else " " for char in text[start:end]]
+    return "".join(masked)
+
+
+def insert_activity(text):
+    mask = list(active_mask(text))
+    for start, end in cross_container_code(text):
+        mask[start:end] = " " * (end - start)
+    return "".join(mask)
+
+
 def callouts(text):
-    mask = active_mask(text)
+    mask = insert_activity(text)
     output, opened, offset = [], set(), 0
     for line in markdown_lines(text):
         scan = mask[offset : offset + len(line)]
@@ -123,7 +162,7 @@ def row_cells(line):
 
 def tables(text):
     lines = markdown_lines(text)
-    scan = active_mask(text)
+    scan = insert_activity(text)
     offsets, cursor = [], 0
     for line in lines:
         offsets.append(cursor)
@@ -131,7 +170,7 @@ def tables(text):
     edits = {}
     for index, line in enumerate(lines):
         suffix = re.search(
-            r':\(table="column-widths:([-0-9,]+);justification:default"\):[ \t]*(?:\n|$)',
+            r':\(table="column-widths:([-0-9,]+);justification:default"\):(?:\n|$)',
             line,
         )
         if (
@@ -248,7 +287,11 @@ def label_text(value):
         )
     value = inline_display(value)
     value = " ".join(value.split()) or "Heading"
-    value = re.sub(r"(?<!\\)([\[\]^$])", r"\\\1", value)
+    value = value.replace("\\<", "<")
+    value = re.sub(r"([\\`*_{}\[\]<>$])", lambda match: "\\" + match[1], value)
+    value = re.sub(
+        r"(^| )(\^[A-Za-z0-9-]+)$", lambda match: match[1] + "\\" + match[2], value
+    )
     return re.sub(
         re.escape(placeholder) + r"M(\d+)" + re.escape(placeholder),
         lambda m: protected[int(m[1])],
@@ -258,7 +301,7 @@ def label_text(value):
 
 def contents(text):
     lines = markdown_lines(text)
-    mask = active_mask(text)
+    mask = insert_activity(text)
     offsets, cursor = [], 0
     for line in lines:
         offsets.append(cursor)
@@ -362,7 +405,7 @@ def contents(text):
             destination = old
         else:
             destination = f"brz-toc-heading-{number}"
-            while destination in used:
+            while destination in used or "^" + destination in text:
                 destination += "-generated"
             used.add(destination)
         claimed.add(destination)
@@ -378,19 +421,22 @@ def contents(text):
             )
             for i in range(heading["start"] + 1, heading["end"] + 1):
                 replacements[i] = ""
-    minimum = min((h["level"] for h in headings), default=1)
+    hierarchy, entries = [], []
+    for heading in headings:
+        while hierarchy and hierarchy[-1] >= heading["level"]:
+            hierarchy.pop()
+        entries.append(
+            "  " * len(hierarchy)
+            + "- ["
+            + heading["label"]
+            + "](#^"
+            + heading["destination"]
+            + ")\n"
+        )
+        hierarchy.append(heading["level"])
     for index, prefix in markers.items():
         replacements[index] = (
-            "".join(
-                prefix
-                + "  " * (h["level"] - minimum)
-                + "- ["
-                + h["label"]
-                + "](#^"
-                + h["destination"]
-                + ")\n"
-                for h in headings
-            )
+            "".join(prefix + entry for entry in entries)
             or prefix + "No authored headings.\n"
         )
     return "".join(replacements.get(i, line) for i, line in enumerate(lines))
@@ -419,7 +465,11 @@ def render_references(text, owner, path, names, assets):
         if index in table_rows:
             contexts.append((offset, offset + len(line)))
         offset += len(line)
-    masked = re.sub(r"<code>[^<]*</code>", lambda match: " " * len(match[0]), text)
+    masked = re.sub(
+        r"<code>[^<]*</code>",
+        lambda match: " " * len(match[0]),
+        protect_cross_container_code(text),
+    )
     for reference in reversed(source_references(masked, owner, assets)):
         if reference["kind"] == "item":
             begin, end = reference["start"], reference["end"]
@@ -441,6 +491,9 @@ def render_references(text, owner, path, names, assets):
 
 def expected_note_text(raw, owner, path, names, assets):
     normalized = raw.replace("\r\n", "\n").replace("\r", "\n")
-    text, _ = literal_edits(normalized)
+    _, edits = literal_edits(protect_cross_container_code(normalized))
+    text = normalized
+    for edit in reversed(edits):
+        text = text[: edit["start"]] + edit["after"] + text[edit["end"] :]
     text = contents(callouts(tables(text)))
     return render_references(text, owner, path, names, assets)

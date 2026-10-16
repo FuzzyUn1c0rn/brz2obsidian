@@ -1188,7 +1188,7 @@ NOTE_FORMAT_EXAMPLES = [
     ),
     pytest.param(
         '### Contents\n[/toc/]\n\n### Table <Value>\n|Thought|Image|:(table="column-widths:-1,0,174;justification:default"):\n|[Child](brain://AAAAAAAAAECAAAAAAAAAAw/title)|![Alt](.data/md-images/00000000-0000-4000-8000-000000000202.webp#$width=50p$)|\n\n> [!note]\n> [Child](brain://AAAAAAAAAECAAAAAAAAAAw/title)\n> [!tip|icon:😂]\n> Press <Enter>.\n\nAuthored body.\n',
-        "### Contents\n- [Table \\<Value>](#^brz-toc-heading-1)\n\n### Table \\<Value> ^brz-toc-heading-1\n|Thought|Image|\n|---|---|\n|[[Child.md\\|Child]]|![Alt](00000000-0000-4000-8000-000000000202.bin)|\n\n> [!note]\n> [[Child.md|Child]]\n\n> [!tip] 😂 Tip\n> Press \\<Enter>.\n\nAuthored body.\n",
+        "### Contents\n- [Table \\<Value\\>](#^brz-toc-heading-1)\n\n### Table \\<Value> ^brz-toc-heading-1\n|Thought|Image|\n|---|---|\n|[[Child.md\\|Child]]|![Alt](00000000-0000-4000-8000-000000000202.bin)|\n\n> [!note]\n> [[Child.md|Child]]\n\n> [!tip] 😂 Tip\n> Press \\<Enter>.\n\nAuthored body.\n",
         id="composition",
     ),
     pytest.param(
@@ -1265,6 +1265,36 @@ NOTE_FORMAT_EXAMPLES = [
         "Plain\u2028> [!tip|icon:😂]\u2028> Body\n\nAuthored body.\n",
         "Plain\u2028> [!tip|icon:😂]\u2028> Body\n\nAuthored body.\n",
         id="unicode-inline-separator",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# First\nBody\n\n### Nested\nBody\n\n## Second\nBody\n\nAuthored body.\n",
+        "- [First](#^brz-toc-heading-1)\n  - [Nested](#^brz-toc-heading-2)\n  - [Second](#^brz-toc-heading-3)\n\n# First ^brz-toc-heading-1\nBody\n\n### Nested ^brz-toc-heading-2\nBody\n\n## Second ^brz-toc-heading-3\nBody\n\nAuthored body.\n",
+        id="toc-skipped-level",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# Target\nBody\n\n`^brz-toc-heading-1`\n\nAuthored body.\n",
+        "- [Target](#^brz-toc-heading-1-generated)\n\n# Target ^brz-toc-heading-1-generated\nBody\n\n`^brz-toc-heading-1`\n\nAuthored body.\n",
+        id="toc-protected-id",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# `a*b`\nBody\n\nAuthored body.\n",
+        "- [a\\*b](#^brz-toc-heading-1)\n\n# `a*b` ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-code-punctuation",
+    ),
+    pytest.param(
+        '|One|Two|:(table="column-widths:-1,0,84;justification:default"): \n|1|2|\n\nAuthored body.\n',
+        '|One|Two|:(table="column-widths:-1,0,84;justification:default"): \n|1|2|\n\nAuthored body.\n',
+        id="table-trailing-space",
+    ),
+    pytest.param(
+        "> [!note] Parent\n> > [!tip] Child\n> > Body\n> > `literal beginning\n> parent literal line\n> literal end`\n\nAuthored body.\n",
+        "> [!note] Parent\n> > [!tip] Child\n> > Body\n> > `literal beginning\n> parent literal line\n> literal end`\n\nAuthored body.\n",
+        id="callout-protected-return",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# Mixed ![Image ^literal](.data/md-images/00000000-0000-4000-8000-000000000202.webp) `Code ^literal` ^authored-mixed\nBody\n\nAuthored body.\n",
+        "- [Mixed Image ^literal Code \\^literal](#^authored-mixed)\n\n# Mixed ![Image ^literal](00000000-0000-4000-8000-000000000202.bin) `Code ^literal` ^authored-mixed\nBody\n\nAuthored body.\n",
+        id="toc-mixed-caret",
     ),
 ]
 
