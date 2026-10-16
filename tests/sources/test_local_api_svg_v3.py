@@ -997,7 +997,10 @@ def test_qualified_external_file_ending_svg_remains_reference_without_target_io(
     "case,baseline_pin",
     [
         ("plain", "9c9efe1ff70bc8727f05f8d3dcb12bc63aae10c1ab8c9318bdccc9d4232a86b1"),
-        ("composed", "8c968af1b6152550ead8a6975c2db8213a4c1a356b8c95286f9de221d3f34c32"),
+        (
+            "composed",
+            "8c968af1b6152550ead8a6975c2db8213a4c1a356b8c95286f9de221d3f34c32",
+        ),
     ],
 )
 def test_standard_workflow_preserves_independent_svg_baseline(
