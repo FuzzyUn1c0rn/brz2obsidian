@@ -1188,7 +1188,7 @@ NOTE_FORMAT_EXAMPLES = [
     ),
     pytest.param(
         '### Contents\n[/toc/]\n\n### Table <Value>\n|Thought|Image|:(table="column-widths:-1,0,174;justification:default"):\n|[Child](brain://AAAAAAAAAECAAAAAAAAAAw/title)|![Alt](.data/md-images/00000000-0000-4000-8000-000000000202.webp#$width=50p$)|\n\n> [!note]\n> [Child](brain://AAAAAAAAAECAAAAAAAAAAw/title)\n> [!tip|icon:😂]\n> Press <Enter>.\n\nAuthored body.\n',
-        "### Contents\n- [Table \\<Value>](#^brz-toc-heading-1)\n\n### Table \\<Value> ^brz-toc-heading-1\n|Thought|Image|\n|---|---|\n|[[Child.md\\|Child]]|![Alt](00000000-0000-4000-8000-000000000202.bin)|\n\n> [!note]\n> [[Child.md|Child]]\n\n> [!tip] 😂 Tip\n> Press \\<Enter>.\n\nAuthored body.\n",
+        "### Contents\n- [Table \\<Value\\>](#^brz-toc-heading-1)\n\n### Table \\<Value> ^brz-toc-heading-1\n|Thought|Image|\n|---|---|\n|[[Child.md\\|Child]]|![Alt](00000000-0000-4000-8000-000000000202.bin)|\n\n> [!note]\n> [[Child.md|Child]]\n\n> [!tip] 😂 Tip\n> Press \\<Enter>.\n\nAuthored body.\n",
         id="composition",
     ),
     pytest.param(
@@ -1266,6 +1266,121 @@ NOTE_FORMAT_EXAMPLES = [
         "Plain\u2028> [!tip|icon:😂]\u2028> Body\n\nAuthored body.\n",
         id="unicode-inline-separator",
     ),
+    pytest.param(
+        "[/toc/]\n\n# First\nBody\n\n### Nested\nBody\n\n## Second\nBody\n\nAuthored body.\n",
+        "- [First](#^brz-toc-heading-1)\n  - [Nested](#^brz-toc-heading-2)\n  - [Second](#^brz-toc-heading-3)\n\n# First ^brz-toc-heading-1\nBody\n\n### Nested ^brz-toc-heading-2\nBody\n\n## Second ^brz-toc-heading-3\nBody\n\nAuthored body.\n",
+        id="toc-skipped-level",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# Target\nBody\n\n`^brz-toc-heading-1`\n\nAuthored body.\n",
+        "- [Target](#^brz-toc-heading-1-generated)\n\n# Target ^brz-toc-heading-1-generated\nBody\n\n`^brz-toc-heading-1`\n\nAuthored body.\n",
+        id="toc-protected-id",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# `a*b`\nBody\n\nAuthored body.\n",
+        "- [a\\*b](#^brz-toc-heading-1)\n\n# `a*b` ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-code-punctuation",
+    ),
+    pytest.param(
+        '|One|Two|:(table="column-widths:-1,0,84;justification:default"): \n|1|2|\n\nAuthored body.\n',
+        '|One|Two|:(table="column-widths:-1,0,84;justification:default"): \n|1|2|\n\nAuthored body.\n',
+        id="table-trailing-space",
+    ),
+    pytest.param(
+        "> [!note] Parent\n> > [!tip] Child\n> > Body\n> > `literal beginning\n> parent literal line\n> literal end`\n\nAuthored body.\n",
+        "> [!note] Parent\n> > [!tip] Child\n> > Body\n> > `literal beginning\n> parent literal line\n> literal end`\n\nAuthored body.\n",
+        id="callout-protected-return",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# Mixed ![Image ^literal](.data/md-images/00000000-0000-4000-8000-000000000202.webp) `Code ^literal` ^authored-mixed\nBody\n\nAuthored body.\n",
+        "- [Mixed Image ^literal Code \\^literal](#^authored-mixed)\n\n# Mixed ![Image ^literal](00000000-0000-4000-8000-000000000202.bin) `Code ^literal` ^authored-mixed\nBody\n\nAuthored body.\n",
+        id="toc-mixed-caret",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# Target\nBody\n\n`^brz-toc-heading-10`\n\nAuthored body.\n",
+        "- [Target](#^brz-toc-heading-1)\n\n# Target ^brz-toc-heading-1\nBody\n\n`^brz-toc-heading-10`\n\nAuthored body.\n",
+        id="toc-id-prefix-nearmiss",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# $a<b$\nBody\n\nAuthored body.\n",
+        "- [\\$a\\<b\\$](#^brz-toc-heading-1)\n\n# $a<b$ ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-math-angle",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# $a[b]$\nBody\n\nAuthored body.\n",
+        "- [\\$a\\[b\\]\\$](#^brz-toc-heading-1)\n\n# $a[b]$ ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-math-square",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# $a>b$\nBody\n\nAuthored body.\n",
+        "- [\\$a\\>b\\$](#^brz-toc-heading-1)\n\n# $a>b$ ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-math-greater",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# $a\\$\nBody\n\nAuthored body.\n",
+        "- [\\$a\\$](#^brz-toc-heading-1)\n\n# $a\\$ ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-escaped-dollar",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# $a `b`$\nBody\n\nAuthored body.\n",
+        "- [\\$a b\\$](#^brz-toc-heading-1)\n\n# $a `b`$ ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-code-overlap",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# ![$x$](.data/md-images/00000000-0000-4000-8000-000000000202.webp)\nBody\n\nAuthored body.\n",
+        "- [\\$x\\$](#^brz-toc-heading-1)\n\n# ![$x$](00000000-0000-4000-8000-000000000202.bin) ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-image-math",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# [$x$](https://example.invalid)\nBody\n\nAuthored body.\n",
+        "- [\\$x\\$](#^brz-toc-heading-1)\n\n# [$x$](https://example.invalid) ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-link-math",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# A  B\nBody\n\nAuthored body.\n",
+        "- [A  B](#^brz-toc-heading-1)\n\n# A  B ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-interior-spaces",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# `\\<`\nBody\n\nAuthored body.\n",
+        "- [\\\\\\<](#^brz-toc-heading-1)\n\n# `\\<` ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-code-backslash",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# ` `\nBody\n\nAuthored body.\n",
+        "- [Heading](#^brz-toc-heading-1)\n\n# ` ` ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-code-empty",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# ![` `](.data/md-images/00000000-0000-4000-8000-000000000202.webp)\nBody\n\nAuthored body.\n",
+        "- [Image](#^brz-toc-heading-1)\n\n# ![` `](00000000-0000-4000-8000-000000000202.bin) ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-image-code-empty",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# \\\\<\nBody\n\nAuthored body.\n",
+        "- [\\\\\\<](#^brz-toc-heading-1)\n\n# \\\\< ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-text-backslash",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# \\`literal` $x$ `tail\nBody\n\nAuthored body.\n",
+        "- [\\`literal\\$x\\$tail](#^brz-toc-heading-1)\n\n# \\`literal` $x$ `tail ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-escaped-code-discovery",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# A <!-- `ignored` --> B\nBody\n\nAuthored body.\n",
+        "- [A  B](#^brz-toc-heading-1)\n\n# A <!-- `ignored` --> B ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-comment-owned-code",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# \\``$x$`\nBody\n\nAuthored body.\n",
+        "- [\\`\\$x\\$](#^brz-toc-heading-1)\n\n# \\``$x$` ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-escaped-run-suffix",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# \\```$x$``\nBody\n\nAuthored body.\n",
+        "- [\\`\\$x\\$](#^brz-toc-heading-1)\n\n# \\```$x$`` ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-escaped-run-suffix-three",
+    ),
 ]
 
 
@@ -1299,6 +1414,16 @@ def test_admitted_api_note_transformations_remain_source_bound(
         ("literal-ref", "\\<Value>", "<Changed>"),
         ("table-code", "<code>x&#124;y</code>", "<code>FORGED</code>"),
         ("toc-simple", "(#^brz-toc-heading-1)", "(#^wrong-target)"),
+        (
+            "toc-id-prefix-nearmiss",
+            "(#^brz-toc-heading-1)",
+            "(#^brz-toc-heading-1-generated)",
+        ),
+        ("toc-math-angle", "\\$a\\<b\\$", "$a<b$"),
+        ("toc-image-math", "\\$x\\$", "$x$"),
+        ("toc-interior-spaces", "[A  B]", "[A B]"),
+        ("toc-escaped-code-discovery", "\\`literal\\$x\\$tail", "\\`literal$x$tail"),
+        ("toc-code-backslash", "\\\\\\<", "\\<"),
         ("toc-simple", "# Target ^brz-toc-heading-1", "# Forged ^brz-toc-heading-1"),
         ("toc-image-label", "Café emphasis", "Forged label"),
         ("composition", "[[Child.md\\|Child]]", "[[Home.md\\|Child]]"),

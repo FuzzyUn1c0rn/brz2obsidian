@@ -36,8 +36,47 @@ def markdown_lines(text):
     return [line for line in re.findall(r"[^\n]*(?:\n|$)", text) if line]
 
 
+def cross_container_code(text):
+    """Supplement scanner regions for admitted lazy multiline quote code spans.
+
+    Prefix depth alone cannot terminate inline code. A blank paragraph does;
+    balanced equal backtick runs preserve every raw character between them.
+    Existing scanner-owned fences/comments/ordinary code remain authoritative.
+    """
+    scan, ranges, cursor = active_mask(text), [], 0
+    for opening in re.finditer(r"(?<![\\`])`+(?!`)", text):
+        if opening.start() < cursor or scan[opening.start() : opening.end()].isspace():
+            continue
+        for closing in re.finditer(
+            r"(?<!`)" + re.escape(opening[0]) + r"(?!`)", text[opening.end() :]
+        ):
+            end = opening.end() + closing.end()
+            between = text[opening.end() : end - len(opening[0])]
+            if re.search(r"\n[ \t]*(?:> ?)*\n", between):
+                break
+            if "\n" in between:
+                ranges.append((opening.start(), end))
+            cursor = end
+            break
+    return ranges
+
+
+def protect_cross_container_code(text):
+    masked = list(text)
+    for start, end in cross_container_code(text):
+        masked[start:end] = ["\n" if char == "\n" else " " for char in text[start:end]]
+    return "".join(masked)
+
+
+def insert_activity(text):
+    mask = list(active_mask(text))
+    for start, end in cross_container_code(text):
+        mask[start:end] = " " * (end - start)
+    return "".join(mask)
+
+
 def callouts(text):
-    mask = active_mask(text)
+    mask = insert_activity(text)
     output, opened, offset = [], set(), 0
     for line in markdown_lines(text):
         scan = mask[offset : offset + len(line)]
@@ -123,7 +162,7 @@ def row_cells(line):
 
 def tables(text):
     lines = markdown_lines(text)
-    scan = active_mask(text)
+    scan = insert_activity(text)
     offsets, cursor = [], 0
     for line in lines:
         offsets.append(cursor)
@@ -131,7 +170,7 @@ def tables(text):
     edits = {}
     for index, line in enumerate(lines):
         suffix = re.search(
-            r':\(table="column-widths:([-0-9,]+);justification:default"\):[ \t]*(?:\n|$)',
+            r':\(table="column-widths:([-0-9,]+);justification:default"\):(?:\n|$)',
             line,
         )
         if (
@@ -224,41 +263,118 @@ def tables(text):
 
 
 def label_text(value):
-    """Independent visible heading text, protecting complete active math."""
-    protected = []
+    """Derive visible inline text, distinguishing code, escapes and active math."""
     placeholder = "\ue000"
     while placeholder in value:
         placeholder += "\ue000"
-    mask = active_mask(value, inline_only=True)
+    mathematics, literals = [], []
+
+    def escaped_at(text, position):
+        return (len(text[:position]) - len(text[:position].rstrip("\\"))) % 2 == 1
+
+    def owned_codes(text):
+        ranges, cursor = [], 0
+        while cursor < len(text):
+            if text.startswith("<!--", cursor) and not escaped_at(text, cursor):
+                close = text.find("-->", cursor + 4)
+                if close >= 0:
+                    cursor = close + 3
+                    continue
+            if text[cursor] != "`":
+                cursor += 1
+                continue
+            if escaped_at(text, cursor):
+                cursor += 1
+                continue
+            opening = re.match(r"`+", text[cursor:])
+            start = cursor
+            cursor += len(opening[0])
+            closing = next(
+                (
+                    run
+                    for run in re.finditer(r"`+", text[cursor:])
+                    if len(run[0]) == len(opening[0])
+                ),
+                None,
+            )
+            if closing is not None:
+                content_end = cursor + closing.start()
+                finish = cursor + closing.end()
+                ranges.append((start, finish, cursor, content_end))
+                cursor = finish
+        return ranges
+
+    phrases = [
+        (start, end) for start, end, *_ in inline_candidates(value, inline_only=True)[0]
+    ]
+    codes = [(start, end) for start, end, _, _ in owned_codes(value)]
+    dollars = [
+        (i - 1, i + 1)
+        for i, char in enumerate(value)
+        if char == "$" and escaped_at(value, i)
+    ]
 
     def math(match):
-        if mask[match.start() : match.start() + 1] != "$":
+        if any(
+            start < match.end() and match.start() < end
+            for start, end in [*phrases, *codes, *dollars]
+        ):
             return match[0]
-        protected.append(match[0])
-        return placeholder + "M" + str(len(protected) - 1) + placeholder
+        mathematics.append(match[0])
+        return placeholder + "M" + str(len(mathematics) - 1) + placeholder
 
-    value = re.sub(r"(?<!\\)\$[^$\n]+\$", math, value)
+    value = re.sub(r"(?<!\\)\$[^$\n\[\]<>]+(?<!\\)\$", math, value)
+
+    def keep(text):
+        literals.append(text)
+        return placeholder + "L" + str(len(literals) - 1) + placeholder
+
+    for begin, end, content_start, content_end in reversed(owned_codes(value)):
+        text = re.sub(r"\r\n?|\n", " ", value[content_start:content_end])
+        if text.startswith(" ") and text.endswith(" ") and text.strip():
+            text = text[1:-1]
+        value = value[:begin] + keep(text) + value[end:]
+    # Shield visible escaped punctuation before the independent display flattener.
+    # This keeps a code literal backslash distinct from a normal escape of '<'.
+    value = re.sub(
+        r"\\([!\"#$%&'()*+,\-./:;<=>?@\[\]\\^_`{|}~])",
+        lambda match: keep(match[1]),
+        value,
+    )
+
+    value = re.sub(r"<!--[\s\S]*?-->", "", value)
+
+    def visible_literals(text):
+        return re.sub(
+            re.escape(placeholder) + r"L(\d+)" + re.escape(placeholder),
+            lambda match: literals[int(match[1])],
+            text,
+        )
+
     for begin, end, image, label, _, _ in reversed(
         inline_candidates(value, inline_only=True)[0]
     ):
-        value = (
-            value[:begin]
-            + (inline_display(label) or ("Image" if image else ""))
-            + value[end:]
-        )
+        display = inline_display(label)
+        if not visible_literals(display).strip():
+            display = "Image" if image else ""
+        value = value[:begin] + display + value[end:]
     value = inline_display(value)
-    value = " ".join(value.split()) or "Heading"
-    value = re.sub(r"(?<!\\)([\[\]^$])", r"\\\1", value)
+    value = re.sub(r"(?: {2,}|\\)?(?:\r\n?|\n)", " ", value)
+    value = visible_literals(value).strip() or "Heading"
+    value = re.sub(r"([\\`*_{}\[\]<>$])", lambda match: "\\" + match[1], value)
+    value = re.sub(
+        r"(^| )(\^[A-Za-z0-9-]+)$", lambda match: match[1] + "\\" + match[2], value
+    )
     return re.sub(
         re.escape(placeholder) + r"M(\d+)" + re.escape(placeholder),
-        lambda m: protected[int(m[1])],
+        lambda match: mathematics[int(match[1])],
         value,
     )
 
 
 def contents(text):
     lines = markdown_lines(text)
-    mask = active_mask(text)
+    mask = insert_activity(text)
     offsets, cursor = [], 0
     for line in lines:
         offsets.append(cursor)
@@ -362,7 +478,9 @@ def contents(text):
             destination = old
         else:
             destination = f"brz-toc-heading-{number}"
-            while destination in used:
+            while destination in used or re.search(
+                r"\^" + re.escape(destination) + r"\b", text
+            ):
                 destination += "-generated"
             used.add(destination)
         claimed.add(destination)
@@ -378,19 +496,22 @@ def contents(text):
             )
             for i in range(heading["start"] + 1, heading["end"] + 1):
                 replacements[i] = ""
-    minimum = min((h["level"] for h in headings), default=1)
+    hierarchy, entries = [], []
+    for heading in headings:
+        while hierarchy and hierarchy[-1] >= heading["level"]:
+            hierarchy.pop()
+        entries.append(
+            "  " * len(hierarchy)
+            + "- ["
+            + heading["label"]
+            + "](#^"
+            + heading["destination"]
+            + ")\n"
+        )
+        hierarchy.append(heading["level"])
     for index, prefix in markers.items():
         replacements[index] = (
-            "".join(
-                prefix
-                + "  " * (h["level"] - minimum)
-                + "- ["
-                + h["label"]
-                + "](#^"
-                + h["destination"]
-                + ")\n"
-                for h in headings
-            )
+            "".join(prefix + entry for entry in entries)
             or prefix + "No authored headings.\n"
         )
     return "".join(replacements.get(i, line) for i, line in enumerate(lines))
@@ -419,7 +540,11 @@ def render_references(text, owner, path, names, assets):
         if index in table_rows:
             contexts.append((offset, offset + len(line)))
         offset += len(line)
-    masked = re.sub(r"<code>[^<]*</code>", lambda match: " " * len(match[0]), text)
+    masked = re.sub(
+        r"<code>[^<]*</code>",
+        lambda match: " " * len(match[0]),
+        protect_cross_container_code(text),
+    )
     for reference in reversed(source_references(masked, owner, assets)):
         if reference["kind"] == "item":
             begin, end = reference["start"], reference["end"]
@@ -441,6 +566,9 @@ def render_references(text, owner, path, names, assets):
 
 def expected_note_text(raw, owner, path, names, assets):
     normalized = raw.replace("\r\n", "\n").replace("\r", "\n")
-    text, _ = literal_edits(normalized)
+    _, edits = literal_edits(protect_cross_container_code(normalized))
+    text = normalized
+    for edit in reversed(edits):
+        text = text[: edit["start"]] + edit["after"] + text[edit["end"] :]
     text = contents(callouts(tables(text)))
     return render_references(text, owner, path, names, assets)
