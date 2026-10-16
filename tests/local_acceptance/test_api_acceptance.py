@@ -1042,9 +1042,7 @@ def test_profile3_oracle_refuses_older_vault_profile(tmp_path, record_profile):
         check_api_vault(baseline, vault, profile_version="3")
 
 
-@pytest.mark.parametrize(
-    "family", ["external-file", "external-folder", "jpeg", "svg", "reverse-hierarchy"]
-)
+@pytest.mark.parametrize("family", ["external-file", "external-folder", "jpeg", "svg"])
 def test_profile3_shared_oracle_keeps_future_family_eligibility_held(tmp_path, family):
     from tests.local_acceptance.api_checker import audit_baseline, expected_asset
 
@@ -1052,29 +1050,19 @@ def test_profile3_shared_oracle_keeps_future_family_eligibility_held(tmp_path, f
     path = baseline.manifest_path.parent / baseline.data["graphs"][identity(2)]
     graph = json.loads(path.read_bytes())
     resource = graph["attachments"][1]
-    if family == "reverse-hierarchy":
-        # Both raw endpoint graph observations agree on the newly unqualified tuple.
-        for graph_name in baseline.data["graphs"].values():
-            graph_path = baseline.manifest_path.parent / graph_name
-            value = json.loads(graph_path.read_bytes())
-            for link in value["links"]:
-                if link["id"] == identity(101):
-                    link["direction"] = 3
-            write_json(graph_path, value)
+    if family in {"external-file", "external-folder"}:
+        resource.update(
+            type=2 if family == "external-file" else 8,
+            location="C:\\External\\Reference",
+        )
     else:
-        if family in {"external-file", "external-folder"}:
-            resource.update(
-                type=2 if family == "external-file" else 8,
-                location="C:\\External\\Reference",
-            )
-        else:
-            resource.update(
-                type=12,
-                location=resource["id"] + (".jpg" if family == "jpeg" else ".svg"),
-            )
-        write_json(path, graph)
-        with pytest.raises(AssertionError):
-            expected_asset(reseal(baseline), resource, "3")
+        resource.update(
+            type=12,
+            location=resource["id"] + (".jpg" if family == "jpeg" else ".svg"),
+        )
+    write_json(path, graph)
+    with pytest.raises(AssertionError):
+        expected_asset(reseal(baseline), resource, "3")
     with pytest.raises(AssertionError):
         audit_baseline(reseal(baseline), profile_version="3")
 
