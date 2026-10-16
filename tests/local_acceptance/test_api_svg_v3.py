@@ -2261,3 +2261,89 @@ def test_svg_resources_keep_inherited_http_targets_outside_owned_svg_inventory(
             check_api_vault(baseline, vault, profile_version="3")
     else:
         assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 4
+
+
+@pytest.mark.parametrize(
+    "placement",
+    [None, "before-section", "other-section", "duplicate-heading", "extra-markdown"],
+)
+def test_svg_owned_resources_bind_one_complete_generated_section(tmp_path, placement):
+    baseline, vault = svg_case(tmp_path)
+    note = vault / "Home.md"
+    text = note.read_text(encoding="utf-8")
+    boundary = text.index("## Resources\n")
+    prefix = text[:boundary]
+    row = f"- [[Attachments/{identity(206)}.svg|{identity(206)}.svg]]\n"
+    if placement == "before-section":
+        text = prefix + row + "\n## Resources\n\n"
+    elif placement == "other-section":
+        text = prefix + "## Elsewhere\n\n" + row + "\n## Resources\n\n"
+    elif placement == "duplicate-heading":
+        text += "\n## Resources\n\n"
+    elif placement == "extra-markdown":
+        text += f"- [Forged](Attachments/{identity(206)}.svg)\n"
+    note.write_text(text, encoding="utf-8")
+    if placement:
+        with pytest.raises(AssertionError):
+            check_api_vault(baseline, vault, profile_version="3")
+    else:
+        assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 4
+
+
+@pytest.mark.parametrize("guard", ["inline-code", "fence", "comment"])
+def test_svg_generated_destination_census_keeps_protected_examples_inactive(
+    tmp_path, guard
+):
+    baseline, vault = svg_case(tmp_path)
+    example = f"[Example](Attachments/{identity(206)}.svg)"
+    protected = {
+        "inline-code": "`" + example + "`",
+        "fence": "```\n" + example + "\n```",
+        "comment": "<!-- " + example + " -->",
+    }[guard]
+    note = vault / "Home.md"
+    note.write_text(
+        note.read_text(encoding="utf-8") + "\n" + protected + "\n", encoding="utf-8"
+    )
+    assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 4
+
+
+def test_svg_resources_classify_owned_destination_separately_from_child_label(tmp_path):
+    baseline, vault = svg_case(tmp_path)
+    root = baseline.manifest_path.parent
+
+    def rename(value):
+        if isinstance(value, dict):
+            if value.get("id") == identity(3) and value.get("name") == "Child":
+                value["name"] = "Child.svg"
+            for child in value.values():
+                rename(child)
+        elif isinstance(value, list):
+            for child in value:
+                rename(child)
+
+    for path in root.rglob("*.json"):
+        value = json.loads(path.read_bytes())
+        rename(value)
+        write_json(path, value)
+    baseline = reseal(baseline)
+    record_path = vault / "migration-record.json"
+    record = json.loads(record_path.read_bytes())
+    rename(record)
+    child = next(
+        row for row in record["item_targets"] if row["item_key"] == identity(3)
+    )
+    child["original_title"] = "Child.svg"
+    write_json(record_path, record)
+    child_path = vault / child["relative_path"]
+    child_path.write_text(
+        child_path.read_text(encoding="utf-8").replace("# Child\n", "# Child.svg\n"),
+        encoding="utf-8",
+    )
+    home = vault / "Home.md"
+    home.write_text(
+        home.read_text(encoding="utf-8")
+        + "\n## Children\n\n- [[Notes/Child.md|Child.svg]]\n",
+        encoding="utf-8",
+    )
+    assert check_api_vault(baseline, vault, profile_version="3")["payloads"] == 4

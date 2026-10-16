@@ -2,13 +2,14 @@
 
 import hashlib
 import json
+import posixpath
 import re
 from decimal import Decimal
 from html.parser import HTMLParser
 from io import BytesIO
 from itertools import pairwise
 from pathlib import Path
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 from uuid import UUID
 from zipfile import BadZipFile, ZipFile
 
@@ -1471,10 +1472,32 @@ def check_svg_notes(baseline, vault, thoughts, attachments, targets, assets):
             "\n" if raw == "\n" else active
             for raw, active in zip(body, mask, strict=True)
         )[cursor:]
+        owned_paths = {assets[key]["relative_path"] for key in owned}
+
+        def owned_destination(destination, *, owned_paths=owned_paths, target=target):
+            parsed = urlsplit(destination)
+            if parsed.scheme or parsed.netloc:
+                return False
+            local = posixpath.normpath(
+                posixpath.join(
+                    posixpath.dirname(target["relative_path"]), unquote(parsed.path)
+                )
+            )
+            if posixpath.dirname(local) in {
+                posixpath.dirname(path) for path in owned_paths
+            } and local.lower().endswith(".svg"):
+                assert local in owned_paths, (
+                    "SVG generated target lacks source identity"
+                )
+            return local in owned_paths
+
         candidates = inline_candidates(activity)[0]
         assert not any(image for _, _, image, _, _, _ in candidates), (
             "SVG unexpected generated image placement"
         )
+        assert not any(
+            owned_destination(tail[begin:end]) for _, _, _, _, begin, end in candidates
+        ), "SVG unexpected generated Markdown placement"
         # An HTTP Markdown destination owns its complete spelling, including
         # wiki-like text in its query/fragment or label. Only remaining active
         # wiki references can be generated local SVG Resources rows.
@@ -1495,17 +1518,34 @@ def check_svg_notes(baseline, vault, thoughts, attachments, targets, assets):
         SVGHTML().feed(activity)
         actual = []
         for match in re.finditer(
-            r"^.*\[\[[^\n]+\]\].*$", resource_activity, re.MULTILINE
+            r"\[\[([^\n|\]]+)(?:\|[^\n\]]*)?\]\]", resource_activity
         ):
-            line = tail[match.start() : match.end()]
-            if ".svg" in match.group():
-                actual.append(line)
-        assert actual == required, "SVG generated Resources links"
-        if required:
-            assert any(
-                activity[m.start() + 3 : m.end()].strip() == "Resources"
-                for m in re.finditer(r"^## Resources[ \t]*$", tail, re.MULTILINE)
-            ), "SVG active Resources section"
+            if owned_destination(match[1]):
+                begin = tail.rfind("\n", 0, match.start()) + 1
+                end = tail.find("\n", match.end())
+                if end < 0:
+                    end = len(tail)
+                actual.append((begin, tail[begin:end]))
+        assert [line for _, line in actual] == required, "SVG generated Resources links"
+        headings = list(
+            re.finditer(
+                r"^ {0,3}#{1,6}[ \t]+Resources\b[^\n]*",
+                resource_activity,
+                re.MULTILINE | re.IGNORECASE,
+            )
+        )
+        if required or headings:
+            assert len(headings) == 1 and headings[0].group() == "## Resources", (
+                "SVG active unique Resources section"
+            )
+            section_start = headings[0].end()
+            following = re.search(
+                r"^ {0,3}#{1,2}[ \t]+", resource_activity[section_start:], re.MULTILINE
+            )
+            section_end = section_start + following.start() if following else len(tail)
+            assert [
+                line for offset, line in actual if section_start <= offset < section_end
+            ] == required, "SVG Resources section owns complete inventory"
 
 
 def check_api_vault(baseline, vault, *, profile_version="1"):
