@@ -1342,6 +1342,7 @@ def qualify_svg_binding(baseline, attachment):
         read_json(baseline.bytes(outcome["path"]), parse_float=Decimal)
     ) == semantic(attachment), "SVG standalone declaration agreement"
 
+
 def svg_table_contexts(text):
     """Independent native-table row ranges, retaining raw CR/LF coordinates."""
     lines = [line for line in re.findall(r"[^\r\n]*(?:\r\n|\r|\n|$)", text) if line]
@@ -1377,6 +1378,7 @@ def svg_table_contexts(text):
                 (offsets[following], offsets[following] + len(lines[following]))
             )
     return contexts
+
 
 def check_svg_notes(baseline, vault, thoughts, attachments, targets, assets):
     svg = {
