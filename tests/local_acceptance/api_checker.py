@@ -4,6 +4,7 @@ import hashlib
 import re
 from decimal import Decimal
 from io import BytesIO
+from itertools import pairwise
 from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -242,7 +243,7 @@ def qualify_reverse_joins(baseline, row, thoughts, links, graphs):
         graph = graphs[owner]
         incident = [
             r["id"]
-            for r in graph["links"] or []
+            for r in graph["links"]
             if owner in (r["thoughtIdA"], r["thoughtIdB"])
         ]
         required = {
@@ -265,8 +266,10 @@ def qualify_reverse_joins(baseline, row, thoughts, links, graphs):
                 expected["jumps"].add(b if owner == a else a)
             elif link["meaning"] == 5 and b == owner:
                 expected["tags"].add(a)
+        for field in (*expected, "siblings"):
+            assert type(graph.get(field)) is list, "required reverse graph array"
         for field, wanted in expected.items():
-            observed = graph[field] or []
+            observed = graph[field]
             keys = [n["id"] for n in observed]
             assert len(keys) == len(set(keys)), "duplicate reverse graph neighbor"
             assert all(
@@ -316,7 +319,8 @@ def source_facts(baseline, *, profile_version="1"):
             )
             assert attachment["id"] not in attachments, "raw attachment identities"
             attachments[attachment["id"]] = attachment
-        for row in graph["links"] or []:
+        assert type(graph["links"]) is list, "required graph relationship array"
+        for row in graph["links"]:
             if row["id"] in links:
                 assert semantic(links[row["id"]]) == semantic(row), (
                     "conflicting raw relationship"
@@ -582,7 +586,7 @@ def audit_baseline(baseline, *, profile_version="1"):
 def check_reverse_navigation(
     baseline, vault, thoughts, expected, raw_links, attachments, targets, assets
 ):
-    """Audit actual trailing navigation independently of migration-record claims."""
+    """Audit every generated navigation section after the trusted authored region."""
     owners = {
         owner
         for row in raw_links.values()
@@ -590,16 +594,66 @@ def check_reverse_navigation(
         == (1, 1, 1, 3)
         for owner in (row["thoughtIdA"], row["thoughtIdB"])
     }
+    if not owners:
+        return
+    # Source facts establish mandatory notes before deterministic edge coverage.
+    # This audit remains scoped to new reverse endpoints; all hierarchy edges
+    # participate because another edge can determine which empty parent is chosen.
+    selected = {baseline.json(baseline.data["brain"])["homeThoughtId"]}
+    selected.update(key for key, row in thoughts.items() if row["kind"] in {2, 4})
+    selected.update(
+        row["item_b"] for row in expected.values() if row["kind"] == "classification"
+    )
+    for key, attachment in attachments.items():
+        if attachment["isNotes"]:
+            text = baseline.bytes(baseline.data["payloads"][key]["path"]).decode(
+                "utf-8"
+            )
+            if text.strip():
+                selected.add(attachment["sourceId"])
+        else:
+            asset = assets[
+                key
+            ]  # independently checked against the raw declaration/bytes
+            if (
+                asset["availability"] == "external"
+                and asset["role"] in {"file", "url", "directory"}
+            ) or (
+                asset["availability"] == "present"
+                and asset["role"] in {"file", "image"}
+                and asset["actual_length"] > 0
+            ):
+                selected.add(attachment["sourceId"])
+    edges = [
+        (row["item_a"], row["item_b"])
+        for row in expected.values()
+        if row["kind"] == "hierarchy"
+    ]
+    pending = [(a, b) for a, b in edges if a not in selected and b not in selected]
+    while pending:
+        # Most uncovered incident edges first, then canonical parent identity.
+        counts = {
+            parent: sum(parent in {a, b} for a, b in pending)
+            for parent in {a for a, b in pending}
+        }
+        selected.add(min(counts, key=lambda key: (-counts[key], key)))
+        pending = [(a, b) for a, b in edges if a not in selected and b not in selected]
     pattern = re.compile(
         r"^## (Parents|Children|Related)\n\n((?:- \[\[[^\n]+\]\]\n)+)", re.MULTILINE
     )
     for owner in owners:
         target = targets[owner]
-        assert target.get("created") is True, "reverse hierarchy note materialization"
+        assert type(target.get("created")) is bool and target["created"] == (
+            owner in selected
+        ), "reverse hierarchy note materialization"
         path = safe_path(vault, target["relative_path"])
+        if owner not in selected:
+            assert not path.exists(), "uncreated reverse hierarchy note exists"
+            continue
         assert path.is_file(), "reverse hierarchy generated note unavailable"
         body = path.read_text(encoding="utf-8")
         title = "# " + escaped(thoughts[owner]["name"]) + "\n"
+        title = title.replace("\r\n", "\n").replace("\r", "\n")
         start = body.find(title)
         assert start >= 0, "reverse hierarchy generated note title unavailable"
         cursor = start + len(title)
@@ -632,13 +686,23 @@ def check_reverse_navigation(
         assert matches and not body[matches[-1].end() :].strip(), (
             "reverse hierarchy generated navigation unavailable"
         )
-        tail = [matches[-1]]
-        for match in reversed(matches[:-1]):
-            if body[match.end() : tail[0].start()].strip():
-                break
-            tail.insert(0, match)
+        headings = list(
+            re.finditer(
+                r"^ {0,3}#{1,6}[ \t]+(?:Parents|Children|Related)\b[^\n]*",
+                body,
+                re.MULTILINE | re.IGNORECASE,
+            )
+        )
+        assert len(headings) == len(matches) and all(
+            heading.start() == match.start()
+            for heading, match in zip(headings, matches)
+        ), "unestablished generated relationship section"
+        assert all(
+            not body[left.end() : right.start()].strip()
+            for left, right in pairwise(matches)
+        ), "unexpected prose between generated relationship sections"
         sections = {}
-        for match in tail:
+        for match in matches:
             heading = match.group(1)
             assert heading not in sections, "duplicate generated relationship section"
             sections[heading] = match.group(2)
