@@ -1,0 +1,453 @@
+{
+  "author": "/root",
+  "authority": "GitHub #210 accepted S10/T10; user-approved proposal02",
+  "scope": "Independent inert input bytes and pre-encoding pixel facts",
+  "source_declaration_fragment": {
+    "sourceType": 2,
+    "type": 5,
+    "isNotes": false,
+    "name": null,
+    "location": "Icon.png"
+  },
+  "derivation": "stdlib struct encoding of explicit source RGBA arrays; no decoder, converter, capture encoder or output import",
+  "dib_fields": {
+    "header_size": 40,
+    "planes": 1,
+    "bit_count": 32,
+    "compression": 0,
+    "image_size": 0,
+    "x_density": 0,
+    "y_density": 0,
+    "colours_used": 0,
+    "colours_important": 0
+  },
+  "entry_fields": {
+    "colour_count": 0,
+    "reserved": 0,
+    "planes": 1,
+    "bit_count": 32
+  },
+  "payloads": [
+    {
+      "file": "inert-a.ico",
+      "actual_format": "ICO",
+      "length": 5430,
+      "sha256": "b44733332d8c307dabc7b11be5164d567f11f962a7b18c6b94df57be28378613",
+      "directory_order": [
+        {
+          "artwork": "A32",
+          "width": 32,
+          "height": 32,
+          "body_length": 4264,
+          "body_sha256": "a314dd1a4c18eba263e56ac741d637297504359e83acfe88f2dd6e56df8a8dcd",
+          "mask_stride": 4,
+          "mask_length": 128,
+          "mask_nonzero_bytes": 1,
+          "mask_logical_set_points": [
+            [
+              0,
+              0
+            ]
+          ],
+          "extra_zero_tail_length": 0,
+          "rgba_layout": "top-to-bottom row-major unpremultiplied RGBA8",
+          "rgba_length": 4096,
+          "rgba_sha256": "33def1f7064ea10ffcd0b3f844dea824a35c14c626669e08058325ebbea3c396",
+          "literal_samples": [
+            {
+              "xy": [
+                0,
+                0
+              ],
+              "rgba": [
+                0,
+                0,
+                0,
+                0
+              ]
+            },
+            {
+              "xy": [
+                31,
+                0
+              ],
+              "rgba": [
+                0,
+                255,
+                0,
+                255
+              ]
+            },
+            {
+              "xy": [
+                16,
+                16
+              ],
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ]
+            },
+            {
+              "xy": [
+                0,
+                31
+              ],
+              "rgba": [
+                0,
+                0,
+                255,
+                255
+              ]
+            },
+            {
+              "xy": [
+                31,
+                31
+              ],
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ]
+            }
+          ],
+          "offset": 38
+        },
+        {
+          "artwork": "A16",
+          "width": 16,
+          "height": 16,
+          "body_length": 1128,
+          "body_sha256": "0fc70cf66a97c4b3b6895741d533fb6dfcae10c7337ef6380c758e222086f6b4",
+          "mask_stride": 4,
+          "mask_length": 64,
+          "mask_nonzero_bytes": 1,
+          "mask_logical_set_points": [
+            [
+              0,
+              0
+            ]
+          ],
+          "extra_zero_tail_length": 0,
+          "rgba_layout": "top-to-bottom row-major unpremultiplied RGBA8",
+          "rgba_length": 1024,
+          "rgba_sha256": "99457935b4f235c9d1d0c9c67be3f51e8d17a6706604401ac10a9bed756f080c",
+          "literal_samples": [
+            {
+              "xy": [
+                0,
+                0
+              ],
+              "rgba": [
+                0,
+                0,
+                0,
+                0
+              ]
+            },
+            {
+              "xy": [
+                15,
+                0
+              ],
+              "rgba": [
+                0,
+                255,
+                255,
+                255
+              ]
+            },
+            {
+              "xy": [
+                8,
+                8
+              ],
+              "rgba": [
+                0,
+                255,
+                255,
+                255
+              ]
+            },
+            {
+              "xy": [
+                0,
+                15
+              ],
+              "rgba": [
+                255,
+                255,
+                0,
+                255
+              ]
+            },
+            {
+              "xy": [
+                15,
+                15
+              ],
+              "rgba": [
+                0,
+                255,
+                255,
+                255
+              ]
+            }
+          ],
+          "offset": 4302
+        }
+      ]
+    },
+    {
+      "file": "inert-b.ico",
+      "actual_format": "ICO",
+      "length": 15406,
+      "sha256": "aeb330e827efb0eb8edfb8b191dd1a5aeb45e9a7a7cd90949dfa7192b25bb6db",
+      "directory_order": [
+        {
+          "artwork": "B16",
+          "width": 16,
+          "height": 16,
+          "body_length": 1128,
+          "body_sha256": "a5feaa6f8697ba75b742c093252a8710f60d82bb135f67f11d1a7c0f71c2e8d7",
+          "mask_stride": 4,
+          "mask_length": 64,
+          "mask_nonzero_bytes": 1,
+          "mask_logical_set_points": [
+            [
+              0,
+              0
+            ]
+          ],
+          "extra_zero_tail_length": 0,
+          "rgba_layout": "top-to-bottom row-major unpremultiplied RGBA8",
+          "rgba_length": 1024,
+          "rgba_sha256": "406f43a1087ed49e521f7674cdb366b445b23ee81de9ad443f4afd4f4c07af98",
+          "literal_samples": [
+            {
+              "xy": [
+                0,
+                0
+              ],
+              "rgba": [
+                0,
+                0,
+                0,
+                0
+              ]
+            },
+            {
+              "xy": [
+                15,
+                0
+              ],
+              "rgba": [
+                255,
+                0,
+                255,
+                255
+              ]
+            },
+            {
+              "xy": [
+                8,
+                8
+              ],
+              "rgba": [
+                0,
+                255,
+                255,
+                255
+              ]
+            },
+            {
+              "xy": [
+                0,
+                15
+              ],
+              "rgba": [
+                255,
+                0,
+                255,
+                255
+              ]
+            },
+            {
+              "xy": [
+                15,
+                15
+              ],
+              "rgba": [
+                0,
+                255,
+                255,
+                255
+              ]
+            }
+          ],
+          "offset": 54
+        },
+        {
+          "artwork": "B32",
+          "width": 32,
+          "height": 32,
+          "body_length": 4392,
+          "body_sha256": "f2eaff05d48b50aac6e8f9b82495e81bcead9ece30ef52ba89dfcf66a1f15565",
+          "mask_stride": 4,
+          "mask_length": 128,
+          "mask_nonzero_bytes": 0,
+          "mask_logical_set_points": [],
+          "extra_zero_tail_length": 128,
+          "rgba_layout": "top-to-bottom row-major unpremultiplied RGBA8",
+          "rgba_length": 4096,
+          "rgba_sha256": "edf7e4a343421ccaaac9ee9e79586d2ba61ebf3d68cca4039bd4c287ffe60ecf",
+          "literal_samples": [
+            {
+              "xy": [
+                0,
+                0
+              ],
+              "rgba": [
+                0,
+                0,
+                0,
+                0
+              ]
+            },
+            {
+              "xy": [
+                31,
+                0
+              ],
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ]
+            },
+            {
+              "xy": [
+                16,
+                16
+              ],
+              "rgba": [
+                255,
+                0,
+                0,
+                255
+              ]
+            },
+            {
+              "xy": [
+                0,
+                31
+              ],
+              "rgba": [
+                255,
+                0,
+                0,
+                255
+              ]
+            },
+            {
+              "xy": [
+                31,
+                31
+              ],
+              "rgba": [
+                255,
+                0,
+                0,
+                255
+              ]
+            }
+          ],
+          "offset": 1182
+        },
+        {
+          "artwork": "B48",
+          "width": 48,
+          "height": 48,
+          "body_length": 9832,
+          "body_sha256": "487df52d5cb237b2ba4bee662a453f8a54942ed8b9d46457f78487a0fd7ff94c",
+          "mask_stride": 8,
+          "mask_length": 384,
+          "mask_nonzero_bytes": 0,
+          "mask_logical_set_points": [],
+          "extra_zero_tail_length": 192,
+          "rgba_layout": "top-to-bottom row-major unpremultiplied RGBA8",
+          "rgba_length": 9216,
+          "rgba_sha256": "766f36d7b970218416965d251875c892b7a491f1cc4b15073696448979a12afe",
+          "literal_samples": [
+            {
+              "xy": [
+                0,
+                0
+              ],
+              "rgba": [
+                0,
+                0,
+                0,
+                0
+              ]
+            },
+            {
+              "xy": [
+                47,
+                0
+              ],
+              "rgba": [
+                0,
+                255,
+                0,
+                255
+              ]
+            },
+            {
+              "xy": [
+                24,
+                24
+              ],
+              "rgba": [
+                255,
+                255,
+                0,
+                255
+              ]
+            },
+            {
+              "xy": [
+                0,
+                47
+              ],
+              "rgba": [
+                0,
+                0,
+                255,
+                255
+              ]
+            },
+            {
+              "xy": [
+                47,
+                47
+              ],
+              "rgba": [
+                0,
+                255,
+                0,
+                255
+              ]
+            }
+          ],
+          "offset": 5574
+        }
+      ]
+    }
+  ]
+}
