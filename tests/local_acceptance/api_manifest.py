@@ -63,7 +63,39 @@ def load_baseline(manifest_path, expected_sha256):
         "baseline manifest changed; independent requalification required"
     )
     data = read_json(raw)
-    assert data["schema"] == "brz2obsidian.api-acceptance/1", "baseline schema"
+    assert data["schema"] in {
+        "brz2obsidian.api-acceptance/1",
+        "brz2obsidian.api-acceptance/2",
+    }, "baseline schema"
+    if data["schema"] == "brz2obsidian.api-acceptance/1":
+        assert "scope_inputs" not in data, "version1 does not grant scope inputs"
+    else:
+        required = {
+            "schema",
+            "files",
+            "brain",
+            "scope",
+            "graphs",
+            "types",
+            "tags",
+            "statistics",
+            "link_attachments",
+            "link_attachment_outcomes",
+            "relationship_metadata",
+            "no_notes",
+            "payloads",
+            "attachment_inventories",
+            "attachment_metadata",
+            "scope_inputs",
+            "qualification",
+            "archive_matches",
+            "one_way_controls",
+        }
+        assert (
+            required
+            <= data.keys()
+            <= required | {"source_packet_ledger", "http_responses"}
+        ), "closed version2 baseline fields"
     baseline = ApiBaseline(path, expected_sha256, data)
     baseline.verify()
     return baseline

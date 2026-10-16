@@ -1,0 +1,62 @@
+{
+  "schema": "independent.scope-inert-input-provenance/1",
+  "inputs": [
+    {
+      "file": "inert-a.ico",
+      "origin": "local_api_images_v3/inert-a.ico",
+      "length": 5430,
+      "sha256": "b44733332d8c307dabc7b11be5164d567f11f962a7b18c6b94df57be28378613",
+      "contributor": "/root (ICO/JPEG), prior independent PNG source fixture",
+      "reuse": "exact qualified inert input bytes; no production result"
+    },
+    {
+      "file": "inert-b.ico",
+      "origin": "local_api_images_v3/inert-b.ico",
+      "length": 15406,
+      "sha256": "aeb330e827efb0eb8edfb8b191dd1a5aeb45e9a7a7cd90949dfa7192b25bb6db",
+      "contributor": "/root (ICO/JPEG), prior independent PNG source fixture",
+      "reuse": "exact qualified inert input bytes; no production result"
+    },
+    {
+      "file": "inert-blue.jpg",
+      "origin": "local_api_images_v3/inert-blue.jpg",
+      "length": 632,
+      "sha256": "e3a2954fee014acf9f0b399791f49458604d6592ab22844bcebecc0e666be5ed",
+      "contributor": "/root (ICO/JPEG), prior independent PNG source fixture",
+      "reuse": "exact qualified inert input bytes; no production result"
+    },
+    {
+      "file": "red-pixel.png",
+      "origin": "local_api_acceptance/red-pixel.png",
+      "length": 120,
+      "sha256": "4ba8d4fd5ab42544feeff22d50e84412502433cc95952fd1df9a5293588ddbea",
+      "contributor": "/root (ICO/JPEG), prior independent PNG source fixture",
+      "reuse": "exact qualified inert input bytes; no production result"
+    },
+    {
+      "file": "red-green.webp",
+      "origin": "new independently selected pre-encoding two RGBA pixels; Pillow lossless input encoder only",
+      "contributor": "/root/baseline_owner",
+      "length": 38,
+      "sha256": "4b23c031ae6c12e8d0f76e5d2161749f4a1f92e515c5b7c44eafa4b404fed421",
+      "rgba_hex": "ff0000ff00ff00ff",
+      "rgba_sha256": "8e56467a23ff16f4059b738417081abf48600e4d0d9958217178f2d5d4ca93f8",
+      "width": 2,
+      "height": 1
+    },
+    {
+      "file": "blank.pdf",
+      "origin": "new stdlib explicit catalog/pages/page/empty content stream and exact xref offsets",
+      "contributor": "/root/baseline_owner",
+      "length": 429,
+      "sha256": "ff0f88907a166714b28cef62a84efdb7a4da3542de64c3fe9079bcad23e73e60",
+      "pages": 1,
+      "page_box": [
+        0,
+        0,
+        20,
+        20
+      ]
+    }
+  ]
+}
