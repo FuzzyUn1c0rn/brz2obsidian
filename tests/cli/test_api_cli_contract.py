@@ -320,3 +320,44 @@ def test_cli_preserves_new_jpeg_and_finite_ico_bytes(
     )
     assert (destination / asset["relative_path"]).read_bytes() == raw
     assert asset["role"] == ("image" if family == "jpeg" else "icon")
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+@pytest.mark.parametrize("operation", ["inspect", "convert"])
+def test_corrupt_new_jpeg_has_safe_cli_refusal_without_publication(
+    tmp_path, monkeypatch, capsys, as_json, operation
+):
+    import struct
+
+    from tests.sources.test_local_api_images_v3 import INPUTS, JpegImageApi
+    from tests.support.local_api import BRAIN, HOME, KEY, api_server
+    from tests.support.local_api_payloads import IMAGE
+
+    raw = (INPUTS / "inert-blue.jpg").read_bytes()
+    marker = raw.index(b"\xff\xda")
+    start = marker + 2 + struct.unpack_from(">H", raw, marker + 2)[0]
+    damaged = raw[: start + 6] + b"\xff\xd9"
+    api = JpegImageApi()
+    api.payloads[IMAGE] = damaged
+    api.attachments[IMAGE]["dataLength"] = len(damaged)
+    api.thoughts[HOME]["name"] = "PRIVATE_JPEG_TITLE_CANARY"
+    monkeypatch.setenv("THE_BRAIN_LOCAL_API_KEY", KEY)
+    with api_server(api) as (_, address):
+        arguments = [operation, BRAIN]
+        if operation == "convert":
+            arguments.append(str(tmp_path / "bad-jpeg"))
+        arguments += ["--source-kind", "local-api", "--api-url", address]
+        if as_json:
+            arguments.append("--json")
+        assert main(arguments) == 1
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert (
+        "Required JPEG image bytes cannot be decoded without recovery" in captured.out
+    )
+    assert "CANARY" not in captured.out
+    if as_json:
+        result = json.loads(captured.out)
+        assert result["issues"][0]["code"] == "invalid_source"
+        assert result["receipt"] is None
+    assert not (tmp_path / "bad-jpeg").exists()

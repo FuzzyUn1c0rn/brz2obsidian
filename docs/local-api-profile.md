@@ -305,3 +305,25 @@ fixture bytes stay exact; the two JSON fact containers have Git LF normalization
 relative to their raw CRLF source containers, with unchanged literal values. This
 source-input qualification does not replace independent checker, complete real
 source or native presentation acceptance.
+
+
+The profile3 JPEG note-image branch adds strict full native decoding through
+simplejpeg (runtime range >=1.9,<2; development pins simplejpeg1.9.0 and NumPy2.5.4).
+It rejects recoverable truncated entropy after existing Pillow verification and
+bounds, using verified native grayscale/CMYK/RGB modes and full dimensions. No
+header-helper mapping, marker/scan restriction or pixel rewrite is introduced.
+The [qualified JPEG neighbors](../tests/fixtures/local_api_jpeg_neighbors_v3/source-facts.json)
+include progressive/multiple-scan and benign-trailer inputs under source pin
+f38560b71eb3d52cd6fb6e33fc2b9439ac1f454fc180315de7f92622884b46d5;
+[grayscale/CMYK facts](../tests/fixtures/local_api_jpeg_neighbors_v3/extended-source-facts.json)
+use source pin 7ec93850ab740845c8536acece14d7782395bdc047521f4fdac0d43dd1c19b67.
+Those source inputs were authored by /root and qualified by /root/reviewer.
+The [literal JPEG classes](../tests/fixtures/local_api_jpeg_classes_v3/class-source-facts.json)
+cover SOF3 grayscale/RGB/CMYK, 4:4:1 sampling and YCCK, authored by /root/reviewer
+and independently qualified by /root under pin
+cfe5277594cadd5873ae351dc5e5bbfbc6b67e03de0bd46af6b2a3b42d1a8aaf.
+Their source measurements label codec-specific CMYK/YCCK interpretations; they
+do not establish a universal RGBA color assertion. Raw input bytes/fact values
+are preserved; Git may normalize JSON line endings. Public controls exercise
+live acquisition, frozen verification and byte-preserving conversion separately
+from the independently authored source checker and later acceptance gates.

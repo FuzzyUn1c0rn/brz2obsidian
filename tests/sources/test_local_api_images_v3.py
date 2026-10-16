@@ -1210,3 +1210,233 @@ def test_ico_rejects_reordered_bodies_even_when_default_variant_decodes(
         ).convert(LocalApiSourceRef(BRAIN), tmp_path / "vault")
     assert result.outcome == "refused" and result.receipt is None
     assert not (tmp_path / "vault").exists()
+
+
+@pytest.mark.parametrize("retained", [0, 1, 3, 6])
+@pytest.mark.parametrize("operation", ["open", "inspect", "convert"])
+def test_jpeg_image_refuses_entropy_truncation_even_with_eoi_and_consistent_metadata(
+    tmp_path, retained, operation
+):
+    import struct
+
+    raw = (INPUTS / "inert-blue.jpg").read_bytes()
+    marker = raw.index(b"\xff\xda")
+    start = marker + 2 + struct.unpack_from(">H", raw, marker + 2)[0]
+    assert raw.rfind(b"\xff\xd9") - start == 7
+    damaged = raw[: start + retained] + b"\xff\xd9"
+    api = JpegImageApi()
+    api.payloads[IMAGE] = damaged
+    api.attachments[IMAGE]["dataLength"] = len(damaged)
+    with api_server(api) as (_, address):
+        config = LocalApiConfig(api_url=address)
+        if operation == "open":
+            with (
+                pytest.raises(MigrationRefused),
+                LocalApiSourceModule(
+                    config, credentials=lambda: KEY, profile_version="3"
+                ).open(LocalApiSourceRef(BRAIN)),
+            ):
+                pytest.fail("A recovered truncated JPEG cannot form a valid session")
+        else:
+            workflow = local_api_workflow(config, credentials=lambda: KEY)
+            result = (
+                workflow.inspect(LocalApiSourceRef(BRAIN))
+                if operation == "inspect"
+                else workflow.convert(LocalApiSourceRef(BRAIN), tmp_path / "vault")
+            )
+            assert result.outcome == "refused", result.issues
+            assert result.receipt is None
+            assert not (tmp_path / "vault").exists()
+
+
+JPEG_NEIGHBORS = Path(__file__).parents[1] / "fixtures/local_api_jpeg_neighbors_v3"
+JPEG_NEIGHBOR_FACTS = json.loads((JPEG_NEIGHBORS / "source-facts.json").read_bytes())
+JPEG_COLOUR_FACTS = json.loads(
+    (JPEG_NEIGHBORS / "extended-source-facts.json").read_bytes()
+)
+
+
+@pytest.mark.parametrize(
+    "filename",
+    ["inert-progressive.jpg", "inert-trailer.jpg", "inert-gray.jpg", "inert-cmyk.jpg"],
+)
+def test_strict_jpeg_keeps_qualified_progressive_trailer_and_native_colour_sources(
+    tmp_path, filename
+):
+    facts = (
+        JPEG_NEIGHBOR_FACTS
+        if filename in JPEG_NEIGHBOR_FACTS["inputs"]
+        else JPEG_COLOUR_FACTS
+    )
+    expected = facts["inputs"][filename]
+    raw = (JPEG_NEIGHBORS / filename).read_bytes()
+    assert len(raw) == expected["length"]
+    assert hashlib.sha256(raw).hexdigest() == expected["sha256"]
+    api = JpegImageApi()
+    api.payloads[IMAGE] = raw
+    api.attachments[IMAGE]["dataLength"] = len(raw)
+    with api_server(api) as (_, address):
+        module = LocalApiSourceModule(
+            LocalApiConfig(api_url=address),
+            credentials=lambda: KEY,
+            profile_version="3",
+        )
+        with module.open(LocalApiSourceRef(BRAIN)) as session:
+            session.verify_consistency()
+            with session.open_payload(IMAGE) as payload:
+                assert payload.read() == raw
+        workflow = local_api_workflow(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        )
+        inspected = workflow.inspect(LocalApiSourceRef(BRAIN))
+        assert inspected.outcome == "clean", inspected.issues
+        result = workflow.convert(LocalApiSourceRef(BRAIN), tmp_path / "vault")
+    assert result.outcome == "clean", result.issues
+    record = json.loads((tmp_path / "vault/migration-record.json").read_bytes())
+    asset = next(row for row in record["asset_targets"] if row["asset_id"] == IMAGE)
+    assert asset["role"] == "image" and asset["original_name"] == IMAGE + ".jpg"
+    assert asset["actual_sha256"] == expected["sha256"]
+    assert (tmp_path / "vault" / asset["relative_path"]).read_bytes() == raw
+
+
+@pytest.mark.parametrize("retained", [0, 1, 3, 6])
+def test_fresh_rehashed_jpeg_rejects_entropy_recovery_at_identical_length(
+    tmp_path, monkeypatch, retained
+):
+    import struct
+
+    from brz2obsidian.contracts import SourceSnapshot
+    from brz2obsidian.sources.thebrain.local_api import LocalApiSession
+
+    raw = (INPUTS / "inert-blue.jpg").read_bytes()
+    api = JpegImageApi()
+    api.payloads[IMAGE] = raw
+    api.attachments[IMAGE]["dataLength"] = len(raw)
+    source, audit, snapshot, payloads = captured_inputs(api, tmp_path, monkeypatch)
+    clean = LocalApiSession(
+        source=source,
+        snapshot=SourceSnapshot.model_validate_json(json.dumps(snapshot)),
+        audit=audit,
+        payloads=payloads,
+        profile_version="3",
+    )
+    clean.verify_consistency()
+    clean.close()
+    marker = raw.index(b"\xff\xda")
+    start = marker + 2 + struct.unpack_from(">H", raw, marker + 2)[0]
+    damaged = raw[: start + retained] + b"\xff\xd9" + b"x" * (7 - retained)
+    assert len(damaged) == len(raw)
+    payloads[IMAGE] = damaged
+    asset = next(row for row in snapshot["assets"] if row["asset_id"] == IMAGE)
+    fact = next(row for row in source["payloads"] if row["asset_id"] == IMAGE)
+    asset["actual_sha256"] = fact["actual_sha256"] = hashlib.sha256(damaged).hexdigest()
+    snapshot["identity"].update(source_sha256="", snapshot_digest="")
+    with pytest.raises(MigrationRefused) as failure:
+        fresh = LocalApiSession(
+            source=source,
+            snapshot=SourceSnapshot.model_validate_json(json.dumps(snapshot)),
+            audit=audit,
+            payloads=payloads,
+            profile_version="3",
+        )
+        fresh.close()
+    assert failure.value.issues[0].code == "invalid_source"
+    assert (
+        failure.value.issues[0].message
+        == "Required JPEG image bytes cannot be decoded without recovery"
+    )
+
+
+@pytest.mark.parametrize("fault", ["recovery", "dimensions"])
+def test_new_jpeg_strict_decoder_failure_is_safe_and_dimension_bound(
+    tmp_path, monkeypatch, fault
+):
+    import numpy as np
+    import simplejpeg
+
+    def broken_decoder(*args, **kwargs):
+        if fault == "recovery":
+            raise ValueError("PRIVATE_BACKEND_CANARY")
+        return np.zeros((2, 1, 3), dtype=np.uint8)
+
+    monkeypatch.setattr(simplejpeg, "decode_jpeg", broken_decoder)
+    with api_server(JpegImageApi()) as (_, address):
+        result = local_api_workflow(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        ).convert(LocalApiSourceRef(BRAIN), tmp_path / "vault")
+    assert result.outcome == "refused" and result.receipt is None
+    assert "CANARY" not in result.model_dump_json()
+    assert not (tmp_path / "vault").exists()
+
+
+@pytest.mark.parametrize("profile", ["2", "3"])
+def test_inherited_png_image_and_jpeg_icon_keep_the_existing_decoder_contract(
+    monkeypatch, profile
+):
+    import simplejpeg
+
+    from tests.support.local_api_payloads import RichPayloadApi
+
+    calls = []
+
+    def unavailable_decoder(*args, **kwargs):
+        calls.append(True)
+        raise ValueError("UNAVAILABLE_NEW_BACKEND_CANARY")
+
+    monkeypatch.setattr(simplejpeg, "decode_jpeg", unavailable_decoder)
+    with (
+        api_server(RichPayloadApi(jpeg=True)) as (_, address),
+        LocalApiSourceModule(
+            LocalApiConfig(api_url=address),
+            credentials=lambda: KEY,
+            profile_version=profile,
+        ).open(LocalApiSourceRef(BRAIN)) as session,
+    ):
+        session.verify_consistency()
+    assert calls == []
+
+
+JPEG_CLASSES = Path(__file__).parents[1] / "fixtures/local_api_jpeg_classes_v3"
+JPEG_CLASS_FACTS = json.loads((JPEG_CLASSES / "class-source-facts.json").read_bytes())
+
+
+@pytest.mark.parametrize("filename", sorted(JPEG_CLASS_FACTS["inputs"]))
+def test_strict_jpeg_keeps_qualified_lossless_sampling_and_ycck_classes(
+    tmp_path, monkeypatch, filename
+):
+    from brz2obsidian.contracts import SourceSnapshot
+    from brz2obsidian.sources.thebrain.local_api import LocalApiSession
+
+    expected = JPEG_CLASS_FACTS["inputs"][filename]
+    raw = (JPEG_CLASSES / filename).read_bytes()
+    assert len(raw) == expected["length"]
+    assert hashlib.sha256(raw).hexdigest() == expected["sha256"]
+    api = JpegImageApi()
+    api.payloads[IMAGE] = raw
+    api.attachments[IMAGE]["dataLength"] = len(raw)
+    source, audit, snapshot, payloads = captured_inputs(api, tmp_path, monkeypatch)
+    frozen = LocalApiSession(
+        source=source,
+        snapshot=SourceSnapshot.model_validate_json(json.dumps(snapshot)),
+        audit=audit,
+        payloads=payloads,
+        profile_version="3",
+    )
+    try:
+        frozen.verify_consistency()
+        with frozen.open_payload(IMAGE) as payload:
+            assert payload.read() == raw
+    finally:
+        frozen.close()
+    with api_server(api) as (_, address):
+        workflow = local_api_workflow(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        )
+        inspected = workflow.inspect(LocalApiSourceRef(BRAIN))
+        assert inspected.outcome == "clean", inspected.issues
+        result = workflow.convert(LocalApiSourceRef(BRAIN), tmp_path / "vault")
+    assert result.outcome == "clean", result.issues
+    record = json.loads((tmp_path / "vault/migration-record.json").read_bytes())
+    asset = next(row for row in record["asset_targets"] if row["asset_id"] == IMAGE)
+    assert asset["actual_sha256"] == expected["sha256"]
+    assert (tmp_path / "vault" / asset["relative_path"]).read_bytes() == raw

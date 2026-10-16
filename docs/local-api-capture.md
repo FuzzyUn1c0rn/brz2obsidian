@@ -214,3 +214,12 @@ Profiles 1/2 retain ICO/JPEG-image refusals. Recreated hashes cannot authorize
 invalid shapes or falsely included excluded-owner icons. Valid changed pixels
 receive new content identities and require fresh review; trusted-pin mutations
 of even an unrequested variant refuse.
+
+
+JPEG note-image construction, sealing and reopening repeat the strict native
+full-decode check after the existing Pillow and dimension checks. Rehashed
+truncated entropy cannot become valid through decoder recovery, including when
+its declared length is preserved with trailing bytes. Original JPEG payloads,
+measurement domains and identity framing remain unchanged. The additional decode
+is restricted to the new profile3 JPEG image role; inherited icon/image predicates
+retain their existing decoder behavior.

@@ -16,6 +16,7 @@ from ..external_files import external_file_uri
 from .declarations import source_date, uuid
 from .errors import refuse, unsupported_shape
 from .ico import validate_ico
+from .jpeg import validate_jpeg
 from .notes import scope_text
 
 ATTACHMENT_FIELDS = {
@@ -229,6 +230,7 @@ def validate_bytes(value, raw, profile_version):
         return selected
     if expected is None:
         refuse("Required image/icon bytes do not match the qualified signature")
+    strict_jpeg = selected == "image" and profile_version == "3" and suffix == "jpg"
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
@@ -248,6 +250,8 @@ def validate_bytes(value, raw, profile_version):
                 for index in range(getattr(image, "n_frames", 1)):
                     image.seek(index)
                     image.load()
+                if strict_jpeg:
+                    verified_jpeg = image.size, image.mode
     except (
         OSError,
         ValueError,
@@ -257,6 +261,8 @@ def validate_bytes(value, raw, profile_version):
         Image.DecompressionBombWarning,
     ):
         refuse("Required image/icon bytes are not fully decodable")
+    if strict_jpeg:
+        validate_jpeg(raw, *verified_jpeg)
     return selected
 
 

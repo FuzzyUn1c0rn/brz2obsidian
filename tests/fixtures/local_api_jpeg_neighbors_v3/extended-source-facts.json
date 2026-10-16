@@ -1,0 +1,140 @@
+{
+  "actor": "/root",
+  "purpose": "Inert existing-Pillow JPEG color-class inputs; no universal CMYK-to-RGB interpretation is asserted.",
+  "predecessor": {
+    "input_pin_sha256": "984940c390484fc36b66fa6824b5cb1bf37ebc868c3768a0eb4259a579852bbd",
+    "verdict": "REWORK",
+    "reason": "A universal CMYK-to-RGB literal was stronger than unprofiled color-managed decoder semantics. Original bytes/facts and failed qualification remain retained."
+  },
+  "inputs": {
+    "inert-gray.jpg": {
+      "length": 332,
+      "sha256": "756aa636cd103ba3040bcb6a0b8173a3fa853c9da2d478b8529ac198959b56e3",
+      "preencoding": {
+        "mode": "L",
+        "size": [
+          2,
+          1
+        ],
+        "value": 85
+      },
+      "pillow_measurement": {
+        "version": "12.3.0",
+        "format": "JPEG",
+        "mode": "L",
+        "size": [
+          2,
+          1
+        ],
+        "native_component_pixels": [
+          85,
+          85
+        ],
+        "rgba_pixels": [
+          85,
+          85,
+          85,
+          255,
+          85,
+          85,
+          85,
+          255
+        ],
+        "rgba_sha256": "426909e69c13627ca308fbb2b36c103028dd59470be55b3373ec1e6962d598d9"
+      },
+      "independent_wic_measurement": {
+        "length": 332,
+        "sha256": "756aa636cd103ba3040bcb6a0b8173a3fa853c9da2d478b8529ac198959b56e3",
+        "codec": "JPEG Decoder",
+        "size": [
+          2,
+          1
+        ],
+        "rgba_sha256": "426909e69c13627ca308fbb2b36c103028dd59470be55b3373ec1e6962d598d9",
+        "rgba_pixels": [
+          85,
+          85,
+          85,
+          255,
+          85,
+          85,
+          85,
+          255
+        ]
+      },
+      "interpretation": "Preencoding component values are literal source facts. Converted RGBA values are labeled codec-specific measurements, not universal source artwork expectations. CMYK conversion cause is not inferred. Complete same-source byte/pixel qualification and subsequent output preservation remain separate."
+    },
+    "inert-cmyk.jpg": {
+      "length": 352,
+      "sha256": "b0e774feb32f6e32d5bed985c0ff52f1cda2663aabfc86ea80d247b9e4cb5a4d",
+      "preencoding": {
+        "mode": "CMYK",
+        "size": [
+          2,
+          1
+        ],
+        "value": [
+          255,
+          255,
+          0,
+          0
+        ]
+      },
+      "pillow_measurement": {
+        "version": "12.3.0",
+        "format": "JPEG",
+        "mode": "CMYK",
+        "size": [
+          2,
+          1
+        ],
+        "native_component_pixels": [
+          [
+            255,
+            255,
+            0,
+            0
+          ],
+          [
+            255,
+            255,
+            0,
+            0
+          ]
+        ],
+        "rgba_pixels": [
+          0,
+          0,
+          255,
+          255,
+          0,
+          0,
+          255,
+          255
+        ],
+        "rgba_sha256": "b978f97a664cc8fae883c8185c0e72e4c16c3be1fb8901b5306b20fdb24a34b4"
+      },
+      "independent_wic_measurement": {
+        "length": 352,
+        "sha256": "b0e774feb32f6e32d5bed985c0ff52f1cda2663aabfc86ea80d247b9e4cb5a4d",
+        "codec": "JPEG Decoder",
+        "size": [
+          2,
+          1
+        ],
+        "rgba_sha256": "71699ad17779681c289960a8d5e7370d56e8daa1ee4432f92f42e293cc81c0f4",
+        "rgba_pixels": [
+          66,
+          40,
+          116,
+          255,
+          66,
+          40,
+          116,
+          255
+        ]
+      },
+      "interpretation": "Preencoding component values are literal source facts. Converted RGBA values are labeled codec-specific measurements, not universal source artwork expectations. CMYK conversion cause is not inferred. Complete same-source byte/pixel qualification and subsequent output preservation remain separate."
+    }
+  }
+}

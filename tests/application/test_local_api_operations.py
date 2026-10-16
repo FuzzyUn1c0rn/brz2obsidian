@@ -1041,3 +1041,45 @@ def test_valid_new_image_pixels_change_identity_and_require_fresh_review(
     assert (
         tmp_path / "new-review" / asset["relative_path"]
     ).read_bytes() == replacement
+
+
+def test_corrupt_new_jpeg_refuses_inspection_and_reviewed_publication_safely(tmp_path):
+    import struct
+
+    from tests.sources.test_local_api_images_v3 import INPUTS, JpegImageApi
+    from tests.support.local_api_payloads import IMAGE
+
+    raw = (INPUTS / "inert-blue.jpg").read_bytes()
+    marker = raw.index(b"\xff\xda")
+    start = marker + 2 + struct.unpack_from(">H", raw, marker + 2)[0]
+    damaged = raw[: start + 6] + b"\xff\xd9"
+    with api_server(JpegImageApi()) as (api, address):
+        selection = LocalApiSourceSelection(
+            brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+        )
+        operations = Operations(credentials=lambda: KEY)
+        original = operations.inspect(selection)
+        assert original.reviewed is not None
+        api.payloads[IMAGE] = damaged
+        api.attachments[IMAGE]["dataLength"] = len(damaged)
+        api.thoughts[HOME]["name"] = "PRIVATE_JPEG_TITLE_CANARY"
+        inspected = operations.inspect(selection)
+        converted = operations.convert_reviewed(
+            selection, tmp_path, "bad-jpeg", original.reviewed
+        )
+    for result, message in (
+        (
+            inspected,
+            "The selected source is not supported or consistent. Correct the source and inspect again.",
+        ),
+        (
+            converted,
+            "The source or prepared output is inconsistent. Review the source and inspect again.",
+        ),
+    ):
+        assert result.outcome == "refused"
+        assert result.findings[0].code == "invalid_source"
+        assert result.findings[0].message == message
+        assert "CANARY" not in result.diagnostic_text
+    assert not converted.publication.receipt_verified
+    assert not (tmp_path / "bad-jpeg").exists()

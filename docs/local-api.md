@@ -239,8 +239,13 @@ warning. Explicit profiles 1/2 continue to refuse these additional declarations.
 
 Profile 3 adds thought-owned JPEG note images declared as the canonical attachment
 UUID plus lowercase `.jpg`, with type 12, isNotes=false and explicit null name.
-Complete JPEG verification and pixel decoding precede byte-preserving capture;
-existing image references, alt/title/order and audited width adaptation apply.
+Complete JPEG verification and pixel decoding precede byte-preserving capture.
+This new note-image branch also requires a strict full native decode through
+simplejpeg after Pillow verification and size bounds, rejecting entropy recovery.
+The decoder uses the verified grayscale, RGB or CMYK mode, checks full dimensions
+and discards decoded pixels; source bytes are preserved. Progressive, lossless,
+unusual valid sampling and harmless trailing bytes keep their JPEG meanings.
+Existing image references, alt/title/order and audited width adaptation apply.
 
 The accepted finite ICO icon alternative keeps role=icon and the authored
 `Icon.png` filename while preserving the complete actual ICO container. Only
