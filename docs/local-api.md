@@ -225,3 +225,13 @@ parent and B the child. Both endpoint inventories, reciprocal parent/child graph
 adjacency and an empty relationship attachment inventory must agree. Original
 arrow facts remain in the migration record. These rules apply to live acquisition
 and frozen captures; older profiles refuse the additional tuple.
+
+
+Profile 3 supports thought-owned external file and directory references with
+explicitly null authored names and the qualified absolute Windows drive-path
+grammar. Resources links keep the final path segment as their display label and
+encode the destination as a file URI. Original source spelling remains in the
+migration record. Actual length/hash stay null; declared lengths remain evidence.
+External-only owners receive ordinary notes with Resources sections. Targets are
+never checked, opened, fetched or copied; unavailable targets add no source-gap
+warning. Explicit profiles 1/2 continue to refuse these additional declarations.

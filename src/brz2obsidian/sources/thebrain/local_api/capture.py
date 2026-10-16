@@ -268,7 +268,12 @@ def validate_source(source):
             if (
                 type(value["isNotes"]) is not bool
                 or type(value["type"]) is not int
-                or value["type"] not in {1, 3, 5, 12, 15}
+                or value["type"]
+                not in (
+                    {1, 2, 3, 5, 8, 12, 15}
+                    if source["identifiers"]["profile_version"] == "3"
+                    else {1, 3, 5, 12, 15}
+                )
                 or value["dataLength"] is not None
                 and (
                     type(value["dataLength"]) is not int

@@ -4,7 +4,7 @@ import hashlib
 import warnings
 from decimal import Decimal
 from io import BytesIO
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from urllib.parse import urlsplit
 from zipfile import BadZipFile, ZipFile
 
@@ -12,6 +12,7 @@ from PIL import Image
 
 from brz2obsidian.contracts import Asset, Document
 
+from ..external_files import external_file_uri
 from .declarations import source_date, uuid
 from .errors import refuse, unsupported_shape
 from .notes import scope_text
@@ -92,6 +93,13 @@ def declaration(value, brain, owner, budget):
     return dict(value, position={"decimal": decimal})
 
 
+def reference_uri(location, profile_version):
+    def invalid(_code, message):
+        unsupported_shape(profile_version, "resource", message)
+
+    return external_file_uri(location, invalid)
+
+
 def role(value, profile_version):
     for field in (
         "creationDateTime",
@@ -107,6 +115,9 @@ def role(value, profile_version):
         if kind == 1 and location == "Notes.md" and name is None:
             return "note_original"
         refuse("The authored note declaration is not qualified")
+    if profile_version == "3" and kind in {2, 8} and name is None:
+        reference_uri(location, profile_version)
+        return {2: "file", 8: "directory"}[kind]
     if kind == 3:
         try:
             uri = urlsplit(location)
@@ -163,7 +174,7 @@ def validate_bytes(value, raw, profile_version):
     else:
         prefix = raw[:24]
     selected = role(value, profile_version)
-    if selected in {"url"}:
+    if selected == "url" or value["type"] in {2, 8}:
         refuse("External destinations must not be fetched")
     if selected == "note_original" or value["type"] == 15:
         try:
@@ -302,6 +313,18 @@ def capture_owner(
                 )
             )
             continue
+        if value["type"] in {2, 8}:
+            assets.append(
+                Asset(
+                    **dict(
+                        common, display_name=PureWindowsPath(value["location"]).name
+                    ),
+                    role=selected,
+                    availability="external",
+                    external_uri=reference_uri(value["location"], profile_version),
+                )
+            )
+            continue
         raw = directory.path / f"{len(client.requests):016x}.bin"
         note_bytes = None
         if selected == "note_original":
@@ -432,6 +455,15 @@ def validate_payload_binding(source, snapshot, audit):
     for key, asset in assets.items():
         value = attachments[key]
         selected = role(value, profile)
+        external_path = value["type"] in {2, 8}
+        external = selected == "url" or external_path
+        expected_uri = (
+            reference_uri(value["location"], profile)
+            if external_path
+            else value["location"]
+            if selected == "url"
+            else None
+        )
         if (
             asset.owner != value["sourceId"]
             or asset.role != selected
@@ -442,10 +474,15 @@ def validate_payload_binding(source, snapshot, audit):
                 if selected == "url" and value["name"] is not None
                 else value["location"]
             )
-            or asset.display_name != value["name"]
+            or asset.display_name
+            != (
+                PureWindowsPath(value["location"]).name
+                if external_path
+                else value["name"]
+            )
             or asset.availability
-            not in ({"external"} if selected == "url" else {"present", "absent"})
-            or asset.external_uri != (value["location"] if selected == "url" else None)
+            not in ({"external"} if external else {"present", "absent"})
+            or asset.external_uri != expected_uri
             or asset.video_presentation is not None
         ):
             refuse("Normalized payload roles or source declarations disagree")
