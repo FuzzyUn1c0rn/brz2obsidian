@@ -1316,6 +1316,71 @@ NOTE_FORMAT_EXAMPLES = [
         "- [\\$a\\>b\\$](#^brz-toc-heading-1)\n\n# $a>b$ ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
         id="toc-math-greater",
     ),
+    pytest.param(
+        "[/toc/]\n\n# $a\\$\nBody\n\nAuthored body.\n",
+        "- [\\$a\\$](#^brz-toc-heading-1)\n\n# $a\\$ ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-escaped-dollar",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# $a `b`$\nBody\n\nAuthored body.\n",
+        "- [\\$a b\\$](#^brz-toc-heading-1)\n\n# $a `b`$ ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-code-overlap",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# ![$x$](.data/md-images/00000000-0000-4000-8000-000000000202.webp)\nBody\n\nAuthored body.\n",
+        "- [\\$x\\$](#^brz-toc-heading-1)\n\n# ![$x$](00000000-0000-4000-8000-000000000202.bin) ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-image-math",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# [$x$](https://example.invalid)\nBody\n\nAuthored body.\n",
+        "- [\\$x\\$](#^brz-toc-heading-1)\n\n# [$x$](https://example.invalid) ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-link-math",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# A  B\nBody\n\nAuthored body.\n",
+        "- [A  B](#^brz-toc-heading-1)\n\n# A  B ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-interior-spaces",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# `\\<`\nBody\n\nAuthored body.\n",
+        "- [\\\\\\<](#^brz-toc-heading-1)\n\n# `\\<` ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-code-backslash",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# ` `\nBody\n\nAuthored body.\n",
+        "- [Heading](#^brz-toc-heading-1)\n\n# ` ` ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-code-empty",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# ![` `](.data/md-images/00000000-0000-4000-8000-000000000202.webp)\nBody\n\nAuthored body.\n",
+        "- [Image](#^brz-toc-heading-1)\n\n# ![` `](00000000-0000-4000-8000-000000000202.bin) ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-image-code-empty",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# \\\\<\nBody\n\nAuthored body.\n",
+        "- [\\\\\\<](#^brz-toc-heading-1)\n\n# \\\\< ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-text-backslash",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# \\`literal` $x$ `tail\nBody\n\nAuthored body.\n",
+        "- [\\`literal\\$x\\$tail](#^brz-toc-heading-1)\n\n# \\`literal` $x$ `tail ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-escaped-code-discovery",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# A <!-- `ignored` --> B\nBody\n\nAuthored body.\n",
+        "- [A  B](#^brz-toc-heading-1)\n\n# A <!-- `ignored` --> B ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-comment-owned-code",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# \\``$x$`\nBody\n\nAuthored body.\n",
+        "- [\\`\\$x\\$](#^brz-toc-heading-1)\n\n# \\``$x$` ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-escaped-run-suffix",
+    ),
+    pytest.param(
+        "[/toc/]\n\n# \\```$x$``\nBody\n\nAuthored body.\n",
+        "- [\\`\\$x\\$](#^brz-toc-heading-1)\n\n# \\```$x$`` ^brz-toc-heading-1\nBody\n\nAuthored body.\n",
+        id="toc-escaped-run-suffix-three",
+    ),
 ]
 
 
@@ -1355,6 +1420,10 @@ def test_admitted_api_note_transformations_remain_source_bound(
             "(#^brz-toc-heading-1-generated)",
         ),
         ("toc-math-angle", "\\$a\\<b\\$", "$a<b$"),
+        ("toc-image-math", "\\$x\\$", "$x$"),
+        ("toc-interior-spaces", "[A  B]", "[A B]"),
+        ("toc-escaped-code-discovery", "\\`literal\\$x\\$tail", "\\`literal$x$tail"),
+        ("toc-code-backslash", "\\\\\\<", "\\<"),
         ("toc-simple", "# Target ^brz-toc-heading-1", "# Forged ^brz-toc-heading-1"),
         ("toc-image-label", "Café emphasis", "Forged label"),
         ("composition", "[[Child.md\\|Child]]", "[[Home.md\\|Child]]"),

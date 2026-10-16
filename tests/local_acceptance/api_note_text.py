@@ -263,38 +263,111 @@ def tables(text):
 
 
 def label_text(value):
-    """Independent visible heading text, protecting complete active math."""
-    protected = []
+    """Derive visible inline text, distinguishing code, escapes and active math."""
     placeholder = "\ue000"
     while placeholder in value:
         placeholder += "\ue000"
-    mask = active_mask(value, inline_only=True)
+    mathematics, literals = [], []
+
+    def escaped_at(text, position):
+        return (len(text[:position]) - len(text[:position].rstrip("\\"))) % 2 == 1
+
+    def owned_codes(text):
+        ranges, cursor = [], 0
+        while cursor < len(text):
+            if text.startswith("<!--", cursor) and not escaped_at(text, cursor):
+                close = text.find("-->", cursor + 4)
+                if close >= 0:
+                    cursor = close + 3
+                    continue
+            if text[cursor] != "`":
+                cursor += 1
+                continue
+            if escaped_at(text, cursor):
+                cursor += 1
+                continue
+            opening = re.match(r"`+", text[cursor:])
+            start = cursor
+            cursor += len(opening[0])
+            closing = next(
+                (
+                    run
+                    for run in re.finditer(r"`+", text[cursor:])
+                    if len(run[0]) == len(opening[0])
+                ),
+                None,
+            )
+            if closing is not None:
+                content_end = cursor + closing.start()
+                finish = cursor + closing.end()
+                ranges.append((start, finish, cursor, content_end))
+                cursor = finish
+        return ranges
+
+    phrases = [
+        (start, end) for start, end, *_ in inline_candidates(value, inline_only=True)[0]
+    ]
+    codes = [(start, end) for start, end, _, _ in owned_codes(value)]
+    dollars = [
+        (i - 1, i + 1)
+        for i, char in enumerate(value)
+        if char == "$" and escaped_at(value, i)
+    ]
 
     def math(match):
-        if mask[match.start() : match.start() + 1] != "$":
+        if any(
+            start < match.end() and match.start() < end
+            for start, end in [*phrases, *codes, *dollars]
+        ):
             return match[0]
-        protected.append(match[0])
-        return placeholder + "M" + str(len(protected) - 1) + placeholder
+        mathematics.append(match[0])
+        return placeholder + "M" + str(len(mathematics) - 1) + placeholder
 
-    value = re.sub(r"(?<!\\)\$[^$\n\[\]<>]+\$", math, value)
+    value = re.sub(r"(?<!\\)\$[^$\n\[\]<>]+(?<!\\)\$", math, value)
+
+    def keep(text):
+        literals.append(text)
+        return placeholder + "L" + str(len(literals) - 1) + placeholder
+
+    for begin, end, content_start, content_end in reversed(owned_codes(value)):
+        text = re.sub(r"\r\n?|\n", " ", value[content_start:content_end])
+        if text.startswith(" ") and text.endswith(" ") and text.strip():
+            text = text[1:-1]
+        value = value[:begin] + keep(text) + value[end:]
+    # Shield visible escaped punctuation before the independent display flattener.
+    # This keeps a code literal backslash distinct from a normal escape of '<'.
+    value = re.sub(
+        r"\\([!\"#$%&'()*+,\-./:;<=>?@\[\]\\^_`{|}~])",
+        lambda match: keep(match[1]),
+        value,
+    )
+
+    value = re.sub(r"<!--[\s\S]*?-->", "", value)
+
+    def visible_literals(text):
+        return re.sub(
+            re.escape(placeholder) + r"L(\d+)" + re.escape(placeholder),
+            lambda match: literals[int(match[1])],
+            text,
+        )
+
     for begin, end, image, label, _, _ in reversed(
         inline_candidates(value, inline_only=True)[0]
     ):
-        value = (
-            value[:begin]
-            + (inline_display(label) or ("Image" if image else ""))
-            + value[end:]
-        )
+        display = inline_display(label)
+        if not visible_literals(display).strip():
+            display = "Image" if image else ""
+        value = value[:begin] + display + value[end:]
     value = inline_display(value)
-    value = " ".join(value.split()) or "Heading"
-    value = value.replace("\\<", "<")
+    value = re.sub(r"(?: {2,}|\\)?(?:\r\n?|\n)", " ", value)
+    value = visible_literals(value).strip() or "Heading"
     value = re.sub(r"([\\`*_{}\[\]<>$])", lambda match: "\\" + match[1], value)
     value = re.sub(
         r"(^| )(\^[A-Za-z0-9-]+)$", lambda match: match[1] + "\\" + match[2], value
     )
     return re.sub(
         re.escape(placeholder) + r"M(\d+)" + re.escape(placeholder),
-        lambda m: protected[int(m[1])],
+        lambda match: mathematics[int(match[1])],
         value,
     )
 
