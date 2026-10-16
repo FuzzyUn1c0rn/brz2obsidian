@@ -10,7 +10,7 @@ from uuid import UUID
 from zipfile import BadZipFile, ZipFile
 
 from .api_manifest import read_json, safe_path
-from .checker import source_references, wiki
+from .checker import adapt_body, escaped, source_references, wiki
 from .images import AuditUnavailable, decode_image
 
 
@@ -579,7 +579,9 @@ def audit_baseline(baseline, *, profile_version="1"):
     return summary
 
 
-def check_reverse_navigation(vault, thoughts, expected, raw_links, targets):
+def check_reverse_navigation(
+    baseline, vault, thoughts, expected, raw_links, attachments, targets, assets
+):
     """Audit actual trailing navigation independently of migration-record claims."""
     owners = {
         owner
@@ -597,6 +599,35 @@ def check_reverse_navigation(vault, thoughts, expected, raw_links, targets):
         path = safe_path(vault, target["relative_path"])
         assert path.is_file(), "reverse hierarchy generated note unavailable"
         body = path.read_text(encoding="utf-8")
+        title = "# " + escaped(thoughts[owner]["name"]) + "\n"
+        start = body.find(title)
+        assert start >= 0, "reverse hierarchy generated note title unavailable"
+        cursor = start + len(title)
+        authored = []
+        if thoughts[owner].get("label"):
+            authored.append(thoughts[owner]["label"])
+        names = {key: value.get("relative_path") for key, value in targets.items()}
+        for attachment in attachments.values():
+            if attachment["sourceId"] == owner and attachment["isNotes"]:
+                note = baseline.bytes(
+                    baseline.data["payloads"][attachment["id"]]["path"]
+                ).decode("utf-8")
+                authored.append(
+                    adapt_body(note, owner, target["relative_path"], names, assets)
+                )
+        for source in authored:
+            text = source.replace("\r\n", "\n").replace("\r", "\n")
+            if text:
+                position = body.find(text, cursor)
+                assert position >= 0, "reverse hierarchy authored content unavailable"
+                cursor = position + len(text)
+        # Authored labels/prose/headings cannot stand in for generated links.
+        body = body[cursor:]
+        footer = "## Categories\n\n[[Categories.md|Browse categories]]"
+        if owner == baseline.json(baseline.data["brain"])[
+            "homeThoughtId"
+        ] and body.rstrip().endswith(footer):
+            body = body.rstrip()[: -len(footer)] + "\n"
         matches = list(pattern.finditer(body))
         assert matches and not body[matches[-1].end() :].strip(), (
             "reverse hierarchy generated navigation unavailable"
@@ -683,7 +714,6 @@ def check_api_vault(baseline, vault, *, profile_version="1"):
             row["original_identity"] == key
             and row["original_title"] == thoughts[key]["name"]
         ), "thought identity/title"
-    check_reverse_navigation(vault, thoughts, expected, raw_links, targets)
     assignments = identities(
         record["classification_assignments"], "relationship_key", "classification"
     )
@@ -761,6 +791,9 @@ def check_api_vault(baseline, vault, *, profile_version="1"):
                     profile_version,
                     proofs,
                 ), "missing TXT lacks measured same-owner PDF"
+    check_reverse_navigation(
+        baseline, vault, thoughts, expected, raw_links, attachments, targets, assets
+    )
     baseline.verify()
     return {
         "thoughts": len(thoughts),

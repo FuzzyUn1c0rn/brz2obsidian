@@ -388,3 +388,147 @@ def test_inherited_hierarchy_keeps_nonordinary_endpoint_roles(tmp_path, profile)
     assert (
         check_api_vault(baseline, vault, profile_version=profile)["relationships"] == 6
     )
+
+
+def test_reverse_hierarchy_home_navigation_allows_existing_categories_footer(tmp_path):
+    baseline, vault = reverse_case(tmp_path)
+    with (vault / "Home.md").open("a", encoding="utf-8") as stream:
+        stream.write("\n## Categories\n\n[[Categories.md|Browse categories]]\n")
+    assert check_api_vault(baseline, vault, profile_version="3")["relationships"] == 5
+
+
+@pytest.mark.parametrize("generated_present", [False, True])
+def test_authored_children_heading_cannot_replace_generated_reverse_navigation(
+    tmp_path, generated_present
+):
+    baseline, vault = reverse_case(tmp_path)
+    raw = b"Authored example.\n\n## Children\n\n- [[Child.md|Child]]\n"
+    note = (
+        baseline.manifest_path.parent / baseline.data["payloads"][identity(201)]["path"]
+    )
+    note.write_bytes(raw)
+    baseline = reseal(baseline)
+    record_path = vault / "migration-record.json"
+    record = json.loads(record_path.read_bytes())
+    target = next(a for a in record["asset_targets"] if a["asset_id"] == identity(201))
+    (vault / target["relative_path"]).write_bytes(raw)
+    target.update(actual_length=len(raw), actual_sha256=fingerprint(note)["sha256"])
+    write_json(record_path, record)
+    body = "# Home\n\n" + raw.decode()
+    if generated_present:
+        body += "\n## Children\n\n- [[Child.md|Child]]\n"
+    (vault / "Home.md").write_text(body, encoding="utf-8")
+    if generated_present:
+        assert (
+            check_api_vault(baseline, vault, profile_version="3")["relationships"] == 5
+        )
+    else:
+        with pytest.raises(AssertionError, match="generated navigation"):
+            check_api_vault(baseline, vault, profile_version="3")
+
+
+def test_authored_label_cannot_replace_generated_reverse_parent_navigation(tmp_path):
+    baseline, vault = reverse_case(tmp_path)
+    label = "## Parents\n\n- [[Home.md|Home]]\n"
+
+    def change(manifest, graphs):
+        for graph in graphs.values():
+            if graph["activeThought"]["id"] == identity(3):
+                graph["activeThought"]["label"] = label
+            for field in ("parents", "children", "jumps", "tags"):
+                for neighbor in graph[field] or []:
+                    if neighbor["id"] == identity(3):
+                        neighbor["label"] = label
+
+    baseline = mutate_source(baseline, change)
+    record_path = vault / "migration-record.json"
+    record = json.loads(record_path.read_bytes())
+    next(
+        r for r in record["original_evidence"][0]["records"] if r["id"] == identity(3)
+    )["label"] = label
+    write_json(record_path, record)
+    (vault / "Child.md").write_text("# Child\n\n" + label, encoding="utf-8")
+    with pytest.raises(AssertionError, match="generated navigation"):
+        check_api_vault(baseline, vault, profile_version="3")
+
+
+@pytest.mark.parametrize("damage", [None, "order", "label"])
+def test_reverse_navigation_uses_canonical_identity_order_and_visible_labels(
+    tmp_path, damage
+):
+    baseline, vault = reverse_case(tmp_path)
+    root = baseline.manifest_path.parent
+    title = "A [type] | one\r\n two"
+    extra = {
+        "id": identity(106),
+        "brainId": identity(1),
+        "thoughtIdA": identity(2),
+        "thoughtIdB": identity(4),
+        "kind": 1,
+        "relation": 1,
+        "meaning": 1,
+        "direction": 1,
+        "typeId": None,
+    }
+
+    def change(manifest, graphs):
+        for graph in graphs.values():
+            rows = [
+                graph["activeThought"],
+                *(graph["parents"] or []),
+                *(graph["children"] or []),
+                *(graph["jumps"] or []),
+                *(graph["tags"] or []),
+            ]
+            if graph["type"]:
+                rows.append(graph["type"])
+            for row in rows:
+                if row["id"] == identity(4):
+                    row["name"] = title
+        types = json.loads((root / manifest["types"]).read_bytes())
+        types[0]["name"] = title
+        write_json(root / manifest["types"], types)
+        graphs[identity(2)]["links"].append(extra)
+        graphs[identity(4)]["links"].append(extra)
+        graphs[identity(2)]["children"].append(graphs[identity(4)]["activeThought"])
+        graphs[identity(4)]["parents"].append(graphs[identity(2)]["activeThought"])
+        manifest["scope"]["relationship_ids"].append(identity(106))
+        name = "additional-display-link-content.json"
+        write_json(root / name, [])
+        manifest["files"][name] = fingerprint(root / name)
+        manifest["link_attachments"][identity(106)] = name
+
+    baseline = mutate_source(baseline, change)
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    next(
+        r for r in record["original_evidence"][0]["records"] if r["id"] == identity(4)
+    )["name"] = title
+    record["original_evidence"][0]["records"].append(extra)
+    next(t for t in record["item_targets"] if t["item_key"] == identity(4)).update(
+        original_title=title, relative_path="Categories/A.md", created=True
+    )
+    record["relationships"].append(
+        {
+            "key": identity(106),
+            "kind": "hierarchy",
+            "item_a": identity(2),
+            "item_b": identity(4),
+        }
+    )
+    write_json(path, record)
+    lines = ["- [[Child.md|Child]]\n", "- [[Categories/A.md|A type one two]]\n"]
+    if damage == "order":
+        lines.reverse()
+    elif damage == "label":
+        lines[1] = "- [[Categories/A.md|Wrong display label]]\n"
+    (vault / "Home.md").write_text(
+        "# Home\n\nOriginal note.\n\n## Children\n\n" + "".join(lines), encoding="utf-8"
+    )
+    if damage:
+        with pytest.raises(AssertionError, match="Parents/Children navigation"):
+            check_api_vault(baseline, vault, profile_version="3")
+    else:
+        assert (
+            check_api_vault(baseline, vault, profile_version="3")["relationships"] == 6
+        )
