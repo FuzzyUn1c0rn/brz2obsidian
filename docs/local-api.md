@@ -227,6 +227,16 @@ arrow facts remain in the migration record. These rules apply to live acquisitio
 and frozen captures; older profiles refuse the additional tuple.
 
 
+Profile 3 supports thought-owned external file and directory references with
+explicitly null authored names and the qualified absolute Windows drive-path
+grammar. Resources links keep the final path segment as their display label and
+encode the destination as a file URI. Original source spelling remains in the
+migration record. Actual length/hash stay null; declared lengths remain evidence.
+External-only owners receive ordinary notes with Resources sections. Targets are
+never checked, opened, fetched or copied; unavailable targets add no source-gap
+warning. Explicit profiles 1/2 continue to refuse these additional declarations.
+
+
 Profile 3 adds thought-owned JPEG note images declared as the canonical attachment
 UUID plus lowercase `.jpg`, with type 12, isNotes=false and explicit null name.
 Complete JPEG verification and pixel decoding precede byte-preserving capture;

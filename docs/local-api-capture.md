@@ -193,6 +193,17 @@ verification. Recreating hashes under profile1/2 cannot authorize that tuple.
 No capture domain, canonical encoding or digest framing changes.
 
 
+Profile3 external references retain their exact type/location/null authored name
+and declaration joins. Normalized external file/directory assets bind their
+original_name to that raw path, display_name to its final Windows segment and
+external_uri to the established pure Windows URI helper. Availability is external,
+actual length/hash are null and no payload binding or local storage is permitted.
+These conditions apply during construction, sealing and verification, including
+when untrusted hashes are recreated. Raw separator spelling remains content-bound
+even if two paths derive the same URI; a valid path change needs a fresh review.
+No capture domain or encoding/framing change is required.
+
+
 Profile3 JPEG note images and the finite ICO icon alternative reuse the existing
 owned-payload domains and measurements. Sealing/revalidation applies identical
 declaration/owner/role/reference/appearance and full byte eligibility, including
