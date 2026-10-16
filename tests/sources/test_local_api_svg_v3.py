@@ -991,3 +991,112 @@ def test_qualified_external_file_ending_svg_remains_reference_without_target_io(
     assert asset["relative_path"] is None
     note = next((tmp_path / "vault").glob("Home*.md")).read_text(encoding="utf-8")
     assert "[External.svg](<file:///C:/Source/External.svg>)" in note
+
+
+@pytest.mark.parametrize(
+    "case,baseline_pin",
+    [
+        ("plain", "9c9efe1ff70bc8727f05f8d3dcb12bc63aae10c1ab8c9318bdccc9d4232a86b1"),
+        ("composed", "8c968af1b6152550ead8a6975c2db8213a4c1a356b8c95286f9de221d3f34c32"),
+    ],
+)
+def test_standard_workflow_preserves_independent_svg_baseline(
+    tmp_path, case, baseline_pin
+):
+    from tests.local_acceptance.api_checker import check_api_vault
+    from tests.local_acceptance.test_api_svg_v3 import svg_baseline, svg_source_packet
+
+    packet = svg_source_packet(case)
+    baseline = svg_baseline(tmp_path / "independent-baseline", case)
+    assert baseline.fingerprint == baseline_pin
+    assert all(baseline.bytes(name) == raw for name, raw in packet["files"].items())
+    ledger = json.loads(packet["ledger"])
+    routes = {row["route"]: row for row in ledger["routes"]}
+    pair = ledger["consistency_pair"]
+
+    class SourcePacketApi:
+        def __init__(self):
+            self.requests = []
+            self.response_chunks = {}
+            self.served = []
+            self.unexpected = []
+            self.statistics_reads = 0
+
+        def response(self, path, query):
+            if path not in routes:
+                self.unexpected.append(path)
+                return 404, b""
+            row = routes[path]
+            body_path = row["body_path"]
+            if path == pair["route"]:
+                self.statistics_reads += 1
+                body_path = (
+                    pair["starting_body"]
+                    if self.statistics_reads % 2
+                    else pair["ending_body"]
+                )
+            raw = packet["files"][body_path]
+            self.served.append(
+                {
+                    "path": path,
+                    "query": query,
+                    "status": row["status"],
+                    "body_path": body_path,
+                    "length": len(raw),
+                    "sha256": hashlib.sha256(raw).hexdigest(),
+                }
+            )
+            return row["status"], raw
+
+    api = SourcePacketApi()
+    brain = json.loads(packet["files"]["responses/brain.json"])["id"]
+    reference = LocalApiSourceRef(brain)
+    destination = tmp_path / "actual-workflow-vault"
+    try:
+        with api_server(api) as (_, address):
+            config = LocalApiConfig(api_url=address)
+            with LocalApiSourceModule(
+                config, credentials=lambda: KEY, profile_version="3"
+            ).open(reference) as session:
+                session.verify_consistency()
+                (tmp_path / "observed-snapshot.json").write_text(
+                    session.snapshot.model_dump_json(), encoding="utf-8"
+                )
+                for key, payload in baseline.data["payloads"].items():
+                    with session.open_payload(key) as stream:
+                        assert stream.read() == baseline.bytes(payload["path"])
+                session.verify_consistency()
+            workflow = local_api_workflow(config, credentials=lambda: KEY)
+            inspected = workflow.inspect(reference)
+            (tmp_path / "inspection-result.json").write_text(
+                inspected.model_dump_json(by_alias=True), encoding="utf-8"
+            )
+            assert inspected.outcome in {"clean", "warnings"}, inspected.issues
+            converted = workflow.convert(reference, destination)
+            (tmp_path / "conversion-result.json").write_text(
+                converted.model_dump_json(by_alias=True), encoding="utf-8"
+            )
+        assert not api.unexpected
+        assert converted.outcome in {"clean", "warnings"}, converted.issues
+        assert converted.receipt.published and converted.receipt.verified
+        assert converted.source_identity == inspected.source_identity
+        record = json.loads((destination / "migration-record.json").read_bytes())
+        assert "documents" not in record
+        assert any(row["documents"] for row in record["item_targets"])
+        check_api_vault(baseline, destination, profile_version="3")
+    finally:
+        (tmp_path / "observed-source-requests.json").write_text(
+            json.dumps(
+                {
+                    "case": case,
+                    "qualified_origin": packet["origin"],
+                    "baseline_fingerprint": baseline.fingerprint,
+                    "served": api.served,
+                    "unexpected": api.unexpected,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        baseline.verify()
