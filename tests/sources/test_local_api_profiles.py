@@ -139,32 +139,6 @@ def test_profile3_stage_messages_do_not_reclassify_other_source_failures(fault):
     assert "CANARY" not in result.model_dump_json()
 
 
-@pytest.mark.parametrize(
-    "family",
-    [
-        "jpeg_image",
-    ],
-)
-def test_profile3_does_not_enable_later_source_families_before_their_slice(family):
-    from tests.support.local_api import HOME
-    from tests.support.local_api_payloads import FILE, PayloadApi, attachment
-
-    api = PayloadApi()
-    kind, location = {
-        "jpeg_image": (12, FILE + ".jpg"),
-    }[family]
-    api.attachments[FILE] = attachment(FILE, HOME, kind, location)
-    with api_server(api) as (_, address):
-        result = local_api_workflow(
-            LocalApiConfig(api_url=address), credentials=lambda: KEY
-        ).inspect(LocalApiSourceRef(BRAIN))
-    assert result.outcome == "refused"
-    assert result.receipt is None
-    assert not any(
-        FILE in path and path.endswith("/file-content") for path, _, _ in api.requests
-    )
-
-
 @pytest.mark.parametrize("version", ["2", "3"])
 def test_recomputed_untrusted_manifest_cannot_replace_pinned_capture(tmp_path, version):
     import hashlib

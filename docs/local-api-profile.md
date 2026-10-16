@@ -285,6 +285,50 @@ captures. Shared Resources escaping/materialization rules apply. No destination
 I/O or additional missing-payload warning is introduced.
 
 
+Profile3 implements the exact JPEG note-image predicate in
+[Q5](local-api-profile3-qualification.md#q5-jpeg-note-image) and the accepted
+[S10 finite ICO alternative](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/210).
+JPEG images require UUID.jpg/type 12 and full JPEG classification/verification/
+pixel decoding. ICO is icon-only under the existing type 5/Icon.png/null-name
+declaration. Ordered square variants are exactly 32/16 or 16/32/48, with 32-bit
+BI_RGB 40-byte headers, exact contiguous body extents and all advertised variants
+fully decoded. Bodies have length 40+4*w*h+4*ceil(w/32)*h+z; z is 0 for both first
+signature entries and 0/128/192 for the second. The second signature's 32/48 masks
+and tails are zero; other qualified masks remain unrestricted. No generic ICO
+fallback or BRZ parser expansion is granted.
+
+The [inert public inputs](../tests/fixtures/local_api_images_v3/source-facts.json)
+were independently authored by /root and qualified by /root/reviewer under input
+pin f11bc1e4c3144b4f1c37c7bde333909f914169fdbc887f5597c95b52cbdb4fe5, including
+all five variant structures/full RGBA hashes/samples and the second JPEG. Binary
+fixture bytes stay exact; the two JSON fact containers have Git LF normalization
+relative to their raw CRLF source containers, with unchanged literal values. This
+source-input qualification does not replace independent checker, complete real
+source or native presentation acceptance.
+
+
+The profile3 JPEG note-image branch adds strict full native decoding through
+simplejpeg (runtime range >=1.9,<2; development pins simplejpeg1.9.0 and NumPy2.5.4).
+It rejects recoverable truncated entropy after existing Pillow verification and
+bounds, using verified native grayscale/CMYK/RGB modes and full dimensions. No
+header-helper mapping, marker/scan restriction or pixel rewrite is introduced.
+The [qualified JPEG neighbors](../tests/fixtures/local_api_jpeg_neighbors_v3/source-facts.json)
+include progressive/multiple-scan and benign-trailer inputs under source pin
+f38560b71eb3d52cd6fb6e33fc2b9439ac1f454fc180315de7f92622884b46d5;
+[grayscale/CMYK facts](../tests/fixtures/local_api_jpeg_neighbors_v3/extended-source-facts.json)
+use source pin 7ec93850ab740845c8536acece14d7782395bdc047521f4fdac0d43dd1c19b67.
+Those source inputs were authored by /root and qualified by /root/reviewer.
+The [literal JPEG classes](../tests/fixtures/local_api_jpeg_classes_v3/class-source-facts.json)
+cover SOF3 grayscale/RGB/CMYK, 4:4:1 sampling and YCCK, authored by /root/reviewer
+and independently qualified by /root under pin
+cfe5277594cadd5873ae351dc5e5bbfbc6b67e03de0bd46af6b2a3b42d1a8aaf.
+Their source measurements label codec-specific CMYK/YCCK interpretations; they
+do not establish a universal RGBA color assertion. Raw input bytes/fact values
+are preserved; Git may normalize JSON line endings. Public controls exercise
+live acquisition, frozen verification and byte-preserving conversion separately
+from the independently authored source checker and later acceptance gates.
+
+
 Profile3 implements the finite static SVG predicate in accepted
 [S7](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/210). The API-local parser
 accepts only strict UTF-8 without BOM, the optional XML1.0/UTF-8 declaration,

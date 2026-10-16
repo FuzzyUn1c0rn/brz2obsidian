@@ -237,6 +237,26 @@ never checked, opened, fetched or copied; unavailable targets add no source-gap
 warning. Explicit profiles 1/2 continue to refuse these additional declarations.
 
 
+Profile 3 adds thought-owned JPEG note images declared as the canonical attachment
+UUID plus lowercase `.jpg`, with type 12, isNotes=false and explicit null name.
+Complete JPEG verification and pixel decoding precede byte-preserving capture.
+This new note-image branch also requires a strict full native decode through
+simplejpeg after Pillow verification and size bounds, rejecting entropy recovery.
+The decoder uses the verified grayscale, RGB or CMYK mode, checks full dimensions
+and discards decoded pixels; source bytes are preserved. Progressive, lossless,
+unusual valid sampling and harmless trailing bytes keep their JPEG meanings.
+Existing image references, alt/title/order and audited width adaptation apply.
+
+The accepted finite ICO icon alternative keeps role=icon and the authored
+`Icon.png` filename while preserving the complete actual ICO container. Only
+ordered 32/16 or 16/32/48 square 32-bit BI_RGB variants with the exact qualified
+directory/DIB/mask/tail pattern are admitted; every variant fully decodes. Direct
+and inherited icon precedence and decorative item selection remain unchanged.
+PNG/JPEG icons retain their existing predicates. No transcoding or preferred-frame
+extraction occurs. Native fidelity of ICO under the authored PNG-style filename
+remains a separate source/output acceptance gate.
+
+
 Profile 3 preserves thought-owned static SVG note images declared as the canonical
 attachment UUID plus lowercase `.svg`, type 12, isNotes=false and explicit null
 name. Each image, including unreferenced attachments, must satisfy the bounded
