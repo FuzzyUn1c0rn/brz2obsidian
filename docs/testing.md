@@ -1,21 +1,80 @@
 # Testing and acceptance
 
+## Coverage-led testing
+
+Measured coverage guides every test addition, removal and change. Measure
+production line and branch coverage with test contexts and elapsed time; keep
+tooling coverage separate. Use focused measurements or applicable existing
+evidence to identify missing decisions and repeated-coverage hotspots. Consolidate
+redundant input products, fixture work and repeated execution through outer
+interfaces. When paths overlap, identify the independently checked outcome or
+meaningful input distinction that justifies retaining separate cases.
+
+Keep independently authored expected results. Combine small known answers with
+valid controlled input changes and a few real integration checks. Prefer useful
+existing tests over rewriting them to meet an arbitrary case count. Partial
+coverage reports describe their executed selection, not the entire suite.
+
+The complete ordinary verification bundle must finish in less than 600 seconds,
+including setup, teardown, reports, receipt validation and required repeated
+checks. Everyday focused feedback should take seconds. Measure the complete
+bundle without competing full-suite processes; an over-budget or interrupted
+attempt does not satisfy this objective. Coverage need not be regenerated for
+an unrelated documentation edit.
+
+The maintained default is [tools/test-suite.json](../tools/test-suite.json).
+Its command requires the GUI development environment and checks **at least 80%
+production branch coverage**. It includes all Python under `src/`, including
+unimported GUI modules; line coverage is reported separately. Coverage.py's
+combined percentage is not the branch percentage. See the
+[selection and maintenance guide](test-suite.md) for responsibilities and focused
+triggers for additional tests.
+
+```powershell
+# Complete ordinary verification: pytest, lint, format, dependency, coverage,
+# reports and receipt validation, all within one 600-second deadline.
+.\.venv\Scripts\python.exe tools/coverage_suite.py
+# Measure a changed consumer without rerunning the accumulated selection.
+.\.venv\Scripts\python.exe tools/coverage_suite.py --test tests/application/test_graph_modules.py
+# Require actual Qt execution in a focused adapter measurement.
+.\.venv\Scripts\python.exe tools/coverage_suite.py --test tests/gui/test_conversion_window.py --require-gui
+```
+
+The command prints its `COVERAGE SUMMARY` path under `tmp/coverage-suite/`.
+That directory contains the manifest hash and independently declared check
+requirements, original command logs, separate branch/line counts, function
+contexts, repeated-line hotspots, raw coverage JSON and an HTML report. Its
+runner receipt stays under `tmp/checks/`. Function contexts aggregate parameter
+instances; overlap is an investigation prompt, not a deletion rule. Focused
+measurements keep the full production denominator but are partial suite evidence
+and have no default coverage threshold. An explicit `--min-branch` override
+requires a recorded `--measurement-intent`; it does not amend the accepted target.
+
+The command validates its receipt before and after reporting. Failure, source
+changes, missing coverage, insufficient branches or deadline exhaustion prevent
+success. Timeout cleanup may take additional seconds; an over-budget attempt
+never qualifies. Retain failed and interrupted evidence as well as later passes.
+
+
 ## Choosing verification
 
 Choose the smallest verification scope that establishes the actual change,
 affected consumers and mandatory acceptance criteria. Record the environment,
 check IDs, pytest selectors/expressions, required GUI execution and freshness
 independently of submitted results. Broaden or repeat checks for new changes,
-failures or unresolved concerns. Explicit full-suite, fresh-execution, native and
-user acceptance requirements remain mandatory.
+failures or unresolved concerns. Normal broad completion uses the maintained
+default bundle, rather than exhaustive historical discovery. Named exhaustive,
+fresh-execution, native and user acceptance requirements remain mandatory;
+identify the actual requirement before adding those gates to an effort.
 
 Focused or manual-only verification is valid when it establishes the required
 scope. Documentation changes need checks of affected facts, commands, links and
 workflow rules; unrelated runtime or GUI runs are unnecessary. Required independent
 review still applies to manual-only completion.
 
-Public tests use synthetic archives and temporary files, primarily through the
-Workflow inspect/convert interfaces and affected public seams. Expected behavior
+Test behavior at its owning public interface. Use source-neutral values for pure
+core/rendering variations, small sources for source admission, and selected
+Workflow inspect/convert compositions and real integrations. Expected behavior
 must come from independently established requirements and source facts. Synthetic
 coverage, private source preservation, native observations and user acceptance
 each establish different evidence.
@@ -52,7 +111,7 @@ $python = Join-Path $checkout '.venv\Scripts\python.exe'
 $runner = Join-Path $checkout 'tools\check.py'
 # Focused base pytest plus lint; matches the requirements example below.
 & $python $runner run --checkout $checkout --python $python --environment base --check pytest --check lint --test tests/application/test_ui_preferences.py
-# Full GUI completion checks, when required.
+# Explicit exhaustive historical discovery, only for a named additional scope.
 & $python $runner run --checkout $checkout --python $python --environment gui --require-gui
 # Focused Qt adapter checks.
 & $python $runner run --checkout $checkout --python $python --environment gui --check pytest -m gui --require-gui
@@ -145,13 +204,22 @@ independent requirements establish hosted acceptance. Offscreen GUI success
 leaves actual Windows appearance, native dialogs and pointer usability unverified;
 private preservation and user acceptance retain their separate gates.
 
+That manual workflow is an explicit exhaustive compatibility/acceptance run.
+It is not the ordinary development bundle and is not requested automatically
+for unrelated changes.
+
 ## Stable-candidate checkpoint
 
 For candidate completion, finish affected focused checks, resolve known findings
-and synchronize integration before committing stable source in a clean checkout.
-Record the full commit ID, run the required completion checks and validate their
-receipts against that candidate. Keep source unchanged through publication.
-Focused success cannot replace required full coverage.
+and freeze the assessed contents. Record the full base commit and source snapshot,
+run the named completion scope and validate its receipts. Ordinary broad scope is
+the maintained default bundle. Focused success alone does not establish that
+bundle's acceptance or an explicitly required exhaustive run.
+
+A pre-commit receipt can bind a later clean candidate when the Git-normalized
+tested contents match, as specified by the runner contract. Commit bookkeeping
+alone does not require another test execution; validate the receipt against the
+full candidate commit. Keep assessed contents unchanged through publication.
 
 A repair produces a new stable candidate. Reassess evidence against the new
 source and requirements, rerun affected checks and every check requiring fresh

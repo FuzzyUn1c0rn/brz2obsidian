@@ -235,9 +235,8 @@ def test_external_missing_or_empty_name_has_windows_display_and_resource_fallbac
     assert source.read_bytes() == before
 
 
-@pytest.mark.parametrize(
-    "body",
-    [
+def _distinct_html_body_cases():
+    bodies = [
         r'Text <Unknown x="a\_b">',
         r"Text <Unknown x=path\_part>",
         'Text <Unknown x="`<Inner>`">',
@@ -257,9 +256,21 @@ def test_external_missing_or_empty_name_has_windows_display_and_resource_fallbac
         "<!A>",
         "<!a>",
         "<!A",
-    ],
-)
-@pytest.mark.parametrize("newline", ["\n", "\r", "\r\n"])
+    ]
+    cases = []
+    seen = set()
+    for body in bodies:
+        for newline in ("\n", "\r", "\r\n"):
+            payload = body.replace("\n", newline).encode()
+            if payload in seen:
+                continue
+            seen.add(payload)
+            # Existing decorator order gives newline-body node IDs.
+            cases.append(pytest.param(body, newline, id=f"{newline}-{body}"))
+    return cases
+
+
+@pytest.mark.parametrize("body,newline", _distinct_html_body_cases())
 def test_genuine_html_attributes_and_closers_refuse_without_inner_edits(
     tmp_path, capsys, body, newline
 ):

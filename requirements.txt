@@ -2,6 +2,7 @@
 # Project installation follows: python -m pip install --no-build-isolation -e ".[dev]"
 annotated-types==0.8.0
 colorama==0.4.6
+coverage==7.16.2
 iniconfig==2.3.0
 markdown-it-py==4.2.0
 mdurl==0.1.2

@@ -40,6 +40,14 @@ needed. See `README.md` for bootstrap commands and dependency manifests.
 
 ## Automated checks
 
+Use measured coverage to guide every test addition, removal and change. Measure
+production line and branch coverage, test contexts and elapsed time. Investigate
+repeated-coverage hotspots and consolidate redundant cases, setup and repeated
+Workflow/CLI execution. Use focused measurements or applicable existing evidence;
+keep independently checked outcomes and meaningful input differences explicit
+when execution paths overlap. The complete ordinary verification bundle must
+finish in less than ten minutes; everyday feedback should take seconds.
+
 Select checks from the actual change, affected consumers and mandatory acceptance
 criteria. Run or accept pytest, Ruff lint/format and dependency checks only through
 `tools/check.py`; before running or accepting them, read
@@ -47,7 +55,12 @@ criteria. Run or accept pytest, Ruff lint/format and dependency checks only thro
 
 Focused or manual-only verification is valid when it establishes the required
 scope. Broaden or repeat checks for new changes, failures or unresolved concerns.
-Required full-suite, fresh-execution and user/native acceptance gates still apply.
+Use `tools/coverage_suite.py` for the complete ordinary verification bundle:
+the maintained selection, all four runner checks, production branch coverage
+and receipt validation. Use focused `tools/check.py` checks during development.
+Exhaustive discovery of every historical test is an explicit additional scope,
+not a routine completion prerequisite. Named exhaustive, fresh-execution and
+user/native acceptance gates still apply.
 
 ## Temporary artifacts
 
