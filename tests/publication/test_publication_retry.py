@@ -1,4 +1,6 @@
 import hashlib
+import json
+import sys
 import time
 from pathlib import Path
 
@@ -12,6 +14,40 @@ def access_denied():
     error = PermissionError("Controlled final rename denial")
     error.winerror = 5
     return error
+
+
+class StagingSetupError(RuntimeError):
+    """The requested adversarial filesystem state could not be prepared."""
+
+
+def park_for_replacement(staging, parked, native_rename, native_sleep, steps):
+    """Prepare an adversarial filesystem state; never retry the conversion."""
+    delays = (0.01, 0.02, 0.04, 0.08, 0.16)
+    for attempt in range(len(delays) + 1):
+        try:
+            return native_rename(staging, parked)
+        except OSError as error:
+            steps.append(
+                {
+                    "setup_exception": type(error).__name__,
+                    "errno": error.errno,
+                    "winerror": getattr(error, "winerror", None),
+                    "message": str(error),
+                }
+            )
+            if not (
+                sys.platform == "win32"
+                and isinstance(error, PermissionError)
+                and getattr(error, "winerror", None) == 5
+            ):
+                raise StagingSetupError(
+                    f"parking setup cannot retry: {steps!r}"
+                ) from error
+            if attempt == len(delays):
+                raise StagingSetupError(
+                    f"parking setup exhausted: {steps!r}"
+                ) from error
+            native_sleep(delays[attempt])
 
 
 @pytest.mark.parametrize("empty", [False, True])
@@ -285,10 +321,11 @@ def test_source_change_during_retry_hashing_refuses_publication(tmp_path, monkey
 
 
 @pytest.mark.parametrize(
-    "replacement", ["directory", "junction", "descendant_junction"]
+    ("replacement", "parking_denials"),
+    [("directory", 0), ("junction", 0), ("descendant_junction", 0), ("directory", 1)],
 )
 def test_replaced_or_reparse_staging_never_claims_foreign_ownership(
-    tmp_path, monkeypatch, replacement
+    tmp_path, monkeypatch, replacement, parking_denials
 ):
     import subprocess
 
@@ -300,8 +337,12 @@ def test_replaced_or_reparse_staging_never_claims_foreign_ownership(
     (caller / "sentinel.bin").write_bytes(b"caller owned\x00\xff")
     parked = tmp_path / "original-owned"
     original = Path.rename
+    real_sleep = time.sleep
     attempts = []
+    parking_attempts = []
+    parking_delays = []
     junctions = []
+    setup = {"complete": False, "steps": []}
 
     def rename(path, target):
         if path.name.startswith(".brz2obsidian-"):
@@ -309,10 +350,27 @@ def test_replaced_or_reparse_staging_never_claims_foreign_ownership(
             raise access_denied()
         return original(path, target)
 
+    def native_parking_rename(path, target):
+        parking_attempts.append((path, target))
+        setup["steps"].append({"parking_attempt": len(parking_attempts)})
+        if len(parking_attempts) <= parking_denials:
+            raise access_denied()
+        return original(path, target)
+
+    def native_sleep(delay):
+        parking_delays.append(delay)
+        # Captured before patching time.sleep; only native parking setup waits.
+        real_sleep(delay)
+
     def sleep(_delay):
         staging = attempts[0]
+        info = staging.lstat()
+        setup["owned_identity"] = (info.st_dev, info.st_ino)
         if replacement != "descendant_junction":
-            original(staging, parked)
+            park_for_replacement(
+                staging, parked, native_parking_rename, native_sleep, setup["steps"]
+            )
+            setup["steps"].append("parking-completed")
         if replacement == "directory":
             staging.mkdir()
             (staging / "foreign.bin").write_bytes(b"replacement owned by caller")
@@ -326,30 +384,46 @@ def test_replaced_or_reparse_staging_never_claims_foreign_ownership(
                 capture_output=True,
             )
             junctions.append(junction)
+        info = staging.lstat()
+        setup["foreign_identity"] = (info.st_dev, info.st_ino)
+        setup["complete"] = True
+        setup["steps"].append("replacement-completed")
 
     monkeypatch.setattr(Path, "rename", rename)
     monkeypatch.setattr(time, "sleep", sleep)
     result = default_workflow().convert(source, destination)
-    assert result.outcome == ("failed" if replacement == "directory" else "refused")
-    assert result.receipt is None
+    context = json.dumps({"setup": setup, "result": result.model_dump(mode="json")})
+    assert setup["complete"], context
+    assert result.outcome == ("failed" if replacement == "directory" else "refused"), (
+        context
+    )
+    assert result.receipt is None, context
     assert [i.code for i in result.issues] == [
         "write_failure" if replacement == "directory" else "unsafe_target_path",
         "cleanup_failure",
-    ]
-    assert len(attempts) == 1
-    assert result.issues[-1].leftover_path == str(attempts[0])
-    assert not destination.exists() and source.read_bytes() == before
-    assert (caller / "sentinel.bin").read_bytes() == b"caller owned\x00\xff"
-    assert list(caller.iterdir()) == [caller / "sentinel.bin"]
+    ], context
+    assert len(attempts) == 1, context
+    assert result.issues[-1].leftover_path == str(attempts[0]), context
+    assert not destination.exists() and source.read_bytes() == before, context
+    assert (caller / "sentinel.bin").read_bytes() == b"caller owned\x00\xff", context
+    assert list(caller.iterdir()) == [caller / "sentinel.bin"], context
     if replacement == "directory":
         assert (attempts[0] / "foreign.bin").read_bytes() == (
             b"replacement owned by caller"
-        )
-        assert list(attempts[0].iterdir()) == [attempts[0] / "foreign.bin"]
+        ), context
+        assert list(attempts[0].iterdir()) == [attempts[0] / "foreign.bin"], context
     if replacement != "descendant_junction":
+        assert setup["foreign_identity"] != setup["owned_identity"], context
         assert (parked / "Attachments/22222222/Notes.md.original").read_bytes() == (
             b"Authored body.\r\n"
-        )
+        ), context
+        assert parking_denials + 1 <= len(parking_attempts) <= 6, context
+        assert (
+            parking_delays
+            == [0.01, 0.02, 0.04, 0.08, 0.16][: len(parking_attempts) - 1]
+        ), context
+    else:
+        assert not parking_attempts and not parking_delays, context
     # Remove only the test-created junction itself, retaining both owned data
     # and caller data; do not leave a traversable link in retained test evidence.
     for junction in junctions:
@@ -437,3 +511,72 @@ def test_failure_before_staging_identity_returns_issue_and_preserves_unknown_pat
     assert (
         created[0] / "caller.bin"
     ).read_bytes() == b"unknown identity caller bytes\x00\xff"
+
+
+@pytest.mark.parametrize(
+    ("error_type", "winerror", "native_platform", "attempt_count"),
+    [
+        (PermissionError, 5, "win32", 6),
+        (PermissionError, 32, "win32", 1),
+        (OSError, 5, "win32", 1),
+        (FileExistsError, 183, "win32", 1),
+        (PermissionError, 5, "linux", 1),
+    ],
+)
+def test_parking_setup_failure_escapes_as_distinct_fixture_failure(
+    tmp_path, monkeypatch, error_type, winerror, native_platform, attempt_count
+):
+    source = make_archive(tmp_path / "source.brz")
+    before = source.read_bytes()
+    destination = tmp_path / "vault"
+    parked = tmp_path / "original-owned"
+    caller = tmp_path / "caller.bin"
+    caller.write_bytes(b"caller owned\x00\xff")
+    original = Path.rename
+    commit_attempts = []
+    parking_attempts = []
+    parking_delays = []
+    steps = []
+
+    def rename(path, target):
+        if path.name.startswith(".brz2obsidian-"):
+            commit_attempts.append(path)
+            raise access_denied()
+        return original(path, target)
+
+    def native_parking_rename(path, target):
+        parking_attempts.append((path, target))
+        error = error_type("Controlled native parking failure")
+        error.winerror = winerror
+        raise error
+
+    def sleep(_delay):
+        # Only the setup syscall policy sees the simulated platform; the real
+        # Windows publisher must first reach its selected denied-rename interval.
+        with monkeypatch.context() as setup_platform:
+            setup_platform.setattr(sys, "platform", native_platform)
+            park_for_replacement(
+                commit_attempts[0],
+                parked,
+                native_parking_rename,
+                parking_delays.append,
+                steps,
+            )
+
+    monkeypatch.setattr(Path, "rename", rename)
+    monkeypatch.setattr(time, "sleep", sleep)
+    with pytest.raises(StagingSetupError, match="parking setup") as error:
+        result = default_workflow().convert(source, destination)
+        pytest.fail(
+            str({"unexpected_result": result.model_dump(mode="json"), "steps": steps})
+        )
+    assert isinstance(error.value.__cause__, error_type)
+    assert error.value.__cause__.winerror == winerror
+    assert len(commit_attempts) == 1 and len(parking_attempts) == attempt_count
+    assert parking_delays == [0.01, 0.02, 0.04, 0.08, 0.16][: attempt_count - 1]
+    assert len(steps) == attempt_count and all(s["winerror"] == winerror for s in steps)
+    assert not destination.exists() and not parked.exists()
+    assert not list(tmp_path.glob(".brz2obsidian-*"))
+    assert (
+        source.read_bytes() == before and caller.read_bytes() == b"caller owned\x00\xff"
+    )
