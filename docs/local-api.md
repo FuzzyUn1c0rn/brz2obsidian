@@ -139,10 +139,13 @@ result = workflow.inspect(reference)
 
 `LocalApiSourceModule(config, credentials=provider)` accepts a zero-argument
 provider returning the key at acquisition time. `local_api_workflow` accepts the
-same provider. References/configuration contain no credential field. The outer `local_api_workflow` explicitly pairs reviewed profile 2 with the
-module. Direct `LocalApiSourceModule` construction defaults to profile 1, which
-refuses the additional profile 2 shapes; explicit `profile_version="2"` requires
-its matching `LOCAL_API_POLICY_V2` when composing a workflow. There is no automatic
+same provider. References/configuration contain no credential field. The outer
+`local_api_workflow` explicitly pairs profile 3 with `LOCAL_API_POLICY_V3`; the
+CLI and Windows app use this factory. Profile 3 inherits every profile 2 resource
+predicate and warning disposition. Direct `LocalApiSourceModule` and
+`LocalApiSession` construction still default to profile 1. Explicit profiles 1
+and 2 remain available with their matching `LOCAL_API_POLICY` and
+`LOCAL_API_POLICY_V2`; explicit profile 3 uses `LOCAL_API_POLICY_V3`. There is no automatic
 fallback or additional GUI/CLI setting. Custom source/policy bindings remain
 caller-owned composition; the factory supplies the reviewed pair. Existing config
 and worker shapes remain unchanged. The module
@@ -196,3 +199,70 @@ that every captured object existed at the same moment, or that API discovery is
 universally complete. Inspection releases its session; conversion acquires again
 and therefore pays the acquisition cost again. Published acquisition evidence
 records `atomic=false`, start/end times and these limits.
+
+
+Profile-3 unsupported search, relationship and resource forms return respectively
+`api_search_shape_unsupported`, `api_relationship_shape_unsupported` and
+`api_resource_shape_unsupported`, using fixed stage-specific messages through
+CLI and Windows diagnostic report/copy/save. Ownership, invalid bytes,
+credentials and operational errors retain their existing classifications;
+explicit older profiles retain their earlier result codes. The finite additional
+source meanings are qualified in [the profile-3 table](local-api-profile3-qualification.md)
+and are implemented in their assigned source-family slices. Qualification alone
+never makes unsupported source content importable. Profile changes require a
+fresh compatible inspection; the worker/review schema remains version 3.
+
+
+Profile 3 discovers relationships from the qualified zero-Brain search envelope
+and legacy requested-Brain link candidates by canonical link ID. Search endpoint
+hints supply no content or traversal seeds; the authoritative link response
+supplies both endpoints. Unique pending IDs count immediately toward the traversal
+bound. Explicit profiles 1/2 retain their earlier hint requirements.
+
+The exact ordinary reverse-arrow hierarchy tuple `(kind, relation, meaning,
+direction, typeId) = (1, 1, 1, 3, null)` is supported under profile 3. A remains the
+parent and B the child. Both endpoint inventories, reciprocal parent/child graph
+adjacency and an empty relationship attachment inventory must agree. Original
+arrow facts remain in the migration record. These rules apply to live acquisition
+and frozen captures; older profiles refuse the additional tuple.
+
+
+Profile 3 supports thought-owned external file and directory references with
+explicitly null authored names and the qualified absolute Windows drive-path
+grammar. Resources links keep the final path segment as their display label and
+encode the destination as a file URI. Original source spelling remains in the
+migration record. Actual length/hash stay null; declared lengths remain evidence.
+External-only owners receive ordinary notes with Resources sections. Targets are
+never checked, opened, fetched or copied; unavailable targets add no source-gap
+warning. Explicit profiles 1/2 continue to refuse these additional declarations.
+
+
+Profile 3 adds thought-owned JPEG note images declared as the canonical attachment
+UUID plus lowercase `.jpg`, with type 12, isNotes=false and explicit null name.
+Complete JPEG verification and pixel decoding precede byte-preserving capture.
+This new note-image branch also requires a strict full native decode through
+simplejpeg after Pillow verification and size bounds, rejecting entropy recovery.
+The decoder uses the verified grayscale, RGB or CMYK mode, checks full dimensions
+and discards decoded pixels; source bytes are preserved. Progressive, lossless,
+unusual valid sampling and harmless trailing bytes keep their JPEG meanings.
+Existing image references, alt/title/order and audited width adaptation apply.
+
+The accepted finite ICO icon alternative keeps role=icon and the authored
+`Icon.png` filename while preserving the complete actual ICO container. Only
+ordered 32/16 or 16/32/48 square 32-bit BI_RGB variants with the exact qualified
+directory/DIB/mask/tail pattern are admitted; every variant fully decodes. Direct
+and inherited icon precedence and decorative item selection remain unchanged.
+PNG/JPEG icons retain their existing predicates. No transcoding or preferred-frame
+extraction occurs. Native fidelity of ICO under the authored PNG-style filename
+remains a separate source/output acceptance gate.
+
+
+Profile 3 preserves thought-owned static SVG note images declared as the canonical
+attachment UUID plus lowercase `.svg`, type 12, isNotes=false and explicit null
+name. Each image, including unreferenced attachments, must satisfy the bounded
+rectangle/line drawing grammar in
+[the profile qualification](local-api-profile3-qualification.md#q6-finite-static-svg-note-image).
+Original UTF-8 bytes, separate attachment identities, filenames, ownership and
+authored image placement remain intact. The existing note sizing adaptations
+apply. Structural acceptance establishes eligibility; exact-source artwork
+fidelity and native presentation retain their recorded acceptance gates.

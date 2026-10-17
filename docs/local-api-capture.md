@@ -159,3 +159,80 @@ For acquisition using the independently qualified [additive resource profile2](l
 The outer LOCAL_API_POLICY and capture identifiers must explicitly select the same reviewed profile version. A version1 capture remains bound to version1 support; it cannot silently acquire version2 semantics. Unknown versions or policy/identifier mismatch refuse. A reviewed version1 identity is incompatible with version2 until another inspection/review because profile_version participates in C(source) and its bound source_sha256; the snapshot and integrity digests consequently differ. No automatic profile fallback or replacement of old fixed expectations is permitted.
 
 All three original version1 fixture files remain byte-for-byte unchanged as committed. The separately authored [profile2 capture literal](../tests/fixtures/local_api_capture/profile2-capture-vector.json) supplies one independent case changing only the profile identifier and consequent source/snapshot/metadata/manifest hash bindings. It specifies the version alternative using existing format1 facts,not a new canonical encoder or a claim of runtime support. Resource-v2 positive/negative controls independently qualify the additional roles/formats. Actual stored-byte file hashes remain unframed and distinct from content digests as above.
+
+
+## Explicit profile3 alternative
+
+Profile 3 adds `profile_version="3"` as an explicit identifier alternative with
+all other format1 identifiers, contract7, CJSON1, digest domains and self-field
+omission rules unchanged. `LOCAL_API_POLICY_V3` is the matching outer policy.
+The [independently qualified table](local-api-profile3-qualification.md) bounds
+source semantics; profile selection never grants blanket role/extension support.
+Live, sealed and reopened captures inherit profile2 support under profile3 and
+retain exact profile matching. Direct module/session defaults remain profile1;
+explicit profiles1/2 preserve their semantics. Unknown or mismatched identifiers
+refuse. Generic custom policy/module composition remains caller-owned.
+
+The [independently authored profile3 literal](../tests/fixtures/local_api_capture/profile3-capture-vector.json)
+is an additional oracle; older fixture bytes and expectations remain unchanged.
+Its framed source/snapshot/integrity expectations differ solely because profile
+identity is bound. Ordinary retained-file hashes remain unframed. Operational
+host/capture/storage paths are excluded from content identity; authored external
+locations and their derived URI/display facts remain content-bound. Pinned
+mutations refuse even with recomputed untrusted manifests. A fresh valid capture
+with valid changed content receives a different identity and needs a new review;
+independent original-source preservation is established by baseline comparison.
+
+
+Profile3 relationship discovery retains authoritative link/endpoint facts, not
+search envelopes or optional hints. Equivalent admitted search envelopes therefore
+produce the same content identity when authoritative facts agree. The added
+ordinary reverse-arrow hierarchy `(1,1,1,3,null)` is checked again against both
+endpoint graphs and normalized parent/child orientation during sealing and
+verification. Recreating hashes under profile1/2 cannot authorize that tuple.
+No capture domain, canonical encoding or digest framing changes.
+
+
+Profile3 external references retain their exact type/location/null authored name
+and declaration joins. Normalized external file/directory assets bind their
+original_name to that raw path, display_name to its final Windows segment and
+external_uri to the established pure Windows URI helper. Availability is external,
+actual length/hash are null and no payload binding or local storage is permitted.
+These conditions apply during construction, sealing and verification, including
+when untrusted hashes are recreated. Raw separator spelling remains content-bound
+even if two paths derive the same URI; a valid path change needs a fresh review.
+No capture domain or encoding/framing change is required.
+
+
+Profile3 JPEG note images and the finite ICO icon alternative reuse the existing
+owned-payload domains and measurements. Sealing/revalidation applies identical
+declaration/owner/role/reference/appearance and full byte eligibility, including
+every ICO variant and its exact masks/tails. Original `Icon.png` remains the
+authored filename for actual ICO bytes; no actual_format field or PNG claim is
+introduced. Complete containers and distinct source identities remain intact.
+Profiles 1/2 retain ICO/JPEG-image refusals. Recreated hashes cannot authorize
+invalid shapes or falsely included excluded-owner icons. Valid changed pixels
+receive new content identities and require fresh review; trusted-pin mutations
+of even an unrequested variant refuse.
+
+
+JPEG note-image construction, sealing and reopening repeat the strict native
+full-decode check after the existing Pillow and dimension checks. Rehashed
+truncated entropy cannot become valid through decoder recovery, including when
+its declared length is preserved with trailing bytes. Original JPEG payloads,
+measurement domains and identity framing remain unchanged. The additional decode
+is restricted to the new profile3 JPEG image role; inherited icon/image predicates
+retain their existing decoder behavior.
+
+
+Profile3 static SVG images use the existing owned-image payload domain. Live
+acquisition, fresh session construction, sealing and reopened verification apply
+the same exact declaration/owner/role/reference bindings and finite XML grammar
+to every payload. Distinct source IDs with identical bytes remain distinct assets
+and owned files. Regenerating hashes cannot authorize an invalid drawing, changed
+ownership/role/filename/reference or falsely included excluded owner. A valid
+changed drawing or equal-byte identity change yields different content identity
+and needs fresh review; mutation of an already pinned unrequested image refuses
+even when length/mtime and a recomputed untrusted manifest appear consistent.
+Capture1, CJSON1 and the existing digest domains remain unchanged. Structural
+capture validation retains the independent original-source fidelity requirement.

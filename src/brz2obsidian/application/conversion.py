@@ -16,6 +16,9 @@ from brz2obsidian.contracts import Counts, Issue, MigrationRefused
 # Never forward source/publisher exception text, evidence or authored guidance.
 # These messages cover safe actions while retaining only explicit path facts.
 _SAFE_FINDINGS = {
+    "api_search_shape_unsupported": "The local API returned an unsupported search result. This source shape needs review.",
+    "api_relationship_shape_unsupported": "The local API returned an unsupported relationship. Its source form needs review.",
+    "api_resource_shape_unsupported": "The local API returned an unsupported resource declaration. Its source form needs review.",
     "api_capture_cleanup_failed": "The private source capture could not be released. Check temporary storage access and the reported publication status before another attempt.",
     "formatting_loss": "Included note formatting needs review: table layout may become responsive, custom icons use visible title fallbacks, or an insert remains unsupported. Review affected notes and declarations in the Migration report and edit the converted Markdown if needed.",
     "review_changed": "The current source or conversion compatibility changed. Inspect the current source before converting.",

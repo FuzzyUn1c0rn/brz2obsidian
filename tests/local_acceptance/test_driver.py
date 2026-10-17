@@ -102,11 +102,17 @@ def test_final_fingerprint_guard_detects_same_count_opaque_source_change(tmp_pat
         check_input(source, before)
 
 
-def test_expected_fact_oracle_has_only_stdlib_and_local_oracle_imports():
+def test_expected_fact_oracle_has_only_reviewed_imports():
     root = Path(__file__).parent
     modules = {
         "api_checker",
         "api_manifest",
+        "api_generated",
+        "api_image_proofs",
+        "api_note_text",
+        "api_scope",
+        "api_scope_inputs",
+        "api_svg",
         "checker",
         "facts",
         "support",
@@ -124,6 +130,11 @@ def test_expected_fact_oracle_has_only_stdlib_and_local_oracle_imports():
             if isinstance(node, ast.Import):
                 assert all(
                     a.name.split(".")[0] in sys.stdlib_module_names for a in node.names
+                ) or (
+                    name == "api_checker.py"
+                    and len(node.names) == 1
+                    and node.names[0].name == "yaml"
+                    and node.names[0].asname is None
                 )
             elif isinstance(node, ast.ImportFrom):
                 assert (node.level == 1 and node.module in modules) or (

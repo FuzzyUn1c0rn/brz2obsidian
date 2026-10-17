@@ -245,3 +245,108 @@ These successful normalizations produce no new SourceFinding. Unqualified additi
 The retained census independently checked all100 additional IDs across51 owner graphs:91 generic PNG files,7 generic ZIP files,one PNG note image and one JPEG icon. Four representatives establish distinct decoder/signature controls. These are conditional per-resource predicates: every accepted resource must satisfy its decoder/directory requirement during the full audit. The100-ID signature/hash census and selected representative decodes do not establish100 per-resource decode/directory verdicts. The PNG note image joins its64-byte raw note by exact destination once. The JPEG icon's273600 measured bytes have SHA-256 `2f50caaed5260f5cf6c96fcf68a8091b67855a9b15c96772785165ec4620a90e`; an independent full-pixel WIC decode corroborates actual JPEG eligibility. The ZIP control has a valid224-member directory without extraction or member CRC claims. No new API/native requests or Brain changes were used. Decoder success is format eligibility,not output appearance acceptance.
 
 The closed capture format does not acquire an actual_format field or a new source domain. Present payload identity/length/hash bind the exact bytes; the independently retained format qualification explains the accepted predicate. Any recorded source/payload format description must be truthful about JPEG bytes despite the declared `.png` suffix. [Capture compatibility](local-api-capture.md#explicit-profile2-alternative) adds only the reviewed profile_version2 identifier alternative; CJSON1,format1,module1 and every version1 fixed vector remain unchanged.
+
+
+## Profile3 qualification and compatibility
+
+[Profile 3](local-api-profile3-qualification.md) is an explicitly reviewed
+alternative that includes every profile2 predicate and disposition. The standard
+library workflow, CLI and Windows factory pair a module configured for profile 3
+with `LOCAL_API_POLICY_V3`.
+Direct source-module/session constructors retain profile1 defaults; explicit
+profiles1/2 and their controls remain available. Capture format1, module1,
+contract7 and worker/review schema3 are unchanged. Every new source-family
+predicate requires matching live and frozen implementation under its assigned
+slice; raw capture or profile selection never expands the finite qualification.
+
+
+The relationship discovery and reverse-arrow hierarchy slice is implemented for
+profile3. The exact [Q1--Q3 predicates](local-api-profile3-qualification.md) apply:
+the new zero-Brain envelope has a closed keyset and actual integer discriminators;
+legacy requested-Brain candidates keep their auxiliary/mixed-thought rules and
+ignored unknown fields. Both paths queue only canonical relationship IDs, ignore
+all endpoint hints and require authoritative endpoint discovery within immediate
+unique-ID bounds. Only the added ordinary/ordinary `(1,1,1,3,null)` hierarchy tuple
+is admitted. Parent A/child B, full incident/adjacency joins, empty link-content
+inventory, original evidence and frozen profile gating are mandatory. Explicit
+profiles1/2 preserve their prior search/relationship behavior. Resource additions
+remain governed by their separately assigned implementation slices.
+
+
+Profile3 external file/directory references are implemented under the exact
+[Q4 predicate](local-api-profile3-qualification.md): type2/type8, thought-owned,
+sourceType2, actual isNotes=false and explicitly null name, with graph/list/metadata
+agreement. Both roles reuse the existing pure absolute Windows drive-path helper,
+including its precise reserved-device and character boundaries. Exact raw source
+location remains original_name and identity-bound evidence; the final Windows
+segment is derived display_name. The escaped file URI, external file/directory
+role, null actual measurements and absent local payload are revalidated in frozen
+captures. Shared Resources escaping/materialization rules apply. No destination
+I/O or additional missing-payload warning is introduced.
+
+
+Profile3 implements the exact JPEG note-image predicate in
+[Q5](local-api-profile3-qualification.md#q5-jpeg-note-image) and the accepted
+[S10 finite ICO alternative](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/210).
+JPEG images require UUID.jpg/type 12 and full JPEG classification/verification/
+pixel decoding. ICO is icon-only under the existing type 5/Icon.png/null-name
+declaration. Ordered square variants are exactly 32/16 or 16/32/48, with 32-bit
+BI_RGB 40-byte headers, exact contiguous body extents and all advertised variants
+fully decoded. Bodies have length 40+4*w*h+4*ceil(w/32)*h+z; z is 0 for both first
+signature entries and 0/128/192 for the second. The second signature's 32/48 masks
+and tails are zero; other qualified masks remain unrestricted. No generic ICO
+fallback or BRZ parser expansion is granted.
+
+The [inert public inputs](../tests/fixtures/local_api_images_v3/source-facts.json)
+were independently authored by /root and qualified by /root/reviewer under input
+pin f11bc1e4c3144b4f1c37c7bde333909f914169fdbc887f5597c95b52cbdb4fe5, including
+all five variant structures/full RGBA hashes/samples and the second JPEG. Binary
+fixture bytes stay exact; the two JSON fact containers have Git LF normalization
+relative to their raw CRLF source containers, with unchanged literal values. This
+source-input qualification does not replace independent checker, complete real
+source or native presentation acceptance.
+
+
+The profile3 JPEG note-image branch adds strict full native decoding through
+simplejpeg (runtime range >=1.9,<2; development pins simplejpeg1.9.0 and NumPy2.5.4).
+It rejects recoverable truncated entropy after existing Pillow verification and
+bounds, using verified native grayscale/CMYK/RGB modes and full dimensions. No
+header-helper mapping, marker/scan restriction or pixel rewrite is introduced.
+The [qualified JPEG neighbors](../tests/fixtures/local_api_jpeg_neighbors_v3/source-facts.json)
+include progressive/multiple-scan and benign-trailer inputs under source pin
+f38560b71eb3d52cd6fb6e33fc2b9439ac1f454fc180315de7f92622884b46d5;
+[grayscale/CMYK facts](../tests/fixtures/local_api_jpeg_neighbors_v3/extended-source-facts.json)
+use source pin 7ec93850ab740845c8536acece14d7782395bdc047521f4fdac0d43dd1c19b67.
+Those source inputs were authored by /root and qualified by /root/reviewer.
+The [literal JPEG classes](../tests/fixtures/local_api_jpeg_classes_v3/class-source-facts.json)
+cover SOF3 grayscale/RGB/CMYK, 4:4:1 sampling and YCCK, authored by /root/reviewer
+and independently qualified by /root under pin
+cfe5277594cadd5873ae351dc5e5bbfbc6b67e03de0bd46af6b2a3b42d1a8aaf.
+Their source measurements label codec-specific CMYK/YCCK interpretations; they
+do not establish a universal RGBA color assertion. Raw input bytes/fact values
+are preserved; Git may normalize JSON line endings. Public controls exercise
+live acquisition, frozen verification and byte-preserving conversion separately
+from the independently authored source checker and later acceptance gates.
+
+
+Profile3 implements the finite static SVG predicate in accepted
+[S7](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/210). The API-local parser
+accepts only strict UTF-8 without BOM, the optional XML1.0/UTF-8 declaration,
+the default SVG namespace, an exact width/height/viewBox root and direct rect/line
+children with the specified closed attributes. Character data is XML whitespace
+only. Entity references, DTD/entity declarations, comments, other processing
+instructions,
+foreign namespaces and dependency/active syntax refuse before interpretation.
+The inclusive limits are 1 MiB, 4096 elements including root, depth2, root dimensions
+32768 and general numeric magnitude1000000. Decimal lexemes are at most64 ASCII
+characters; coefficient/exponent comparisons preserve arbitrarily tiny positives
+without floating-point underflow or exponent expansion. Rectangle dimensions and
+both shape stroke widths are positive; omitted attributes keep SVG defaults.
+
+Every owned SVG receives the same structural validation, including unreferenced
+images and each distinct identity with equal bytes. Validation preserves the
+complete original; no rewriting, rasterization or dependency resolution occurs.
+Profiles1/2 retain refusals. Known excluded owners keep the existing no-fetch
+scope boundary; previous external URL/file roles retain their own predicates.
+The actual-source sixteen-image identity/artwork investigation, complete audit
+and native presentation gates remain separate from this synthetic eligibility.

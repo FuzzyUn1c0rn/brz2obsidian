@@ -59,9 +59,9 @@ def test_resource_review_rejects_cross_profile_compatibility_and_changed_payload
         operations = Operations()
         inspected = operations.inspect(selection)
         assert inspected.reviewed is not None
-        assert inspected.reviewed.profile_version == "2"
+        assert inspected.reviewed.profile_version == "3"
         previous_profile = inspected.reviewed.model_copy(
-            update={"profile_version": "1"}
+            update={"profile_version": "2"}
         )
         refused = operations.convert_reviewed(
             selection, tmp_path, "old-profile", previous_profile
@@ -800,3 +800,441 @@ def test_real_worker_requires_gap_warning_authorization_and_fresh_pdf_review(
         assert converted.status == "conversion_created_with_warnings"
         assert converted.publication.receipt_verified
         assert_published_txt_pdf_gap(tmp_path / "authorized")
+
+
+@pytest.mark.parametrize("stage", ["search", "relationship", "resource"])
+def test_profile3_fixed_stage_messages_survive_real_worker_and_reviewed_conversion(
+    tmp_path, monkeypatch, stage
+):
+    from tests.support.local_api import MetadataApi
+    from tests.support.local_api_graph import HIERARCHY
+    from tests.support.local_api_payloads import (
+        FILE,
+        SHAPE_MESSAGES,
+        unsupported_shape_api,
+    )
+
+    monkeypatch.setenv("THE_BRAIN_LOCAL_API_KEY", KEY)
+    api = unsupported_shape_api(stage)
+    if stage == "search":
+        fault = api.search
+        api.search = MetadataApi().search
+    elif stage == "relationship":
+        fault = api.links[HIERARCHY]["relation"]
+        api.links[HIERARCHY]["relation"] = 1
+    else:
+        fault = api.attachments.pop(FILE)
+    worker = Supervisor(Path(sys.executable), Path(__file__).parents[2] / "src")
+    with api_server(api) as (_, address):
+        selection = LocalApiSourceSelection(
+            brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+        )
+        operations = Operations()
+        review = operations.inspect(selection).reviewed
+        assert review is not None
+        if stage == "search":
+            api.search = fault
+        elif stage == "relationship":
+            api.links[HIERARCHY]["relation"] = fault
+        else:
+            api.attachments[FILE] = fault
+        results = [
+            operations.inspect(selection),
+            operations.convert_reviewed(selection, tmp_path, "refused", review),
+        ]
+        for operation, arguments in (
+            ("inspect", InspectArguments(source_selection=selection)),
+            (
+                "convert_reviewed",
+                ConvertArguments(
+                    source_selection=selection,
+                    parent=str(tmp_path),
+                    vault_name="worker-refused",
+                    reviewed=review,
+                    proceed_with_warnings=False,
+                ),
+            ),
+        ):
+            terminal = worker.run(
+                WorkerRequest(
+                    request_id=str(uuid4()), operation=operation, arguments=arguments
+                )
+            )
+            assert terminal.phase == "completed"
+            results.append(terminal.response.result)
+        for result in results:
+            assert result.outcome == "refused"
+            assert result.findings[0].code == f"api_{stage}_shape_unsupported"
+            assert result.findings[0].message == SHAPE_MESSAGES[stage]
+            assert SHAPE_MESSAGES[stage] in result.diagnostic_text
+            assert "CANARY" not in result.model_dump_json()
+        assert not (tmp_path / "refused").exists()
+        assert not (tmp_path / "worker-refused").exists()
+
+
+def test_valid_replacement_image_has_new_identity_and_needs_new_review(tmp_path):
+    from io import BytesIO
+
+    from PIL import Image
+
+    from tests.support.local_api_payloads import IMAGE, RichPayloadApi
+
+    stream = BytesIO()
+    Image.new("RGB", (2, 1), "blue").save(stream, format="PNG")
+    replacement = stream.getvalue()
+    with api_server(RichPayloadApi()) as (api, address):
+        selection = LocalApiSourceSelection(
+            brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+        )
+        operations = Operations(credentials=lambda: KEY)
+        original = operations.inspect(selection)
+        assert original.reviewed is not None
+        api.payloads[IMAGE] = replacement
+        current = operations.inspect(selection)
+        assert current.reviewed is not None
+        assert current.reviewed.source_identity != original.reviewed.source_identity
+        assert (
+            current.reviewed.source_identity.source_sha256
+            != original.reviewed.source_identity.source_sha256
+        )
+        refused = operations.convert_reviewed(
+            selection, tmp_path, "old-review", original.reviewed
+        )
+        assert refused.findings[0].code == "review_changed"
+        assert not (tmp_path / "old-review").exists()
+        accepted = operations.convert_reviewed(
+            selection, tmp_path, "new-review", current.reviewed
+        )
+        assert accepted.publication.receipt_verified
+        assert (
+            tmp_path / f"new-review/Attachments/22222222/{IMAGE}.png"
+        ).read_bytes() == replacement
+
+
+def test_valid_reverse_arrow_change_requires_a_fresh_review(tmp_path):
+    from tests.sources.test_local_api_relationship_candidates import (
+        LINK,
+        LinkCandidateApi,
+    )
+
+    api = LinkCandidateApi()
+    with api_server(api) as (_, address):
+        selection = LocalApiSourceSelection(
+            brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+        )
+        operations = Operations(credentials=lambda: KEY)
+        original = operations.inspect(selection)
+        assert original.reviewed is not None
+        api.links[LINK]["direction"] = 3
+        current = operations.inspect(selection)
+        assert current.reviewed is not None
+        assert (
+            current.reviewed.source_identity.source_sha256
+            != original.reviewed.source_identity.source_sha256
+        )
+        assert (
+            current.reviewed.source_identity.snapshot_digest
+            != original.reviewed.source_identity.snapshot_digest
+        )
+        refused = operations.convert_reviewed(
+            selection, tmp_path, "old-review", original.reviewed
+        )
+        assert refused.findings[0].code == "review_changed"
+        assert not (tmp_path / "old-review").exists()
+        accepted = operations.convert_reviewed(
+            selection, tmp_path, "new-review", current.reviewed
+        )
+        assert accepted.publication.receipt_verified
+
+
+@pytest.mark.parametrize("kind", [2, 8])
+def test_changed_external_path_spelling_requires_fresh_review_without_target_access(
+    tmp_path, monkeypatch, kind
+):
+    from tests.sources.test_local_api_external_references import (
+        FILE,
+        ExternalReferenceApi,
+        forbid_external_target_io,
+    )
+    from tests.support.local_api import ALONE
+    from tests.support.local_api_payloads import attachment
+
+    api = ExternalReferenceApi()
+    api.attachments = {FILE: attachment(FILE, ALONE, kind, "C:\\Source\\Document")}
+    forbid_external_target_io(monkeypatch)
+    with api_server(api) as (_, address):
+        selection = LocalApiSourceSelection(
+            brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+        )
+        operations = Operations(credentials=lambda: KEY)
+        original = operations.inspect(selection)
+        assert original.reviewed is not None
+        api.attachments[FILE]["location"] = "C:/Source/Document"
+        current = operations.inspect(selection)
+        assert current.reviewed is not None
+        assert current.reviewed.source_identity != original.reviewed.source_identity
+        refused = operations.convert_reviewed(
+            selection, tmp_path, "old-review", original.reviewed
+        )
+        assert refused.findings[0].code == "review_changed"
+        assert not (tmp_path / "old-review").exists()
+        accepted = operations.convert_reviewed(
+            selection, tmp_path, "new-review", current.reviewed
+        )
+        assert accepted.publication.receipt_verified
+    note = (tmp_path / "new-review/Notes/External owner.md").read_text(encoding="utf-8")
+    assert "- [Document](<file:///C:/Source/Document>)" in note
+    assert not any(path.endswith("/file-content") for path, _, _ in api.requests)
+
+
+@pytest.mark.parametrize("family", ["jpeg", "inert-a.ico", "inert-b.ico"])
+def test_valid_new_image_pixels_change_identity_and_require_fresh_review(
+    tmp_path, family
+):
+    from tests.sources.test_local_api_images_v3 import (
+        BLUE_JPEG,
+        ICON,
+        INPUTS,
+        IcoIconApi,
+        JpegImageApi,
+        changed_valid_icon,
+    )
+    from tests.support.local_api_payloads import IMAGE
+
+    api = (
+        JpegImageApi()
+        if family == "jpeg"
+        else IcoIconApi((INPUTS / family).read_bytes())
+    )
+    key = IMAGE if family == "jpeg" else ICON
+    replacement = BLUE_JPEG if family == "jpeg" else changed_valid_icon(family)
+    with api_server(api) as (_, address):
+        selection = LocalApiSourceSelection(
+            brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+        )
+        operations = Operations(credentials=lambda: KEY)
+        original = operations.inspect(selection)
+        assert original.reviewed is not None
+        api.payloads[key] = replacement
+        api.attachments[key]["dataLength"] = len(replacement)
+        current = operations.inspect(selection)
+        assert current.reviewed is not None
+        assert (
+            current.reviewed.source_identity.source_sha256
+            != original.reviewed.source_identity.source_sha256
+        )
+        assert (
+            current.reviewed.source_identity.snapshot_digest
+            != original.reviewed.source_identity.snapshot_digest
+        )
+        refused = operations.convert_reviewed(
+            selection, tmp_path, "old-review", original.reviewed
+        )
+        assert refused.findings[0].code == "review_changed"
+        assert not (tmp_path / "old-review").exists()
+        accepted = operations.convert_reviewed(
+            selection, tmp_path, "new-review", current.reviewed
+        )
+        assert accepted.publication.receipt_verified
+    record = json.loads((tmp_path / "new-review/migration-record.json").read_bytes())
+    asset = next(row for row in record["asset_targets"] if row["asset_id"] == key)
+    assert (
+        tmp_path / "new-review" / asset["relative_path"]
+    ).read_bytes() == replacement
+
+
+def test_corrupt_new_jpeg_refuses_inspection_and_reviewed_publication_safely(tmp_path):
+    import struct
+
+    from tests.sources.test_local_api_images_v3 import INPUTS, JpegImageApi
+    from tests.support.local_api_payloads import IMAGE
+
+    raw = (INPUTS / "inert-blue.jpg").read_bytes()
+    marker = raw.index(b"\xff\xda")
+    start = marker + 2 + struct.unpack_from(">H", raw, marker + 2)[0]
+    damaged = raw[: start + 6] + b"\xff\xd9"
+    with api_server(JpegImageApi()) as (api, address):
+        selection = LocalApiSourceSelection(
+            brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+        )
+        operations = Operations(credentials=lambda: KEY)
+        original = operations.inspect(selection)
+        assert original.reviewed is not None
+        api.payloads[IMAGE] = damaged
+        api.attachments[IMAGE]["dataLength"] = len(damaged)
+        api.thoughts[HOME]["name"] = "PRIVATE_JPEG_TITLE_CANARY"
+        inspected = operations.inspect(selection)
+        converted = operations.convert_reviewed(
+            selection, tmp_path, "bad-jpeg", original.reviewed
+        )
+    for result, message in (
+        (
+            inspected,
+            "The selected source is not supported or consistent. Correct the source and inspect again.",
+        ),
+        (
+            converted,
+            "The source or prepared output is inconsistent. Review the source and inspect again.",
+        ),
+    ):
+        assert result.outcome == "refused"
+        assert result.findings[0].code == "invalid_source"
+        assert result.findings[0].message == message
+        assert "CANARY" not in result.diagnostic_text
+    assert not converted.publication.receipt_verified
+    assert not (tmp_path / "bad-jpeg").exists()
+
+
+@pytest.mark.parametrize("change", ["drawing", "identity"])
+def test_valid_unreferenced_svg_change_requires_fresh_review(tmp_path, change):
+    from tests.sources.test_local_api_svg_v3 import SECOND, SVG, DualSvgApi
+
+    with api_server(DualSvgApi()) as (api, address):
+        selection = LocalApiSourceSelection(
+            brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+        )
+        operations = Operations(credentials=lambda: KEY)
+        original = operations.inspect(selection)
+        assert original.reviewed is not None and not original.findings
+        identity = SECOND
+        expected = SVG
+        if change == "drawing":
+            expected = SVG.replace(b'fill="#aBc"', b'fill="#dEf"')
+            api.payloads[SECOND] = expected
+        else:
+            identity = "a3333333-3333-4333-8333-333333333335"
+            api.attachments[identity] = api.attachments.pop(SECOND) | {
+                "id": identity,
+                "location": identity + ".svg",
+            }
+            api.payloads[identity] = api.payloads.pop(SECOND)
+        current = operations.inspect(selection)
+        assert current.reviewed is not None
+        assert (
+            current.reviewed.source_identity.source_sha256
+            != original.reviewed.source_identity.source_sha256
+        )
+        assert (
+            current.reviewed.source_identity.snapshot_digest
+            != original.reviewed.source_identity.snapshot_digest
+        )
+        refused = operations.convert_reviewed(
+            selection, tmp_path, "old-review", original.reviewed
+        )
+        assert refused.findings[0].code == "review_changed"
+        assert not (tmp_path / "old-review").exists()
+        accepted = operations.convert_reviewed(
+            selection, tmp_path, "new-review", current.reviewed
+        )
+        assert accepted.publication.receipt_verified
+        record = json.loads(
+            (tmp_path / "new-review/migration-record.json").read_bytes()
+        )
+        asset = next(
+            row for row in record["asset_targets"] if row["asset_id"] == identity
+        )
+        assert (
+            tmp_path / "new-review" / asset["relative_path"]
+        ).read_bytes() == expected
+
+
+@pytest.mark.parametrize("execution", ["operations", "worker"])
+def test_mixed_scope_review_requires_warning_authorization_and_fresh_changed_source(
+    tmp_path, monkeypatch, execution
+):
+    from tests.local_acceptance.api_checker import audit_baseline, check_api_vault
+    from tests.local_acceptance.api_scope_inputs import (
+        mixed_expectations,
+        mixed_source_packet,
+    )
+    from tests.local_acceptance.test_api_scope_v3 import scope_baseline
+    from tests.support.local_api_packet import RawPacketApi
+
+    baseline = scope_baseline(tmp_path / "independent-source", "tags")
+    changed_baseline = scope_baseline(
+        tmp_path / "changed-independent-source", "changed-svg"
+    )
+    audit_baseline(baseline, profile_version="3")
+    audit_baseline(changed_baseline, profile_version="3")
+    packet = mixed_source_packet("tags")
+    api = RawPacketApi.from_source_packet(packet)
+    monkeypatch.setenv("THE_BRAIN_LOCAL_API_KEY", KEY)
+    brain = baseline.json(baseline.data["brain"])["id"]
+    operations = Operations(credentials=lambda: KEY)
+    worker = Supervisor(Path(sys.executable), Path(__file__).parents[2] / "src")
+    with api_server(api) as (_, address):
+        selection = LocalApiSourceSelection(
+            brain_id=brain,
+            config=ApiAcquisitionConfig(api_url=address, include_pins=False),
+        )
+
+        def inspect():
+            if execution == "operations":
+                return operations.inspect(selection)
+            return worker.run(
+                WorkerRequest(
+                    request_id=str(uuid4()),
+                    operation="inspect",
+                    arguments=InspectArguments(source_selection=selection),
+                )
+            ).response.result
+
+        def convert(name, reviewed, authorized):
+            if execution == "operations":
+                return operations.convert_reviewed(
+                    selection,
+                    tmp_path,
+                    name,
+                    reviewed,
+                    proceed_with_warnings=authorized,
+                )
+            return worker.run(
+                WorkerRequest(
+                    request_id=str(uuid4()),
+                    operation="convert_reviewed",
+                    arguments=ConvertArguments(
+                        source_selection=selection,
+                        parent=str(tmp_path),
+                        vault_name=name,
+                        reviewed=reviewed,
+                        proceed_with_warnings=authorized,
+                    ),
+                )
+            ).response.result
+
+        original = inspect()
+        assert original.reviewed is not None and original.reviewed.outcome == "warnings"
+        refused = convert("unauthorized", original.reviewed, False)
+        assert refused.status == "conversion_refused"
+        assert "warning_authorization_required" in {f.code for f in refused.findings}
+        assert not (tmp_path / "unauthorized").exists()
+        api.use_packet(
+            {
+                "files": (changed := mixed_source_packet("changed-svg"))["files"],
+                "ledger": changed["files"]["endpoints.json"],
+            }
+        )
+        stale = convert("stale-review", original.reviewed, True)
+        assert stale.status == "conversion_refused"
+        assert "review_changed" in {f.code for f in stale.findings}
+        assert not (tmp_path / "stale-review").exists()
+        fresh = inspect()
+        assert fresh.reviewed is not None
+        assert fresh.reviewed.source_identity != original.reviewed.source_identity
+        published = convert("fresh-reviewed", fresh.reviewed, True)
+    assert published.publication.receipt_verified
+    assert published.status == "conversion_created_with_warnings"
+    baseline.verify()
+    changed_baseline.verify()
+    check_api_vault(changed_baseline, tmp_path / "fresh-reviewed", profile_version="3")
+    with pytest.raises(AssertionError):
+        check_api_vault(baseline, tmp_path / "fresh-reviewed", profile_version="3")
+    assert not api.unexpected_requests
+    ledger = json.loads(packet["files"]["endpoints.json"])
+    assert {row["path"] for row in api.served}.isdisjoint(ledger["forbidden_routes"])
+    text = (
+        original.model_dump_json()
+        + stale.model_dump_json()
+        + published.model_dump_json()
+    )
+    assert all(c not in text for c in mixed_expectations()["canaries"])

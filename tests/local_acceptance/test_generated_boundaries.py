@@ -209,7 +209,7 @@ def test_rehashed_missing_wrong_extra_moved_generated_closures_reject(
     source, _, note_path = source_with_tail(tmp_path / "source.brz", body, tail)
     vault = tmp_path / "vault"
     result = default_workflow().convert(source, vault).model_dump(mode="json")
-    assert result["outcome"] == "clean"
+    assert result["outcome"] == "clean", result
     path = vault / note_path
     before = path.read_bytes()
     assert note_body(before) == authored_full_note(

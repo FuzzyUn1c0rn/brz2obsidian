@@ -1,0 +1,63 @@
+{
+  "actor": "/root",
+  "purpose": "Independent inert positive JPEG class neighbors for strict nonrecovering qualification; no runtime/checker imports or output expectations.",
+  "preencoding": {
+    "mode": "RGB",
+    "size": [
+      2,
+      1
+    ],
+    "pixels": [
+      [
+        0,
+        0,
+        255
+      ],
+      [
+        0,
+        0,
+        255
+      ]
+    ]
+  },
+  "expected_decoded": {
+    "mode": "RGBA",
+    "size": [
+      2,
+      1
+    ],
+    "pixels": [
+      [
+        0,
+        0,
+        254,
+        255
+      ],
+      [
+        0,
+        0,
+        254,
+        255
+      ]
+    ],
+    "rgba_sha256": "b23b857e1c1dbdd69c6ef9bcabba8147deac6b201229e417507edde00265887b"
+  },
+  "inputs": {
+    "inert-progressive.jpg": {
+      "length": 522,
+      "sha256": "0d59d04ea15a5775d91fbbfe711048de285424936ec1181144fb4465602320e5",
+      "sos_markers": 10,
+      "sof2_markers": 1,
+      "source": "Pillow12.3 independent RGB-blue progressive encode",
+      "measured_pillow_rgba_sha256": "b23b857e1c1dbdd69c6ef9bcabba8147deac6b201229e417507edde00265887b"
+    },
+    "inert-trailer.jpg": {
+      "length": 659,
+      "sha256": "3dd1ece8593498482ad7349794f81974b0cb90911734b77127ca529dbcb2ff74",
+      "sos_markers": 1,
+      "sof2_markers": 0,
+      "source": "unchanged previously qualified inert-blue JPEG codestream plus literal ASCII trailer",
+      "measured_pillow_rgba_sha256": "b23b857e1c1dbdd69c6ef9bcabba8147deac6b201229e417507edde00265887b"
+    }
+  }
+}

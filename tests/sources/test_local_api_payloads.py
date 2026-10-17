@@ -40,10 +40,10 @@ from tests.support.local_api_payloads import (
 
 def test_module_refuses_an_unreviewed_selected_profile():
     with pytest.raises(MigrationRefused):
-        LocalApiSourceModule(profile_version="3")
+        LocalApiSourceModule(profile_version="4")
 
 
-def test_explicit_profile2_outer_pairing_preserves_generic_png_without_promoting_it(
+def test_standard_profile3_outer_pairing_preserves_generic_png_without_promoting_it(
     tmp_path,
 ):
 
@@ -59,7 +59,7 @@ def test_explicit_profile2_outer_pairing_preserves_generic_png_without_promoting
         workflow = local_api_workflow(config, credentials=lambda: KEY)
         inspected = workflow.inspect(LocalApiSourceRef(BRAIN))
         assert inspected.outcome == "clean", inspected.issues
-        assert workflow.binding.policy.profile_version == "2"
+        assert workflow.binding.policy.profile_version == "3"
         converted = workflow.convert(LocalApiSourceRef(BRAIN), tmp_path / "vault")
         assert converted.outcome == "clean", converted.issues
         assert (tmp_path / "vault/Attachments/22222222/generic.png").read_bytes() == PNG
@@ -404,8 +404,9 @@ def test_acquired_payload_stream_revocation_corruption_and_unknown_access(
         (5, "Icon.png", "jpeg"),
     ],
 )
+@pytest.mark.parametrize("profile3", [False, True])
 def test_each_qualified_payload_format_preserves_literal_role_and_bytes(
-    kind, location, format_name
+    kind, location, format_name, profile3
 ):
 
     if format_name == "pdf":
@@ -429,7 +430,7 @@ def test_each_qualified_payload_format_preserves_literal_role_and_bytes(
     api = PayloadApi()
     api.attachments[FILE] = attachment(FILE, HOME, kind, location, length=12345)
     api.payloads[FILE] = raw
-    version = "2" if format_name in {"zip", "jpeg"} else "1"
+    version = "3" if profile3 else "2" if format_name in {"zip", "jpeg"} else "1"
     with (
         api_server(api) as (_, address),
         LocalApiSourceModule(
@@ -450,12 +451,13 @@ def test_each_qualified_payload_format_preserves_literal_role_and_bytes(
             assert captured.read() == raw
 
 
-def test_independent_profile2_capture_literal_and_profile_match_remain_exact():
+@pytest.mark.parametrize("version", ["2", "3"])
+def test_independent_capture_literal_and_profile_match_remain_exact(version):
 
     vector = json.loads(
         (
             Path(__file__).parents[1]
-            / "fixtures/local_api_capture/profile2-capture-vector.json"
+            / f"fixtures/local_api_capture/profile{version}-capture-vector.json"
         ).read_text(encoding="utf-8")
     )
     files = {f["storage_key"]: f["utf8"].encode() for f in vector["retained_files"]}
@@ -475,7 +477,7 @@ def test_independent_profile2_capture_literal_and_profile_match_remain_exact():
         snapshot=snapshot,
         audit=audit,
         payloads=payloads,
-        profile_version="2",
+        profile_version=version,
     )
     try:
         assert session.source_identity.source_sha256 == vector["expected_source_sha256"]

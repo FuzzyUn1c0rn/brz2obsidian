@@ -5,7 +5,9 @@ import ntpath
 import os
 import shutil
 import stat
+import sys
 import tempfile
+import time
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -173,11 +175,62 @@ def _staged_files(staging):
     return files
 
 
+def _owned_staging(staging, destination, identity):
+    if identity is None:
+        raise OSError("Cannot establish owned staging identity")
+    # Reject reparse ancestry before stat, inventory, reads or cleanup can follow it.
+    _safe_ancestors(staging)
+    info = staging.stat()
+    if (
+        staging.parent != destination.parent.resolve()
+        or not staging.name.startswith(".brz2obsidian-")
+        or staging.resolve() != staging
+        or (info.st_dev, info.st_ino) != identity
+    ):
+        raise OSError("Cannot establish owned staging containment")
+
+
+def _verify_retry_staging(staging, destination, identity, expected, payloads):
+    _owned_staging(staging, destination, identity)
+    payloads.verify_consistency()
+    if _staged_files(staging) != set(expected):
+        raise MigrationFailed(
+            (_issue("payload_integrity_failure", "Staged files changed before retry"),)
+        )
+    for relative_path, expected_facts in expected.items():
+        path = staging / relative_path
+        _safe_ancestors(path)
+        with path.open("rb") as stream:
+            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        if (path.stat().st_size, digest) != expected_facts:
+            raise MigrationFailed(
+                (
+                    _issue(
+                        "payload_integrity_failure",
+                        "Staged content changed before retry",
+                    ),
+                )
+            )
+    _owned_staging(staging, destination, identity)
+    if _staged_files(staging) != set(expected):
+        raise MigrationFailed(
+            (
+                _issue(
+                    "payload_integrity_failure",
+                    "Staged files changed during retry verification",
+                ),
+            )
+        )
+    payloads.verify_consistency()
+    _fresh(destination)
+
+
 def publish(
     artifacts: RenderedVault, payloads: SourceSession, destination: object
 ) -> Receipt:
     destination = Path(destination).absolute()
     staging = None
+    owned_identity = None
     try:
         _fresh(destination)
         if (
@@ -334,12 +387,30 @@ def publish(
         try:
             if destination.exists():
                 destination.rmdir()
-            # Native Windows rename refuses any existing destination. Removing
-            # an empty directory cannot remove a late file (rmdir then fails).
-            staging.rename(destination)
         except OSError:
             _fresh(destination)
             raise
+        # Remove an initially empty destination once only. A caller-created
+        # destination during a delay must remain protected by native rename.
+        delays = (0.01, 0.02, 0.04, 0.08, 0.16)
+        for attempt in range(len(delays) + 1):
+            try:
+                # Native Windows rename refuses any existing destination.
+                staging.rename(destination)
+                break
+            except OSError as error:
+                _fresh(destination)
+                if not (
+                    sys.platform == "win32"
+                    and isinstance(error, PermissionError)
+                    and getattr(error, "winerror", None) == 5
+                    and attempt < len(delays)
+                ):
+                    raise
+                time.sleep(delays[attempt])
+                _verify_retry_staging(
+                    staging, destination, owned_identity, expected, payloads
+                )
         staging = None
         return receipt
     except (MigrationFailed, MigrationRefused) as error:
@@ -355,14 +426,7 @@ def publish(
     if staging is not None:
         try:
             # Only this freshly created sibling staging directory is owned.
-            if (
-                staging.parent != destination.parent.resolve()
-                or not staging.name.startswith(".brz2obsidian-")
-                or staging.resolve() != staging
-                or (staging.stat().st_dev, staging.stat().st_ino) != owned_identity
-            ):
-                raise OSError("Cannot establish owned staging containment")
-            _safe_ancestors(staging)
+            _owned_staging(staging, destination, owned_identity)
             _staged_files(staging)
             shutil.rmtree(staging)
         except (OSError, MigrationRefused, MigrationFailed) as error:

@@ -4,7 +4,7 @@ import hashlib
 import warnings
 from decimal import Decimal
 from io import BytesIO
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from urllib.parse import urlsplit
 from zipfile import BadZipFile, ZipFile
 
@@ -12,9 +12,13 @@ from PIL import Image
 
 from brz2obsidian.contracts import Asset, Document
 
+from ..external_files import external_file_uri
 from .declarations import source_date, uuid
-from .errors import refuse
+from .errors import refuse, unsupported_shape
+from .ico import validate_ico
+from .jpeg import validate_jpeg
 from .notes import scope_text
+from .svg import validate_svg
 
 ATTACHMENT_FIELDS = {
     "id",
@@ -92,6 +96,13 @@ def declaration(value, brain, owner, budget):
     return dict(value, position={"decimal": decimal})
 
 
+def reference_uri(location, profile_version):
+    def invalid(_code, message):
+        unsupported_shape(profile_version, "resource", message)
+
+    return external_file_uri(location, invalid)
+
+
 def role(value, profile_version):
     for field in (
         "creationDateTime",
@@ -107,6 +118,9 @@ def role(value, profile_version):
         if kind == 1 and location == "Notes.md" and name is None:
             return "note_original"
         refuse("The authored note declaration is not qualified")
+    if profile_version == "3" and kind in {2, 8} and name is None:
+        reference_uri(location, profile_version)
+        return {2: "file", 8: "directory"}[kind]
     if kind == 3:
         try:
             uri = urlsplit(location)
@@ -128,7 +142,9 @@ def role(value, profile_version):
         and name is None
         and location
         in {value["id"] + ".webp"}
-        | ({value["id"] + ".png"} if profile_version == "2" else set())
+        | ({value["id"] + ".png"} if profile_version in {"2", "3"} else set())
+        | ({value["id"] + ".jpg"} if profile_version == "3" else set())
+        | ({value["id"] + ".svg"} if profile_version == "3" else set())
     ):
         return "image"
     if kind in {1, 15}:
@@ -143,12 +159,16 @@ def role(value, profile_version):
         suffix = location.rsplit(".", 1)[-1].lower() if "." in location else ""
         if (
             (kind, suffix) in {(1, "pdf"), (15, "txt")}
-            or profile_version == "2"
+            or profile_version in {"2", "3"}
             and name is None
             and (kind, suffix) in {(1, "png"), (1, "zip")}
         ):
             return "file"
-    refuse("The attachment role/location is outside the reviewed profile")
+    unsupported_shape(
+        profile_version,
+        "resource",
+        "The attachment role/location is outside the reviewed profile",
+    )
 
 
 def validate_bytes(value, raw, profile_version):
@@ -159,7 +179,7 @@ def validate_bytes(value, raw, profile_version):
     else:
         prefix = raw[:24]
     selected = role(value, profile_version)
-    if selected in {"url"}:
+    if selected == "url" or value["type"] in {2, 8}:
         refuse("External destinations must not be fetched")
     if selected == "note_original" or value["type"] == 15:
         try:
@@ -183,15 +203,20 @@ def validate_bytes(value, raw, profile_version):
         except BadZipFile, ValueError, OSError:
             refuse("Required ZIP bytes have no valid central directory")
         return selected
+    if selected == "image" and suffix == "svg" and profile_version == "3":
+        validate_svg(raw)
+        return selected
     expected = None
     if prefix.startswith(b"\x89PNG\r\n\x1a\n") and (
         selected == "icon" or suffix == "png"
     ):
         expected = "PNG"
-    elif (
+    elif prefix.startswith(b"\xff\xd8\xff") and (
         selected == "icon"
-        and profile_version == "2"
-        and prefix.startswith(b"\xff\xd8\xff")
+        and profile_version in {"2", "3"}
+        or selected == "image"
+        and profile_version == "3"
+        and suffix == "jpg"
     ):
         expected = "JPEG"
     elif (
@@ -201,23 +226,37 @@ def validate_bytes(value, raw, profile_version):
         and prefix[8:12] == b"WEBP"
     ):
         expected = "WEBP"
+    if (
+        selected == "icon"
+        and profile_version == "3"
+        and prefix[:4] == b"\x00\x00\x01\x00"
+    ):
+        validate_ico(raw)
+        return selected
     if expected is None:
         refuse("Required image/icon bytes do not match the qualified signature")
+    strict_jpeg = selected == "image" and profile_version == "3" and suffix == "jpg"
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             with Image.open(
                 raw if isinstance(raw, Path) else BytesIO(raw), formats=(expected,)
             ) as image:
+                if selected == "image" and suffix == "jpg" and image.format != "JPEG":
+                    raise ValueError
                 image.verify()
             with Image.open(
                 raw if isinstance(raw, Path) else BytesIO(raw), formats=(expected,)
             ) as image:
+                if selected == "image" and suffix == "jpg" and image.format != "JPEG":
+                    raise ValueError
                 if min(image.size) <= 0:
                     raise ValueError
                 for index in range(getattr(image, "n_frames", 1)):
                     image.seek(index)
                     image.load()
+                if strict_jpeg:
+                    verified_jpeg = image.size, image.mode
     except (
         OSError,
         ValueError,
@@ -227,6 +266,8 @@ def validate_bytes(value, raw, profile_version):
         Image.DecompressionBombWarning,
     ):
         refuse("Required image/icon bytes are not fully decodable")
+    if strict_jpeg:
+        validate_jpeg(raw, *verified_jpeg)
     return selected
 
 
@@ -295,6 +336,18 @@ def capture_owner(
                     role="url",
                     availability="external",
                     external_uri=value["location"],
+                )
+            )
+            continue
+        if value["type"] in {2, 8}:
+            assets.append(
+                Asset(
+                    **dict(
+                        common, display_name=PureWindowsPath(value["location"]).name
+                    ),
+                    role=selected,
+                    availability="external",
+                    external_uri=reference_uri(value["location"], profile_version),
                 )
             )
             continue
@@ -428,6 +481,15 @@ def validate_payload_binding(source, snapshot, audit):
     for key, asset in assets.items():
         value = attachments[key]
         selected = role(value, profile)
+        external_path = value["type"] in {2, 8}
+        external = selected == "url" or external_path
+        expected_uri = (
+            reference_uri(value["location"], profile)
+            if external_path
+            else value["location"]
+            if selected == "url"
+            else None
+        )
         if (
             asset.owner != value["sourceId"]
             or asset.role != selected
@@ -438,10 +500,15 @@ def validate_payload_binding(source, snapshot, audit):
                 if selected == "url" and value["name"] is not None
                 else value["location"]
             )
-            or asset.display_name != value["name"]
+            or asset.display_name
+            != (
+                PureWindowsPath(value["location"]).name
+                if external_path
+                else value["name"]
+            )
             or asset.availability
-            not in ({"external"} if selected == "url" else {"present", "absent"})
-            or asset.external_uri != (value["location"] if selected == "url" else None)
+            not in ({"external"} if external else {"present", "absent"})
+            or asset.external_uri != expected_uri
             or asset.video_presentation is not None
         ):
             refuse("Normalized payload roles or source declarations disagree")

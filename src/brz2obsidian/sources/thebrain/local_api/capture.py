@@ -66,7 +66,7 @@ IDENTIFIERS = {
 
 
 def identifiers(profile_version):
-    if profile_version not in {"1", "2"}:
+    if profile_version not in {"1", "2", "3"}:
         refuse("Select an explicitly reviewed local API profile")
     return dict(IDENTIFIERS, profile_version=profile_version)
 
@@ -268,7 +268,12 @@ def validate_source(source):
             if (
                 type(value["isNotes"]) is not bool
                 or type(value["type"]) is not int
-                or value["type"] not in {1, 3, 5, 12, 15}
+                or value["type"]
+                not in (
+                    {1, 2, 3, 5, 8, 12, 15}
+                    if source["identifiers"]["profile_version"] == "3"
+                    else {1, 3, 5, 12, 15}
+                )
                 or value["dataLength"] is not None
                 and (
                     type(value["dataLength"]) is not int
@@ -677,7 +682,13 @@ def validate_graph_binding(source, snapshot):
                 refuse("Excluded relationship evidence is not minimal and scoped")
             continue
         links[key] = value
-    expected, assignments = normalize_relationships(links, graphs, thoughts, excluded)
+    expected, assignments = normalize_relationships(
+        links,
+        graphs,
+        thoughts,
+        excluded,
+        profile_version=source["identifiers"]["profile_version"],
+    )
     signatures = lambda values: {(r.key, r.kind, r.item_a, r.item_b) for r in values}
     assignment_signatures = lambda values: {
         (a.relationship_key, a.definition_key, a.item_key) for a in values

@@ -58,8 +58,21 @@ DECLARATIONS = [
 ]
 
 
-@pytest.mark.parametrize("newline", ["\n", "\r", "\r\n"])
-@pytest.mark.parametrize("authored", DECLARATIONS)
+def _distinct_declaration_cases():
+    cases = []
+    seen = set()
+    for authored in DECLARATIONS:
+        for newline in ("\n", "\r", "\r\n"):
+            payload = authored.replace("\n", newline).encode()
+            if payload in seen:
+                continue
+            seen.add(payload)
+            # This reproduces the existing authored-newline pytest ID.
+            cases.append(pytest.param(authored, newline, id=f"{authored}-{newline}"))
+    return cases
+
+
+@pytest.mark.parametrize("authored,newline", _distinct_declaration_cases())
 def test_active_declaration_blocks_refuse_with_included_document_context(
     tmp_path, capsys, authored, newline
 ):

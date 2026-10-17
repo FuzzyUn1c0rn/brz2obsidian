@@ -106,11 +106,13 @@ class RichPayloadApi(PayloadApi, CompleteGraphApi):
         self.payloads[FILE] = PNG
 
 
-def assert_published_payloads(destination, *, explicit=False, jpeg=False):
+def assert_published_payloads(
+    destination, *, explicit=False, jpeg=False, expected_profile="3"
+):
     """Literal profile-derived vault assertions, shared by public delivery seams."""
     record = json.loads((destination / "migration-record.json").read_bytes())
     items = {t["item_key"]: t for t in record["item_targets"]}
-    assert record["profile_version"] == "2"
+    assert record["profile_version"] == expected_profile
     assert items[HOME]["icon_snapshot"]["effective_icon_asset_id"] == (
         DIRECT_ICON if explicit else TYPE_ICON
     )
@@ -173,3 +175,39 @@ def assert_published_txt_pdf_gap(destination):
     assert absent["actual_length"] is absent["actual_sha256"] is None
     assert absent["source_findings"][0]["rule_id"] == "local-api.missing-txt-pdf.v1"
     assert "CANARY" not in note + report + json.dumps(record)
+
+
+# Literal diagnostic contract from #210 S9, independent of production projection.
+SHAPE_MESSAGES = {
+    "search": "The local API returned an unsupported search result. This source shape needs review.",
+    "relationship": "The local API returned an unsupported relationship. Its source form needs review.",
+    "resource": "The local API returned an unsupported resource declaration. Its source form needs review.",
+}
+
+
+def unsupported_shape_api(stage):
+    from tests.support.local_api_graph import HIERARCHY, GraphApi
+
+    if stage == "search":
+        api = MetadataApi()
+        api.search = [
+            {
+                "brainId": "00000000-0000-0000-0000-000000000000",
+                "isFromOtherBrain": False,
+                "sourceThought": {"id": HOME, "brainId": BRAIN},
+                "sourceLink": None,
+                "searchResultType": 999,
+                "entityType": 2,
+                "sourceType": 0,
+                "attachmentId": "00000000-0000-0000-0000-000000000000",
+                "name": "RAW_HINT_CANARY",
+            }
+        ]
+    elif stage == "relationship":
+        api = GraphApi()
+        api.links[HIERARCHY]["relation"] = 999
+        api.links[HIERARCHY]["name"] = "RAW_HINT_CANARY"
+    else:
+        api = PayloadApi()
+        api.attachments[FILE] = attachment(FILE, HOME, 999, "PRIVATE_LOCATION_CANARY")
+    return api
