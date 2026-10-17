@@ -48,13 +48,17 @@ integration. Supported check IDs are `pytest`, `lint`, `format`, and `dependency
 Each requirement has an explicit `fresh` boolean. A check may override the stage
 `environment` with `base` or `gui`; this allows the same check ID once in each
 environment. Optional `requirement_key` strings distinguish multiple scopes of
-the same check in one environment: for example `full-suite` and `handoff-tests`
-for full pytest and additional focused pytest outside configured testpaths.
+the same check in one environment: for example `maintained-selection` and
+`handoff-tests` for the reduced manifest selection and focused helper controls
+outside configured testpaths.
 Each matching submitted result carries the same key. Duplicate
 check/environment/key requirements are refused. A pytest
-requirement includes every scope field shown; `full` has empty selectors and
-null expressions. A full receipt may cover focused selectors only when it
-actually executed their tests. Unknown fields, IDs and versions are errors.
+requirement includes every scope field shown. The schema retains `full` with
+empty selectors and null expressions for protocol compatibility; repository
+verification uses explicit surviving selectors or the maintained reduced bundle,
+as required by the testing contract. Historical full receipts cover focused
+selectors only when they actually executed those tests and satisfy the current
+reuse requirements. Unknown fields, IDs and versions are errors.
 Manual-only scope uses an explicit empty requirements `checks` array.
 
 A covered automated outcome uses `kind: "runner"`, its `check_id`, optional

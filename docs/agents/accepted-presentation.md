@@ -103,10 +103,12 @@ accepted correction, rather than inferring all styling from the earlier A choice
 | P3 | Adjacent source-gap notices remain separate warning panels. | Check distinct callout blocks and observe an adjacent pair natively. |
 | P4 | Category Parents/Children follow the title, then notices, then Members/Gallery. | Check hierarchy/notice/Base ordering and observe a representative category. |
 
-Existing [ordinary fallback tests](../../tests/application/test_absent_note_images_workflow.py),
-[type-gap tests](../../tests/application/test_type_source_gaps_workflow.py),
-[hierarchy tests](../../tests/application/test_category_hierarchy_workflow.py) and
-[independent corruption controls](../../tests/local_acceptance/test_checker_v3.py)
-provide reusable automated coverage. The accepted correction's report supplies
-the separate native appearance evidence; the renderer and matching oracle output
-alone would not establish that the approved presentation was preserved.
+The ordinary fallback, type-gap, hierarchy and independent corruption controls
+that previously covered this example were retired by
+[issue #229](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/229). P1–P4 remain
+the accepted presentation requirements; those retired cases provide no current
+automated guarantee. Future changes to these behaviors need focused checks for
+their actual scope and the applicable visual sampling above. The accepted
+correction's historical report retains the separate native appearance evidence;
+renderer and oracle output alone would not establish preservation of the
+approved presentation.

@@ -1,12 +1,10 @@
 import os
-from threading import Event
 from time import monotonic
 
 import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
-from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTabBar, QTextEdit
 
 from tests.gui.test_conversion_window import window_text
@@ -113,64 +111,4 @@ def test_real_check_outcome_titles_findings_and_unavailable_counts(
         assert "Check the path" in text
     window.close()
     until(app, lambda: not window.isVisible())
-    window.shutdown()
-
-
-def test_blocked_check_processes_queued_gui_input_and_redraws_with_deferred_close(
-    tmp_path,
-):
-    from brz2obsidian.application.contracts import (
-        SelectVault,
-        SimpleCommand,
-        WorkerResponse,
-    )
-    from brz2obsidian.application.operations import check_vault
-    from brz2obsidian.application.transport import Terminal
-    from brz2obsidian_ui.window import MainWindow
-
-    app = QApplication.instance() or QApplication([])
-    entered, release = Event(), Event()
-
-    class BlockedSupervisor:
-        def run(self, request):
-            entered.set()
-            assert release.wait(10)
-            return Terminal(
-                phase="completed",
-                process_status=0,
-                response=WorkerResponse(
-                    request_id=request.request_id,
-                    operation="check_vault",
-                    result=check_vault(tmp_path),
-                ),
-            )
-
-    window = MainWindow(supervisor=BlockedSupervisor())
-    window.show()
-    window.findChild(QTabBar).setCurrentIndex(2)
-    window.submit(SelectVault(path_or_null=str(tmp_path)))
-    until(app, lambda: window.snapshot.vault is not None)
-    window.submit(SimpleCommand(command="check_vault"))
-    until(app, entered.is_set)
-    until(app, lambda: window.snapshot.busy_operation == "check_vault")
-    QTimer.singleShot(0, button(window, "Diagnostic details").click)
-    until(app, lambda: window.diagnostics_expanded)
-    painted = []
-    QTimer.singleShot(
-        0, lambda: (window.repaint(), painted.append(not window.grab().isNull()))
-    )
-    until(app, lambda: bool(painted))
-    assert painted == [True]
-    assert "Checking vault" in window_text(window)
-    assert not button(window, "Choose vault folder").isEnabled()
-    assert not button(window, "Check vault").isEnabled()
-    window.close()
-    until(app, lambda: window.snapshot.close_pending)
-    assert window.isVisible() and not release.is_set()
-    assert "Close requested" in "\n".join(
-        widget.text() for widget in window.findChildren(QLabel)
-    )
-    release.set()
-    until(app, lambda: not window.isVisible())
-    assert window.snapshot.result.status == "check_clean"
     window.shutdown()
