@@ -58,9 +58,14 @@ scope. Broaden or repeat checks for new changes, failures or unresolved concerns
 Use `tools/coverage_suite.py` for the complete ordinary verification bundle:
 the maintained selection, all four runner checks, production branch coverage
 and receipt validation. Use focused `tools/check.py` checks during development.
-Exhaustive discovery of every historical test is an explicit additional scope,
-not a routine completion prerequisite. Named exhaustive, fresh-execution and
-user/native acceptance gates still apply.
+The historical exhaustive suite is retired. Never run it, including through
+unrestricted pytest discovery, the old full BASE/GUI workflow, or repeated
+batches that reconstruct it. The user's 2026-10-17 decision supersedes every
+older ticket, specification or skill requirement for those runs, including
+fresh independent repetitions. Do not treat an obsolete gate as a blocker or
+ask to restore it. Use the reduced selection and focused checks within the
+total ten-minute budget. Source/native and user acceptance remain separate
+from automated regression requirements.
 
 ## Temporary artifacts
 

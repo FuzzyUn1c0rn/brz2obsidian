@@ -1,5 +1,20 @@
 # Testing and acceptance
 
+## Retired exhaustive suite
+
+The user's 2026-10-17 decision permanently retires the historical exhaustive
+regression suite. Do not execute all historical tests, full BASE/GUI repetitions,
+or batches that reconstruct those runs. This decision supersedes conflicting
+requirements in older tickets, specifications and skills; those requirements
+are withdrawn, not deferred gates for draft publication, review or delivery.
+The old exhaustive GitHub Actions workflow has been removed.
+
+Use the maintained reduced selection for broad verification and focused checks
+for development and repairs. All required automated checks together must stay
+below ten minutes. If the selection grows too expensive, improve the selection
+and setup rather than restoring exhaustive discovery. Preserve historical
+results with their original identities; they are not new-candidate executions.
+
 ## Coverage-led testing
 
 Measured coverage guides every test addition, removal and change. Measure
@@ -63,9 +78,9 @@ affected consumers and mandatory acceptance criteria. Record the environment,
 check IDs, pytest selectors/expressions, required GUI execution and freshness
 independently of submitted results. Broaden or repeat checks for new changes,
 failures or unresolved concerns. Normal broad completion uses the maintained
-default bundle, rather than exhaustive historical discovery. Named exhaustive,
-fresh-execution, native and user acceptance requirements remain mandatory;
-identify the actual requirement before adding those gates to an effort.
+default bundle. Older exhaustive and repeated full-suite requirements are
+withdrawn under the retirement decision above. Fresh focused checks, native
+observations and user acceptance apply only to their actual accepted scope.
 
 Focused or manual-only verification is valid when it establishes the required
 scope. Documentation changes need checks of affected facts, commands, links and
@@ -90,8 +105,9 @@ separately. See [README](../README.md) for bootstrap and dependency manifests.
 `run` defaults to `pytest`, `lint`, `format` and `dependency`. Repeat `--check`
 to select checks and `--test` for repository-relative files/directories or pytest
 node IDs. Use `-k` and `-m` for keyword and marker expressions. No pytest selector
-or expression means the full configured suite, which discovers `tests/`;
-handoff regressions in `.agents/skills/implement-spec-enhanced/tests/` need a
+or expression still means full configured discovery in the runner's legacy
+interface; do not invoke that path. Use explicit narrow selectors or the reduced
+coverage command. Handoff regressions in `.agents/skills/implement-spec-enhanced/tests/` need a
 separate focused selection. Invalid, zero-test or entirely skipped selections
 do not establish passing pytest coverage.
 
@@ -102,8 +118,8 @@ do not establish passing pytest coverage.
 | `auto` | Development convenience; records the detected environment |
 
 Completion requirements name `base` or `gui`. The runner supplies offscreen Qt;
-`--require-gui` requires actual GUI test execution. A full GUI suite includes
-Windows launcher controls; `-m gui` alone is focused coverage.
+`--require-gui` requires actual GUI test execution. Select affected Qt and
+Windows launcher controls explicitly; do not request the historical full GUI suite.
 
 ```powershell
 $checkout = (Get-Location).Path
@@ -111,10 +127,8 @@ $python = Join-Path $checkout '.venv\Scripts\python.exe'
 $runner = Join-Path $checkout 'tools\check.py'
 # Focused base pytest plus lint; matches the requirements example below.
 & $python $runner run --checkout $checkout --python $python --environment base --check pytest --check lint --test tests/application/test_ui_preferences.py
-# Explicit exhaustive historical discovery, only for a named additional scope.
-& $python $runner run --checkout $checkout --python $python --environment gui --require-gui
 # Focused Qt adapter checks.
-& $python $runner run --checkout $checkout --python $python --environment gui --check pytest -m gui --require-gui
+& $python $runner run --checkout $checkout --python $python --environment gui --check pytest --test tests/gui/test_completion_window.py --require-gui
 & $python $runner run --help
 & $python $runner validate --help
 ```
@@ -195,18 +209,12 @@ qualifying completion evidence through the runner and validate it. Package
 installation/builds, private acceptance drivers and native observations use
 their own routes.
 
-The manual-only workflow in `.github/workflows/checks.yml` runs full Windows
-base and GUI checks and retains runner receipts/logs. Automatic pull request
-and push triggers are disabled to preserve the GitHub Actions minutes allowance.
-The workflow is also disabled in GitHub; re-enable it before requesting a manual
-run. Both job results and receipts validated against
-independent requirements establish hosted acceptance. Offscreen GUI success
-leaves actual Windows appearance, native dialogs and pointer usability unverified;
-private preservation and user acceptance retain their separate gates.
-
-That manual workflow is an explicit exhaustive compatibility/acceptance run.
-It is not the ordinary development bundle and is not requested automatically
-for unrelated changes.
+The former `.github/workflows/checks.yml` exhaustive BASE/GUI workflow is retired
+and removed. Do not re-enable its historical revisions or dispatch an old ref.
+Any future hosted workflow must use the reduced selection and runtime budget.
+Offscreen GUI success leaves actual Windows appearance, native dialogs and
+pointer usability unverified; source preservation and user acceptance remain
+separate evidence.
 
 ## Stable-candidate checkpoint
 
@@ -214,7 +222,7 @@ For candidate completion, finish affected focused checks, resolve known findings
 and freeze the assessed contents. Record the full base commit and source snapshot,
 run the named completion scope and validate its receipts. Ordinary broad scope is
 the maintained default bundle. Focused success alone does not establish that
-bundle's acceptance or an explicitly required exhaustive run.
+bundle's acceptance. Historical exhaustive runs are not a completion gate.
 
 A pre-commit receipt can bind a later clean candidate when the Git-normalized
 tested contents match, as specified by the runner contract. Commit bookkeeping

@@ -22,6 +22,11 @@ coverage measurement helps the decision. Focused measurements are partial suite
 evidence; neither command requires running the default bundle after every edit.
 See [the runner and measurement contract](testing.md#automated-check-runner).
 
+The historical exhaustive suite is retired by the user's 2026-10-17 decision.
+Older full-suite or fresh full BASE/GUI ticket requirements are withdrawn.
+Never recreate those executions by accumulating focused batches. The reduced
+selection and affected focused checks are the automated verification strategy.
+
 ## Responsibilities and additional checks
 
 The manifest retains existing public-contract tests and representative real
@@ -38,7 +43,7 @@ assertions even when they add no production branches.
 | Qt and platform | Actual worker conversion, API controls, responsiveness, diagnostics, recovery, completion actions, preferences and startup coordination | Changed controls, asynchronous callbacks, layout or Windows integration: select their adapter cases. Approved presentation changes also require the existing visual sampling procedure. |
 | Publication | Real filesystem staging, ownership, failure cleanup, retry and verified publication facts | Changed filesystem operation or artifact family: select the corresponding fault timing and affected nested-manifest examples. |
 | Production vault checker | Source-free conventions, findings, read-only behavior and application integration | Changed convention or checker command: select its direct checker/CLI cases and affected consumer projection. This checker does not prove migration preservation. |
-| Independent preservation audit | Original payloads/metadata, pinned-source drift, real-file evidence and rehashed image/span/count forgeries | Changed oracle, source/output meaning or shared audit support: select the affected audit family and its positive/adversarial controls. Full qualification needs an explicit acceptance scope; all 3,000-plus oracle cases are not routine developer feedback. |
+| Independent preservation audit | Original payloads/metadata, pinned-source drift, real-file evidence and rehashed image/span/count forgeries | Changed oracle, source/output meaning or shared audit support: select the affected audit family and its positive/adversarial controls. Do not restore the historical 3,000-plus-case oracle suite. Actual migration acceptance has a separate scope. |
 | Runner, coverage and architecture | Source-bound receipts, failures/interruption, Unicode pipes, parameter evidence, isolation, honest metrics, import direction and Windows launchers | Changed runner/coverage contract: run affected public-command controls. Changed packaging/assets/entry points: verify the affected build, install and runnable examples. Skill evals run when their skills change. |
 
 Unlisted cases remain available for these named responsibilities. They are not
