@@ -391,3 +391,49 @@ def test_exhausted_rename_and_cleanup_denial_report_owned_leftover(
     assert result.issues[-1].leftover_path == str(attempts[0])
     assert attempts[0].is_dir()
     assert not destination.exists() and source.read_bytes() == before
+
+
+@pytest.mark.parametrize("failure_boundary", ["ancestry", "identity_stat"])
+def test_failure_before_staging_identity_returns_issue_and_preserves_unknown_path(
+    tmp_path, monkeypatch, failure_boundary
+):
+    import tempfile
+
+    source = make_archive(tmp_path / "source.brz")
+    before = source.read_bytes()
+    destination = tmp_path / "vault"
+    original_create = tempfile.mkdtemp
+    original_read = Path.lstat if failure_boundary == "ancestry" else Path.stat
+    created = []
+    failures = []
+
+    def create(*args, **kwargs):
+        name = original_create(*args, **kwargs)
+        staging = Path(name)
+        (staging / "caller.bin").write_bytes(b"unknown identity caller bytes\x00\xff")
+        created.append(staging)
+        return name
+
+    def read_identity(path, *args, **kwargs):
+        if created and path == created[0]:
+            failures.append(path)
+            raise PermissionError("Controlled failure before staging identity capture")
+        return original_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(tempfile, "mkdtemp", create)
+    monkeypatch.setattr(
+        Path, "lstat" if failure_boundary == "ancestry" else "stat", read_identity
+    )
+    result = default_workflow().convert(source, destination)
+    assert result.outcome == "failed", result.model_dump(mode="json")
+    assert result.receipt is None
+    assert [i.code for i in result.issues] == ["write_failure", "cleanup_failure"]
+    assert (
+        "Controlled failure before staging identity capture" in result.issues[0].message
+    )
+    assert result.issues[-1].leftover_path == str(created[0])
+    assert failures == created
+    assert not destination.exists() and source.read_bytes() == before
+    assert (
+        created[0] / "caller.bin"
+    ).read_bytes() == b"unknown identity caller bytes\x00\xff"

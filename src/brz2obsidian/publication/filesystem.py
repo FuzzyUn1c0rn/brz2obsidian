@@ -176,6 +176,8 @@ def _staged_files(staging):
 
 
 def _owned_staging(staging, destination, identity):
+    if identity is None:
+        raise OSError("Cannot establish owned staging identity")
     # Reject reparse ancestry before stat, inventory, reads or cleanup can follow it.
     _safe_ancestors(staging)
     info = staging.stat()
@@ -228,6 +230,7 @@ def publish(
 ) -> Receipt:
     destination = Path(destination).absolute()
     staging = None
+    owned_identity = None
     try:
         _fresh(destination)
         if (
