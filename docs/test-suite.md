@@ -34,6 +34,13 @@ integrations. It also retains a compact independent preservation audit and
 checks of the measurement/runner infrastructure. These protect distinct
 assertions even when they add no production branches.
 
+Three selected existing controls address the function-level review's first
+priorities: distinct resource filenames and original bytes after naming
+collisions, preservation of caller-owned replacement capture directories,
+and rejection of same-size payload corruption after repeated verification.
+The corruption control selects profile 3; it does not restore the older-profile
+matrix. These checks protect observable migration and filesystem safety outcomes.
+
 | Family | Default responsibility | Trigger for additional focused checks |
 | --- | --- | --- |
 | Core and rendering | Source-neutral planning, names, references, resources, tags, categories, strict facts and exact output examples | A changed planning rule, renderer, classification or resource obligation: select its owning public-module cases and affected output examples. |
