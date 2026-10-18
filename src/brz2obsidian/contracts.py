@@ -1,9 +1,9 @@
 """Durable source-neutral contracts. No outer implementations or I/O."""
 
+import unicodedata
 from contextlib import AbstractContextManager
 from datetime import date
 from typing import BinaryIO, Literal, Protocol
-import unicodedata
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 

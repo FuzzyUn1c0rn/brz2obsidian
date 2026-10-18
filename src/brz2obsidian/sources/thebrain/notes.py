@@ -13,14 +13,13 @@ from markdown_it.rules_block.state_block import StateBlock
 from markdown_it.rules_inline import autolink, html_inline, image, link
 from markdown_it.rules_inline.backticks import backtick
 
-from brz2obsidian.diagnostics import diagnosed_issue
-
 from brz2obsidian.contracts import (
     ImagePresentationNormalization,
     Issue,
     MigrationRefused,
     ReferenceSpan,
 )
+from brz2obsidian.diagnostics import diagnosed_issue
 
 
 def _refuse(code, message):

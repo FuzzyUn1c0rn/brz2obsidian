@@ -6,6 +6,9 @@ source modules supply stable hexadecimal naming seeds. Original JSON is
 independently retained as immutable text and embedded directly in the record,
 preserving numeric precision, raw dates and omitted/null distinctions.
 Sessions and binary streams are scoped outer resources rather than model fields.
+Optional source-neutral `Issue.subject` provides bounded printable display metadata;
+its absent-field serialization preserves existing results. See the
+[diagnostic extension and compatibility contract](diagnostics.md#structured-interface-compatibility).
 
 Version 2 adds `Item.role="definition"`, `Relationship.kind="classification"`
 and immutable `ClassificationAssignment(relationship_key, definition_key,

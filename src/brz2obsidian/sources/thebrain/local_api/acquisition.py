@@ -14,6 +14,7 @@ from brz2obsidian.contracts import (
     SourceIdentity,
     SourceSnapshot,
 )
+from brz2obsidian.diagnostics import with_subject
 
 from .capture import canonical, identifiers
 from .declarations import (
@@ -26,7 +27,7 @@ from .declarations import (
     thought,
     uuid,
 )
-from .errors import refuse, unsupported_shape, with_subject
+from .errors import refuse, unsupported_shape
 from .graph import link_identity, normalize_relationships
 from .notes import bind_documents
 from .resources import capture_owner
@@ -121,6 +122,14 @@ def _candidate_shape(hit, brain_id, profile_version="1"):
     return None
 
 
+def _contextual_thought(value, brain_id, expected=None):
+    try:
+        return thought(value, brain_id, expected)
+    except MigrationRefused as error:
+        name = value.get("name") if isinstance(value, dict) else None
+        raise with_subject(error, "item", name) from None
+
+
 class Acquisition:
     def __init__(
         self,
@@ -167,7 +176,7 @@ class Acquisition:
             )
 
     def observe(self, value):
-        value = thought(value, self.brain_id)
+        value = _contextual_thought(value, self.brain_id)
         key = value["id"]
         if key in self.observations and self.observations[key] != value:
             refuse("Repeated authoritative thought observations disagree")
@@ -339,7 +348,7 @@ class Acquisition:
                 resolved_links.add(link_id)
                 continue
             key = min(self.ids - self.thoughts.keys())
-            value = thought(
+            value = _contextual_thought(
                 self.get("thought", "/thoughts/" + b + "/" + key, key), b, key
             )
             self.observe(value)

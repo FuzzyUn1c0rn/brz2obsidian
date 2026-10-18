@@ -5,6 +5,7 @@ import hashlib
 from uuid import UUID
 
 from brz2obsidian.contracts import MigrationRefused, SourceFinding
+from brz2obsidian.diagnostics import with_subject
 from brz2obsidian.sources.thebrain.inserts import trace_adapted_references
 from brz2obsidian.sources.thebrain.literals import source_position
 from brz2obsidian.sources.thebrain.notes import (
@@ -14,7 +15,7 @@ from brz2obsidian.sources.thebrain.notes import (
 )
 from brz2obsidian.sources.thebrain.scope import contains_omitted_identity
 
-from .errors import refuse, with_subject
+from .errors import refuse
 from .markdown import adapt_literals, adapt_note
 
 
@@ -48,7 +49,13 @@ def scope_text(text, excluded):
 
 
 def bind_documents(
-    documents, assets, included, *, with_findings=False, preserve_bom=False, subjects=None
+    documents,
+    assets,
+    included,
+    *,
+    with_findings=False,
+    preserve_bom=False,
+    subjects=None,
 ):
     from .capture import canonical
 

@@ -12,8 +12,6 @@ from zlib import error as DeflateError
 
 from pydantic import ValidationError
 
-from brz2obsidian.diagnostics import diagnostic_reason
-
 from brz2obsidian.contracts import (
     AccountingEntry,
     Issue,
@@ -25,6 +23,7 @@ from brz2obsidian.contracts import (
     SourceIdentity,
     SourceSnapshot,
 )
+from brz2obsidian.diagnostics import diagnosed_issue, diagnostic_reason, with_subject
 
 from .attachments import normalize_attachments
 from .classifications import decode_classifications
@@ -39,19 +38,21 @@ from .semantics import validate_semantic_fields
 def _refuse(code, message, affected=(), *, evidence=(), guidance=None):
     raise MigrationRefused(
         (
-            Issue(
-                code=code,
-                phase="source",
-                message=message,
-                rule_id=diagnostic_reason(code, message),
-                affected=affected,
-                evidence=evidence,
-                guidance=guidance
-                or (
-                    "Set a valid Home in TheBrain and re-export."
-                    if code == "invalid_entry"
-                    else "Review the affected source records and archive evidence before retrying."
-                ),
+            diagnosed_issue(
+                Issue(
+                    code=code,
+                    phase="source",
+                    message=message,
+                    rule_id=diagnostic_reason(code, message),
+                    affected=affected,
+                    evidence=evidence,
+                    guidance=guidance
+                    or (
+                        "Set a valid Home in TheBrain and re-export."
+                        if code == "invalid_entry"
+                        else "Review the affected source records and archive evidence before retrying."
+                    ),
+                )
             ),
         )
     )
@@ -420,6 +421,23 @@ class BrzSession:
             _refuse("invalid_entry", "Home setting is not a valid thought identity")
         if entry not in thoughts or thoughts[entry]["Kind"] != 1:
             _refuse("invalid_entry", "Home does not identify a live ordinary thought")
+
+        def attachment_refuse(code, message, affected=(), **details):
+            try:
+                _refuse(code, message, affected, **details)
+            except MigrationRefused as error:
+                owners = {
+                    record["Id"]: record["SourceId"]
+                    for record in records["attachments.json"]
+                }
+                for identity in affected:
+                    owner = identity if identity in thoughts else owners.get(identity)
+                    if owner in thoughts:
+                        raise with_subject(
+                            error, "item", thoughts[owner]["Name"]
+                        ) from None
+                raise
+
         (
             assets,
             documents,
@@ -434,7 +452,7 @@ class BrzSession:
             records["attachments.json"],
             meta,
             thoughts,
-            _refuse,
+            attachment_refuse,
             _uuid,
             self.excluded,
             self.scope_tokens,

@@ -55,9 +55,17 @@ matrix. These checks protect observable migration and filesystem safety outcomes
 
 [Issue #229](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/229) physically
 retires the unselected historical definitions and parameter variants. The
-retained suite contains 397 test definitions and exactly 1,149 cases. Helper-only
+retirement baseline retained 397 test definitions and 1,149 cases. Helper-only
 modules, fixtures and assets remain available to retained tests and independent
 acceptance tools. Retired assertions provide no current automated assurance.
+Later changes add controls to that baseline; the runner receipt records the
+actual selected case count for each candidate.
+
+Issues #231 and #232 add leading-BOM note interpretation/capture compatibility
+and readable error controls at public source, application, CLI and Qt boundaries.
+These preserve independently checked input distinctions and safe presentation
+outcomes even where parser or workflow execution overlaps existing coverage.
+Native application appearance remains independently reviewed.
 
 For a future change, select surviving cases that establish its actual scope and
 author focused checks where the changed behavior needs coverage. Do not assume

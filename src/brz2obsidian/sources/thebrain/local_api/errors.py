@@ -1,9 +1,6 @@
 """Safe failures: external exception/body text never crosses the source seam."""
 
-import unicodedata
-
 from brz2obsidian.contracts import (
-    DiagnosticSubject,
     Issue,
     MigrationFailed,
     MigrationRefused,
@@ -23,30 +20,6 @@ def refuse(message, code="invalid_source"):
                 )
             ),
         )
-    )
-
-
-def with_subject(error, kind, name):
-    """Attach only validated display metadata; omit URI-like and secret labels."""
-    if not isinstance(name, str) or any(
-        token in name.casefold()
-        for token in ("://", "token=", "key=", "password=", "authorization:")
-    ):
-        return error
-    name = "".join(
-        char for char in name if not unicodedata.category(char).startswith("C")
-    ).strip()[:120]
-    if not name:
-        return error
-    subject = DiagnosticSubject(kind=kind, name=name)
-    return type(error)(
-        tuple(
-            issue.model_copy(update={"subject": subject})
-            if issue.subject is None
-            else issue
-            for issue in error.issues
-        ),
-        receipt=error.receipt,
     )
 
 

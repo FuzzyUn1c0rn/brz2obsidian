@@ -6,8 +6,8 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
-from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QTextOption
+from PySide6.QtWidgets import QApplication
 
 from brz2obsidian.application.contracts import (
     ApiAcquisitionConfig,
@@ -61,6 +61,7 @@ def test_converter_limitation_has_operation_title_and_literal_safe_item_context(
         assert 'Thought note: "Create <b>Link & path</b>[31m".' in shown
         assert "Source cannot be used" not in shown
         assert "planned contents" not in shown
+        assert "cause could not be identified" not in shown
         assert (
             window.findings.wordWrapMode()
             == QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere

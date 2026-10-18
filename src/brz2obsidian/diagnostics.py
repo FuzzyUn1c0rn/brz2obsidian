@@ -1,5 +1,9 @@
 """Deliberate, source-neutral explanations; arbitrary error text is never trusted."""
 
+import unicodedata
+
+from brz2obsidian.contracts import DiagnosticSubject
+
 # A reason is admitted with its original code. The pair prevents a foreign rule
 # or a familiar rule on an unrelated failure from inventing an explanation.
 REASONS = {
@@ -225,6 +229,10 @@ CODE_EXPLANATIONS = {
         "the Brain or conversion settings no longer match the inspection you reviewed.",
         "Inspect the current Brain again before conversion.",
     ),
+    "missing_required_payload": (
+        "required thought-note or attachment contents are unavailable in the BRZ archive.",
+        "Check that the contents open in TheBrain, then export the Brain again. If they open there but are still absent from the export, report the problem with the diagnostic report.",
+    ),
     "payload_read_failure": (
         "a required attachment could not be read completely.",
         "Check that it is available and opens in TheBrain, then inspect again. If it opens there, report the problem with the diagnostic report.",
@@ -342,3 +350,27 @@ def explain_issue(issue, operation):
         }[issue.subject.kind]
         context = f' {label}: "{issue.subject.name}".'
     return f"{prefix} because {cause}{context} {action}"
+
+
+def with_subject(error, kind, name):
+    """Attach only validated display metadata; omit URI-like and secret labels."""
+    if not isinstance(name, str) or any(
+        token in name.casefold()
+        for token in ("://", "token=", "key=", "password=", "authorization:")
+    ):
+        return error
+    name = "".join(
+        char for char in name if not unicodedata.category(char).startswith("C")
+    ).strip()[:120]
+    if not name:
+        return error
+    subject = DiagnosticSubject(kind=kind, name=name)
+    return type(error)(
+        tuple(
+            issue.model_copy(update={"subject": subject})
+            if issue.subject is None
+            else issue
+            for issue in error.issues
+        ),
+        receipt=error.receipt,
+    )

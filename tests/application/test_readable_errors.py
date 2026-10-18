@@ -83,8 +83,8 @@ def test_brain_listing_explains_access_failure_without_remote_text():
 def test_unknown_source_error_is_safe_in_structured_cli_and_application_output(
     capsys, monkeypatch
 ):
-    from brz2obsidian.application.workflow import SourceModuleBinding, Workflow
     from brz2obsidian.application.wiring import default_workflow
+    from brz2obsidian.application.workflow import SourceModuleBinding, Workflow
     from brz2obsidian.cli import main
 
     ordinary = default_workflow()
@@ -157,6 +157,8 @@ def test_api_source_failures_keep_distinct_known_causes(problem, explanation):
         )
     assert result.outcome in {"refused", "failed"}
     assert explanation in result.findings[0].message
+    if problem == "unsupported_metadata":
+        assert 'Thought: "Entry".' in result.findings[0].message
     if problem == "missing_target":
         assert 'Thought note: "Entry".' in result.findings[0].message
     assert result.findings[0].message in result.diagnostic_text
@@ -316,8 +318,8 @@ def test_destination_and_vault_check_explain_the_operation_and_next_action(
 def test_supported_issue_categories_are_safe_without_inventing_causes(
     code, reason, explanation, action
 ):
-    from brz2obsidian.application.workflow import SourceModuleBinding, Workflow
     from brz2obsidian.application.wiring import default_workflow
+    from brz2obsidian.application.workflow import SourceModuleBinding, Workflow
     from brz2obsidian.contracts import Issue, MigrationRefused
 
     ordinary = default_workflow()
@@ -348,3 +350,59 @@ def test_supported_issue_categories_are_safe_without_inventing_causes(
     message = result.findings[0].message
     assert explanation in message and action in message
     assert "CANARY" not in result.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    "payload,explanation,action",
+    [
+        (
+            b"<script>BODY_CANARY</script>",
+            "does not support this HTML",
+            "Report this limitation",
+        ),
+        (
+            b"[missing](brain://qqqqqqqqqkqKqqqqqqqqqg/Missing)",
+            "does not point to a live thought",
+            "Check the link",
+        ),
+        (
+            None,
+            "required thought-note or attachment contents are unavailable",
+            "Check that the contents open in TheBrain",
+        ),
+    ],
+)
+def test_brz_note_failures_retain_safe_thought_name(
+    tmp_path, payload, explanation, action
+):
+    from zipfile import ZipFile
+
+    fixture = Path(__file__).parents[1] / "fixtures/minimal.brz"
+    source = tmp_path / "note-problem.brz"
+    member = "22222222-2222-4222-8222-222222222222/Notes.md"
+    with ZipFile(fixture) as original, ZipFile(source, "w") as changed:
+        for name in original.namelist():
+            content = original.read(name)
+            if name == member:
+                if payload is None:
+                    continue
+                content = payload
+            elif name == "attachments.json" and payload is not None:
+                record = json.loads(content)
+                record["DataLength"] = len(payload)
+                content = json.dumps(record).encode()
+            changed.writestr(name, content)
+    result = Operations().inspect(source)
+    assert result.outcome == "refused"
+    message = result.findings[0].message
+    assert explanation in message and action in message
+    assert '"Entry thought"' in message
+    assert message in result.diagnostic_text
+    assert "CANARY" not in result.model_dump_json()
+    from brz2obsidian.application.wiring import default_workflow
+
+    issue = default_workflow().inspect(source).issues[0]
+    assert issue.subject.name == "Entry thought"
+    if payload is not None and payload.startswith(b"<script>"):
+        assert "Report this limitation" in issue.guidance
+        assert "resolved before retrying" not in issue.guidance
