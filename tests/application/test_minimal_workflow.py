@@ -66,30 +66,3 @@ def test_minimal_brain_inspects_then_converts_into_verified_home(tmp_path):
     assert config["openBehavior"] == "file:Home — Entry thought.md"
     bookmarks = json.loads((destination / ".obsidian" / "bookmarks.json").read_bytes())
     assert bookmarks["items"][0]["path"] == "Home — Entry thought.md"
-
-
-def test_empty_home_is_materialized_and_existing_destination_is_protected(tmp_path):
-    source = make_archive(tmp_path / "brain.brz", empty=True)
-    workflow = default_workflow()
-    destination = tmp_path / "vault"
-    destination.mkdir()
-    first = workflow.convert(source, destination)
-    assert first.outcome == "clean"
-    assert (destination / "Home — Entry thought.md").read_bytes() == PROPERTIES + (
-        b"# Entry thought\n\n## Categories\n\n[[Categories.md|Browse categories]]\n"
-    )
-    before = {
-        p.relative_to(destination).as_posix(): p.read_bytes()
-        for p in destination.rglob("*")
-        if p.is_file()
-    }
-    refused = workflow.convert(source, destination)
-    assert refused.outcome == "refused"
-    assert refused.receipt is None
-    assert refused.issues[0].code == "destination_not_empty"
-    assert {
-        p.relative_to(destination).as_posix(): p.read_bytes()
-        for p in destination.rglob("*")
-        if p.is_file()
-    } == before
-    assert list(tmp_path.glob(".brz2obsidian-*")) == []

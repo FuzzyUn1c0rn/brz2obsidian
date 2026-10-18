@@ -23,8 +23,10 @@ Record a short plan alongside the stage requirements or lightweight record:
 - Prior evidence proposed for reuse, its original commit/context and limits.
 
 Choose the smallest coverage that establishes these obligations. Broaden for
-shared contracts, cross-cutting behavior, uncertain dependencies or an explicit
-full-suite requirement. Record the reason for a full run. Reassess when repairs
+shared contracts, cross-cutting behavior, uncertain dependencies or an applicable
+acceptance requirement. Broad verification uses the maintained reduced bundle in
+`tools/coverage_suite.py`; historical exhaustive requirements are withdrawn by
+the repository testing contract. Reassess when repairs
 or new findings change impact; preserve superseded requirements and failures.
 An intentionally narrow plan still accounts for every mandatory criterion.
 
@@ -49,8 +51,11 @@ with independent rubric review; helper tests alone do not establish prompt behav
 An unchanged helper protocol can use its existing focused controls alongside
 manual instruction review. A read-only audit does not imply running checks that
 create receipts or other artifacts when the user's requested scope forbids writes.
-When pytest is needed, name its meaningful selectors: omitting selectors runs the
-full suite, and an empty/zero-test selection is not passing evidence.
+When pytest is needed, name explicit surviving selectors or use the maintained
+reduced bundle. The runner's legacy selector-omission path invokes configured
+discovery and must not be used. Empty/zero-test selections are not passing
+evidence. Retired historical cases are not available for additional checks;
+author focused checks when a future changed behavior needs them.
 
 ## Stage differences and reuse
 

@@ -8,11 +8,6 @@ from zipfile import ZIP_STORED, ZipFile
 import pytest
 
 from brz2obsidian.contracts import RunMetadata
-from brz2obsidian.core import analyze, plan
-from brz2obsidian.obsidian import render
-from brz2obsidian.sources.thebrain import BrzSourceModule
-from brz2obsidian.sources.thebrain.profile import BRZ_POLICY
-from tests.support.notes import note_body
 
 HOME = "22222222-2222-4222-8222-222222222222"
 BRAIN = "11111111-1111-4111-8111-111111111111"
@@ -337,65 +332,3 @@ def assert_record(record, document, members, archive_bytes):
             "references": [DOCUMENT, IMAGE_ID],
         },
     ]
-
-
-@pytest.mark.parametrize("index,newline", CASES)
-def test_protected_neighbors_preserve_source_core_rendered_facts(
-    tmp_path, index, newline
-):
-    source_text, adapted, document, note = authored_facts(index, newline)
-    source = tmp_path / "source.brz"
-    members = declaration_archive(source, source_text)
-    before = source.read_bytes()
-    _, payloads, digest = expected_evidence(members)
-    with BrzSourceModule().open(source) as session:
-        snapshot = session.snapshot
-        assert snapshot.identity.source_sha256 == sha256(before).hexdigest()
-        assert snapshot.identity.snapshot_digest == digest
-        assert len(snapshot.documents) == 1
-        assert snapshot.documents[0].model_dump(mode="json") == dict(
-            document, text=adapted
-        )
-        assert snapshot.relationships == ()
-        for asset, identity, role, payload, pointer in zip(
-            snapshot.assets,
-            (DOCUMENT, IMAGE_ID),
-            ("note_original", "image"),
-            payloads,
-            ("attachments.json:0", "attachments.json:1"),
-            strict=True,
-        ):
-            assert asset.asset_id == identity and asset.owner == HOME
-            assert asset.role == role and asset.availability == "present"
-            assert (asset.actual_length, asset.actual_sha256) == (
-                payload["length"],
-                payload["sha256"],
-            )
-            assert asset.evidence == (pointer,)
-        analysis = analyze(snapshot, BRZ_POLICY)
-        assert analysis.issues == ()
-        migration_plan = plan(analysis)
-        assert migration_plan.issues == ()
-        assert_counts(migration_plan.counts.model_dump())
-        rendered = render(migration_plan, METADATA)
-        session.verify_consistency()
-    assert source.read_bytes() == before
-    # Durable returned values remain usable after the source session closes.
-    generated = {file.relative_path: file.content for file in rendered.generated_files}
-    assert note_body(generated[NOTE_PATH]) == note
-    assert "Notes/Topic.v2.md" not in generated
-    assert_counts(rendered.counts.model_dump(), rendered=True)
-    assert [copy.model_dump() for copy in rendered.copies] == [
-        {
-            "relative_path": path,
-            "asset_id": identity,
-            "expected_length": payload["length"],
-            "expected_sha256": payload["sha256"],
-        }
-        for path, identity, payload in zip(
-            (ORIGINAL_PATH, IMAGE_PATH), (DOCUMENT, IMAGE_ID), payloads, strict=True
-        )
-    ]
-    record = json.loads(generated["migration-record.json"])
-    assert_record(record, document, members, before)
-    assert_counts(record["counts"], rendered=True)

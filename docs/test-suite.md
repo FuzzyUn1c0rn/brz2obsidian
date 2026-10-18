@@ -53,17 +53,23 @@ matrix. These checks protect observable migration and filesystem safety outcomes
 | Independent preservation audit | Original payloads/metadata, pinned-source drift, real-file evidence and rehashed image/span/count forgeries | Changed oracle, source/output meaning or shared audit support: select the affected audit family and its positive/adversarial controls. Do not restore the historical 3,000-plus-case oracle suite. Actual migration acceptance has a separate scope. |
 | Runner, coverage and architecture | Source-bound receipts, failures/interruption, Unicode pipes, parameter evidence, isolation, honest metrics, import direction and Windows launchers | Changed runner/coverage contract: run affected public-command controls. Changed packaging/assets/entry points: verify the affected build, install and runnable examples. Skill evals run when their skills change. |
 
-Unlisted cases remain available for these named responsibilities. They are not
-an automatic second full-suite gate. Select their relevant functions or parameter
-families from the actual change; do not invoke every old matrix merely because a
-shared module was imported. Broaden for a failure, a new affected consumer, an
-unresolved concern or a named acceptance requirement. Budget additional ordinary
-checks together with the default bundle when both are required.
+[Issue #229](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/229) physically
+retires the unselected historical definitions and parameter variants. The
+retained suite contains 397 test definitions and exactly 1,149 cases. Helper-only
+modules, fixtures and assets remain available to retained tests and independent
+acceptance tools. Retired assertions provide no current automated assurance.
+
+For a future change, select surviving cases that establish its actual scope and
+author focused checks where the changed behavior needs coverage. Do not assume
+that an older family or matrix remains executable. Broaden for a failure, a new
+affected consumer, an unresolved concern or a named acceptance requirement.
+Budget additional ordinary checks together with the default bundle when both
+are required.
 
 ## How the selection changes
 
 1. Inspect missing branches and meaningful outcomes for the changed behavior.
-   Measure a small existing batch before writing replacements.
+   Measure relevant surviving cases before adding focused checks for gaps.
 2. Compare additional branch coverage and elapsed time. Inspect assertions and
    input distinctions wherever contexts show repeated execution. Function
    contexts combine parameter instances, so they cannot prove an individual
