@@ -194,6 +194,28 @@ def test_reviewed_conversion_and_human_cli_keep_the_note_reason(
         assert (
             main(
                 [
+                    "convert",
+                    BRAIN,
+                    str(tmp_path / "CLI vault"),
+                    "--source-kind",
+                    "local-api",
+                    "--api-url",
+                    address,
+                    "--json",
+                ]
+            )
+            == 1
+        )
+        conversion_details = json.loads(capsys.readouterr().out)
+        assert conversion_details["operation"] == "convert"
+        assert (
+            "does not support this HTML" in conversion_details["issues"][0]["guidance"]
+        )
+        assert "Report this limitation" in conversion_details["issues"][0]["guidance"]
+        assert "Inspection stopped" not in conversion_details["issues"][0]["guidance"]
+        assert (
+            main(
+                [
                     "inspect",
                     BRAIN,
                     "--source-kind",
@@ -445,3 +467,260 @@ def test_publication_and_cleanup_keep_exception_text_out_of_cli_json(
     leftover = Path(result["issues"][1]["leftover_path"])
     assert leftover.parent == tmp_path and leftover.is_dir()
     native_rmtree(leftover)
+
+
+@pytest.mark.parametrize(
+    "name,expected",
+    [
+        ("Explains decision history", 'Relationship: "Explains decision history".'),
+        (
+            "Explains\u202e decision\x1b history",
+            'Relationship: "Explains decision history".',
+        ),
+        ("https://RELATIONSHIP_LABEL_CANARY", 'Relationship: "Entry \u2014 Alone".'),
+        (
+            "Authorization: Bearer RELATIONSHIP_SECRET_CANARY",
+            'Relationship: "Entry \u2014 Alone".',
+        ),
+        ("\u202e\x1b", 'Relationship: "Entry \u2014 Alone".'),
+        (None, 'Relationship: "Entry — Alone".'),
+    ],
+)
+def test_relationship_failure_identifies_safe_name_or_endpoints(name, expected):
+    from tests.support.local_api_graph import HIERARCHY, GraphApi
+
+    api = GraphApi()
+    api.links[HIERARCHY].update(name=name, color="bad_color")
+    with api_server(api) as (_, address):
+        result = Operations(credentials=lambda: KEY).inspect(
+            LocalApiSourceSelection(
+                brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+            )
+        )
+    message = result.findings[0].message
+    assert result.outcome == "refused"
+    assert "could not interpret a relationship" in message
+    assert expected in message
+    assert "CANARY" not in result.model_dump_json()
+    assert "\u202e" not in message and "\x1b" not in message
+
+
+def test_relationship_summary_failure_identifies_affected_thought():
+    from tests.support.local_api_graph import CompleteGraphApi
+
+    api = CompleteGraphApi()
+    api.thoughts[HOME]["typeId"] = None
+    with api_server(api) as (_, address):
+        result = Operations(credentials=lambda: KEY).inspect(
+            LocalApiSourceSelection(
+                brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+            )
+        )
+    assert result.outcome == "refused"
+    message = result.findings[0].message
+    assert "conflicting information about a relationship" in message
+    assert 'Thought: "Entry".' in message
+
+
+def test_api_graph_failure_identifies_current_thought():
+    from tests.support.local_api_graph import GraphApi
+
+    api = GraphApi()
+    api.overrides[f"/api/thoughts/{BRAIN}/{HOME}/graph"] = (200, {})
+    with api_server(api) as (_, address):
+        result = Operations(credentials=lambda: KEY).inspect(
+            LocalApiSourceSelection(
+                brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+            )
+        )
+    assert result.outcome == "refused"
+    assert 'Thought: "Entry".' in result.findings[0].message
+
+
+def test_brz_relationship_failure_identifies_safe_endpoints(tmp_path):
+    from zipfile import ZipFile
+
+    fixture = Path(__file__).parents[1] / "fixtures/minimal.brz"
+    source = tmp_path / "relationship-problem.brz"
+    peer = "44444444-4444-4444-8444-444444444444"
+    with ZipFile(fixture) as original, ZipFile(source, "w") as changed:
+        original_thought = json.loads(original.read("thoughts.json"))
+        for name in original.namelist():
+            content = original.read(name)
+            if name == "thoughts.json":
+                content = (
+                    json.dumps(original_thought)
+                    + "\n"
+                    + json.dumps(dict(original_thought, Id=peer, Name="Other thought"))
+                )
+            elif name == "links.json":
+                content = json.dumps(
+                    {
+                        "Id": "55555555-5555-4555-8555-555555555555",
+                        "BrainId": original_thought["BrainId"],
+                        "ThoughtIdA": original_thought["Id"],
+                        "ThoughtIdB": peer,
+                        "Kind": 1,
+                        "Relation": 1,
+                        "Meaning": 999,
+                        "Direction": -1,
+                    }
+                )
+            changed.writestr(name, content)
+    result = Operations().inspect(source)
+    assert result.outcome == "refused"
+    assert (
+        'Relationship: "Entry thought — Other thought".' in result.findings[0].message
+    )
+
+
+def test_brz_thought_failure_identifies_admitted_title(tmp_path):
+    from zipfile import ZipFile
+
+    fixture = Path(__file__).parents[1] / "fixtures/minimal.brz"
+    source = tmp_path / "thought-problem.brz"
+    with ZipFile(fixture) as original, ZipFile(source, "w") as changed:
+        for name in original.namelist():
+            content = original.read(name)
+            if name == "thoughts.json":
+                content = json.dumps(dict(json.loads(content), Aliases=["BODY_CANARY"]))
+            changed.writestr(name, content)
+    result = Operations().inspect(source)
+    assert result.outcome == "refused"
+    assert 'Thought: "Entry thought".' in result.findings[0].message
+    assert "CANARY" not in result.model_dump_json()
+
+
+def test_brz_payload_read_failure_identifies_admitted_attachment(monkeypatch):
+    from zipfile import ZipExtFile
+
+    from brz2obsidian.contracts import MigrationFailed
+    from brz2obsidian.sources.thebrain import BrzSourceModule
+
+    source = Path(__file__).parents[1] / "fixtures/minimal.brz"
+    with BrzSourceModule().open(source) as session:
+        asset = session.snapshot.assets[0]
+
+        def unreadable(*args, **kwargs):
+            raise OSError("Authorization: Bearer PAYLOAD_EXCEPTION_CANARY")
+
+        monkeypatch.setattr(ZipExtFile, "read", unreadable)
+        with (
+            pytest.raises(MigrationFailed) as caught,
+            session.open_payload(asset.asset_id) as stream,
+        ):
+            stream.read()
+    issue = caught.value.issues[0]
+    assert issue.subject.kind == "asset" and issue.subject.name == "Notes.md"
+    assert "CANARY" not in issue.model_dump_json()
+
+
+def test_api_no_note_failure_identifies_current_thought():
+    from tests.support.local_api_graph import GraphApi
+
+    api = GraphApi()
+    api.overrides[f"/api/notes/{BRAIN}/{HOME}"] = (200, {})
+    with api_server(api) as (_, address):
+        result = Operations(credentials=lambda: KEY).inspect(
+            LocalApiSourceSelection(
+                brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+            )
+        )
+    assert result.outcome == "refused"
+    assert 'Thought: "Entry".' in result.findings[0].message
+
+
+def test_excluded_relationship_metadata_is_absent_from_public_api_diagnostics():
+    from tests.support.local_api import ALONE
+    from tests.support.local_api_graph import HIERARCHY, GraphApi
+
+    api = GraphApi()
+    api.thoughts[ALONE].update(
+        name="EXCLUDED_THOUGHT_CANARY", forgottenDateTime="2026-10-01T00:00:00"
+    )
+    api.links[HIERARCHY].update(name="EXCLUDED_RELATIONSHIP_CANARY", color="bad_color")
+    with api_server(api) as (_, address):
+        result = Operations(credentials=lambda: KEY).inspect(
+            LocalApiSourceSelection(
+                brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+            )
+        )
+    assert result.outcome == "clean"
+    assert "CANARY" not in result.model_dump_json()
+
+
+def test_brz_private_relationship_refusal_does_not_infer_endpoint_names(tmp_path):
+    from zipfile import ZipFile
+
+    fixture = Path(__file__).parents[1] / "fixtures/minimal.brz"
+    source = tmp_path / "private-relationship.brz"
+    peer = "44444444-4444-4444-8444-444444444444"
+    with ZipFile(fixture) as original, ZipFile(source, "w") as changed:
+        thought = json.loads(original.read("thoughts.json"))
+        for name in original.namelist():
+            content = original.read(name)
+            if name == "thoughts.json":
+                content = (
+                    json.dumps(thought)
+                    + "\n"
+                    + json.dumps(
+                        dict(
+                            thought,
+                            Id=peer,
+                            Name="PRIVATE_CANARY",
+                            ForgottenDateTime="2026-10-01T00:00:00",
+                        )
+                    )
+                )
+            elif name == "links.json":
+                content = json.dumps(
+                    {
+                        "Id": "55555555-5555-4555-8555-555555555555",
+                        "BrainId": thought["BrainId"],
+                        "ThoughtIdA": thought["Id"],
+                        "ThoughtIdB": thought["Id"],
+                        "Kind": peer,
+                        "Relation": 1,
+                        "Meaning": 1,
+                        "Direction": -1,
+                    }
+                )
+            changed.writestr(name, content)
+    result = Operations().inspect(source)
+    assert result.outcome == "refused"
+    assert "CANARY" not in result.model_dump_json()
+    assert "Relationship:" not in result.findings[0].message
+    assert "Entry thought" not in result.findings[0].message
+
+
+def test_core_content_failure_keeps_safe_owner_without_inventing_broken_link():
+    from types import SimpleNamespace
+
+    from brz2obsidian.application.wiring import default_workflow
+    from brz2obsidian.application.workflow import SourceModuleBinding, Workflow
+    from brz2obsidian.sources.thebrain import BrzSourceModule
+
+    ordinary = default_workflow()
+    source = Path(__file__).parents[1] / "fixtures/minimal.brz"
+    with BrzSourceModule().open(source) as session:
+        snapshot = session.snapshot
+    document = snapshot.documents[0].model_copy(update={"text_digest": "0" * 64})
+    snapshot = snapshot.model_copy(update={"documents": (document,)})
+
+    class DeclaredSource:
+        @contextmanager
+        def open(self, reference):
+            yield SimpleNamespace(snapshot=snapshot)
+
+    workflow = Workflow(
+        SourceModuleBinding(DeclaredSource(), ordinary.binding.policy),
+        ordinary.renderer,
+        ordinary.publisher,
+    )
+    result = Operations(workflow).inspect(Path("unused.brz"))
+    assert result.outcome == "refused"
+    message = result.findings[0].message
+    assert 'Thought note: "Entry thought".' in message
+    assert "could not safely prepare" in message
+    assert "link" not in message.casefold() and "missing" not in message.casefold()
+    assert "report" in message.casefold()

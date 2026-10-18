@@ -5,11 +5,11 @@ from brz2obsidian.contracts import (
     MigrationFailed,
     MigrationRefused,
 )
-from brz2obsidian.diagnostics import diagnosed_issue
+from brz2obsidian.diagnostics import diagnosed_issue, with_subject
 
 
-def refuse(message, code="invalid_source"):
-    raise MigrationRefused(
+def refuse(message, code="invalid_source", *, subject=None):
+    error = MigrationRefused(
         (
             diagnosed_issue(
                 Issue(
@@ -21,6 +21,8 @@ def refuse(message, code="invalid_source"):
             ),
         )
     )
+
+    raise with_subject(error, *subject) if subject is not None else error
 
 
 def failure(code, message):

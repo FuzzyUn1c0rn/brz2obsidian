@@ -2,7 +2,7 @@
 
 import unicodedata
 
-from brz2obsidian.contracts import DiagnosticSubject
+from brz2obsidian.contracts import DiagnosticSubject, MigrationRefused
 
 # A reason is admitted with its original code. The pair prevents a foreign rule
 # or a familiar rule on an unrelated failure from inventing an explanation.
@@ -210,8 +210,8 @@ CODE_EXPLANATIONS = {
         "Set Home to a live ordinary thought in TheBrain, then inspect again. For a BRZ archive, export it again first.",
     ),
     "invalid_reference": (
-        "the converter could not interpret a link in a thought note safely.",
-        "Report the affected note and diagnostic report so the link can be checked. The available details do not establish that the link is broken.",
+        "the converter could not safely prepare some of the Brain's content.",
+        "Save the diagnostic report and report the problem. The available details do not establish whether the cause is the Brain or a converter limitation.",
     ),
     "unsupported_feature": (
         "the converter does not support a feature used by this Brain.",
@@ -307,7 +307,10 @@ def diagnosed_issue(issue):
         issue = issue.model_copy(
             update={"rule_id": diagnostic_reason(issue.code, issue.message)}
         )
-    return issue.model_copy(update={"guidance": explain_issue(issue, "inspect")})
+    guidance = explain_issue(issue, "inspect").removeprefix(
+        "Inspection stopped because "
+    )
+    return issue.model_copy(update={"guidance": guidance[0].upper() + guidance[1:]})
 
 
 def explain_issue(issue, operation):
@@ -374,3 +377,42 @@ def with_subject(error, kind, name):
         ),
         receipt=error.receipt,
     )
+
+
+def contextual_issue(issue, snapshot):
+    """Use only qualified snapshot metadata for a later typed failure."""
+    if issue.subject is not None or snapshot is None:
+        return issue
+    affected = set(issue.affected)
+    items = {item.key: item for item in snapshot.items}
+    subject = None
+    for document in snapshot.documents:
+        if document.key in affected and document.owner in items:
+            subject = ("document", items[document.owner].title)
+            break
+    if subject is None:
+        for asset in snapshot.assets:
+            if asset.asset_id in affected:
+                subject = ("asset", asset.display_name or asset.original_name)
+                break
+    if subject is None:
+        for relationship in snapshot.relationships:
+            if relationship.key in affected:
+                subject = (
+                    "relationship",
+                    " \u2014 ".join(
+                        items[key].title
+                        for key in (relationship.item_a, relationship.item_b)
+                        if key in items
+                    ),
+                )
+                break
+    if subject is None:
+        for item in snapshot.items:
+            if item.key in affected:
+                subject = ("item", item.title)
+                break
+    if subject is None:
+        return issue
+    error = with_subject(MigrationRefused((issue,)), *subject)
+    return error.issues[0]
