@@ -5,8 +5,8 @@ import hashlib
 from uuid import UUID
 
 from brz2obsidian.contracts import MigrationRefused, SourceFinding
-from brz2obsidian.sources.thebrain.inserts import adapt_note, trace_adapted_references
-from brz2obsidian.sources.thebrain.literals import adapt_literals, source_position
+from brz2obsidian.sources.thebrain.inserts import trace_adapted_references
+from brz2obsidian.sources.thebrain.literals import source_position
 from brz2obsidian.sources.thebrain.notes import (
     bind_note_references,
     compact_thought_identity,
@@ -15,6 +15,7 @@ from brz2obsidian.sources.thebrain.notes import (
 from brz2obsidian.sources.thebrain.scope import contains_omitted_identity
 
 from .errors import refuse
+from .markdown import adapt_literals, adapt_note
 
 
 def scope_text(text, excluded):
@@ -49,13 +50,17 @@ def scope_text(text, excluded):
         refuse("Authored Markdown has an unqualified scoped association")
 
 
-def bind_documents(documents, assets, included, *, with_findings=False):
+def bind_documents(
+    documents, assets, included, *, with_findings=False, preserve_bom=False
+):
     from .capture import canonical
 
     result, findings = [], []
     for document in documents:
         try:
-            adapted, edits, losses = adapt_note(document.text)
+            adapted, edits, losses = adapt_note(
+                document.text, preserve_bom=preserve_bom
+            )
             for loss in losses:
                 findings.append(
                     SourceFinding(

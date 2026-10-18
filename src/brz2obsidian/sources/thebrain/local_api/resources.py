@@ -544,11 +544,22 @@ def validate_payload_binding(source, snapshot, audit):
                 "text_adaptations": (),
             }
         )
+        # A prior capture can retain the leading signature as ordinary text.
+        # Its absence of a signature-deletion edit selects exactly that prior
+        # interpretation; fresh captures always declare the exact deletion.
+        signature_removed = bool(
+            document.text_adaptations
+            and document.text_adaptations[0].start == 0
+            and document.text_adaptations[0].end == 1
+            and document.text_adaptations[0].before == "\ufeff"
+            and document.text_adaptations[0].after == ""
+        )
         expected_documents, document_findings = bind_documents(
             [source_document],
             snapshot.assets,
             {i.key for i in snapshot.items},
             with_findings=True,
+            preserve_bom=raw.startswith("\ufeff") and not signature_removed,
         )
         expected = expected_documents[0]
         expected_findings.extend(document_findings)

@@ -97,6 +97,28 @@ snapshot_digest = H(b"brz2obsidian.local-api.snapshot.v1\n" + C(snapshot_without
 
 Neither content preimage contains endpoint/port, transport response order, request counters, credentials, storage keys, audit method/limits/times or machine paths. Safe source modification timestamps, authored values and normalized text/evidence remain bound. Different content/scope/payload association/availability/bytes change source_sha256; any normalized fact/evidence/accounting change changes snapshot_digest. The snapshot digest also changes when its bound source_sha256 changes. An irrelevant port/time/storage relocation does not make a review stale by content identity; independently required converter/policy compatibility still applies. GUI source/acquisition-configuration changes still invalidate inspection under the parent workflow; digest equality does not override that rule.
 
+## Thought-note UTF-8 signatures
+
+All three explicit profiles admit a single leading UTF-8 BOM in a qualified raw
+thought note. Strict UTF-8 decoding remains required. Retained scoped source
+`note_text` includes its leading U+FEFF; unomitted originals retain their exact
+bytes, length and SHA-256. Markdown interpretation removes only that first
+signature, with an exact `literal_text` deletion adaptation at scoped Unicode
+codepoint interval `[0,1)`. Other adaptations bind the same retained source digest
+and shifted source positions; references bind the adapted document text.
+Interior U+FEFF characters remain authored content. Successful empty and BOM-only
+raw notes remain present original attachments. Scope removal still omits unsafe
+original copies under the existing exclusion rules.
+
+Capture format1 and profile identifiers remain unchanged. Existing captures
+without a signature retain their exact interpretation and identities. Previously
+qualified signature-bearing captures without the leading deletion adaptation
+rebind using their exact prior Markdown interpretation. New captures declare the
+deletion. Both forms require exact full normalized-document equality against
+retained scoped text and the same original byte measurements; arbitrary changed
+text, adaptations, references or original bytes do not qualify. This compatibility
+path does not change live acquisition or admit unsupported active HTML.
+
 ## Audit and metadata
 
 `metadata.json` is exactly `{identifiers,identity,schema_sha256,desktop_build}`. identity is the complete final SourceIdentity. schema_sha256 is the assessed schema's actual digest; desktop_build is the observed build string. They are bound capture metadata and compatibility evidence, not authored content. Module/profile validation must reject an unqualified schema/build combination rather than use a hash comparison as semantic qualification.
