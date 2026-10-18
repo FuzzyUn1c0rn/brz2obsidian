@@ -76,6 +76,8 @@ def main(argv=None):
         if args.json_output:
             print(result.model_dump_json(by_alias=True))
         else:
+            from brz2obsidian.application.checking import finding_for_check
+
             print(f"check-vault: {result.outcome}")
             print(f"Vault: {result.vault.location}")
             print(
@@ -84,17 +86,13 @@ def main(argv=None):
             )
             for issue in result.issues:
                 location = issue.artifact or "vault"
-                if issue.property:
-                    location += ":" + issue.property
-                print(f"{issue.code} ({location}): {issue.message} {issue.guidance}")
-                if issue.reference:
-                    print(f"Reference: {issue.reference}")
-                if issue.candidates:
-                    print("Candidates: " + ", ".join(issue.candidates))
+                print(finding_for_check(issue, result.outcome).message)
+                print(f"Details: {issue.code}; affected file: {location}")
         return {"clean": 0, "issues": 2, "failed": 1}[result.outcome]
     from brz2obsidian import __version__
     from brz2obsidian.application.wiring import default_workflow, local_api_workflow
     from brz2obsidian.contracts import Issue, RunResult
+    from brz2obsidian.diagnostics import explain_issue
 
     options = {
         name: getattr(args, "api_" + name)
@@ -178,11 +176,8 @@ def main(argv=None):
         if result.inspection:
             print("Pending: " + ", ".join(result.inspection.pending_checks))
         for issue in result.issues:
-            print(f"{issue.code}: {issue.message} {issue.guidance}")
-            if issue.affected:
-                print("Affected: " + ", ".join(issue.affected))
-            if issue.evidence:
-                print("Evidence: " + ", ".join(issue.evidence))
+            print(explain_issue(issue, result.operation))
+            print(f"Details: {issue.code}")
             if issue.leftover_path:
                 print(f"Owned staging left at: {issue.leftover_path}")
     return {"clean": 0, "warnings": 2, "refused": 1, "failed": 1}[result.outcome]

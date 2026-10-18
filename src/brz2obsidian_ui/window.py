@@ -58,7 +58,7 @@ EXPLANATIONS = (
 TITLES = {
     "inspection_clean": "Inspection completed — ready for review",
     "inspection_warnings": "Inspection completed — source warnings",
-    "inspection_refused": "Source cannot be used",
+    "inspection_refused": "Inspection could not continue",
     "brains_listed": "Accessible Brains loaded",
     "brains_refused": "Brain listing was refused",
     "brains_failed": "Brain listing could not complete",
@@ -427,6 +427,7 @@ class MainWindow(QMainWindow):
         self.findings = PathText(
             "Your inspection findings will appear here.", "findings"
         )
+        self.findings.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
         self.findings.setAccessibleName("Inspection findings")
         body.addWidget(self.findings)
         self.recovery_status = PathText(name="recoveryGuidance")
@@ -1369,8 +1370,10 @@ class MainWindow(QMainWindow):
                     else "\nVerified publication. The generated vault has not been checked."
                     if result.operation == "convert_reviewed"
                     and result.publication.receipt_verified
-                    else "\nReview the failure guidance and destination before another attempt."
+                    else "\nThe cause could not be identified. Open Diagnostic details and report the problem before another attempt."
                     if result.operation == "convert_reviewed"
+                    else "\nThe cause could not be identified. Open Diagnostic details and report the problem before another attempt."
+                    if result.outcome in ("failed", "refused")
                     else "\nReview the planned contents and pending checks below."
                 )
                 + (

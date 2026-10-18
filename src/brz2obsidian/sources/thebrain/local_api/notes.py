@@ -14,7 +14,7 @@ from brz2obsidian.sources.thebrain.notes import (
 )
 from brz2obsidian.sources.thebrain.scope import contains_omitted_identity
 
-from .errors import refuse
+from .errors import refuse, with_subject
 
 
 def scope_text(text, excluded):
@@ -46,10 +46,10 @@ def scope_text(text, excluded):
             refuse("Excluded note associations cannot be removed safely")
         return text, removed
     except MigrationRefused:
-        refuse("Authored Markdown has an unqualified scoped association")
+        raise
 
 
-def bind_documents(documents, assets, included, *, with_findings=False):
+def bind_documents(documents, assets, included, *, with_findings=False, subjects=None):
     from .capture import canonical
 
     result, findings = [], []
@@ -95,8 +95,8 @@ def bind_documents(documents, assets, included, *, with_findings=False):
                         bind_note_references(image_document, assets, {}).references
                     )
             result.append(document.model_copy(update={"references": tuple(bound)}))
-        except MigrationRefused:
-            refuse(
-                "Authored Markdown contains an unqualified reference or formatting declaration"
-            )
+        except MigrationRefused as error:
+            raise with_subject(
+                error, "document", (subjects or {}).get(document.owner)
+            ) from None
     return (result, findings) if with_findings else result

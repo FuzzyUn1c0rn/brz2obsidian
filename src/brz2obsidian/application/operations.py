@@ -44,35 +44,9 @@ from brz2obsidian.application.contracts import (
     source_selection,
 )
 from brz2obsidian.application.conversion import convert
+from brz2obsidian.application.diagnostics import finding_for
 from brz2obsidian.contracts import Counts, MigrationFailed, MigrationRefused
 from brz2obsidian.publication.filesystem import preflight_destination
-
-# Deliberately static messages: backend Issue.message/evidence can contain authored
-# text, filenames or exception strings. Never project them across this boundary.
-SAFE_ISSUES = {
-    "api_search_shape_unsupported": "The local API returned an unsupported search result. This source shape needs review.",
-    "api_relationship_shape_unsupported": "The local API returned an unsupported relationship. Its source form needs review.",
-    "api_resource_shape_unsupported": "The local API returned an unsupported resource declaration. Its source form needs review.",
-    "api_capture_cleanup_failed": "The private inspection capture could not be released. Check temporary storage access before inspecting again.",
-    "api_credentials_missing": "Set THE_BRAIN_LOCAL_API_KEY in the launch environment or configure the external credential provider, then try again.",
-    "api_authentication_failed": "The local API denied access. Check its current key in TheBrain settings and update the credential provider or THE_BRAIN_LOCAL_API_KEY.",
-    "api_transport_failed": "The local API could not be reached. Start TheBrain, enable its local API and check the configured address before retrying.",
-    "api_request_timeout": "A local API request timed out. Check TheBrain and the configured bounds, then retry.",
-    "formatting_loss": "Included note formatting needs review: table layout may become responsive, custom icons use visible title fallbacks, or an insert remains unsupported. Review affected notes and declarations in the Migration report and edit the converted Markdown if needed.",
-    "invalid_source": "The selected source is not supported or consistent. Correct the source and inspect again.",
-    "invalid_entry": "The source needs a valid live Home thought. Set Home and inspect again.",
-    "invalid_reference": "Source references could not be interpreted safely. Correct the source and inspect again.",
-    "unsupported_feature": "The source contains an unsupported feature. Review the source before continuing.",
-    "source_changed": "The source changed while it was being read. Inspect the current stable source again.",
-    "payload_read_failure": "A source resource could not be read. Check the source and access.",
-    "operation_failure": "Inspection could not complete. Check source access and inspect again.",
-    "session_teardown_failure": "The source could not be closed normally. Check source access and inspect again.",
-    "target_path_too_long": "A planned path exceeds the supported Windows path limit.",
-    "absent_payload": "A source resource is unavailable. Review source warnings before conversion.",
-    "source_gap": "Source content is unavailable. Review source warnings before conversion.",
-    "approved_source_gap": "Source note, icon or resource bytes are unavailable. Their absence will be disclosed during conversion. Review these source limitations before continuing.",
-    "approved_metadata_discrepancy": "Source resource metadata differs from the available bytes. Conversion preserves verified actual bytes and reports the discrepancy.",
-}
 
 
 class Operations:
@@ -108,17 +82,7 @@ class Operations:
             )
         except (MigrationFailed, MigrationRefused) as error:
             outcome = "refused" if isinstance(error, MigrationRefused) else "failed"
-            findings = tuple(
-                Finding(
-                    code=i.code if i.code in SAFE_ISSUES else "api_listing_failed",
-                    severity="error",
-                    message=SAFE_ISSUES.get(
-                        i.code,
-                        "The accessible Brain list could not be read safely. Check TheBrain and retry.",
-                    ),
-                )
-                for i in error.issues
-            )
+            findings = tuple(finding_for(i, "list_brains") for i in error.issues)
             return BrainListResult(
                 outcome=outcome,
                 status="brains_" + outcome,
@@ -172,16 +136,7 @@ class Operations:
             else None
         )
         findings = tuple(
-            Finding(
-                code=issue.code if issue.code in SAFE_ISSUES else "inspection_finding",
-                severity=issue.severity,
-                message=SAFE_ISSUES.get(
-                    issue.code,
-                    "Inspection found a source limitation. Review the source and its supported content before conversion.",
-                ),
-                field="source",
-            )
-            for issue in raw.issues
+            finding_for(issue, "inspect", field="source") for issue in raw.issues
         )
         counts = raw.counts or Counts()
         checked = (
@@ -215,7 +170,9 @@ class Operations:
                 ),
                 *(f"{finding.code}: {finding.message}" for finding in findings),
                 "Pending: " + ", ".join(pending),
-                "Guidance: Review the planned contents and pending checks before conversion.",
+                "Guidance: Review the planned contents and pending checks before conversion."
+                if usable
+                else "Guidance: Follow the explanation above. Save this diagnostic report when reporting a converter problem.",
             )
         )
         return InspectionResult(

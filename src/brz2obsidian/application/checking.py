@@ -11,18 +11,28 @@ from brz2obsidian.vault_check.contracts import VaultCheckResult
 # Raw messages, references and candidate lists can contain authored content.
 # Only known codes, static guidance and the affected artifact path are admitted.
 SAFE_FINDINGS = {
-    "invalid_frontmatter": "Frontmatter is not valid data-only YAML. Correct its mapping, duplicate keys or unsupported tags.",
-    "invalid_property": "A known property has an invalid value. Review its type and supported format.",
-    "invalid_category": "A category membership is invalid. Link to a Categories note with the categories tag.",
-    "invalid_provider": "An appearance provider is invalid. Choose a valid category membership or leave it blank.",
-    "missing_base": "A required Base is unavailable. Review the Base link and its target file.",
-    "missing_image": "A required image is unavailable. Review the image link and its target file.",
-    "ambiguous_reference": "A required reference has multiple possible targets. Use an unambiguous vault path.",
-    "duplicate_source_identity": "Multiple notes share an imported source identity pair. Review those copies before making changes.",
-    "unsafe_reference": "A path or reference cannot be read safely. Use regular files and directories contained in the vault.",
-    "read_failure": "The vault directory or a file could not be read completely. Check the path, permissions and encoding, then check again.",
-    "invalid_base": "A Base is not valid data-only YAML. Correct its mapping, duplicate keys or unsupported tags.",
+    "invalid_frontmatter": "Vault check found invalid frontmatter, the properties at the start of a note. These properties must use YAML (a text data format) with one value per key and no executable tags. Correct the properties in the affected note, then check again.",
+    "invalid_property": "Vault check found a note property with an invalid value. Review that property's type and supported format in the affected note, then check again.",
+    "invalid_category": "Vault check found an invalid category membership. Link it to a note in Categories with the categories tag, then check again.",
+    "invalid_provider": "Vault check found an invalid appearance category. Choose a valid category membership or leave the appearance category blank, then check again.",
+    "missing_base": "Vault check could not verify a required Base file. Check the Base link and that its target is a nonempty Base file, then check again.",
+    "missing_image": "Vault check could not verify a required image. Review the image link and check that its target is a nonempty image file, then check again.",
+    "ambiguous_reference": "Vault check found a link with multiple possible targets. Give the link a complete, unambiguous path within the vault, then check again.",
+    "duplicate_source_identity": "Vault check found multiple notes with the same imported Brain and thought identifiers. Review those copies before making changes, then check again.",
+    "unsafe_reference": "Vault check could not read a path or link safely. Use regular files and directories contained in the vault, then check again.",
+    "read_failure": "Vault check could not read the vault folder or one of its files completely. Check the path, permissions and text encoding, then check again.",
+    "invalid_base": "Vault check found invalid Base data. A Base must use YAML (a text data format), with one value per key and no executable tags. Correct the affected Base file, then check again.",
 }
+
+
+def finding_for_check(issue, outcome):
+    return Finding(
+        code=issue.code,
+        severity="error" if outcome == "failed" else "warning",
+        message=SAFE_FINDINGS[issue.code],
+        field="vault",
+        path=issue.artifact,
+    )
 
 
 def check_vault(
@@ -30,16 +40,7 @@ def check_vault(
 ) -> CheckResult:
     root = vault.absolute()
     raw = (checker if checker is not None else check_current_vault)(root)
-    findings = tuple(
-        Finding(
-            code=issue.code,
-            severity="error" if raw.outcome == "failed" else "warning",
-            message=SAFE_FINDINGS[issue.code],
-            field="vault",
-            path=issue.artifact,
-        )
-        for issue in raw.issues
-    )
+    findings = tuple(finding_for_check(issue, raw.outcome) for issue in raw.issues)
     return CheckResult(
         outcome=raw.outcome,
         status="check_" + raw.outcome,

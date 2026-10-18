@@ -127,6 +127,7 @@ def test_projection_excludes_raw_issue_evidence_and_reference_fragment_canaries(
     assert "invalid_reference" in text
     assert "CANARY" not in text
     assert "Authored body" not in text
+    assert "Inspection stopped" not in result.findings[0].message
 
 
 def test_nested_safe_counts_and_review_are_immutable():

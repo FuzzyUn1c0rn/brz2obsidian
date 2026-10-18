@@ -12,6 +12,8 @@ from zlib import error as DeflateError
 
 from pydantic import ValidationError
 
+from brz2obsidian.diagnostics import diagnostic_reason
+
 from brz2obsidian.contracts import (
     AccountingEntry,
     Issue,
@@ -41,6 +43,7 @@ def _refuse(code, message, affected=(), *, evidence=(), guidance=None):
                 code=code,
                 phase="source",
                 message=message,
+                rule_id=diagnostic_reason(code, message),
                 affected=affected,
                 evidence=evidence,
                 guidance=guidance
@@ -109,7 +112,7 @@ class _PayloadStream:
                         Issue(
                             code="payload_read_failure",
                             phase="source",
-                            message=str(error),
+                            message="A BRZ attachment could not be read completely.",
                             affected=(self.asset_id,),
                             guidance="Check the source archive and re-export before retrying.",
                         ),
@@ -164,7 +167,12 @@ class BrzSourceModule:
                     Issue(
                         code="write_failure",
                         phase="source",
-                        message=str(error),
+                        message="The selected BRZ archive could not be read.",
+                        rule_id="diagnostic.archive_missing"
+                        if isinstance(error, FileNotFoundError)
+                        else "diagnostic.source_access_denied"
+                        if isinstance(error, PermissionError)
+                        else "diagnostic.source_read_failed",
                         guidance="Check source access and retry.",
                     ),
                 )
@@ -546,7 +554,7 @@ class BrzSession:
                     Issue(
                         code="payload_read_failure",
                         phase="source",
-                        message=str(error),
+                        message="A BRZ attachment could not be read completely.",
                         affected=(asset_id,),
                         guidance="Check the source archive and re-export before retrying.",
                     ),
@@ -569,8 +577,8 @@ class BrzSession:
                 or _fingerprint(self.path) != self.source_identity.source_sha256
             ):
                 _refuse("source_changed", "Source changed during conversion")
-        except OSError as error:
-            _refuse("source_changed", f"Source is no longer readable: {error}")
+        except OSError:
+            _refuse("source_changed", "Source is no longer readable")
 
     def close(self):
         self.closed = True
@@ -578,12 +586,12 @@ class BrzSession:
         for resource in (*tuple(self.streams), self.archive, self.source_stream):
             try:
                 resource.close()
-            except OSError as error:
+            except OSError:
                 issues.append(
                     Issue(
                         code="session_teardown_failure",
                         phase="session_teardown",
-                        message=str(error),
+                        message="A BRZ source file could not be closed normally.",
                         guidance="Check source access; any published receipt remains valid.",
                     )
                 )

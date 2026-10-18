@@ -161,7 +161,10 @@ class LocalHttp:
                 allow_tag_error and operation == "tags" and response.status == 400
             ):
                 raise failure(
-                    "api_request_failed", "A required local API request failed"
+                    "api_request_failed",
+                    "A required attachment was not found by the local API"
+                    if operation == "attachment-content" and response.status == 404
+                    else "A required local API request failed",
                 )
             cap = (
                 self.config.search_max_response_bytes

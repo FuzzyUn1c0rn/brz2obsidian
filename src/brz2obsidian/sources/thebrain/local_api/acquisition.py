@@ -7,6 +7,8 @@ from brz2obsidian.contracts import (
     CalendarDates,
     DeclaredAppearance,
     Item,
+    MigrationFailed,
+    MigrationRefused,
     OriginalEvidence,
     SourceAccounting,
     SourceIdentity,
@@ -24,7 +26,7 @@ from .declarations import (
     thought,
     uuid,
 )
-from .errors import refuse, unsupported_shape
+from .errors import refuse, unsupported_shape, with_subject
 from .graph import link_identity, normalize_relationships
 from .notes import bind_documents
 from .resources import capture_owner
@@ -489,19 +491,22 @@ class Acquisition:
                     "attachments", "/thoughts/" + b + "/" + key + "/attachments", key
                 )
             )
-            owner_assets, owner_documents, owner_payloads = capture_owner(
-                self.client,
-                self.config,
-                b,
-                key,
-                owned,
-                attachments,
-                record,
-                self.profile_version,
-                {k: self.thoughts[k] for k in excluded},
-                decisions,
-                self.capture_directory,
-            )
+            try:
+                owner_assets, owner_documents, owner_payloads = capture_owner(
+                    self.client,
+                    self.config,
+                    b,
+                    key,
+                    owned,
+                    attachments,
+                    record,
+                    self.profile_version,
+                    {k: self.thoughts[k] for k in excluded},
+                    decisions,
+                    self.capture_directory,
+                )
+            except (MigrationFailed, MigrationRefused) as error:
+                raise with_subject(error, "item", value["name"]) from None
             assets.extend(owner_assets)
             documents.extend(owner_documents)
             payloads.update(owner_payloads)
@@ -617,6 +622,7 @@ class Acquisition:
             assets,
             set().union(*map(set, included.values())),
             with_findings=True,
+            subjects={key: value["name"] for key, value in self.thoughts.items()},
         )
         from .gaps import gap_projections
 

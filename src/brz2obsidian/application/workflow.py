@@ -80,8 +80,10 @@ class Workflow:
                         if phase == "session_teardown"
                         else "operation_failure",
                         phase=phase,
-                        message=str(error),
-                        guidance="Check source and filesystem access, then retry with a fresh destination.",
+                        message="The source could not be closed normally."
+                        if phase == "session_teardown"
+                        else "An unexpected error prevented the operation from completing.",
+                        guidance="Save the diagnostic report and report the problem. Check the publication status before another conversion.",
                     ),
                 )
                 failures.append("failed")
