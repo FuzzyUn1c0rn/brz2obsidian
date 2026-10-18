@@ -5,8 +5,8 @@ import hashlib
 from uuid import UUID
 
 from brz2obsidian.contracts import MigrationRefused, SourceFinding
-from brz2obsidian.sources.thebrain.inserts import adapt_note, trace_adapted_references
-from brz2obsidian.sources.thebrain.literals import adapt_literals, source_position
+from brz2obsidian.sources.thebrain.inserts import trace_adapted_references
+from brz2obsidian.sources.thebrain.literals import source_position
 from brz2obsidian.sources.thebrain.notes import (
     bind_note_references,
     compact_thought_identity,
@@ -15,47 +15,49 @@ from brz2obsidian.sources.thebrain.notes import (
 from brz2obsidian.sources.thebrain.scope import contains_omitted_identity
 
 from .errors import refuse, with_subject
+from .markdown import adapt_literals, adapt_note
 
 
 def scope_text(text, excluded):
-    try:
-        adapted, edits = adapt_literals(text)
-        references = trace_note_references(adapted, excluded)
-        removals = [
-            r
-            for r in references
-            if r.kind == "item" and compact_thought_identity(r.target) in excluded
-        ]
-        removed = {compact_thought_identity(r.target) for r in removals}
-        for reference in reversed(removals):
-            begin, end = (
-                source_position(reference.start, edits),
-                source_position(reference.end, edits),
-            )
-            text = text[:begin] + text[end:]
-        tokens = {
-            token
-            for key in excluded
-            for token in (
-                key,
-                key.replace("-", ""),
-                base64.urlsafe_b64encode(UUID(key).bytes_le).decode().rstrip("="),
-            )
-        }
-        if contains_omitted_identity(text, tokens):
-            refuse("Excluded note associations cannot be removed safely")
-        return text, removed
-    except MigrationRefused:
-        raise
+    adapted, edits = adapt_literals(text)
+    references = trace_note_references(adapted, excluded)
+    removals = [
+        r
+        for r in references
+        if r.kind == "item" and compact_thought_identity(r.target) in excluded
+    ]
+    removed = {compact_thought_identity(r.target) for r in removals}
+    for reference in reversed(removals):
+        begin, end = (
+            source_position(reference.start, edits),
+            source_position(reference.end, edits),
+        )
+        text = text[:begin] + text[end:]
+    tokens = {
+        token
+        for key in excluded
+        for token in (
+            key,
+            key.replace("-", ""),
+            base64.urlsafe_b64encode(UUID(key).bytes_le).decode().rstrip("="),
+        )
+    }
+    if contains_omitted_identity(text, tokens):
+        refuse("Excluded note associations cannot be removed safely")
+    return text, removed
 
 
-def bind_documents(documents, assets, included, *, with_findings=False, subjects=None):
+def bind_documents(
+    documents, assets, included, *, with_findings=False, preserve_bom=False, subjects=None
+):
     from .capture import canonical
 
     result, findings = [], []
     for document in documents:
         try:
-            adapted, edits, losses = adapt_note(document.text)
+            adapted, edits, losses = adapt_note(
+                document.text, preserve_bom=preserve_bom
+            )
             for loss in losses:
                 findings.append(
                     SourceFinding(
