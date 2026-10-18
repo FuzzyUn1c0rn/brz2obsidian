@@ -69,9 +69,7 @@ class Workflow:
         def retain(error):
             nonlocal issues, receipt, counts
             if isinstance(error, (MigrationRefused, MigrationFailed)):
-                issues += tuple(
-                    contextual_issue(issue, snapshot) for issue in error.issues
-                )
+                issues += error.issues
                 receipt = error.receipt or receipt
                 failures.append(
                     "refused" if isinstance(error, MigrationRefused) else "failed"
@@ -164,6 +162,7 @@ class Workflow:
                     guidance="Review the published vault; conversion cannot reuse that nonempty destination.",
                 ),
             )
+        issues = tuple(contextual_issue(issue, snapshot) for issue in issues)
         outcome = (
             "failed"
             if "failed" in failures

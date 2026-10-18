@@ -79,3 +79,55 @@ def test_converter_limitation_has_operation_title_and_literal_safe_item_context(
         window.close()
         until(app, lambda: not window.isVisible())
         window.shutdown()
+
+
+def test_source_warning_displays_literal_attachment_context_and_diagnostics(tmp_path):
+    from tests.application.test_verified_coverage import (
+        TXT,
+        absent_parts,
+        change_record,
+        write_source,
+    )
+
+    parts = absent_parts(tmp_path)
+    change_record(parts, TXT, Name="<b>paper & notes</b>")
+    source = write_source(tmp_path, parts)
+    result = Operations().inspect(source)
+    assert result.outcome == "warnings"
+
+    class PreparedRunner:
+        def run(self, request):
+            return Terminal(
+                phase="completed",
+                process_status=2,
+                response=WorkerResponse(
+                    request_id=request.request_id, operation="inspect", result=result
+                ),
+            )
+
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow(supervisor=PreparedRunner())
+    window.tabs.setCurrentIndex(1)
+    window.show()
+    window.submit(SelectSource(path_or_null=str(source)))
+    window.submit(InspectCommand())
+    until(app, lambda: window.snapshot.result is not None)
+    try:
+        shown = window.findings.toPlainText()
+        assert "source warnings" in shown
+        assert 'Attachment: "<b>paper & notes</b>".' in shown
+        assert "Migration report" in shown and "Review" in shown
+        window.disclosure.click()
+        until(app, lambda: bool(window.diagnostic_text.toPlainText()))
+        assert (
+            'Attachment: "<b>paper & notes</b>".'
+            in window.diagnostic_text.toPlainText()
+        )
+        assert (
+            window.findings.wordWrapMode()
+            == QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere
+        )
+    finally:
+        window.close()
+        until(app, lambda: not window.isVisible())
+        window.shutdown()

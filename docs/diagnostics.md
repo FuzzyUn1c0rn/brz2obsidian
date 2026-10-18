@@ -60,6 +60,12 @@ source capture/schema/profile versions remain unchanged: this extension adds
 optional diagnostic context, and does not change migration or capture meaning.
 This compatibility change is explicit in the #232 review scope.
 
+Warnings receive the same admitted affected context as failures. A warning names
+its qualified attachment or thought note when available, while its raw structured
+message, rule and guidance remain intact. Conflicting repeated source observations
+use the established prior metadata for display; the contradictory replacement's
+newly asserted label is not trusted.
+
 Detailed structured source evidence remains available through the existing
 library contracts. Human CLI output and application reports display admitted
 explanations, codes and applicable artifact paths instead of arbitrary evidence

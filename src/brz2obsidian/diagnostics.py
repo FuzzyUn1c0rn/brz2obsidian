@@ -31,6 +31,10 @@ REASONS = {
         "the local API returned data in a form the converter could not read.",
         "Check that the configured address is TheBrain's local API. If it is, report this limitation with the diagnostic report.",
     ),
+    ("invalid_source", "thought_conflict"): (
+        "the local API returned conflicting details for the same thought.",
+        "Let changes in TheBrain finish, then inspect again. If the problem continues, report it with the diagnostic report.",
+    ),
     ("invalid_source", "attachment_conflict"): (
         "the local API returned different details for the same attachment.",
         "Let changes in TheBrain finish, then inspect again. If the problem continues, report it with the diagnostic report.",
@@ -92,6 +96,7 @@ _KNOWN_MESSAGES = {
     "A wildcard candidate has foreign or invalid ownership": "api_ownership",
     "An attachment declaration has foreign ownership": "api_ownership",
     "A relationship has foreign or invalid ownership": "api_ownership",
+    "Repeated authoritative thought observations disagree": "thought_conflict",
     "Authoritative attachment declarations disagree": "attachment_conflict",
     "Graph and owned attachment inventories disagree": "attachment_conflict",
     "Repeated authoritative relationship observations disagree": "relationship_conflict",
@@ -326,8 +331,6 @@ def explain_issue(issue, operation):
             "convert": "Conversion reported a warning",
             "list_brains": "Brain listing reported a warning",
         }[operation]
-    if issue.code in WARNING_EXPLANATIONS:
-        return WARNING_EXPLANATIONS[issue.code]
     reason = (
         (issue.rule_id or "").removeprefix("diagnostic.")
         if (issue.rule_id or "").startswith("diagnostic.")
@@ -352,6 +355,8 @@ def explain_issue(issue, operation):
             "relationship": "Relationship",
         }[issue.subject.kind]
         context = f' {label}: "{issue.subject.name}".'
+    if issue.code in WARNING_EXPLANATIONS:
+        return WARNING_EXPLANATIONS[issue.code] + context
     return f"{prefix} because {cause}{context} {action}"
 
 

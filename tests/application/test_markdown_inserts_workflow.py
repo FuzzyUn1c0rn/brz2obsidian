@@ -886,9 +886,11 @@ def test_insert_warnings_surface_in_cli_and_reviewed_ui_authorization(tmp_path, 
     }
     assert main(["inspect", str(source)]) == 2
     text = capsys.readouterr().out
-    assert (
-        "formatting_loss" in text and "callout_icon" in text and "column-widths" in text
-    )
+    assert "formatting_loss" in text
+    assert "Tables may become responsive" in text
+    assert "custom icons may use text labels" in text
+    assert "Review" in text and "Migration report" in text
+    assert 'Thought note: "Entry thought".' in text
     assert "Text adaptations:" in text
     operation = Operations()
     inspected = operation.inspect(source)

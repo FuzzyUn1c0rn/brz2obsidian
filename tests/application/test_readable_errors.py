@@ -1021,3 +1021,36 @@ def test_cli_does_not_expose_failure_of_its_safe_error_output(
     assert main(["check-vault", str(tmp_path), "--json"]) == 1
     output = capsys.readouterr()
     assert output.out == output.err == ""
+
+
+def test_conflicting_observation_uses_established_thought_name():
+    from tests.support.local_api import MetadataApi
+
+    api = MetadataApi()
+    path = f"/api/thoughts/{BRAIN}/{HOME}/graph"
+    graph = api.response(path, {})[1]
+    graph["activeThought"] = dict(api.thoughts[HOME], name="CONFLICT_CANARY")
+    api.overrides[path] = (200, graph)
+    with api_server(api) as (_, address):
+        result = Operations(credentials=lambda: KEY).inspect(
+            LocalApiSourceSelection(
+                brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+            )
+        )
+    assert result.outcome == "refused"
+    message = result.findings[0].message
+    assert "conflicting details for the same thought" in message
+    assert 'Thought: "Entry".' in message
+    assert "CANARY" not in result.model_dump_json()
+
+
+def test_warning_keeps_qualified_attachment_context_in_application_report(tmp_path):
+    from tests.application.test_verified_coverage import absent_parts, write_source
+
+    source = write_source(tmp_path, absent_parts(tmp_path))
+    result = Operations().inspect(source)
+    assert result.outcome == "warnings"
+    finding = next(f for f in result.findings if f.code == "approved_source_gap")
+    assert 'Attachment: "paper.txt".' in finding.message
+    assert "Review" in finding.message and "Migration report" in finding.message
+    assert finding.message in result.diagnostic_text

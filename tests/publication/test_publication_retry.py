@@ -491,7 +491,7 @@ def test_failure_before_staging_identity_returns_issue_and_preserves_unknown_pat
     def read_identity(path, *args, **kwargs):
         if created and path == created[0]:
             failures.append(path)
-            raise PermissionError("Controlled failure before staging identity capture")
+            raise PermissionError("Authorization: Bearer STAGING_IDENTITY_CANARY")
         return original_read(path, *args, **kwargs)
 
     monkeypatch.setattr(tempfile, "mkdtemp", create)
@@ -502,9 +502,8 @@ def test_failure_before_staging_identity_returns_issue_and_preserves_unknown_pat
     assert result.outcome == "failed", result.model_dump(mode="json")
     assert result.receipt is None
     assert [i.code for i in result.issues] == ["write_failure", "cleanup_failure"]
-    assert (
-        "Controlled failure before staging identity capture" in result.issues[0].message
-    )
+    assert result.issues[0].message == "The vault could not be written or published."
+    assert "CANARY" not in result.model_dump_json()
     assert result.issues[-1].leftover_path == str(created[0])
     assert failures == created
     assert not destination.exists() and source.read_bytes() == before

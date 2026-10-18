@@ -191,7 +191,7 @@ class Acquisition:
         if key in self.observations and self.observations[key] != value:
             refuse(
                 "Repeated authoritative thought observations disagree",
-                subject=("item", _included_name(value)),
+                subject=("item", _included_name(self.observations[key])),
             )
         self.observations[key] = value
         self.seed(key)
