@@ -463,8 +463,10 @@ class Acquisition:
                     refuse("Link-owned content is outside reviewed coverage")
             except (MigrationFailed, MigrationRefused) as error:
                 value = active_links[relationship.key]
-                name = value.get("name") or endpoint_description(value, self.thoughts)
-                raise with_subject(error, "relationship", name) from None
+                error = with_subject(error, "relationship", value.get("name"))
+                raise with_subject(
+                    error, "relationship", endpoint_description(value, self.thoughts)
+                ) from None
         records, decisions, items = [], [], []
 
         def record(domain, key, owner, value):

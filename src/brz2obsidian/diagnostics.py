@@ -393,8 +393,10 @@ def contextual_issue(issue, snapshot):
     if subject is None:
         for asset in snapshot.assets:
             if asset.asset_id in affected:
-                subject = ("asset", asset.display_name or asset.original_name)
-                break
+                error = with_subject(
+                    MigrationRefused((issue,)), "asset", asset.display_name
+                )
+                return with_subject(error, "asset", asset.original_name).issues[0]
     if subject is None:
         for relationship in snapshot.relationships:
             if relationship.key in affected:

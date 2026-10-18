@@ -724,3 +724,44 @@ def test_core_content_failure_keeps_safe_owner_without_inventing_broken_link():
     assert "could not safely prepare" in message
     assert "link" not in message.casefold() and "missing" not in message.casefold()
     assert "report" in message.casefold()
+
+
+def test_scoped_original_note_payload_keeps_public_access_without_asset_record(
+    tmp_path,
+):
+    import base64
+    from uuid import UUID
+
+    from brz2obsidian.sources.thebrain import BrzSourceModule
+    from tests.application.test_forgotten_workflow import forget, rewrite
+    from tests.application.test_graph_workflow import graph_archive, identity
+
+    compact = base64.urlsafe_b64encode(UUID(identity(2)).bytes_le).decode().rstrip("=")
+    original = f"Before [private](brain://{compact}/private) after".encode()
+    source = graph_archive(
+        tmp_path / "source.brz", {1: "Home", 2: "Private"}, notes={1: (original, 4)}
+    )
+    rewrite(source, lambda parts: forget(parts, 2))
+    with BrzSourceModule().open(source) as session:
+        document = session.snapshot.documents[0]
+        assert document.original_copy_omitted
+        assert document.key not in {asset.asset_id for asset in session.snapshot.assets}
+        with session.open_payload(document.key) as stream:
+            assert stream.read() == original
+
+
+def test_link_owned_failure_uses_safe_endpoints_when_relationship_label_is_unsafe():
+    from tests.support.local_api_graph import HIERARCHY, GraphApi
+
+    api = GraphApi()
+    api.links[HIERARCHY]["name"] = "Authorization: Bearer RELATIONSHIP_OWNER_CANARY"
+    api.overrides[f"/api/links/{BRAIN}/{HIERARCHY}/attachments"] = (200, [{}])
+    with api_server(api) as (_, address):
+        result = Operations(credentials=lambda: KEY).inspect(
+            LocalApiSourceSelection(
+                brain_id=BRAIN, config=ApiAcquisitionConfig(api_url=address)
+            )
+        )
+    assert result.outcome == "refused"
+    assert 'Relationship: "Entry \u2014 Alone".' in result.findings[0].message
+    assert "CANARY" not in result.model_dump_json()

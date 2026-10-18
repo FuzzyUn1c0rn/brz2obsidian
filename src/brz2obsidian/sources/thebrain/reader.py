@@ -581,9 +581,14 @@ class BrzSession:
         if asset_id not in self.members:
             _refuse("invalid_reference", "Unknown payload identity", (asset_id,))
         asset = next(
-            asset for asset in self.snapshot.assets if asset.asset_id == asset_id
+            (asset for asset in self.snapshot.assets if asset.asset_id == asset_id),
+            None,
         )
-        name = asset.display_name or asset.original_name
+        name = (
+            asset.display_name or asset.original_name
+            if asset is not None
+            else PurePosixPath(self.members[asset_id]).name
+        )
         try:
             stream = self.archive.open(self.members[asset_id])
         except (
