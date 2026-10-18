@@ -406,3 +406,42 @@ def test_brz_note_failures_retain_safe_thought_name(
     if payload is not None and payload.startswith(b"<script>"):
         assert "Report this limitation" in issue.guidance
         assert "resolved before retrying" not in issue.guidance
+
+
+def test_publication_and_cleanup_keep_exception_text_out_of_cli_json(
+    tmp_path, monkeypatch, capsys
+):
+    import shutil
+
+    from brz2obsidian.cli import main
+
+    source = Path(__file__).parents[1] / "fixtures/minimal.brz"
+    destination = tmp_path / "Published"
+    native_rename, native_rmtree = Path.rename, shutil.rmtree
+
+    def denied_rename(path, target):
+        if path.name.startswith(".brz2obsidian-"):
+            raise OSError("Authorization: Bearer WRITE_EXCEPTION_CANARY")
+        return native_rename(path, target)
+
+    def denied_cleanup(path, *args, **kwargs):
+        if Path(path).name.startswith(".brz2obsidian-"):
+            raise OSError("Authorization: Bearer CLEANUP_EXCEPTION_CANARY")
+        return native_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "rename", denied_rename)
+    monkeypatch.setattr(shutil, "rmtree", denied_cleanup)
+    assert main(["convert", str(source), str(destination), "--json"]) == 1
+    output = capsys.readouterr()
+    result = json.loads(output.out)
+    assert [issue["code"] for issue in result["issues"]] == [
+        "write_failure",
+        "cleanup_failure",
+    ]
+    assert "CANARY" not in output.out + output.err
+    assert "Authorization" not in output.out + output.err
+    assert result["receipt"] is None
+    assert not destination.exists()
+    leftover = Path(result["issues"][1]["leftover_path"])
+    assert leftover.parent == tmp_path and leftover.is_dir()
+    native_rmtree(leftover)

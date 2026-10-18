@@ -416,8 +416,10 @@ def publish(
     except (MigrationFailed, MigrationRefused) as error:
         issues = error.issues
         error_type = type(error)
-    except OSError as error:
-        issues = (_issue("write_failure", str(error)),)
+    except OSError:
+        issues = (
+            _issue("write_failure", "The vault could not be written or published."),
+        )
         error_type = MigrationFailed
     except BaseException as error:  # noqa: BLE001 - cleanup, then re-raise unchanged
         unexpected = error
@@ -429,8 +431,14 @@ def publish(
             _owned_staging(staging, destination, owned_identity)
             _staged_files(staging)
             shutil.rmtree(staging)
-        except (OSError, MigrationRefused, MigrationFailed) as error:
-            issues += (_issue("cleanup_failure", str(error), str(staging)),)
+        except OSError, MigrationRefused, MigrationFailed:
+            issues += (
+                _issue(
+                    "cleanup_failure",
+                    "The temporary folder used to prepare the vault could not be removed.",
+                    str(staging),
+                ),
+            )
     if error_type is None:
         for issue in issues:
             unexpected.add_note(
