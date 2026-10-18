@@ -825,3 +825,199 @@ def test_brz_classification_failure_uses_next_safe_affected_thought(tmp_path):
     assert result.outcome == "refused"
     assert 'Thought: "Safe definition".' in result.findings[0].message
     assert "CANARY" not in result.model_dump_json()
+
+
+def test_unexpected_library_programming_errors_still_propagate():
+    from brz2obsidian.application.wiring import default_workflow
+    from brz2obsidian.application.workflow import SourceModuleBinding, Workflow
+
+    ordinary = default_workflow()
+
+    class BrokenSource:
+        @contextmanager
+        def open(self, reference):
+            raise RuntimeError("Authorization: Bearer RUNTIME_EXCEPTION_CANARY")
+            yield
+
+    workflow = Workflow(
+        SourceModuleBinding(BrokenSource(), ordinary.binding.policy),
+        ordinary.renderer,
+        ordinary.publisher,
+    )
+    with pytest.raises(RuntimeError, match="RUNTIME_EXCEPTION_CANARY"):
+        workflow.inspect("unused")
+
+
+@pytest.mark.parametrize("json_output", [False, True])
+def test_cli_inspection_contains_unexpected_programming_errors(
+    monkeypatch, capsys, json_output
+):
+    from brz2obsidian.application.wiring import default_workflow
+    from brz2obsidian.application.workflow import SourceModuleBinding, Workflow
+    from brz2obsidian.cli import main
+    from brz2obsidian.contracts import RunResult
+
+    ordinary = default_workflow()
+
+    class BrokenSource:
+        @contextmanager
+        def open(self, reference):
+            raise RuntimeError("Authorization: Bearer RUNTIME_EXCEPTION_CANARY")
+            yield
+
+    workflow = Workflow(
+        SourceModuleBinding(BrokenSource(), ordinary.binding.policy),
+        ordinary.renderer,
+        ordinary.publisher,
+    )
+    monkeypatch.setattr(
+        "brz2obsidian.application.wiring.default_workflow", lambda: workflow
+    )
+    assert main(["inspect", "unused.brz", *(["--json"] if json_output else [])]) == 1
+    output = capsys.readouterr()
+    assert "CANARY" not in output.out + output.err
+    if json_output:
+        result = RunResult.model_validate_json(output.out)
+        assert (
+            result.schema_version == 7
+            and result.operation == "inspect"
+            and result.outcome == "failed"
+        )
+        assert result.counts is None and result.receipt is None
+        message = result.issues[0].message + " " + result.issues[0].guidance
+    else:
+        message = output.out
+    assert "Inspection" in message and "cause is not known" in message
+    assert "report" in message.casefold()
+
+
+@pytest.mark.parametrize("json_output", [False, True])
+def test_cli_conversion_failure_keeps_publication_uncertainty(
+    tmp_path, monkeypatch, capsys, json_output
+):
+    from brz2obsidian.application.wiring import default_workflow
+    from brz2obsidian.application.workflow import Workflow
+    from brz2obsidian.cli import main
+    from brz2obsidian.contracts import RunResult
+
+    ordinary = default_workflow()
+
+    class LaterFailurePublisher:
+        def publish(self, artifacts, payloads, destination):
+            ordinary.publisher.publish(artifacts, payloads, destination)
+            raise RuntimeError("Authorization: Bearer PUBLICATION_RUNTIME_CANARY")
+
+    workflow = Workflow(ordinary.binding, ordinary.renderer, LaterFailurePublisher())
+    monkeypatch.setattr(
+        "brz2obsidian.application.wiring.default_workflow", lambda: workflow
+    )
+    source = Path(__file__).parents[1] / "fixtures/minimal.brz"
+    destination = tmp_path / "Created before failure"
+    assert (
+        main(
+            [
+                "convert",
+                str(source),
+                str(destination),
+                *(["--json"] if json_output else []),
+            ]
+        )
+        == 1
+    )
+    output = capsys.readouterr()
+    assert destination.is_dir() and (destination / "Home — Entry thought.md").is_file()
+    assert "CANARY" not in output.out + output.err
+    if json_output:
+        result = RunResult.model_validate_json(output.out)
+        assert (
+            result.schema_version == 7
+            and result.operation == "convert"
+            and result.outcome == "failed"
+        )
+        assert result.receipt is None and result.counts is None
+        message = result.issues[0].message + " " + result.issues[0].guidance
+    else:
+        message = output.out
+    assert "Conversion" in message and "cause is not known" in message
+    assert "Publication status is unknown" in message
+    assert "Check the destination" in message and "another" in message
+    assert "not published" not in message.casefold()
+
+
+@pytest.mark.parametrize("json_output", [False, True])
+def test_cli_vault_check_contains_unexpected_errors(
+    tmp_path, monkeypatch, capsys, json_output
+):
+    from brz2obsidian.cli import main
+
+    def unavailable(vault):
+        raise RuntimeError("Authorization: Bearer CHECK_RUNTIME_CANARY")
+
+    monkeypatch.setattr("brz2obsidian.vault_check.check_vault", unavailable)
+    assert (
+        main(["check-vault", str(tmp_path), *(["--json"] if json_output else [])]) == 1
+    )
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert "CANARY" not in output.err
+    assert "Vault check" in output.err and "cause is not known" in output.err
+    assert "report" in output.err.casefold()
+
+
+def test_cli_workflow_factory_type_error_is_unknown_not_invalid_settings(
+    monkeypatch, capsys
+):
+    from brz2obsidian.cli import main
+    from brz2obsidian.contracts import RunResult
+
+    def broken_factory():
+        raise TypeError("Authorization: Bearer FACTORY_RUNTIME_CANARY")
+
+    monkeypatch.setattr(
+        "brz2obsidian.application.wiring.default_workflow", broken_factory
+    )
+    assert main(["inspect", "unused.brz", "--json"]) == 1
+    output = capsys.readouterr()
+    result = RunResult.model_validate_json(output.out)
+    assert result.outcome == "failed"
+    assert result.issues[0].code == "operation_failure"
+    assert "cause is not known" in result.issues[0].message
+    assert "CANARY" not in output.out + output.err
+
+
+@pytest.mark.parametrize("signal", [KeyboardInterrupt, SystemExit])
+def test_cli_keeps_interruption_and_process_exit_signals(monkeypatch, signal):
+    from brz2obsidian.cli import main
+
+    def interrupted_factory():
+        raise signal("Controlled process interruption")
+
+    monkeypatch.setattr(
+        "brz2obsidian.application.wiring.default_workflow", interrupted_factory
+    )
+    with pytest.raises(signal):
+        main(["inspect", "unused.brz"])
+
+
+def test_cli_does_not_expose_failure_of_its_safe_error_output(
+    tmp_path, monkeypatch, capsys
+):
+    import sys
+
+    from brz2obsidian.cli import main
+
+    def unavailable(vault):
+        raise RuntimeError("Authorization: Bearer ORIGINAL_RUNTIME_CANARY")
+
+    class BrokenOutput:
+        def write(self, text):
+            raise OSError("Authorization: Bearer OUTPUT_FAILURE_CANARY")
+
+        def flush(self):
+            pass
+
+    monkeypatch.setattr("brz2obsidian.vault_check.check_vault", unavailable)
+    monkeypatch.setattr(sys, "stderr", BrokenOutput())
+    assert main(["check-vault", str(tmp_path), "--json"]) == 1
+    output = capsys.readouterr()
+    assert output.out == output.err == ""

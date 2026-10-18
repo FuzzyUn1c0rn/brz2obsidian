@@ -69,6 +69,56 @@ def main(argv=None):
         args = parser.parse_args(argv)
     except SystemExit as error:
         return 0 if error.code == 0 else 1
+    try:
+        return _execute(args)
+    except Exception:  # noqa: BLE001 -- final CLI boundary; never expose raw errors.
+        try:
+            return _unexpected_failure(args)
+        except Exception:  # noqa: BLE001 -- output may itself be unavailable.
+            return 1
+
+
+def _unexpected_failure(args):
+    label = {
+        "inspect": "Inspection",
+        "convert": "Conversion",
+        "check-vault": "Vault check",
+    }[args.operation]
+    message = f"{label} could not complete because an unexpected error occurred. The cause is not known."
+    guidance = "Save this result and report the problem."
+    if args.operation == "convert":
+        message += " Publication status is unknown."
+        guidance += " Check the destination before another conversion."
+    if args.operation == "check-vault":
+        # The checker envelope has no unknown-operation/no-counts failure shape.
+        # Preserve that interface instead of inventing a diagnosis or read counts.
+        print(message + " " + guidance, file=sys.stderr)
+        return 1
+    from brz2obsidian import __version__
+    from brz2obsidian.contracts import Issue, RunResult
+
+    result = RunResult(
+        converter_version=__version__,
+        operation=args.operation,
+        outcome="failed",
+        issues=(
+            Issue(
+                code="operation_failure",
+                phase="operation",
+                message=message,
+                guidance=guidance,
+            ),
+        ),
+    )
+    if args.json_output:
+        print(result.model_dump_json(by_alias=True))
+    else:
+        print(f"{result.operation}: failed")
+        print(message + " " + guidance)
+    return 1
+
+
+def _execute(args):
     if args.operation == "check-vault":
         from brz2obsidian.vault_check import check_vault
 
@@ -105,21 +155,21 @@ def main(argv=None):
         )
         if getattr(args, "api_" + name) is not None
     }
+    if args.source_kind == "local-api":
+        from brz2obsidian.sources.thebrain.local_api import (
+            LocalApiConfig,
+            LocalApiSourceRef,
+        )
     try:
         if args.source_kind == "brz":
             if options:
                 raise ValueError
-            workflow, reference = default_workflow(), args.source
+            reference, config = args.source, None
         else:
-            from brz2obsidian.sources.thebrain.local_api import (
-                LocalApiConfig,
-                LocalApiSourceRef,
-            )
-
             if "url" in options:
                 options["api_url"] = options.pop("url")
             reference = LocalApiSourceRef(args.source)
-            workflow = local_api_workflow(LocalApiConfig(**options))
+            config = LocalApiConfig(**options)
     except ValueError, TypeError:
         result = RunResult(
             converter_version=__version__,
@@ -135,6 +185,7 @@ def main(argv=None):
             ),
         )
     else:
+        workflow = default_workflow() if config is None else local_api_workflow(config)
         result = (
             workflow.inspect(reference)
             if args.operation == "inspect"

@@ -55,7 +55,7 @@ Old inputs without `subject` remain valid. If no subject exists, serialization
 omits the field exactly, preserving the previous shape, including existing null
 fields. A populated subject is included in library/CLI JSON results. Older strict
 readers that reject additional properties must accept this extension or use a
-current result model before reading such results. Result schema version 4 and
+current result model before reading such results. Result schema version 7 and
 source capture/schema/profile versions remain unchanged: this extension adds
 optional diagnostic context, and does not change migration or capture meaning.
 This compatibility change is explicit in the #232 review scope.
@@ -63,7 +63,21 @@ This compatibility change is explicit in the #232 review scope.
 Detailed structured source evidence remains available through the existing
 library contracts. Human CLI output and application reports display admitted
 explanations, codes and applicable artifact paths instead of arbitrary evidence
-or exception strings. The JSON CLI remains the structured result interface.
+or exception strings. The JSON CLI remains the structured result interface. Unexpected programming
+errors intentionally propagate from the library Workflow. The final CLI boundary
+contains ordinary exceptions and returns an existing version-7 failed RunResult
+for inspection/conversion, without raw exception text. Counts and the receipt
+remain unavailable. After an unexpected conversion failure, publication status
+is unknown; check the destination before another conversion, even if no receipt
+was returned. A vault may already exist when an unexpected later failure occurs.
+
+For an unexpected checker error, the CLI exits 1 with a static, safe explanation
+on stderr and no JSON result on stdout. Version-1 VaultCheckResult has neither an
+unknown-operation error code nor unavailable read-count fields; the CLI does not
+invent a read diagnosis or zero-count result. Normal supported checker results
+retain their existing JSON envelope. If safe output itself cannot be written,
+the CLI exits 1 without forwarding the output exception. Help, argument handling,
+SystemExit and KeyboardInterrupt keep their existing behavior.
 
 ## Verification
 

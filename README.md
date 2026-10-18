@@ -300,7 +300,7 @@ $env:PYTHONIOENCODING = 'utf-8'
 .\.venv\Scripts\python.exe -m brz2obsidian inspect 'C:\exports\Work.brz' --json | Out-File -Encoding utf8 '.\inspection.json'
 ```
 
-Migration results use schema `brz2obsidian.result`, version 4. The checker has
+Migration results use schema `brz2obsidian.result`, version 7. The checker has
 its own schema, `brz2obsidian.vault-check`, version 1. Inspection has no
 publication receipt; a conversion receipt records the verified published vault.
 Errors retain their existing codes and may include a diagnostic reason and safe
