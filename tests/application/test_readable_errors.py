@@ -482,6 +482,10 @@ def test_publication_and_cleanup_keep_exception_text_out_of_cli_json(
             "Authorization: Bearer RELATIONSHIP_SECRET_CANARY",
             'Relationship: "Entry \u2014 Alone".',
         ),
+        (
+            "Authoriz\u202eation: Bearer RELATIONSHIP_SECRET_CANARY",
+            'Relationship: "Entry \u2014 Alone".',
+        ),
         ("\u202e\x1b", 'Relationship: "Entry \u2014 Alone".'),
         (None, 'Relationship: "Entry — Alone".'),
     ],
@@ -707,7 +711,10 @@ def test_brz_private_relationship_refusal_does_not_infer_endpoint_names(tmp_path
     assert "Entry thought" not in result.findings[0].message
 
 
-def test_core_content_failure_keeps_safe_owner_without_inventing_broken_link():
+@pytest.mark.parametrize("unsafe_owner", [False, True])
+def test_core_content_failure_keeps_safe_owner_without_inventing_broken_link(
+    unsafe_owner,
+):
     from types import SimpleNamespace
 
     from brz2obsidian.application.wiring import default_workflow
@@ -720,6 +727,11 @@ def test_core_content_failure_keeps_safe_owner_without_inventing_broken_link():
         snapshot = session.snapshot
     document = snapshot.documents[0].model_copy(update={"text_digest": "0" * 64})
     snapshot = snapshot.model_copy(update={"documents": (document,)})
+    if unsafe_owner:
+        owner = snapshot.items[0].model_copy(
+            update={"title": "Authorization: Bearer OWNER_CANARY"}
+        )
+        snapshot = snapshot.model_copy(update={"items": (owner,)})
 
     class DeclaredSource:
         @contextmanager
@@ -734,7 +746,10 @@ def test_core_content_failure_keeps_safe_owner_without_inventing_broken_link():
     result = Operations(workflow).inspect(Path("unused.brz"))
     assert result.outcome == "refused"
     message = result.findings[0].message
-    assert 'Thought note: "Entry thought".' in message
+    assert (
+        'Attachment: "Notes.md".' if unsafe_owner else 'Thought note: "Entry thought".'
+    ) in message
+    assert "CANARY" not in result.model_dump_json()
     assert "could not safely prepare" in message
     assert "link" not in message.casefold() and "missing" not in message.casefold()
     assert "report" in message.casefold()
@@ -778,4 +793,35 @@ def test_link_owned_failure_uses_safe_endpoints_when_relationship_label_is_unsaf
         )
     assert result.outcome == "refused"
     assert 'Relationship: "Entry \u2014 Alone".' in result.findings[0].message
+    assert "CANARY" not in result.model_dump_json()
+
+
+def test_brz_classification_failure_uses_next_safe_affected_thought(tmp_path):
+    from zipfile import ZipFile
+
+    fixture = Path(__file__).parents[1] / "fixtures/minimal.brz"
+    source = tmp_path / "classification-problem.brz"
+    definition = "44444444-4444-4444-8444-444444444444"
+    with ZipFile(fixture) as original, ZipFile(source, "w") as changed:
+        thought = json.loads(original.read("thoughts.json"))
+        for name in original.namelist():
+            content = original.read(name)
+            if name == "thoughts.json":
+                content = (
+                    json.dumps(
+                        dict(
+                            thought,
+                            Name="Authorization: Bearer FIRST_OWNER_CANARY",
+                            TypeId=definition,
+                        )
+                    )
+                    + "\n"
+                    + json.dumps(
+                        dict(thought, Id=definition, Name="Safe definition", Kind=2)
+                    )
+                )
+            changed.writestr(name, content)
+    result = Operations().inspect(source)
+    assert result.outcome == "refused"
+    assert 'Thought: "Safe definition".' in result.findings[0].message
     assert "CANARY" not in result.model_dump_json()

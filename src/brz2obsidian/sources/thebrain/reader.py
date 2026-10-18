@@ -447,7 +447,11 @@ class BrzSession:
                 }
                 for identity in affected:
                     owner = identity if identity in thoughts else owners.get(identity)
-                    if owner in thoughts:
+                    if (
+                        owner in thoughts
+                        and diagnostic_subject("item", thoughts[owner]["Name"])
+                        is not None
+                    ):
                         raise with_subject(
                             error, "item", thoughts[owner]["Name"]
                         ) from None

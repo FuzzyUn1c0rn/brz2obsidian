@@ -45,7 +45,10 @@ and guidance are user-facing wording and can change.
 characters. The model keeps these source-neutral values; TheBrain presentation
 uses thought, thought note, attachment and relationship. Source adapters admit
 metadata names deliberately, remove control and bidirectional-format characters,
-limit length and omit URI-like or credential-like labels. A label is metadata,
+limit length and omit URI-like or credential-like labels. The unsafe-label
+policy checks both original and normalized printable text, so removed control
+characters cannot hide a credential marker. Context selection tries the next
+qualified safe alternative when a preferred name is rejected. A label is metadata,
 never note content or a transport error. Views render it literally.
 
 Old inputs without `subject` remain valid. If no subject exists, serialization

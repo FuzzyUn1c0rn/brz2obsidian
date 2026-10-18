@@ -2,7 +2,7 @@
 
 import unicodedata
 
-from brz2obsidian.contracts import DiagnosticSubject, MigrationRefused
+from brz2obsidian.contracts import DiagnosticSubject
 
 # A reason is admitted with its original code. The pair prevents a foreign rule
 # or a familiar rule on an unrelated failure from inventing an explanation.
@@ -357,17 +357,18 @@ def explain_issue(issue, operation):
 
 def diagnostic_subject(kind, name):
     """Admit bounded display metadata; omit URI-like and secret labels."""
-    if not isinstance(name, str) or any(
-        token in name.casefold()
+    if not isinstance(name, str):
+        return None
+    printable = "".join(
+        char for char in name if not unicodedata.category(char).startswith("C")
+    ).strip()[:120]
+    if not printable or any(
+        token in value.casefold()
+        for value in (name, printable)
         for token in ("://", "token=", "key=", "password=", "authorization:")
     ):
         return None
-    name = "".join(
-        char for char in name if not unicodedata.category(char).startswith("C")
-    ).strip()[:120]
-    if not name:
-        return None
-    return DiagnosticSubject(kind=kind, name=name)
+    return DiagnosticSubject(kind=kind, name=printable)
 
 
 def with_subject(error, kind, name):
@@ -387,41 +388,34 @@ def with_subject(error, kind, name):
 
 
 def contextual_issue(issue, snapshot):
-    """Use only qualified snapshot metadata for a later typed failure."""
+    """Use the first admitted affected label from qualified snapshot metadata."""
     if issue.subject is not None or snapshot is None:
         return issue
     affected = set(issue.affected)
     items = {item.key: item for item in snapshot.items}
-    subject = None
+    candidates, original_assets = [], set()
     for document in snapshot.documents:
-        if document.key in affected and document.owner in items:
-            subject = ("document", items[document.owner].title)
-            break
-    if subject is None:
-        for asset in snapshot.assets:
-            if asset.asset_id in affected:
-                error = with_subject(
-                    MigrationRefused((issue,)), "asset", asset.display_name
-                )
-                return with_subject(error, "asset", asset.original_name).issues[0]
-    if subject is None:
-        for relationship in snapshot.relationships:
-            if relationship.key in affected:
-                subject = (
-                    "relationship",
-                    " \u2014 ".join(
-                        items[key].title
-                        for key in (relationship.item_a, relationship.item_b)
-                        if key in items
-                    ),
-                )
-                break
-    if subject is None:
-        for item in snapshot.items:
-            if item.key in affected:
-                subject = ("item", item.title)
-                break
-    if subject is None:
-        return issue
-    error = with_subject(MigrationRefused((issue,)), *subject)
-    return error.issues[0]
+        if document.key in affected:
+            if document.owner in items:
+                candidates.append(("document", items[document.owner].title))
+            if document.original_asset_id is not None:
+                original_assets.add(document.original_asset_id)
+    for asset in snapshot.assets:
+        if asset.asset_id in affected | original_assets:
+            candidates.extend(
+                (("asset", asset.display_name), ("asset", asset.original_name))
+            )
+    for relationship in snapshot.relationships:
+        endpoints = (relationship.item_a, relationship.item_b)
+        if relationship.key in affected and all(key in items for key in endpoints):
+            candidates.append(
+                ("relationship", " \u2014 ".join(items[key].title for key in endpoints))
+            )
+    candidates.extend(
+        ("item", item.title) for item in snapshot.items if item.key in affected
+    )
+    for kind, name in candidates:
+        subject = diagnostic_subject(kind, name)
+        if subject is not None:
+            return issue.model_copy(update={"subject": subject})
+    return issue
