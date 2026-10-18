@@ -591,13 +591,27 @@ def test_brz_thought_failure_identifies_admitted_title(tmp_path):
     assert "CANARY" not in result.model_dump_json()
 
 
-def test_brz_payload_read_failure_identifies_admitted_attachment(monkeypatch):
-    from zipfile import ZipExtFile
+@pytest.mark.parametrize(
+    "display_name", [None, "Authorization: Bearer DISPLAY_NAME_CANARY"]
+)
+def test_brz_payload_read_failure_identifies_admitted_attachment(
+    monkeypatch, tmp_path, display_name
+):
+    from zipfile import ZipExtFile, ZipFile
 
     from brz2obsidian.contracts import MigrationFailed
     from brz2obsidian.sources.thebrain import BrzSourceModule
 
     source = Path(__file__).parents[1] / "fixtures/minimal.brz"
+    if display_name is not None:
+        selected = tmp_path / "display-name.brz"
+        with ZipFile(source) as original, ZipFile(selected, "w") as changed:
+            for name in original.namelist():
+                content = original.read(name)
+                if name == "attachments.json":
+                    content = json.dumps(dict(json.loads(content), Name=display_name))
+                changed.writestr(name, content)
+        source = selected
     with BrzSourceModule().open(source) as session:
         asset = session.snapshot.assets[0]
 

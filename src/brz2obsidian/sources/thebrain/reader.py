@@ -23,7 +23,12 @@ from brz2obsidian.contracts import (
     SourceIdentity,
     SourceSnapshot,
 )
-from brz2obsidian.diagnostics import diagnosed_issue, diagnostic_reason, with_subject
+from brz2obsidian.diagnostics import (
+    diagnosed_issue,
+    diagnostic_reason,
+    diagnostic_subject,
+    with_subject,
+)
 
 from .attachments import normalize_attachments
 from .classifications import decode_classifications
@@ -584,11 +589,13 @@ class BrzSession:
             (asset for asset in self.snapshot.assets if asset.asset_id == asset_id),
             None,
         )
-        name = (
-            asset.display_name or asset.original_name
+        subject = (
+            diagnostic_subject("asset", asset.display_name)
+            or diagnostic_subject("asset", asset.original_name)
             if asset is not None
-            else PurePosixPath(self.members[asset_id]).name
+            else diagnostic_subject("asset", PurePosixPath(self.members[asset_id]).name)
         )
+        name = subject.name if subject is not None else None
         try:
             stream = self.archive.open(self.members[asset_id])
         except (

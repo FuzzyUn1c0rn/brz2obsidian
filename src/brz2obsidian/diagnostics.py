@@ -355,19 +355,26 @@ def explain_issue(issue, operation):
     return f"{prefix} because {cause}{context} {action}"
 
 
-def with_subject(error, kind, name):
-    """Attach only validated display metadata; omit URI-like and secret labels."""
+def diagnostic_subject(kind, name):
+    """Admit bounded display metadata; omit URI-like and secret labels."""
     if not isinstance(name, str) or any(
         token in name.casefold()
         for token in ("://", "token=", "key=", "password=", "authorization:")
     ):
-        return error
+        return None
     name = "".join(
         char for char in name if not unicodedata.category(char).startswith("C")
     ).strip()[:120]
     if not name:
+        return None
+    return DiagnosticSubject(kind=kind, name=name)
+
+
+def with_subject(error, kind, name):
+    """Attach admitted metadata while preserving an earlier explicit subject."""
+    subject = diagnostic_subject(kind, name)
+    if subject is None:
         return error
-    subject = DiagnosticSubject(kind=kind, name=name)
     return type(error)(
         tuple(
             issue.model_copy(update={"subject": subject})
