@@ -1333,7 +1333,7 @@ class MainWindow(QMainWindow):
                     if self.snapshot.busy_operation == "convert_reviewed"
                     else "Inspecting archive"
                 )
-                + "\nWaiting for the worker. The window remains available."
+                + "\nPlease wait..."
             )
         elif self.snapshot.feedback:
             self.findings.setPlainText(self.snapshot.feedback)
