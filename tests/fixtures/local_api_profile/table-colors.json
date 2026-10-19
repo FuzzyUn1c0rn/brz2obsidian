@@ -10,7 +10,7 @@
     "|`ip.addr == 192.0.2.2`|Show either endpoint.|",
     "|`udp.port == 53`|DNS with an escaped \\| pipe.|"
   ],
-  "expected_header": "|||\n|---|---|\n|Filter|Description|",
+  "expected_header": "| | |\n|---|---|\n|Filter|Description|",
   "color_loss": "Source table styling is omitted; the editable table uses native Markdown layout. Blank native headings preserve every source row as data.",
   "negative_controls": [
     "multiple active declarations",

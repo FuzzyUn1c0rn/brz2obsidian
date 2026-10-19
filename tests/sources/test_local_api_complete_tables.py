@@ -46,7 +46,7 @@ def test_plain_tables_keep_all_rows_cells_breaks_and_exact_evidence():
                 0,
                 15,
                 "|Field|Meaning|",
-                "|||\n|---|---|\n|Field|Meaning|",
+                "| | |\n|---|---|\n|Field|Meaning|",
             )
             assert {change.source_digest for change in document.text_adaptations} == {
                 hashlib.sha256(original.encode()).hexdigest()
@@ -215,9 +215,9 @@ Ordinary a | b pipeline.
         + marker_table
     )
     expected = (
-        "Intro sentence.\n\n|||\n|---|---|\n|A|B|\n|1|2|\n\nFollowing prose.\n\n"
+        "Intro sentence.\n\n| | |\n|---|---|\n|A|B|\n|1|2|\n\nFollowing prose.\n\n"
         + protected
-        + "|||\n|---|---|\n"
+        + "| | |\n|---|---|\n"
         + marker_table
     )
     with api_server(note_api(original)) as (_, address):
@@ -240,7 +240,7 @@ def test_image_adjacent_plain_table_keeps_reference_spans_and_cell_ownership():
     image = f".data/md-images/{IMAGE}.png"
     target = "brain://MzMzMzMzM0ODMzMzMzMzMw/Alone"
     original = f"![First]({image})![Second]({image})\n||\n|1{{nl}}2|`first|second`{{nl}}[Alone]({target})|\n"
-    expected = f"![First]({image})![Second]({image})\n\n|||\n|---|---|\n|1<br>2|<code>first&#124;second</code><br>[Alone]({target})|\n"
+    expected = f"![First]({image})![Second]({image})\n\n| | |\n|---|---|\n|1<br>2|<code>first&#124;second</code><br>[Alone]({target})|\n"
     api = note_api(original)
     api.attachments[IMAGE] = attachment(
         IMAGE, HOME, 12, IMAGE + ".png", length=len(PNG)
@@ -302,14 +302,14 @@ def test_styling_never_promotes_data_and_combined_styles_become_plain_tables():
         + '|A|B|:(table="label:literal :(table=marker"):\n|1|2|\n'
     )
     expected = (
-        "|||\n|---|---|\n|**Before**|Choose early.|\n|**After**|Choose later.|\n\n"
-        "|||\n|---|---|\n|Filter|Meaning|\n|`ip`|Packets.|\n\n"
-        "|||\n|---|---|\n|1<br>2|first<br>second|\n\n"
-        "|||\n|---|---|\n|a|b|\n\n"
-        "|||\n|---|---|\n|Record|Value|\n|a|b|\n\n"
-        "|||\n|---|---|\n|1<br>2|first<br>second|\n\n"
+        "| | |\n|---|---|\n|**Before**|Choose early.|\n|**After**|Choose later.|\n\n"
+        "| | |\n|---|---|\n|Filter|Meaning|\n|`ip`|Packets.|\n\n"
+        "| | |\n|---|---|\n|1<br>2|first<br>second|\n\n"
+        "| | |\n|---|---|\n|a|b|\n\n"
+        "| | |\n|---|---|\n|Record|Value|\n|a|b|\n\n"
+        "| | |\n|---|---|\n|1<br>2|first<br>second|\n\n"
         "|A|B|\n|---|---|\n|only|\n\n"
-        "|||\n|---|---|\n|A|B|\n|1|2|\n"
+        "| | |\n|---|---|\n|A|B|\n|1|2|\n"
     )
     with api_server(note_api(original)) as (_, address):
         module = LocalApiSourceModule(
@@ -346,7 +346,7 @@ def test_only_qualified_table_cell_code_links_gain_valid_plain_markdown():
         + literal
     )
     expected = (
-        prose + "|||\n|---|---|\n|Command|Meaning|\n"
+        prose + "| | |\n|---|---|\n|Command|Meaning|\n"
         "|[`curl -I https://example.invalid`](https://example.invalid)|Headers only|\n"
         "|[`curl -i https://example.invalid/path`](https://example.invalid/path)|Include headers|\n"
         + near_misses
@@ -510,6 +510,105 @@ def test_exact_52ca_capture_keeps_its_whole_table_interpretation(tmp_path, monke
         LocalApiSession(
             source=source,
             snapshot=previous.model_copy(update={"documents": (mixed_document,)}),
+            audit=audit,
+            payloads={document.original_asset_id: original.encode()},
+        )
+
+
+def test_spaced_neutral_headers_keep_exact_compact_capture_compatibility(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    original = '|First|Meaning|\n|one|Keep.|\n\n||\n|2|Second|\n\n|||:(table="unfamiliar:value"):\n|3|Third|\n\n|||\n|---|---|\n|4|Fourth|\n\n| | |:(table="existing:spacing"):\n|5|Fifth|\n'
+    expected = "| | |\n|---|---|\n|First|Meaning|\n|one|Keep.|\n\n| | |\n|---|---|\n|2|Second|\n\n| | |\n|---|---|\n|3|Third|\n\n| | |\n|---|---|\n|4|Fourth|\n\n| | |\n|---|---|\n|5|Fifth|\n"
+    compact = "|||\n|---|---|\n|First|Meaning|\n|one|Keep.|\n\n|||\n|---|---|\n|2|Second|\n\n|||\n|---|---|\n|3|Third|\n\n|||\n|---|---|\n|4|Fourth|\n\n| | |\n|---|---|\n|5|Fifth|\n"
+    with api_server(note_api(original)) as (_, address):
+        module = LocalApiSourceModule(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        )
+        with module.open(LocalApiSourceRef(BRAIN)) as live:
+            current = live.snapshot
+            document = current.documents[0]
+            assert document.text == expected
+            assert MarkdownIt("commonmark").enable("table").render(
+                expected
+            ) == MarkdownIt("commonmark").enable("table").render(compact)
+            with live.open_payload(document.original_asset_id) as stream:
+                assert stream.read() == original.encode()
+            capture = next(tmp_path.glob("brz2obsidian-api-*"))
+            source = json.loads((capture / "source.json").read_bytes())
+            audit = json.loads((capture / "audit.json").read_bytes())
+    prior_edits, delta = [], 0
+    for change in document.text_adaptations:
+        after = (
+            change.after
+            if change.before.startswith("| | |")
+            else change.after.replace("| | |", "|||")
+        )
+        if after == change.before:
+            continue
+        prior_edits.append(
+            change.model_copy(
+                update={
+                    "after": after,
+                    "adapted_start": change.start + delta,
+                    "adapted_end": change.start + delta + len(after),
+                }
+            )
+        )
+        delta += len(after) - len(change.before)
+    prior_document = document.model_copy(
+        update={
+            "text": compact,
+            "text_digest": hashlib.sha256(compact.encode()).hexdigest(),
+            "text_adaptations": tuple(prior_edits),
+        }
+    )
+    prior = current.model_copy(
+        update={
+            "identity": current.identity.model_copy(
+                update={"source_sha256": "", "snapshot_digest": ""}
+            ),
+            "documents": (prior_document,),
+        }
+    )
+    frozen = LocalApiSession(
+        source=source,
+        snapshot=prior,
+        audit=audit,
+        payloads={document.original_asset_id: original.encode()},
+    )
+    try:
+        assert frozen.snapshot.documents == (prior_document,)
+        assert frozen.snapshot.findings == current.findings
+        frozen.verify_consistency()
+    finally:
+        frozen.close()
+    mixed_text = compact.replace("|||", "| | |", 1)
+    mixed_edits, delta = [], 0
+    for index, change in enumerate(prior_edits):
+        after = change.after.replace("|||", "| | |", 1) if index == 0 else change.after
+        mixed_edits.append(
+            change.model_copy(
+                update={
+                    "after": after,
+                    "adapted_start": change.start + delta,
+                    "adapted_end": change.start + delta + len(after),
+                }
+            )
+        )
+        delta += len(after) - len(change.before)
+    mixed = prior_document.model_copy(
+        update={
+            "text": mixed_text,
+            "text_digest": hashlib.sha256(mixed_text.encode()).hexdigest(),
+            "text_adaptations": tuple(mixed_edits),
+        }
+    )
+    with pytest.raises(MigrationRefused):
+        LocalApiSession(
+            source=source,
+            snapshot=prior.model_copy(update={"documents": (mixed,)}),
             audit=audit,
             payloads={document.original_asset_id: original.encode()},
         )

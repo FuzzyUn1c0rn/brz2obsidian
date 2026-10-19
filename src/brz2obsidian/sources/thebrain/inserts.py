@@ -244,13 +244,19 @@ def _native_table_row(
 
 
 def adapt_note(
-    text, *, preserve_table_colors=False, legacy_tables=False, previous_tables=False
+    text,
+    *,
+    preserve_table_colors=False,
+    legacy_tables=False,
+    previous_tables=False,
+    compact_tables=False,
 ):
     """Return scoped adapted text, source-neutral exact edits and loss facts.
 
     Parser block ownership protects code, comments and literal examples. All
     references are traced after adaptation, so their offsets bind final text.
     """
+    blank_cell = "" if compact_tables or previous_tables or legacy_tables else " "
     original = text
     text, literal_edits = adapt_literals(text)
     lines = re.findall(r"[^\r\n]*(?:\r\n|\r|\n|$)", text)
@@ -514,8 +520,12 @@ def adapt_note(
                 previous_tables=previous_tables,
             )
         )
-        if imported:
-            header = "|||"
+        if (
+            imported
+            or not (legacy_tables or previous_tables or compact_tables)
+            and all(not cell.strip() for cell in cells)
+        ):
+            header = "|" + "|".join(blank_cell for _ in cells) + "|"
         separator_row = "|" + "|".join("---" for _ in cells) + "|"
         if separator_present:
             replacement = header
@@ -524,7 +534,14 @@ def adapt_note(
         ):
             replacement = header + "\n" + separator_row
         else:
-            replacement = "|" * (len(cells) + 1) + "\n" + separator_row + "\n" + header
+            replacement = (
+                "|"
+                + "|".join(blank_cell for _ in cells)
+                + "|\n"
+                + separator_row
+                + "\n"
+                + header
+            )
         replace(line, raw, replacement)
         for row_line in range(line + 1, cursor):
             row = lines[row_line].rstrip("\r\n")
@@ -601,7 +618,8 @@ def adapt_note(
                 "Malformed or ambiguous table retained as source text; supply an ordinary Markdown table with matching columns and a header separator.",
             )
             continue
-        header = "|" * (width + 1) + "\n|" + "|".join("---" for _ in range(width)) + "|"
+        empty_row = "|" + "|".join(blank_cell for _ in range(width)) + "|"
+        header = empty_row + "\n|" + "|".join("---" for _ in range(width)) + "|"
         for row_line in range(start, line):
             raw = lines[row_line].rstrip("\r\n")
             native = _native_table_row(
@@ -612,7 +630,9 @@ def adapt_note(
                 previous_tables=previous_tables,
             )
             if row_line == start:
-                if imported or empty_header and not separator:
+                if empty_header and separator and not compact_tables:
+                    native = empty_row
+                elif imported or empty_header and not separator:
                     native = header
                 elif not separator:
                     native = header + "\n" + native

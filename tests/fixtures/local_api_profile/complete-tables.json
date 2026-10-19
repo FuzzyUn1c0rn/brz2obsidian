@@ -22,7 +22,7 @@
           "Matches the example destination."
         ]
       ],
-      "expected": "|||\n|---|---|\n|Field|Meaning|\n|`src == 192.0.2.1`|Matches the example source.|\n|`dst == 192.0.2.2`|Matches the example destination.|\n"
+      "expected": "| | |\n|---|---|\n|Field|Meaning|\n|`src == 192.0.2.1`|Matches the example source.|\n|`dst == 192.0.2.2`|Matches the example destination.|\n"
     },
     {
       "id": "TABLE237-KEYVALUE",
@@ -37,7 +37,7 @@
           "Select after recording."
         ]
       ],
-      "expected": "|||\n|---|---|\n|**Before**|Select before recording.|\n|**After**|Select after recording.|\n"
+      "expected": "| | |\n|---|---|\n|**Before**|Select before recording.|\n|**After**|Select after recording.|\n"
     },
     {
       "id": "TABLE237-SIXCOL",
@@ -60,7 +60,7 @@
           "Second record."
         ]
       ],
-      "expected": "|||||||\n|---|---|---|---|---|---|\n|Alex|Course A|Self-paced|Training|https://example.invalid/a|First record.|\n|Blair|Course B|Classroom|Training|https://example.invalid/b|Second record.|\n"
+      "expected": "| | | | | | |\n|---|---|---|---|---|---|\n|Alex|Course A|Self-paced|Training|https://example.invalid/a|First record.|\n|Blair|Course B|Classroom|Training|https://example.invalid/b|Second record.|\n"
     },
     {
       "id": "TABLE237-EMPTYCOL",
@@ -82,7 +82,7 @@
           ""
         ]
       ],
-      "expected": "||||\n|---|---|---|\n|Notes|Findings||\n|First|Second|Additional information|\n|Third|Fourth||\n"
+      "expected": "| | | |\n|---|---|---|\n|Notes|Findings||\n|First|Second|Additional information|\n|Third|Fourth||\n"
     },
     {
       "id": "TABLE237-BREAKLINK",
@@ -97,7 +97,7 @@
           "First{nl}{nl}**Second**"
         ]
       ],
-      "expected": "|||\n|---|---|\n|Name|Value|\n|[Reference](https://example.invalid/reference)|First<br><br>**Second**|\n"
+      "expected": "| | |\n|---|---|\n|Name|Value|\n|[Reference](https://example.invalid/reference)|First<br><br>**Second**|\n"
     },
     {
       "id": "TABLE237-PIPEOWNERSHIP",
@@ -120,7 +120,7 @@
           "\\`one\\|two\\`"
         ]
       ],
-      "expected": "|||\n|---|---|\n|Name|Value|\n|Operator|\\|\\||\n|Command|<code>print a&#92;&#124;b</code>|\n|Literal|\\`one\\|two\\`|\n"
+      "expected": "| | |\n|---|---|\n|Name|Value|\n|Operator|\\|\\||\n|Command|<code>print a&#92;&#124;b</code>|\n|Literal|\\`one\\|two\\`|\n"
     },
     {
       "id": "TABLE237-IMPORTED",
@@ -134,7 +134,7 @@
           "print first{nl}print second{nl}"
         ]
       ],
-      "expected": "|||\n|---|---|\n|1<br>2|print first<br>print second<br>|\n"
+      "expected": "| | |\n|---|---|\n|1<br>2|print first<br>print second<br>|\n"
     },
     {
       "id": "TABLE237-IMAGEPREFIX",
@@ -148,7 +148,7 @@
           "print first{nl}print second"
         ]
       ],
-      "expected": "![](first.png)![](second.png)\n\n|||\n|---|---|\n|1<br>2|print first<br>print second|\n",
+      "expected": "![](first.png)![](second.png)\n\n| | |\n|---|---|\n|1<br>2|print first<br>print second|\n",
       "image_targets": [
         "first.png",
         "second.png"

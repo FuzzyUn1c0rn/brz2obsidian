@@ -34,11 +34,11 @@ def test_brz_plain_tables_publish_every_data_cell_and_preserve_original_evidence
         (destination / "Home \u2014 Entry thought.md").read_text(encoding="utf-8")
     )
     assert (
-        "![First](Attachments/22222222/photo.png)![Second](Attachments/22222222/photo.png)\n\n|||\n|---|---|\n|1<br>2|<code>first&#124;second</code><br>[[Notes/Topic.v2.md\\|Topic]]|"
+        "![First](Attachments/22222222/photo.png)![Second](Attachments/22222222/photo.png)\n\n| | |\n|---|---|\n|1<br>2|<code>first&#124;second</code><br>[[Notes/Topic.v2.md\\|Topic]]|"
         in body
     )
     assert (
-        "|||\n|---|---|\n|**Before**|Select before recording.|\n|**After**|Select after recording.|"
+        "| | |\n|---|---|\n|**Before**|Select before recording.|\n|**After**|Select after recording.|"
         in body
     )
     tokens = MarkdownIt("commonmark").enable("table").parse(body)

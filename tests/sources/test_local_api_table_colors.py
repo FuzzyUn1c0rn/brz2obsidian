@@ -63,7 +63,7 @@ def test_color_table_live_and_frozen_keep_editable_cells_and_exact_evidence(
                 FACTS["header"] + DECLARATION,
                 FACTS["expected_header"],
             )
-            assert (edit.end, edit.adapted_start, edit.adapted_end) == (356, 0, 34)
+            assert (edit.end, edit.adapted_start, edit.adapted_end) == (356, 0, 36)
             assert edit.source_digest == hashlib.sha256(TABLE.encode()).hexdigest()
             finding = snapshot.findings[0]
             assert finding.kind == "formatting_loss"
@@ -203,7 +203,7 @@ def test_opaque_styling_and_literal_ownership_keep_structural_safety():
     )
     text = "\n".join(styled + malformed + protected + [existing])
     expected = "\n".join(
-        ["|||\n|---|---|\n|A|B|\n|1|2|\n"] * len(styled)
+        ["| | |\n|---|---|\n|A|B|\n|1|2|\n"] * len(styled)
         + malformed
         + protected
         + ["|**One**|Two|\n|:---|---:|\n|a\\|b|<code>x&#124;y</code>|\n"]

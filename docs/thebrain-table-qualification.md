@@ -10,10 +10,11 @@ no-note records) and 61 tables in 17 notes, including all 13 Wireshark tables.
 Read-only TheBrain 15 observation confirms that undeclared first rows have no
 structural header distinction: words, boldness and styling cannot identify one.
 Render every such table consistently with empty Markdown headings and a separator,
-then every authored row as data. Do not infer roles from content or titles.
+then every authored row as data. Put one space in every empty header cell so
+Obsidian Live Preview recognizes the native editable table. Do not infer roles from content or titles.
 
 ```markdown
-|||
+| | |
 |---|---|
 |Field|Meaning|
 |`src == 192.0.2.1`|Matches the example source.|
@@ -60,7 +61,7 @@ content. Malformed table-shaped content retains its source and actionable findin
 a warning is never proof that an intended table converted successfully.
 
 Frozen validation must match complete current or complete prior Documents AND
-formatting findings, including exact 52ca table/header/link behavior, pre237,
+formatting findings, including exact compact-header 7bda output, 52ca table/header/link behavior, pre237,
 older color and existing BOM alternatives.
 Preserve prior sealed identities; reject invented cells, edits, references,
 findings or original bytes. Never mix old/new row interpretations.
