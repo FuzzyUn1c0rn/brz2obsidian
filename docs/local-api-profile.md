@@ -408,3 +408,12 @@ predicate failure and existing separators. One public Workflow conversion checks
 an editable five-row table plus original bytes, warning and migration evidence.
 The strategic actual Obsidian table check remains separate from these automated
 controls and does not require source colors.
+
+## Complete undecorated table amendment (#237)
+
+The [complete table qualification](thebrain-table-qualification.md) bounds the
+shared source interpretation for undecorated rectangular, data-first, imported
+blank-header and narrowly qualified image-adjacent tables. Its independent
+source/native facts and synthetic controls are required before runtime acceptance
+expands. Existing width/color, literal and ordinary Markdown behavior remain
+separately qualified.
