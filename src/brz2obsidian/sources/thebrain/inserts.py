@@ -34,6 +34,25 @@ CALLOUTS = frozenset(
 )
 _CALLOUT = re.compile(r"^( {0,3}(?:> ?)+)\[!([A-Za-z]+)([^\]]*)\]([+-]?)(.*)$")
 _TABLE = re.compile(r':\(table="column-widths:([-0-9,]+);justification:([a-z]+)"\):$')
+_COLOR_TABLE = re.compile(
+    r':\(table="'
+    + ";".join(
+        key + r":#[0-9a-fA-F]{8}"
+        for key in (
+            "foreground-color",
+            "background-color",
+            "alt-background-color",
+            "line-color",
+            "first-row-background-color",
+            "first-row-foreground-color",
+            "first-row-line-color",
+            "first-column-background-color",
+            "first-column-foreground-color",
+            "first-column-line-color",
+        )
+    )
+    + r'"\):$'
+)
 
 
 def _cells(row, source_offset, code_ranges, literal_ranges):
@@ -173,7 +192,7 @@ def _native_code_pipes(row, source_offset, code_ranges):
     return re.sub(r"(?<![\\`])(`+)(?!`)(.*?)(?<!`)\1(?!`)", replace, row)
 
 
-def adapt_note(text):
+def adapt_note(text, *, preserve_table_colors=False):
     """Return scoped adapted text, source-neutral exact edits and loss facts.
 
     Parser block ownership protects code, comments and literal examples. All
@@ -337,7 +356,9 @@ def adapt_note(text):
         ]
         if not declarations:
             continue
-        match = _TABLE.search(raw)
+        widths_match = _TABLE.search(raw)
+        colors_match = None if preserve_table_colors else _COLOR_TABLE.search(raw)
+        match = widths_match or colors_match
         if match and match.start() not in declarations:
             match = None
         cells = (
@@ -356,14 +377,18 @@ def adapt_note(text):
             row = lines[cursor].rstrip("\r\n")
             rows.append(_cells(row, offsets[cursor], inline_code, inline_literals))
             cursor += 1
-        widths = match[1].split(",") if match else []
+        widths = widths_match[1].split(",") if widths_match else []
         valid = bool(
             cells
             and len(cells) >= 1
-            and len(widths) == len(cells) + 1
-            and all(re.fullmatch(r"-1|0|[1-9][0-9]*", w) for w in widths)
+            and (
+                colors_match
+                or widths_match
+                and len(widths) == len(cells) + 1
+                and all(re.fullmatch(r"-1|0|[1-9][0-9]*", w) for w in widths)
+                and widths_match[2] == "default"
+            )
             and len(declarations) == 1
-            and match[2] == "default"
             and rows
             and all(r is not None and len(r) == len(cells) for r in rows)
         )
@@ -390,7 +415,9 @@ def adapt_note(text):
         loss(
             "table",
             declaration,
-            "Column widths and justification become native responsive table layout; edit the table in Obsidian to adjust its presentation.",
+            "Custom table colors are not reproduced; the editable table uses Obsidian's native styling."
+            if colors_match
+            else "Column widths and justification become native responsive table layout; edit the table in Obsidian to adjust its presentation.",
         )
 
     marker_prefixes = {

@@ -562,6 +562,21 @@ def validate_payload_binding(source, snapshot, audit):
             preserve_bom=raw.startswith("\ufeff") and not signature_removed,
         )
         expected = expected_documents[0]
+        if document != expected:
+            # Frozen captures may retain the exact pre-color-table interpretation.
+            # Recompute the whole document and its findings, never trust supplied
+            # adaptation metadata to waive the source binding. Live acquisition
+            # always uses the current interpretation.
+            prior_documents, prior_findings = bind_documents(
+                [source_document],
+                snapshot.assets,
+                {i.key for i in snapshot.items},
+                with_findings=True,
+                preserve_bom=raw.startswith("\ufeff") and not signature_removed,
+                preserve_table_colors=True,
+            )
+            if document == prior_documents[0]:
+                expected, document_findings = prior_documents[0], prior_findings
         expected_findings.extend(document_findings)
         candidates = [
             key

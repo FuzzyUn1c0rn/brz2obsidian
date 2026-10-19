@@ -55,6 +55,7 @@ def bind_documents(
     *,
     with_findings=False,
     preserve_bom=False,
+    preserve_table_colors=False,
     subjects=None,
 ):
     from .capture import canonical
@@ -63,7 +64,9 @@ def bind_documents(
     for document in documents:
         try:
             adapted, edits, losses = adapt_note(
-                document.text, preserve_bom=preserve_bom
+                document.text,
+                preserve_bom=preserve_bom,
+                preserve_table_colors=preserve_table_colors,
             )
             for loss in losses:
                 findings.append(
