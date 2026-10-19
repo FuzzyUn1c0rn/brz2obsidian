@@ -413,7 +413,7 @@ controls and does not require source colors.
 
 The [complete table qualification](thebrain-table-qualification.md) bounds the
 shared source interpretation for undecorated rectangular, data-first, imported
-blank-header and narrowly qualified image-adjacent tables. Its independent
+blank-header and neighboring prose/image forms. Its independent
 source/native facts and synthetic controls are required before runtime acceptance
 expands. Existing width/color, literal and ordinary Markdown behavior remain
 separately qualified.

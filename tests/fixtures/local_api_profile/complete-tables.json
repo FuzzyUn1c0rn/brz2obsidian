@@ -135,6 +135,28 @@
         ]
       ],
       "expected": "|||\n|---|---|\n|1<br>2|print first<br>print second<br>|\n"
+    },
+    {
+      "id": "TABLE237-IMAGEPREFIX",
+      "raw": "![](first.png)![](second.png)\n||\n|1{nl}2|print first{nl}print second|\n",
+      "source_cells": [
+        [
+          ""
+        ],
+        [
+          "1{nl}2",
+          "print first{nl}print second"
+        ]
+      ],
+      "expected": "![](first.png)![](second.png)\n\n|||\n|---|---|\n|1<br>2|print first<br>print second|\n",
+      "image_targets": [
+        "first.png",
+        "second.png"
+      ],
+      "image_table_cell": [
+        false,
+        false
+      ]
     }
   ],
   "required_protection": [
@@ -146,9 +168,9 @@
     "ordinary prose/pipeline",
     "heading pipe",
     "link-label pipe",
-    "text/mixed image prefix",
     "nested quote/list paragraph",
-    "code/comment/escaped {nl}"
+    "code/comment/escaped {nl}",
+    "neighboring prose/images remain unchanged and separate from table"
   ],
   "required_rejections": [
     "unequal columns",
