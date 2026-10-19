@@ -22,6 +22,7 @@ from brz2obsidian.contracts import (
     SourcePolicy,
 )
 from brz2obsidian.core import analyze, plan
+from brz2obsidian.diagnostics import contextual_issue
 
 
 @dataclass(frozen=True)
@@ -60,7 +61,7 @@ class Workflow:
         return self._run("convert", source_ref, destination)
 
     def _run(self, operation, source_ref, destination):
-        identity = counts = inspection = receipt = None
+        identity = counts = inspection = receipt = snapshot = None
         issues = ()
         failures = []
         phase = "source"
@@ -80,8 +81,10 @@ class Workflow:
                         if phase == "session_teardown"
                         else "operation_failure",
                         phase=phase,
-                        message=str(error),
-                        guidance="Check source and filesystem access, then retry with a fresh destination.",
+                        message="The source could not be closed normally."
+                        if phase == "session_teardown"
+                        else "An unexpected error prevented the operation from completing.",
+                        guidance="Save the diagnostic report and report the problem. Check the publication status before another conversion.",
                     ),
                 )
                 failures.append("failed")
@@ -91,7 +94,8 @@ class Workflow:
         try:
             with self.binding.source.open(source_ref) as session:
                 try:
-                    identity = session.snapshot.identity
+                    snapshot = session.snapshot
+                    identity = snapshot.identity
                     counts = Counts(
                         source_items=len(session.snapshot.items),
                         source_relationships=len(session.snapshot.relationships),
@@ -158,6 +162,7 @@ class Workflow:
                     guidance="Review the published vault; conversion cannot reuse that nonempty destination.",
                 ),
             )
+        issues = tuple(contextual_issue(issue, snapshot) for issue in issues)
         outcome = (
             "failed"
             if "failed" in failures

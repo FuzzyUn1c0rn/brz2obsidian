@@ -1,10 +1,11 @@
 """Durable source-neutral contracts. No outer implementations or I/O."""
 
+import unicodedata
 from contextlib import AbstractContextManager
 from datetime import date
 from typing import BinaryIO, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class Contract(BaseModel):
@@ -20,6 +21,20 @@ class SourceIdentity(Contract):
     snapshot_digest: str
 
 
+class DiagnosticSubject(Contract):
+    """Small display metadata, never a note body or transport error."""
+
+    kind: Literal["item", "document", "asset", "relationship"]
+    name: str = Field(min_length=1, max_length=120)
+
+    @field_validator("name")
+    @classmethod
+    def plain_name(cls, value):
+        if any(unicodedata.category(char).startswith("C") for char in value):
+            raise ValueError("Diagnostic names must be printable plain text")
+        return value
+
+
 class Issue(Contract):
     code: str
     severity: Literal["warning", "error"] = "error"
@@ -30,6 +45,9 @@ class Issue(Contract):
     rule_id: str | None = None
     guidance: str
     leftover_path: str | None = None
+    subject: DiagnosticSubject | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class MigrationError(Exception):

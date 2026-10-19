@@ -62,7 +62,7 @@ def preflight_destination(parent: Path, vault_name: str) -> DestinationPreflight
             DestinationError(
                 "invalid_vault_name",
                 "vault_name",
-                "Enter one nonblank Windows folder name without reserved names, separators or a trailing dot or space.",
+                "The destination cannot be used because its vault folder name is not valid for Windows. Enter one nonblank folder name without reserved names, separators or a trailing dot or space.",
             )
         )
     if not parent.is_absolute():
@@ -70,7 +70,7 @@ def preflight_destination(parent: Path, vault_name: str) -> DestinationPreflight
             DestinationError(
                 "invalid_parent",
                 "parent",
-                "Choose an existing absolute parent folder.",
+                "The destination cannot be checked because its parent folder does not use a full path. Choose an existing parent folder with an absolute path (for example, C:\\Vaults).",
             )
         )
     destination = parent / vault_name if not errors else None
@@ -82,7 +82,7 @@ def preflight_destination(parent: Path, vault_name: str) -> DestinationPreflight
                 DestinationError(
                     "parent_unavailable",
                     "parent",
-                    "Choose an existing parent folder.",
+                    "The destination cannot be used because its parent folder is unavailable. Choose an existing parent folder that you can read.",
                 )
             )
         if destination is not None:
@@ -95,9 +95,9 @@ def preflight_destination(parent: Path, vault_name: str) -> DestinationPreflight
             DestinationError(
                 code,
                 field,
-                "Choose an absent or empty destination folder. Existing contents are never removed."
+                "The destination cannot be used because it is occupied or could not be confirmed empty. Choose an absent or empty destination folder. Existing contents are never removed."
                 if code == "destination_not_empty"
-                else "Choose a parent and destination without symbolic links or reparse points.",
+                else "The destination cannot be used because its path contains a folder redirect. Choose a parent and destination without symbolic links or reparse points (Windows folder redirects).",
             )
         )
     except OSError:
@@ -416,8 +416,10 @@ def publish(
     except (MigrationFailed, MigrationRefused) as error:
         issues = error.issues
         error_type = type(error)
-    except OSError as error:
-        issues = (_issue("write_failure", str(error)),)
+    except OSError:
+        issues = (
+            _issue("write_failure", "The vault could not be written or published."),
+        )
         error_type = MigrationFailed
     except BaseException as error:  # noqa: BLE001 - cleanup, then re-raise unchanged
         unexpected = error
@@ -429,8 +431,14 @@ def publish(
             _owned_staging(staging, destination, owned_identity)
             _staged_files(staging)
             shutil.rmtree(staging)
-        except (OSError, MigrationRefused, MigrationFailed) as error:
-            issues += (_issue("cleanup_failure", str(error), str(staging)),)
+        except OSError, MigrationRefused, MigrationFailed:
+            issues += (
+                _issue(
+                    "cleanup_failure",
+                    "The temporary folder used to prepare the vault could not be removed.",
+                    str(staging),
+                ),
+            )
     if error_type is None:
         for issue in issues:
             unexpected.add_note(

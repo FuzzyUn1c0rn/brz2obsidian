@@ -23,6 +23,12 @@ from brz2obsidian.contracts import (
     SourceIdentity,
     SourceSnapshot,
 )
+from brz2obsidian.diagnostics import (
+    diagnosed_issue,
+    diagnostic_reason,
+    diagnostic_subject,
+    with_subject,
+)
 
 from .attachments import normalize_attachments
 from .classifications import decode_classifications
@@ -37,18 +43,21 @@ from .semantics import validate_semantic_fields
 def _refuse(code, message, affected=(), *, evidence=(), guidance=None):
     raise MigrationRefused(
         (
-            Issue(
-                code=code,
-                phase="source",
-                message=message,
-                affected=affected,
-                evidence=evidence,
-                guidance=guidance
-                or (
-                    "Set a valid Home in TheBrain and re-export."
-                    if code == "invalid_entry"
-                    else "Review the affected source records and archive evidence before retrying."
-                ),
+            diagnosed_issue(
+                Issue(
+                    code=code,
+                    phase="source",
+                    message=message,
+                    rule_id=diagnostic_reason(code, message),
+                    affected=affected,
+                    evidence=evidence,
+                    guidance=guidance
+                    or (
+                        "Set a valid Home in TheBrain and re-export."
+                        if code == "invalid_entry"
+                        else "Review the affected source records and archive evidence before retrying."
+                    ),
+                )
             ),
         )
     )
@@ -77,8 +86,8 @@ def _uuid(value):
 class _PayloadStream:
     """Translate archive read errors without translating a consumer's writes."""
 
-    def __init__(self, stream, asset_id):
-        self.stream, self.asset_id = stream, asset_id
+    def __init__(self, stream, asset_id, name):
+        self.stream, self.asset_id, self.name = stream, asset_id, name
 
     def __getattr__(self, name):
         value = getattr(self.stream, name)
@@ -90,6 +99,7 @@ class _PayloadStream:
             "readline",
             "readlines",
             "seek",
+            "close",
         }:
             return value
 
@@ -103,18 +113,19 @@ class _PayloadStream:
                 DeflateError,
                 LZMAError,
                 ZstdError,
-            ) as error:
-                raise MigrationFailed(
+            ):
+                error = MigrationFailed(
                     (
                         Issue(
                             code="payload_read_failure",
                             phase="source",
-                            message=str(error),
+                            message="A BRZ attachment could not be read completely.",
                             affected=(self.asset_id,),
                             guidance="Check the source archive and re-export before retrying.",
                         ),
                     )
-                ) from error
+                )
+                raise with_subject(error, "asset", self.name) from None
 
         return read
 
@@ -122,7 +133,7 @@ class _PayloadStream:
         return self
 
     def __exit__(self, *args):
-        self.stream.close()
+        self.close()
 
     def __iter__(self):
         return self
@@ -164,7 +175,12 @@ class BrzSourceModule:
                     Issue(
                         code="write_failure",
                         phase="source",
-                        message=str(error),
+                        message="The selected BRZ archive could not be read.",
+                        rule_id="diagnostic.archive_missing"
+                        if isinstance(error, FileNotFoundError)
+                        else "diagnostic.source_access_denied"
+                        if isinstance(error, PermissionError)
+                        else "diagnostic.source_read_failed",
                         guidance="Check source access and retry.",
                     ),
                 )
@@ -272,6 +288,11 @@ class BrzSession:
                         references=(pointer,),
                     )
                 )
+        original_relationships = {
+            record["Id"]: dict(record)
+            for record in records["links.json"]
+            if isinstance(record.get("Id"), str)
+        }
         records, self.excluded, dropped_members, self.scope_tokens = scope_records(
             records, set(names), _refuse, _uuid
         )
@@ -340,49 +361,52 @@ class BrzSession:
             _refuse("invalid_source", "A live identity also occurs in deleted history")
         thoughts = {}
         for index, record in enumerate(thought_records):
-            key = _uuid(record["Id"])
-            validate_semantic_fields(record, _refuse, known_type_fields=("TypeId",))
-            if "TagIds" in record and type(record["TagIds"]) is not list:
-                _refuse("invalid_source", "TagIds must be an array", (key,))
-            if record.get("Aliases"):
-                _refuse(
-                    "unsupported_feature",
-                    "Thought aliases are outside reviewed content coverage",
-                    (key,),
-                )
-            if key in thoughts or record.get("BrainId") != brain_id:
-                _refuse(
-                    "invalid_source",
-                    "Duplicate thought or foreign collection ownership",
-                )
-            if (
-                type(record.get("Kind")) is not int
-                or record["Kind"] not in {1, 2, 4, 5}
-                or type(record.get("ACType", 0)) is not int
-                or record.get("ACType", 0) != 0
-                or record.get("TagIds")
-                or record.get("ThoughtTypeId")
-            ):
-                _refuse(
-                    "unsupported_feature",
-                    "Only reviewed ordinary, type, tag and system roles are supported",
-                )
-            if type(record.get("Name")) is not str or (
-                record.get("Label") is not None and type(record["Label"]) is not str
-            ):
-                _refuse("invalid_source", "Thought title/label is invalid")
-            if record.get("Label"):
-                try:
-                    qualify_declaration_blocks(record["Label"])
-                except MigrationRefused:
+            try:
+                key = _uuid(record["Id"])
+                validate_semantic_fields(record, _refuse, known_type_fields=("TypeId",))
+                if "TagIds" in record and type(record["TagIds"]) is not list:
+                    _refuse("invalid_source", "TagIds must be an array", (key,))
+                if record.get("Aliases"):
                     _refuse(
                         "unsupported_feature",
-                        "Thought label contains an unsupported HTML declaration block",
+                        "Thought aliases are outside reviewed content coverage",
                         (key,),
-                        evidence=(f"thoughts.json:{index}.Label",),
-                        guidance="Review the affected thought's own label; active HTML declaration blocks are outside reviewed label coverage.",
                     )
-            thoughts[key] = record
+                if key in thoughts or record.get("BrainId") != brain_id:
+                    _refuse(
+                        "invalid_source",
+                        "Duplicate thought or foreign collection ownership",
+                    )
+                if (
+                    type(record.get("Kind")) is not int
+                    or record["Kind"] not in {1, 2, 4, 5}
+                    or type(record.get("ACType", 0)) is not int
+                    or record.get("ACType", 0) != 0
+                    or record.get("TagIds")
+                    or record.get("ThoughtTypeId")
+                ):
+                    _refuse(
+                        "unsupported_feature",
+                        "Only reviewed ordinary, type, tag and system roles are supported",
+                    )
+                if type(record.get("Name")) is not str or (
+                    record.get("Label") is not None and type(record["Label"]) is not str
+                ):
+                    _refuse("invalid_source", "Thought title/label is invalid")
+                if record.get("Label"):
+                    try:
+                        qualify_declaration_blocks(record["Label"])
+                    except MigrationRefused:
+                        _refuse(
+                            "unsupported_feature",
+                            "Thought label contains an unsupported HTML declaration block",
+                            (key,),
+                            evidence=(f"thoughts.json:{index}.Label",),
+                            guidance="Review the affected thought's own label; active HTML declaration blocks are outside reviewed label coverage.",
+                        )
+                thoughts[key] = record
+            except MigrationRefused as error:
+                raise with_subject(error, "item", record.get("Name")) from None
         setting_id = str(uuid5(UUID(brain_id), "20"))
         setting_keys = set()
         for record in records["settings.json"]:
@@ -412,6 +436,27 @@ class BrzSession:
             _refuse("invalid_entry", "Home setting is not a valid thought identity")
         if entry not in thoughts or thoughts[entry]["Kind"] != 1:
             _refuse("invalid_entry", "Home does not identify a live ordinary thought")
+
+        def attachment_refuse(code, message, affected=(), **details):
+            try:
+                _refuse(code, message, affected, **details)
+            except MigrationRefused as error:
+                owners = {
+                    record["Id"]: record["SourceId"]
+                    for record in records["attachments.json"]
+                }
+                for identity in affected:
+                    owner = identity if identity in thoughts else owners.get(identity)
+                    if (
+                        owner in thoughts
+                        and diagnostic_subject("item", thoughts[owner]["Name"])
+                        is not None
+                    ):
+                        raise with_subject(
+                            error, "item", thoughts[owner]["Name"]
+                        ) from None
+                raise
+
         (
             assets,
             documents,
@@ -426,7 +471,7 @@ class BrzSession:
             records["attachments.json"],
             meta,
             thoughts,
-            _refuse,
+            attachment_refuse,
             _uuid,
             self.excluded,
             self.scope_tokens,
@@ -491,15 +536,28 @@ class BrzSession:
                 return any(relationship_private(entry) for entry in value)
             return False
 
+        def relationship_refuse(code, message, affected=(), **details):
+            try:
+                _refuse(code, message, affected, **details)
+            except MigrationRefused as error:
+                name = " \u2014 ".join(
+                    thoughts[key]["Name"] for key in affected if key in thoughts
+                )
+                raise with_subject(error, "relationship", name) from None
+
         relationships = decode_relationships(
             records["links.json"],
             thoughts,
             brain_id,
-            _refuse,
+            relationship_refuse,
             _uuid,
-            private_record=relationship_private,
+            private_record=lambda record: relationship_private(
+                original_relationships.get(record.get("Id"), record)
+            ),
         )
-        assignments = decode_classifications(thoughts, relationships, _refuse, _uuid)
+        assignments = decode_classifications(
+            thoughts, relationships, attachment_refuse, _uuid
+        )
         return SourceSnapshot(
             identity=identity,
             collection_title=meta.get("Name", "TheBrain collection"),
@@ -531,6 +589,17 @@ class BrzSession:
             )
         if asset_id not in self.members:
             _refuse("invalid_reference", "Unknown payload identity", (asset_id,))
+        asset = next(
+            (asset for asset in self.snapshot.assets if asset.asset_id == asset_id),
+            None,
+        )
+        subject = (
+            diagnostic_subject("asset", asset.display_name)
+            or diagnostic_subject("asset", asset.original_name)
+            if asset is not None
+            else diagnostic_subject("asset", PurePosixPath(self.members[asset_id]).name)
+        )
+        name = subject.name if subject is not None else None
         try:
             stream = self.archive.open(self.members[asset_id])
         except (
@@ -540,22 +609,23 @@ class BrzSession:
             DeflateError,
             LZMAError,
             ZstdError,
-        ) as error:
-            raise MigrationFailed(
+        ):
+            failure = MigrationFailed(
                 (
                     Issue(
                         code="payload_read_failure",
                         phase="source",
-                        message=str(error),
+                        message="A BRZ attachment could not be read completely.",
                         affected=(asset_id,),
                         guidance="Check the source archive and re-export before retrying.",
                     ),
                 )
-            ) from error
-        with stream:
+            )
+            raise with_subject(failure, "asset", name) from None
+        with _PayloadStream(stream, asset_id, name) as payload:
             self.streams.add(stream)
             try:
-                yield _PayloadStream(stream, asset_id)
+                yield payload
             finally:
                 self.streams.discard(stream)
 
@@ -569,8 +639,8 @@ class BrzSession:
                 or _fingerprint(self.path) != self.source_identity.source_sha256
             ):
                 _refuse("source_changed", "Source changed during conversion")
-        except OSError as error:
-            _refuse("source_changed", f"Source is no longer readable: {error}")
+        except OSError:
+            _refuse("source_changed", "Source is no longer readable")
 
     def close(self):
         self.closed = True
@@ -578,12 +648,12 @@ class BrzSession:
         for resource in (*tuple(self.streams), self.archive, self.source_stream):
             try:
                 resource.close()
-            except OSError as error:
+            except OSError:
                 issues.append(
                     Issue(
                         code="session_teardown_failure",
                         phase="session_teardown",
-                        message=str(error),
+                        message="A BRZ source file could not be closed normally.",
                         guidance="Check source access; any published receipt remains valid.",
                     )
                 )

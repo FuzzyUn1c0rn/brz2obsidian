@@ -1,7 +1,5 @@
 """Reviewed conversion composition and safe receipt-based projection."""
 
-from pathlib import Path
-
 from brz2obsidian import __version__
 from brz2obsidian.application.contracts import (
     ConversionResult,
@@ -10,57 +8,9 @@ from brz2obsidian.application.contracts import (
     ReviewedInspection,
     same_source_selection,
 )
+from brz2obsidian.application.diagnostics import finding_for
 from brz2obsidian.application.workflow import Workflow
 from brz2obsidian.contracts import Counts, Issue, MigrationRefused
-
-# Never forward source/publisher exception text, evidence or authored guidance.
-# These messages cover safe actions while retaining only explicit path facts.
-_SAFE_FINDINGS = {
-    "api_search_shape_unsupported": "The local API returned an unsupported search result. This source shape needs review.",
-    "api_relationship_shape_unsupported": "The local API returned an unsupported relationship. Its source form needs review.",
-    "api_resource_shape_unsupported": "The local API returned an unsupported resource declaration. Its source form needs review.",
-    "api_capture_cleanup_failed": "The private source capture could not be released. Check temporary storage access and the reported publication status before another attempt.",
-    "formatting_loss": "Included note formatting needs review: table layout may become responsive, custom icons use visible title fallbacks, or an insert remains unsupported. Review affected notes and declarations in the Migration report and edit the converted Markdown if needed.",
-    "review_changed": "The current source or conversion compatibility changed. Inspect the current source before converting.",
-    "source_changed": "The source changed during conversion. Inspect the current stable source before converting again.",
-    "invalid_source": "The source or prepared output is inconsistent. Review the source and inspect again.",
-    "invalid_entry": "The source needs a valid live Home thought. Set Home and inspect again.",
-    "invalid_reference": "Source references could not be interpreted safely. Review the source and inspect again.",
-    "unsupported_feature": "The source contains an unsupported feature. Review the source before continuing.",
-    "unsupported_format": "The source format and conversion profile are incompatible. Review the source and inspect again.",
-    "approved_source_gap": "Source note, icon or resource bytes are unavailable. Conversion discloses these source limitations; review the migration report.",
-    "approved_metadata_discrepancy": "Source metadata differs from verified available bytes. Review the migration report for the disclosed discrepancy.",
-    "target_path_too_long": "A generated path exceeds the final supported Windows limit. Choose a shorter output parent or vault name.",
-    "unsafe_target_path": "Generated paths are unsafe or collide. Review the source and choose a valid destination.",
-    "destination_not_empty": "The destination is populated or unavailable. Review it and choose another absent or empty destination.",
-    "unsafe_destination": "The destination has an unsafe path or reparse ancestor. Choose another output parent.",
-    "write_failure": "Conversion could not write or publish the vault. Review filesystem access, free space and the destination before another attempt.",
-    "payload_integrity_failure": "Staged output failed verification. Review the source and filesystem before another attempt.",
-    "cleanup_failure": "Owned staging cleanup did not complete. Review the exact reported leftover path; the app will not delete it or retry automatically. Use an absent or empty destination with a shorter path and check filesystem access.",
-    "session_teardown_failure": "The source could not be closed normally. Review source access and the reported publication status.",
-    "operation_failure": "Conversion did not complete normally. Review source access and the destination before another attempt.",
-    "publication_occurred": "A verified vault was published before a later handled error. Review the published vault; choose another destination for another conversion.",
-}
-
-
-def _safe_finding(issue):
-    known = issue.code in _SAFE_FINDINGS
-    path = (
-        issue.leftover_path
-        if issue.code == "cleanup_failure"
-        and issue.leftover_path is not None
-        and Path(issue.leftover_path).is_absolute()
-        else None
-    )
-    return Finding(
-        code=issue.code if known else "conversion_finding",
-        severity=issue.severity,
-        message=_SAFE_FINDINGS.get(
-            issue.code,
-            "Conversion reported a source or filesystem limitation. Review the source, destination and publication status before continuing.",
-        ),
-        path=path,
-    )
 
 
 class _CapturedRenderer:
@@ -184,7 +134,7 @@ def convert(
         workflow.metadata_factory,
     )
     raw = current.convert(source, destination)
-    findings = tuple(_safe_finding(issue) for issue in raw.issues)
+    findings = tuple(finding_for(issue, "convert") for issue in raw.issues)
     receipt = raw.receipt
     published = receipt is not None and receipt.published and receipt.verified
     path = receipt.destination if published else str(destination)

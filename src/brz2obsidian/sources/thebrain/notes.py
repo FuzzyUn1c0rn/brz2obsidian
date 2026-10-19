@@ -19,16 +19,19 @@ from brz2obsidian.contracts import (
     MigrationRefused,
     ReferenceSpan,
 )
+from brz2obsidian.diagnostics import diagnosed_issue
 
 
 def _refuse(code, message):
     raise MigrationRefused(
         (
-            Issue(
-                code=code,
-                phase="source",
-                message=message,
-                guidance="Use supported same-Brain inline Markdown references to live thoughts and archived images, then re-export.",
+            diagnosed_issue(
+                Issue(
+                    code=code,
+                    phase="source",
+                    message=message,
+                    guidance="Use supported same-Brain inline Markdown references to live thoughts and archived images, then re-export.",
+                )
             ),
         )
     )

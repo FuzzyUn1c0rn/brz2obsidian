@@ -435,6 +435,7 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
     root = Path(brz2obsidian.__file__).parent
     allowed = {
         "contracts": {"brz2obsidian", "brz2obsidian.contracts"},
+        "diagnostics": {"brz2obsidian", "brz2obsidian.contracts"},
         "core": {"brz2obsidian", "brz2obsidian.contracts", "brz2obsidian.core"},
         "obsidian": {
             "brz2obsidian",
@@ -473,11 +474,20 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
             "brz2obsidian.application.contracts",
             "brz2obsidian.vault_check",
         },
-        "application/conversion.py": {"brz2obsidian.application.contracts"},
+        "application/conversion.py": {
+            "brz2obsidian.application.contracts",
+            "brz2obsidian.application.diagnostics",
+        },
+        "application/diagnostics.py": {
+            "brz2obsidian.application.contracts",
+            "brz2obsidian.diagnostics",
+        },
+        "application/workflow.py": {"brz2obsidian.diagnostics"},
         "application/operations.py": {
             "brz2obsidian.application.checking",
             "brz2obsidian.application.contracts",
             "brz2obsidian.application.conversion",
+            "brz2obsidian.application.diagnostics",
             "brz2obsidian.application.wiring",
             "brz2obsidian.publication.filesystem",
         },
@@ -493,8 +503,8 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
     }
     for area, permitted in allowed.items():
         files = (
-            [root / "contracts.py"]
-            if area == "contracts"
+            [root / (area + ".py")]
+            if area in {"contracts", "diagnostics"}
             else sorted((root / area).rglob("*.py"))
         )
         for file in files:

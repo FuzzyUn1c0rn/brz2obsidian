@@ -27,7 +27,7 @@ def until(app, condition):
     [
         ("clean", "ready for review"),
         ("warnings", "source warnings"),
-        ("refused", "Source cannot be used"),
+        ("refused", "Inspection could not continue"),
         ("failed", "Inspection could not complete"),
     ],
 )

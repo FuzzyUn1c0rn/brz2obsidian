@@ -31,11 +31,18 @@ def test_profile3_stage_diagnostics_reach_cli_without_source_hints(
         assert main(arguments) == 1
     captured = capsys.readouterr()
     assert captured.err == ""
-    assert SHAPE_MESSAGES[stage] in captured.out
     assert f"api_{stage}_shape_unsupported" in captured.out
     assert "CANARY" not in captured.out
     if as_json:
         result = json.loads(captured.out)
         assert result["receipt"] is None
         assert result["issues"][0]["message"] == SHAPE_MESSAGES[stage]
+    else:
+        assert "Conversion stopped" in captured.out
+        assert (
+            "converter does not support the search results returned by the local API"
+            in captured.out
+        )
+        assert "Report this limitation with the diagnostic report" in captured.out
+        assert "source shape" not in captured.out
     assert not (tmp_path / "refused").exists()

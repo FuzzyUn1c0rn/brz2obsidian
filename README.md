@@ -300,9 +300,13 @@ $env:PYTHONIOENCODING = 'utf-8'
 .\.venv\Scripts\python.exe -m brz2obsidian inspect 'C:\exports\Work.brz' --json | Out-File -Encoding utf8 '.\inspection.json'
 ```
 
-Migration results use schema `brz2obsidian.result`, version 4. The checker has
+Migration results use schema `brz2obsidian.result`, version 7. The checker has
 its own schema, `brz2obsidian.vault-check`, version 1. Inspection has no
 publication receipt; a conversion receipt records the verified published vault.
+Errors retain their existing codes and may include a diagnostic reason and safe
+item name. An absent name leaves the old JSON shape unchanged; a populated
+optional `subject` requires older strict readers to accept this extension.
+See [readable diagnostics and compatibility](docs/diagnostics.md).
 
 ## What you will find in the vault
 
@@ -361,7 +365,7 @@ its exit code.
 | The destination is not empty | Choose a new output folder. Conversion does not overwrite or merge existing files. |
 | An output path is too long | Choose a shorter destination, such as `C:\v\Brain`. |
 | Home is missing or forgotten | Set an included Home thought in TheBrain, export again and inspect the new archive. |
-| Source content or features are refused | Follow the [inspection guidance](#4-inspect-the-archive) and the printed diagnostic. Repair or simplify the source in TheBrain where appropriate, then re-export. |
+| Source content or features are refused | Follow the [inspection guidance](#4-inspect-the-archive) and the printed diagnostic. Follow the stated action: converter limitations need a report; source or access problems have their own guidance. |
 | Conversion succeeds with warnings | Review `MIGRATION REPORT.md`, including any optional source-repair steps. |
 | The checker reports issues | Follow its diagnostics and the [checker guide](docs/vault-checker.md). It does not modify the vault. |
 
