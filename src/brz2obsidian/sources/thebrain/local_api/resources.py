@@ -564,10 +564,11 @@ def validate_payload_binding(source, snapshot, audit):
         # Compare complete interpretations, including findings when text is
         # unchanged. Legacy options only validate frozen captures, never live.
         legacy_bom = raw.startswith("\ufeff") and not signature_removed
-        for preserve_bom, preserve_colors, legacy_tables in (
-            (False, False, False),
-            (legacy_bom, False, True),
-            (legacy_bom, True, True),
+        for preserve_bom, preserve_colors, legacy_tables, previous_tables in (
+            (False, False, False, False),
+            (False, False, False, True),
+            (legacy_bom, False, True, False),
+            (legacy_bom, True, True, False),
         ):
             try:
                 documents, document_findings = bind_documents(
@@ -578,6 +579,7 @@ def validate_payload_binding(source, snapshot, audit):
                     preserve_bom=preserve_bom,
                     preserve_table_colors=preserve_colors,
                     legacy_tables=legacy_tables,
+                    previous_tables=previous_tables,
                 )
             except MigrationRefused:
                 continue

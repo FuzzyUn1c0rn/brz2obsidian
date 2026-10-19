@@ -34,24 +34,25 @@ CALLOUTS = frozenset(
 )
 _CALLOUT = re.compile(r"^( {0,3}(?:> ?)+)\[!([A-Za-z]+)([^\]]*)\]([+-]?)(.*)$")
 _TABLE = re.compile(r':\(table="column-widths:([-0-9,]+);justification:([a-z]+)"\):$')
-_COLOR_TABLE = re.compile(
-    r':\(table="'
-    + ";".join(
-        key + r":#[0-9a-fA-F]{8}"
-        for key in (
-            "foreground-color",
-            "background-color",
-            "alt-background-color",
-            "line-color",
-            "first-row-background-color",
-            "first-row-foreground-color",
-            "first-row-line-color",
-            "first-column-background-color",
-            "first-column-foreground-color",
-            "first-column-line-color",
-        )
+_TABLE_COLORS = ";".join(
+    key + r":#[0-9a-fA-F]{8}"
+    for key in (
+        "foreground-color",
+        "background-color",
+        "alt-background-color",
+        "line-color",
+        "first-row-background-color",
+        "first-row-foreground-color",
+        "first-row-line-color",
+        "first-column-background-color",
+        "first-column-foreground-color",
+        "first-column-line-color",
     )
-    + r'"\):$'
+)
+_COLOR_TABLE = re.compile(r':\(table="' + _TABLE_COLORS + r'"\):$')
+_STYLE_TABLE = re.compile(r':\(table="(?:[^"\\\r\n]|\\.)*"\):$')
+_TABLE_CODE_LINK = re.compile(
+    r"(?P<space>\s*)`(?P<prefix>curl -[Ii] )\[(?P<url>https?://[^\s`|<>\[\]()\\]+)`\]\((?P=url)\)(?P<tail>\s*)"
 )
 
 
@@ -195,8 +196,35 @@ def _native_code_pipes(row, source_offset, code_ranges, *, legacy=False):
     return re.sub(r"(?<![\\`])(`+)(?!`)(.*?)(?<!`)\1(?!`)", replace, row)
 
 
-def _native_table_row(row, source_offset, code_ranges, literal_ranges):
+def _native_table_row(
+    row, source_offset, code_ranges, literal_ranges, *, previous_tables=False
+):
     changes = []
+    if not previous_tables:
+        cells = _cells(row, source_offset, code_ranges, literal_ranges)
+        position = len(row) - len(row.lstrip()) + 1
+        for cell in cells or ():
+            match = _TABLE_CODE_LINK.fullmatch(cell)
+            if (
+                match
+                and (
+                    source_offset + position + len(match["space"]),
+                    source_offset + position + match.end("url") + 1,
+                )
+                in code_ranges
+            ):
+                linked = (
+                    match["space"]
+                    + "[`"
+                    + match["prefix"]
+                    + match["url"]
+                    + "`]("
+                    + match["url"]
+                    + ")"
+                    + match["tail"]
+                )
+                changes.append((position, position + len(cell), linked))
+            position += len(cell) + 1
     for begin, end in code_ranges:
         if source_offset <= begin < end <= source_offset + len(row):
             before = row[begin - source_offset : end - source_offset]
@@ -215,7 +243,9 @@ def _native_table_row(row, source_offset, code_ranges, literal_ranges):
     return row
 
 
-def adapt_note(text, *, preserve_table_colors=False, legacy_tables=False):
+def adapt_note(
+    text, *, preserve_table_colors=False, legacy_tables=False, previous_tables=False
+):
     """Return scoped adapted text, source-neutral exact edits and loss facts.
 
     Parser block ownership protects code, comments and literal examples. All
@@ -383,9 +413,18 @@ def adapt_note(text, *, preserve_table_colors=False, legacy_tables=False):
         ]
         if not declarations:
             continue
+        style_match = (
+            _STYLE_TABLE.search(raw) if not (legacy_tables or previous_tables) else None
+        )
+        if style_match:
+            declarations = [
+                start
+                for start in declarations
+                if not style_match.start() < start < style_match.end()
+            ]
         widths_match = _TABLE.search(raw)
         colors_match = None if preserve_table_colors else _COLOR_TABLE.search(raw)
-        match = widths_match or colors_match
+        match = style_match or widths_match or colors_match
         if match and match.start() not in declarations:
             match = None
         cells = (
@@ -419,12 +458,29 @@ def adapt_note(text, *, preserve_table_colors=False, legacy_tables=False):
             )
             cursor += 1
         declared_tables.update(range(line, cursor))
+        imported = bool(
+            style_match
+            and raw[: style_match.start()].strip() == "||"
+            and len(rows) == 1
+            and rows[0] is not None
+            and len(rows[0]) == 2
+        )
+        if imported:
+            cells = ["", ""]
+        separator_present = bool(
+            cells
+            and rows
+            and rows[0] is not None
+            and len(rows[0]) == len(cells)
+            and all(re.fullmatch(r"\s*:?-{3,}:?\s*", cell) for cell in rows[0])
+        )
         widths = widths_match[1].split(",") if widths_match else []
         valid = bool(
             cells
             and len(cells) >= 1
             and (
-                colors_match
+                style_match
+                or colors_match
                 or widths_match
                 and len(widths) == len(cells) + 1
                 and all(re.fullmatch(r"-1|0|[1-9][0-9]*", w) for w in widths)
@@ -432,7 +488,11 @@ def adapt_note(text, *, preserve_table_colors=False, legacy_tables=False):
             )
             and len(declarations) == 1
             and rows
-            and all(r is not None and len(r) == len(cells) for r in rows)
+            and (
+                style_match
+                and separator_present
+                or all(r is not None and len(r) == len(cells) for r in rows)
+            )
         )
         if not valid:
             loss(
@@ -447,15 +507,24 @@ def adapt_note(text, *, preserve_table_colors=False, legacy_tables=False):
             )
             if legacy_tables
             else _native_table_row(
-                raw[: match.start()], offsets[line], inline_code, inline_literals
+                raw[: match.start()],
+                offsets[line],
+                inline_code,
+                inline_literals,
+                previous_tables=previous_tables,
             )
         )
-        separator_present = all(re.fullmatch(r"\s*:?-{3,}:?\s*", c) for c in rows[0])
-        replacement = (
-            header
-            if separator_present
-            else header + "\n|" + "|".join("---" for _ in cells) + "|"
-        )
+        if imported:
+            header = "|||"
+        separator_row = "|" + "|".join("---" for _ in cells) + "|"
+        if separator_present:
+            replacement = header
+        elif (
+            legacy_tables or previous_tables or all(not cell.strip() for cell in cells)
+        ):
+            replacement = header + "\n" + separator_row
+        else:
+            replacement = "|" * (len(cells) + 1) + "\n" + separator_row + "\n" + header
         replace(line, raw, replacement)
         for row_line in range(line + 1, cursor):
             row = lines[row_line].rstrip("\r\n")
@@ -463,18 +532,27 @@ def adapt_note(text, *, preserve_table_colors=False, legacy_tables=False):
                 _native_code_pipes(row, offsets[row_line], inline_code, legacy=True)
                 if legacy_tables
                 else _native_table_row(
-                    row, offsets[row_line], inline_code, inline_literals
+                    row,
+                    offsets[row_line],
+                    inline_code,
+                    inline_literals,
+                    previous_tables=previous_tables,
                 )
             )
             if row != native_row:
                 replace(row_line, row, native_row)
-        loss(
-            "table",
-            declaration,
+        change = (
             "Custom table colors are not reproduced; the editable table uses Obsidian's native styling."
             if colors_match
-            else "Column widths and justification become native responsive table layout; edit the table in Obsidian to adjust its presentation.",
+            else "Column widths and justification become native responsive table layout; edit the table in Obsidian to adjust its presentation."
         )
+        if style_match:
+            change = "Source table styling is omitted; the editable table uses native Markdown layout."
+        if not (legacy_tables or previous_tables or separator_present) and any(
+            cell.strip() for cell in cells
+        ):
+            change += " Blank native headings preserve every source row as data."
+        loss("table", declaration, change)
 
     line = 0
     while not legacy_tables and line < len(lines):
@@ -505,6 +583,7 @@ def adapt_note(text, *, preserve_table_colors=False, legacy_tables=False):
             and rows[1] is not None
             and len(rows[1]) == 2
         )
+        empty_header = not previous_tables and all(not cell.strip() for cell in rows[0])
         width = len(rows[1] if imported else rows[0])
         separator = (
             not imported
@@ -526,10 +605,14 @@ def adapt_note(text, *, preserve_table_colors=False, legacy_tables=False):
         for row_line in range(start, line):
             raw = lines[row_line].rstrip("\r\n")
             native = _native_table_row(
-                raw, offsets[row_line], inline_code, inline_literals
+                raw,
+                offsets[row_line],
+                inline_code,
+                inline_literals,
+                previous_tables=previous_tables,
             )
             if row_line == start:
-                if imported:
+                if imported or empty_header and not separator:
                     native = header
                 elif not separator:
                     native = header + "\n" + native

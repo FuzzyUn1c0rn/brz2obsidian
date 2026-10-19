@@ -63,7 +63,7 @@ def test_color_table_live_and_frozen_keep_editable_cells_and_exact_evidence(
                 FACTS["header"] + DECLARATION,
                 FACTS["expected_header"],
             )
-            assert (edit.end, edit.adapted_start, edit.adapted_end) == (356, 0, 30)
+            assert (edit.end, edit.adapted_start, edit.adapted_end) == (356, 0, 34)
             assert edit.source_digest == hashlib.sha256(TABLE.encode()).hexdigest()
             finding = snapshot.findings[0]
             assert finding.kind == "formatting_loss"
@@ -167,9 +167,9 @@ def test_prior_color_table_capture_keeps_its_complete_interpretation_and_rejects
             )
 
 
-def test_color_table_closed_predicate_and_literal_ownership_keep_safe_fallbacks():
+def test_opaque_styling_and_literal_ownership_keep_structural_safety():
     plain = "|A|B|" + DECLARATION + "\n|1|2|\n"
-    invalid_declarations = [
+    discarded_styles = [
         DECLARATION.replace("foreground-color", "unknown-color", 1),
         DECLARATION.replace("foreground-color:#ff370c0b;", "", 1),
         DECLARATION.replace("background-color:", "foreground-color:", 1),
@@ -181,10 +181,14 @@ def test_color_table_closed_predicate_and_literal_ownership_keep_safe_fallbacks(
         DECLARATION.replace("#ff370c0b", "#ff370c0"),
         DECLARATION.replace('"):', ';"):'),
         DECLARATION.replace('table="', 'table="column-widths:-1,0,84;'),
-        DECLARATION + DECLARATION,
     ]
-    malformed = ["|A|B|" + d + "\n|1|2|\n" for d in invalid_declarations]
-    malformed += ["|A|B|" + DECLARATION + "\n|1|2|3|\n", "|A|B|" + DECLARATION + "\n"]
+    styled = ["|A|B|" + declaration + "\n|1|2|\n" for declaration in discarded_styles]
+    malformed = [
+        "|A|B|" + DECLARATION + DECLARATION + "\n|1|2|\n",
+        "|A|B|" + DECLARATION + "\n|1|2|3|\n",
+        "|A|B|" + DECLARATION + "\n",
+        '|A|B|:(table="unclosed):\n|1|2|\n',
+    ]
     protected = [
         "```md\n" + plain + "```\n",
         "    " + plain.replace("\n|", "\n    |"),
@@ -197,9 +201,10 @@ def test_color_table_closed_predicate_and_literal_ownership_keep_safe_fallbacks(
         + DECLARATION.replace("#ff", "#FF")
         + "\n|:---|---:|\n|a\\|b|`x|y`|\n"
     )
-    text = "\n".join(malformed + protected + [existing])
+    text = "\n".join(styled + malformed + protected + [existing])
     expected = "\n".join(
-        malformed
+        ["|||\n|---|---|\n|A|B|\n|1|2|\n"] * len(styled)
+        + malformed
         + protected
         + ["|**One**|Two|\n|:---|---:|\n|a\\|b|<code>x&#124;y</code>|\n"]
     )
@@ -212,12 +217,15 @@ def test_color_table_closed_predicate_and_literal_ownership_keep_safe_fallbacks(
             changes = [
                 json.loads(f.observed_json)["change"] for f in session.snapshot.findings
             ]
-            assert len(changes) == len(malformed) + 1
-            assert changes.count(FACTS["color_loss"]) == 1
+            assert len(changes) == len(styled) + len(malformed) + 1
+            assert changes.count(FACTS["color_loss"]) == len(styled)
+            assert changes.count(FACTS["style_loss"]) == 1
             assert sum(
                 "Malformed or ambiguous table retained" in c for c in changes
             ) == len(malformed)
-            assert len(session.snapshot.documents[0].text_adaptations) == 2
+            assert (
+                len(session.snapshot.documents[0].text_adaptations) == len(styled) + 2
+            )
             session.verify_consistency()
 
 
@@ -235,13 +243,15 @@ def test_workflow_publishes_editable_five_row_table_with_migration_evidence(tmp_
     assert EXPECTED in body and DECLARATION not in body
     tokens = MarkdownIt("commonmark").enable("table").parse(body)
     assert sum(t.type == "table_open" for t in tokens) == 1
-    assert sum(t.type == "tr_open" for t in tokens) == 6
+    assert sum(t.type == "tr_open" for t in tokens) == 7
     table = tokens[
         next(i for i, t in enumerate(tokens) if t.type == "table_open") : next(
             i for i, t in enumerate(tokens) if t.type == "table_close"
         )
     ]
     assert [t.content for t in table if t.type == "inline"] == [
+        "",
+        "",
         "Filter",
         "Description",
         "`ip`",

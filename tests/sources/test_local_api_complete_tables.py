@@ -8,14 +8,14 @@ from pathlib import Path
 import pytest
 from markdown_it import MarkdownIt
 
-from brz2obsidian.contracts import MigrationRefused
+from brz2obsidian.contracts import MigrationRefused, SourceFinding, TextAdaptation
 from brz2obsidian.sources.thebrain.local_api import (
     LocalApiConfig,
     LocalApiSession,
     LocalApiSourceModule,
     LocalApiSourceRef,
 )
-from tests.sources.test_local_api_table_colors import note_api
+from tests.sources.test_local_api_table_colors import DECLARATION, note_api
 from tests.support.local_api import ALONE, BRAIN, HOME, KEY, api_server
 from tests.support.local_api_payloads import IMAGE, PNG, attachment
 
@@ -277,3 +277,239 @@ def test_image_adjacent_plain_table_keeps_reference_spans_and_cell_ownership():
                 == hashlib.sha256(expected.encode()).hexdigest()
             )
             session.verify_consistency()
+
+
+def test_styling_never_promotes_data_and_combined_styles_become_plain_tables():
+    width = ':(table="column-widths:-1,0,0;justification:default"):'
+    combined = (
+        ':(table="column-widths:-1,0,0;justification:default;'
+        + DECLARATION.removeprefix(':(table="')
+    )
+    original = (
+        "|**Before**|Choose early.|"
+        + width
+        + "\n|**After**|Choose later.|\n\n"
+        + "|Filter|Meaning|"
+        + combined
+        + "\n|`ip`|Packets.|\n\n"
+        + "|||"
+        + width
+        + "\n|1{nl}2|first{nl}second|\n\n"
+        + "|||\n|a|b|\n\n"
+        + '|Record|Value|:(table="new-key:future-style;columns:unexpected;z:first"):\n|a|b|\n\n'
+        + '||:(table="unfamiliar:ignored"):\n|1{nl}2|first{nl}second|\n\n'
+        + '|A|B|:(table="opaque:value"):\n|---|---|\n|only|\n\n'
+        + '|A|B|:(table="label:literal :(table=marker"):\n|1|2|\n'
+    )
+    expected = (
+        "|||\n|---|---|\n|**Before**|Choose early.|\n|**After**|Choose later.|\n\n"
+        "|||\n|---|---|\n|Filter|Meaning|\n|`ip`|Packets.|\n\n"
+        "|||\n|---|---|\n|1<br>2|first<br>second|\n\n"
+        "|||\n|---|---|\n|a|b|\n\n"
+        "|||\n|---|---|\n|Record|Value|\n|a|b|\n\n"
+        "|||\n|---|---|\n|1<br>2|first<br>second|\n\n"
+        "|A|B|\n|---|---|\n|only|\n\n"
+        "|||\n|---|---|\n|A|B|\n|1|2|\n"
+    )
+    with api_server(note_api(original)) as (_, address):
+        module = LocalApiSourceModule(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        )
+        with module.open(LocalApiSourceRef(BRAIN)) as session:
+            assert session.snapshot.documents[0].text == expected
+            assert len(session.snapshot.findings) == 8
+            changes = [
+                json.loads(f.observed_json)["change"] for f in session.snapshot.findings
+            ]
+            assert not any("Malformed" in change for change in changes)
+            with session.open_payload(
+                session.snapshot.documents[0].original_asset_id
+            ) as stream:
+                assert stream.read() == original.encode()
+            session.verify_consistency()
+
+
+def test_only_qualified_table_cell_code_links_gain_valid_plain_markdown():
+    near_misses = (
+        "|`curl -I [https://example.invalid`](https://other.invalid)|Different target|\n"
+        "|`` `curl -I [https://example.invalid`](https://example.invalid) ``|Literal code|\n"
+        "|[`curl -I https://example.invalid`](https://example.invalid)|Already valid|\n"
+    )
+    prose = "`curl -I [https://example.invalid`](https://example.invalid)\n\n"
+    literal = "```text\n|Literal|Example|\n|`curl -I [https://example.invalid`](https://example.invalid)|Keep|\n```\n"
+    original = (
+        prose + "|Command|Meaning|\n"
+        "|`curl -I [https://example.invalid`](https://example.invalid)|Headers only|\n"
+        "|`curl -i [https://example.invalid/path`](https://example.invalid/path)|Include headers|\n"
+        + near_misses
+        + "\n"
+        + literal
+    )
+    expected = (
+        prose + "|||\n|---|---|\n|Command|Meaning|\n"
+        "|[`curl -I https://example.invalid`](https://example.invalid)|Headers only|\n"
+        "|[`curl -i https://example.invalid/path`](https://example.invalid/path)|Include headers|\n"
+        + near_misses
+        + "\n"
+        + literal
+    )
+    with api_server(note_api(original)) as (_, address):
+        module = LocalApiSourceModule(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        )
+        with module.open(LocalApiSourceRef(BRAIN)) as session:
+            document = session.snapshot.documents[0]
+            assert document.text == expected
+            rendered = MarkdownIt("commonmark").enable("table").render(document.text)
+            assert (
+                '<a href="https://example.invalid"><code>curl -I https://example.invalid</code></a>'
+                in rendered
+            )
+            assert (
+                document.text_adaptations[-1].source_digest
+                == hashlib.sha256(original.encode()).hexdigest()
+            )
+            with session.open_payload(document.original_asset_id) as stream:
+                assert stream.read() == original.encode()
+            session.verify_consistency()
+
+
+def test_exact_52ca_capture_keeps_its_whole_table_interpretation(tmp_path, monkeypatch):
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    width = ':(table="column-widths:-1,0,0;justification:default"):'
+    plain = "|P|Q|\n|a|b|\n"
+    styled = "|Capture|Description|" + width + "\n|Display|Later|\n"
+    link = "`curl -I [https://example.invalid`](https://example.invalid)"
+    linked = "[`curl -I https://example.invalid`](https://example.invalid)"
+    code = "|Command|Use|\n|" + link + "|Headers|\n"
+    combined = width.removesuffix('"):') + ';foreground-color:#ffffff"):'
+    malformed = "|Legacy|Style|" + combined + "\n|Still|Literal|\n"
+    original = plain + "\n" + styled + "\n" + code + "\n" + malformed
+    prior_text = (
+        "|||\n|---|---|\n|P|Q|\n|a|b|\n\n"
+        "|Capture|Description|\n|---|---|\n|Display|Later|\n\n"
+        "|||\n|---|---|\n|Command|Use|\n|" + link + "|Headers|\n"
+    )
+    prior_text += "\n" + malformed
+    with api_server(note_api(original)) as (_, address):
+        module = LocalApiSourceModule(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        )
+        with module.open(LocalApiSourceRef(BRAIN)) as live:
+            current = live.snapshot
+            capture = next(tmp_path.glob("brz2obsidian-api-*"))
+            source = json.loads((capture / "source.json").read_bytes())
+            audit = json.loads((capture / "audit.json").read_bytes())
+    source_digest = hashlib.sha256(original.encode()).hexdigest()
+    replacements = [
+        (0, "|P|Q|", "|||\n|---|---|\n|P|Q|"),
+        (
+            len(plain) + 1,
+            "|Capture|Description|" + width,
+            "|Capture|Description|\n|---|---|",
+        ),
+        (
+            len(plain) + len(styled) + 2,
+            "|Command|Use|",
+            "|||\n|---|---|\n|Command|Use|",
+        ),
+    ]
+    edits, delta = [], 0
+    for start, before, after in replacements:
+        assert original[start : start + len(before)] == before
+        edits.append(
+            TextAdaptation(
+                kind="markdown_insert",
+                start=start,
+                end=start + len(before),
+                before=before,
+                after=after,
+                adapted_start=start + delta,
+                adapted_end=start + delta + len(after),
+                source_digest=source_digest,
+            )
+        )
+        delta += len(after) - len(before)
+    document = current.documents[0]
+    findings = tuple(
+        SourceFinding(
+            kind="formatting_loss",
+            rule_id="local-api.note-formatting.v1",
+            affected=tuple(sorted((document.owner, document.key))),
+            evidence=document.evidence,
+            observed_json=json.dumps(
+                {"feature": "table", "declaration": declaration, "change": change},
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        )
+        for declaration, change in (
+            ("|P|Q|", FACTS["neutral_header_loss"]),
+            (
+                width,
+                "Column widths and justification become native responsive table layout; edit the table in Obsidian to adjust its presentation.",
+            ),
+            ("|Command|Use|", FACTS["neutral_header_loss"]),
+            (
+                combined,
+                "Malformed or ambiguous table retained as source text; supply an ordinary Markdown table with a matching header separator.",
+            ),
+        )
+    )
+    previous_document = document.model_copy(
+        update={
+            "text": prior_text,
+            "text_digest": hashlib.sha256(prior_text.encode()).hexdigest(),
+            "text_adaptations": tuple(edits),
+            "references": (),
+        }
+    )
+    previous = current.model_copy(
+        update={
+            "identity": current.identity.model_copy(
+                update={"source_sha256": "", "snapshot_digest": ""}
+            ),
+            "documents": (previous_document,),
+            "findings": findings,
+        }
+    )
+    frozen = LocalApiSession(
+        source=source,
+        snapshot=previous,
+        audit=audit,
+        payloads={document.original_asset_id: original.encode()},
+    )
+    try:
+        assert frozen.snapshot.documents == (previous_document,)
+        assert sorted(
+            frozen.snapshot.findings, key=lambda f: f.observed_json
+        ) == sorted(findings, key=lambda f: f.observed_json)
+        frozen.verify_consistency()
+    finally:
+        frozen.close()
+    start = original.index(link)
+    mixed_edit = TextAdaptation(
+        kind="markdown_insert",
+        start=start,
+        end=start + len(link),
+        before=link,
+        after=linked,
+        adapted_start=start + delta,
+        adapted_end=start + delta + len(linked),
+        source_digest=source_digest,
+    )
+    mixed_text = prior_text.replace(link, linked)
+    mixed_document = previous_document.model_copy(
+        update={
+            "text": mixed_text,
+            "text_digest": hashlib.sha256(mixed_text.encode()).hexdigest(),
+            "text_adaptations": (*edits, mixed_edit),
+        }
+    )
+    with pytest.raises(MigrationRefused):
+        LocalApiSession(
+            source=source,
+            snapshot=previous.model_copy(update={"documents": (mixed_document,)}),
+            audit=audit,
+            payloads={document.original_asset_id: original.encode()},
+        )

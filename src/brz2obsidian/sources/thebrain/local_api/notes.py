@@ -57,6 +57,7 @@ def bind_documents(
     preserve_bom=False,
     preserve_table_colors=False,
     legacy_tables=False,
+    previous_tables=False,
     subjects=None,
 ):
     from .capture import canonical
@@ -69,6 +70,7 @@ def bind_documents(
                 preserve_bom=preserve_bom,
                 preserve_table_colors=preserve_table_colors,
                 legacy_tables=legacy_tables,
+                previous_tables=previous_tables,
             )
             for loss in losses:
                 findings.append(

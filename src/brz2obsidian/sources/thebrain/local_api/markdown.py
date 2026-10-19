@@ -40,7 +40,12 @@ def adapt_literals(text):
 
 
 def adapt_note(
-    text, *, preserve_bom=False, preserve_table_colors=False, legacy_tables=False
+    text,
+    *,
+    preserve_bom=False,
+    preserve_table_colors=False,
+    legacy_tables=False,
+    previous_tables=False,
 ):
     # Frozen captures that already qualified before BOM normalization retain
     # their exact prior interpretation. This is never a live acquisition option.
@@ -49,10 +54,12 @@ def adapt_note(
             text,
             preserve_table_colors=preserve_table_colors,
             legacy_tables=legacy_tables,
+            previous_tables=previous_tables,
         )
     adapted, edits, losses = _adapt_note(
         text[1:],
         preserve_table_colors=preserve_table_colors,
         legacy_tables=legacy_tables,
+        previous_tables=previous_tables,
     )
     return adapted, _signature_edits(text, edits), losses

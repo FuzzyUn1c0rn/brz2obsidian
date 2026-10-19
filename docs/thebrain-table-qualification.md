@@ -19,8 +19,11 @@ then every authored row as data. Do not infer roles from content or titles.
 |`src == 192.0.2.1`|Matches the example source.|
 ```
 
-This is the issue's clarified illustration. Existing Markdown separators and
-qualified width/color declarations retain their explicit header semantics.
+Only an explicit Markdown separator establishes an authored header. Styling
+metadata supplies no header meaning. Once row structure establishes the table,
+discard any well-formed attached `:(table="..."):` suffix opaquely: keys, values,
+order and width counts do not limit plain Markdown output. Reuse an entirely
+empty structural first row as the neutral header rather than duplicating it.
 
 Recognize consecutive active edge-pipe rows in a top-level Markdown paragraph,
 with at least two rows, at least two columns and equal cell counts. Preserve empty
@@ -33,7 +36,8 @@ No title, vocabulary, style or image-prefix classifier is needed.
 The observed imported form `||` followed by one two-cell row is an empty structural
 header: native source displays two empty cells followed by the two data cells.
 Write the matching empty Markdown header/separator and preserve both data cells.
-Other unequal widths remain malformed. Never drop a first data row or a command.
+The native-expanded `|||` form follows the same empty-header rule. Other unequal
+row widths remain malformed. Never drop a first data row or a command.
 
 Keep emphasis, links, escaped delimiters and inline code. Reuse existing code-pipe
 normalization, including literal backslashes inside code. Active unescaped `{nl}`
@@ -41,14 +45,23 @@ inside table cells becomes the already-supported attribute-free `<br>`; keep
 repeated/trailing breaks. Code/comment/escaped markers stay literal. No custom
 HTML table, styling, new source-profile identifier or contract is introduced.
 
+Native source also establishes the exact table-cell spelling
+`` `curl -I [https://example.invalid`](https://example.invalid) `` (and `-i`)
+as visible command text plus its URL link. Normalize only this complete cell
+pattern with a parser-owned single-backtick code prefix and identical HTTP(S)
+URL label/destination to `` [`curl -I https://example.invalid`](https://example.invalid) ``.
+The complete command becomes clickable. Literal/code examples, differing targets,
+ordinary valid links and prose are unchanged; this is no general link repair.
+
 Original bytes remain unchanged. Existing exact adaptation spans, before/after
 text, scoped digests and final reference bindings apply. Report neutral headings
-as a formatting adaptation that preserves every source row, separately from color
-loss. Malformed table-shaped content retains its source and actionable finding;
+and discarded styling as actual presentation adaptations that preserve source
+content. Malformed table-shaped content retains its source and actionable finding;
 a warning is never proof that an intended table converted successfully.
 
 Frozen validation must match complete current or complete prior Documents AND
-formatting findings, including pre237, older color and existing BOM alternatives.
+formatting findings, including exact 52ca table/header/link behavior, pre237,
+older color and existing BOM alternatives.
 Preserve prior sealed identities; reject invented cells, edits, references,
 findings or original bytes. Never mix old/new row interpretations.
 
