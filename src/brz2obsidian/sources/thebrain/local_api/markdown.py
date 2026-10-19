@@ -39,12 +39,20 @@ def adapt_literals(text):
     return adapted, _signature_edits(text, edits)
 
 
-def adapt_note(text, *, preserve_bom=False, preserve_table_colors=False):
+def adapt_note(
+    text, *, preserve_bom=False, preserve_table_colors=False, legacy_tables=False
+):
     # Frozen captures that already qualified before BOM normalization retain
     # their exact prior interpretation. This is never a live acquisition option.
     if preserve_bom or not text.startswith("\ufeff"):
-        return _adapt_note(text, preserve_table_colors=preserve_table_colors)
+        return _adapt_note(
+            text,
+            preserve_table_colors=preserve_table_colors,
+            legacy_tables=legacy_tables,
+        )
     adapted, edits, losses = _adapt_note(
-        text[1:], preserve_table_colors=preserve_table_colors
+        text[1:],
+        preserve_table_colors=preserve_table_colors,
+        legacy_tables=legacy_tables,
     )
     return adapted, _signature_edits(text, edits), losses

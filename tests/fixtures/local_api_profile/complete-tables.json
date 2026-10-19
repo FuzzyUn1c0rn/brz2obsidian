@@ -120,7 +120,7 @@
           "\\`one\\|two\\`"
         ]
       ],
-      "expected": "|||\n|---|---|\n|Name|Value|\n|Operator|\\|\\||\n|Command|<code>print a\\&#124;b</code>|\n|Literal|\\`one\\|two\\`|\n"
+      "expected": "|||\n|---|---|\n|Name|Value|\n|Operator|\\|\\||\n|Command|<code>print a&#92;&#124;b</code>|\n|Literal|\\`one\\|two\\`|\n"
     },
     {
       "id": "TABLE237-IMPORTED",

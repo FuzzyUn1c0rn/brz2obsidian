@@ -27,6 +27,11 @@ Older full-suite or fresh full BASE/GUI ticket requirements are withdrawn.
 Never recreate those executions by accumulating focused batches. The reduced
 selection and affected focused checks are the automated verification strategy.
 
+Plain table controls retain source rows/cells, code and breaks, literal protection,
+exact current/prior capture binding, references and one real BRZ publication.
+The complete actual-source table inventory and native Obsidian review remain
+separate acceptance evidence for #237.
+
 ## Responsibilities and additional checks
 
 The manifest retains existing public-contract tests and representative real

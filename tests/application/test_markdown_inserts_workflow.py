@@ -749,7 +749,7 @@ def test_ambiguous_tables_retain_source_and_actionable_loss_warning(
 
 def test_table_cells_keep_escapes_code_formatting_and_existing_valid_tables(tmp_path):
     text = """|**One**|Two|:(table="column-widths:-1,0,84;justification:default"):
-|a\\|b|`x|y`|
+|a\\|b|`x|y`{nl}tail|
 
 |Valid|Table|
 |:---|---:|
@@ -761,7 +761,7 @@ def test_table_cells_keep_escapes_code_formatting_and_existing_valid_tables(tmp_
     body = note_body(
         (tmp_path / "vault/Home — Entry thought.md").read_text(encoding="utf-8")
     )
-    assert "|**One**|Two|\n|---|---|\n|a\\|b|<code>x&#124;y</code>|" in body
+    assert "|**One**|Two|\n|---|---|\n|a\\|b|<code>x&#124;y</code><br>tail|" in body
     assert text.split("\n\n", 1)[1] in body
     record = json.loads(
         (tmp_path / "vault/migration-record.json").read_text(encoding="utf-8")

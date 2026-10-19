@@ -5,9 +5,9 @@ This amendment covers the shared BRZ adapter and `local-api.note-formatting.v1`
 under profiles 1/2/3. The [public controls](../tests/fixtures/local_api_profile/complete-tables.json)
 come from independently audited source facts and invented public content.
 
-The retained source accounts for 740 thoughts (360 exact original notes and380
-no-note records) and61 tables in17 notes, including all13 Wireshark tables.
-Read-only TheBrain15 observation confirms that undeclared first rows have no
+The retained source accounts for 740 thoughts (360 exact original notes and 380
+no-note records) and 61 tables in 17 notes, including all 13 Wireshark tables.
+Read-only TheBrain 15 observation confirms that undeclared first rows have no
 structural header distinction: words, boldness and styling cannot identify one.
 Render every such table consistently with empty Markdown headings and a separator,
 then every authored row as data. Do not infer roles from content or titles.
@@ -54,7 +54,7 @@ findings or original bytes. Never mix old/new row interpretations.
 
 Public SourceModule/Session and selected BRZ/API Workflow controls verify these
 facts and existing literals/separators/width/colors. Measure production line/branch
-coverage, contexts and time. Complete source/output reconciliation covers all61
-tables. Independent actual Obsidian review covers all13 Wireshark Reading tables,
+coverage, contexts and time. Complete source/output reconciliation covers all 61
+tables. Independent actual Obsidian review covers all 13 Wireshark Reading tables,
 distinct Live Preview/editable forms and additional audited formats. These remain
 separate from parser success and the final maintained ordinary checks.
