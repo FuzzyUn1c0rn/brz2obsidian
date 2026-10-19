@@ -2,6 +2,7 @@
   "schema_version": 1,
   "selectors": [
     "tests/sources/test_local_api_bom.py",
+    "tests/sources/test_local_api_table_colors.py",
     "tests/application/test_readable_errors.py",
     "tests/gui/test_readable_errors_window.py",
     "tests/application/test_graph_modules.py",

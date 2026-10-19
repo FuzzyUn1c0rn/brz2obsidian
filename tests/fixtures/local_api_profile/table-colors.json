@@ -1,0 +1,42 @@
+{
+  "qualification": "issue235-table-colors",
+  "source": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/235",
+  "declaration": ":(table=\"foreground-color:#ff370c0b;background-color:#fff9d3d2;alt-background-color:#fff2aaa8;line-color:#ffeb7d7a;first-row-background-color:#ffdf2e28;first-row-foreground-color:#ffffffff;first-row-line-color:#ffec8380;first-column-background-color:#ffcc312d;first-column-foreground-color:#ffffffff;first-column-line-color:#ffec8380\"):",
+  "header": "|Filter|Description|",
+  "rows": [
+    "|`ip`|Show all IP packets.|",
+    "|`ip.src == 192.0.2.1`|Show packets from the example address.|",
+    "|`tcp.port == 443`|Show HTTPS port traffic.|",
+    "|`ip.addr == 192.0.2.2`|Show either endpoint.|",
+    "|`udp.port == 53`|DNS with an escaped \\| pipe.|"
+  ],
+  "expected_header": "|Filter|Description|\n|---|---|",
+  "color_loss": "Custom table colors are not reproduced; the editable table uses Obsidian's native styling.",
+  "negative_controls": [
+    "unknown property",
+    "missing property",
+    "duplicate property",
+    "reordered properties",
+    "non-hex value",
+    "wrong color length",
+    "trailing semicolon",
+    "mixed width declaration",
+    "multiple active declarations",
+    "unequal cell counts",
+    "missing data row"
+  ],
+  "protected_controls": [
+    "fenced code",
+    "indented code",
+    "inline code",
+    "HTML comment",
+    "escaped declaration marker"
+  ],
+  "compatibility_controls": [
+    "new live and frozen interpretation agree",
+    "exact prior unchanged table and malformed finding still reopen",
+    "invented cells refused",
+    "invented findings refused",
+    "inconsistent adaptation refused"
+  ]
+}

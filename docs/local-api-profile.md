@@ -350,3 +350,61 @@ Profiles1/2 retain refusals. Known excluded owners keep the existing no-fetch
 scope boundary; previous external URL/file roles retain their own predicates.
 The actual-source sixteen-image identity/artwork investigation, complete audit
 and native presentation gates remain separate from this synthetic eligibility.
+
+## Color-only table declaration amendment (#235)
+
+This finite amendment qualifies the raw-text shape observed in the Wireshark
+thought note and reproduced in [#235](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/235).
+The independently reviewable [synthetic controls](../tests/fixtures/local_api_profile/table-colors.json)
+retain the complete declaration, five representative data rows and expected
+ordinary Markdown header. The ticket binds the source investigation; these
+synthetic addresses and rows make no private-content preservation claim.
+Independent qualification review must accept this exact predicate and controls
+before runtime acceptance expands.
+
+For `local-api.note-formatting.v1` under profiles 1, 2 and 3, admit one additional
+color-only declaration family. After the existing parser establishes active
+block/inline ownership, the header has exactly one active suffix
+`:(table="KEY:#AARRGGBB;...;KEY:#AARRGGBB"):`. Keys are exactly, in this order:
+`foreground-color`, `background-color`, `alt-background-color`, `line-color`,
+`first-row-background-color`, `first-row-foreground-color`, `first-row-line-color`,
+`first-column-background-color`, `first-column-foreground-color`,
+`first-column-line-color`. Each value is `#` followed by exactly eight ASCII
+hexadecimal digits, case-insensitive. There are no spaces, additional keys,
+duplicates, missing/reordered keys, trailing semicolon, mixed width/justification
+settings or other CSS values. This is a closed textual predicate, not a CSS parser.
+
+The header and at least one following pipe-delimited row must pass the existing
+parser-owned cell boundary rules and have equal cell counts. Preserve cell
+content and order, escaped pipes and inline code using the established native
+code-pipe normalization. Remove only the source declaration and add a matching
+ordinary Markdown separator if absent. Keep a valid existing separator unchanged.
+Literal/code/comment/escaped examples retain existing protection. A table failing
+any predicate retains its exact source text and existing malformed/ambiguous
+formatting-loss finding; unqualified source declarations remain unaccepted.
+
+A successful color adaptation still emits the existing `formatting_loss` finding,
+with its exact original declaration and a change explanation stating that custom
+table colors are not reproduced and the editable table uses native Obsidian
+styling. Preserve original note bytes and the existing exact `TextAdaptation`
+source/adapted spans and scoped source digest in migration evidence. There is no
+new warning code, source profile, capture identifier or contract shape.
+
+Fresh live acquisition always applies this normalization, identically across
+profiles 1/2/3. Sealed/reopened capture validation must independently rederive the
+complete current document/findings, or the exact previous interpretation that
+retains the color declaration and its prior malformed-table finding. A prior
+interpretation keeps its sealed text, references, adaptations, original bytes and
+identity; it is never silently rewritten. A changed text, finding or adaptation
+must match one complete qualified interpretation, not a mixture selected merely
+from supplied metadata. This compatibility alternative applies only to frozen
+validation, never new live acquisition. Existing BOM compatibility is preserved.
+The changed live normalized document changes its snapshot digest and requires a
+fresh compatible inspection/review before conversion.
+
+Public SourceModule/SourceSession controls cover live/frozen equivalence, the
+prior interpretation and tampering, each protected ownership context, each closed
+predicate failure and existing separators. One public Workflow conversion checks
+an editable five-row table plus original bytes, warning and migration evidence.
+The strategic actual Obsidian table check remains separate from these automated
+controls and does not require source colors.
