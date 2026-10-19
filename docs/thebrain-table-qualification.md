@@ -31,7 +31,9 @@ with at least two rows, at least two columns and equal cell counts. Preserve emp
 and trailing cells. Existing parser ownership protects code, comments and escaped
 examples; headings, ordinary prose/pipeline/link-label pipes and nested containers
 are not table rows. A table may follow prose or images: insert an ordinary blank
-paragraph boundary when needed, retaining neighboring text and reference bindings.
+paragraph boundary on either side when needed, retaining neighboring text and reference bindings.
+This same block-separation rule applies with or without styling metadata; real
+image embeds must not share a paragraph with the emitted table.
 No title, vocabulary, style or image-prefix classifier is needed.
 
 The observed imported form `||` followed by one two-cell row is an empty structural
@@ -61,7 +63,7 @@ content. Malformed table-shaped content retains its source and actionable findin
 a warning is never proof that an intended table converted successfully.
 
 Frozen validation must match complete current or complete prior Documents AND
-formatting findings, including exact compact-header 7bda output, 52ca table/header/link behavior, pre237,
+formatting findings, including exact 29c3 block boundaries, compact-header 7bda output, 52ca table/header/link behavior, pre237,
 older color and existing BOM alternatives.
 Preserve prior sealed identities; reject invented cells, edits, references,
 findings or original bytes. Never mix old/new row interpretations.

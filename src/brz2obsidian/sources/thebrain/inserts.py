@@ -250,6 +250,7 @@ def adapt_note(
     legacy_tables=False,
     previous_tables=False,
     compact_tables=False,
+    legacy_table_boundaries=False,
 ):
     """Return scoped adapted text, source-neutral exact edits and loss facts.
 
@@ -257,6 +258,9 @@ def adapt_note(
     references are traced after adaptation, so their offsets bind final text.
     """
     blank_cell = "" if compact_tables or previous_tables or legacy_tables else " "
+    separate_tables = not (
+        legacy_table_boundaries or legacy_tables or previous_tables or compact_tables
+    )
     original = text
     text, literal_edits = adapt_literals(text)
     lines = re.findall(r"[^\r\n]*(?:\r\n|\r|\n|$)", text)
@@ -542,6 +546,8 @@ def adapt_note(
                 + "\n"
                 + header
             )
+        if separate_tables and line and lines[line - 1].strip():
+            replacement = "\n" + replacement
         replace(line, raw, replacement)
         for row_line in range(line + 1, cursor):
             row = lines[row_line].rstrip("\r\n")
@@ -556,6 +562,13 @@ def adapt_note(
                     previous_tables=previous_tables,
                 )
             )
+            if (
+                separate_tables
+                and row_line == cursor - 1
+                and cursor < len(lines)
+                and lines[cursor].strip()
+            ):
+                native_row += "\n"
             if row != native_row:
                 replace(row_line, row, native_row)
         change = (

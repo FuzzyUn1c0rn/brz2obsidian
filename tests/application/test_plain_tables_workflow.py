@@ -3,6 +3,7 @@
 import hashlib
 import json
 
+import pytest
 from markdown_it import MarkdownIt
 
 from brz2obsidian.application.wiring import default_workflow
@@ -11,12 +12,15 @@ from tests.support.local_api_payloads import PNG
 from tests.support.notes import note_body
 
 
+@pytest.mark.parametrize("style", ["", ':(table="unfamiliar:value"):'])
 def test_brz_plain_tables_publish_every_data_cell_and_preserve_original_evidence(
     tmp_path,
+    style,
 ):
     original = f"""![First](.data/md-images/photo.png)![Second](.data/md-images/photo.png)
-||
+||{style}
 |1{{nl}}2|`first|second`{{nl}}[Topic](brain://{COMPACT}/title)|
+Following prose.
 
 |**Before**|Select before recording.|
 |**After**|Select after recording.|
@@ -53,6 +57,7 @@ def test_brz_plain_tables_publish_every_data_cell_and_preserve_original_evidence
         "**After**",
         "Select after recording.",
     ]
+    assert "[[Notes/Topic.v2.md\\|Topic]]|\n\nFollowing prose." in body
     assert result.counts.actual_references == 3
     assert (
         destination / "Attachments/22222222/Notes.md.original"
@@ -69,4 +74,6 @@ def test_brz_plain_tables_publish_every_data_cell_and_preserve_original_evidence
     )
     report = (destination / "Migration report.md").read_text(encoding="utf-8")
     assert "blank native headings preserve every source row" in report
-    assert "both data cells are preserved" in report
+    assert (
+        "styling is omitted" if style else "both data cells are preserved"
+    ) in report

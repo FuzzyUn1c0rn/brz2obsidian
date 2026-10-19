@@ -59,6 +59,7 @@ def bind_documents(
     legacy_tables=False,
     previous_tables=False,
     compact_tables=False,
+    legacy_table_boundaries=False,
     subjects=None,
 ):
     from .capture import canonical
@@ -73,6 +74,7 @@ def bind_documents(
                 legacy_tables=legacy_tables,
                 previous_tables=previous_tables,
                 compact_tables=compact_tables,
+                legacy_table_boundaries=legacy_table_boundaries,
             )
             for loss in losses:
                 findings.append(

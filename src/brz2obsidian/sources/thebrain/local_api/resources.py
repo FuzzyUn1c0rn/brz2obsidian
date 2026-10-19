@@ -570,12 +570,14 @@ def validate_payload_binding(source, snapshot, audit):
             legacy_tables,
             previous_tables,
             compact_tables,
+            legacy_table_boundaries,
         ) in (
-            (False, False, False, False, False),
-            (False, False, False, False, True),
-            (False, False, False, True, True),
-            (legacy_bom, False, True, False, True),
-            (legacy_bom, True, True, False, True),
+            (False, False, False, False, False, False),
+            (False, False, False, False, False, True),
+            (False, False, False, False, True, True),
+            (False, False, False, True, True, True),
+            (legacy_bom, False, True, False, True, True),
+            (legacy_bom, True, True, False, True, True),
         ):
             try:
                 documents, document_findings = bind_documents(
@@ -588,6 +590,7 @@ def validate_payload_binding(source, snapshot, audit):
                     legacy_tables=legacy_tables,
                     previous_tables=previous_tables,
                     compact_tables=compact_tables,
+                    legacy_table_boundaries=legacy_table_boundaries,
                 )
             except MigrationRefused:
                 continue

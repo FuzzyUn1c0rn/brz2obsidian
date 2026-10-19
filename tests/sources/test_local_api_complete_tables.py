@@ -236,11 +236,12 @@ Ordinary a | b pipeline.
             session.verify_consistency()
 
 
-def test_image_adjacent_plain_table_keeps_reference_spans_and_cell_ownership():
+@pytest.mark.parametrize("style", ["", ':(table="unfamiliar:value"):'])
+def test_image_adjacent_plain_table_keeps_reference_spans_and_cell_ownership(style):
     image = f".data/md-images/{IMAGE}.png"
     target = "brain://MzMzMzMzM0ODMzMzMzMzMw/Alone"
-    original = f"![First]({image})![Second]({image})\n||\n|1{{nl}}2|`first|second`{{nl}}[Alone]({target})|\n"
-    expected = f"![First]({image})![Second]({image})\n\n| | |\n|---|---|\n|1<br>2|<code>first&#124;second</code><br>[Alone]({target})|\n"
+    original = f"![First]({image})![Second]({image})\n||{style}\n|1{{nl}}2|`first|second`{{nl}}[Alone]({target})|\nFollowing prose.\n"
+    expected = f"![First]({image})![Second]({image})\n\n| | |\n|---|---|\n|1<br>2|<code>first&#124;second</code><br>[Alone]({target})|\n\nFollowing prose.\n"
     api = note_api(original)
     api.attachments[IMAGE] = attachment(
         IMAGE, HOME, 12, IMAGE + ".png", length=len(PNG)
@@ -255,6 +256,8 @@ def test_image_adjacent_plain_table_keeps_reference_spans_and_cell_ownership():
         with module.open(LocalApiSourceRef(BRAIN)) as session:
             document = session.snapshot.documents[0]
             assert document.text == expected
+            with session.open_payload(document.original_asset_id) as stream:
+                assert stream.read() == original.encode()
             assert [(r.kind, r.target, r.table_cell) for r in document.references] == [
                 ("image", IMAGE, False),
                 ("image", IMAGE, False),
@@ -588,6 +591,105 @@ def test_spaced_neutral_headers_keep_exact_compact_capture_compatibility(
     mixed_edits, delta = [], 0
     for index, change in enumerate(prior_edits):
         after = change.after.replace("|||", "| | |", 1) if index == 0 else change.after
+        mixed_edits.append(
+            change.model_copy(
+                update={
+                    "after": after,
+                    "adapted_start": change.start + delta,
+                    "adapted_end": change.start + delta + len(after),
+                }
+            )
+        )
+        delta += len(after) - len(change.before)
+    mixed = prior_document.model_copy(
+        update={
+            "text": mixed_text,
+            "text_digest": hashlib.sha256(mixed_text.encode()).hexdigest(),
+            "text_adaptations": tuple(mixed_edits),
+        }
+    )
+    with pytest.raises(MigrationRefused):
+        LocalApiSession(
+            source=source,
+            snapshot=prior.model_copy(update={"documents": (mixed,)}),
+            audit=audit,
+            payloads={document.original_asset_id: original.encode()},
+        )
+
+
+def test_frozen_styled_tables_keep_complete_29c3_block_boundaries(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    style = ':(table="unfamiliar:value"):'
+    original = (
+        "First paragraph.\n|||"
+        + style
+        + "\n|1|One|\nAfter first.\n\nSecond paragraph.\n|||"
+        + style
+        + "\n|2|Two|\nAfter second.\n"
+    )
+    prior_text = "First paragraph.\n| | |\n|---|---|\n|1|One|\nAfter first.\n\nSecond paragraph.\n| | |\n|---|---|\n|2|Two|\nAfter second.\n"
+    expected = "First paragraph.\n\n| | |\n|---|---|\n|1|One|\n\nAfter first.\n\nSecond paragraph.\n\n| | |\n|---|---|\n|2|Two|\n\nAfter second.\n"
+    with api_server(note_api(original)) as (_, address):
+        module = LocalApiSourceModule(
+            LocalApiConfig(api_url=address), credentials=lambda: KEY
+        )
+        with module.open(LocalApiSourceRef(BRAIN)) as live:
+            current = live.snapshot
+            document = current.documents[0]
+            assert document.text == expected
+            with live.open_payload(document.original_asset_id) as stream:
+                assert stream.read() == original.encode()
+            capture = next(tmp_path.glob("brz2obsidian-api-*"))
+            source = json.loads((capture / "source.json").read_bytes())
+            audit = json.loads((capture / "audit.json").read_bytes())
+    prior_edits, delta = [], 0
+    for change in document.text_adaptations:
+        after = change.after.strip("\n")
+        if after == change.before:
+            continue
+        prior_edits.append(
+            change.model_copy(
+                update={
+                    "after": after,
+                    "adapted_start": change.start + delta,
+                    "adapted_end": change.start + delta + len(after),
+                }
+            )
+        )
+        delta += len(after) - len(change.before)
+    prior_document = document.model_copy(
+        update={
+            "text": prior_text,
+            "text_digest": hashlib.sha256(prior_text.encode()).hexdigest(),
+            "text_adaptations": tuple(prior_edits),
+        }
+    )
+    prior = current.model_copy(
+        update={
+            "identity": current.identity.model_copy(
+                update={"source_sha256": "", "snapshot_digest": ""}
+            ),
+            "documents": (prior_document,),
+        }
+    )
+    frozen = LocalApiSession(
+        source=source,
+        snapshot=prior,
+        audit=audit,
+        payloads={document.original_asset_id: original.encode()},
+    )
+    try:
+        assert frozen.snapshot.documents == (prior_document,)
+        assert frozen.snapshot.findings == current.findings
+        frozen.verify_consistency()
+    finally:
+        frozen.close()
+    mixed_text = prior_text.replace("First paragraph.\n", "First paragraph.\n\n", 1)
+    mixed_edits, delta = [], 0
+    for index, change in enumerate(prior_edits):
+        after = "\n" + change.after if index == 0 else change.after
         mixed_edits.append(
             change.model_copy(
                 update={
