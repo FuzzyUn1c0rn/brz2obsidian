@@ -68,6 +68,10 @@ _Avoid_: Vault tag; thought type when referring to the destination concept
 The association of a vault note with a vault category, distinct from an ordinary relationship or tag assignment.
 _Avoid_: Parent/child relationship; source type assignment when referring to destination membership
 
+**Category mapping**:
+The association of a source classification, such as a thought type, with the vault category used for its imported members. The chosen category may be separate for that import or shared with existing vault content.
+_Avoid_: Category membership when referring to the mapping itself; note merge when implying that category-note content is combined
+
 **Category dashboard**:
 A category note that provides context and views of the notes belonging to that category.
 _Avoid_: Manually maintained index when membership is discovered dynamically
@@ -131,6 +135,14 @@ _Avoid_: Arrow when referring to the one-way setting; access restriction
 **Migration**:
 A one-time transfer from a source collection into a new vault.
 _Avoid_: Synchronization, update of an existing vault
+
+**Import**:
+Bringing a source collection into a vault for the first time, whether the vault is new or already contains other knowledge.
+_Avoid_: Update when referring to the first transfer of that collection; merge when implying that similarly named items are combined
+
+**Update**:
+Applying a later export of a previously imported source collection to the same vault while accounting for changes made in the vault since that import or its last update.
+_Avoid_: Reimport when implying replacement of the existing notes; synchronization when implying changes are also sent back to the source collection
 
 **Migration record**:
 A record connecting source items and relationships to their destination representations, including source details retained for traceability.
