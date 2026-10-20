@@ -9,7 +9,7 @@ import pytest
 from markdown_it import MarkdownIt
 
 from brz2obsidian.application.wiring import local_api_workflow
-from brz2obsidian.contracts import MigrationRefused
+from brz2obsidian.contracts import MigrationRefused, SourceFinding
 from brz2obsidian.sources.thebrain.local_api import (
     LocalApiConfig,
     LocalApiSession,
@@ -65,13 +65,7 @@ def test_color_table_live_and_frozen_keep_editable_cells_and_exact_evidence(
             )
             assert (edit.end, edit.adapted_start, edit.adapted_end) == (356, 0, 36)
             assert edit.source_digest == hashlib.sha256(TABLE.encode()).hexdigest()
-            finding = snapshot.findings[0]
-            assert finding.kind == "formatting_loss"
-            assert json.loads(finding.observed_json) == {
-                "feature": "table",
-                "declaration": DECLARATION,
-                "change": FACTS["color_loss"],
-            }
+            assert snapshot.findings == ()
             with live.open_payload(NOTE) as stream:
                 assert stream.read() == TABLE.encode()
             live.verify_consistency()
@@ -109,16 +103,18 @@ def test_prior_color_table_capture_keeps_its_complete_interpretation_and_rejects
             "text_adaptations": (),
         }
     )
-    previous_finding = current.findings[0].model_copy(
-        update={
-            "observed_json": json.dumps(
-                {
-                    "feature": "table",
-                    "declaration": DECLARATION,
-                    "change": "Malformed or ambiguous table retained as source text; supply an ordinary Markdown table with a matching header separator.",
-                }
-            )
-        }
+    previous_finding = SourceFinding(
+        kind="formatting_loss",
+        rule_id="local-api.note-formatting.v1",
+        affected=tuple(sorted((previous_document.owner, previous_document.key))),
+        evidence=previous_document.evidence,
+        observed_json=json.dumps(
+            {
+                "feature": "table",
+                "declaration": DECLARATION,
+                "change": "Malformed or ambiguous table retained as source text; supply an ordinary Markdown table with a matching header separator.",
+            }
+        ),
     )
     previous = current.model_copy(
         update={
@@ -217,9 +213,7 @@ def test_opaque_styling_and_literal_ownership_keep_structural_safety():
             changes = [
                 json.loads(f.observed_json)["change"] for f in session.snapshot.findings
             ]
-            assert len(changes) == len(styled) + len(malformed) + 1
-            assert changes.count(FACTS["color_loss"]) == len(styled)
-            assert changes.count(FACTS["style_loss"]) == 1
+            assert len(changes) == len(malformed)
             assert sum(
                 "Malformed or ambiguous table retained" in c for c in changes
             ) == len(malformed)
@@ -235,9 +229,8 @@ def test_workflow_publishes_editable_five_row_table_with_migration_evidence(tmp_
         result = local_api_workflow(
             LocalApiConfig(api_url=address), credentials=lambda: KEY
         ).convert(LocalApiSourceRef(BRAIN), destination)
-    assert result.outcome == "warnings", result.issues
-    assert len(result.issues) == 1 and result.issues[0].code == "formatting_loss"
-    assert FACTS["color_loss"] in result.issues[0].message
+    assert result.outcome == "clean", result.issues
+    assert result.issues == ()
     note = next(destination.glob("Home*.md")).read_text(encoding="utf-8")
     body = note_body(note)
     assert EXPECTED in body and DECLARATION not in body
@@ -269,10 +262,7 @@ def test_workflow_publishes_editable_five_row_table_with_migration_evidence(tmp_
         destination / "Attachments/22222222/Notes.md.original"
     ).read_bytes() == TABLE.encode()
     record = json.loads((destination / "migration-record.json").read_bytes())
-    finding = next(t for t in record["asset_targets"] if t["source_findings"])[
-        "source_findings"
-    ][0]
-    assert json.loads(finding["observed_json"])["declaration"] == DECLARATION
+    assert all(not target["source_findings"] for target in record["asset_targets"])
     adaptation = record["adaptations"][0]["text_edit"]
     assert adaptation["before"] == FACTS["header"] + DECLARATION
     assert adaptation["after"] == FACTS["expected_header"]

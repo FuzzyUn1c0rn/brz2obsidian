@@ -251,6 +251,7 @@ def adapt_note(
     previous_tables=False,
     compact_tables=False,
     legacy_table_boundaries=False,
+    preserve_table_warnings=False,
 ):
     """Return scoped adapted text, source-neutral exact edits and loss facts.
 
@@ -261,6 +262,7 @@ def adapt_note(
     separate_tables = not (
         legacy_table_boundaries or legacy_tables or previous_tables or compact_tables
     )
+    warn_tables = preserve_table_warnings or not separate_tables
     original = text
     text, literal_edits = adapt_literals(text)
     lines = re.findall(r"[^\r\n]*(?:\r\n|\r|\n|$)", text)
@@ -571,18 +573,19 @@ def adapt_note(
                 native_row += "\n"
             if row != native_row:
                 replace(row_line, row, native_row)
-        change = (
-            "Custom table colors are not reproduced; the editable table uses Obsidian's native styling."
-            if colors_match
-            else "Column widths and justification become native responsive table layout; edit the table in Obsidian to adjust its presentation."
-        )
-        if style_match:
-            change = "Source table styling is omitted; the editable table uses native Markdown layout."
-        if not (legacy_tables or previous_tables or separator_present) and any(
-            cell.strip() for cell in cells
-        ):
-            change += " Blank native headings preserve every source row as data."
-        loss("table", declaration, change)
+        if warn_tables:
+            change = (
+                "Custom table colors are not reproduced; the editable table uses Obsidian's native styling."
+                if colors_match
+                else "Column widths and justification become native responsive table layout; edit the table in Obsidian to adjust its presentation."
+            )
+            if style_match:
+                change = "Source table styling is omitted; the editable table uses native Markdown layout."
+            if not (legacy_tables or previous_tables or separator_present) and any(
+                cell.strip() for cell in cells
+            ):
+                change += " Blank native headings preserve every source row as data."
+            loss("table", declaration, change)
 
     line = 0
     while not legacy_tables and line < len(lines):
@@ -655,7 +658,7 @@ def adapt_note(
                 native += "\n"
             if native != raw:
                 replace(row_line, raw, native)
-        if not separator:
+        if warn_tables and not separator:
             loss(
                 "table",
                 lines[start].rstrip("\r\n"),

@@ -57,13 +57,15 @@ The complete command becomes clickable. Literal/code examples, differing targets
 ordinary valid links and prose are unchanged; this is no general link repair.
 
 Original bytes remain unchanged. Existing exact adaptation spans, before/after
-text, scoped digests and final reference bindings apply. Report neutral headings
-and discarded styling as actual presentation adaptations that preserve source
-content. Malformed table-shaped content retains its source and actionable finding;
-a warning is never proof that an intended table converted successfully.
+text, scoped digests and final reference bindings apply. Successful plain Markdown
+normalization is expected behavior and emits no warning for neutral headings,
+discarded styling or block spacing. Exact adaptations remain in the migration
+record and report provenance. Malformed table-shaped content retains its source
+and actionable warning; unrelated warnings, including image sizing, remain.
+A warning is never proof that an intended table converted successfully.
 
 Frozen validation must match complete current or complete prior Documents AND
-formatting findings, including exact 29c3 block boundaries, compact-header 7bda output, 52ca table/header/link behavior, pre237,
+formatting findings, including prior successful-table warnings, exact 29c3 block boundaries, compact-header 7bda output, 52ca table/header/link behavior, pre237,
 older color and existing BOM alternatives.
 Preserve prior sealed identities; reject invented cells, edits, references,
 findings or original bytes. Never mix old/new row interpretations.

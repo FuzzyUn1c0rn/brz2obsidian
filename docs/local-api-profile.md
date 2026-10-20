@@ -356,6 +356,10 @@ and native presentation gates remain separate from this synthetic eligibility.
 Historical qualification below is retained for prior-capture interpretation.
 Current acquisition follows [the plain-table amendment](thebrain-table-qualification.md):
 well-formed styling is discarded opaquely and never establishes header meaning.
+Successful table normalization emits no warning; exact text adaptations, source
+originals and report provenance remain. Malformed tables and unrelated formatting
+warnings remain actionable. Historical successful-table findings remain valid only
+when reopening their complete sealed prior interpretation.
 
 This finite amendment qualifies the raw-text shape observed in the Wireshark
 thought note and reproduced in [#235](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/235).

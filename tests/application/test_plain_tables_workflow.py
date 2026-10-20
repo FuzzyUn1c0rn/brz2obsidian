@@ -33,7 +33,8 @@ Following prose.
     before = source.read_bytes()
     destination = tmp_path / "vault"
     result = default_workflow().convert(source, destination)
-    assert result.outcome == "warnings", result.issues
+    assert result.outcome == "clean", result.issues
+    assert result.issues == ()
     body = note_body(
         (destination / "Home \u2014 Entry thought.md").read_text(encoding="utf-8")
     )
@@ -73,7 +74,79 @@ Following prose.
         for e in edits
     )
     report = (destination / "Migration report.md").read_text(encoding="utf-8")
-    assert "blank native headings preserve every source row" in report
+    assert "exact text adaptations for Markdown display" in report
+    assert "migration-record.json" in report
+
+
+def test_table_normalization_keeps_unresolved_and_unrelated_warnings(tmp_path):
+    original = """|First|Meaning|:(table="unfamiliar:value"):
+|one|Expected table.|
+
+|Broken|Table|
+|one|two|three|
+
+![First](.data/md-images/photo.png#$width=50p$)
+![Second](.data/md-images/photo.png#$width=25p$)
+
+> [!tip|icon:😂] Advice
+> Keep this icon fallback warning.
+"""
+    source = links_archive(
+        tmp_path / "mixed.brz",
+        original,
+        resources=[({"Type": 12, "Location": "photo.png"}, PNG)],
+    )
+    before = source.read_bytes()
+    destination = tmp_path / "vault"
+    result = default_workflow().convert(source, destination)
+    assert result.outcome == "warnings", result.model_dump_json()
+    assert sorted(issue.code for issue in result.issues) == [
+        "formatting_loss",
+        "formatting_loss",
+        "image_presentation_normalized",
+        "image_presentation_normalized",
+    ]
+    features = sorted(
+        json.loads(issue.message.split("Observed: ", 1)[1])["feature"]
+        for issue in result.issues
+        if issue.code == "formatting_loss"
+    )
+    assert features == ["callout_icon", "table"]
+    malformed = next(
+        issue
+        for issue in result.issues
+        if "Malformed or ambiguous table" in issue.message
+    )
     assert (
-        "styling is omitted" if style else "both data cells are preserved"
-    ) in report
+        json.loads(malformed.message.split("Observed: ", 1)[1])["declaration"]
+        == "|Broken|Table|"
+    )
+    assert {
+        declaration
+        for declaration in ("#$width=50p$", "#$width=25p$")
+        if any(
+            declaration in issue.message
+            for issue in result.issues
+            if issue.code == "image_presentation_normalized"
+        )
+    } == {"#$width=50p$", "#$width=25p$"}
+    body = note_body(
+        (destination / "Home — Entry thought.md").read_text(encoding="utf-8")
+    )
+    assert "| | |\n|---|---|\n|First|Meaning|\n|one|Expected table.|" in body
+    assert "|Broken|Table|\n|one|two|three|" in body
+    assert (
+        destination / "Attachments/22222222/Notes.md.original"
+    ).read_bytes() == original.encode()
+    assert (destination / "Attachments/22222222/photo.png").read_bytes() == PNG
+    assert source.read_bytes() == before
+    record = json.loads((destination / "migration-record.json").read_bytes())
+    assert any(
+        change["text_edit"]
+        and change["text_edit"]["source_digest"]
+        == hashlib.sha256(original.encode()).hexdigest()
+        for change in record["adaptations"]
+    )
+    assert "exact text adaptations for Markdown display" in (
+        destination / "Migration report.md"
+    ).read_text(encoding="utf-8")

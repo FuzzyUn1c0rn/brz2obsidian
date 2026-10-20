@@ -26,6 +26,32 @@ FACTS = json.loads(
 )
 
 
+def table_findings(document, facts):
+    return tuple(
+        sorted(
+            (
+                SourceFinding(
+                    kind="formatting_loss",
+                    rule_id="local-api.note-formatting.v1",
+                    affected=tuple(sorted((document.owner, document.key))),
+                    evidence=document.evidence,
+                    observed_json=json.dumps(
+                        {
+                            "feature": "table",
+                            "declaration": declaration,
+                            "change": change,
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                )
+                for declaration, change in facts
+            ),
+            key=lambda finding: finding.observed_json,
+        )
+    )
+
+
 def test_plain_tables_keep_all_rows_cells_breaks_and_exact_evidence():
     cases = FACTS["cases"][:7]
     original = "\n".join(case["raw"] for case in cases)
@@ -40,7 +66,7 @@ def test_plain_tables_keep_all_rows_cells_breaks_and_exact_evidence():
             assert "<code>print a\\|b</code>" in MarkdownIt("commonmark").enable(
                 "table"
             ).render(document.text)
-            assert len(session.snapshot.findings) == 7
+            assert session.snapshot.findings == ()
             edit = document.text_adaptations[0]
             assert (edit.start, edit.end, edit.before, edit.after) == (
                 0,
@@ -232,7 +258,7 @@ Ordinary a | b pipeline.
             assert (
                 sum("Malformed or ambiguous table" in change for change in changes) == 2
             )
-            assert changes.count(FACTS["neutral_header_loss"]) == 2
+            assert len(changes) == 2
             session.verify_consistency()
 
 
@@ -320,11 +346,7 @@ def test_styling_never_promotes_data_and_combined_styles_become_plain_tables():
         )
         with module.open(LocalApiSourceRef(BRAIN)) as session:
             assert session.snapshot.documents[0].text == expected
-            assert len(session.snapshot.findings) == 8
-            changes = [
-                json.loads(f.observed_json)["change"] for f in session.snapshot.findings
-            ]
-            assert not any("Malformed" in change for change in changes)
+            assert session.snapshot.findings == ()
             with session.open_payload(
                 session.snapshot.documents[0].original_asset_id
             ) as stream:
@@ -573,6 +595,21 @@ def test_spaced_neutral_headers_keep_exact_compact_capture_compatibility(
                 update={"source_sha256": "", "snapshot_digest": ""}
             ),
             "documents": (prior_document,),
+            "findings": table_findings(
+                document,
+                (
+                    ("|First|Meaning|", FACTS["neutral_header_loss"]),
+                    ("||", FACTS["imported_header_loss"]),
+                    (
+                        ':(table="unfamiliar:value"):',
+                        "Source table styling is omitted; the editable table uses native Markdown layout.",
+                    ),
+                    (
+                        ':(table="existing:spacing"):',
+                        "Source table styling is omitted; the editable table uses native Markdown layout.",
+                    ),
+                ),
+            ),
         }
     )
     frozen = LocalApiSession(
@@ -583,10 +620,30 @@ def test_spaced_neutral_headers_keep_exact_compact_capture_compatibility(
     )
     try:
         assert frozen.snapshot.documents == (prior_document,)
-        assert frozen.snapshot.findings == current.findings
+        assert frozen.snapshot.findings == prior.findings
         frozen.verify_consistency()
     finally:
         frozen.close()
+    warned = prior.model_copy(update={"documents": current.documents})
+    historical = LocalApiSession(
+        source=source,
+        snapshot=warned,
+        audit=audit,
+        payloads={document.original_asset_id: original.encode()},
+    )
+    try:
+        assert historical.snapshot.documents == current.documents
+        assert historical.snapshot.findings == prior.findings
+        historical.verify_consistency()
+    finally:
+        historical.close()
+    with pytest.raises(MigrationRefused):
+        LocalApiSession(
+            source=source,
+            snapshot=warned.model_copy(update={"findings": prior.findings[:1]}),
+            audit=audit,
+            payloads={document.original_asset_id: original.encode()},
+        )
     mixed_text = compact.replace("|||", "| | |", 1)
     mixed_edits, delta = [], 0
     for index, change in enumerate(prior_edits):
@@ -672,6 +729,16 @@ def test_frozen_styled_tables_keep_complete_29c3_block_boundaries(
                 update={"source_sha256": "", "snapshot_digest": ""}
             ),
             "documents": (prior_document,),
+            "findings": table_findings(
+                document,
+                (
+                    (
+                        style,
+                        "Source table styling is omitted; the editable table uses native Markdown layout.",
+                    ),
+                )
+                * 2,
+            ),
         }
     )
     frozen = LocalApiSession(
@@ -682,7 +749,7 @@ def test_frozen_styled_tables_keep_complete_29c3_block_boundaries(
     )
     try:
         assert frozen.snapshot.documents == (prior_document,)
-        assert frozen.snapshot.findings == current.findings
+        assert frozen.snapshot.findings == prior.findings
         frozen.verify_consistency()
     finally:
         frozen.close()

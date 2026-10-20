@@ -102,7 +102,7 @@ Unmatched ` tick
         converted.model_dump_json()
     )
     assert inspected.issues == converted.issues
-    assert len(converted.issues) == 2
+    assert len(converted.issues) == 1
     assert {i.code for i in converted.issues} == {"formatting_loss"}
     body = note_body(
         (tmp_path / "vault/Home — Entry thought.md").read_text(encoding="utf-8")
@@ -122,7 +122,7 @@ Unmatched ` tick
     "text",
     [
         "> [!tip|icon:`invalid`]\n> Body.\n",
-        '|One|Two|:(table="`ambiguous`"):\n|1|2|\n',
+        '|One|Two|:(table="`ambiguous`"extra"):\n|1|2|\n',
         "[/toc depth=`2`]\n",
     ],
 )
@@ -244,9 +244,8 @@ def test_active_table_does_not_rewrite_code_shaped_comment_payload(tmp_path):
     text = '|One|Two|:(table="column-widths:-1,0,84;justification:default"):\n|<!-- `x\\|y` -->|value|\n'
     source = literal_archive(tmp_path / "source.brz", text.encode())
     result = default_workflow().convert(source, tmp_path / "vault")
-    assert result.outcome == "warnings", result.model_dump_json()
-    assert len(result.issues) == 1
-    assert result.issues[0].code == "formatting_loss"
+    assert result.outcome == "clean", result.model_dump_json()
+    assert result.issues == ()
     body = note_body((tmp_path / "vault/Home — Entry thought.md").read_bytes())
     assert b"| | |\n|---|---|\n|One|Two|\n|<!-- `x\\|y` -->|value|\n" in body
     assert b"<code>" not in body
@@ -286,9 +285,8 @@ def test_literal_table_metadata_in_a_code_cell_does_not_hide_the_active_suffix(
     text = '|`code :(table="ambiguous"): literal`|Two|:(table="column-widths:-1,0,84;justification:default"):\n|1|2|\n'
     source = literal_archive(tmp_path / "source.brz", text.encode())
     result = default_workflow().convert(source, tmp_path / "vault")
-    assert result.outcome == "warnings", result.model_dump_json()
-    assert len(result.issues) == 1
-    assert result.issues[0].code == "formatting_loss"
+    assert result.outcome == "clean", result.model_dump_json()
+    assert result.issues == ()
     body = note_body((tmp_path / "vault/Home — Entry thought.md").read_bytes())
     assert (
         b'| | |\n|---|---|\n|`code :(table="ambiguous"): literal`|Two|\n|1|2|\n' in body
@@ -338,7 +336,7 @@ def test_sample_inserts_preserve_content_and_disclose_only_lossy_adaptations(tmp
     assert "[/toc/]" not in body
     assert "column-widths" not in body
     assert {i.code for i in inspected.issues} == {"formatting_loss"}
-    assert len(inspected.issues) == 2
+    assert len(inspected.issues) == 1
     assert (
         tmp_path / "vault/Attachments/22222222/Notes.md.original"
     ).read_bytes() == SAMPLE.encode()
@@ -762,7 +760,7 @@ def test_table_cells_keep_escapes_code_formatting_and_existing_valid_tables(tmp_
 """
     source = literal_archive(tmp_path / "source.brz", text.encode())
     result = default_workflow().convert(source, tmp_path / "vault")
-    assert result.outcome == "warnings", result.model_dump_json()
+    assert result.outcome == "clean", result.model_dump_json()
     body = note_body(
         (tmp_path / "vault/Home — Entry thought.md").read_text(encoding="utf-8")
     )
@@ -887,7 +885,7 @@ def test_insert_warnings_surface_in_cli_and_reviewed_ui_authorization(tmp_path, 
     source = literal_archive(tmp_path / "source.brz", SAMPLE.encode())
     assert main(["inspect", str(source), "--json"]) == 2
     envelope = json.loads(capsys.readouterr().out)
-    assert len(envelope["issues"]) == 2
+    assert len(envelope["issues"]) == 1
     assert {a["kind"] for a in envelope["inspection"]["adaptations"]} >= {
         "markdown_insert"
     }
@@ -984,10 +982,10 @@ def test_generated_code_cells_escape_markup_without_admitting_authored_html(tmp_
     text = '|Code|Other|:(table="column-widths:-1,0,84;justification:default"):\n|`<a>brain://literal|& text</a>`|value|\n'
     source = literal_archive(tmp_path / "source.brz", text.encode())
     inspected = default_workflow().inspect(source)
-    assert inspected.outcome == "warnings", inspected.model_dump_json()
+    assert inspected.outcome == "clean", inspected.model_dump_json()
     assert inspected.counts.source_references == 0
     result = default_workflow().convert(source, tmp_path / "vault")
-    assert result.outcome == "warnings", result.model_dump_json()
+    assert result.outcome == "clean", result.model_dump_json()
     body = note_body(
         (tmp_path / "vault/Home — Entry thought.md").read_text(encoding="utf-8")
     )
