@@ -36,8 +36,8 @@ Each case has:
   awaits review; case 3 is blocked and cannot be treated as an applied update.
 - `before-inventory.json` and `proposal-inventory.json`: every path, size and
   SHA-256, including synthetic `.obsidian` settings and attachments.
-- `native-before/` and `native-proposal/`: fresh review copies. Open these copies
-  only after the safe native environment is established. Preserve snapshots.
+- `native-before/` and `native-proposal/`: fresh review copies. Native review uses
+  explicit synthetic paths through the installed app UI; preserve snapshots.
 - `independent-expectations.json`: explicit expected membership lists, tags,
   overview targets, absent targets and source-reference content from the
   separately authored `scenarios.json`, rather than inferring success from
@@ -78,84 +78,82 @@ This only establishes safety properties of these chosen synthetic filenames.
 It does not settle the general naming algorithm, case/Unicode collisions,
 arbitrary shortened links, filesystem limitations or plugin behavior.
 
-## Bounded native observation plan
+## Bounded native evidence
 
-Decision: whether these explicit choices present shared membership and preserved
-source content clearly, and whether these fixture links retain their targets.
-Known evidence: exact identities, inventories, bytes and expected members above;
-official research leaves ambiguous resolution and actual Base rendering open.
+Independent reviewer `/root/prototype_review` observed three fresh proposal copies
+in installed **Obsidian 1.14.4**, default dark theme, during a **10m19s** batch on
+2026-10-20. The coordinator authorized standard **Open folder as vault** with
+explicit synthetic paths; a separate app profile was not required. The app
+briefly restored a retained vault; only chrome/vault-manager navigation was used
+to leave it, with no retained note or settings edits. No retained-vault captures,
+community-plugin installation or Sync activation occurred. The earlier proposed
+profile-isolation prerequisite and blanket access limit are superseded.
 
-Batch: these three cases only, at most 15 minutes after the isolated workspace is
-ready. Each case already includes present-content controls (existing Topic,
-Local project, existing Ada and existing Work note). Stop once listed targets
-and Base members are observed, or at the first isolation/version/plugin limit.
-Do not expand to extra vaults or install plugins. No paid Sync activity.
+Canonical published evidence is the [independent native report summary](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/246#issuecomment-6299475058).
+The full local report and exact source/pre/post inventories are under
+`tmp/merge-wayfinding/prototype-review/native-1603b9fd/`. Source reference:
+local commit `fc98f9b90afcdc45da916ee48b6966cf7ed9f6fd`; native input copies came
+from generator run `tmp/merge-wayfinding/categories/20261020T190242Z-4dc4a41f/`.
+The report's `source-inventory.json` and `pre-inventories.json` bind actual inputs;
+subsequent documentation edits do not change that observed candidate.
 
-Native access discovery on 2026-10-20 established that the Computer Use package
-`@oai/sky` imports and `sky.list_apps()` works. It returned no Obsidian window.
-The pre-existing executable exists at
-`C:/Users/stefa/AppData/Local/Obsidian/Obsidian.exe`; its version metadata did not
-yield a usable product/file version. No app was launched or activated. The
-documented `sky.launch_app` accepts an identifier/path, with no isolated-profile
-arguments/environment. Official [URI documentation](https://obsidian.md/help/uri)
-and [CLI documentation](https://obsidian.md/help/cli) did not establish an isolated
-profile contract. An ordinary launch might restore retained vaults or change
-global recent-vault state. Safe isolation was therefore not established; every
-native observation remains **unverified**. This is an access/isolation limit,
-not a claim that Obsidian is absent or that the native helper failed.
+Observed results:
 
-When the coordinator resumes native review:
+- Shared Projects rendered exactly three expected rows; separate imported Topics
+  rendered one. The shortened Topic and relative Markdown heading links reached
+  the existing Topic content. Intentional targets stayed visibly unresolved and
+  were not created.
+- The source-reference note visibly preserved source prose/identity, the shared
+  category link and imported attachment link. The import overview displayed
+  Projects (shared), Topics (separate) and original-content navigation; its
+  separate-category link reached the expected category.
+- The proposed compatible People Base rendered exactly the two expected rows.
+  Existing People prose and its unexecuted Dataview fence were visible.
+- Pending remap rows matched Work/Projects expectations. The moved note retained
+  source identity, manual memberships/prose and visible `atlas/research`/`reviewed`
+  tag chips; the incoming relationship reached it. This was a hand-authored
+  snapshot, with no automatic move, merge or Apply demonstrated.
+- All non-`.obsidian` bytes and paths across all six copies stayed identical to
+  pre-inventories. Only the three opened proposal copies changed expected
+  `.obsidian` serialization/defaults/workspace state. Before copies were unopened
+  and fully unchanged.
 
-1. Establish an approved disposable Obsidian profile/environment before launching.
-   Do not guess an Electron switch, change retained user preferences, open a
-   retained vault or add plugins. If isolation remains unavailable, leave the
-   native gate open and use a user-controlled review environment.
-2. Within that environment choose **Open folder as vault**, selecting exactly
-   the printed case's `native-before/` or `native-proposal/` absolute path.
-   Confirm the visible vault path/name before following any note link. Record
-   actual Obsidian version, theme, core plugins and automatic-link-update setting.
-3. Case 1: open `Existing/Link probes.md` in both copies; observe the shortened
-   Topic link and qualified/alias/heading/block/Markdown controls reach the
-   existing content. Inspect uncreated links/listings without clicking them.
-   Open shared Projects and separate Topics dashboards and compare actual row
-   sets to `independent-expectations.json`. Open the source reference and its
-   attachment, then the import and existing overviews.
-4. Case 2: inspect the existing custom People dashboard, then the proposed
-   compatible view. Observe two expected linked members; record unsupported
-   custom-query rendering separately. Do not install Dataview or imply that a
-   fenced code example proves any plugin behavior.
-5. Case 3: inspect the moved note/source identity, unchanged manual membership
-   and prose, incoming relationship to the moved note, proposed Work view and
-   review JSON. The UI/file snapshot cannot approve the pending conflict. Do not
-   simulate Apply or describe its proposal as a completed update.
-6. Preserve a native post-interaction inventory/hashes, separating expected
-   `.obsidian` workspace/cache writes from note/content differences. Compare to
-   the original manifests. Record case/requirement status and exact observations;
-   screenshots alone do not prove file preservation or link targets.
+Unverified observations remain precise: attachment-viewer navigation, native
+existing-root-overview presentation, Tag pane interaction, qualified/alias/
+explicit-heading/block link clicks, existing Topics native view and native
+before-copy comparison. Static bytes, visible links and tag chips establish
+different facts. Automatic rename/link rewriting on/off, duplicate-basename
+ambiguity, template insertion, arbitrary plugins, Sync/Git recovery and production
+import correctness were not established. A further native sample needs a concrete
+decision gap; no broad rerun or separate-profile gate is implied.
 
-Rename/move behavior under automatic-link-update on/off, ambiguous duplicate
-basenames, template insertion and full-copy/Sync history are outside this first
-batch. They remain unverified; a later batch needs a concrete decision gap.
+## Accepted presentation and remaining scope
 
-## Proposed presentation details — awaiting human verdict
+On **2026-10-20**, after viewing actual source-reference and overview captures,
+the user accepted: “an import-specific category overview labels categories as
+shared or separate, and incoming category prose/attachments are preserved in a
+clearly named source-reference note linked to the shared category”.
 
-These stable IDs are candidates for recording an accepted presentation. None has
-been approved, and the HTML is an explanatory model rather than the final app UI.
-Native vault appearance needs its own actual Obsidian reference/version/theme.
+Approval covers organization and shown links only. It does not settle exact
+typography, duplicate title display, metadata visibility or final naming details.
+The HTML remains an explanatory model, and this verdict does not approve all
+of #246. The coordinator owns publishing the canonical accepted-presentation
+record; the native evidence comment above precedes this narrow verdict.
 
-| Candidate ID | Proposed detail | Evidence/check needed |
+| ID | Status and requirement | Reference and planned check |
 | --- | --- | --- |
-| CAT-P1 | Show each incoming category's title, separate/shared choice and exact selected vault category. A same-name match does not select sharing automatically. | Demo actions; final UI behavior and user verdict. |
-| CAT-P2 | Keep shared category prose unchanged; preserve source category content in a separately named reference note with links to shared category and source attachments. | Case-1/2 static bytes; native reference/attachment presentation; user verdict. |
-| CAT-P3 | Import overview lists only categories used by that import and labels shared/separate choices; existing vault overview stays authored. | Static exact link set; native overview navigation and user verdict. |
-| CAT-P4 | Explain the incompatible existing dashboard and offer a separate compatible view for its own review. | Case-2 preserved bytes and explicit-target Base; actual rows/native appearance and user verdict. |
-| CAT-P5 | Show stable source identity, old/new category target and affected memberships/links; visibly block a whole proposal while a manual membership conflict needs a verdict. | Case-3 JSON/static evidence; final review interactions and user verdict. |
-| CAT-P6 | Explain readable source tag namespace versus explicit existing-tag reuse and remember the mapping. | Static tags/mapping examples; native tag view and user verdict. |
+| CAT-P2 | **Accepted organization/links:** preserve incoming category prose/attachments in a clearly named source-reference note linked to the shared category. Exact final name, typography and metadata visibility remain open. | Actual `01-source-reference.png` under the native evidence directory; static source prose/attachment bytes and explicit links; future output checks independently assert separate content and links, plus native organization/navigation comparison. Attachment viewer remains unverified. |
+| CAT-P3 | **Accepted organization/labels:** the import-specific categories overview labels categories as shared or separate. Exact styling remains open. Import scope and preserving the existing overview are earlier product constraints. | Actual `01-scoped-overview.png`; static exact category link set and preserved existing overview; future output checks assert labels/targets and native navigation. Existing overview native appearance remains unverified. |
+| CAT-P1 | **Proposed presentation, reconcile with final GUI:** show each incoming category and its explicit separate/shared destination choice. | Browser/static explanation and native output observed; final mapping UI presentation is not accepted by CAT-P2/P3. |
+| CAT-P4 | **Proposed presentation, reconcile route:** explain incompatibility and offer the separately reviewed compatible view. | Native People Base exact rows observed; where the preserved category exposes the additional view remains a material presentation decision. Arbitrary custom-query adaptation stays outside the accepted boundary. |
+| CAT-P5 | **Proposed presentation, reconcile with final review UI:** show identity/mapping consequences and block unresolved manual membership conflicts. | Browser block-state and native pending snapshot observed. The illustrative conflict needs no user data-resolution verdict; actual future conflicts require their own review. |
+| CAT-P6 | **Proposed presentation, reconcile with final mapping UI:** explain namespace/reuse and remembered tag choices. | Static mappings and native tag chips observed; explanation/discovery UI is not accepted by CAT-P2/P3. |
 
-Remaining user decisions include whether reference-note names/location and scoped
-overview wording are understandable; how a separately reviewed compatible view
-should be reached from an incompatible shared category; and the case-3 manual
-membership conflict verdict. Those do not reopen the accepted initial
-linked-membership boundary. General filename reservation and persistence/support
-contracts need specification work after native evidence; this prototype makes no
-new product-policy decision.
+The remaining material category presentation decision is how users reach and
+review a compatible view from an incompatible preserved dashboard; mapping/tag
+explanation and conflict presentation should be reconciled with the owning GUI
+design, rather than requiring a choice of fictional memberships. The case-3
+`verdict: null` models a future user's conflict and is not a pending real-data
+approval request. General filename reservation, identity persistence and support
+contracts remain specification questions. Initial linked-membership support and
+the accepted organization do not need to be reopened.
