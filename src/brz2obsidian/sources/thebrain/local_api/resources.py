@@ -10,7 +10,7 @@ from zipfile import BadZipFile, ZipFile
 
 from PIL import Image
 
-from brz2obsidian.contracts import Asset, Document
+from brz2obsidian.contracts import Asset, Document, MigrationRefused
 
 from ..external_files import external_file_uri
 from .declarations import source_date, uuid
@@ -554,30 +554,55 @@ def validate_payload_binding(source, snapshot, audit):
             and document.text_adaptations[0].before == "\ufeff"
             and document.text_adaptations[0].after == ""
         )
-        expected_documents, document_findings = bind_documents(
-            [source_document],
-            snapshot.assets,
-            {i.key for i in snapshot.items},
-            with_findings=True,
-            preserve_bom=raw.startswith("\ufeff") and not signature_removed,
-        )
-        expected = expected_documents[0]
-        if document != expected:
-            # Frozen captures may retain the exact pre-color-table interpretation.
-            # Recompute the whole document and its findings, never trust supplied
-            # adaptation metadata to waive the source binding. Live acquisition
-            # always uses the current interpretation.
-            prior_documents, prior_findings = bind_documents(
-                [source_document],
-                snapshot.assets,
-                {i.key for i in snapshot.items},
-                with_findings=True,
-                preserve_bom=raw.startswith("\ufeff") and not signature_removed,
-                preserve_table_colors=True,
-            )
-            if document == prior_documents[0]:
-                expected, document_findings = prior_documents[0], prior_findings
-        expected_findings.extend(document_findings)
+        retained_findings = [
+            finding
+            for finding in snapshot.findings
+            if finding.rule_id == "local-api.note-formatting.v1"
+            and finding.affected == tuple(sorted((document.owner, document.key)))
+        ]
+        expected = None
+        # Compare complete interpretations, including findings when text is
+        # unchanged. Legacy options only validate frozen captures, never live.
+        legacy_bom = raw.startswith("\ufeff") and not signature_removed
+        for (
+            preserve_bom,
+            preserve_colors,
+            legacy_tables,
+            previous_tables,
+            compact_tables,
+            legacy_table_boundaries,
+            preserve_table_warnings,
+        ) in (
+            (False, False, False, False, False, False, False),
+            (False, False, False, False, False, False, True),
+            (False, False, False, False, False, True, True),
+            (False, False, False, False, True, True, True),
+            (False, False, False, True, True, True, True),
+            (legacy_bom, False, True, False, True, True, True),
+            (legacy_bom, True, True, False, True, True, True),
+        ):
+            try:
+                documents, document_findings = bind_documents(
+                    [source_document],
+                    snapshot.assets,
+                    {item.key for item in snapshot.items},
+                    with_findings=True,
+                    preserve_bom=preserve_bom,
+                    preserve_table_colors=preserve_colors,
+                    legacy_tables=legacy_tables,
+                    previous_tables=previous_tables,
+                    compact_tables=compact_tables,
+                    legacy_table_boundaries=legacy_table_boundaries,
+                    preserve_table_warnings=preserve_table_warnings,
+                )
+            except MigrationRefused:
+                continue
+            if document == documents[0] and sorted(
+                retained_findings, key=lambda finding: finding.observed_json
+            ) == sorted(document_findings, key=lambda finding: finding.observed_json):
+                expected = documents[0]
+                expected_findings.extend(document_findings)
+                break
         candidates = [
             key
             for key, value in attachments.items()

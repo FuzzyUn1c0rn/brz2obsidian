@@ -34,32 +34,35 @@ CALLOUTS = frozenset(
 )
 _CALLOUT = re.compile(r"^( {0,3}(?:> ?)+)\[!([A-Za-z]+)([^\]]*)\]([+-]?)(.*)$")
 _TABLE = re.compile(r':\(table="column-widths:([-0-9,]+);justification:([a-z]+)"\):$')
-_COLOR_TABLE = re.compile(
-    r':\(table="'
-    + ";".join(
-        key + r":#[0-9a-fA-F]{8}"
-        for key in (
-            "foreground-color",
-            "background-color",
-            "alt-background-color",
-            "line-color",
-            "first-row-background-color",
-            "first-row-foreground-color",
-            "first-row-line-color",
-            "first-column-background-color",
-            "first-column-foreground-color",
-            "first-column-line-color",
-        )
+_TABLE_COLORS = ";".join(
+    key + r":#[0-9a-fA-F]{8}"
+    for key in (
+        "foreground-color",
+        "background-color",
+        "alt-background-color",
+        "line-color",
+        "first-row-background-color",
+        "first-row-foreground-color",
+        "first-row-line-color",
+        "first-column-background-color",
+        "first-column-foreground-color",
+        "first-column-line-color",
     )
-    + r'"\):$'
+)
+_COLOR_TABLE = re.compile(r':\(table="' + _TABLE_COLORS + r'"\):$')
+_STYLE_TABLE = re.compile(r':\(table="(?:[^"\\\r\n]|\\.)*"\):$')
+_TABLE_CODE_LINK = re.compile(
+    r"(?P<space>\s*)`(?P<prefix>curl -[Ii] )\[(?P<url>https?://[^\s`|<>\[\]()\\]+)`\]\((?P=url)\)(?P<tail>\s*)"
 )
 
 
-def _cells(row, source_offset, code_ranges, literal_ranges):
+def _cells(row, source_offset, code_ranges, literal_ranges, *, legacy=False):
     """Only parser-owned code or escapes shelter an authored cell's pipes."""
     source_offset += len(row) - len(row.lstrip())
     row = row.strip()
     if not row.startswith("|") or not row.endswith("|"):
+        return None
+    if not legacy and (len(row[:-1]) - len(row[:-1].rstrip("\\"))) % 2:
         return None
     if any(
         begin <= boundary < end
@@ -166,7 +169,7 @@ def _toc_label(title, mathematics):
     return label
 
 
-def _native_code_pipes(row, source_offset, code_ranges):
+def _native_code_pipes(row, source_offset, code_ranges, *, legacy=False):
     """A narrowly generated code element preserves native code-cell pipes.
 
     Obsidian displays a backslash for pipe escapes inside inline code. Source
@@ -185,19 +188,81 @@ def _native_code_pipes(row, source_offset, code_ranges):
         content = content.replace("\r", " ").replace("\n", " ")
         if content.startswith(" ") and content.endswith(" ") and content.strip():
             content = content[1:-1]
-        return (
-            "<code>" + escape(content, quote=False).replace("|", "&#124;") + "</code>"
-        )
+        content = escape(content, quote=False)
+        if not legacy:
+            content = content.replace("\\", "&#92;")
+        return "<code>" + content.replace("|", "&#124;") + "</code>"
 
     return re.sub(r"(?<![\\`])(`+)(?!`)(.*?)(?<!`)\1(?!`)", replace, row)
 
 
-def adapt_note(text, *, preserve_table_colors=False):
+def _native_table_row(
+    row, source_offset, code_ranges, literal_ranges, *, previous_tables=False
+):
+    changes = []
+    if not previous_tables:
+        cells = _cells(row, source_offset, code_ranges, literal_ranges)
+        position = len(row) - len(row.lstrip()) + 1
+        for cell in cells or ():
+            match = _TABLE_CODE_LINK.fullmatch(cell)
+            if (
+                match
+                and (
+                    source_offset + position + len(match["space"]),
+                    source_offset + position + match.end("url") + 1,
+                )
+                in code_ranges
+            ):
+                linked = (
+                    match["space"]
+                    + "[`"
+                    + match["prefix"]
+                    + match["url"]
+                    + "`]("
+                    + match["url"]
+                    + ")"
+                    + match["tail"]
+                )
+                changes.append((position, position + len(cell), linked))
+            position += len(cell) + 1
+    for begin, end in code_ranges:
+        if source_offset <= begin < end <= source_offset + len(row):
+            before = row[begin - source_offset : end - source_offset]
+            after = _native_code_pipes(before, begin, code_ranges)
+            if before != after:
+                changes.append((begin - source_offset, end - source_offset, after))
+    for marker in re.finditer(re.escape("{nl}"), row):
+        begin, end = source_offset + marker.start(), source_offset + marker.end()
+        slashes = len(row[: marker.start()]) - len(row[: marker.start()].rstrip("\\"))
+        if slashes % 2 == 0 and not any(
+            left < end and begin < right for left, right in literal_ranges
+        ):
+            changes.append((marker.start(), marker.end(), "<br>"))
+    for begin, end, after in sorted(changes, reverse=True):
+        row = row[:begin] + after + row[end:]
+    return row
+
+
+def adapt_note(
+    text,
+    *,
+    preserve_table_colors=False,
+    legacy_tables=False,
+    previous_tables=False,
+    compact_tables=False,
+    legacy_table_boundaries=False,
+    preserve_table_warnings=False,
+):
     """Return scoped adapted text, source-neutral exact edits and loss facts.
 
     Parser block ownership protects code, comments and literal examples. All
     references are traced after adaptation, so their offsets bind final text.
     """
+    blank_cell = "" if compact_tables or previous_tables or legacy_tables else " "
+    separate_tables = not (
+        legacy_table_boundaries or legacy_tables or previous_tables or compact_tables
+    )
+    warn_tables = preserve_table_warnings or not separate_tables
     original = text
     text, literal_edits = adapt_literals(text)
     lines = re.findall(r"[^\r\n]*(?:\r\n|\r|\n|$)", text)
@@ -209,10 +274,13 @@ def adapt_note(text, *, preserve_table_colors=False):
         position += len(line)
     tokens = MarkdownIt("commonmark").parse(text)
     active, protected, quoted, headings = set(), set(), set(), []
+    paragraph_lines = set()
     for index, token in enumerate(tokens):
         if not token.map:
             continue
         extent = range(*token.map)
+        if token.type == "paragraph_open" and token.level == 0:
+            paragraph_lines.update(extent)
         if token.type == "blockquote_open":
             quoted.update(extent)
         if token.type in {"fence", "code_block", "html_block"}:
@@ -339,6 +407,7 @@ def adapt_note(text, *, preserve_table_colors=False):
         if separator or after != raw:
             replace(line, raw, separator + after)
 
+    declared_tables = set()
     for line in sorted(active):
         raw = lines[line].rstrip("\r\n")
         if ":(table=" not in raw:
@@ -356,13 +425,28 @@ def adapt_note(text, *, preserve_table_colors=False):
         ]
         if not declarations:
             continue
+        style_match = (
+            _STYLE_TABLE.search(raw) if not (legacy_tables or previous_tables) else None
+        )
+        if style_match:
+            declarations = [
+                start
+                for start in declarations
+                if not style_match.start() < start < style_match.end()
+            ]
         widths_match = _TABLE.search(raw)
         colors_match = None if preserve_table_colors else _COLOR_TABLE.search(raw)
-        match = widths_match or colors_match
+        match = style_match or widths_match or colors_match
         if match and match.start() not in declarations:
             match = None
         cells = (
-            _cells(raw[: match.start()], offsets[line], inline_code, inline_literals)
+            _cells(
+                raw[: match.start()],
+                offsets[line],
+                inline_code,
+                inline_literals,
+                legacy=legacy_tables,
+            )
             if match
             else None
         )
@@ -375,14 +459,40 @@ def adapt_note(text, *, preserve_table_colors=False):
             and lines[cursor].lstrip().startswith("|")
         ):
             row = lines[cursor].rstrip("\r\n")
-            rows.append(_cells(row, offsets[cursor], inline_code, inline_literals))
+            rows.append(
+                _cells(
+                    row,
+                    offsets[cursor],
+                    inline_code,
+                    inline_literals,
+                    legacy=legacy_tables,
+                )
+            )
             cursor += 1
+        declared_tables.update(range(line, cursor))
+        imported = bool(
+            style_match
+            and raw[: style_match.start()].strip() == "||"
+            and len(rows) == 1
+            and rows[0] is not None
+            and len(rows[0]) == 2
+        )
+        if imported:
+            cells = ["", ""]
+        separator_present = bool(
+            cells
+            and rows
+            and rows[0] is not None
+            and len(rows[0]) == len(cells)
+            and all(re.fullmatch(r"\s*:?-{3,}:?\s*", cell) for cell in rows[0])
+        )
         widths = widths_match[1].split(",") if widths_match else []
         valid = bool(
             cells
             and len(cells) >= 1
             and (
-                colors_match
+                style_match
+                or colors_match
                 or widths_match
                 and len(widths) == len(cells) + 1
                 and all(re.fullmatch(r"-1|0|[1-9][0-9]*", w) for w in widths)
@@ -390,7 +500,11 @@ def adapt_note(text, *, preserve_table_colors=False):
             )
             and len(declarations) == 1
             and rows
-            and all(r is not None and len(r) == len(cells) for r in rows)
+            and (
+                style_match
+                and separator_present
+                or all(r is not None and len(r) == len(cells) for r in rows)
+            )
         )
         if not valid:
             loss(
@@ -399,26 +513,159 @@ def adapt_note(text, *, preserve_table_colors=False):
                 "Malformed or ambiguous table retained as source text; supply an ordinary Markdown table with a matching header separator.",
             )
             continue
-        header = _native_code_pipes(raw[: match.start()], offsets[line], inline_code)
-        separator_present = all(re.fullmatch(r"\s*:?-{3,}:?\s*", c) for c in rows[0])
-        replacement = (
-            header
-            if separator_present
-            else header + "\n|" + "|".join("---" for _ in cells) + "|"
+        header = (
+            _native_code_pipes(
+                raw[: match.start()], offsets[line], inline_code, legacy=True
+            )
+            if legacy_tables
+            else _native_table_row(
+                raw[: match.start()],
+                offsets[line],
+                inline_code,
+                inline_literals,
+                previous_tables=previous_tables,
+            )
         )
+        if (
+            imported
+            or not (legacy_tables or previous_tables or compact_tables)
+            and all(not cell.strip() for cell in cells)
+        ):
+            header = "|" + "|".join(blank_cell for _ in cells) + "|"
+        separator_row = "|" + "|".join("---" for _ in cells) + "|"
+        if separator_present:
+            replacement = header
+        elif (
+            legacy_tables or previous_tables or all(not cell.strip() for cell in cells)
+        ):
+            replacement = header + "\n" + separator_row
+        else:
+            replacement = (
+                "|"
+                + "|".join(blank_cell for _ in cells)
+                + "|\n"
+                + separator_row
+                + "\n"
+                + header
+            )
+        if separate_tables and line and lines[line - 1].strip():
+            replacement = "\n" + replacement
         replace(line, raw, replacement)
         for row_line in range(line + 1, cursor):
             row = lines[row_line].rstrip("\r\n")
-            native_row = _native_code_pipes(row, offsets[row_line], inline_code)
+            native_row = (
+                _native_code_pipes(row, offsets[row_line], inline_code, legacy=True)
+                if legacy_tables
+                else _native_table_row(
+                    row,
+                    offsets[row_line],
+                    inline_code,
+                    inline_literals,
+                    previous_tables=previous_tables,
+                )
+            )
+            if (
+                separate_tables
+                and row_line == cursor - 1
+                and cursor < len(lines)
+                and lines[cursor].strip()
+            ):
+                native_row += "\n"
             if row != native_row:
                 replace(row_line, row, native_row)
-        loss(
-            "table",
-            declaration,
-            "Custom table colors are not reproduced; the editable table uses Obsidian's native styling."
-            if colors_match
-            else "Column widths and justification become native responsive table layout; edit the table in Obsidian to adjust its presentation.",
+        if warn_tables:
+            change = (
+                "Custom table colors are not reproduced; the editable table uses Obsidian's native styling."
+                if colors_match
+                else "Column widths and justification become native responsive table layout; edit the table in Obsidian to adjust its presentation."
+            )
+            if style_match:
+                change = "Source table styling is omitted; the editable table uses native Markdown layout."
+            if not (legacy_tables or previous_tables or separator_present) and any(
+                cell.strip() for cell in cells
+            ):
+                change += " Blank native headings preserve every source row as data."
+            loss("table", declaration, change)
+
+    line = 0
+    while not legacy_tables and line < len(lines):
+        start = line
+        rows = []
+        while (
+            line < len(lines)
+            and line in active
+            and line in paragraph_lines
+            and line not in declared_tables
+            and lines[line].lstrip().startswith("|")
+        ):
+            rows.append(
+                _cells(
+                    lines[line].rstrip("\r\n"),
+                    offsets[line],
+                    inline_code,
+                    inline_literals,
+                )
+            )
+            line += 1
+        if len(rows) < 2 or rows[0] is None:
+            line = max(line, start + 1)
+            continue
+        imported = (
+            len(rows) == 2
+            and lines[start].strip() == "||"
+            and rows[1] is not None
+            and len(rows[1]) == 2
         )
+        empty_header = not previous_tables and all(not cell.strip() for cell in rows[0])
+        width = len(rows[1] if imported else rows[0])
+        separator = (
+            not imported
+            and rows[1] is not None
+            and len(rows[1]) == width
+            and all(re.fullmatch(r"\s*:?-{3,}:?\s*", cell) for cell in rows[1])
+        )
+        if not separator and (
+            width < 2
+            or any(row is None or len(row) != width for row in rows[int(imported) :])
+        ):
+            loss(
+                "table",
+                lines[start].rstrip("\r\n"),
+                "Malformed or ambiguous table retained as source text; supply an ordinary Markdown table with matching columns and a header separator.",
+            )
+            continue
+        empty_row = "|" + "|".join(blank_cell for _ in range(width)) + "|"
+        header = empty_row + "\n|" + "|".join("---" for _ in range(width)) + "|"
+        for row_line in range(start, line):
+            raw = lines[row_line].rstrip("\r\n")
+            native = _native_table_row(
+                raw,
+                offsets[row_line],
+                inline_code,
+                inline_literals,
+                previous_tables=previous_tables,
+            )
+            if row_line == start:
+                if empty_header and separator and not compact_tables:
+                    native = empty_row
+                elif imported or empty_header and not separator:
+                    native = header
+                elif not separator:
+                    native = header + "\n" + native
+                if start and lines[start - 1].strip():
+                    native = "\n" + native
+            if row_line == line - 1 and line < len(lines) and lines[line].strip():
+                native += "\n"
+            if native != raw:
+                replace(row_line, raw, native)
+        if warn_tables and not separator:
+            loss(
+                "table",
+                lines[start].rstrip("\r\n"),
+                "The empty source header is expanded to the two-column data width; both data cells are preserved."
+                if imported
+                else "No column headings were declared; blank native headings preserve every source row as data.",
+            )
 
     marker_prefixes = {
         line: match[1]

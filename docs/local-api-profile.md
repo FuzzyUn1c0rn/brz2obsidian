@@ -353,6 +353,14 @@ and native presentation gates remain separate from this synthetic eligibility.
 
 ## Color-only table declaration amendment (#235)
 
+Historical qualification below is retained for prior-capture interpretation.
+Current acquisition follows [the plain-table amendment](thebrain-table-qualification.md):
+well-formed styling is discarded opaquely and never establishes header meaning.
+Successful table normalization emits no warning; exact text adaptations, source
+originals and report provenance remain. Malformed tables and unrelated formatting
+warnings remain actionable. Historical successful-table findings remain valid only
+when reopening their complete sealed prior interpretation.
+
 This finite amendment qualifies the raw-text shape observed in the Wireshark
 thought note and reproduced in [#235](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/235).
 The independently reviewable [synthetic controls](../tests/fixtures/local_api_profile/table-colors.json)
@@ -408,3 +416,12 @@ predicate failure and existing separators. One public Workflow conversion checks
 an editable five-row table plus original bytes, warning and migration evidence.
 The strategic actual Obsidian table check remains separate from these automated
 controls and does not require source colors.
+
+## Complete undecorated table amendment (#237)
+
+The [complete table qualification](thebrain-table-qualification.md) bounds the
+shared source interpretation for undecorated rectangular, data-first, imported
+blank-header and neighboring prose/image forms. Its independent
+source/native facts and synthetic controls are required before runtime acceptance
+expands. Existing width/color, literal and ordinary Markdown behavior remain
+separately qualified.

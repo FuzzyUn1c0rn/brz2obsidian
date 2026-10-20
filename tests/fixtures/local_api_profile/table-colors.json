@@ -10,20 +10,13 @@
     "|`ip.addr == 192.0.2.2`|Show either endpoint.|",
     "|`udp.port == 53`|DNS with an escaped \\| pipe.|"
   ],
-  "expected_header": "|Filter|Description|\n|---|---|",
-  "color_loss": "Custom table colors are not reproduced; the editable table uses Obsidian's native styling.",
+  "expected_header": "| | |\n|---|---|\n|Filter|Description|",
+  "color_loss": "Source table styling is omitted; the editable table uses native Markdown layout. Blank native headings preserve every source row as data.",
   "negative_controls": [
-    "unknown property",
-    "missing property",
-    "duplicate property",
-    "reordered properties",
-    "non-hex value",
-    "wrong color length",
-    "trailing semicolon",
-    "mixed width declaration",
     "multiple active declarations",
     "unequal cell counts",
-    "missing data row"
+    "missing data row",
+    "malformed quote/suffix"
   ],
   "protected_controls": [
     "fenced code",
@@ -38,5 +31,18 @@
     "invented cells refused",
     "invented findings refused",
     "inconsistent adaptation refused"
+  ],
+  "prior_expected_header": "|Filter|Description|\n|---|---|",
+  "prior_color_loss": "Custom table colors are not reproduced; the editable table uses Obsidian's native styling.",
+  "style_loss": "Source table styling is omitted; the editable table uses native Markdown layout.",
+  "discarded_styling_controls": [
+    "unknown property",
+    "missing property",
+    "duplicate property",
+    "reordered properties",
+    "non-hex value",
+    "wrong color length",
+    "trailing semicolon",
+    "mixed width declaration"
   ]
 }

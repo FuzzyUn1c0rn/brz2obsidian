@@ -3,6 +3,7 @@
   "selectors": [
     "tests/sources/test_local_api_bom.py",
     "tests/sources/test_local_api_table_colors.py",
+    "tests/sources/test_local_api_complete_tables.py",
     "tests/application/test_readable_errors.py",
     "tests/gui/test_readable_errors_window.py",
     "tests/application/test_graph_modules.py",
@@ -28,6 +29,7 @@
     "tests/gui/test_check_window.py::test_check_tab_async_selection_real_worker_clean_result_and_cancel_preserve_state",
     "tests/sources/test_reader.py",
     "tests/application/test_markdown_inserts_workflow.py",
+    "tests/application/test_plain_tables_workflow.py",
     "tests/application/test_forgotten_workflow.py",
     "tests/publication/test_failure_protection.py",
     "tests/publication/test_publication_retry.py",

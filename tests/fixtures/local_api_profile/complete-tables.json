@@ -1,0 +1,190 @@
+{
+  "qualification": "issue237-complete-tables",
+  "source": "https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/237",
+  "expectation_provenance": "Accepted meaning-preservation requirement plus independent retained-source audit and read-only TheBrain15 observations; invented public content. Native undecorated rows lack a structural header marker. Root clarification and independent qualification must precede runtime use.",
+  "neutral_header_loss": "No column headings were declared; blank native headings preserve every source row as data.",
+  "imported_header_loss": "The empty source header is expanded to the two-column data width; both data cells are preserved.",
+  "cases": [
+    {
+      "id": "TABLE237-HEADWORDS",
+      "raw": "|Field|Meaning|\n|`src == 192.0.2.1`|Matches the example source.|\n|`dst == 192.0.2.2`|Matches the example destination.|\n",
+      "source_cells": [
+        [
+          "Field",
+          "Meaning"
+        ],
+        [
+          "`src == 192.0.2.1`",
+          "Matches the example source."
+        ],
+        [
+          "`dst == 192.0.2.2`",
+          "Matches the example destination."
+        ]
+      ],
+      "expected": "| | |\n|---|---|\n|Field|Meaning|\n|`src == 192.0.2.1`|Matches the example source.|\n|`dst == 192.0.2.2`|Matches the example destination.|\n"
+    },
+    {
+      "id": "TABLE237-KEYVALUE",
+      "raw": "|**Before**|Select before recording.|\n|**After**|Select after recording.|\n",
+      "source_cells": [
+        [
+          "**Before**",
+          "Select before recording."
+        ],
+        [
+          "**After**",
+          "Select after recording."
+        ]
+      ],
+      "expected": "| | |\n|---|---|\n|**Before**|Select before recording.|\n|**After**|Select after recording.|\n"
+    },
+    {
+      "id": "TABLE237-SIXCOL",
+      "raw": "|Alex|Course A|Self-paced|Training|https://example.invalid/a|First record.|\n|Blair|Course B|Classroom|Training|https://example.invalid/b|Second record.|\n",
+      "source_cells": [
+        [
+          "Alex",
+          "Course A",
+          "Self-paced",
+          "Training",
+          "https://example.invalid/a",
+          "First record."
+        ],
+        [
+          "Blair",
+          "Course B",
+          "Classroom",
+          "Training",
+          "https://example.invalid/b",
+          "Second record."
+        ]
+      ],
+      "expected": "| | | | | | |\n|---|---|---|---|---|---|\n|Alex|Course A|Self-paced|Training|https://example.invalid/a|First record.|\n|Blair|Course B|Classroom|Training|https://example.invalid/b|Second record.|\n"
+    },
+    {
+      "id": "TABLE237-EMPTYCOL",
+      "raw": "|Notes|Findings||\n|First|Second|Additional information|\n|Third|Fourth||\n",
+      "source_cells": [
+        [
+          "Notes",
+          "Findings",
+          ""
+        ],
+        [
+          "First",
+          "Second",
+          "Additional information"
+        ],
+        [
+          "Third",
+          "Fourth",
+          ""
+        ]
+      ],
+      "expected": "| | | |\n|---|---|---|\n|Notes|Findings||\n|First|Second|Additional information|\n|Third|Fourth||\n"
+    },
+    {
+      "id": "TABLE237-BREAKLINK",
+      "raw": "|Name|Value|\n|[Reference](https://example.invalid/reference)|First{nl}{nl}**Second**|\n",
+      "source_cells": [
+        [
+          "Name",
+          "Value"
+        ],
+        [
+          "[Reference](https://example.invalid/reference)",
+          "First{nl}{nl}**Second**"
+        ]
+      ],
+      "expected": "| | |\n|---|---|\n|Name|Value|\n|[Reference](https://example.invalid/reference)|First<br><br>**Second**|\n"
+    },
+    {
+      "id": "TABLE237-PIPEOWNERSHIP",
+      "raw": "|Name|Value|\n|Operator|\\|\\||\n|Command|`print a\\|b`|\n|Literal|\\`one\\|two\\`|\n",
+      "source_cells": [
+        [
+          "Name",
+          "Value"
+        ],
+        [
+          "Operator",
+          "\\|\\|"
+        ],
+        [
+          "Command",
+          "`print a\\|b`"
+        ],
+        [
+          "Literal",
+          "\\`one\\|two\\`"
+        ]
+      ],
+      "expected": "| | |\n|---|---|\n|Name|Value|\n|Operator|\\|\\||\n|Command|<code>print a&#92;&#124;b</code>|\n|Literal|\\`one\\|two\\`|\n"
+    },
+    {
+      "id": "TABLE237-IMPORTED",
+      "raw": "||\n|1{nl}2|print first{nl}print second{nl}|\n",
+      "source_cells": [
+        [
+          ""
+        ],
+        [
+          "1{nl}2",
+          "print first{nl}print second{nl}"
+        ]
+      ],
+      "expected": "| | |\n|---|---|\n|1<br>2|print first<br>print second<br>|\n"
+    },
+    {
+      "id": "TABLE237-IMAGEPREFIX",
+      "raw": "![](first.png)![](second.png)\n||\n|1{nl}2|print first{nl}print second|\n",
+      "source_cells": [
+        [
+          ""
+        ],
+        [
+          "1{nl}2",
+          "print first{nl}print second"
+        ]
+      ],
+      "expected": "![](first.png)![](second.png)\n\n| | |\n|---|---|\n|1<br>2|print first<br>print second|\n",
+      "image_targets": [
+        "first.png",
+        "second.png"
+      ],
+      "image_table_cell": [
+        false,
+        false
+      ]
+    }
+  ],
+  "required_protection": [
+    "fenced code",
+    "indented code",
+    "multiline inline code",
+    "HTML comments",
+    "escaped edge pipes",
+    "ordinary prose/pipeline",
+    "heading pipe",
+    "link-label pipe",
+    "nested quote/list paragraph",
+    "code/comment/escaped {nl}",
+    "neighboring prose/images remain unchanged and separate from table"
+  ],
+  "required_rejections": [
+    "unequal columns",
+    "unclosed structural row",
+    "literal-owned structural boundary",
+    "unqualified blank marker width",
+    "unknown declaration"
+  ],
+  "required_compatibility": [
+    "complete current Document plus findings",
+    "exact pre237 interpretation",
+    "exact precolor interpretation",
+    "existing BOM compatibility",
+    "no hybrid current/prior rows or findings",
+    "invented cell/span/digest/reference/original bytes refused"
+  ]
+}

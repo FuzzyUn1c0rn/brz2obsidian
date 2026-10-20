@@ -9,7 +9,7 @@ import pytest
 from markdown_it import MarkdownIt
 
 from brz2obsidian.application.wiring import local_api_workflow
-from brz2obsidian.contracts import MigrationRefused
+from brz2obsidian.contracts import MigrationRefused, SourceFinding
 from brz2obsidian.sources.thebrain.local_api import (
     LocalApiConfig,
     LocalApiSession,
@@ -63,15 +63,9 @@ def test_color_table_live_and_frozen_keep_editable_cells_and_exact_evidence(
                 FACTS["header"] + DECLARATION,
                 FACTS["expected_header"],
             )
-            assert (edit.end, edit.adapted_start, edit.adapted_end) == (356, 0, 30)
+            assert (edit.end, edit.adapted_start, edit.adapted_end) == (356, 0, 36)
             assert edit.source_digest == hashlib.sha256(TABLE.encode()).hexdigest()
-            finding = snapshot.findings[0]
-            assert finding.kind == "formatting_loss"
-            assert json.loads(finding.observed_json) == {
-                "feature": "table",
-                "declaration": DECLARATION,
-                "change": FACTS["color_loss"],
-            }
+            assert snapshot.findings == ()
             with live.open_payload(NOTE) as stream:
                 assert stream.read() == TABLE.encode()
             live.verify_consistency()
@@ -109,16 +103,18 @@ def test_prior_color_table_capture_keeps_its_complete_interpretation_and_rejects
             "text_adaptations": (),
         }
     )
-    previous_finding = current.findings[0].model_copy(
-        update={
-            "observed_json": json.dumps(
-                {
-                    "feature": "table",
-                    "declaration": DECLARATION,
-                    "change": "Malformed or ambiguous table retained as source text; supply an ordinary Markdown table with a matching header separator.",
-                }
-            )
-        }
+    previous_finding = SourceFinding(
+        kind="formatting_loss",
+        rule_id="local-api.note-formatting.v1",
+        affected=tuple(sorted((previous_document.owner, previous_document.key))),
+        evidence=previous_document.evidence,
+        observed_json=json.dumps(
+            {
+                "feature": "table",
+                "declaration": DECLARATION,
+                "change": "Malformed or ambiguous table retained as source text; supply an ordinary Markdown table with a matching header separator.",
+            }
+        ),
     )
     previous = current.model_copy(
         update={
@@ -167,9 +163,9 @@ def test_prior_color_table_capture_keeps_its_complete_interpretation_and_rejects
             )
 
 
-def test_color_table_closed_predicate_and_literal_ownership_keep_safe_fallbacks():
+def test_opaque_styling_and_literal_ownership_keep_structural_safety():
     plain = "|A|B|" + DECLARATION + "\n|1|2|\n"
-    invalid_declarations = [
+    discarded_styles = [
         DECLARATION.replace("foreground-color", "unknown-color", 1),
         DECLARATION.replace("foreground-color:#ff370c0b;", "", 1),
         DECLARATION.replace("background-color:", "foreground-color:", 1),
@@ -181,10 +177,14 @@ def test_color_table_closed_predicate_and_literal_ownership_keep_safe_fallbacks(
         DECLARATION.replace("#ff370c0b", "#ff370c0"),
         DECLARATION.replace('"):', ';"):'),
         DECLARATION.replace('table="', 'table="column-widths:-1,0,84;'),
-        DECLARATION + DECLARATION,
     ]
-    malformed = ["|A|B|" + d + "\n|1|2|\n" for d in invalid_declarations]
-    malformed += ["|A|B|" + DECLARATION + "\n|1|2|3|\n", "|A|B|" + DECLARATION + "\n"]
+    styled = ["|A|B|" + declaration + "\n|1|2|\n" for declaration in discarded_styles]
+    malformed = [
+        "|A|B|" + DECLARATION + DECLARATION + "\n|1|2|\n",
+        "|A|B|" + DECLARATION + "\n|1|2|3|\n",
+        "|A|B|" + DECLARATION + "\n",
+        '|A|B|:(table="unclosed):\n|1|2|\n',
+    ]
     protected = [
         "```md\n" + plain + "```\n",
         "    " + plain.replace("\n|", "\n    |"),
@@ -197,9 +197,10 @@ def test_color_table_closed_predicate_and_literal_ownership_keep_safe_fallbacks(
         + DECLARATION.replace("#ff", "#FF")
         + "\n|:---|---:|\n|a\\|b|`x|y`|\n"
     )
-    text = "\n".join(malformed + protected + [existing])
+    text = "\n".join(styled + malformed + protected + [existing])
     expected = "\n".join(
-        malformed
+        ["| | |\n|---|---|\n|A|B|\n|1|2|\n"] * len(styled)
+        + malformed
         + protected
         + ["|**One**|Two|\n|:---|---:|\n|a\\|b|<code>x&#124;y</code>|\n"]
     )
@@ -212,12 +213,13 @@ def test_color_table_closed_predicate_and_literal_ownership_keep_safe_fallbacks(
             changes = [
                 json.loads(f.observed_json)["change"] for f in session.snapshot.findings
             ]
-            assert len(changes) == len(malformed) + 1
-            assert changes.count(FACTS["color_loss"]) == 1
+            assert len(changes) == len(malformed)
             assert sum(
                 "Malformed or ambiguous table retained" in c for c in changes
             ) == len(malformed)
-            assert len(session.snapshot.documents[0].text_adaptations) == 2
+            assert (
+                len(session.snapshot.documents[0].text_adaptations) == len(styled) + 2
+            )
             session.verify_consistency()
 
 
@@ -227,21 +229,22 @@ def test_workflow_publishes_editable_five_row_table_with_migration_evidence(tmp_
         result = local_api_workflow(
             LocalApiConfig(api_url=address), credentials=lambda: KEY
         ).convert(LocalApiSourceRef(BRAIN), destination)
-    assert result.outcome == "warnings", result.issues
-    assert len(result.issues) == 1 and result.issues[0].code == "formatting_loss"
-    assert FACTS["color_loss"] in result.issues[0].message
+    assert result.outcome == "clean", result.issues
+    assert result.issues == ()
     note = next(destination.glob("Home*.md")).read_text(encoding="utf-8")
     body = note_body(note)
     assert EXPECTED in body and DECLARATION not in body
     tokens = MarkdownIt("commonmark").enable("table").parse(body)
     assert sum(t.type == "table_open" for t in tokens) == 1
-    assert sum(t.type == "tr_open" for t in tokens) == 6
+    assert sum(t.type == "tr_open" for t in tokens) == 7
     table = tokens[
         next(i for i, t in enumerate(tokens) if t.type == "table_open") : next(
             i for i, t in enumerate(tokens) if t.type == "table_close"
         )
     ]
     assert [t.content for t in table if t.type == "inline"] == [
+        "",
+        "",
         "Filter",
         "Description",
         "`ip`",
@@ -259,10 +262,7 @@ def test_workflow_publishes_editable_five_row_table_with_migration_evidence(tmp_
         destination / "Attachments/22222222/Notes.md.original"
     ).read_bytes() == TABLE.encode()
     record = json.loads((destination / "migration-record.json").read_bytes())
-    finding = next(t for t in record["asset_targets"] if t["source_findings"])[
-        "source_findings"
-    ][0]
-    assert json.loads(finding["observed_json"])["declaration"] == DECLARATION
+    assert all(not target["source_findings"] for target in record["asset_targets"])
     adaptation = record["adaptations"][0]["text_edit"]
     assert adaptation["before"] == FACTS["header"] + DECLARATION
     assert adaptation["after"] == FACTS["expected_header"]
