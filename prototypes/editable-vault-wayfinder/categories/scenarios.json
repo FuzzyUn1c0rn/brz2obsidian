@@ -1,0 +1,137 @@
+{
+  "question": "Can explicit category choices preserve an existing vault while making imported membership and source content understandable?",
+  "synthetic_source": {
+    "collection_id": "synthetic-atlas",
+    "title": "Atlas",
+    "category_id": "type-project",
+    "category_title": "Projects"
+  },
+  "cases": [
+    {
+      "id": "01-separate-and-shared",
+      "title": "Share Projects, keep Topics separate",
+      "expected_members": {
+        "Categories/Projects.md": [
+          "Existing/Local project.md",
+          "Imports/Atlas/Notes/Topic — Atlas.md",
+          "Imports/Atlas/Notes/FutureIdea — Atlas.md"
+        ],
+        "Categories/Topics.md": [
+          "Existing/Topic.md"
+        ],
+        "Imports/Atlas/Categories/Topics — Atlas.md": [
+          "Imports/Atlas/Notes/Topic — Atlas.md"
+        ]
+      },
+      "expected_overview": [
+        "Categories/Projects.md",
+        "Imports/Atlas/Categories/Topics — Atlas.md"
+      ],
+      "expected_absent": [
+        "FutureIdea.md",
+        "Plans/FutureIdea.md",
+        "Imports/Atlas/Notes/Topic.md",
+        "Imports/Atlas/Notes/FutureIdea.md"
+      ],
+      "expected_tags": {
+        "Imports/Atlas/Notes/Topic — Atlas.md": [
+          "atlas/research",
+          "reviewed"
+        ],
+        "Imports/Atlas/Notes/FutureIdea — Atlas.md": [
+          "atlas/research"
+        ]
+      },
+      "source_reference": {
+        "path": "Imports/Atlas/References/Projects — source reference.md",
+        "item_id": "type-project",
+        "prose": "Synthetic source category prose: Keep experiments small.",
+        "category": "Categories/Projects.md",
+        "attachment": "Imports/Atlas/Attachments/projects-guide.txt",
+        "attachment_text": "Synthetic source attachment: an Atlas project checklist.\n"
+      }
+    },
+    {
+      "id": "02-incompatible-dashboard",
+      "title": "Select People and separately propose a compatible view",
+      "expected_members": {
+        "Categories/People.md": [
+          "Existing/Ada.md",
+          "Imports/Atlas/Notes/Ada — Atlas.md"
+        ]
+      },
+      "expected_overview": [
+        "Categories/People.md"
+      ],
+      "expected_absent": [
+        "Imports/Atlas/Notes/Ada.md"
+      ],
+      "expected_tags": {
+        "Imports/Atlas/Notes/Ada — Atlas.md": [
+          "atlas/research"
+        ]
+      },
+      "source_reference": {
+        "path": "Imports/Atlas/References/People — source reference.md",
+        "item_id": "type-people",
+        "prose": "Synthetic source People guidance.",
+        "category": "Categories/People.md",
+        "attachment": "Imports/Atlas/Attachments/people-guide.txt",
+        "attachment_text": "Synthetic People attachment.\n"
+      }
+    },
+    {
+      "id": "03-identity-and-remap",
+      "title": "Rename source category and review a mapping change after vault edits",
+      "expected_members": {
+        "Categories/Projects.md": [
+          "Existing/Local project.md",
+          "Reading/Atlas topic moved.md"
+        ],
+        "Categories/Work.md": [
+          "Existing/Work note.md",
+          "Imports/Atlas/Notes/FutureIdea — Atlas.md"
+        ],
+        "Categories/Manual favorites.md": [
+          "Reading/Atlas topic moved.md"
+        ],
+        "Imports/Atlas/Categories/Topics — Atlas.md": [
+          "Reading/Atlas topic moved.md"
+        ]
+      },
+      "expected_overview": [
+        "Categories/Work.md",
+        "Imports/Atlas/Categories/Topics — Atlas.md"
+      ],
+      "expected_absent": [
+        "Imports/Atlas/Notes/Topic — Atlas.md",
+        "FutureIdea.md",
+        "Plans/FutureIdea.md"
+      ],
+      "expected_tags": {
+        "Reading/Atlas topic moved.md": [
+          "atlas/research",
+          "reviewed"
+        ],
+        "Imports/Atlas/Notes/FutureIdea — Atlas.md": [
+          "atlas/research"
+        ]
+      },
+      "pending_conflict": "Reading/Atlas topic moved.md",
+      "source_reference": {
+        "path": "Imports/Atlas/References/Projects — source reference.md",
+        "item_id": "type-project",
+        "prose": "Synthetic source category prose: Keep experiments small.",
+        "category": "Categories/Work.md",
+        "attachment": "Imports/Atlas/Attachments/projects-guide.txt",
+        "attachment_text": "Synthetic source attachment: an Atlas project checklist.\n"
+      }
+    }
+  ],
+  "native_batch": {
+    "case_limit": 3,
+    "time_limit_minutes": 15,
+    "stop": "Observe the listed native targets and Base membership, or record the first isolation/version/plugin limitation. Do not expand the batch without a specific evidence gap.",
+    "status": "unverified"
+  }
+}
