@@ -10,6 +10,7 @@ from brz2obsidian.contracts import (
     ReconciliationFinding,
     ReconciliationInput,
     UpdateProposal,
+    reconciliation_subject_id,
 )
 from brz2obsidian.core.identity import bind_identity
 
@@ -154,13 +155,11 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
     if not facts.subjects:
         findings.extend(_findings(facts, None, None, facts.safety_facts))
     for subject in facts.subjects:
-        subject_id = _digest(
-            (
-                facts.incoming_identity.module_id,
-                facts.incoming_identity.collection_id,
-                subject.item_id,
-                subject.facet,
-            )
+        subject_id = reconciliation_subject_id(
+            facts.incoming_identity.module_id,
+            facts.incoming_identity.collection_id,
+            subject.item_id,
+            subject.facet,
         )
         binding = bind_identity(facts, subject, subject_id)
         subject = binding.subject

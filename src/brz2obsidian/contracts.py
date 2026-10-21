@@ -551,6 +551,17 @@ class Publisher(Protocol):
 
 # Reconciliation facts are in-memory source-neutral values. They describe review;
 # they confer no filesystem or history authority.
+def reconciliation_subject_id(module_id, collection_id, item_id, facet):
+    """Stable source-facet scope shared by proposals and remembered provenance."""
+    encoded = json.dumps(
+        (module_id, collection_id, item_id, facet),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode()
+    return sha256(encoded).hexdigest()
+
+
 class ReconciliationContract(Contract):
     model_config = ConfigDict(
         strict=True,
@@ -1297,7 +1308,18 @@ class SourceMemoryProvenance(ReconciliationContract):
     decision_id: str = Field(min_length=1)
     proposal_id: str = Field(min_length=1)
     generation: int = Field(ge=1)
-    reviewed_assumptions: tuple[ProposalAssumption, ...]
+    reviewed_assumptions: tuple[ProposalAssumption, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def meaningful_reviewed_fingerprints(self):
+        if any(
+            not assumption.key
+            or len(assumption.fingerprint) != 64
+            or set(assumption.fingerprint) - set("0123456789abcdef")
+            for assumption in self.reviewed_assumptions
+        ):
+            raise ValueError("Memory provenance needs named SHA256 review fingerprints")
+        return self
 
 
 class SourceVersionMemory(ReconciliationContract):
@@ -1319,6 +1341,44 @@ class SourceVersionMemory(ReconciliationContract):
         if sha256(self.reviewed_incoming.data).hexdigest() != self.source_version:
             raise ValueError(
                 "Remembered source version must match available reviewed bytes"
+            )
+        scope = reconciliation_subject_id(
+            self.module_id, self.collection_id, self.item_id, self.facet
+        )
+        required = {
+            f"{scope}:{kind}": kind
+            for kind in (
+                "identity",
+                "inventory",
+                "baseline",
+                "current",
+                "incoming",
+                "interpretation",
+                "format",
+                "structure",
+            )
+        } | {f"memory:{scope}": "memory", f"identity-review:{scope}": "identity"}
+        reviewed = {a.key: a.kind for a in self.provenance.reviewed_assumptions}
+        if any(reviewed.get(key) != kind for key, kind in required.items()):
+            raise ValueError(
+                "Memory provenance lacks mandatory review evidence for its source facet"
+            )
+        candidate_prefix = f"identity-candidate:{scope}:"
+        if not any(
+            key.startswith(candidate_prefix)
+            and len(key) > len(candidate_prefix)
+            and kind == "identity"
+            for key, kind in reviewed.items()
+        ):
+            raise ValueError("Memory provenance lacks its reviewed identity candidate")
+        safety = {
+            kind
+            for key, kind in reviewed.items()
+            if key.startswith("safety:") and len(key) > len("safety:")
+        }
+        if not {"identity", "target", "candidate", "operation"} <= safety:
+            raise ValueError(
+                "Memory provenance lacks required reviewed safety attestations"
             )
         return self
 

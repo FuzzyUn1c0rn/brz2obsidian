@@ -242,29 +242,37 @@ def test_memory_history_is_scoped_to_source_facet_and_relevant_version_without_c
 
     base = facts_for(current=b"authored", incoming=b"abc")
     first = remembered(base)
-    other_facet = first.model_copy(
-        update={
-            "facet": "attachment:payload",
-            "provenance": first.provenance.model_copy(
-                update={"decision_id": "attachment:abc"}
-            ),
-        }
+    other_facet = remembered(
+        facts_for(current=b"authored", incoming=b"abc", facet="attachment:payload"),
+        decision_id="attachment:abc",
     )
-    other_module = first.model_copy(
-        update={
-            "module_id": "other-module",
-            "provenance": first.provenance.model_copy(
-                update={"decision_id": "other-module:abc"}
-            ),
-        }
-    )
-    other_collection = first.model_copy(
-        update={
-            "collection_id": "other-collection",
-            "provenance": first.provenance.model_copy(
-                update={"decision_id": "other-collection:abc"}
-            ),
-        }
+
+    def review_in_context(decision_id, **scope):
+        identity = base.baseline_identity.model_copy(update=scope)
+        inventory = base.identity_inventory[0]
+        context = base.model_copy(
+            update={
+                "baseline_identity": identity,
+                "incoming_identity": identity,
+                "identity_inventory": (
+                    inventory.model_copy(
+                        update={"identity": inventory.identity.model_copy(update=scope)}
+                    ),
+                ),
+                "format_operation": base.format_operation.model_copy(
+                    update={
+                        "established_baseline": base.format_operation.established_baseline.model_copy(
+                            update={"identity": identity}
+                        )
+                    }
+                ),
+            }
+        )
+        return remembered(context, decision_id=decision_id)
+
+    other_module = review_in_context("other-module:abc", module_id="other-module")
+    other_collection = review_in_context(
+        "other-collection:abc", collection_id="other-collection"
     )
     unrelated = (other_facet, other_module, other_collection)
     independent = reconcile(
@@ -627,3 +635,81 @@ def test_memory_keeps_opaque_or_overlapping_bytes_but_never_trusts_contradictory
         assert not refused.ready and refused.changes[0].result is None
         assert refused.changes[0].provenance.rule == rule
         assert refused.source_version_memory == (memory,)
+
+
+def test_reconstructed_memory_requires_sufficient_subject_scoped_review_provenance():
+    import json
+
+    from pydantic import ValidationError
+
+    from brz2obsidian.contracts import SourceVersionMemory
+
+    facts = facts_for(current=b"authored\xff", incoming=b"abc")
+    valid = remembered(facts)
+    raw = json.loads(valid.model_dump_json())
+    assumptions = raw["provenance"]["reviewed_assumptions"]
+    malformed = (
+        [],
+        [
+            {
+                "key": "unrelated",
+                "kind": "history",
+                "fingerprint": "0" * 64,
+                "depends_on": [],
+            }
+        ],
+        [a for a in assumptions if not a["key"].endswith(":incoming")],
+        [
+            a | {"kind": "current"} if a["key"].endswith(":incoming") else a
+            for a in assumptions
+        ],
+        [
+            a | {"fingerprint": "unknown"} if a["key"].endswith(":current") else a
+            for a in assumptions
+        ],
+        [
+            a
+            for a in assumptions
+            if not (a["key"].startswith("safety:") and a["kind"] == "operation")
+        ],
+        [a for a in assumptions if not a["key"].startswith("identity-candidate:")],
+    )
+    for history in malformed:
+        candidate = raw | {
+            "provenance": raw["provenance"] | {"reviewed_assumptions": history}
+        }
+        with pytest.raises(ValidationError):
+            SourceVersionMemory.model_validate_json(json.dumps(candidate))
+    for changed_scope in (
+        {"item_id": "another-item"},
+        {"facet": "attachment:payload"},
+        {"module_id": "another-module"},
+        {"collection_id": "another-collection"},
+    ):
+        with pytest.raises(ValidationError):
+            SourceVersionMemory.model_validate_json(json.dumps(raw | changed_scope))
+    historical = assumptions + [
+        {
+            "key": "legacy:context",
+            "kind": "history",
+            "fingerprint": "1" * 64,
+            "depends_on": [],
+        }
+    ]
+    reconstructed = SourceVersionMemory.model_validate_json(
+        json.dumps(
+            raw
+            | {"provenance": raw["provenance"] | {"reviewed_assumptions": historical}}
+        )
+    )
+    later = facts_for(current=b"more writing\xfe", incoming=b"abc").model_copy(
+        update={"source_version_memory": (reconstructed,)}
+    )
+    result = reconcile(later)
+    assert result.ready and result.changes[0].result.data == b"more writing\xfe"
+    assert result.changes[0].original.data == b"original"
+    assert result.source_version_memory == (reconstructed,)
+    assert (
+        result.source_version_memory[0].provenance.reviewed_assumptions[-1].key
+        == "legacy:context"
+    )
