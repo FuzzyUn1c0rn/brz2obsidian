@@ -16,6 +16,7 @@ from brz2obsidian.core.identity import bind_identity
 
 from .attachments import attachment_review
 from .formats import format_assumption, format_findings, format_proposal, review_facts
+from .link_meanings import validate_current_link_context
 from .preservation import preservation_decision, preservation_policy
 from .structures import (
     structure_assumption,
@@ -176,13 +177,17 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
                 source_version=facts.format_operation.baseline_source_version,
             )
         )
+        link_problem = validate_current_link_context(facts, subject)
         policy_allowed = (
-            format_review is None
+            link_problem is None
+            and format_review is None
             and format_choice is None
             and structure_problem is None
         )
         policy = preservation_policy(facts, subject, subject_id, policy_allowed)
-        binary_review, binary_assumptions = attachment_review(facts, subject, subject_id)
+        binary_review, binary_assumptions = attachment_review(
+            facts, subject, subject_id
+        )
         safety = tuple(
             sorted(
                 (
@@ -203,6 +208,15 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
         problems = _findings(facts, subject, subject_id, safety) + list(
             binding.findings
         )
+        if link_problem is not None:
+            problems.append(
+                ReconciliationFinding(
+                    code=link_problem,
+                    subject_id=subject_id,
+                    blocking=True,
+                    assumption_keys=(f"links:{subject_id}",),
+                )
+            )
         findings.extend(problems)
         preservation_review = policy.review
         disposition, result, rule, requires_decision = (

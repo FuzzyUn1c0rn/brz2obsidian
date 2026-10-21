@@ -67,6 +67,7 @@ def request(
         "proposal_id": "review:one",
         "generation": 1,
         "source_version_memory": (),
+        "link_context": None,
         "baseline_identity": identity(),
         "incoming_identity": identity(),
         "subjects": (subject,),

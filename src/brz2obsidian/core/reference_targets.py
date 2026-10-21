@@ -48,7 +48,9 @@ def validate_targets(targets):
             ):
                 raise ValueError("structure_conflict")
             paths.add(target.normalized_path)
-            if record.kind in ("category", "relationship"):
+            if record.kind in ("category", "relationship") or (
+                record.kind == "note" and record.identity is not None
+            ):
                 if record.identity is None:
                     raise ValueError("structure_conflict")
                 identity = record.identity
@@ -56,7 +58,7 @@ def validate_targets(targets):
             else:
                 if record.identity is not None:
                     raise ValueError("structure_conflict")
-                meaning = ("resource", record.target_id)
+                meaning = (record.kind, record.target_id)
         if record.target_id in ids or meaning in meanings:
             raise ValueError("structure_conflict")
         ids.add(record.target_id)

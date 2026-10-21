@@ -811,7 +811,7 @@ class ReferenceTarget(ReconciliationContract):
     schema_id: Literal["brz2obsidian.reference-target"]
     schema_version: Literal[1]
     target_id: str = Field(min_length=1)
-    kind: Literal["category", "tag", "relationship", "resource"]
+    kind: Literal["category", "tag", "relationship", "resource", "note"]
     canonical_path: str | None
     identity: ImportedItemIdentity | None
     target: IdentityTargetFacts | None
@@ -965,6 +965,7 @@ class ReconciliationInput(ReconciliationContract):
     rename_decisions: tuple[RenamePathDecision, ...] = ()
     source_version_memory: tuple[SourceVersionMemory, ...]
     preservation_decisions: tuple[PreservationDecision, ...] = ()
+    link_context: LinkContext | None
 
     @model_validator(mode="after")
     def unique_subjects_and_facts(self):
@@ -990,10 +991,9 @@ class ReconciliationInput(ReconciliationContract):
             raise ValueError("Duplicate identity/rename decision IDs")
         for family in (self.association_decisions, self.rename_decisions):
             decision_items = [(decision.item_id, decision.facet) for decision in family]
-            if (
-                len(set(decision_items)) != len(decision_items)
-                or not set(decision_items) <= set(identities)
-            ):
+            if len(set(decision_items)) != len(decision_items) or not set(
+                decision_items
+            ) <= set(identities):
                 raise ValueError("Decisions must name distinct known source items")
         memory_ids = [
             record.provenance.decision_id for record in self.source_version_memory
@@ -1217,6 +1217,9 @@ class ReconciliationFinding(ReconciliationContract):
         "format_source_changed",
         "format_target_unsupported",
         "format_outputs_unavailable",
+        "link_context_unavailable",
+        "link_context_invalid",
+        "link_current_unsafe",
     ]
     subject_id: str | None
     blocking: bool
@@ -1501,6 +1504,7 @@ class AttachmentFacts(ReconciliationContract):
 
     current_target_id: str = Field(min_length=1)
     allocation_candidates: tuple[AttachmentDestination, ...]
+    affected_documents: tuple[str, ...]
 
 
 class AttachmentOutput(ReconciliationContract):
@@ -1520,15 +1524,30 @@ class AttachmentAlternative(ReconciliationContract):
     choice: Literal["current", "incoming", "both"]
     outputs: tuple[AttachmentOutput, ...]
     eligible: bool
-    unavailable_reasons: tuple[Literal["content_unavailable", "inventory_uncertain", "allocation_unavailable", "unsafe_target", "collision"], ...]
+    unavailable_reasons: tuple[
+        Literal[
+            "content_unavailable",
+            "inventory_uncertain",
+            "allocation_unavailable",
+            "unsafe_target",
+            "collision",
+        ],
+        ...,
+    ]
 
     @model_validator(mode="after")
     def explicit_availability(self):
         if self.eligible:
-            if self.unavailable_reasons or len(self.outputs) != (2 if self.choice == "both" else 1):
-                raise ValueError("Eligible alternatives require their complete exact outputs")
+            if self.unavailable_reasons or len(self.outputs) != (
+                2 if self.choice == "both" else 1
+            ):
+                raise ValueError(
+                    "Eligible alternatives require their complete exact outputs"
+                )
         elif not self.unavailable_reasons:
-            raise ValueError("Unavailable alternatives must explain their missing authority")
+            raise ValueError(
+                "Unavailable alternatives must explain their missing authority"
+            )
         return self
 
 
@@ -1536,19 +1555,8 @@ class AttachmentReview(ReconciliationContract):
     incoming_source_path: str
     alternatives: tuple[AttachmentAlternative, ...]
     assumptions: tuple[ProposalAssumption, ...]
-
-
-class ReferenceTarget(ReconciliationContract):
-    schema_id: Literal["brz2obsidian.reference-target"]
-    schema_version: Literal[1]
-    target_id: str = Field(min_length=1)
-    kind: Literal["category", "tag", "relationship", "resource", "note"]
-    canonical_path: str | None
-    identity: ImportedItemIdentity | None
-    target: IdentityTargetFacts | None
-    representations: tuple[str, ...]
-    validation_fingerprint: str = Field(min_length=1)
-    status: Literal["safe", "unsafe", "unknown"]
+    links: tuple[AssociatedLinkReview, ...]
+    link_inventory: Literal["complete", "partial", "unreadable", "unknown"]
 
 
 class LinkFragment(ReconciliationContract):
@@ -1556,24 +1564,81 @@ class LinkFragment(ReconciliationContract):
     value: str = Field(min_length=1)
 
 
+class LinkAnchor(ReconciliationContract):
+    fragment: LinkFragment
+    spans: tuple[StructureSpan, ...]
+    raw_parts: tuple[bytes, ...]
+
+
 class LinkTargetFacts(ReconciliationContract):
     schema_id: Literal["brz2obsidian.link-target-facts"]
     schema_version: Literal[1]
     target_id: str = Field(min_length=1)
-    existence: Literal["present", "missing", "known_source_gap", "intentionally_uncreated", "unknown"]
+    existence: Literal[
+        "present", "missing", "known_source_gap", "intentionally_uncreated", "unknown"
+    ]
     content: ExactContent | None
     fragments: tuple[LinkFragment, ...]
+    anchors: tuple[LinkAnchor, ...]
+    structure: StructuredDocument | None
     memberships: tuple[str, ...]
     interpretation: Literal["supported", "unsupported", "unknown"]
+
+    @model_validator(mode="after")
+    def bound_fragment_and_membership_evidence(self):
+        if tuple(a.fragment for a in self.anchors) != self.fragments:
+            raise ValueError("Fragment facts require exact available anchors")
+        for anchor in self.anchors:
+            if (
+                self.content is None
+                or not anchor.spans
+                or len(anchor.spans) != len(anchor.raw_parts)
+            ):
+                raise ValueError("Fragment evidence requires available content")
+            for span, raw in zip(anchor.spans, anchor.raw_parts, strict=True):
+                if (
+                    span.end > len(self.content.data)
+                    or self.content.data[span.start : span.end] != raw
+                ):
+                    raise ValueError("Fragment evidence must bind exact target bytes")
+            if b"#".join(anchor.raw_parts) != anchor.fragment.value.encode("utf-8"):
+                raise ValueError("Fragment value must bind its normalized anchor parts")
+        if self.structure is not None:
+            if self.content is None or self.structure.content.data != self.content.data:
+                raise ValueError("Target structure must bind exact available bytes")
+            observed = tuple(
+                e.target_id for m in self.structure.memberships for e in m.entries
+            )
+            if observed != self.memberships:
+                raise ValueError(
+                    "Target membership facts must bind normalized structure"
+                )
+        elif self.memberships:
+            raise ValueError("Membership facts require exact normalized structure")
+        return self
 
 
 class LinkQuery(ReconciliationContract):
     value: str = Field(min_length=1)
     mode: Literal["exact", "shortened"]
+    spellings: tuple[str, ...]
 
 
 class LinkMeaning(ReconciliationContract):
-    status: Literal["resolved", "missing", "known_source_gap", "intentionally_uncreated", "unknown", "ambiguous", "unsupported", "inventory_uncertain", "unsafe", "fragment_missing", "fragment_ambiguous", "external"]
+    status: Literal[
+        "resolved",
+        "missing",
+        "known_source_gap",
+        "intentionally_uncreated",
+        "unknown",
+        "ambiguous",
+        "unsupported",
+        "inventory_uncertain",
+        "unsafe",
+        "fragment_missing",
+        "fragment_ambiguous",
+        "external",
+    ]
     target_id: str | None
     target_identity: ImportedItemIdentity | None
     path: str | None
@@ -1611,8 +1676,131 @@ class LinkDocument(ReconciliationContract):
         end, keys = 0, set()
         for occurrence in self.occurrences:
             span, destination = occurrence.span, occurrence.destination_span
-            if occurrence.occurrence_id in keys or not end <= span.start < span.end <= len(self.content.data) or not span.start <= destination.start < destination.end <= span.end or self.content.data[span.start:span.end] != occurrence.raw:
-                raise ValueError("Link occurrence must bind distinct disjoint exact document bytes")
+            if (
+                occurrence.occurrence_id in keys
+                or not end <= span.start < span.end <= len(self.content.data)
+                or not span.start <= destination.start < destination.end <= span.end
+                or self.content.data[span.start : span.end] != occurrence.raw
+            ):
+                raise ValueError(
+                    "Link occurrence must bind distinct disjoint exact document bytes"
+                )
             keys.add(occurrence.occurrence_id)
             end = span.end
+        return self
+
+
+class LinkContext(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.link-context"]
+    schema_version: Literal[1]
+    inventory: Literal["complete", "partial", "unreadable"]
+    current_targets: tuple[ReferenceTarget, ...]
+    incoming_targets: tuple[ReferenceTarget, ...]
+    current_target_facts: tuple[LinkTargetFacts, ...]
+    incoming_target_facts: tuple[LinkTargetFacts, ...]
+    current_documents: tuple[LinkDocument, ...]
+    incoming_documents: tuple[LinkDocument, ...]
+
+
+class AssociatedLinkReview(ReconciliationContract):
+    document_id: str
+    occurrence_id: str | None
+    old: LinkMeaning | None
+    incoming: LinkMeaning | None
+    secondary: LinkMeaning | None
+    status: Literal["review", "unchanged", "unsupported"]
+    choices: tuple[Literal["keep_current", "use_incoming", "use_secondary"], ...]
+    assumptions: tuple[ProposalAssumption, ...]
+
+
+class LinkValidationFinding(ReconciliationContract):
+    code: Literal[
+        "link_unbound",
+        "link_inventory_uncertain",
+        "link_unsupported",
+        "link_facts_invalid",
+        "link_meaning_mismatch",
+        "link_harmed",
+        "existing_link_warning",
+        "link_membership_invalid",
+    ]
+    document_id: str
+    occurrence_id: str | None
+    blocking: bool
+
+
+class LinkDocumentValidation(ReconciliationContract):
+    valid: bool
+    findings: tuple[LinkValidationFinding, ...]
+
+    @model_validator(mode="after")
+    def truthful_validation_result(self):
+        if self.valid != (not any(f.blocking for f in self.findings)):
+            raise ValueError("Validation result must agree with its blocking findings")
+        return self
+
+
+class LinkOccurrenceChoice(ReconciliationContract):
+    document_id: str = Field(min_length=1)
+    occurrence_id: str = Field(min_length=1)
+    old: LinkMeaning
+    replacement: bytes
+    selected: LinkMeaning | None
+    expected_memberships: tuple[str, ...]
+    provenance: Literal["explicit_user"]
+
+
+class AttachmentSelection(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.attachment-selection"]
+    schema_version: Literal[1]
+    proposal_id: str = Field(min_length=1)
+    generation: int = Field(ge=1)
+    item_id: str = Field(min_length=1)
+    facet: str = Field(min_length=1)
+    reviewed_change_id: str = Field(min_length=1)
+    reviewed_assumptions: tuple[ProposalAssumption, ...]
+    choice: Literal["current", "incoming", "both"]
+    link_choices: tuple[LinkOccurrenceChoice, ...]
+    provenance: Literal["explicit_user"]
+
+
+class AttachmentCandidate(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.attachment-candidate"]
+    schema_version: Literal[1]
+    outputs: tuple[AttachmentOutput, ...]
+    documents: tuple[LinkDocument, ...]
+    targets: tuple[ReferenceTarget, ...]
+    target_facts: tuple[LinkTargetFacts, ...]
+
+
+class AttachmentValidationFinding(ReconciliationContract):
+    code: Literal[
+        "attachment_facts_invalid",
+        "attachment_stale_selection",
+        "attachment_unsafe_input",
+        "attachment_unavailable",
+        "attachment_payload_mismatch",
+        "attachment_target_invalid",
+        "attachment_context_incomplete",
+        "attachment_link_choice_invalid",
+        "attachment_link_choice_missing",
+        "attachment_document_changed",
+        "attachment_link_invalid",
+    ]
+    document_id: str | None
+    occurrence_id: str | None
+    blocking: bool
+
+
+class AttachmentCandidateValidation(ReconciliationContract):
+    valid: bool
+    findings: tuple[AttachmentValidationFinding, ...]
+    link_findings: tuple[LinkValidationFinding, ...]
+
+    @model_validator(mode="after")
+    def truthful_validation_result(self):
+        if self.valid != (
+            not any(f.blocking for f in self.findings + self.link_findings)
+        ):
+            raise ValueError("Validation result must agree with its blocking findings")
         return self
