@@ -11,6 +11,7 @@ from brz2obsidian.contracts import (
     ReconciliationInput,
     UpdateProposal,
 )
+from brz2obsidian.core.identity import bind_identity
 
 from .formats import format_assumption, format_findings, format_proposal, review_facts
 
@@ -146,8 +147,15 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
         findings.extend(_findings(facts, None, None, facts.safety_facts))
     for subject in facts.subjects:
         subject_id = _digest(
-            (facts.incoming_identity.collection_id, subject.item_id, subject.facet)
+            (
+                facts.incoming_identity.module_id,
+                facts.incoming_identity.collection_id,
+                subject.item_id,
+                subject.facet,
+            )
         )
+        binding = bind_identity(facts, subject, subject_id)
+        subject = binding.subject
         safety = tuple(
             sorted(
                 (
@@ -158,13 +166,35 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
                 key=lambda f: f.key,
             )
         )
-        assumptions = _assumptions(facts, subject, subject_id, safety)
-        problems = _findings(facts, subject, subject_id, safety)
+        assumptions = (
+            _assumptions(facts, subject, subject_id, safety)
+            + binding.assumptions
+            + (() if binding.rename is None else binding.rename.assumptions)
+        )
+        problems = _findings(facts, subject, subject_id, safety) + list(
+            binding.findings
+        )
         findings.extend(problems)
         disposition, result, rule, requires_decision = format_proposal(
             facts, subject
         ) or _proposal(subject)
-        if problems:
+        if binding.review.status != "matched":
+            disposition, result, rule, requires_decision = (
+                "identity_resolution",
+                None,
+                "identity_resolution",
+                True,
+            )
+        if binding.review.status == "stale":
+            disposition = "stale"
+        if binding.rename is not None and binding.rename.status == "stale":
+            disposition, result, rule, requires_decision = (
+                "stale",
+                None,
+                "rename_review",
+                True,
+            )
+        if any(problem.blocking for problem in problems):
             disposition, result, rule, requires_decision = (
                 "refused",
                 None,
@@ -177,7 +207,13 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
             and _bytes(subject.current.content) != _bytes(subject.baseline.content)
         ):
             local_changes.append(subject_id)
-        change_id = _digest((subject_id, [(a.key, a.fingerprint) for a in assumptions]))
+        change_id = _digest(
+            (
+                subject_id,
+                [(a.key, a.fingerprint) for a in assumptions],
+                binding.target_path,
+            )
+        )
         changes.append(
             ProposedChange(
                 change_id=change_id,
@@ -185,6 +221,7 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
                 item_id=subject.item_id,
                 facet=subject.facet,
                 path=subject.current.path,
+                target_path=binding.target_path,
                 original=subject.baseline.content,
                 current=subject.current.content,
                 incoming=subject.incoming,
@@ -192,20 +229,26 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
                 disposition=disposition,
                 requires_decision=requires_decision,
                 provenance=ChangeProvenance(
-                    producer="format-review/v1"
-                    if review_facts(facts, subject)
+                    producer="identity-review/v1"
+                    if rule in ("identity_resolution", "rename_review")
+                    else "format-review/v1"
+                    if review_facts(facts, subject) is not None
                     else "exact-bytes/v1",
                     rule=rule,
                 ),
                 assumptions=assumptions,
-                decision_dependencies=(),
+                decision_dependencies=(f"identity-repair:{subject_id}",)
+                if binding.review.repair_required
+                else (),
                 source_version=_content_identity(subject.incoming),
                 format_review=review_facts(facts, subject),
+                identity_review=binding.review,
+                rename_review=binding.rename,
             )
         )
     readiness = (
         "refused"
-        if findings
+        if any(finding.blocking for finding in findings)
         else "review_required"
         if any(c.requires_decision for c in changes)
         else "ready"

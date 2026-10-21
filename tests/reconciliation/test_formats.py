@@ -53,7 +53,14 @@ def test_unavailable_old_generation_requires_separate_preservation_first_review(
 
 
 def test_old_known_and_unknown_originals_expose_separate_role_choices_without_promoting_current():
-    from brz2obsidian.contracts import ContentVersion, CurrentContent, ExactContent
+    from brz2obsidian.contracts import (
+        ContentVersion,
+        CurrentContent,
+        ExactContent,
+        IdentityInventoryItem,
+        IdentityTargetFacts,
+        ImportedItemIdentity,
+    )
 
     facts = request()
     old = facts.baseline_identity.model_copy(update={"output_format": 6})
@@ -65,6 +72,11 @@ def test_old_known_and_unknown_originals_expose_separate_role_choices_without_pr
                     "item_id": role,
                     "output_role": role,
                     "path": f"{role}.md",
+                    "source_target": IdentityTargetFacts(
+                        normalized_path=f"{role}.md",
+                        containment="contained",
+                        status="safe",
+                    ),
                     "baseline": ContentVersion(
                         status="known" if known else "unknown",
                         content=ExactContent(data=b"old generated\r\n")
@@ -87,6 +99,22 @@ def test_old_known_and_unknown_originals_expose_separate_role_choices_without_pr
                 update={
                     "baseline_identity": old,
                     "subjects": subjects,
+                    "identity_inventory": tuple(
+                        IdentityInventoryItem(
+                            entry_id=f"entry:{subject.item_id}",
+                            identity_state="valid",
+                            identity=ImportedItemIdentity(
+                                collection_id=facts.incoming_identity.collection_id,
+                                module_id=facts.incoming_identity.module_id,
+                                item_id=subject.item_id,
+                            ),
+                            raw_identity=None,
+                            title=subject.item_id,
+                            current=subject.current,
+                            target=subject.source_target,
+                        )
+                        for subject in subjects
+                    ),
                     "format_operation": operation(
                         "format_transition",
                         recorded_generation="unavailable",

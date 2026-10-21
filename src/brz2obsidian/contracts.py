@@ -581,7 +581,14 @@ class ReconciliationContract(Contract):
         json.loads(json_data, object_pairs_hook=unique_fields)
         return super().model_validate_json(json_data, **kwargs)
 
-    @field_validator("path", mode="before", check_fields=False)
+    @field_validator(
+        "path",
+        "current_path",
+        "source_path",
+        "target_path",
+        mode="before",
+        check_fields=False,
+    )
     @classmethod
     def relative_vault_path(cls, value):
         if (
@@ -590,6 +597,13 @@ class ReconciliationContract(Contract):
             or any(part in ("", ".", "..") for part in value.split("/"))
         ):
             raise ValueError("A canonical relative vault path is required")
+        return value
+
+    @field_validator("reviewed_assumptions", check_fields=False)
+    @classmethod
+    def unique_reviewed_assumptions(cls, value):
+        if len({assumption.key for assumption in value}) != len(value):
+            raise ValueError("Duplicate reviewed assumption keys")
         return value
 
 
@@ -722,6 +736,8 @@ class ReconciliationSubject(ReconciliationContract):
     current: CurrentContent
     incoming: ExactContent | None
     interpretation: Literal["supported", "opaque", "unsupported"]
+    title: str | None = None
+    source_target: IdentityTargetFacts
     output_role: Literal["note", "dashboard", "template", "guide", "configuration"]
 
 
@@ -736,6 +752,9 @@ class ReconciliationInput(ReconciliationContract):
     format_operation: FormatOperation
     inventory: Literal["complete", "partial", "unreadable"]
     safety_facts: tuple[SafetyFact, ...]
+    identity_inventory: tuple[IdentityInventoryItem, ...]
+    association_decisions: tuple[IdentityAssociationDecision, ...] = ()
+    rename_decisions: tuple[RenamePathDecision, ...] = ()
 
     @model_validator(mode="after")
     def unique_subjects_and_facts(self):
@@ -749,6 +768,19 @@ class ReconciliationInput(ReconciliationContract):
             for f in self.safety_facts
         ):
             raise ValueError("Safety scopes must name distinct available subjects")
+        inventory_keys = [item.entry_id for item in self.identity_inventory]
+        if len(set(inventory_keys)) != len(inventory_keys):
+            raise ValueError("Duplicate inventory entry IDs")
+        decisions = self.association_decisions + self.rename_decisions
+        if len({decision.decision_id for decision in decisions}) != len(decisions):
+            raise ValueError("Duplicate identity/rename decision IDs")
+        for family in (self.association_decisions, self.rename_decisions):
+            decision_items = [decision.item_id for decision in family]
+            if (
+                len(set(decision_items)) != len(decision_items)
+                or not set(decision_items) <= items
+            ):
+                raise ValueError("Decisions must name distinct known source items")
         return self
 
 
@@ -801,7 +833,7 @@ class ProposalAssumption(ReconciliationContract):
 
 
 class ChangeProvenance(ReconciliationContract):
-    producer: Literal["exact-bytes/v1", "format-review/v1"]
+    producer: Literal["exact-bytes/v1", "identity-review/v1", "format-review/v1"]
     rule: Literal[
         "unknown_original",
         "source_absent",
@@ -812,6 +844,8 @@ class ChangeProvenance(ReconciliationContract):
         "divergent",
         "source_only",
         "unsafe_input",
+        "identity_resolution",
+        "rename_review",
         "onboarding_required",
         "format_review",
         "format_source_uncertain",
@@ -824,23 +858,46 @@ class ProposedChange(ReconciliationContract):
     item_id: str
     facet: str
     path: str
+    target_path: str
     original: ExactContent | None
     current: ExactContent | None
     incoming: ExactContent | None
     result: ExactContent | None
     disposition: Literal[
-        "no_change", "preserve_vault", "compatible", "unresolved", "refused"
+        "no_change",
+        "preserve_vault",
+        "compatible",
+        "unresolved",
+        "refused",
+        "identity_resolution",
+        "stale",
     ]
     requires_decision: bool
     provenance: ChangeProvenance
     assumptions: tuple[ProposalAssumption, ...]
     decision_dependencies: tuple[str, ...]
     source_version: str | None
+    identity_review: IdentityReview
+    rename_review: RenameReview | None
     format_review: FormatReview | None
 
     @model_validator(mode="after")
     def conservative_result(self):
-        if self.disposition in ("unresolved", "refused"):
+        unresolved = ("unresolved", "refused", "identity_resolution", "stale")
+        if self.identity_review.repair_required and self.disposition not in unresolved:
+            raise ValueError(
+                "Observed identity repairs remain required independently of a content choice"
+            )
+        if self.target_path != self.path and (
+            self.rename_review is None
+            or self.rename_review.status != "accepted"
+            or self.rename_review.source_path != self.target_path
+            or self.rename_review.current_path != self.path
+        ):
+            raise ValueError(
+                "A changed target path requires the exact reviewed source rename"
+            )
+        if self.disposition in unresolved:
             if self.result is not None or not self.requires_decision:
                 raise ValueError("Unresolved/refused changes cannot choose a result")
         elif self.disposition == "compatible":
@@ -868,6 +925,14 @@ class ReconciliationFinding(ReconciliationContract):
         "current_unavailable",
         "missing_safety_facts",
         "unsafe_assumption",
+        "unsafe_identity_target",
+        "current_inventory_mismatch",
+        "stale_identity_decision",
+        "unsafe_identity_decision",
+        "identity_repair_incomplete",
+        "stale_rename_decision",
+        "unsafe_rename_target",
+        "unsafe_rename_decision",
         "format_source_changed",
         "format_target_unsupported",
         "format_outputs_unavailable",
@@ -902,7 +967,12 @@ class UpdateProposal(ReconciliationContract):
             if any(f.blocking for f in self.findings)
             or any(c.disposition == "refused" for c in self.changes)
             else "review_required"
-            if any(c.requires_decision for c in self.changes)
+            if any(
+                c.requires_decision
+                or c.identity_review.repair_required
+                or (c.rename_review is not None and c.rename_review.requires_decision)
+                for c in self.changes
+            )
             else "ready"
         )
         if self.readiness != required or self.ready != (required == "ready"):
@@ -910,3 +980,135 @@ class UpdateProposal(ReconciliationContract):
                 "Proposal readiness must reflect every required review and safety finding"
             )
         return self
+
+
+class ImportedItemIdentity(ReconciliationContract):
+    collection_id: str = Field(min_length=1)
+    module_id: str = Field(min_length=1)
+    item_id: str = Field(min_length=1)
+
+
+class IdentityTargetFacts(ReconciliationContract):
+    """Outer target facts; normalized_path uses Unicode NFC and casefold.
+
+    Core independently checks that key, known unsafe spellings and inventory
+    collisions. Containment and access/reparse validation remain outer facts.
+    """
+
+    normalized_path: str = Field(min_length=1)
+    containment: Literal["contained", "outside", "unknown"]
+    status: Literal["safe", "unsafe", "unknown"]
+
+
+class IdentityInventoryItem(ReconciliationContract):
+    entry_id: str = Field(min_length=1)
+    identity_state: Literal["valid", "missing", "malformed", "inconsistent"]
+    identity: ImportedItemIdentity | None
+    raw_identity: str | None
+    title: str
+    current: CurrentContent
+    target: IdentityTargetFacts
+
+    @model_validator(mode="after")
+    def consistent_identity_state(self):
+        if self.identity_state == "valid" and self.identity is None:
+            raise ValueError(
+                "A valid observed identity requires its full source identity"
+            )
+        if self.identity_state == "missing" and self.identity is not None:
+            raise ValueError("Missing identity cannot also claim a parsed identity")
+        return self
+
+
+class IdentityCandidate(ReconciliationContract):
+    entry_id: str
+    current: CurrentContent
+    title: str
+    identity_state: Literal["valid", "missing", "malformed", "inconsistent"]
+    identity: ImportedItemIdentity | None
+    suggestion: Literal["identity", "title", "path", "unassociated"]
+    eligible: bool
+    target_safe: bool
+    assumptions: tuple[ProposalAssumption, ...]
+
+
+class IdentityReview(ReconciliationContract):
+    """Observed association and proposed repairs, with no claim of file repair.
+
+    repair_required keeps the update unresolved while observed identities are
+    absent, malformed or duplicated, even after an explicit association choice.
+    """
+
+    status: Literal["matched", "unresolved", "association_proposed", "stale", "refused"]
+    reason: Literal[
+        "unique_identity",
+        "duplicate_identity",
+        "identity_unavailable",
+        "decision_stale",
+        "decision_unsafe",
+        "repair_incomplete",
+        "association_proposed",
+        "target_unsafe",
+        "current_mismatch",
+    ]
+    selected_entry_id: str | None
+    candidates: tuple[IdentityCandidate, ...]
+    repair_required: bool
+    disassociate_entry_ids: tuple[str, ...]
+    decision_id: str | None
+    provenance: Literal["unique_identity", "explicit_user", "unresolved"]
+    assumptions: tuple[ProposalAssumption, ...]
+
+
+class RenameReview(ReconciliationContract):
+    current_path: str
+    source_path: str
+    status: Literal["offered", "accepted", "declined", "blocked", "stale"]
+    requires_decision: bool
+    decision_id: str | None
+    provenance: Literal["explicit_user", "unresolved"]
+    assumptions: tuple[ProposalAssumption, ...]
+
+
+class IdentityAssociationDecision(ReconciliationContract):
+    """Explicit candidate association and disassociation proposals for review."""
+
+    schema_id: Literal["brz2obsidian.identity-association-decision"]
+    schema_version: Literal[1]
+    decision_id: str = Field(min_length=1)
+    proposal_id: str = Field(min_length=1)
+    generation: int = Field(ge=1)
+    collection_id: str = Field(min_length=1)
+    module_id: str = Field(min_length=1)
+    item_id: str = Field(min_length=1)
+    selected_entry_id: str = Field(min_length=1)
+    disassociate_entry_ids: tuple[str, ...]
+    reviewed_assumptions: tuple[ProposalAssumption, ...]
+    provenance: Literal["explicit_user"]
+
+    @model_validator(mode="after")
+    def explicit_distinct_repairs(self):
+        if (
+            len(set(self.disassociate_entry_ids)) != len(self.disassociate_entry_ids)
+            or self.selected_entry_id in self.disassociate_entry_ids
+        ):
+            raise ValueError(
+                "Disassociation proposals must be distinct from the selected entry"
+            )
+        return self
+
+
+class RenamePathDecision(ReconciliationContract):
+    """Choose the current or incoming source path; arbitrary paths are excluded."""
+
+    schema_id: Literal["brz2obsidian.rename-decision"]
+    schema_version: Literal[1]
+    decision_id: str = Field(min_length=1)
+    proposal_id: str = Field(min_length=1)
+    generation: int = Field(ge=1)
+    collection_id: str = Field(min_length=1)
+    module_id: str = Field(min_length=1)
+    item_id: str = Field(min_length=1)
+    choice: Literal["keep_path", "source_path"]
+    reviewed_assumptions: tuple[ProposalAssumption, ...]
+    provenance: Literal["explicit_user"]

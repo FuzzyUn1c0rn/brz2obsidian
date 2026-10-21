@@ -11,7 +11,10 @@ from brz2obsidian.contracts import (
     ExactContent,
     FormatBaselineOutput,
     FormatOperation,
+    IdentityInventoryItem,
+    IdentityTargetFacts,
     ImmutableContentReference,
+    ImportedItemIdentity,
     OutputIdentity,
     ReconciliationInput,
     ReconciliationSubject,
@@ -50,6 +53,10 @@ def request(
         ),
         incoming=ExactContent(data=incoming),
         interpretation="supported",
+        title="Opening",
+        source_target=IdentityTargetFacts(
+            normalized_path="notes/opening.md", containment="contained", status="safe"
+        ),
         output_role="note",
     )
     fields = {
@@ -82,6 +89,21 @@ def request(
             ),
         ),
         "inventory": "complete",
+        "identity_inventory": (
+            IdentityInventoryItem(
+                entry_id="opening-entry",
+                identity_state="valid",
+                identity=ImportedItemIdentity(
+                    collection_id="folio:collection",
+                    module_id="synthetic-folio",
+                    item_id="entry:opening",
+                ),
+                raw_identity=None,
+                title="Opening",
+                current=subject.current,
+                target=subject.source_target,
+            ),
+        ),
         "safety_facts": tuple(
             SafetyFact(
                 key=kind,
@@ -174,7 +196,18 @@ def test_divergent_changes_and_unknown_originals_offer_exact_unresolved_alternat
             )
         }
     )
-    unknown_result = reconcile(facts.model_copy(update={"subjects": (unknown,)}))
+    unknown_result = reconcile(
+        facts.model_copy(
+            update={
+                "subjects": (unknown,),
+                "identity_inventory": (
+                    facts.identity_inventory[0].model_copy(
+                        update={"current": unknown.current}
+                    ),
+                ),
+            }
+        )
+    )
     assert unknown_result.changes[0].disposition == "unresolved"
     assert unknown_result.local_changes == ()
 
@@ -214,7 +247,18 @@ def test_inventory_uncertainty_and_missing_current_bytes_are_refusals_never_dele
             )
         }
     )
-    result = reconcile(facts.model_copy(update={"subjects": (subject,)}))
+    result = reconcile(
+        facts.model_copy(
+            update={
+                "subjects": (subject,),
+                "identity_inventory": (
+                    facts.identity_inventory[0].model_copy(
+                        update={"current": subject.current}
+                    ),
+                ),
+            }
+        )
+    )
     assert result.findings[0].code == "current_unavailable"
     assert result.changes[0].disposition == "refused"
 
@@ -256,7 +300,18 @@ def test_absent_versions_are_conservative_unresolved_facts_at_this_seam():
         ),
     ):
         subject = facts.subjects[0].model_copy(update=update)
-        result = reconcile(facts.model_copy(update={"subjects": (subject,)}))
+        result = reconcile(
+            facts.model_copy(
+                update={
+                    "subjects": (subject,),
+                    "identity_inventory": (
+                        facts.identity_inventory[0].model_copy(
+                            update={"current": subject.current}
+                        ),
+                    ),
+                }
+            )
+        )
         (change,) = result.changes
         assert change.disposition == "unresolved" and change.result is None
         assert change.provenance.rule == rule
