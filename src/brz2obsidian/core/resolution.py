@@ -13,15 +13,19 @@ from brz2obsidian.contracts import (
     ReviewAction,
     ReviewApproval,
     ReviewConsentDecision,
+    ReviewHistory,
     ReviewPlan,
     ReviewPreflight,
+    ReviewRefreshEvent,
     ReviewRequirement,
     ReviewTransition,
 )
 from brz2obsidian.core.attachment_validation import validate_attachment_candidate
 from brz2obsidian.core.link_meanings import _semantic
-from brz2obsidian.core.reconciliation import reconcile
+from brz2obsidian.core.memberships import used_mappings
+from brz2obsidian.core.reconciliation import _reconcile
 from brz2obsidian.core.review_attachments import (
+    applicable_approvals,
     attachment_candidate_assumption,
     attachment_selection_valid,
 )
@@ -63,7 +67,8 @@ def _domain(facts, change):
         meaning = lambda records: {
             m.classification_id: (m.kind, m.target_id) for m in records
         }
-        if meaning(comparison.prior_mappings) != meaning(comparison.incoming_mappings):
+        prior, incoming = used_mappings(comparison)
+        if meaning(prior) != meaning(incoming):
             return "mapping"
     return "text"
 
@@ -117,11 +122,25 @@ def _choices(facts, change, domain):
 
 
 def _plan(
-    facts, preflight, actions=(), approvals=(), consents=(), *, producer_facts=None
+    facts,
+    preflight,
+    actions=(),
+    approvals=(),
+    consents=(),
+    *,
+    producer_facts=None,
+    producer_applicability=(),
+    attachment_applicability=(),
 ):
     initial = facts
     facts = producer_facts or facts
-    proposal = reconcile(facts)
+    proposal = _reconcile(facts, _applicability=producer_applicability)
+    attachment_applicability = tuple(
+        a
+        for a in attachment_applicability
+        if any(b.decision_id == a.decision_id for b in approvals)
+    )
+    effective_approvals = applicable_approvals(approvals, attachment_applicability)
     approved = {(a.change_id, a.domain) for a in approvals}
     requirements = tuple(
         ReviewRequirement(
@@ -179,7 +198,7 @@ def _plan(
                 assumptions=(dependency,),
             ),
         )
-    consent_rows = consent_requirements(preflight, proposal, approvals)
+    consent_rows = consent_requirements(preflight, proposal, effective_approvals)
     satisfied = {c.consent_id: c for c in consents}
     requirements += tuple(
         r
@@ -196,7 +215,7 @@ def _plan(
             if current_observation_problem(facts) is None
             else (current_observation_problem(facts),)
         )
-        + selected_effect_blockers(facts, proposal, actions, approvals)
+        + selected_effect_blockers(facts, proposal, actions, effective_approvals)
         + tuple(
             "consent_declined:" + c.consent_id
             for c in consents
@@ -209,6 +228,15 @@ def _plan(
     return ReviewPlan(
         schema_id="brz2obsidian.review-plan",
         schema_version=1,
+        history=ReviewHistory(
+            schema_id="brz2obsidian.review-history",
+            schema_version=1,
+            initial_facts=initial,
+            initial_preflight=preflight,
+            events=(),
+        ),
+        producer_applicability=producer_applicability,
+        attachment_applicability=attachment_applicability,
         facts=initial,
         producer_facts=facts,
         preflight=preflight,
@@ -270,8 +298,9 @@ def _preserved_memory(plan, change, action, choice="keep_vault"):
         for d in plan.producer_facts.preservation_decisions
         if (d.item_id, d.facet) != (change.item_id, change.facet)
     ) + (decision,)
-    result = reconcile(
-        plan.producer_facts.model_copy(update={"preservation_decisions": decisions})
+    result = _reconcile(
+        plan.producer_facts.model_copy(update={"preservation_decisions": decisions}),
+        _applicability=plan.producer_applicability,
     )
     selected = next(c for c in result.changes if c.subject_id == change.subject_id)
     if selected.requires_decision or selected.disposition != (
@@ -317,7 +346,7 @@ def _candidate_assumption(candidate, change, decision_id):
 
 
 def _producer_transition(plan, action, facts):
-    proposal = reconcile(facts)
+    proposal = _reconcile(facts, _applicability=plan.producer_applicability)
     current = {c.change_id: c for c in proposal.changes}
     retained = tuple(
         a
@@ -335,10 +364,12 @@ def _producer_transition(plan, action, facts):
         retained,
         plan.consents,
         producer_facts=facts,
+        producer_applicability=plan.producer_applicability,
+        attachment_applicability=plan.attachment_applicability,
     )
 
 
-def _resolve(plan, action):
+def _resolve_action(plan, action):
     action = ReviewAction.model_validate(action)
     reserved = {
         d.decision_id
@@ -411,6 +442,8 @@ def _resolve(plan, action):
                 plan.approvals,
                 consents,
                 producer_facts=plan.producer_facts,
+                producer_applicability=plan.producer_applicability,
+                attachment_applicability=plan.attachment_applicability,
             ),
             "accepted",
             "accepted",
@@ -455,6 +488,8 @@ def _resolve(plan, action):
                 plan.approvals + approvals,
                 plan.consents,
                 producer_facts=plan.producer_facts,
+                producer_applicability=plan.producer_applicability,
+                attachment_applicability=plan.attachment_applicability,
             ),
             "accepted",
             "accepted",
@@ -622,6 +657,8 @@ def _resolve(plan, action):
                 + (approval,),
                 plan.consents,
                 producer_facts=plan.producer_facts,
+                producer_applicability=plan.producer_applicability,
+                attachment_applicability=plan.attachment_applicability,
             ),
             "accepted",
             "accepted",
@@ -760,6 +797,8 @@ def _resolve(plan, action):
                 + (approval,),
                 plan.consents,
                 producer_facts=plan.producer_facts,
+                producer_applicability=plan.producer_applicability,
+                attachment_applicability=plan.attachment_applicability,
             ),
             "accepted",
             "accepted",
@@ -858,16 +897,43 @@ def _resolve(plan, action):
         + (approval,),
         plan.consents,
         producer_facts=plan.producer_facts,
+        producer_applicability=plan.producer_applicability,
+        attachment_applicability=plan.attachment_applicability,
     )
     return _transition(updated, "accepted", "accepted")
 
 
+def _resolve(plan, action):
+    action = ReviewAction.model_validate(action)
+    result = _resolve_action(plan, action)
+    if result.status == "accepted":
+        result = result.model_copy(
+            update={
+                "plan": result.plan.model_copy(
+                    update={
+                        "history": plan.history.model_copy(
+                            update={"events": plan.history.events + (action,)}
+                        )
+                    }
+                )
+            }
+        )
+    return result
+
+
 def validate_review(plan: ReviewPlan) -> ReviewTransition:
-    """Reconstruct the complete review against its supplied facts, without observing state."""
+    """Reconstruct original actions and publication-free refreshes in their epochs."""
+    from .refresh import _refresh
+
     plan = ReviewPlan.model_validate(plan)
-    canonical = prepare_review(plan.facts, preflight=plan.preflight)
-    for previous in plan.actions:
-        replayed = _resolve(canonical, previous)
+    canonical = prepare_review(
+        plan.history.initial_facts, preflight=plan.history.initial_preflight
+    )
+    for event in plan.history.events:
+        if isinstance(event, ReviewRefreshEvent):
+            replayed = _refresh(canonical, event.facts, event.preflight)
+        else:
+            replayed = _resolve(canonical, event)
         if replayed.status != "accepted":
             return _transition(canonical, "refused", "invalid_plan")
         canonical = replayed.plan

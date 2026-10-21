@@ -13,9 +13,10 @@ choice. Refused or stale actions record no approval and preserve exact compariso
 bytes. No action accepts a path list: producers offer the current and source
 paths, and normalized target safety remains authoritative.
 
-The plan retains initial `facts` and derived `producer_facts`. Resolution replays
-its admitted actions from those initial facts and rejects altered proposals,
-results, readiness, approvals or derived facts. A decision ID cannot be reused.
+The plan retains current-epoch `facts` and derived `producer_facts`; its ordered
+`history` preserves the original initial facts, actions and refresh events.
+Resolution reconstructs that history in its original epochs and rejects altered
+proposals, results, readiness, approvals or derived facts. A decision ID cannot be reused.
 Choices stay within the current generation; a refresh belongs to the separate
 refresh boundary and advances the generation. `core.validate_review(plan)` exposes
 this same reconstruction for a saved plan when no new action is requested. It
@@ -206,3 +207,82 @@ Exact source-unchanged opaque preservation and proved observed absence introduce
 no new effect requiring that interpretation. A generic synthetic link-free case
 can supply explicit exact empty-occurrence facts; a real outer interpreter must
 establish those facts for its format, and cannot substitute an unbound safe flag.
+
+
+## Selective refresh and immutable consent history
+
+`core.refresh_review(plan, facts, *, preflight)` validates the original review,
+advances the same proposal by exactly one generation, recomputes comparisons and
+returns a `ReviewTransition`. Accepted refresh means the supplied facts were
+processed; new or changed choices remain unresolved. An old action token keeps
+its original expected generation and cannot approve the new generation.
+
+Every plan has closed version-1 `ReviewHistory`: exact initial facts/preflight
+and an ordered tuple of original `ReviewAction` and `ReviewRefreshEvent` records.
+`validate_review` reconstructs these epochs in order and compares the complete
+canonical result. Refresh events expose old/new versioned dependency nodes,
+changed keys, transitive invalidation and typed retention/applicability evidence.
+These fields are recomputed during reconstruction; supplied retained/ready flags,
+changed edges, graphs or results cannot authorize a choice. Decision IDs remain
+reserved across the whole history. No record claims a new filesystem observation.
+
+A retained approval preserves its exact original result, path, candidate, source
+memory and explicit-user or compatible-bulk provenance. `ReviewRetention` binds
+that original member to current applicability. A bulk decision can retain an
+unchanged member after its group ID or siblings change; it does not replay the
+old group against new members. Edited and binary candidates are independently
+revalidated against fresh exact facts. Removing an unsafe approval or producer
+choice triggers another graph/effect pass until the affected set stabilizes.
+
+`ReviewProducerApplicability` preserves original normalized association/rename
+decisions while binding their unchanged current assumptions to the new epoch.
+The preceding canonical review must actually have admitted that exact decision;
+a stale, refused or ignored record cannot be revived by mere presence. Public
+`reconcile` retains strict current-epoch admission. Only canonical review's
+private producer evaluation receives reconstructed applicability evidence.
+Observed repair stays required until independently supplied identity facts
+establish it. This evidence is neither a new action nor actual file repair.
+
+`ReviewAttachmentApplicability` is a derived validation view, separate from the
+original approval. Its original selected outputs and explicit associated-document
+writes are identified against the original admitted context. Fresh independently
+bound unrelated documents/registry entries supply current validation proof; they
+do not become selected writes. Exact originally written document preimages and
+query meanings must remain valid. Current public selection admission stays
+strict, including its original generation. The graph, effective-output gate and
+storage consent consume the same derived view; original tokens/candidates remain
+immutable. New collisions, lookup competitors, fragments or membership meanings
+invalidate dependent choices, while unrelated context changes can retain them.
+
+Dependency nodes expose producer kind, semantic fingerprint and actual edges.
+Current bytes/existence/path, available original/source facet bytes, semantic
+profile/settings/output format, used mappings/targets/query competitors, identity,
+safety, policy/history, candidates, selected effects and scoped consents participate
+where consumed. Reverse transitive closure includes removed edges. Unknown or
+missing indispensable provenance, conflicting definitions and cycles refuse
+retention. Source-memory historical graphs are validated independently; their
+old fingerprints are not compared with new local bytes. Unusable records remain
+in supplied history rather than being pruned or treated as originals.
+
+Complete current lookup proof starts from independent inventory rows and includes
+canonical registry/state bindings and required current documents. Missing context,
+unknown inventory or omitted backlinks cannot prove a selected effect safe.
+A genuinely required global history/operation/safety change may invalidate all
+consumers; global reset is not the default. Source-neutral exact no-effect opaque
+preservation keeps its existing conservative boundary.
+
+Semantic output identity excludes informational module-release metadata while
+retaining its provenance. Established-original and section-basis validation use
+the same projection as fingerprints. No converter-version field is invented.
+Mapping scope excludes only records proven unused by supported structure; unknown
+syntax cannot establish non-use. Safety admission keeps the relevant attestation
+and excludes changes solely to which other subjects share it.
+
+Configuration source memory retains its original domain, reviewed source version,
+profile/settings/output-format context and reviewed provenance across epochs.
+Content memory cannot become configuration consent. Safe new local writing may
+be preserved by independently applicable same-source policy after current safety
+checks; this does not claim the exact old approval covered newly observed bytes.
+Changed source/context reopens review, and onboarding/format choices stay separate.
+Refresh performs no save/load, apply, cleanup, restoration or recovery; consumers
+must supply fresh observations, and later persistence uses canonical validation.

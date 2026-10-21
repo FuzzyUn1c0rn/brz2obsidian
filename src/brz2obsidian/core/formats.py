@@ -5,6 +5,11 @@ from hashlib import sha256
 from brz2obsidian.contracts import FormatReview
 
 
+def output_semantics(identity):
+    """Compatibility meaning excludes informational source-module release metadata."""
+    return identity.model_dump(mode="json", exclude={"module_version"})
+
+
 def format_findings(facts):
     """Return typed operation-level problems; unavailable old paths allow onboarding."""
     operation = facts.format_operation
@@ -42,7 +47,8 @@ def established_original(facts, subject):
     baseline = operation.established_baseline
     if (
         baseline is None
-        or baseline.identity != facts.baseline_identity
+        or output_semantics(baseline.identity)
+        != output_semantics(facts.baseline_identity)
         or baseline.identity.output_format != 7
         or baseline.source_version != operation.baseline_source_version
         or subject.baseline.content is None
@@ -144,7 +150,7 @@ def format_assumption(facts, subject):
         None
         if baseline is None
         else (
-            baseline.identity.model_dump(mode="json"),
+            output_semantics(baseline.identity),
             baseline.source_version,
             tuple(
                 sha256(o.content.data).hexdigest()

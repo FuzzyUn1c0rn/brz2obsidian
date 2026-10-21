@@ -1,6 +1,7 @@
 """Independent binding and atomicity of supplied section facts; no text parsing."""
 
 from brz2obsidian.contracts import StructureSpan
+from brz2obsidian.core.formats import output_semantics
 from brz2obsidian.core.reference_targets import validate_targets
 
 
@@ -40,7 +41,8 @@ def validate_section_facts(
     for basis in bases.values():
         if (
             basis.original.data != subject.baseline.content.data
-            or basis.output_identity != baseline_identity
+            or output_semantics(basis.output_identity)
+            != output_semantics(baseline_identity)
             or basis.source_version != source_version
             or basis.item_id != subject.item_id
             or basis.facet != subject.facet

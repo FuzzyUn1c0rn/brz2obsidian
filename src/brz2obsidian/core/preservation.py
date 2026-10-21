@@ -14,6 +14,8 @@ from brz2obsidian.contracts import (
 )
 from brz2obsidian.core.formats import configuration_memory_allowed
 
+from .dependency_graph import validate_dependencies
+
 
 @dataclass(frozen=True)
 class PreservationPolicy:
@@ -45,6 +47,18 @@ def configuration_context(facts):
     )
 
 
+def _memory_dependencies_known(record):
+    assumptions = record.provenance.reviewed_assumptions
+    nodes = {a.key: a for a in assumptions}
+    if len(nodes) != len(assumptions):
+        return False
+    try:
+        validate_dependencies(nodes)
+    except ValueError:
+        return False
+    return True
+
+
 def preservation_policy(facts, subject, subject_id, allowed):
     version = _version(subject.incoming)
     deleted = subject.current.existence == "absent"
@@ -54,6 +68,7 @@ def preservation_policy(facts, subject, subject_id, allowed):
         for record in facts.source_version_memory
         if (record.module_id, record.collection_id, record.item_id, record.facet)
         == _scope(facts, subject)
+        and _memory_dependencies_known(record)
         and record.source_version == version
         and record.choice == choice
         and record.review_domain

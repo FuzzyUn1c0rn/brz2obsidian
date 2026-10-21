@@ -115,10 +115,19 @@ def _assumptions_equal(left, right):
     )
 
 
-def _decision_current(decision, facts, subject, assumptions):
+def _decision_current(decision, facts, subject, assumptions, applicability=()):
     return (
         decision.proposal_id == facts.proposal_id
-        and decision.generation == facts.generation
+        and (
+            decision.generation == facts.generation
+            or any(
+                binding.original == decision
+                and binding.proposal_id == facts.proposal_id
+                and binding.generation == facts.generation
+                and _assumptions_equal(binding.reviewed_assumptions, assumptions)
+                for binding in applicability
+            )
+        )
         and decision.collection_id == facts.incoming_identity.collection_id
         and decision.module_id == facts.incoming_identity.module_id
         and decision.item_id == subject.item_id
@@ -127,7 +136,16 @@ def _decision_current(decision, facts, subject, assumptions):
     )
 
 
-def _rename(facts, subject, subject_id, selected, items, identity_review, assumptions):
+def _rename(
+    facts,
+    subject,
+    subject_id,
+    selected,
+    items,
+    identity_review,
+    assumptions,
+    applicability,
+):
     decision = next(
         (
             d
@@ -205,7 +223,7 @@ def _rename(facts, subject, subject_id, selected, items, identity_review, assump
     if decision is not None:
         decision_id, provenance = decision.decision_id, "explicit_user"
         if not _decision_current(
-            decision, facts, subject, (assumption,) + link_assumptions
+            decision, facts, subject, (assumption,) + link_assumptions, applicability
         ):
             status, required = "stale", True
             findings.append(
@@ -245,7 +263,7 @@ def _rename(facts, subject, subject_id, selected, items, identity_review, assump
     )
 
 
-def bind_identity(facts, subject, subject_id):
+def bind_identity(facts, subject, subject_id, *, applicability=()):
     items = tuple(sorted(facts.identity_inventory, key=lambda item: item.entry_id))
     by_id = {item.entry_id: item for item in items}
     matches = tuple(item for item in items if _same_identity(facts, subject, item))
@@ -280,7 +298,7 @@ def bind_identity(facts, subject, subject_id):
                 subject.facet,
                 facts.inventory,
                 [_claim_fact(item) for item in matches],
-                [fact.model_dump(mode="json") for fact in safety],
+                [fact.model_dump(mode="json", exclude={"subjects"}) for fact in safety],
             )
         ),
         depends_on=dependencies,
@@ -378,7 +396,7 @@ def bind_identity(facts, subject, subject_id):
             for a in candidate.assumptions
         )
         candidate = candidate_by_id.get(decision.selected_entry_id)
-        if not _decision_current(decision, facts, subject, reviewed):
+        if not _decision_current(decision, facts, subject, reviewed, applicability):
             selected, status, reason = None, "stale", "decision_stale"
             finding("stale_identity_decision", False)
         elif (
@@ -464,7 +482,14 @@ def bind_identity(facts, subject, subject_id):
         for a in candidate.assumptions
     )
     rename, target_path, rename_findings = _rename(
-        facts, effective, subject_id, selected, items, review, assumptions
+        facts,
+        effective,
+        subject_id,
+        selected,
+        items,
+        review,
+        assumptions,
+        applicability,
     )
     return IdentityBinding(
         effective,

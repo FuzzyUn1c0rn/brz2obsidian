@@ -48,6 +48,34 @@ def appearance_issues(document):
     return ("appearance_not_member",)
 
 
+def used_mappings(comparison):
+    """Keep only classification meanings actually referenced by this comparison."""
+    if any(
+        d.status != "supported"
+        for d in (comparison.original, comparison.current, comparison.incoming)
+    ):
+        # Unsupported syntax cannot prove a supplied mapping is unused.
+        return comparison.prior_mappings, comparison.incoming_mappings
+    targets = {
+        e.target_id
+        for d in (comparison.original, comparison.current, comparison.incoming)
+        for m in d.memberships
+        for e in m.entries
+    }
+    targets.update(
+        t.target_id
+        for d in (comparison.original, comparison.current, comparison.incoming)
+        for section in d.owned_sections
+        for t in section.targets
+    )
+    records = comparison.prior_mappings + comparison.incoming_mappings
+    ids = {m.classification_id for m in records if m.target_id in targets}
+    return tuple(
+        tuple(m for m in values if m.classification_id in ids)
+        for values in (comparison.prior_mappings, comparison.incoming_mappings)
+    )
+
+
 def combine_memberships(documents, comparison):
     old_sets, local_sets, source_sets = (validate_memberships(d) for d in documents)
     if set(old_sets) != set(local_sets) or set(old_sets) != set(source_sets):
@@ -58,6 +86,11 @@ def combine_memberships(documents, comparison):
         if len(index) != len(records) or len(set(index.values())) != len(records):
             raise ValueError("structure_conflict")
         maps.append(index)
+    prior, incoming = used_mappings(comparison)
+    maps = [
+        {m.classification_id: (m.kind, m.target_id) for m in records}
+        for records in (prior, incoming)
+    ]
     if any(maps[1].get(key) != value for key, value in maps[0].items()):
         raise ValueError("structure_conflict")
     replacements, results = {}, {}

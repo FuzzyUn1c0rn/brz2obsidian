@@ -75,3 +75,60 @@ def attachment_selection_valid(facts, change, action, choice):
         )
         and validate_attachment_candidate(facts, selection, candidate).valid
     )
+
+
+def applicable_approvals(approvals, applicability):
+    views = {a.decision_id: a.candidate for a in applicability}
+    return tuple(
+        a.model_copy(update={"attachment_candidate": views[a.decision_id]})
+        if a.decision_id in views
+        else a
+        for a in approvals
+    )
+
+
+def retained_attachment_view(facts, selection, candidate, original_facts):
+    """Rebind unrelated proof observations without changing originally selected writes."""
+    from .review_effects import current_note_coverage
+    from .review_links import current_observation_problem
+
+    context = facts.link_context
+    original = original_facts.link_context
+    if (
+        context is None
+        or original is None
+        or not current_note_coverage(facts)
+        or current_observation_problem(facts) is not None
+    ):
+        return None
+    old_documents = {d.document_id: d for d in original.current_documents}
+    writes = {
+        d.document_id: d
+        for d in candidate.documents
+        if d.document_id not in old_documents
+        or d.content != old_documents[d.document_id].content
+        or d.source_path != old_documents[d.document_id].source_path
+    }
+    if not set(writes) <= {d.document_id for d in context.current_documents}:
+        return None
+    outputs = {o.target_id for o in candidate.outputs}
+    document_paths = {d.source_path for d in writes.values()}
+    selected_ids = outputs | {
+        t.target_id for t in candidate.targets if t.canonical_path in document_paths
+    }
+    targets = tuple(
+        t for t in context.current_targets if t.target_id not in outputs
+    ) + tuple(t for t in candidate.targets if t.target_id in outputs)
+    states = tuple(
+        s for s in context.current_target_facts if s.target_id not in selected_ids
+    ) + tuple(s for s in candidate.target_facts if s.target_id in selected_ids)
+    documents = tuple(writes.get(d.document_id, d) for d in context.current_documents)
+    view = candidate.model_copy(
+        update={"targets": targets, "target_facts": states, "documents": documents}
+    )
+    observed_epoch = facts.model_copy(update={"generation": selection.generation})
+    return (
+        view
+        if validate_attachment_candidate(observed_epoch, selection, view).valid
+        else None
+    )

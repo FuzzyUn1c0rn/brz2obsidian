@@ -20,6 +20,7 @@ from .formats import (
     format_assumption,
     format_findings,
     format_proposal,
+    output_semantics,
     review_facts,
 )
 from .link_meanings import validate_current_link_context
@@ -31,6 +32,7 @@ from .preservation import (
 from .review_links import text_link_assumptions
 from .structures import (
     structure_assumption,
+    structure_dependencies,
     structure_proposal,
     validate_structure_facts,
 )
@@ -57,7 +59,13 @@ def _content_identity(content):
 
 def _assumptions(facts, subject, subject_id, safety):
     values = (
-        ("identity", (_dump(facts.baseline_identity), _dump(facts.incoming_identity))),
+        (
+            "identity",
+            (
+                output_semantics(facts.baseline_identity),
+                output_semantics(facts.incoming_identity),
+            ),
+        ),
         ("inventory", facts.inventory),
         (
             "baseline",
@@ -80,12 +88,15 @@ def _assumptions(facts, subject, subject_id, safety):
         ("format", format_assumption(facts, subject)),
         ("structure", structure_assumption(subject.structure)),
     )
+    dependencies = structure_dependencies(subject.structure, subject_id)
     assumptions = [
         ProposalAssumption(
             key=f"{subject_id}:{kind}",
             kind=kind,
             fingerprint=_digest(value),
-            depends_on=(),
+            depends_on=tuple(a.key for a in dependencies)
+            if kind == "structure"
+            else (),
         )
         for kind, value in values
     ]
@@ -93,12 +104,12 @@ def _assumptions(facts, subject, subject_id, safety):
         ProposalAssumption(
             key=f"safety:{fact.key}",
             kind=fact.kind,
-            fingerprint=_digest(_dump(fact)),
+            fingerprint=_digest(fact.model_dump(mode="json", exclude={"subjects"})),
             depends_on=(),
         )
         for fact in safety
     )
-    return tuple(assumptions)
+    return tuple(assumptions) + dependencies
 
 
 def _findings(facts, subject, subject_id, safety):
@@ -155,7 +166,7 @@ def _proposal(subject):
     return "compatible", subject.incoming, "source_only", True
 
 
-def reconcile(facts: ReconciliationInput) -> UpdateProposal:
+def _reconcile(facts: ReconciliationInput, *, _applicability=()) -> UpdateProposal:
     """Compare immutable exact versions and return review facts, never write consent.
 
     The explicit safety attestations are outer validated facts, not validations
@@ -174,7 +185,9 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
             subject.item_id,
             subject.facet,
         )
-        binding = bind_identity(facts, subject, subject_id)
+        binding = bind_identity(
+            facts, subject, subject_id, applicability=_applicability
+        )
         subject = binding.subject
         format_review = review_facts(facts, subject)
         format_choice = format_proposal(facts, subject)
@@ -393,3 +406,8 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
         local_changes=tuple(local_changes),
         source_version_memory=tuple(memory),
     )
+
+
+def reconcile(facts: ReconciliationInput) -> UpdateProposal:
+    """Prepare facts with strict current-epoch producer decision admission."""
+    return _reconcile(facts)

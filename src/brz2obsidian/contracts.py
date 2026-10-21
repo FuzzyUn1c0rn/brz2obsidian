@@ -2031,9 +2031,72 @@ class ReviewConsentDecision(ReconciliationContract):
     provenance: Literal["explicit_user"]
 
 
+class ReviewProducerApplicability(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.review-producer-applicability"]
+    schema_version: Literal[1]
+    original: IdentityAssociationDecision | RenamePathDecision
+    proposal_id: str = Field(min_length=1)
+    generation: int = Field(ge=1)
+    reviewed_assumptions: tuple[ProposalAssumption, ...]
+
+
+class ReviewAttachmentApplicability(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.review-attachment-applicability"]
+    schema_version: Literal[1]
+    decision_id: str = Field(min_length=1)
+    generation: int = Field(ge=1)
+    candidate: AttachmentCandidate
+
+
+class ReviewDependencyNode(ProposalAssumption):
+    schema_id: Literal["brz2obsidian.review-dependency-node"]
+    schema_version: Literal[1]
+    producer: Literal[
+        "producer", "candidate", "selected", "coverage", "effect", "consent", "group"
+    ]
+
+
+class ReviewRetention(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.review-retention"]
+    schema_version: Literal[1]
+    decision_id: str = Field(min_length=1)
+    subject_id: str
+    domain: ReviewDomain
+    origin_generation: int = Field(ge=1)
+    origin_change_id: str
+    current_change_id: str
+    dependency_keys: tuple[str, ...]
+
+
+class ReviewRefreshEvent(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.review-refresh-event"]
+    schema_version: Literal[1]
+    expected_generation: int = Field(ge=1)
+    facts: ReconciliationInput
+    preflight: ReviewPreflight
+    previous_dependencies: tuple[ReviewDependencyNode, ...]
+    dependencies: tuple[ReviewDependencyNode, ...]
+    changed_keys: tuple[str, ...]
+    invalidated_keys: tuple[str, ...]
+    retained: tuple[ReviewRetention, ...]
+    producer_applicability: tuple[ReviewProducerApplicability, ...]
+    attachment_applicability: tuple[ReviewAttachmentApplicability, ...]
+
+
+class ReviewHistory(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.review-history"]
+    schema_version: Literal[1]
+    initial_facts: ReconciliationInput
+    initial_preflight: ReviewPreflight
+    events: tuple[ReviewAction | ReviewRefreshEvent, ...]
+
+
 class ReviewPlan(ReconciliationContract):
     schema_id: Literal["brz2obsidian.review-plan"]
     schema_version: Literal[1]
+    history: ReviewHistory
+    producer_applicability: tuple[ReviewProducerApplicability, ...]
+    attachment_applicability: tuple[ReviewAttachmentApplicability, ...]
     facts: ReconciliationInput
     producer_facts: ReconciliationInput
     preflight: ReviewPreflight
@@ -2065,5 +2128,6 @@ class ReviewTransition(ReconciliationContract):
         "decision_id_reused",
         "unsafe_producer_choice",
         "attachment_invalid",
+        "dependency_graph_invalid",
     ]
     plan: ReviewPlan

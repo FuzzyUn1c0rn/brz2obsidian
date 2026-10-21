@@ -1,11 +1,19 @@
 """Conservative combination of normalized field and byte-span facts, without parsing."""
 
+import json
 from hashlib import sha256
 
-from brz2obsidian.contracts import ExactContent, StructuredDocument, StructureSpan
+from brz2obsidian.contracts import (
+    ExactContent,
+    ProposalAssumption,
+    StructuredDocument,
+    StructureSpan,
+)
+from brz2obsidian.core.formats import output_semantics
 from brz2obsidian.core.memberships import (
     appearance_issues,
     combine_memberships,
+    used_mappings,
     validate_memberships,
 )
 from brz2obsidian.core.sections import (
@@ -290,15 +298,18 @@ def structure_assumption(comparison):
     values = comparison.model_dump(
         mode="json", exclude={"original", "current", "incoming"}
     )
-    for name in ("prior_mappings", "incoming_mappings"):
+    for name, records in zip(
+        ("prior_mappings", "incoming_mappings"), used_mappings(comparison), strict=True
+    ):
         values[name] = [
             record.model_dump(mode="json", exclude={"source_label"})
-            for record in getattr(comparison, name)
+            for record in records
         ]
     values["section_bases"] = [
         basis.model_dump(mode="json", exclude={"original"})
         | {
             "original_sha256": sha256(basis.original.data).hexdigest(),
+            "output_identity": output_semantics(basis.output_identity),
         }
         for basis in comparison.section_bases
     ]
@@ -308,3 +319,57 @@ def structure_assumption(comparison):
             "content_sha256": sha256(doc.content.data).hexdigest(),
         }
     return values
+
+
+def structure_dependencies(comparison, subject_id):
+    """Expose the actual used classification and reference-target edges."""
+    if comparison is None:
+        return ()
+    result = []
+    maps = used_mappings(comparison)
+    for stage, records in zip(("prior", "incoming"), maps, strict=True):
+        for record in records:
+            result.append(
+                ProposalAssumption(
+                    key=f"mapping:{subject_id}:{stage}:{record.classification_id}",
+                    kind="mapping",
+                    fingerprint=sha256(
+                        json.dumps(
+                            record.model_dump(mode="json", exclude={"source_label"}),
+                            sort_keys=True,
+                        ).encode()
+                    ).hexdigest(),
+                    depends_on=(),
+                )
+            )
+    for stage, document, records in zip(
+        ("prior", "current", "incoming"),
+        (comparison.original, comparison.current, comparison.incoming),
+        (maps[0], maps[0], maps[1]),
+        strict=True,
+    ):
+        targets = {
+            t.target_id: t
+            for t in tuple(e.target for m in document.memberships for e in m.entries)
+            + tuple(t for section in document.owned_sections for t in section.targets)
+        }
+        for target_id, target in sorted(targets.items()):
+            phase = "prior" if stage == "current" else stage
+            dependencies = tuple(
+                f"mapping:{subject_id}:{phase}:{m.classification_id}"
+                for m in records
+                if m.target_id == target_id
+            )
+            result.append(
+                ProposalAssumption(
+                    key=f"structure-target:{subject_id}:{stage}:{target_id}",
+                    kind="target",
+                    fingerprint=sha256(
+                        json.dumps(
+                            target.model_dump(mode="json"), sort_keys=True
+                        ).encode()
+                    ).hexdigest(),
+                    depends_on=dependencies,
+                )
+            )
+    return tuple(result)
