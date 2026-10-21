@@ -5,7 +5,7 @@ from hashlib import sha256
 
 from brz2obsidian.contracts import LinkValidationBaseline, ProposalAssumption
 
-from .identity import _paths_collide
+from .identity import _paths_collide, _target_context, _target_safe
 from .link_meanings import _semantic, resolve_occurrence
 from .link_validation import validate_link_document
 
@@ -156,7 +156,8 @@ def known_result_document(facts, change):
 
 def compatible_result_eligible(facts, change):
     return (
-        facts.link_context is None or known_result_document(facts, change) is not None
+        facts.link_context is not None
+        and known_result_document(facts, change) is not None
     )
 
 
@@ -351,8 +352,12 @@ def rename_link_assumptions(facts, subject, subject_id, dependencies):
 
 def selected_current_links_safe(facts, change):
     context = facts.link_context
-    if context is None or change.current is None:
+    if change.current is None:
         return True
+    if context is None:
+        return not current_keep_needs_proof(facts, change)
+    if current_keep_needs_proof(facts, change) and not current_lookup_coverage(facts):
+        return False
     documents = tuple(
         d
         for d in context.current_documents
@@ -379,3 +384,85 @@ def selected_current_links_safe(facts, change):
             m.target_id for m in meanings if m.target_id is not None
         ),
     ).valid
+
+
+def current_keep_needs_proof(facts, change):
+    subject = next(
+        s
+        for s in facts.subjects
+        if (s.item_id, s.facet) == (change.item_id, change.facet)
+    )
+    return change.current is not None and not (
+        subject.baseline.status == "known"
+        and subject.incoming is not None
+        and subject.baseline.content is not None
+        and subject.incoming.data == subject.baseline.content.data
+    )
+
+
+def current_lookup_coverage(facts):
+    context = facts.link_context
+    if context is None or context.inventory != "complete":
+        return False
+    for entry in facts.identity_inventory:
+        if entry.current.existence == "absent":
+            continue
+        if entry.current.existence == "unknown":
+            return False
+        records = tuple(
+            t
+            for t in context.current_targets
+            if t.canonical_path == entry.current.path and t.kind != "tag"
+        )
+        if len(records) != 1:
+            return False
+        states = tuple(
+            v
+            for v in context.current_target_facts
+            if v.target_id == records[0].target_id
+        )
+        if (
+            len(states) != 1
+            or states[0].existence != "present"
+            or states[0].content != entry.current.content
+        ):
+            return False
+        if records[0].kind == "resource":
+            if not bound_resource_record(facts, entry, records[0], states[0]):
+                return False
+        elif records[0].identity != entry.identity:
+            return False
+    return True
+
+
+def bound_resource_record(facts, entry, target, state):
+    associated = any(
+        sub.attachment is not None
+        and sub.attachment.current_target_id == target.target_id
+        and entry.identity_state == "valid"
+        and sub.facet == entry.facet
+        and entry.identity is not None
+        and sub.item_id == entry.identity.item_id
+        and facts.incoming_identity.collection_id == entry.identity.collection_id
+        and facts.incoming_identity.module_id == entry.identity.module_id
+        and sub.current.existence == entry.current.existence
+        and sub.current.content == entry.current.content
+        for sub in facts.subjects
+    )
+    return (
+        associated
+        and target.kind == "resource"
+        and target.identity is None
+        and target.canonical_path == entry.current.path
+        and target.status == "safe"
+        and target.target is not None
+        and _target_safe(
+            target.canonical_path,
+            target.target,
+            _target_context(
+                target.canonical_path, facts.identity_inventory, entry.entry_id
+            ),
+        )
+        and state.existence == "present"
+        and state.content == entry.current.content
+    )

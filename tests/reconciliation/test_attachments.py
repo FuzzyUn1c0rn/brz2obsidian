@@ -598,7 +598,9 @@ def linked_attachment_request(
         target_facts=(new_state,),
         inventory="complete",
     )
-    note_target = target_for_links("owner:note", "Notes/Owner.md")
+    note_target = target_for_links("owner:note", "Notes/Owner.md").model_copy(
+        update={"identity": facts.identity_inventory[0].identity}
+    )
     note_state = interpret_link_target(
         ExactContent(data=raw),
         target_id="owner:note",
@@ -747,6 +749,8 @@ def binary_context(facts):
         target = target_for_links(
             target_id, entry.current.path, kind="resource" if resource else "note"
         )
+        if not resource:
+            target = target.model_copy(update={"identity": entry.identity})
         targets += (target,)
         old_states += (
             interpret_link_target(

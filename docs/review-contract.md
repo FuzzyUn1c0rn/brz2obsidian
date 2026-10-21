@@ -139,8 +139,9 @@ When link context is supplied, compatible approval requires independently
 interpreted exact result bytes at the effective selected path. Interpretation at
 a different source path cannot authorize preserved authored-path relative links.
 Unavailable result interpretation excludes bulk approval and requires an explicit
-independently interpreted whole-file candidate. Source-neutral attested cases
-without a link context retain their existing contract. The `text-links` producer
+independently interpreted whole-file candidate. Generic source-neutral cases likewise supply bounded exact normalized link
+documents, canonical registry and target states. A null link context is unknown
+for selected byte/path/meaning effects, not evidence of a link-free scope. The `text-links` producer
 assumption binds the current/source/effective-path interpretations and relevant
 lookup competitors, collisions, selected target versions and nested membership
 facts. Unrelated unused registry files are excluded. A separate `rename-links`
@@ -188,3 +189,20 @@ Known absence/status facts still distinguish a source gap or intentionally
 uncreated target. Exact source-unchanged preservation introduces no new effect
 requiring interpretation of opaque current files. Keeping configuration current
 likewise does not introduce the discarded incoming file's effects.
+
+
+Canonical lookup coverage also derives from independent current inventory. Every
+present potential file needs one canonical current registry identity/path and
+exact current target state; a reduced registry cannot relabel an existing file
+as a missing pre-existing link, even after consistent public reinterpretation.
+Unknown observations remain uncertainty and never count as proven absence.
+An explicit changed-source current choice, and remembered current policy, require
+this current lookup proof and their bound current document. Removing the whole
+context or a consumed canonical lookup cannot create preservation consent or
+new source memory. These requirements remain distinct from unrelated backlink
+document coverage: a safe exact configuration keep needs current consumed proof,
+whereas newly selected bytes/path/meaning also need potential backlink coverage.
+Exact source-unchanged opaque preservation and proved observed absence introduce
+no new effect requiring that interpretation. A generic synthetic link-free case
+can supply explicit exact empty-occurrence facts; a real outer interpreter must
+establish those facts for its format, and cannot substitute an unbound safe flag.

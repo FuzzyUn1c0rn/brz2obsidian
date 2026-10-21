@@ -1,15 +1,31 @@
 """Derive effective selected files and check cross-choice link coherence."""
 
-from brz2obsidian.core.identity import _target_context, _target_safe
 from brz2obsidian.core.link_meanings import resolve_occurrence
 from brz2obsidian.core.link_validation import validate_link_document
-from brz2obsidian.core.review_links import current_baseline, known_result_document
+from brz2obsidian.core.review_links import (
+    bound_resource_record,
+    current_baseline,
+    current_keep_needs_proof,
+    current_lookup_coverage,
+    known_result_document,
+)
 
 
 def selected_effect_blockers(facts, proposal, actions, approvals):
     context = facts.link_context
     if context is None:
-        return ()
+        return (
+            ("current_link_coverage_unavailable",)
+            if (
+                selected_effect_active(facts, proposal, approvals)
+                or any(
+                    c.provenance.rule == "remembered_keep"
+                    and current_keep_needs_proof(facts, c)
+                    for c in proposal.changes
+                )
+            )
+            else ()
+        )
     targets = {t.target_id: t for t in context.current_targets}
     states = {s.target_id: s for s in context.current_target_facts}
     documents = {d.document_id: d for d in context.current_documents}
@@ -25,6 +41,12 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
     def add(code):
         if code not in blockers:
             blockers.append(code)
+
+    if any(
+        c.provenance.rule == "remembered_keep" and current_keep_needs_proof(facts, c)
+        for c in proposal.changes
+    ) and not current_lookup_coverage(facts):
+        add("current_link_coverage_unavailable")
 
     def write(target, content, path, state):
         previous = writes.get(target.target_id)
@@ -183,29 +205,9 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
         if approval is not None or change.provenance.rule == "remembered_keep":
             explicit_documents.add(document.document_id)
 
-    selected_change = bool(changed_ids)
-    for change in proposal.changes:
-        approval = approved.get(change.change_id)
-        if approval is not None and approval.attachment_candidate is not None:
-            for output in approval.attachment_candidate.outputs:
-                selected_change |= not any(
-                    e.current.path == output.path
-                    and e.current.content == output.content
-                    for e in facts.identity_inventory
-                )
-            continue
-        content = change.result if approval is None else approval.result
-        if content is not None:
-            subject = next(
-                s
-                for s in facts.subjects
-                if (s.item_id, s.facet) == (change.item_id, change.facet)
-            )
-            path = change.target_path if approval is None else approval.target_path
-            selected_change |= (
-                path != subject.current.path or content != subject.current.content
-            )
-    if selected_change and not current_note_coverage(facts):
+    if (
+        changed_ids or selected_effect_active(facts, proposal, approvals)
+    ) and not current_note_coverage(facts):
         add("current_link_coverage_unavailable")
 
     final_targets = tuple(targets.values())
@@ -278,8 +280,12 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
 def current_note_coverage(facts):
     """An omitted registry entry cannot hide an independently observed potential note."""
     context = facts.link_context
+    if not current_lookup_coverage(facts):
+        return False
     for entry in facts.identity_inventory:
-        if entry.current.existence != "present":
+        if entry.current.existence == "unknown":
+            return False
+        if entry.current.existence == "absent":
             continue
         resources = tuple(
             t
@@ -294,34 +300,8 @@ def current_note_coverage(facts):
                 for s in context.current_target_facts
                 if s.target_id == target.target_id
             )
-            associated_resource = any(
-                s.attachment is not None
-                and s.attachment.current_target_id == target.target_id
-                and entry.identity_state == "valid"
-                and s.facet == entry.facet
-                and entry.identity is not None
-                and s.item_id == entry.identity.item_id
-                and facts.incoming_identity.collection_id
-                == entry.identity.collection_id
-                and facts.incoming_identity.module_id == entry.identity.module_id
-                and s.current == entry.current
-                for s in facts.subjects
-            )
-            resource = (
-                associated_resource
-                and target.status == "safe"
-                and target.target is not None
-                and (target.identity is None or target.identity == entry.identity)
-                and _target_safe(
-                    target.canonical_path,
-                    target.target,
-                    _target_context(
-                        target.canonical_path, facts.identity_inventory, entry.entry_id
-                    ),
-                )
-                and len(states) == 1
-                and states[0].existence == "present"
-                and states[0].content == entry.current.content
+            resource = len(states) == 1 and bound_resource_record(
+                facts, entry, target, states[0]
             )
         if resource:
             continue
@@ -338,3 +318,37 @@ def current_note_coverage(facts):
         ):
             return False
     return True
+
+
+def selected_effect_active(facts, proposal, approvals):
+    approved = {a.change_id: a for a in approvals}
+    for change in proposal.changes:
+        approval = approved.get(change.change_id)
+        if approval is not None and approval.attachment_candidate is not None:
+            if any(
+                not any(
+                    e.current.path == o.path and e.current.content == o.content
+                    for e in facts.identity_inventory
+                )
+                for o in approval.attachment_candidate.outputs
+            ):
+                return True
+            continue
+        content = change.result if approval is None else approval.result
+        if content is None:
+            continue
+        subject = next(
+            s
+            for s in facts.subjects
+            if (s.item_id, s.facet) == (change.item_id, change.facet)
+        )
+        path = change.target_path if approval is None else approval.target_path
+        if path != subject.current.path or content != subject.current.content:
+            return True
+        if (
+            approval is not None
+            and approval.domain in ("mapping", "format")
+            and approval.choice in ("incoming", "edited", "approve")
+        ):
+            return True
+    return False
