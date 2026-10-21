@@ -2138,3 +2138,74 @@ def test_unchanged_unrelated_appearance_warning_is_reported_without_waiving_memb
     assert not blocked.valid and "link_membership_invalid" in {
         f.code for f in blocked.findings
     }
+
+
+def test_new_invalid_appearance_in_changed_affected_target_cannot_claim_existing_warning():
+    from brz2obsidian.contracts import ExactContent
+    from brz2obsidian.core import validate_link_document
+    from brz2obsidian.obsidian import interpret_link_target, interpret_links
+    from tests.reconciliation.test_memberships import target
+
+    category = target("a", "category", "[[A]]")
+    note = target_for_links("note:target", "Notes/Target.md")
+    old_bytes = ExactContent(
+        data=b'---\ncategories:\n  - "[[A]]"\nappearance_category: "[[A]]"\n---\nText.\n'
+    )
+    new_bytes = ExactContent(
+        data=b'---\ncategories:\n  - "[[A]]"\nappearance_category: "[[Absent]]"\n---\nText.\n'
+    )
+    old_state = interpret_link_target(
+        old_bytes,
+        target_id=note.target_id,
+        existence="present",
+        memberships=("a",),
+        membership_targets=(category,),
+    )
+    new_state = interpret_link_target(
+        new_bytes,
+        target_id=note.target_id,
+        existence="present",
+        memberships=("a",),
+        membership_targets=(category,),
+    )
+    token = ExactContent(data=b"[[Notes/Target.md]]")
+
+    def document(state):
+        return interpret_links(
+            token,
+            document_id="owner",
+            source_path="Owner.md",
+            path_mode="vault",
+            targets=(note, category),
+            target_facts=(state,),
+            inventory="complete",
+        )
+
+    old_doc, selected = document(old_state), document(new_state)
+    assert old_doc.content.data == selected.content.data == b"[[Notes/Target.md]]"
+    assert (
+        old_doc.occurrences[0].meaning.target_version
+        != selected.occurrences[0].meaning.target_version
+    )
+
+    def validate(baseline):
+        return validate_link_document(
+            selected,
+            expected_content=token,
+            expected_path="Owner.md",
+            targets=(note, category),
+            target_facts=(new_state,),
+            inventory="complete",
+            baseline=baseline,
+            affected_target_ids=(note.target_id,),
+        )
+
+    newly_harmful = validate(old_doc)
+    assert not newly_harmful.valid
+    assert "link_membership_invalid" in {f.code for f in newly_harmful.findings}
+    # Identical available target version proves a retained issue, even when its file is affected.
+    retained = validate(selected)
+    assert retained.valid and [(f.code, f.blocking) for f in retained.findings] == [
+        ("link_appearance_warning", False)
+    ]
+    assert not validate(None).valid

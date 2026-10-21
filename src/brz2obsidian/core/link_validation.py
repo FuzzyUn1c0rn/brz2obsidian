@@ -171,8 +171,23 @@ def validate_link_document(
             except ValueError:
                 add("link_membership_invalid", occurrence.occurrence_id)
             if state.structure is not None and appearance_issues(state.structure):
-                # Appearance diagnostics do not weaken membership/identity/target safety.
-                add("link_appearance_warning", occurrence.occurrence_id, False)
+                # Available selected bytes plus the same resolved historical version
+                # prove retention. A changed version or missing proof cannot do so.
+                retained = actual.target_version is not None and any(
+                    previous.meaning.status == "resolved"
+                    and previous.meaning.target_id == actual.target_id
+                    and previous.meaning.target_identity == actual.target_identity
+                    and previous.meaning.path == actual.path
+                    and previous.meaning.target_version == actual.target_version
+                    for previous in old
+                )
+                add(
+                    "link_appearance_warning"
+                    if retained
+                    else "link_membership_invalid",
+                    occurrence.occurrence_id,
+                    not retained,
+                )
         if actual.status not in SAFE_LINK_STATUSES:
             add("link_harmed", occurrence.occurrence_id)
     return result()

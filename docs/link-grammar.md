@@ -65,9 +65,10 @@ targets, target_facts, inventory, baseline=None, affected_target_ids=())` return
 exact bindings, selected lookup meaning, target identity/path safety, fragment
 and membership facts. A baseline may retain an unchanged unrelated warning;
 affected unsafe state and newly harmful meaning block validation. Retained
-appearance-not-member diagnostics are reported as nonblocking appearance warnings,
-consistent with structure review; membership identity and target safety remain
-mandatory. Cached external status cannot hide a retained internal query. The baseline
+appearance-not-member diagnostics require proof from a resolved baseline occurrence
+with the same stable target ID, identity, path and nonnull available content version
+to remain nonblocking. Changed target versions or missing prior proof cannot claim
+a retained warning. Membership identity and target safety remain mandatory. Cached external status cannot hide a retained internal query. The baseline
 must describe the same document/path/mode. Normalized syntax facts are supplied
 by the bounded outer interpreter, rather than reconstructed by the core.
 
