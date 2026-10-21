@@ -3,6 +3,16 @@
 from hashlib import sha256
 
 from brz2obsidian.contracts import ExactContent, StructuredDocument, StructureSpan
+from brz2obsidian.core.memberships import (
+    appearance_issues,
+    combine_memberships,
+    validate_memberships,
+)
+from brz2obsidian.core.sections import (
+    result_sections,
+    validate_section_document,
+    validate_sections,
+)
 
 
 def _value(document, field):
@@ -60,7 +70,9 @@ def validate_structure_facts(subject, baseline_identity, incoming_identity):
     return None
 
 
-def structure_proposal(subject, baseline_identity, incoming_identity):
+def structure_proposal(
+    subject, baseline_identity, incoming_identity, *, source_version
+):
     comparison = subject.structure
     documents = comparison.original, comparison.current, comparison.incoming
 
@@ -86,8 +98,19 @@ def structure_proposal(subject, baseline_identity, incoming_identity):
     ):
         return unresolved("structure_conflict")
     replacements = {}
+    try:
+        membership_replacements, memberships = combine_memberships(
+            documents, comparison
+        )
+        validate_sections(subject, baseline_identity, source_version)
+    except ValueError as error:
+        return unresolved(str(error))
+    if len({d.appearance_field for d in documents}) != 1:
+        return unresolved("structure_conflict")
     for key, source in source_fields.items():
         old, local = old_fields[key], current_fields[key]
+        if key in memberships or key == current.appearance_field:
+            continue
         if old.kind != local.kind or old.kind != source.kind:
             return unresolved("structure_conflict")
         old_value, local_value, source_value = (
@@ -103,7 +126,7 @@ def structure_proposal(subject, baseline_identity, incoming_identity):
     old_body = original.content.data[original.body.start : original.body.end]
     local_body = current.content.data[current.body.start : current.body.end]
     try:
-        candidate_body = _combine_body(
+        candidate_body, patches = _combine_body(
             old_body,
             local_body,
             source_body,
@@ -126,6 +149,8 @@ def structure_proposal(subject, baseline_identity, incoming_identity):
             ]
             raw = raw[:value_start] + replacement + raw[value_end:]
             value_end = value_start + len(replacement)
+        if field.key in membership_replacements:
+            raw = membership_replacements[field.key]
         start = len(data)
         data += raw
         fields.append(
@@ -152,7 +177,18 @@ def structure_proposal(subject, baseline_identity, incoming_identity):
         issues=(),
         fields=tuple(fields),
         body=StructureSpan(start=body_start, end=len(data)),
+        memberships=tuple(memberships.values()),
+        appearance_field=current.appearance_field,
+        owned_sections=result_sections(comparison, patches, body_start),
     )
+    try:
+        validate_memberships(result)
+        validate_section_document(
+            result, {b.section_id: b for b in comparison.section_bases}
+        )
+    except ValueError as error:
+        return unresolved(str(error))
+    result = result.model_copy(update={"issues": appearance_issues(result)})
     if result.content.data == current.content.data:
         return ("no_change", current.content, "structure_combined", False), result
     return ("compatible", result.content, "structure_combined", True), result
@@ -213,7 +249,7 @@ def _combine_body(original, current, incoming, local_edits, source_edits):
         patches.append((start, end, source.replacement))
     for start, end, replacement in reversed(patches):
         current = current[:start] + replacement + current[end:]
-    return current
+    return current, patches
 
 
 def structure_assumption(comparison):
@@ -222,6 +258,18 @@ def structure_assumption(comparison):
     values = comparison.model_dump(
         mode="json", exclude={"original", "current", "incoming"}
     )
+    for name in ("prior_mappings", "incoming_mappings"):
+        values[name] = [
+            record.model_dump(mode="json", exclude={"source_label"})
+            for record in getattr(comparison, name)
+        ]
+    values["section_bases"] = [
+        basis.model_dump(mode="json", exclude={"original"})
+        | {
+            "original_sha256": sha256(basis.original.data).hexdigest(),
+        }
+        for basis in comparison.section_bases
+    ]
     for name in ("original", "current", "incoming"):
         doc = getattr(comparison, name)
         values[name] = doc.model_dump(mode="json", exclude={"content"}) | {

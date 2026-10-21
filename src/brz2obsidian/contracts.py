@@ -787,6 +787,87 @@ class StructureField(ReconciliationContract):
         return self
 
 
+class ImportedItemIdentity(ReconciliationContract):
+    collection_id: str = Field(min_length=1)
+    module_id: str = Field(min_length=1)
+    item_id: str = Field(min_length=1)
+
+
+class IdentityTargetFacts(ReconciliationContract):
+    """Outer target facts; normalized_path uses Unicode NFC and casefold.
+
+    Core independently checks that key, known unsafe spellings and inventory
+    collisions. Containment and access/reparse validation remain outer facts.
+    """
+
+    normalized_path: str = Field(min_length=1)
+    containment: Literal["contained", "outside", "unknown"]
+    status: Literal["safe", "unsafe", "unknown"]
+
+
+class ReferenceTarget(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.reference-target"]
+    schema_version: Literal[1]
+    target_id: str = Field(min_length=1)
+    kind: Literal["category", "tag", "relationship", "resource"]
+    canonical_path: str | None
+    identity: ImportedItemIdentity | None
+    target: IdentityTargetFacts | None
+    representations: tuple[str, ...]
+    validation_fingerprint: str = Field(min_length=1)
+    status: Literal["safe", "unsafe", "unknown"]
+
+
+class MembershipEntry(ReconciliationContract):
+    target: ReferenceTarget
+    representation: str
+    raw: bytes
+
+    @property
+    def target_id(self):
+        return self.target.target_id
+
+
+class MembershipSet(ReconciliationContract):
+    field_key: str
+    kind: Literal["category", "tag"]
+    prefix: bytes
+    entries: tuple[MembershipEntry, ...]
+
+
+class ClassificationMapping(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.classification-mapping"]
+    schema_version: Literal[1]
+    classification_id: str = Field(min_length=1)
+    target_id: str = Field(min_length=1)
+    kind: Literal["category", "tag"]
+    source_label: str
+
+
+class GeneratedSectionBasis(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.generated-section-basis"]
+    schema_version: Literal[1]
+    original: ExactContent
+    output_identity: OutputIdentity
+    source_version: str = Field(min_length=1)
+    item_id: str = Field(min_length=1)
+    facet: str = Field(min_length=1)
+    section_id: str = Field(min_length=1)
+    kind: Literal["relationship", "resource"]
+    span: StructureSpan
+    heading: bytes
+    generation_fingerprint: str = Field(min_length=1)
+
+
+class OwnedSection(ReconciliationContract):
+    section_id: str = Field(min_length=1)
+    kind: Literal["relationship", "resource"]
+    span: StructureSpan
+    raw: bytes
+    entries: tuple[str, ...]
+    targets: tuple[ReferenceTarget, ...]
+
+
 class StructuredDocument(ReconciliationContract):
     schema_id: Literal["brz2obsidian.structured-document"]
     schema_version: Literal[1]
@@ -796,6 +877,9 @@ class StructuredDocument(ReconciliationContract):
     issues: tuple[str, ...]
     fields: tuple[StructureField, ...]
     body: StructureSpan
+    memberships: tuple[MembershipSet, ...]
+    appearance_field: str | None
+    owned_sections: tuple[OwnedSection, ...]
 
     @model_validator(mode="after")
     def bounded_distinct_fields(self):
@@ -843,6 +927,9 @@ class StructureComparison(ReconciliationContract):
     issues: tuple[str, ...]
     local_edits: tuple[StructureByteEdit, ...]
     source_edits: tuple[StructureByteEdit, ...]
+    prior_mappings: tuple[ClassificationMapping, ...]
+    incoming_mappings: tuple[ClassificationMapping, ...]
+    section_bases: tuple[GeneratedSectionBasis, ...]
 
 
 class ReconciliationSubject(ReconciliationContract):
@@ -1170,24 +1257,6 @@ class UpdateProposal(ReconciliationContract):
                 "Proposal readiness must reflect every required review and safety finding"
             )
         return self
-
-
-class ImportedItemIdentity(ReconciliationContract):
-    collection_id: str = Field(min_length=1)
-    module_id: str = Field(min_length=1)
-    item_id: str = Field(min_length=1)
-
-
-class IdentityTargetFacts(ReconciliationContract):
-    """Outer target facts; normalized_path uses Unicode NFC and casefold.
-
-    Core independently checks that key, known unsafe spellings and inventory
-    collisions. Containment and access/reparse validation remain outer facts.
-    """
-
-    normalized_path: str = Field(min_length=1)
-    containment: Literal["contained", "outside", "unknown"]
-    status: Literal["safe", "unsafe", "unknown"]
 
 
 class IdentityInventoryItem(ReconciliationContract):

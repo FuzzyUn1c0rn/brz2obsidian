@@ -214,7 +214,10 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
         ):
             (disposition, result, rule, requires_decision), structured_result = (
                 structure_proposal(
-                    subject, facts.baseline_identity, facts.incoming_identity
+                    subject,
+                    facts.baseline_identity,
+                    facts.incoming_identity,
+                    source_version=facts.format_operation.baseline_source_version,
                 )
             )
         if (

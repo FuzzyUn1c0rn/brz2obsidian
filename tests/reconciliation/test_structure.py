@@ -102,6 +102,9 @@ def test_source_neutral_edits_combine_through_core_without_obsidian_interpretati
     facts = request(original=original, current=current, incoming=incoming)
     docs = tuple(
         StructuredDocument(
+            memberships=(),
+            appearance_field=None,
+            owned_sections=(),
             schema_id="brz2obsidian.structured-document",
             schema_version=1,
             output_format=7,
@@ -114,6 +117,9 @@ def test_source_neutral_edits_combine_through_core_without_obsidian_interpretati
         for data in (original, current, incoming)
     )
     comparison = StructureComparison(
+        prior_mappings=(),
+        incoming_mappings=(),
+        section_bases=(),
         schema_id="brz2obsidian.structure-comparison",
         schema_version=1,
         original=docs[0],
@@ -295,6 +301,9 @@ def test_core_scalar_combination_uses_source_neutral_facts_and_validates_candida
     )
     docs = tuple(
         StructuredDocument(
+            memberships=(),
+            appearance_field=None,
+            owned_sections=(),
             schema_id="brz2obsidian.structured-document",
             schema_version=1,
             output_format=7,
@@ -332,6 +341,9 @@ def test_core_scalar_combination_uses_source_neutral_facts_and_validates_candida
         for data, a, b in ((raw[0], 1, 2), (raw[1], 1, 4), (raw[2], 3, 2))
     )
     comparison = StructureComparison(
+        prior_mappings=(),
+        incoming_mappings=(),
+        section_bases=(),
         schema_id="brz2obsidian.structure-comparison",
         schema_version=1,
         original=docs[0],

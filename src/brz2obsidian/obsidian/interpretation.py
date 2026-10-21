@@ -10,11 +10,18 @@ from datetime import date
 from difflib import SequenceMatcher
 
 from brz2obsidian.contracts import (
+    MembershipEntry,
+    MembershipSet,
     StructureByteEdit,
     StructureComparison,
     StructuredDocument,
     StructureField,
     StructureSpan,
+)
+from brz2obsidian.obsidian.sections import (
+    SectionUnsupported,
+    align_sections,
+    interpret_sections,
 )
 
 
@@ -124,10 +131,18 @@ def _fields(lines):
     raise _Unsupported("frontmatter_malformed")
 
 
-def interpret_structure(content, *, output_format):
+def interpret_structure(
+    content,
+    *,
+    output_format,
+    membership_targets=(),
+    section_bases=(),
+    section_targets=(),
+):
     """Read immutable in-memory bytes into bounded source-neutral structure facts."""
     raw = content.data
     fields, body_start, status, issues = (), 0, "supported", ()
+    memberships, appearance, sections = (), None, ()
     try:
         if output_format != 7:
             raise _Unsupported("format_unsupported")
@@ -146,7 +161,15 @@ def interpret_structure(content, *, output_format):
             fields, body_start = _fields(lines)
         elif raw.startswith(b"---"):
             raise _Unsupported("frontmatter_malformed")
-    except _Unsupported as error:
+        if membership_targets:
+            memberships = _memberships(raw, fields, membership_targets)
+        appearance = next(
+            (f.key for f in fields if f.key == "appearance_category"), None
+        )
+        sections = interpret_sections(
+            content, section_bases, body_start, section_targets
+        )
+    except (_Unsupported, SectionUnsupported) as error:
         issues = (str(error),)
         status = "opaque" if issues == ("encoding_uncertain",) else "unsupported"
     return StructuredDocument(
@@ -158,7 +181,67 @@ def interpret_structure(content, *, output_format):
         issues=issues,
         fields=fields,
         body=StructureSpan(start=body_start, end=len(raw)),
+        memberships=memberships,
+        appearance_field=appearance,
+        owned_sections=sections,
     )
+
+
+def _memberships(raw, fields, targets):
+    if len({t.target_id for t in targets}) != len(targets):
+        raise _Unsupported("membership_target_ambiguous")
+    result = []
+    for field in fields:
+        kind = {"categories": "category", "tags": "tag"}.get(field.key)
+        if kind is None:
+            continue
+        if field.kind != "opaque":
+            raise _Unsupported("membership_unsupported")
+        lines = raw[field.span.start : field.span.end].splitlines(keepends=True)
+        entries = []
+        if lines[0].rstrip(b"\r\n").endswith(b"[]"):
+            if len(lines) != 1:
+                raise _Unsupported("membership_unsupported")
+        else:
+            if lines[0].rstrip(b"\r\n") != (field.key + ":").encode():
+                raise _Unsupported("membership_unsupported")
+            for line in lines[1:]:
+                value, scalar_type = _scalar(line[4:].decode().rstrip("\r\n"))
+                if scalar_type != "string":
+                    raise _Unsupported("membership_unsupported")
+                if kind == "category":
+                    match = re.fullmatch(
+                        r"\[\[([^\[\]\r\n|#^]+)(?:\|[^\[\]\r\n]+)?\]\]", value
+                    )
+                    if (
+                        match is None
+                        or any(part in ("", ".", "..") for part in match[1].split("/"))
+                        or ":" in match[1]
+                        or "\\" in match[1]
+                    ):
+                        raise _Unsupported("membership_unsupported")
+                elif re.fullmatch(r"[\w/-]+", value) is None:
+                    raise _Unsupported("membership_unsupported")
+                matches = [
+                    t for t in targets if t.kind == kind and value in t.representations
+                ]
+                if (
+                    scalar_type != "string"
+                    or len(matches) != 1
+                    or matches[0].status != "safe"
+                ):
+                    raise _Unsupported("membership_target_unknown")
+                entries.append(
+                    MembershipEntry(target=matches[0], representation=value, raw=line)
+                )
+        if len({e.target_id for e in entries}) != len(entries):
+            raise _Unsupported("membership_duplicate")
+        result.append(
+            MembershipSet(
+                field_key=field.key, kind=kind, prefix=lines[0], entries=tuple(entries)
+            )
+        )
+    return tuple(result)
 
 
 def _prose_lines(body):
@@ -198,7 +281,31 @@ def _edits(original, changed):
     )
 
 
-def align_structure(original, current, incoming):
+def _gap_edits(old_body, local_body, source_body):
+    if source_body == old_body:
+        return (
+            ()
+            if local_body == old_body
+            else (
+                StructureByteEdit(
+                    span=StructureSpan(start=0, end=len(old_body)),
+                    expected=old_body,
+                    replacement=local_body,
+                ),
+            )
+        ), ()
+    return _edits(old_body, local_body), _edits(old_body, source_body)
+
+
+def align_structure(
+    original,
+    current,
+    incoming,
+    *,
+    prior_mappings=(),
+    incoming_mappings=(),
+    section_bases=(),
+):
     """Supply explicit body alignment facts without deciding a merged result."""
     bodies = tuple(
         doc.content.data[doc.body.start : doc.body.end]
@@ -207,22 +314,13 @@ def align_structure(original, current, incoming):
     old_body, local_body, source_body = bodies
     local_edits, source_edits, alignment, issues = (), (), "supported", ()
     try:
-        if source_body == old_body:
-            local_edits = (
-                ()
-                if local_body == old_body
-                else (
-                    StructureByteEdit(
-                        span=StructureSpan(start=0, end=len(old_body)),
-                        expected=old_body,
-                        replacement=local_body,
-                    ),
-                )
+        if section_bases:
+            local_edits, source_edits = align_sections(
+                (original, current, incoming), _gap_edits
             )
         else:
-            local_edits = _edits(old_body, local_body)
-            source_edits = _edits(old_body, source_body)
-    except _Unsupported as error:
+            local_edits, source_edits = _gap_edits(old_body, local_body, source_body)
+    except (_Unsupported, SectionUnsupported) as error:
         issues = (str(error),)
         alignment = "ambiguous" if issues == ("prose_ambiguous",) else "unsupported"
     return StructureComparison(
@@ -235,4 +333,7 @@ def align_structure(original, current, incoming):
         issues=issues,
         local_edits=local_edits,
         source_edits=source_edits,
+        prior_mappings=prior_mappings,
+        incoming_mappings=incoming_mappings,
+        section_bases=section_bases,
     )
