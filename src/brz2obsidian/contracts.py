@@ -1,11 +1,13 @@
 """Durable source-neutral contracts. No outer implementations or I/O."""
 
+import json
 import unicodedata
 from contextlib import AbstractContextManager
 from datetime import date
+from hashlib import sha256
 from typing import BinaryIO, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class Contract(BaseModel):
@@ -545,3 +547,303 @@ class Publisher(Protocol):
     def publish(
         self, artifacts: RenderedVault, payloads: SourceSession, destination: object
     ) -> Receipt: ...
+
+
+# Reconciliation facts are in-memory source-neutral values. They describe review;
+# they confer no filesystem or history authority.
+class ReconciliationContract(Contract):
+    model_config = ConfigDict(
+        strict=True,
+        frozen=True,
+        extra="forbid",
+        ser_json_bytes="base64",
+        val_json_bytes="base64",
+        revalidate_instances="always",
+    )
+
+    @field_validator("schema_version", mode="before", check_fields=False)
+    @classmethod
+    def integer_record_version(cls, value):
+        if type(value) is not int:
+            raise ValueError("Record version must be an integer")
+        return value
+
+    @classmethod
+    def model_validate_json(cls, json_data, **kwargs):
+        def unique_fields(pairs):
+            values = {}
+            for key, value in pairs:
+                if key in values:
+                    raise ValueError(f"Duplicate field: {key}")
+                values[key] = value
+            return values
+
+        json.loads(json_data, object_pairs_hook=unique_fields)
+        return super().model_validate_json(json_data, **kwargs)
+
+    @field_validator("path", mode="before", check_fields=False)
+    @classmethod
+    def relative_vault_path(cls, value):
+        if (
+            not isinstance(value, str)
+            or any(c in value for c in "\\:\x00")
+            or any(part in ("", ".", "..") for part in value.split("/"))
+        ):
+            raise ValueError("A canonical relative vault path is required")
+        return value
+
+
+class ImmutableContentReference(ReconciliationContract):
+    """An immutable locator whose supplied bytes must validate before use."""
+
+    content_id: str = Field(min_length=1)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    size: int = Field(ge=0)
+
+
+class ExactContent(ReconciliationContract):
+    """Available bytes, optionally retaining a validated immutable locator.
+
+    A locator alone is never available content. Outer stores materialize bytes
+    before invoking this contract; equality in reconciliation uses those bytes.
+    """
+
+    data: bytes
+    reference: ImmutableContentReference | None = None
+
+    @model_validator(mode="after")
+    def validate_reference(self):
+        if self.reference is not None and (
+            len(self.data) != self.reference.size
+            or sha256(self.data).hexdigest() != self.reference.sha256
+        ):
+            raise ValueError(
+                "Immutable content reference does not match available bytes"
+            )
+        return self
+
+
+class OutputIdentity(ReconciliationContract):
+    collection_id: str = Field(min_length=1)
+    module_id: str = Field(min_length=1)
+    module_version: str = Field(min_length=1)
+    profile_id: str = Field(min_length=1)
+    profile_version: str = Field(min_length=1)
+    output_format: int = Field(ge=1)
+    settings_digest: str = Field(min_length=1)
+
+
+class ContentVersion(ReconciliationContract):
+    status: Literal["known", "unknown"]
+    content: ExactContent | None
+    unavailable_digest: str | None
+
+    @model_validator(mode="after")
+    def available_original(self):
+        if (self.status == "known") != (self.content is not None):
+            raise ValueError(
+                "Known originals require available exact content; "
+                "unknown originals cannot contain invented content"
+            )
+        if self.status == "known" and self.unavailable_digest is not None:
+            raise ValueError("Available originals do not use an unavailable digest")
+        return self
+
+
+class CurrentContent(ReconciliationContract):
+    existence: Literal["present", "absent", "unknown"]
+    path: str
+    content: ExactContent | None
+
+    @model_validator(mode="after")
+    def consistent_existence(self):
+        if (self.existence == "present") != (self.content is not None):
+            raise ValueError("Only present current files have available content")
+        return self
+
+
+class ReconciliationSubject(ReconciliationContract):
+    item_id: str = Field(min_length=1)
+    facet: str = Field(min_length=1)
+    path: str
+    baseline: ContentVersion
+    current: CurrentContent
+    incoming: ExactContent | None
+    interpretation: Literal["supported", "opaque", "unsupported"]
+
+
+class ReconciliationInput(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.reconciliation-input"]
+    schema_version: Literal[1]
+    proposal_id: str = Field(min_length=1)
+    generation: int = Field(ge=1)
+    baseline_identity: OutputIdentity
+    incoming_identity: OutputIdentity
+    subjects: tuple[ReconciliationSubject, ...]
+    inventory: Literal["complete", "partial", "unreadable"]
+    safety_facts: tuple[SafetyFact, ...]
+
+    @model_validator(mode="after")
+    def unique_subjects_and_facts(self):
+        identities = [(s.item_id, s.facet) for s in self.subjects]
+        keys = [f.key for f in self.safety_facts]
+        if len(set(identities)) != len(identities) or len(set(keys)) != len(keys):
+            raise ValueError("Duplicate subjects or safety fact keys")
+        items = {s.item_id for s in self.subjects}
+        if any(
+            not set(f.subjects) <= items or len(set(f.subjects)) != len(f.subjects)
+            for f in self.safety_facts
+        ):
+            raise ValueError("Safety scopes must name distinct available subjects")
+        return self
+
+
+class SafetyFact(ReconciliationContract):
+    """Outer validation bound to a fingerprint and explicit affected item IDs.
+
+    Empty subjects means global scope. Every subject needs identity, target,
+    candidate and operation attestations; no absent attestation implies safety.
+    Additional mapping, link, policy and history facts retain the same gate.
+    """
+
+    key: str = Field(min_length=1)
+    kind: Literal[
+        "identity",
+        "target",
+        "candidate",
+        "operation",
+        "history",
+        "policy",
+        "mapping",
+        "link",
+        "content",
+    ]
+    fingerprint: str = Field(min_length=1)
+    status: Literal["safe", "unsafe", "unknown", "active", "recovery_required"]
+    subjects: tuple[str, ...]
+
+
+class ProposalAssumption(ReconciliationContract):
+    key: str
+    kind: Literal[
+        "baseline",
+        "current",
+        "incoming",
+        "identity",
+        "inventory",
+        "interpretation",
+        "target",
+        "candidate",
+        "operation",
+        "history",
+        "policy",
+        "mapping",
+        "link",
+        "content",
+    ]
+    fingerprint: str
+    depends_on: tuple[str, ...]
+
+
+class ChangeProvenance(ReconciliationContract):
+    producer: Literal["exact-bytes/v1"]
+    rule: Literal[
+        "unknown_original",
+        "source_absent",
+        "local_absent",
+        "source_unchanged",
+        "unsupported_interpretation",
+        "already_current",
+        "divergent",
+        "source_only",
+        "unsafe_input",
+    ]
+
+
+class ProposedChange(ReconciliationContract):
+    change_id: str
+    subject_id: str
+    item_id: str
+    facet: str
+    path: str
+    original: ExactContent | None
+    current: ExactContent | None
+    incoming: ExactContent | None
+    result: ExactContent | None
+    disposition: Literal[
+        "no_change", "preserve_vault", "compatible", "unresolved", "refused"
+    ]
+    requires_decision: bool
+    provenance: ChangeProvenance
+    assumptions: tuple[ProposalAssumption, ...]
+    decision_dependencies: tuple[str, ...]
+    source_version: str | None
+
+    @model_validator(mode="after")
+    def conservative_result(self):
+        if self.disposition in ("unresolved", "refused"):
+            if self.result is not None or not self.requires_decision:
+                raise ValueError("Unresolved/refused changes cannot choose a result")
+        elif self.disposition == "compatible":
+            if self.result is None or not self.requires_decision:
+                raise ValueError("Compatible results still require review")
+        elif (
+            self.requires_decision
+            or self.result is None
+            or self.current is None
+            or self.result.data != self.current.data
+        ):
+            raise ValueError(
+                "Preservation/no-change results must keep exact current bytes"
+            )
+        return self
+
+
+class ReconciliationFinding(ReconciliationContract):
+    code: Literal[
+        "identity_mismatch",
+        "format_transition_required",
+        "unsupported_format",
+        "profile_transition_required",
+        "inventory_uncertain",
+        "current_unavailable",
+        "missing_safety_facts",
+        "unsafe_assumption",
+    ]
+    subject_id: str | None
+    blocking: bool
+    assumption_keys: tuple[str, ...]
+
+
+class UpdateProposal(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.update-proposal"]
+    schema_version: Literal[1]
+    proposal_id: str = Field(min_length=1)
+    generation: int = Field(ge=1)
+    changes: tuple[ProposedChange, ...]
+    findings: tuple[ReconciliationFinding, ...]
+    readiness: Literal["ready", "review_required", "refused"]
+    ready: bool
+    local_changes: tuple[str, ...]
+
+    @model_validator(mode="after")
+    def consistent_readiness(self):
+        change_ids = [c.change_id for c in self.changes]
+        subject_ids = [c.subject_id for c in self.changes]
+        if len(set(change_ids)) != len(change_ids) or len(set(subject_ids)) != len(
+            subject_ids
+        ):
+            raise ValueError("Proposal changes and subjects must be unique")
+        required = (
+            "refused"
+            if any(f.blocking for f in self.findings)
+            or any(c.disposition == "refused" for c in self.changes)
+            else "review_required"
+            if any(c.requires_decision for c in self.changes)
+            else "ready"
+        )
+        if self.readiness != required or self.ready != (required == "ready"):
+            raise ValueError(
+                "Proposal readiness must reflect every required review and safety finding"
+            )
+        return self

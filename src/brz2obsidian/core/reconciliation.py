@@ -1,0 +1,215 @@
+"""Pure exact-byte reconciliation; interpretation and all I/O belong to callers."""
+
+import json
+from hashlib import sha256
+
+from brz2obsidian.contracts import (
+    ChangeProvenance,
+    ProposalAssumption,
+    ProposedChange,
+    ReconciliationFinding,
+    ReconciliationInput,
+    UpdateProposal,
+)
+
+
+def _digest(value):
+    encoded = json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode()
+    return sha256(encoded).hexdigest()
+
+
+def _dump(value):
+    return None if value is None else value.model_dump(mode="json")
+
+
+def _bytes(content):
+    return None if content is None else content.data
+
+
+def _content_identity(content):
+    return None if content is None else sha256(content.data).hexdigest()
+
+
+def _assumptions(facts, subject, subject_id, safety):
+    values = (
+        ("identity", (_dump(facts.baseline_identity), _dump(facts.incoming_identity))),
+        ("inventory", facts.inventory),
+        (
+            "baseline",
+            (
+                subject.baseline.status,
+                _content_identity(subject.baseline.content),
+                subject.baseline.unavailable_digest,
+            ),
+        ),
+        (
+            "current",
+            (
+                subject.current.existence,
+                subject.current.path,
+                _content_identity(subject.current.content),
+            ),
+        ),
+        ("incoming", (subject.path, _content_identity(subject.incoming))),
+        ("interpretation", subject.interpretation),
+    )
+    assumptions = [
+        ProposalAssumption(
+            key=f"{subject_id}:{kind}",
+            kind=kind,
+            fingerprint=_digest(value),
+            depends_on=(),
+        )
+        for kind, value in values
+    ]
+    assumptions.extend(
+        ProposalAssumption(
+            key=f"safety:{fact.key}",
+            kind=fact.kind,
+            fingerprint=_digest(_dump(fact)),
+            depends_on=(),
+        )
+        for fact in safety
+    )
+    return tuple(assumptions)
+
+
+def _findings(facts, subject, subject_id, safety):
+    problems = []
+
+    def add(code, keys):
+        problems.append(
+            ReconciliationFinding(
+                code=code, subject_id=subject_id, blocking=True, assumption_keys=keys
+            )
+        )
+
+    baseline, incoming = facts.baseline_identity, facts.incoming_identity
+    identity_key = (f"{subject_id}:identity",)
+    if (baseline.collection_id, baseline.module_id) != (
+        incoming.collection_id,
+        incoming.module_id,
+    ):
+        add("identity_mismatch", identity_key)
+    elif baseline.output_format != incoming.output_format:
+        add("format_transition_required", identity_key)
+    elif baseline.output_format != 7:
+        add("unsupported_format", identity_key)
+    elif baseline != incoming:
+        add("profile_transition_required", identity_key)
+    if facts.inventory != "complete":
+        add("inventory_uncertain", (f"{subject_id}:inventory",))
+    if subject is not None and subject.current.existence == "unknown":
+        add("current_unavailable", (f"{subject_id}:current",))
+    if not {"identity", "target", "candidate", "operation"} <= {s.kind for s in safety}:
+        add("missing_safety_facts", ())
+    for fact in safety:
+        if fact.status != "safe":
+            add("unsafe_assumption", (f"safety:{fact.key}",))
+    return problems
+
+
+def _proposal(subject):
+    original = _bytes(subject.baseline.content)
+    current = _bytes(subject.current.content)
+    incoming = _bytes(subject.incoming)
+    if subject.baseline.status == "unknown":
+        return "unresolved", None, "unknown_original", True
+    if subject.incoming is None:
+        return "unresolved", None, "source_absent", True
+    if subject.current.existence == "absent":
+        return "unresolved", None, "local_absent", True
+    if incoming == original:
+        disposition = "no_change" if current == original else "preserve_vault"
+        return disposition, subject.current.content, "source_unchanged", False
+    if subject.interpretation != "supported":
+        return "unresolved", None, "unsupported_interpretation", True
+    if current == incoming:
+        return "no_change", subject.current.content, "already_current", False
+    if current != original:
+        return "unresolved", None, "divergent", True
+    return "compatible", subject.incoming, "source_only", True
+
+
+def reconcile(facts: ReconciliationInput) -> UpdateProposal:
+    """Compare immutable exact versions and return review facts, never write consent.
+
+    The explicit safety attestations are outer validated facts, not validations
+    performed here. Missing attestations and unavailable inputs refuse dependent
+    changes. No current or incoming content is decoded or parsed.
+    """
+    facts = ReconciliationInput.model_validate(facts)
+    changes, findings, local_changes = [], [], []
+    if not facts.subjects:
+        findings.extend(_findings(facts, None, None, facts.safety_facts))
+    for subject in facts.subjects:
+        subject_id = _digest(
+            (facts.incoming_identity.collection_id, subject.item_id, subject.facet)
+        )
+        safety = tuple(
+            sorted(
+                (
+                    f
+                    for f in facts.safety_facts
+                    if not f.subjects or subject.item_id in f.subjects
+                ),
+                key=lambda f: f.key,
+            )
+        )
+        assumptions = _assumptions(facts, subject, subject_id, safety)
+        problems = _findings(facts, subject, subject_id, safety)
+        findings.extend(problems)
+        disposition, result, rule, requires_decision = _proposal(subject)
+        if problems:
+            disposition, result, rule, requires_decision = (
+                "refused",
+                None,
+                "unsafe_input",
+                True,
+            )
+        if (
+            subject.baseline.status == "known"
+            and subject.current.existence != "unknown"
+            and _bytes(subject.current.content) != _bytes(subject.baseline.content)
+        ):
+            local_changes.append(subject_id)
+        change_id = _digest((subject_id, [(a.key, a.fingerprint) for a in assumptions]))
+        changes.append(
+            ProposedChange(
+                change_id=change_id,
+                subject_id=subject_id,
+                item_id=subject.item_id,
+                facet=subject.facet,
+                path=subject.current.path,
+                original=subject.baseline.content,
+                current=subject.current.content,
+                incoming=subject.incoming,
+                result=result,
+                disposition=disposition,
+                requires_decision=requires_decision,
+                provenance=ChangeProvenance(producer="exact-bytes/v1", rule=rule),
+                assumptions=assumptions,
+                decision_dependencies=(),
+                source_version=_content_identity(subject.incoming),
+            )
+        )
+    readiness = (
+        "refused"
+        if findings
+        else "review_required"
+        if any(c.requires_decision for c in changes)
+        else "ready"
+    )
+    return UpdateProposal(
+        schema_id="brz2obsidian.update-proposal",
+        schema_version=1,
+        proposal_id=facts.proposal_id,
+        generation=facts.generation,
+        changes=tuple(changes),
+        findings=tuple(findings),
+        readiness=readiness,
+        ready=readiness == "ready",
+        local_changes=tuple(local_changes),
+    )

@@ -24,7 +24,7 @@ markers = ["gui: optional Qt adapter checks (skip cleanly without PySide6)"]
 
 [tool.ruff]
 target-version = "py314"
-extend-exclude = [".scratch", "docs/history"]
+extend-exclude = [".scratch", "docs/history", "prototypes/editable-vault-wayfinder"]
 cache-dir = "tmp/ruff-cache"
 
 [tool.setuptools.packages.find]

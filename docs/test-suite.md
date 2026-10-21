@@ -22,6 +22,11 @@ coverage measurement helps the decision. Focused measurements are partial suite
 evidence; neither command requires running the default bundle after every edit.
 See [the runner and measurement contract](testing.md#automated-check-runner).
 
+Ruff excludes the retained experiment sources under
+`prototypes/editable-vault-wayfinder/` from routine lint and format checks.
+Those files preserve historical experiments and their as-run evidence;
+production code, tests and tools remain within both checks.
+
 The historical exhaustive suite is retired by the user's 2026-10-17 decision.
 Older full-suite or fresh full BASE/GUI ticket requirements are withdrawn.
 Never recreate those executions by accumulating focused batches. The reduced
