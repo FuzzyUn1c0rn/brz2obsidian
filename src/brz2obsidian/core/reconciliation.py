@@ -12,6 +12,8 @@ from brz2obsidian.contracts import (
     UpdateProposal,
 )
 
+from .formats import format_assumption, format_findings, format_proposal, review_facts
+
 
 def _digest(value):
     encoded = json.dumps(
@@ -54,6 +56,7 @@ def _assumptions(facts, subject, subject_id, safety):
         ),
         ("incoming", (subject.path, _content_identity(subject.incoming))),
         ("interpretation", subject.interpretation),
+        ("format", format_assumption(facts, subject)),
     )
     assumptions = [
         ProposalAssumption(
@@ -93,12 +96,9 @@ def _findings(facts, subject, subject_id, safety):
         incoming.module_id,
     ):
         add("identity_mismatch", identity_key)
-    elif baseline.output_format != incoming.output_format:
-        add("format_transition_required", identity_key)
-    elif baseline.output_format != 7:
-        add("unsupported_format", identity_key)
-    elif baseline != incoming:
-        add("profile_transition_required", identity_key)
+    else:
+        for code in format_findings(facts):
+            add(code, (f"{subject_id}:format",) if subject_id else ())
     if facts.inventory != "complete":
         add("inventory_uncertain", (f"{subject_id}:inventory",))
     if subject is not None and subject.current.existence == "unknown":
@@ -161,7 +161,9 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
         assumptions = _assumptions(facts, subject, subject_id, safety)
         problems = _findings(facts, subject, subject_id, safety)
         findings.extend(problems)
-        disposition, result, rule, requires_decision = _proposal(subject)
+        disposition, result, rule, requires_decision = format_proposal(
+            facts, subject
+        ) or _proposal(subject)
         if problems:
             disposition, result, rule, requires_decision = (
                 "refused",
@@ -189,10 +191,16 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
                 result=result,
                 disposition=disposition,
                 requires_decision=requires_decision,
-                provenance=ChangeProvenance(producer="exact-bytes/v1", rule=rule),
+                provenance=ChangeProvenance(
+                    producer="format-review/v1"
+                    if review_facts(facts, subject)
+                    else "exact-bytes/v1",
+                    rule=rule,
+                ),
                 assumptions=assumptions,
                 decision_dependencies=(),
                 source_version=_content_identity(subject.incoming),
+                format_review=review_facts(facts, subject),
             )
         )
     readiness = (
@@ -208,6 +216,7 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
         proposal_id=facts.proposal_id,
         generation=facts.generation,
         changes=tuple(changes),
+        operation=facts.format_operation.kind,
         findings=tuple(findings),
         readiness=readiness,
         ready=readiness == "ready",

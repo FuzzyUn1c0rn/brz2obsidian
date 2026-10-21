@@ -9,11 +9,14 @@ from brz2obsidian.contracts import (
     ContentVersion,
     CurrentContent,
     ExactContent,
+    FormatBaselineOutput,
+    FormatOperation,
     ImmutableContentReference,
     OutputIdentity,
     ReconciliationInput,
     ReconciliationSubject,
     SafetyFact,
+    SupportedFormatBaseline,
 )
 from brz2obsidian.core import reconcile
 
@@ -47,6 +50,7 @@ def request(
         ),
         incoming=ExactContent(data=incoming),
         interpretation="supported",
+        output_role="note",
     )
     fields = {
         "schema_id": "brz2obsidian.reconciliation-input",
@@ -56,6 +60,27 @@ def request(
         "baseline_identity": identity(),
         "incoming_identity": identity(),
         "subjects": (subject,),
+        "format_operation": FormatOperation(
+            schema_id="brz2obsidian.format-operation",
+            schema_version=1,
+            kind="source_update",
+            recorded_generation="supported",
+            baseline_source_version="source:a",
+            target_source_version="source:b",
+            established_baseline=SupportedFormatBaseline(
+                schema_id="brz2obsidian.supported-format-baseline",
+                schema_version=1,
+                identity=identity(),
+                source_version="source:a",
+                outputs=(
+                    FormatBaselineOutput(
+                        item_id=subject.item_id,
+                        facet=subject.facet,
+                        content=ExactContent(data=original),
+                    ),
+                ),
+            ),
+        ),
         "inventory": "complete",
         "safety_facts": tuple(
             SafetyFact(
