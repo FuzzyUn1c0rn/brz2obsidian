@@ -294,18 +294,21 @@ def current_note_coverage(facts):
                 for s in context.current_target_facts
                 if s.target_id == target.target_id
             )
-            declared_note = any(
-                s.attachment is None
+            associated_resource = any(
+                s.attachment is not None
+                and s.attachment.current_target_id == target.target_id
+                and entry.identity_state == "valid"
                 and s.facet == entry.facet
                 and entry.identity is not None
                 and s.item_id == entry.identity.item_id
                 and facts.incoming_identity.collection_id
                 == entry.identity.collection_id
                 and facts.incoming_identity.module_id == entry.identity.module_id
+                and s.current == entry.current
                 for s in facts.subjects
             )
             resource = (
-                not declared_note
+                associated_resource
                 and target.status == "safe"
                 and target.target is not None
                 and (target.identity is None or target.identity == entry.identity)

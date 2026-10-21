@@ -179,8 +179,10 @@ paths or normalized target meaning change, every present potential note in that
 bounded inventory needs an exact bound, supported, complete link document.
 Omitted documents, opaque potential backlinks or omitted registry layers leave
 coverage unavailable and block whole-plan readiness. An explicit validated safe
-resource record with matching owner/facet and observed payload can exclude a
-binary file; omission cannot establish a resource classification. Supplied
+resource record with matching canonical owner/facet, a positively associated
+`AttachmentFacts` target and exact observed payload can exclude a
+binary file; omission or relabelling an unassociated file cannot establish that
+resource classification. Supplied
 current queries are independently re-resolved before they establish meaning.
 Known absence/status facts still distinguish a source gap or intentionally
 uncreated target. Exact source-unchanged preservation introduces no new effect

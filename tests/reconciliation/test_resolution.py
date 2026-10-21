@@ -2350,6 +2350,7 @@ def test_inventory_backlink_coverage_cannot_be_removed_with_interpretation_or_re
         "document",
         "document_target_state",
         "referenced_current_target",
+        "unknown_resource_relabel",
     ):
         current_docs = (
             docs
@@ -2366,6 +2367,13 @@ def test_inventory_backlink_coverage_cannot_be_removed_with_interpretation_or_re
             if omission != "document_target_state"
             else tuple(t for t in old_states if t.target_id != "backlink")
         )
+        if omission == "unknown_resource_relabel":
+            targets = tuple(
+                t.model_copy(update={"kind": "resource"})
+                if t.target_id == "backlink"
+                else t
+                for t in targets
+            )
         if omission == "referenced_current_target":
             targets = tuple(t for t in targets if t.target_id != "opening")
             states = tuple(t for t in states if t.target_id != "opening")
