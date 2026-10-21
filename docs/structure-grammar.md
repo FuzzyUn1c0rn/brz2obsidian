@@ -23,7 +23,10 @@ filesystem access, rendering, choice resolution or application.
   line beginning with `---` but containing other characters is ambiguous.
 - Each property begins in column zero. Keys match `[A-Za-z_][A-Za-z0-9_]*`;
   after the colon there is either no value or exactly one separating space.
-  Keys must be unique. Blank/comment lines, indentation, merge keys, mappings,
+  Keys must be unique string keys. Case-insensitive YAML boolean/null spellings
+  (`true`, `false`, `null`, `yes`, `no`, `on`, `off`, `y`, `n`) are excluded, so
+  semantic aliases such as `true`/`True` cannot masquerade as distinct properties.
+  Blank/comment lines, indentation, merge keys, mappings,
   custom tags, aliases/anchors, block scalars and multiline values are excluded.
 - Scalars are JSON double-quoted strings, strict decimal integers, lowercase
   `true`/`false`/`null`, empty values, valid ISO `YYYY-MM-DD` dates, or plain

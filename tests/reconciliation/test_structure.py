@@ -563,3 +563,43 @@ def test_supported_structure_cannot_override_an_explicit_opaque_interpretation()
     result = reconcile(facts.model_copy(update={"subjects": (subject,)}))
     assert result.changes[0].disposition == "unresolved"
     assert result.changes[0].result is None and not result.ready
+
+
+def test_semantic_yaml_key_aliases_cannot_survive_a_compatible_scalar_update():
+    from brz2obsidian.core import reconcile
+
+    original = b"---\ntrue: one\nTrue: two\npriority: 1\n---\nText.\n"
+    incoming = b"---\ntrue: one\nTrue: two\npriority: 2\n---\nText.\n"
+    result = reconcile(structured_request(original, original, incoming))
+    change = result.changes[0]
+    assert change.disposition == "unresolved" and change.result is None
+    assert (change.original.data, change.current.data, change.incoming.data) == (
+        original,
+        original,
+        incoming,
+    )
+    assert not result.ready
+    document = interpret_structure(ExactContent(data=original), output_format=7)
+    assert document.status == "unsupported"
+    assert document.issues == ("yaml_key_unsupported",)
+    preserved = reconcile(structured_request(original, b"authored\xff", original))
+    assert preserved.changes[0].disposition == "preserve_vault"
+    assert preserved.changes[0].result.data == b"authored\xff" and preserved.ready
+
+
+def test_reserved_key_meanings_are_excluded_while_ordinary_string_keys_remain_supported():
+    # Boolean false, null and legacy boolean-like names are distinct unsupported
+    # meanings, even though they share the conservative lexical rejection path.
+    for key in (b"false", b"NULL", b"Yes", b"NO", b"on", b"Off", b"y", b"N"):
+        document = interpret_structure(
+            ExactContent(data=b"---\n" + key + b": one\n---\nText.\n"), output_format=7
+        )
+        assert document.status == "unsupported" and document.issues == (
+            "yaml_key_unsupported",
+        )
+    for key in (b"truth", b"nullable", b"yes_value", b"n_label"):
+        document = interpret_structure(
+            ExactContent(data=b"---\n" + key + b": one\n---\nText.\n"), output_format=7
+        )
+        assert document.status == "supported"
+        assert document.fields[0].key == key.decode()

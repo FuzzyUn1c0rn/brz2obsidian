@@ -68,6 +68,18 @@ def _fields(lines):
         if match is None:
             raise _Unsupported("yaml_unsupported")
         key, value = match[1], match[2] or ""
+        if key.casefold() in (
+            "true",
+            "false",
+            "null",
+            "yes",
+            "no",
+            "on",
+            "off",
+            "y",
+            "n",
+        ):
+            raise _Unsupported("yaml_key_unsupported")
         if key in seen:
             raise _Unsupported("duplicate_property")
         seen.add(key)
