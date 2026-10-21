@@ -1,5 +1,7 @@
 """Identity follows validated inventory facts at the public reconciliation seam."""
 
+import pytest
+
 from brz2obsidian.contracts import (
     IdentityInventoryItem,
     IdentityTargetFacts,
@@ -676,15 +678,27 @@ def test_unoffered_rename_and_unsafe_disassociation_are_rejected_without_path_au
     assert result.findings[0].code == "unsafe_identity_target"
 
 
-def test_two_explicit_source_renames_cannot_claim_the_same_new_target():
+@pytest.mark.parametrize(
+    "first_path,second_path",
+    (
+        ("Shared.md", "SHARED.MD"),
+        ("Shared.md", "SHARED.MD/child.md"),
+        ("Shared.md/child.md", "SHARED.MD"),
+    ),
+)
+def test_simultaneous_selected_targets_reject_equality_and_both_ancestor_directions(
+    first_path, second_path
+):
     from brz2obsidian.contracts import CurrentContent, ExactContent
 
-    facts = request()
+    facts = request(incoming=b"original\r\n")
     first = facts.subjects[0].model_copy(
         update={
-            "path": "Shared.md",
+            "path": first_path,
             "source_target": IdentityTargetFacts(
-                normalized_path="shared.md", containment="contained", status="safe"
+                normalized_path=first_path.casefold(),
+                containment="contained",
+                status="safe",
             ),
         }
     )
@@ -692,6 +706,12 @@ def test_two_explicit_source_renames_cannot_claim_the_same_new_target():
         update={
             "item_id": "second:item",
             "title": "Second",
+            "path": second_path,
+            "source_target": IdentityTargetFacts(
+                normalized_path=second_path.casefold(),
+                containment="contained",
+                status="safe",
+            ),
             "current": CurrentContent(
                 existence="present",
                 path="B.md",
@@ -734,3 +754,23 @@ def test_two_explicit_source_renames_cannot_claim_the_same_new_target():
         change.disposition == "refused" for change in result.changes
     )
     assert {finding.code for finding in result.findings} == {"unsafe_rename_target"}
+    # Declining one optional rename permits the other after its context is reviewed.
+    declined = second_decision.model_copy(update={"choice": "keep_path"})
+    refreshed = reconcile(
+        facts.model_copy(update={"rename_decisions": (first_decision, declined)})
+    )
+    assert refreshed.changes[0].disposition == "stale" and not refreshed.ready
+    assert refreshed.changes[1].rename_review.status == "declined"
+    approved = first_decision.model_copy(
+        update={"reviewed_assumptions": refreshed.changes[0].rename_review.assumptions}
+    )
+    safe = reconcile(
+        facts.model_copy(update={"rename_decisions": (approved, declined)})
+    )
+    assert safe.ready and safe.findings == ()
+    assert tuple(change.target_path for change in safe.changes) == (first_path, "B.md")
+    assert tuple(change.rename_review.status for change in safe.changes) == (
+        "accepted",
+        "declined",
+    )
+    assert all(change.result.data == b"original\r\n" for change in safe.changes)

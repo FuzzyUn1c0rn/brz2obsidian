@@ -70,18 +70,18 @@ def _normalized(path):
     return unicodedata.normalize("NFC", unicodedata.normalize("NFC", path).casefold())
 
 
+def _paths_collide(left, right):
+    left, right = _normalized(left), _normalized(right)
+    return left == right or left.startswith(right + "/") or right.startswith(left + "/")
+
+
 def _target_context(path, items, selected_id):
-    normalized = _normalized(path)
     return tuple(
         item
         for item in items
         if item.entry_id != selected_id
         and item.current.existence != "absent"
-        and (
-            _normalized(item.current.path) == normalized
-            or _normalized(item.current.path).startswith(normalized + "/")
-            or normalized.startswith(_normalized(item.current.path) + "/")
-        )
+        and _paths_collide(item.current.path, path)
     )
 
 
@@ -144,7 +144,7 @@ def _rename(facts, subject, subject_id, selected, items, identity_review, assump
             (other.item_id, other.path, other.source_target.model_dump())
             for other in facts.subjects
             if other.item_id != subject.item_id
-            and _normalized(other.path) == _normalized(subject.path)
+            and _paths_collide(other.path, subject.path)
             and any(
                 d.item_id == other.item_id and d.choice == "source_path"
                 for d in facts.rename_decisions
