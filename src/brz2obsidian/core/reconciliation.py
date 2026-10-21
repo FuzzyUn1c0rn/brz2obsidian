@@ -14,6 +14,7 @@ from brz2obsidian.contracts import (
 from brz2obsidian.core.identity import bind_identity
 
 from .formats import format_assumption, format_findings, format_proposal, review_facts
+from .preservation import preservation_decision, preservation_policy
 from .structures import structure_assumption, structure_proposal
 
 
@@ -145,6 +146,7 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
     """
     facts = ReconciliationInput.model_validate(facts)
     changes, findings, local_changes = [], [], []
+    memory = list(facts.source_version_memory)
     if not facts.subjects:
         findings.extend(_findings(facts, None, None, facts.safety_facts))
     for subject in facts.subjects:
@@ -158,6 +160,10 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
         )
         binding = bind_identity(facts, subject, subject_id)
         subject = binding.subject
+        format_review = review_facts(facts, subject)
+        format_choice = format_proposal(facts, subject)
+        policy_allowed = format_review is None and format_choice is None
+        policy = preservation_policy(facts, subject, subject_id, policy_allowed)
         safety = tuple(
             sorted(
                 (
@@ -172,14 +178,18 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
             _assumptions(facts, subject, subject_id, safety)
             + binding.assumptions
             + (() if binding.rename is None else binding.rename.assumptions)
+            + (policy.assumption,)
         )
         problems = _findings(facts, subject, subject_id, safety) + list(
             binding.findings
         )
         findings.extend(problems)
-        disposition, result, rule, requires_decision = format_proposal(
-            facts, subject
-        ) or _proposal(subject)
+        preservation_review = policy.review
+        disposition, result, rule, requires_decision = (
+            format_choice
+            or (policy.proposal if policy_allowed else None)
+            or _proposal(subject)
+        )
         structured_result = None
         if (
             subject.structure is not None
@@ -231,6 +241,25 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
                 binding.target_path,
             )
         )
+        decision, preservation_review, remembered, decision_findings = (
+            preservation_decision(
+                facts,
+                subject,
+                subject_id,
+                change_id,
+                assumptions,
+                preservation_review,
+                policy_allowed
+                and binding.review.status == "matched"
+                and not any(problem.blocking for problem in problems)
+                and disposition != "stale",
+            )
+        )
+        findings.extend(decision_findings)
+        if decision is not None and not any(problem.blocking for problem in problems):
+            disposition, result, rule, requires_decision = decision
+        if remembered is not None:
+            memory.append(remembered)
         changes.append(
             ProposedChange(
                 change_id=change_id,
@@ -250,8 +279,18 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
                     if rule in ("identity_resolution", "rename_review")
                     else "structure/v1"
                     if rule.startswith("structure_")
+                    else "preservation/v1"
+                    if rule
+                    in (
+                        "source_absent",
+                        "local_deleted",
+                        "restoration_required",
+                        "remembered_keep",
+                        "remembered_decline",
+                        "preservation_decision",
+                    )
                     else "format-review/v1"
-                    if review_facts(facts, subject) is not None
+                    if format_review is not None
                     else "exact-bytes/v1",
                     rule=rule,
                 ),
@@ -260,7 +299,8 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
                 if binding.review.repair_required
                 else (),
                 source_version=_content_identity(subject.incoming),
-                format_review=review_facts(facts, subject),
+                format_review=format_review,
+                preservation_review=preservation_review,
                 identity_review=binding.review,
                 rename_review=binding.rename,
                 structure_result=structured_result,
@@ -284,4 +324,5 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
         readiness=readiness,
         ready=readiness == "ready",
         local_changes=tuple(local_changes),
+        source_version_memory=tuple(memory),
     )

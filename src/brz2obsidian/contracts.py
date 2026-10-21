@@ -862,6 +862,8 @@ class ReconciliationInput(ReconciliationContract):
     identity_inventory: tuple[IdentityInventoryItem, ...]
     association_decisions: tuple[IdentityAssociationDecision, ...] = ()
     rename_decisions: tuple[RenamePathDecision, ...] = ()
+    source_version_memory: tuple[SourceVersionMemory, ...]
+    preservation_decisions: tuple[PreservationDecision, ...] = ()
 
     @model_validator(mode="after")
     def unique_subjects_and_facts(self):
@@ -878,7 +880,11 @@ class ReconciliationInput(ReconciliationContract):
         inventory_keys = [item.entry_id for item in self.identity_inventory]
         if len(set(inventory_keys)) != len(inventory_keys):
             raise ValueError("Duplicate inventory entry IDs")
-        decisions = self.association_decisions + self.rename_decisions
+        decisions = (
+            self.association_decisions
+            + self.rename_decisions
+            + self.preservation_decisions
+        )
         if len({decision.decision_id for decision in decisions}) != len(decisions):
             raise ValueError("Duplicate identity/rename decision IDs")
         for family in (self.association_decisions, self.rename_decisions):
@@ -888,6 +894,22 @@ class ReconciliationInput(ReconciliationContract):
                 or not set(decision_items) <= items
             ):
                 raise ValueError("Decisions must name distinct known source items")
+        memory_ids = [
+            record.provenance.decision_id for record in self.source_version_memory
+        ]
+        if len(set(memory_ids)) != len(memory_ids) or set(memory_ids) & {
+            d.decision_id for d in decisions
+        }:
+            raise ValueError("Remembered and new decision IDs must be distinct")
+        preservation_scopes = [
+            (d.item_id, d.facet) for d in self.preservation_decisions
+        ]
+        if len(set(preservation_scopes)) != len(preservation_scopes) or not set(
+            preservation_scopes
+        ) <= set(identities):
+            raise ValueError(
+                "Preservation decisions must name distinct known source facets"
+            )
         return self
 
 
@@ -935,6 +957,7 @@ class ProposalAssumption(ReconciliationContract):
         "mapping",
         "link",
         "content",
+        "memory",
     ]
     fingerprint: str
     depends_on: tuple[str, ...]
@@ -942,7 +965,7 @@ class ProposalAssumption(ReconciliationContract):
 
 class ChangeProvenance(ReconciliationContract):
     producer: Literal[
-        "exact-bytes/v1", "identity-review/v1", "format-review/v1", "structure/v1"
+        "exact-bytes/v1", "identity-review/v1", "format-review/v1", "structure/v1", "preservation/v1"
     ]
     rule: Literal[
         "unknown_original",
@@ -965,6 +988,11 @@ class ChangeProvenance(ReconciliationContract):
         "structure_unsupported",
         "structure_identity_conflict",
         "structure_ambiguous",
+        "local_deleted",
+        "restoration_required",
+        "remembered_keep",
+        "remembered_decline",
+        "preservation_decision",
     ]
 
 
@@ -987,6 +1015,9 @@ class ProposedChange(ReconciliationContract):
         "refused",
         "identity_resolution",
         "stale",
+        "source_absent",
+        "local_deleted",
+        "restoration",
     ]
     requires_decision: bool
     provenance: ChangeProvenance
@@ -997,6 +1028,7 @@ class ProposedChange(ReconciliationContract):
     rename_review: RenameReview | None
     format_review: FormatReview | None
     structure_result: StructuredDocument | None
+    preservation_review: PreservationReview | None
 
     @model_validator(mode="after")
     def conservative_result(self):
@@ -1008,7 +1040,13 @@ class ProposedChange(ReconciliationContract):
             raise ValueError(
                 "Structured candidate facts must bind the exact available result"
             )
-        unresolved = ("unresolved", "refused", "identity_resolution", "stale")
+        unresolved = (
+            "unresolved",
+            "refused",
+            "identity_resolution",
+            "stale",
+            "restoration",
+        )
         if self.identity_review.repair_required and self.disposition not in unresolved:
             raise ValueError(
                 "Observed identity repairs remain required independently of a content choice"
@@ -1025,6 +1063,15 @@ class ProposedChange(ReconciliationContract):
         if self.disposition in unresolved:
             if self.result is not None or not self.requires_decision:
                 raise ValueError("Unresolved/refused changes cannot choose a result")
+        elif self.disposition == "local_deleted":
+            if (
+                self.current is not None
+                or self.result is not None
+                or self.requires_decision
+            ):
+                raise ValueError(
+                    "Suppressed local deletion retains absence without selecting bytes"
+                )
         elif self.disposition == "compatible":
             if self.result is None or not self.requires_decision:
                 raise ValueError("Compatible results still require review")
@@ -1058,6 +1105,8 @@ class ReconciliationFinding(ReconciliationContract):
         "stale_rename_decision",
         "unsafe_rename_target",
         "unsafe_rename_decision",
+        "stale_preservation_decision",
+        "unsafe_preservation_decision",
         "format_source_changed",
         "format_target_unsupported",
         "format_outputs_unavailable",
@@ -1078,6 +1127,7 @@ class UpdateProposal(ReconciliationContract):
     readiness: Literal["ready", "review_required", "refused"]
     ready: bool
     local_changes: tuple[str, ...]
+    source_version_memory: tuple[SourceVersionMemory, ...]
 
     @model_validator(mode="after")
     def consistent_readiness(self):
@@ -1236,4 +1286,64 @@ class RenamePathDecision(ReconciliationContract):
     item_id: str = Field(min_length=1)
     choice: Literal["keep_path", "source_path"]
     reviewed_assumptions: tuple[ProposalAssumption, ...]
+    provenance: Literal["explicit_user"]
+
+
+class SourceMemoryProvenance(ReconciliationContract):
+    decision_id: str = Field(min_length=1)
+    proposal_id: str = Field(min_length=1)
+    generation: int = Field(ge=1)
+    reviewed_assumptions: tuple[ProposalAssumption, ...]
+
+
+class SourceVersionMemory(ReconciliationContract):
+    """Reviewed source-facet policy facts; no persisted history or original proof."""
+
+    schema_id: Literal["brz2obsidian.source-version-memory"]
+    schema_version: Literal[1]
+    collection_id: str = Field(min_length=1)
+    module_id: str = Field(min_length=1)
+    item_id: str = Field(min_length=1)
+    facet: str = Field(min_length=1)
+    source_version: str = Field(pattern=r"^[0-9a-f]{64}$")
+    reviewed_incoming: ExactContent
+    choice: Literal["keep_vault", "decline_restoration"]
+    provenance: SourceMemoryProvenance
+
+    @model_validator(mode="after")
+    def exact_reviewed_version(self):
+        if sha256(self.reviewed_incoming.data).hexdigest() != self.source_version:
+            raise ValueError(
+                "Remembered source version must match available reviewed bytes"
+            )
+        return self
+
+
+class PreservationReview(ReconciliationContract):
+    kind: Literal["source_absent", "local_deleted", "restoration", "keep_vault"]
+    default_choice: Literal["keep_vault", "decline_restoration"]
+    choices: tuple[
+        Literal["keep_vault", "decline_restoration", "restore_incoming"], ...
+    ]
+    reviewed_source_version: str | None
+    matched_memory_ids: tuple[str, ...]
+    provenance: Literal["preservation_default", "source_memory", "explicit_user"]
+
+
+class PreservationDecision(ReconciliationContract):
+    """Current-generation keep/decline choice; restoration remains a later resolution."""
+
+    schema_id: Literal["brz2obsidian.preservation-decision"]
+    schema_version: Literal[1]
+    decision_id: str = Field(min_length=1)
+    proposal_id: str = Field(min_length=1)
+    generation: int = Field(ge=1)
+    collection_id: str = Field(min_length=1)
+    module_id: str = Field(min_length=1)
+    item_id: str = Field(min_length=1)
+    facet: str = Field(min_length=1)
+    reviewed_source_version: str = Field(pattern=r"^[0-9a-f]{64}$")
+    reviewed_change_id: str = Field(min_length=1)
+    reviewed_assumptions: tuple[ProposalAssumption, ...]
+    choice: Literal["keep_vault", "decline_restoration"]
     provenance: Literal["explicit_user"]

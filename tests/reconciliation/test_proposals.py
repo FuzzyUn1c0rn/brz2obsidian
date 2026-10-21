@@ -65,6 +65,7 @@ def request(
         "schema_version": 1,
         "proposal_id": "review:one",
         "generation": 1,
+        "source_version_memory": (),
         "baseline_identity": identity(),
         "incoming_identity": identity(),
         "subjects": (subject,),
@@ -287,17 +288,20 @@ def test_unsafe_unknown_active_and_recovery_facts_block_dependent_readiness():
     assert absent.changes[0].disposition == "refused"
 
 
-def test_absent_versions_are_conservative_unresolved_facts_at_this_seam():
+def test_absent_versions_expose_preservation_and_optional_restoration_at_this_seam():
     facts = request()
-    for update, rule in (
-        ({"incoming": None}, "source_absent"),
+    for update, disposition, rule, expected, ready in (
+        ({"incoming": None}, "source_absent", "source_absent", b"original\r\n", True),
         (
             {
                 "current": CurrentContent(
                     existence="absent", path="Notes/Opening.md", content=None
                 )
             },
-            "local_absent",
+            "restoration",
+            "restoration_required",
+            None,
+            False,
         ),
     ):
         subject = facts.subjects[0].model_copy(update=update)
@@ -314,9 +318,10 @@ def test_absent_versions_are_conservative_unresolved_facts_at_this_seam():
             )
         )
         (change,) = result.changes
-        assert change.disposition == "unresolved" and change.result is None
+        assert change.disposition == disposition
+        assert (None if change.result is None else change.result.data) == expected
         assert change.provenance.rule == rule
-        assert not result.ready
+        assert result.ready is ready
 
 
 def test_closed_frozen_input_rejects_missing_unknown_duplicate_and_ill_typed_facts():
