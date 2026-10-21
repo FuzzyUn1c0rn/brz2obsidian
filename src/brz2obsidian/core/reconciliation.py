@@ -15,7 +15,11 @@ from brz2obsidian.core.identity import bind_identity
 
 from .formats import format_assumption, format_findings, format_proposal, review_facts
 from .preservation import preservation_decision, preservation_policy
-from .structures import structure_assumption, structure_proposal
+from .structures import (
+    structure_assumption,
+    structure_proposal,
+    validate_structure_facts,
+)
 
 
 def _digest(value):
@@ -162,7 +166,18 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
         subject = binding.subject
         format_review = review_facts(facts, subject)
         format_choice = format_proposal(facts, subject)
-        policy_allowed = format_review is None and format_choice is None
+        structure_problem = (
+            None
+            if subject.structure is None
+            else validate_structure_facts(
+                subject, facts.baseline_identity, facts.incoming_identity
+            )
+        )
+        policy_allowed = (
+            format_review is None
+            and format_choice is None
+            and structure_problem is None
+        )
         policy = preservation_policy(facts, subject, subject_id, policy_allowed)
         safety = tuple(
             sorted(
@@ -202,6 +217,18 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
                 structure_proposal(
                     subject, facts.baseline_identity, facts.incoming_identity
                 )
+            )
+        if (
+            structure_problem is not None
+            and format_review is None
+            and format_choice is None
+        ):
+            structured_result = None
+            disposition, result, rule, requires_decision = (
+                "unresolved",
+                None,
+                structure_problem,
+                True,
             )
         if binding.review.status != "matched":
             disposition, result, rule, requires_decision = (
@@ -258,6 +285,7 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
         findings.extend(decision_findings)
         if decision is not None and not any(problem.blocking for problem in problems):
             disposition, result, rule, requires_decision = decision
+            structured_result = None
         if remembered is not None:
             memory.append(remembered)
         changes.append(

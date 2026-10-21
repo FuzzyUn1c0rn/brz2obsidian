@@ -60,6 +60,7 @@ def preservation_policy(facts, subject, subject_id, allowed):
             f"{subject_id}:incoming",
             f"{subject_id}:format",
             f"{subject_id}:current",
+            f"{subject_id}:structure",
         ),
     )
     review, proposal = None, None

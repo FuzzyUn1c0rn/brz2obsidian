@@ -965,7 +965,11 @@ class ProposalAssumption(ReconciliationContract):
 
 class ChangeProvenance(ReconciliationContract):
     producer: Literal[
-        "exact-bytes/v1", "identity-review/v1", "format-review/v1", "structure/v1", "preservation/v1"
+        "exact-bytes/v1",
+        "identity-review/v1",
+        "format-review/v1",
+        "structure/v1",
+        "preservation/v1",
     ]
     rule: Literal[
         "unknown_original",

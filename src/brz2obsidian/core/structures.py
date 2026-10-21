@@ -11,7 +11,12 @@ def _value(document, field):
     return field.kind, field.scalar_type, field.value
 
 
-def structure_proposal(subject, baseline_identity, incoming_identity):
+def validate_structure_facts(subject, baseline_identity, incoming_identity):
+    """Check exact binding and declared identity, independently of merge support.
+
+    Opaque documents need whole-file review; absent parsed fields in those facts
+    do not establish missing imported identity. Supported documents must agree.
+    """
     baseline_format, incoming_format = (
         baseline_identity.output_format,
         incoming_identity.output_format,
@@ -20,11 +25,10 @@ def structure_proposal(subject, baseline_identity, incoming_identity):
     documents = comparison.original, comparison.current, comparison.incoming
     versions = subject.baseline.content, subject.current.content, subject.incoming
 
-    def unresolved(rule):
-        return ("unresolved", None, rule, True), None
-
     if any(
-        doc.content.data != content.data or doc.output_format != version
+        content is None
+        or doc.content.data != content.data
+        or doc.output_format != version
         for doc, content, version in zip(
             documents,
             versions,
@@ -32,7 +36,40 @@ def structure_proposal(subject, baseline_identity, incoming_identity):
             strict=True,
         )
     ):
-        return unresolved("structure_unbound")
+        return "structure_unbound"
+    expected_identity = {
+        "collection": incoming_identity.collection_id,
+        "item": subject.item_id,
+        "module": incoming_identity.module_id,
+    }
+    if any(
+        field.identity_component is not None
+        and field.value != expected_identity[field.identity_component]
+        for document in documents
+        for field in document.fields
+    ):
+        return "structure_identity_conflict"
+    identities = tuple(
+        tuple(sorted((f.key, f.value) for f in doc.fields if f.kind == "identity"))
+        for doc in documents
+    )
+    if all(doc.status == "supported" for doc in documents) and (
+        identities[0] != identities[1] or identities[0] != identities[2]
+    ):
+        return "structure_identity_conflict"
+    return None
+
+
+def structure_proposal(subject, baseline_identity, incoming_identity):
+    comparison = subject.structure
+    documents = comparison.original, comparison.current, comparison.incoming
+
+    def unresolved(rule):
+        return ("unresolved", None, rule, True), None
+
+    problem = validate_structure_facts(subject, baseline_identity, incoming_identity)
+    if problem is not None:
+        return unresolved(problem)
     if (
         any(doc.status != "supported" for doc in documents)
         or comparison.alignment == "unsupported"
@@ -48,24 +85,6 @@ def structure_proposal(subject, baseline_identity, incoming_identity):
         current_fields
     ):
         return unresolved("structure_conflict")
-    identities = tuple(
-        tuple(sorted((f.key, f.value) for f in doc.fields if f.kind == "identity"))
-        for doc in documents
-    )
-    if identities[0] != identities[1] or identities[0] != identities[2]:
-        return unresolved("structure_identity_conflict")
-    expected_identity = {
-        "collection": incoming_identity.collection_id,
-        "item": subject.item_id,
-        "module": incoming_identity.module_id,
-    }
-    if any(
-        field.identity_component is not None
-        and field.value != expected_identity[field.identity_component]
-        for document in documents
-        for field in document.fields
-    ):
-        return unresolved("structure_identity_conflict")
     replacements = {}
     for key, source in source_fields.items():
         old, local = old_fields[key], current_fields[key]
@@ -127,7 +146,7 @@ def structure_proposal(subject, baseline_identity, incoming_identity):
     result = StructuredDocument(
         schema_id="brz2obsidian.structured-document",
         schema_version=1,
-        output_format=incoming_format,
+        output_format=incoming_identity.output_format,
         content=ExactContent(data=data),
         status="supported",
         issues=(),

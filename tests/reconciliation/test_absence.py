@@ -556,3 +556,74 @@ def test_historical_deletion_policy_does_not_invalidate_an_existing_file_choice(
     assert after.changes[0].disposition == "unresolved" and not after.ready
     assert after.changes[0].preservation_review.matched_memory_ids == ()
     assert after.source_version_memory == (memory,)
+
+
+def test_whole_file_keep_clears_a_different_structured_candidate():
+    from tests.reconciliation.test_structure import structured_request
+
+    original = b'---\npriority: 1\nowner: "source"\n---\nBody.\n'
+    current = b'---\npriority: 1\nowner: "local"\n---\nBody.\n'
+    incoming = b'---\npriority: 2\nowner: "source"\n---\nBody.\n'
+    facts = structured_request(original, current, incoming)
+    offered = reconcile(facts)
+    assert (
+        offered.changes[0].result.data
+        == b'---\npriority: 2\nowner: "local"\n---\nBody.\n'
+    )
+    assert offered.changes[0].structure_result is not None
+    decision = choose(facts, offered, "keep_vault")
+    kept = reconcile(facts.model_copy(update={"preservation_decisions": (decision,)}))
+    assert kept.ready and kept.changes[0].result.data == current
+    assert kept.changes[0].structure_result is None
+    assert len(kept.source_version_memory) == 1
+
+
+def test_memory_keeps_opaque_or_overlapping_bytes_but_never_trusts_contradictory_structure():
+    from tests.reconciliation.test_structure import structured_request
+
+    original = b'---\nsource_item_id: "entry:opening"\npriority: 1\n---\nBody.\n'
+    current = b'---\nsource_item_id: "entry:opening"\npriority: 2\n---\nBody.\n'
+    incoming = b'---\nsource_item_id: "entry:opening"\npriority: 3\n---\nBody.\n'
+    base = structured_request(original, current, incoming)
+    memory = remembered(base)
+    for local in (
+        current,
+        b"---\npriority: 2\npriority: 4\n---\nAuthored.\n",
+        b"\xff\x00Opaque local bytes",
+    ):
+        facts = structured_request(original, local, incoming).model_copy(
+            update={"source_version_memory": (memory,)}
+        )
+        preserved = reconcile(facts)
+        assert preserved.ready and preserved.changes[0].result.data == local
+        assert preserved.changes[0].structure_result is None
+    changed_identity = structured_request(
+        original, current.replace(b"entry:opening", b"other:item"), incoming
+    )
+    missing_identity = structured_request(
+        original, b"---\npriority: 2\n---\nBody.\n", incoming
+    )
+    wrong_binding = base.model_copy(
+        update={
+            "subjects": (
+                base.subjects[0].model_copy(
+                    update={
+                        "structure": base.subjects[0].structure.model_copy(
+                            update={"current": base.subjects[0].structure.incoming}
+                        )
+                    }
+                ),
+            )
+        }
+    )
+    for unsafe, rule in (
+        (changed_identity, "structure_identity_conflict"),
+        (missing_identity, "structure_identity_conflict"),
+        (wrong_binding, "structure_unbound"),
+    ):
+        refused = reconcile(
+            unsafe.model_copy(update={"source_version_memory": (memory,)})
+        )
+        assert not refused.ready and refused.changes[0].result is None
+        assert refused.changes[0].provenance.rule == rule
+        assert refused.source_version_memory == (memory,)
