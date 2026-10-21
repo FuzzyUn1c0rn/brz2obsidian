@@ -201,7 +201,7 @@ def review_dependencies(plan):
         derived(
             "effect:" + change.subject_id,
             "candidate",
-            (portions, inbound),
+            (portions, sorted(inbound, key=lambda entry: (entry[0], entry[1]))),
             dependencies,
             "effect",
         )

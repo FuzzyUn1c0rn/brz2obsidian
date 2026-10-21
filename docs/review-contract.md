@@ -286,3 +286,14 @@ checks; this does not claim the exact old approval covered newly observed bytes.
 Changed source/context reopens review, and onboarding/format choices stay separate.
 Refresh performs no save/load, apply, cleanup, restoration or recovery; consumers
 must supply fresh observations, and later persistence uses canonical validation.
+
+
+Semantic dependency projections treat classification mapping rows and ID-keyed
+link registry, target-state and document inventories as sets of supplied facts.
+Consent subject membership and per-subject effect scope are also set-like.
+Exact target representations and query spellings are lookup alternatives with
+set semantics. Reordering those facts preserves applicable consent; removing a
+used alias or changing a target meaning still invalidates its consumers. The
+original normalized records retain their supplied order in history. Current and
+incoming evidence remain separate stages. Authored bytes, occurrence order,
+membership entries, allocation choices and history event order remain meaningful.

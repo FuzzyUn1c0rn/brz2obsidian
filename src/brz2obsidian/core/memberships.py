@@ -50,12 +50,18 @@ def appearance_issues(document):
 
 def used_mappings(comparison):
     """Keep only classification meanings actually referenced by this comparison."""
+
+    def ordered(records):
+        return tuple(
+            sorted(records, key=lambda m: (m.classification_id, m.kind, m.target_id))
+        )
+
     if any(
         d.status != "supported"
         for d in (comparison.original, comparison.current, comparison.incoming)
     ):
         # Unsupported syntax cannot prove a supplied mapping is unused.
-        return comparison.prior_mappings, comparison.incoming_mappings
+        return ordered(comparison.prior_mappings), ordered(comparison.incoming_mappings)
     targets = {
         e.target_id
         for d in (comparison.original, comparison.current, comparison.incoming)
@@ -71,7 +77,7 @@ def used_mappings(comparison):
     records = comparison.prior_mappings + comparison.incoming_mappings
     ids = {m.classification_id for m in records if m.target_id in targets}
     return tuple(
-        tuple(m for m in values if m.classification_id in ids)
+        ordered(m for m in values if m.classification_id in ids)
         for values in (comparison.prior_mappings, comparison.incoming_mappings)
     )
 

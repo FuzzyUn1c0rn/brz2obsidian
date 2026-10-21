@@ -11,10 +11,16 @@ from .link_validation import validate_link_document
 
 
 def consumed_context(
-    documents, targets, states, inventory, *, include_document_targets=True
+    documents,
+    targets,
+    states,
+    inventory,
+    *,
+    include_document_targets=True,
+    target_ids=(),
 ):
     """Include query competitors, selected membership facts and path collisions."""
-    ids = {
+    ids = set(target_ids) | {
         t.target_id
         for t in targets
         if include_document_targets
@@ -46,9 +52,24 @@ def consumed_context(
         changed = ids != previous
     return (
         inventory,
-        documents,
-        tuple(t for t in targets if t.target_id in ids),
-        tuple(s for s in states if s.target_id in ids),
+        tuple(
+            sorted(
+                documents,
+                key=lambda d: (
+                    d.document_id,
+                    d.source_path,
+                    sha256(d.content.data).hexdigest(),
+                ),
+            )
+        ),
+        tuple(
+            sorted(
+                (t for t in targets if t.target_id in ids), key=lambda t: t.target_id
+            )
+        ),
+        tuple(
+            sorted((s for s in states if s.target_id in ids), key=lambda s: s.target_id)
+        ),
     )
 
 

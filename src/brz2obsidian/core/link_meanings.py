@@ -9,6 +9,7 @@ from brz2obsidian.contracts import (
     LinkMeaning,
     LinkQuery,
     ProposalAssumption,
+    ReferenceTarget,
 )
 
 from .identity import _paths_collide, _target_safe
@@ -116,9 +117,15 @@ def _semantic(value):
     if hasattr(value, "model_dump"):
         if hasattr(value, "data"):
             return {"available_sha256": sha256(value.data).hexdigest()}
-        return {
+        result = {
             name: _semantic(getattr(value, name)) for name in type(value).model_fields
         }
+        # These spellings are lookup alternatives, not authored occurrence order.
+        if isinstance(value, ReferenceTarget):
+            result["representations"] = sorted(set(value.representations))
+        elif isinstance(value, LinkQuery):
+            result["spellings"] = sorted(set(value.spellings))
+        return result
     if isinstance(value, (list, tuple)):
         return [_semantic(item) for item in value]
     if isinstance(value, bytes):
@@ -137,61 +144,39 @@ def associated_link_reviews(facts, subject, subject_id, both_outputs):
                 depends_on=(f"attachment:{subject_id}", f"{subject_id}:inventory"),
             ),
         )
+    from .review_links import consumed_context
+
     association = subject.attachment.current_target_id
-    documents = tuple(
-        d
-        for d in context.current_documents + context.incoming_documents
-        if d.document_id in subject.attachment.affected_documents
-        or any(
-            o.meaning.target_id == association or association in o.meaning.candidates
-            for o in d.occurrences
-        )
-    )
-    relevant_ids = {association}
-    relevant_ids.update(
-        t.target_id
-        for t in context.current_targets + context.incoming_targets
-        if any(d.source_path == t.canonical_path for d in documents)
-    )
-    for document in documents:
-        for occurrence in document.occurrences:
-            relevant_ids.update(occurrence.meaning.candidates)
-            if occurrence.meaning.target_id is not None:
-                relevant_ids.add(occurrence.meaning.target_id)
-    relevant_targets = tuple(
-        t
-        for t in context.current_targets + context.incoming_targets
-        if t.target_id in relevant_ids
-    )
-    collisions = tuple(
-        t
-        for t in context.current_targets + context.incoming_targets
-        if t.target_id not in relevant_ids
-        and t.canonical_path is not None
-        and any(
-            r.canonical_path is not None
-            and _paths_collide(t.canonical_path, r.canonical_path)
-            for r in relevant_targets
-        )
-    )
-    relevant_states = tuple(
-        state
-        for state in context.current_target_facts + context.incoming_target_facts
-        if state.target_id in relevant_ids
-    )
-    fingerprint = sha256(
-        json.dumps(
-            _semantic(
+    portions = []
+    documents = ()
+    for stage in ("current", "incoming"):
+        targets = getattr(context, stage + "_targets")
+        states = getattr(context, stage + "_target_facts")
+        selected = tuple(
+            d
+            for d in getattr(context, stage + "_documents")
+            if d.document_id in subject.attachment.affected_documents
+            or any(
                 (
-                    context.inventory,
-                    documents,
-                    relevant_targets,
-                    collisions,
-                    relevant_states,
-                )
-            ),
-            sort_keys=True,
-        ).encode()
+                    meaning := resolve_occurrence(o, targets, states, context.inventory)
+                ).target_id
+                == association
+                or association in meaning.candidates
+                for o in d.occurrences
+            )
+        )
+        documents += selected
+        portions.append(
+            consumed_context(
+                selected,
+                targets,
+                states,
+                context.inventory,
+                target_ids=(association,),
+            )
+        )
+    fingerprint = sha256(
+        json.dumps(_semantic(portions), sort_keys=True).encode()
     ).hexdigest()
     assumption = ProposalAssumption(
         key=f"links:{subject_id}",

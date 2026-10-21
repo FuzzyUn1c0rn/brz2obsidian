@@ -1,5 +1,7 @@
 """Literal selective refresh at the public review/history boundary."""
 
+import pytest
+
 from tests.reconciliation.test_proposals import request
 from tests.reconciliation.test_resolution import action, preflight, with_review_links
 
@@ -904,26 +906,26 @@ def add_unrelated_note(facts, payload=b"Unrelated authored prose"):
         existence="present",
         memberships=(),
     )
-    document = interpret_links(
-        ExactContent(data=payload),
-        document_id="local:other",
-        source_path="Other.md",
-        path_mode="vault",
-        targets=(target,),
-        target_facts=(state,),
-        inventory="complete",
-    )
     context = facts.link_context
-    context = context.model_copy(
-        update={
-            "current_targets": context.current_targets + (target,),
-            "incoming_targets": context.incoming_targets + (target,),
-            "current_target_facts": context.current_target_facts + (state,),
-            "incoming_target_facts": context.incoming_target_facts + (state,),
-            "current_documents": context.current_documents + (document,),
-            "incoming_documents": context.incoming_documents + (document,),
-        }
-    )
+    updates = {}
+    for stage in ("current", "incoming"):
+        targets = getattr(context, stage + "_targets") + (target,)
+        states = getattr(context, stage + "_target_facts") + (state,)
+        document = interpret_links(
+            ExactContent(data=payload),
+            document_id="local:other",
+            source_path="Other.md",
+            path_mode="vault",
+            targets=targets,
+            target_facts=states,
+            inventory="complete",
+        )
+        updates[stage + "_targets"] = targets
+        updates[stage + "_target_facts"] = states
+        updates[stage + "_documents"] = getattr(context, stage + "_documents") + (
+            document,
+        )
+    context = context.model_copy(update=updates)
     return facts.model_copy(
         update={
             "identity_inventory": facts.identity_inventory + (item,),
@@ -1303,3 +1305,358 @@ def test_refresh_history_records_are_closed_strict_versioned_and_duplicate_safe(
     )
     with pytest.raises(ValueError):
         ReviewHistory.model_validate_json(duplicate)
+
+
+@pytest.mark.parametrize("ordering", ("mapping_rows", "membership_target_spellings"))
+def test_mapping_row_order_retains_review_without_reordering_original_facts(ordering):
+    from brz2obsidian.contracts import ClassificationMapping
+    from brz2obsidian.core import (
+        prepare_review,
+        refresh_review,
+        resolve_review,
+        validate_review,
+    )
+    from tests.reconciliation.test_memberships import membership_request, target
+
+    original = b"---\ntags:\n  - alpha\n  - beta\npriority: 1\n---\nText.\n"
+    mappings = tuple(
+        ClassificationMapping(
+            schema_id="brz2obsidian.classification-mapping",
+            schema_version=1,
+            classification_id="source:" + name,
+            target_id=name,
+            kind="tag",
+            source_label=name,
+        )
+        for name in ("alpha", "beta")
+    )
+    facts = with_review_links(
+        membership_request(
+            original,
+            original,
+            original.replace(b"priority: 1", b"priority: 2"),
+            targets=(
+                target("alpha", "tag", "alpha", "alias-alpha"),
+                target("beta", "tag", "beta", "alias-beta"),
+            ),
+            prior_mappings=mappings,
+            incoming_mappings=mappings,
+        )
+    )
+    plan = prepare_review(facts, preflight=preflight())
+    approved = resolve_review(plan, action(plan)).plan
+    assert approved.ready
+    comparison = facts.subjects[0].structure
+    if ordering == "mapping_rows":
+        structure = comparison.model_copy(
+            update={
+                "prior_mappings": mappings[::-1],
+                "incoming_mappings": mappings[::-1],
+            }
+        )
+    else:
+        structure = comparison.model_copy(
+            update={
+                stage: getattr(comparison, stage).model_copy(
+                    update={
+                        "memberships": tuple(
+                            m.model_copy(
+                                update={
+                                    "entries": tuple(
+                                        e.model_copy(
+                                            update={
+                                                "target": e.target.model_copy(
+                                                    update={
+                                                        "representations": e.target.representations[
+                                                            ::-1
+                                                        ]
+                                                    }
+                                                )
+                                            }
+                                        )
+                                        for e in m.entries
+                                    )
+                                }
+                            )
+                            for m in getattr(comparison, stage).memberships
+                        ),
+                    }
+                )
+                for stage in ("original", "current", "incoming")
+            }
+        )
+    fresh = facts.model_copy(
+        update={
+            "generation": 2,
+            "subjects": (
+                facts.subjects[0].model_copy(update={"structure": structure}),
+            ),
+        }
+    )
+    refreshed = refresh_review(approved, fresh, preflight=preflight()).plan
+    assert refreshed.ready
+    assert refreshed.approvals == approved.approvals
+    assert refreshed.producer_facts.subjects[0].structure == structure
+    assert approved.producer_facts.subjects[0].structure.prior_mappings == mappings
+    assert validate_review(refreshed).status == "accepted"
+
+
+@pytest.mark.parametrize(
+    "ordering", ("targets", "target_facts", "documents", "representations", "spellings")
+)
+def test_lookup_set_order_retains_original_binary_review_and_authored_order(ordering):
+    from brz2obsidian.core import (
+        prepare_review,
+        refresh_review,
+        resolve_review,
+        validate_review,
+    )
+    from tests.reconciliation.test_attachments import (
+        attachment_candidate,
+        linked_attachment_request,
+    )
+
+    facts = add_unrelated_note(linked_attachment_request(), b"Also [[Assets/data.bin]]")
+    context = facts.link_context
+    updates = {}
+    for stage in ("current", "incoming"):
+        targets = tuple(
+            t.model_copy(
+                update={"representations": (t.canonical_path, "alias:" + t.target_id)}
+            )
+            for t in getattr(context, stage + "_targets")
+        )
+        docs = tuple(
+            d.model_copy(
+                update={
+                    "occurrences": tuple(
+                        o.model_copy(
+                            update={
+                                "query": o.query.model_copy(
+                                    update={
+                                        "spellings": (
+                                            o.query.value,
+                                            "[[" + o.query.value + "]]",
+                                        )
+                                    }
+                                )
+                            }
+                        )
+                        for o in d.occurrences
+                    )
+                }
+            )
+            for d in getattr(context, stage + "_documents")
+        )
+        updates[stage + "_targets"] = targets
+        updates[stage + "_documents"] = docs
+    context = context.model_copy(update=updates)
+    facts = facts.model_copy(update={"link_context": context})
+    selection, candidate = attachment_candidate(facts, "both")
+    plan = prepare_review(facts, preflight=preflight())
+    approved = resolve_review(
+        plan,
+        action(
+            plan,
+            domain="attachment",
+            choice="both",
+            attachment_selection=selection,
+            attachment_candidate=candidate,
+        ),
+    ).plan
+    assert approved.ready
+    updates = {}
+    for stage in ("current", "incoming"):
+        if ordering in ("targets", "target_facts", "documents"):
+            key = stage + "_" + ordering
+            updates[key] = getattr(context, key)[::-1]
+        elif ordering == "representations":
+            updates[stage + "_targets"] = tuple(
+                t.model_copy(update={"representations": t.representations[::-1]})
+                for t in getattr(context, stage + "_targets")
+            )
+        else:
+            updates[stage + "_documents"] = tuple(
+                d.model_copy(
+                    update={
+                        "occurrences": tuple(
+                            o.model_copy(
+                                update={
+                                    "query": o.query.model_copy(
+                                        update={"spellings": o.query.spellings[::-1]}
+                                    )
+                                }
+                            )
+                            for o in d.occurrences
+                        )
+                    }
+                )
+                for d in getattr(context, stage + "_documents")
+            )
+    fresh = facts.model_copy(
+        update={"generation": 2, "link_context": context.model_copy(update=updates)}
+    )
+    result = refresh_review(approved, fresh, preflight=preflight()).plan
+    assert result.ready
+    assert result.approvals == approved.approvals
+    assert result.approvals[0].attachment_candidate == candidate
+    assert result.approvals[0].attachment_selection == selection
+    assert result.producer_facts.link_context == fresh.link_context
+    assert result.history.initial_facts.link_context == context
+    assert (
+        candidate.documents[0].content.data
+        == b"[[Assets/data.bin|Keep first]] and [[Assets/data.bin|Redirect second]]"
+    )
+    assert len(candidate.documents[0].occurrences) == 2
+    assert candidate.documents[1].content.data == b"Also [[Assets/data.bin]]"
+    assert validate_review(result).status == "accepted"
+
+
+def test_changed_used_alias_meaning_reopens_binary_review_with_same_authored_bytes():
+    from brz2obsidian.core import prepare_review, refresh_review, resolve_review
+    from brz2obsidian.obsidian import interpret_links
+    from tests.reconciliation.test_attachments import (
+        attachment_candidate,
+        linked_attachment_request,
+    )
+
+    facts = linked_attachment_request(raw=b"[[Payload]]")
+
+    def observed(context, aliases):
+        updates = {}
+        for stage in ("current", "incoming"):
+            targets = tuple(
+                t.model_copy(update={"representations": aliases})
+                if t.target_id == "resource:payload"
+                else t
+                for t in getattr(context, stage + "_targets")
+            )
+            updates[stage + "_targets"] = targets
+            updates[stage + "_documents"] = tuple(
+                interpret_links(
+                    d.content,
+                    document_id=d.document_id,
+                    source_path=d.source_path,
+                    path_mode="vault",
+                    targets=targets,
+                    target_facts=getattr(context, stage + "_target_facts"),
+                    inventory="complete",
+                )
+                for d in getattr(context, stage + "_documents")
+            )
+        return context.model_copy(update=updates)
+
+    facts = facts.model_copy(
+        update={
+            "link_context": observed(facts.link_context, ("Assets/data.bin", "Payload"))
+        }
+    )
+    assert (
+        facts.link_context.current_documents[0].occurrences[0].meaning.status
+        == "resolved"
+    )
+    selection, candidate = attachment_candidate(facts, "both")
+    # Preserve the existing target's reviewed alias on the current output only.
+    candidate = candidate.model_copy(
+        update={
+            "targets": tuple(
+                t.model_copy(update={"representations": ("Assets/data.bin", "Payload")})
+                if t.target_id == "resource:payload"
+                else t
+                for t in candidate.targets
+            )
+        }
+    )
+    plan = prepare_review(facts, preflight=preflight())
+    approved = resolve_review(
+        plan,
+        action(
+            plan,
+            domain="attachment",
+            choice="both",
+            attachment_selection=selection,
+            attachment_candidate=candidate,
+        ),
+    ).plan
+    assert approved.ready
+    fresh = facts.model_copy(
+        update={
+            "generation": 2,
+            "link_context": observed(facts.link_context, ("Assets/data.bin",)),
+        }
+    )
+    assert fresh.link_context.current_documents[0].content.data == b"[[Payload]]"
+    assert (
+        fresh.link_context.current_documents[0].occurrences[0].meaning.status
+        == "missing"
+    )
+    result = refresh_review(approved, fresh, preflight=preflight()).plan
+    assert result.approvals == ()
+    assert not result.ready
+    assert any(
+        n.kind == "link" and n.key in result.history.events[-1].invalidated_keys
+        for n in result.history.events[-1].previous_dependencies
+    )
+
+
+@pytest.mark.parametrize("ordering", ("consent_subjects", "proposal_subjects"))
+def test_consent_scope_set_order_retains_exact_original_consent(ordering):
+    from brz2obsidian.contracts import ReviewConsentRequirement
+    from brz2obsidian.core import (
+        prepare_review,
+        refresh_review,
+        resolve_review,
+        validate_review,
+    )
+
+    facts = with_review_links(two_items())
+    proposal = prepare_review(facts, preflight=preflight()).proposal
+    subjects = tuple(c.subject_id for c in proposal.changes)
+    consent = ReviewConsentRequirement(
+        schema_id="brz2obsidian.review-consent-requirement",
+        schema_version=1,
+        consent_id="both-storage",
+        kind="storage",
+        requirement="required",
+        policy="ordinary",
+        fingerprint="storage-policy",
+        disclosure="Both outputs",
+        subjects=subjects,
+    )
+    checks = preflight().model_copy(update={"consents": (consent,)})
+    plan = prepare_review(facts, preflight=checks)
+    for change in plan.proposal.changes:
+        plan = resolve_review(
+            plan, action(plan, change, decision_id=change.item_id)
+        ).plan
+    requirement = next(r for r in plan.requirements if r.domain == "storage")
+    plan = resolve_review(
+        plan,
+        action(
+            plan,
+            domain="storage",
+            choice="accept",
+            change_id=requirement.change_id,
+            reviewed_assumptions=requirement.assumptions,
+            decision_id="storage:original",
+        ),
+    ).plan
+    assert plan.ready
+    fresh = facts.model_copy(update={"generation": 2})
+    fresh_checks = checks
+    if ordering == "consent_subjects":
+        fresh_checks = checks.model_copy(
+            update={
+                "consents": (consent.model_copy(update={"subjects": subjects[::-1]}),)
+            }
+        )
+    else:
+        fresh = fresh.model_copy(update={"subjects": facts.subjects[::-1]})
+    result = refresh_review(plan, fresh, preflight=fresh_checks).plan
+    assert result.ready
+    assert result.approvals == plan.approvals
+    assert result.consents == plan.consents
+    assert result.history.initial_preflight == checks
+    assert result.preflight == fresh_checks
+    assert result.producer_facts.subjects == fresh.subjects
+    assert validate_review(result).status == "accepted"

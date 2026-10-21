@@ -93,7 +93,12 @@ def consent_requirements(preflight, proposal, approvals):
             )
         fingerprint = sha256(
             json.dumps(
-                (consent.model_dump(mode="json"), values), sort_keys=True
+                (
+                    consent.model_dump(mode="json")
+                    | {"subjects": sorted(set(consent.subjects))},
+                    sorted(values, key=lambda value: value[0]),
+                ),
+                sort_keys=True,
             ).encode()
         ).hexdigest()
         key = "consent:" + consent.consent_id

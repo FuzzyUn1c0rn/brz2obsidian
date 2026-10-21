@@ -10,6 +10,7 @@ from brz2obsidian.contracts import (
     StructureSpan,
 )
 from brz2obsidian.core.formats import output_semantics
+from brz2obsidian.core.link_meanings import _semantic
 from brz2obsidian.core.memberships import (
     appearance_issues,
     combine_memberships,
@@ -315,9 +316,9 @@ def structure_assumption(comparison):
     ]
     for name in ("original", "current", "incoming"):
         doc = getattr(comparison, name)
-        values[name] = doc.model_dump(mode="json", exclude={"content"}) | {
-            "content_sha256": sha256(doc.content.data).hexdigest(),
-        }
+        values[name] = _semantic(doc)
+        values[name].pop("content")
+        values[name]["content_sha256"] = sha256(doc.content.data).hexdigest()
     return values
 
 
@@ -365,9 +366,7 @@ def structure_dependencies(comparison, subject_id):
                     key=f"structure-target:{subject_id}:{stage}:{target_id}",
                     kind="target",
                     fingerprint=sha256(
-                        json.dumps(
-                            target.model_dump(mode="json"), sort_keys=True
-                        ).encode()
+                        json.dumps(_semantic(target), sort_keys=True).encode()
                     ).hexdigest(),
                     depends_on=dependencies,
                 )
