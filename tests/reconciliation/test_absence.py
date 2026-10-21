@@ -95,6 +95,7 @@ def choose(facts, proposal, choice, decision_id="preserve:1"):
         item_id=change.item_id,
         facet=change.facet,
         choice=choice,
+        review_domain="content",
         reviewed_source_version=change.source_version,
         reviewed_change_id=change.change_id,
         reviewed_assumptions=change.assumptions,

@@ -1403,6 +1403,13 @@ class SourceMemoryProvenance(ReconciliationContract):
         return self
 
 
+class ConfigurationMemoryContext(ReconciliationContract):
+    profile_id: str = Field(min_length=1)
+    profile_version: str = Field(min_length=1)
+    settings_digest: str = Field(min_length=1)
+    output_format: int = Field(ge=1)
+
+
 class SourceVersionMemory(ReconciliationContract):
     """Reviewed source-facet policy facts; no persisted history or original proof."""
 
@@ -1414,11 +1421,37 @@ class SourceVersionMemory(ReconciliationContract):
     facet: str = Field(min_length=1)
     source_version: str = Field(pattern=r"^[0-9a-f]{64}$")
     reviewed_incoming: ExactContent
+    review_domain: Literal["content", "configuration"]
+    configuration_context: ConfigurationMemoryContext | None
     choice: Literal["keep_vault", "decline_restoration"]
     provenance: SourceMemoryProvenance
 
     @model_validator(mode="after")
     def exact_reviewed_version(self):
+        if (self.review_domain == "configuration") != (
+            self.configuration_context is not None
+        ):
+            raise ValueError(
+                "Configuration memory requires its semantic context; content memory excludes it"
+            )
+        if self.review_domain == "configuration":
+            subject_id = reconciliation_subject_id(
+                self.module_id, self.collection_id, self.item_id, self.facet
+            )
+            expected = sha256(
+                json.dumps(
+                    self.configuration_context.model_dump(mode="json"), sort_keys=True
+                ).encode()
+            ).hexdigest()
+            if not any(
+                a.key == "configuration:" + subject_id
+                and a.kind == "policy"
+                and a.fingerprint == expected
+                for a in self.provenance.reviewed_assumptions
+            ):
+                raise ValueError(
+                    "Configuration memory lacks its explicitly reviewed semantic context"
+                )
         if sha256(self.reviewed_incoming.data).hexdigest() != self.source_version:
             raise ValueError(
                 "Remembered source version must match available reviewed bytes"
@@ -1490,6 +1523,7 @@ class PreservationDecision(ReconciliationContract):
     reviewed_source_version: str = Field(pattern=r"^[0-9a-f]{64}$")
     reviewed_change_id: str = Field(min_length=1)
     reviewed_assumptions: tuple[ProposalAssumption, ...]
+    review_domain: Literal["content", "configuration"]
     choice: Literal["keep_vault", "decline_restoration"]
     provenance: Literal["explicit_user"]
 
@@ -1816,3 +1850,220 @@ class AttachmentCandidateValidation(ReconciliationContract):
         ):
             raise ValueError("Validation result must agree with its blocking findings")
         return self
+
+
+class ReviewConsentRequirement(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.review-consent-requirement"]
+    schema_version: Literal[1]
+    consent_id: str = Field(min_length=1)
+    kind: Literal["tracking", "storage"]
+    requirement: Literal["not_required", "required", "unknown", "unsupported"]
+    policy: Literal[
+        "ordinary",
+        "builtin_transform",
+        "custom_filter",
+        "encryption",
+        "lfs",
+        "hook",
+        "driver",
+        "unsupported_layout",
+        "unknown",
+    ]
+    fingerprint: str = Field(min_length=1)
+    disclosure: str = Field(min_length=1)
+    subjects: tuple[str, ...]
+
+
+class ReviewPreflight(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.review-preflight"]
+    schema_version: Literal[1]
+    operation_status: Literal[
+        "idle", "active", "incomplete", "recovery_required", "unknown"
+    ]
+    state_status: Literal[
+        "supported",
+        "absent",
+        "unsupported_version",
+        "unsupported_state",
+        "corrupt",
+        "unknown",
+    ]
+    state_schema: str | None
+    state_version: int | None
+    state_fingerprint: str = Field(min_length=1)
+    consents: tuple[ReviewConsentRequirement, ...]
+
+    @model_validator(mode="after")
+    def distinct_consents(self):
+        if len({c.consent_id for c in self.consents}) != len(self.consents):
+            raise ValueError("Review consent IDs must be unique")
+        return self
+
+
+class ReviewedProperty(ReconciliationContract):
+    key: str = Field(min_length=1)
+    span: StructureSpan
+    raw: bytes
+    identity_component: Literal["collection", "item", "module"] | None
+    identity_value: str | None
+    membership_kind: Literal["category", "tag"] | None
+    representations: tuple[str, ...]
+    targets: tuple[ReferenceTarget, ...]
+
+
+class TextCandidateDocument(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.text-candidate-document"]
+    schema_version: Literal[1]
+    output_format: int = Field(ge=1)
+    content: ExactContent
+    status: Literal["safe", "unsafe", "unknown"]
+    issues: tuple[str, ...]
+    properties: tuple[ReviewedProperty, ...]
+    body: StructureSpan
+    appearance: str | None
+    appearance_present: bool
+
+
+class ReviewedTextCandidate(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.reviewed-text-candidate"]
+    schema_version: Literal[1]
+    content: ExactContent
+    document: TextCandidateDocument
+    links: LinkDocument
+    link_targets: tuple[ReferenceTarget, ...]
+    link_target_facts: tuple[LinkTargetFacts, ...]
+    identity: ImportedItemIdentity
+    target: IdentityTargetFacts
+    validation_fingerprint: str = Field(min_length=1)
+    status: Literal["safe", "unsafe", "unknown"]
+
+
+type ReviewDomain = Literal[
+    "text",
+    "compatible_group",
+    "configuration",
+    "mapping",
+    "format",
+    "identity",
+    "rename",
+    "restoration",
+    "attachment",
+    "tracking",
+    "storage",
+]
+
+
+type ReviewChoice = Literal[
+    "approve",
+    "current",
+    "incoming",
+    "edited",
+    "accept",
+    "decline",
+    "associate",
+    "keep_path",
+    "source_path",
+    "restore_incoming",
+    "decline_restoration",
+    "both",
+]
+
+
+class ReviewAction(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.review-action"]
+    schema_version: Literal[1]
+    decision_id: str = Field(min_length=1)
+    proposal_id: str = Field(min_length=1)
+    expected_generation: int = Field(ge=1)
+    change_id: str = Field(min_length=1)
+    reviewed_assumptions: tuple[ProposalAssumption, ...]
+    domain: ReviewDomain
+    choice: ReviewChoice
+    candidate: ReviewedTextCandidate | None
+    attachment_selection: AttachmentSelection | None
+    attachment_candidate: AttachmentCandidate | None
+    selected_entry_id: str | None
+    disassociate_entry_ids: tuple[str, ...]
+
+
+class ReviewApproval(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.review-approval"]
+    schema_version: Literal[1]
+    decision_id: str
+    change_id: str
+    domain: ReviewDomain
+    choice: ReviewChoice
+    attachment_selection: AttachmentSelection | None
+    attachment_candidate: AttachmentCandidate | None
+    result: ExactContent | None
+    target_path: str
+    assumptions: tuple[ProposalAssumption, ...]
+    provenance: Literal["explicit_user", "compatible_bulk"]
+    source_accepted: bool
+    source_memory: SourceVersionMemory | None
+
+
+class ReviewRequirement(ReconciliationContract):
+    requirement_id: str
+    domain: ReviewDomain
+    change_id: str
+    choices: tuple[ReviewChoice, ...]
+    assumptions: tuple[ProposalAssumption, ...]
+
+
+class CompatibleReviewGroup(ReconciliationContract):
+    group_id: str
+    member_change_ids: tuple[str, ...]
+    comparisons: tuple[ProposedChange, ...]
+    count: int = Field(ge=1)
+    proposed_bytes: int = Field(ge=0)
+    assumptions: tuple[ProposalAssumption, ...]
+
+
+class ReviewConsentDecision(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.review-consent-decision"]
+    schema_version: Literal[1]
+    decision_id: str
+    consent_id: str
+    kind: Literal["tracking", "storage"]
+    choice: Literal["accept", "decline"]
+    assumptions: tuple[ProposalAssumption, ...]
+    provenance: Literal["explicit_user"]
+
+
+class ReviewPlan(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.review-plan"]
+    schema_version: Literal[1]
+    facts: ReconciliationInput
+    producer_facts: ReconciliationInput
+    preflight: ReviewPreflight
+    proposal: UpdateProposal
+    actions: tuple[ReviewAction, ...]
+    approvals: tuple[ReviewApproval, ...]
+    consents: tuple[ReviewConsentDecision, ...]
+    requirements: tuple[ReviewRequirement, ...]
+    groups: tuple[CompatibleReviewGroup, ...]
+    blockers: tuple[str, ...]
+    readiness: Literal["ready", "review_required", "refused"]
+    ready: bool
+
+
+class ReviewTransition(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.review-transition"]
+    schema_version: Literal[1]
+    status: Literal["accepted", "stale", "refused"]
+    code: Literal[
+        "accepted",
+        "wrong_proposal",
+        "generation_changed",
+        "assumptions_changed",
+        "unknown_change",
+        "choice_not_admitted",
+        "invalid_candidate",
+        "invalid_plan",
+        "preflight_refused",
+        "decision_id_reused",
+        "unsafe_producer_choice",
+        "attachment_invalid",
+    ]
+    plan: ReviewPlan

@@ -29,7 +29,9 @@ def validate_section_document(document, bases, *, target_safety=True):
         end = section.span.end
 
 
-def validate_section_facts(subject, baseline_identity, source_version):
+def validate_section_facts(
+    subject, baseline_identity, source_version, *, current_target_safety=True
+):
     comparison = subject.structure
     documents = (comparison.original, comparison.current, comparison.incoming)
     bases = {b.section_id: b for b in comparison.section_bases}
@@ -52,7 +54,9 @@ def validate_section_facts(subject, baseline_identity, source_version):
         ):
             raise ValueError("structure_unbound")
     for index, document in enumerate(documents):
-        validate_section_document(document, bases, target_safety=index == 1)
+        validate_section_document(
+            document, bases, target_safety=current_target_safety and index == 1
+        )
     for section in documents[0].owned_sections:
         if section.span != bases[section.section_id].span:
             raise ValueError("structure_unbound")

@@ -15,9 +15,20 @@ from brz2obsidian.contracts import (
 from brz2obsidian.core.identity import bind_identity
 
 from .attachments import attachment_review
-from .formats import format_assumption, format_findings, format_proposal, review_facts
+from .formats import (
+    configuration_memory_allowed,
+    format_assumption,
+    format_findings,
+    format_proposal,
+    review_facts,
+)
 from .link_meanings import validate_current_link_context
-from .preservation import preservation_decision, preservation_policy
+from .preservation import (
+    configuration_assumptions,
+    preservation_decision,
+    preservation_policy,
+)
+from .review_links import text_link_assumptions
 from .structures import (
     structure_assumption,
     structure_proposal,
@@ -180,10 +191,13 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
         link_problem = validate_current_link_context(facts, subject)
         policy_allowed = (
             link_problem is None
-            and format_review is None
-            and format_choice is None
+            and (
+                (format_review is None and format_choice is None)
+                or configuration_memory_allowed(facts, subject)
+            )
             and structure_problem is None
         )
+
         policy = preservation_policy(facts, subject, subject_id, policy_allowed)
         binary_review, binary_assumptions = attachment_review(
             facts, subject, subject_id
@@ -204,6 +218,8 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
             + (() if binding.rename is None else binding.rename.assumptions)
             + (policy.assumption,)
             + binary_assumptions
+            + configuration_assumptions(facts, subject, subject_id)
+            + text_link_assumptions(facts, subject, subject_id, binding.target_path)
         )
         problems = _findings(facts, subject, subject_id, safety) + list(
             binding.findings
@@ -220,8 +236,8 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
         findings.extend(problems)
         preservation_review = policy.review
         disposition, result, rule, requires_decision = (
-            format_choice
-            or (policy.proposal if policy_allowed else None)
+            (policy.proposal if policy_allowed else None)
+            or format_choice
             or _proposal(subject)
         )
         structured_result = None

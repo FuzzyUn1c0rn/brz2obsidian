@@ -23,7 +23,12 @@ def _value(document, field):
 
 
 def validate_structure_facts(
-    subject, baseline_identity, incoming_identity, *, source_version
+    subject,
+    baseline_identity,
+    incoming_identity,
+    *,
+    source_version,
+    current_target_safety=True,
 ):
     """Check exact normalized binding and target/identity safety before any policy.
 
@@ -81,8 +86,15 @@ def validate_structure_facts(
             ):
                 return "structure_unbound"
         for index, document in enumerate(documents):
-            validate_memberships(document, target_safety=index == 1)
-        validate_section_facts(subject, baseline_identity, source_version)
+            validate_memberships(
+                document, target_safety=current_target_safety and index == 1
+            )
+        validate_section_facts(
+            subject,
+            baseline_identity,
+            source_version,
+            current_target_safety=current_target_safety,
+        )
     except ValueError as error:
         return str(error)
     return None

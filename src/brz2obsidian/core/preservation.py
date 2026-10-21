@@ -5,12 +5,14 @@ from dataclasses import dataclass
 from hashlib import sha256
 
 from brz2obsidian.contracts import (
+    ConfigurationMemoryContext,
     PreservationReview,
     ProposalAssumption,
     ReconciliationFinding,
     SourceMemoryProvenance,
     SourceVersionMemory,
 )
+from brz2obsidian.core.formats import configuration_memory_allowed
 
 
 @dataclass(frozen=True)
@@ -33,6 +35,16 @@ def _scope(facts, subject):
     )
 
 
+def configuration_context(facts):
+    identity = facts.incoming_identity
+    return ConfigurationMemoryContext(
+        profile_id=identity.profile_id,
+        profile_version=identity.profile_version,
+        settings_digest=identity.settings_digest,
+        output_format=identity.output_format,
+    )
+
+
 def preservation_policy(facts, subject, subject_id, allowed):
     version = _version(subject.incoming)
     deleted = subject.current.existence == "absent"
@@ -44,6 +56,13 @@ def preservation_policy(facts, subject, subject_id, allowed):
         == _scope(facts, subject)
         and record.source_version == version
         and record.choice == choice
+        and record.review_domain
+        == ("configuration" if subject.output_role == "configuration" else "content")
+        and (
+            record.configuration_context == configuration_context(facts)
+            if record.review_domain == "configuration"
+            else record.configuration_context is None
+        )
     )
     used = records if allowed and subject.current.existence != "unknown" else ()
     fingerprint = sha256(
@@ -115,7 +134,7 @@ def preservation_policy(facts, subject, subject_id, allowed):
     review = PreservationReview(
         kind=kind,
         default_choice=choice,
-        choices=choices if allowed else (),
+        choices=choices if allowed and subject.output_role != "configuration" else (),
         reviewed_source_version=version,
         matched_memory_ids=matched_ids,
         provenance="source_memory" if matches else "preservation_default",
@@ -155,7 +174,26 @@ def preservation_decision(
         not current
         or not allowed
         or review is None
-        or decision.choice not in review.choices
+        or (
+            decision.choice not in review.choices
+            and not (
+                decision.review_domain == "configuration"
+                and configuration_memory_allowed(facts, subject)
+                and (
+                    (
+                        decision.choice == "keep_vault"
+                        and subject.current.existence == "present"
+                    )
+                    or (
+                        decision.choice == "decline_restoration"
+                        and subject.current.existence == "absent"
+                    )
+                )
+                and subject.incoming is not None
+            )
+        )
+        or decision.review_domain
+        != ("configuration" if subject.output_role == "configuration" else "content")
     ):
         code = (
             "stale_preservation_decision"
@@ -189,6 +227,10 @@ def preservation_decision(
         facet=decision.facet,
         source_version=decision.reviewed_source_version,
         reviewed_incoming=subject.incoming,
+        review_domain=decision.review_domain,
+        configuration_context=configuration_context(facts)
+        if decision.review_domain == "configuration"
+        else None,
         choice=decision.choice,
         provenance=SourceMemoryProvenance(
             decision_id=decision.decision_id,
@@ -215,4 +257,20 @@ def preservation_decision(
         ),
         record,
         (),
+    )
+
+
+def configuration_assumptions(facts, subject, subject_id):
+    if subject.output_role != "configuration":
+        return ()
+    context = configuration_context(facts)
+    return (
+        ProposalAssumption(
+            key="configuration:" + subject_id,
+            kind="policy",
+            fingerprint=sha256(
+                json.dumps(context.model_dump(mode="json"), sort_keys=True).encode()
+            ).hexdigest(),
+            depends_on=(f"{subject_id}:identity", f"{subject_id}:format"),
+        ),
     )

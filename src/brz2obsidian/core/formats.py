@@ -154,3 +154,14 @@ def format_assumption(facts, subject):
         ),
         subject.output_role,
     )
+
+
+def configuration_memory_allowed(facts, subject):
+    """Only an ordinary established configuration update admits scoped keep memory."""
+    return (
+        subject.output_role == "configuration"
+        and facts.format_operation.kind == "source_update"
+        and facts.format_operation.recorded_generation == "supported"
+        and not needs_onboarding(facts, subject)
+        and not format_findings(facts)
+    )

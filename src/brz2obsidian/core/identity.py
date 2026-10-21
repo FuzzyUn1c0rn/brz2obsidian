@@ -149,6 +149,9 @@ def _rename(facts, subject, subject_id, selected, items, identity_review, assump
                 ),
             )
         return None, current_path, findings
+    from .review_links import rename_link_assumptions
+
+    link_assumptions = rename_link_assumptions(facts, subject, subject_id, assumptions)
     collisions = _target_context(subject.path, items, selected.entry_id)
     planned = tuple(
         sorted(
@@ -201,7 +204,9 @@ def _rename(facts, subject, subject_id, selected, items, identity_review, assump
     target_path, findings = current_path, []
     if decision is not None:
         decision_id, provenance = decision.decision_id, "explicit_user"
-        if not _decision_current(decision, facts, subject, (assumption,)):
+        if not _decision_current(
+            decision, facts, subject, (assumption,) + link_assumptions
+        ):
             status, required = "stale", True
             findings.append(
                 ReconciliationFinding(
@@ -233,7 +238,7 @@ def _rename(facts, subject, subject_id, selected, items, identity_review, assump
             requires_decision=required,
             decision_id=decision_id,
             provenance=provenance,
-            assumptions=(assumption,),
+            assumptions=(assumption,) + link_assumptions,
         ),
         target_path,
         tuple(findings),
