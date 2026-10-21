@@ -14,6 +14,7 @@ from brz2obsidian.contracts import (
 from brz2obsidian.core.identity import bind_identity
 
 from .formats import format_assumption, format_findings, format_proposal, review_facts
+from .structures import structure_assumption, structure_proposal
 
 
 def _digest(value):
@@ -58,6 +59,7 @@ def _assumptions(facts, subject, subject_id, safety):
         ("incoming", (subject.path, _content_identity(subject.incoming))),
         ("interpretation", subject.interpretation),
         ("format", format_assumption(facts, subject)),
+        ("structure", structure_assumption(subject.structure)),
     )
     assumptions = [
         ProposalAssumption(
@@ -178,6 +180,19 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
         disposition, result, rule, requires_decision = format_proposal(
             facts, subject
         ) or _proposal(subject)
+        structured_result = None
+        if (
+            subject.structure is not None
+            and subject.interpretation == "supported"
+            and binding.review.status == "matched"
+            and not any(problem.blocking for problem in problems)
+            and rule in ("source_only", "divergent", "already_current")
+        ):
+            (disposition, result, rule, requires_decision), structured_result = (
+                structure_proposal(
+                    subject, facts.baseline_identity, facts.incoming_identity
+                )
+            )
         if binding.review.status != "matched":
             disposition, result, rule, requires_decision = (
                 "identity_resolution",
@@ -188,6 +203,7 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
         if binding.review.status == "stale":
             disposition = "stale"
         if binding.rename is not None and binding.rename.status == "stale":
+            structured_result = None
             disposition, result, rule, requires_decision = (
                 "stale",
                 None,
@@ -195,6 +211,7 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
                 True,
             )
         if any(problem.blocking for problem in problems):
+            structured_result = None
             disposition, result, rule, requires_decision = (
                 "refused",
                 None,
@@ -231,6 +248,8 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
                 provenance=ChangeProvenance(
                     producer="identity-review/v1"
                     if rule in ("identity_resolution", "rename_review")
+                    else "structure/v1"
+                    if rule.startswith("structure_")
                     else "format-review/v1"
                     if review_facts(facts, subject) is not None
                     else "exact-bytes/v1",
@@ -244,6 +263,7 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
                 format_review=review_facts(facts, subject),
                 identity_review=binding.review,
                 rename_review=binding.rename,
+                structure_result=structured_result,
             )
         )
     readiness = (

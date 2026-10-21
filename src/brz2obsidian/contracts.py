@@ -728,6 +728,112 @@ class FormatReview(ReconciliationContract):
     target_eligible: bool
 
 
+class StructureSpan(ReconciliationContract):
+    start: int = Field(ge=0)
+    end: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def ordered(self):
+        if self.end < self.start:
+            raise ValueError("Structure span ends before its start")
+        return self
+
+
+class StructureField(ReconciliationContract):
+    key: str = Field(min_length=1)
+    kind: Literal["scalar", "identity", "opaque"]
+    identity_component: Literal["collection", "item", "module"] | None
+    value: str | int | bool | None
+    scalar_type: Literal["string", "integer", "boolean", "null", "date", "opaque"]
+    span: StructureSpan
+    value_span: StructureSpan
+
+    @model_validator(mode="after")
+    def typed_value(self):
+        if self.identity_component is not None and self.kind != "identity":
+            raise ValueError("Identity components require an identity field")
+        if self.kind == "identity" and (self.scalar_type != "string" or not self.value):
+            raise ValueError("Imported identity facts require nonempty text identity")
+        expected = {
+            "string": str,
+            "date": str,
+            "integer": int,
+            "boolean": bool,
+            "null": type(None),
+            "opaque": type(None),
+        }[self.scalar_type]
+        if type(self.value) is not expected or (self.kind == "opaque") != (
+            self.scalar_type == "opaque"
+        ):
+            raise ValueError("Structured scalar type and value must agree")
+        if (
+            not self.span.start
+            <= self.value_span.start
+            <= self.value_span.end
+            <= self.span.end
+        ):
+            raise ValueError("Scalar value span must stay within its field")
+        return self
+
+
+class StructuredDocument(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.structured-document"]
+    schema_version: Literal[1]
+    output_format: int = Field(ge=1)
+    content: ExactContent
+    status: Literal["supported", "unsupported", "opaque"]
+    issues: tuple[str, ...]
+    fields: tuple[StructureField, ...]
+    body: StructureSpan
+
+    @model_validator(mode="after")
+    def bounded_distinct_fields(self):
+        if self.body.end != len(self.content.data):
+            raise ValueError("Structure body must end at available content boundary")
+        keys = [f.key for f in self.fields]
+        if len(set(keys)) != len(keys):
+            raise ValueError("Structured property keys must be unique")
+        components = [
+            f.identity_component
+            for f in self.fields
+            if f.identity_component is not None
+        ]
+        if len(set(components)) != len(components):
+            raise ValueError("Imported identity components must be unique")
+        end = 0
+        for field in self.fields:
+            if field.span.start < end or field.span.end > self.body.start:
+                raise ValueError(
+                    "Structure fields must be ordered, disjoint and before body"
+                )
+            end = field.span.end
+        return self
+
+
+class StructureByteEdit(ReconciliationContract):
+    span: StructureSpan
+    expected: bytes
+    replacement: bytes
+
+    @model_validator(mode="after")
+    def exact_span(self):
+        if self.span.end - self.span.start != len(self.expected):
+            raise ValueError("Edit expected bytes must match span length")
+        return self
+
+
+class StructureComparison(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.structure-comparison"]
+    schema_version: Literal[1]
+    original: StructuredDocument
+    current: StructuredDocument
+    incoming: StructuredDocument
+    alignment: Literal["supported", "ambiguous", "unsupported"]
+    issues: tuple[str, ...]
+    local_edits: tuple[StructureByteEdit, ...]
+    source_edits: tuple[StructureByteEdit, ...]
+
+
 class ReconciliationSubject(ReconciliationContract):
     item_id: str = Field(min_length=1)
     facet: str = Field(min_length=1)
@@ -739,6 +845,7 @@ class ReconciliationSubject(ReconciliationContract):
     title: str | None = None
     source_target: IdentityTargetFacts
     output_role: Literal["note", "dashboard", "template", "guide", "configuration"]
+    structure: StructureComparison | None
 
 
 class ReconciliationInput(ReconciliationContract):
@@ -819,6 +926,7 @@ class ProposalAssumption(ReconciliationContract):
         "inventory",
         "interpretation",
         "format",
+        "structure",
         "target",
         "candidate",
         "operation",
@@ -833,7 +941,9 @@ class ProposalAssumption(ReconciliationContract):
 
 
 class ChangeProvenance(ReconciliationContract):
-    producer: Literal["exact-bytes/v1", "identity-review/v1", "format-review/v1"]
+    producer: Literal[
+        "exact-bytes/v1", "identity-review/v1", "format-review/v1", "structure/v1"
+    ]
     rule: Literal[
         "unknown_original",
         "source_absent",
@@ -849,6 +959,12 @@ class ChangeProvenance(ReconciliationContract):
         "onboarding_required",
         "format_review",
         "format_source_uncertain",
+        "structure_combined",
+        "structure_conflict",
+        "structure_unbound",
+        "structure_unsupported",
+        "structure_identity_conflict",
+        "structure_ambiguous",
     ]
 
 
@@ -880,9 +996,18 @@ class ProposedChange(ReconciliationContract):
     identity_review: IdentityReview
     rename_review: RenameReview | None
     format_review: FormatReview | None
+    structure_result: StructuredDocument | None
 
     @model_validator(mode="after")
     def conservative_result(self):
+        if self.structure_result is not None and (
+            self.result is None
+            or self.structure_result.content.data != self.result.data
+            or self.structure_result.status != "supported"
+        ):
+            raise ValueError(
+                "Structured candidate facts must bind the exact available result"
+            )
         unresolved = ("unresolved", "refused", "identity_resolution", "stale")
         if self.identity_review.repair_required and self.disposition not in unresolved:
             raise ValueError(

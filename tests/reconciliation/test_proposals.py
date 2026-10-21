@@ -58,6 +58,7 @@ def request(
             normalized_path="notes/opening.md", containment="contained", status="safe"
         ),
         output_role="note",
+        structure=None,
     )
     fields = {
         "schema_id": "brz2obsidian.reconciliation-input",
