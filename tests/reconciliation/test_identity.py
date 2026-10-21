@@ -21,10 +21,12 @@ def inventory_item(
     module="synthetic-folio",
     title="Opening",
     state="valid",
+    facet="content",
 ):
     from brz2obsidian.contracts import CurrentContent, ExactContent
 
     return IdentityInventoryItem(
+        facet=facet,
         entry_id=entry_id,
         identity_state=state,
         identity=ImportedItemIdentity(
@@ -295,6 +297,7 @@ def association(facts, review, entry_id, disassociate=()):
     from brz2obsidian.contracts import IdentityAssociationDecision
 
     return IdentityAssociationDecision(
+        facet=facts.subjects[0].facet,
         schema_id="brz2obsidian.identity-association-decision",
         schema_version=1,
         decision_id="identity-choice:1",
@@ -435,6 +438,7 @@ def rename_decision(facts, review, choice):
     from brz2obsidian.contracts import RenamePathDecision
 
     return RenamePathDecision(
+        facet=facts.subjects[0].facet,
         schema_id="brz2obsidian.rename-decision",
         schema_version=1,
         decision_id="rename-choice:1",

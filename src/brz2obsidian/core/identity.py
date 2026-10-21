@@ -30,7 +30,7 @@ def _digest(value):
     return sha256(encoded).hexdigest()
 
 
-def _same_identity(facts, subject, item):
+def _same_owner(facts, subject, item):
     claim = item.identity
     return claim is not None and (
         claim.module_id,
@@ -43,9 +43,14 @@ def _same_identity(facts, subject, item):
     )
 
 
+def _same_identity(facts, subject, item):
+    return _same_owner(facts, subject, item) and item.facet == subject.facet
+
+
 def _claim_fact(item):
     return (
         item.entry_id,
+        item.facet,
         item.identity_state,
         None if item.identity is None else item.identity.model_dump(),
     )
@@ -117,13 +122,14 @@ def _decision_current(decision, facts, subject, assumptions):
         and decision.collection_id == facts.incoming_identity.collection_id
         and decision.module_id == facts.incoming_identity.module_id
         and decision.item_id == subject.item_id
+        and decision.facet == subject.facet
         and _assumptions_equal(decision.reviewed_assumptions, assumptions)
     )
 
 
 def _rename(facts, subject, subject_id, selected, items, identity_review, assumptions):
     decision = next(
-        (d for d in facts.rename_decisions if d.item_id == subject.item_id), None
+        (d for d in facts.rename_decisions if (d.item_id, d.facet) == (subject.item_id, subject.facet)), None
     )
     current_path = subject.current.path
     if selected is None or subject.path == current_path:
@@ -141,12 +147,12 @@ def _rename(facts, subject, subject_id, selected, items, identity_review, assump
     collisions = _target_context(subject.path, items, selected.entry_id)
     planned = tuple(
         sorted(
-            (other.item_id, other.path, other.source_target.model_dump())
+            (other.item_id, other.facet, other.path, other.source_target.model_dump())
             for other in facts.subjects
-            if other.item_id != subject.item_id
+            if (other.item_id, other.facet) != (subject.item_id, subject.facet)
             and _paths_collide(other.path, subject.path)
             and any(
-                d.item_id == other.item_id and d.choice == "source_path"
+                (d.item_id, d.facet) == (other.item_id, other.facet) and d.choice == "source_path"
                 for d in facts.rename_decisions
             )
         )
@@ -174,7 +180,7 @@ def _rename(facts, subject, subject_id, selected, items, identity_review, assump
         + tuple(
             f"rename:{_digest((facts.incoming_identity.module_id, facts.incoming_identity.collection_id, other.item_id, other.facet))}"
             for other in facts.subjects
-            if any(item_id == other.item_id for item_id, _, _ in planned)
+            if any((item_id, facet) == (other.item_id, other.facet) for item_id, facet, _, _ in planned)
         ),
     )
     status, required, decision_id, provenance = (
@@ -257,6 +263,7 @@ def bind_identity(facts, subject, subject_id):
                 facts.incoming_identity.module_id,
                 facts.incoming_identity.collection_id,
                 subject.item_id,
+                subject.facet,
                 facts.inventory,
                 [_claim_fact(item) for item in matches],
                 [fact.model_dump(mode="json") for fact in safety],
@@ -289,6 +296,7 @@ def bind_identity(facts, subject, subject_id):
         candidates.append(
             IdentityCandidate(
                 entry_id=item.entry_id,
+                facet=item.facet,
                 current=item.current,
                 title=item.title,
                 identity_state=item.identity_state,
@@ -301,7 +309,10 @@ def bind_identity(facts, subject, subject_id):
                 if same_path
                 else "unassociated",
                 eligible=same
-                or (item.identity_state != "valid" and item.identity is None),
+                or (item.facet in (None, subject.facet) and (
+                    (item.identity_state != "valid" and item.identity is None)
+                    or (item.facet is None and _same_owner(facts, subject, item))
+                )),
                 target_safe=_target_safe(item.current.path, item.target, collisions),
                 assumptions=(assumption,),
             )
@@ -333,7 +344,7 @@ def bind_identity(facts, subject, subject_id):
         )
 
     decision = next(
-        (d for d in facts.association_decisions if d.item_id == subject.item_id), None
+        (d for d in facts.association_decisions if (d.item_id, d.facet) == (subject.item_id, subject.facet)), None
     )
     if decision is not None:
         decision_id, provenance = decision.decision_id, "explicit_user"
@@ -399,7 +410,7 @@ def bind_identity(facts, subject, subject_id):
             status, reason = "refused", "current_mismatch"
             finding("current_inventory_mismatch", True)
     repair_required = (
-        selected is None or selected.identity_state != "valid" or len(matches) != 1
+        selected is None or selected.identity_state != "valid" or selected.facet != subject.facet or len(matches) != 1
     )
     if (
         selected is not None

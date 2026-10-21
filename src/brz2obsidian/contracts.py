@@ -602,6 +602,8 @@ class ReconciliationContract(Contract):
     )
     @classmethod
     def relative_vault_path(cls, value):
+        if value is None:
+            return value
         if (
             not isinstance(value, str)
             or any(c in value for c in "\\:\x00")
@@ -944,6 +946,7 @@ class ReconciliationSubject(ReconciliationContract):
     source_target: IdentityTargetFacts
     output_role: Literal["note", "dashboard", "template", "guide", "configuration"]
     structure: StructureComparison | None
+    attachment: AttachmentFacts | None
 
 
 class ReconciliationInput(ReconciliationContract):
@@ -986,10 +989,10 @@ class ReconciliationInput(ReconciliationContract):
         if len({decision.decision_id for decision in decisions}) != len(decisions):
             raise ValueError("Duplicate identity/rename decision IDs")
         for family in (self.association_decisions, self.rename_decisions):
-            decision_items = [decision.item_id for decision in family]
+            decision_items = [(decision.item_id, decision.facet) for decision in family]
             if (
                 len(set(decision_items)) != len(decision_items)
-                or not set(decision_items) <= items
+                or not set(decision_items) <= set(identities)
             ):
                 raise ValueError("Decisions must name distinct known source items")
         memory_ids = [
@@ -1056,6 +1059,7 @@ class ProposalAssumption(ReconciliationContract):
         "link",
         "content",
         "memory",
+        "attachment",
     ]
     fingerprint: str
     depends_on: tuple[str, ...]
@@ -1131,6 +1135,7 @@ class ProposedChange(ReconciliationContract):
     format_review: FormatReview | None
     structure_result: StructuredDocument | None
     preservation_review: PreservationReview | None
+    attachment_review: AttachmentReview | None
 
     @model_validator(mode="after")
     def conservative_result(self):
@@ -1261,6 +1266,7 @@ class UpdateProposal(ReconciliationContract):
 
 class IdentityInventoryItem(ReconciliationContract):
     entry_id: str = Field(min_length=1)
+    facet: str | None = Field(min_length=1)
     identity_state: Literal["valid", "missing", "malformed", "inconsistent"]
     identity: ImportedItemIdentity | None
     raw_identity: str | None
@@ -1281,6 +1287,7 @@ class IdentityInventoryItem(ReconciliationContract):
 
 class IdentityCandidate(ReconciliationContract):
     entry_id: str
+    facet: str | None = Field(min_length=1)
     current: CurrentContent
     title: str
     identity_state: Literal["valid", "missing", "malformed", "inconsistent"]
@@ -1340,6 +1347,7 @@ class IdentityAssociationDecision(ReconciliationContract):
     collection_id: str = Field(min_length=1)
     module_id: str = Field(min_length=1)
     item_id: str = Field(min_length=1)
+    facet: str = Field(min_length=1)
     selected_entry_id: str = Field(min_length=1)
     disassociate_entry_ids: tuple[str, ...]
     reviewed_assumptions: tuple[ProposalAssumption, ...]
@@ -1368,6 +1376,7 @@ class RenamePathDecision(ReconciliationContract):
     collection_id: str = Field(min_length=1)
     module_id: str = Field(min_length=1)
     item_id: str = Field(min_length=1)
+    facet: str = Field(min_length=1)
     choice: Literal["keep_path", "source_path"]
     reviewed_assumptions: tuple[ProposalAssumption, ...]
     provenance: Literal["explicit_user"]
@@ -1480,3 +1489,130 @@ class PreservationDecision(ReconciliationContract):
     reviewed_assumptions: tuple[ProposalAssumption, ...]
     choice: Literal["keep_vault", "decline_restoration"]
     provenance: Literal["explicit_user"]
+
+
+class AttachmentDestination(ReconciliationContract):
+    path: str
+    target: IdentityTargetFacts
+
+
+class AttachmentFacts(ReconciliationContract):
+    """Canonical resource association plus explicitly attested allocation slots."""
+
+    current_target_id: str = Field(min_length=1)
+    allocation_candidates: tuple[AttachmentDestination, ...]
+
+
+class AttachmentOutput(ReconciliationContract):
+    target_id: str = Field(min_length=1)
+    path: str
+    content: ExactContent
+    content_version: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def exact_payload_version(self):
+        if sha256(self.content.data).hexdigest() != self.content_version:
+            raise ValueError("Attachment version must bind exact available bytes")
+        return self
+
+
+class AttachmentAlternative(ReconciliationContract):
+    choice: Literal["current", "incoming", "both"]
+    outputs: tuple[AttachmentOutput, ...]
+    eligible: bool
+    unavailable_reasons: tuple[Literal["content_unavailable", "inventory_uncertain", "allocation_unavailable", "unsafe_target", "collision"], ...]
+
+    @model_validator(mode="after")
+    def explicit_availability(self):
+        if self.eligible:
+            if self.unavailable_reasons or len(self.outputs) != (2 if self.choice == "both" else 1):
+                raise ValueError("Eligible alternatives require their complete exact outputs")
+        elif not self.unavailable_reasons:
+            raise ValueError("Unavailable alternatives must explain their missing authority")
+        return self
+
+
+class AttachmentReview(ReconciliationContract):
+    incoming_source_path: str
+    alternatives: tuple[AttachmentAlternative, ...]
+    assumptions: tuple[ProposalAssumption, ...]
+
+
+class ReferenceTarget(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.reference-target"]
+    schema_version: Literal[1]
+    target_id: str = Field(min_length=1)
+    kind: Literal["category", "tag", "relationship", "resource", "note"]
+    canonical_path: str | None
+    identity: ImportedItemIdentity | None
+    target: IdentityTargetFacts | None
+    representations: tuple[str, ...]
+    validation_fingerprint: str = Field(min_length=1)
+    status: Literal["safe", "unsafe", "unknown"]
+
+
+class LinkFragment(ReconciliationContract):
+    kind: Literal["heading", "block"]
+    value: str = Field(min_length=1)
+
+
+class LinkTargetFacts(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.link-target-facts"]
+    schema_version: Literal[1]
+    target_id: str = Field(min_length=1)
+    existence: Literal["present", "missing", "known_source_gap", "intentionally_uncreated", "unknown"]
+    content: ExactContent | None
+    fragments: tuple[LinkFragment, ...]
+    memberships: tuple[str, ...]
+    interpretation: Literal["supported", "unsupported", "unknown"]
+
+
+class LinkQuery(ReconciliationContract):
+    value: str = Field(min_length=1)
+    mode: Literal["exact", "shortened"]
+
+
+class LinkMeaning(ReconciliationContract):
+    status: Literal["resolved", "missing", "known_source_gap", "intentionally_uncreated", "unknown", "ambiguous", "unsupported", "inventory_uncertain", "unsafe", "fragment_missing", "fragment_ambiguous", "external"]
+    target_id: str | None
+    target_identity: ImportedItemIdentity | None
+    path: str | None
+    target_version: str | None
+    display_text: str
+    fragment: LinkFragment | None
+    candidates: tuple[str, ...]
+
+
+class LinkOccurrence(ReconciliationContract):
+    occurrence_id: str = Field(min_length=1)
+    syntax: Literal["wiki", "markdown"]
+    embedded: bool
+    span: StructureSpan
+    destination_span: StructureSpan
+    raw: bytes
+    query: LinkQuery | None
+    meaning: LinkMeaning
+
+
+class LinkDocument(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.link-document"]
+    schema_version: Literal[1]
+    document_id: str = Field(min_length=1)
+    source_path: str
+    content: ExactContent
+    path_mode: Literal["vault", "relative", "shortened"]
+    inventory: Literal["complete", "partial", "unreadable"]
+    status: Literal["supported", "unsupported"]
+    issues: tuple[str, ...]
+    occurrences: tuple[LinkOccurrence, ...]
+
+    @model_validator(mode="after")
+    def exact_distinct_occurrences(self):
+        end, keys = 0, set()
+        for occurrence in self.occurrences:
+            span, destination = occurrence.span, occurrence.destination_span
+            if occurrence.occurrence_id in keys or not end <= span.start < span.end <= len(self.content.data) or not span.start <= destination.start < destination.end <= span.end or self.content.data[span.start:span.end] != occurrence.raw:
+                raise ValueError("Link occurrence must bind distinct disjoint exact document bytes")
+            keys.add(occurrence.occurrence_id)
+            end = span.end
+        return self

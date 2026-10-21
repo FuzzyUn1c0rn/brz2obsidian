@@ -28,7 +28,7 @@ def facts_for(
             "incoming": None if incoming is None else ExactContent(data=incoming),
         }
     )
-    entry = facts.identity_inventory[0].model_copy(update={"current": subject.current})
+    entry = facts.identity_inventory[0].model_copy(update={"current": subject.current, "facet": subject.facet})
     return with_subjects(facts, (subject,), (entry,))
 
 
@@ -355,7 +355,7 @@ def test_source_absence_and_reference_change_are_independent_exact_comparisons()
         facts,
         (facts.subjects[0], reference),
         facts.identity_inventory
-        + (inventory_item("ref", "reference-note", "Reference.md", b"old reference"),),
+        + (inventory_item("ref", "reference-note", "Reference.md", b"old reference", facet="imported-references"),),
     )
     result = reconcile(facts)
     retained, changed = result.changes

@@ -59,6 +59,7 @@ def request(
         ),
         output_role="note",
         structure=None,
+        attachment=None,
     )
     fields = {
         "schema_id": "brz2obsidian.reconciliation-input",
@@ -93,6 +94,7 @@ def request(
         "inventory": "complete",
         "identity_inventory": (
             IdentityInventoryItem(
+                facet=subject.facet,
                 entry_id="opening-entry",
                 identity_state="valid",
                 identity=ImportedItemIdentity(

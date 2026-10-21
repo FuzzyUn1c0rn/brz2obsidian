@@ -14,6 +14,7 @@ from brz2obsidian.contracts import (
 )
 from brz2obsidian.core.identity import bind_identity
 
+from .attachments import attachment_review
 from .formats import format_assumption, format_findings, format_proposal, review_facts
 from .preservation import preservation_decision, preservation_policy
 from .structures import (
@@ -181,6 +182,7 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
             and structure_problem is None
         )
         policy = preservation_policy(facts, subject, subject_id, policy_allowed)
+        binary_review, binary_assumptions = attachment_review(facts, subject, subject_id)
         safety = tuple(
             sorted(
                 (
@@ -196,6 +198,7 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
             + binding.assumptions
             + (() if binding.rename is None else binding.rename.assumptions)
             + (policy.assumption,)
+            + binary_assumptions
         )
         problems = _findings(facts, subject, subject_id, safety) + list(
             binding.findings
@@ -334,6 +337,7 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
                 source_version=_content_identity(subject.incoming),
                 format_review=format_review,
                 preservation_review=preservation_review,
+                attachment_review=binary_review,
                 identity_review=binding.review,
                 rename_review=binding.rename,
                 structure_result=structured_result,

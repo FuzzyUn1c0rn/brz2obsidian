@@ -101,6 +101,7 @@ def test_old_known_and_unknown_originals_expose_separate_role_choices_without_pr
                     "subjects": subjects,
                     "identity_inventory": tuple(
                         IdentityInventoryItem(
+                            facet=subject.facet,
                             entry_id=f"entry:{subject.item_id}",
                             identity_state="valid",
                             identity=ImportedItemIdentity(
