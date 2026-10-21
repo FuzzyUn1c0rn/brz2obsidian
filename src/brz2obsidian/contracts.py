@@ -1702,6 +1702,17 @@ class LinkContext(ReconciliationContract):
     incoming_documents: tuple[LinkDocument, ...]
 
 
+class LinkValidationBaseline(ReconciliationContract):
+    """Available prior document and complete normalized lookup evidence."""
+
+    schema_id: Literal["brz2obsidian.link-validation-baseline"]
+    schema_version: Literal[1]
+    document: LinkDocument
+    targets: tuple[ReferenceTarget, ...]
+    target_facts: tuple[LinkTargetFacts, ...]
+    inventory: Literal["complete", "partial", "unreadable"]
+
+
 class AssociatedLinkReview(ReconciliationContract):
     document_id: str
     occurrence_id: str | None

@@ -9,6 +9,7 @@ from brz2obsidian.contracts import (
     LinkDocument,
     LinkDocumentValidation,
     LinkTargetFacts,
+    LinkValidationBaseline,
     LinkValidationFinding,
     ReferenceTarget,
 )
@@ -56,8 +57,97 @@ def validate_link_target_state(state, targets):
                 or target.identity != entry.target.identity
                 or target.canonical_path != entry.target.canonical_path
                 or target.target != entry.target.target
+                or target.status != entry.target.status
+                or set(target.representations) != set(entry.target.representations)
             ):
                 raise ValueError("link_membership_invalid")
+
+
+def _validated_baseline(baseline, document, expected_path):
+    if baseline is None:
+        return None
+    prior = baseline.document
+    if (
+        prior.document_id != document.document_id
+        or prior.source_path != expected_path
+        or prior.path_mode != document.path_mode
+        or baseline.inventory != "complete"
+        or prior.inventory != "complete"
+        or prior.status != "supported"
+    ):
+        raise ValueError("link_unbound")
+    if (
+        len({t.target_id for t in baseline.targets}) != len(baseline.targets)
+        or len({s.target_id for s in baseline.target_facts})
+        != len(baseline.target_facts)
+        or any(
+            s.target_id not in {t.target_id for t in baseline.targets}
+            for s in baseline.target_facts
+        )
+    ):
+        raise ValueError("link_facts_invalid")
+    own = tuple(t for t in baseline.targets if t.canonical_path == prior.source_path)
+    validate_targets(own)
+    for target in own:
+        states = tuple(
+            s for s in baseline.target_facts if s.target_id == target.target_id
+        )
+        if (
+            len(states) != 1
+            or states[0].content is None
+            or states[0].content.data != prior.content.data
+        ):
+            raise ValueError("link_unbound")
+    for occurrence in prior.occurrences:
+        actual = resolve_occurrence(
+            occurrence, baseline.targets, baseline.target_facts, baseline.inventory
+        )
+        if actual != occurrence.meaning:
+            raise ValueError("link_meaning_mismatch")
+        if actual.status == "resolved":
+            selected = tuple(
+                t for t in baseline.targets if t.target_id == actual.target_id
+            )
+            validate_targets(selected)
+            state = next(
+                s for s in baseline.target_facts if s.target_id == actual.target_id
+            )
+            validate_link_target_state(state, baseline.targets)
+    return baseline
+
+
+def _appearance_value(state):
+    if state.structure is None or state.structure.appearance_field is None:
+        return None
+    key = state.structure.appearance_field
+    field = next(f for f in state.structure.fields if f.key == key)
+    return key, field.kind, field.scalar_type, field.value
+
+
+def _retained_appearance(baseline, actual, state):
+    if baseline is None:
+        return False
+    for previous in baseline.document.occurrences:
+        meaning = previous.meaning
+        if (
+            meaning.status != "resolved"
+            or meaning.target_id != actual.target_id
+            or meaning.target_identity != actual.target_identity
+            or meaning.path != actual.path
+        ):
+            continue
+        prior_state = next(
+            (s for s in baseline.target_facts if s.target_id == meaning.target_id), None
+        )
+        if (
+            prior_state is not None
+            and prior_state.content is not None
+            and prior_state.structure is not None
+            and appearance_issues(prior_state.structure)
+            and _appearance_value(prior_state) == _appearance_value(state)
+        ):
+            return True
+    return False
 
 
 def validate_link_document(
@@ -68,7 +158,7 @@ def validate_link_document(
     targets: tuple[ReferenceTarget, ...],
     target_facts: tuple[LinkTargetFacts, ...],
     inventory: Literal["complete", "partial", "unreadable"],
-    baseline: LinkDocument | None = None,
+    baseline: LinkValidationBaseline | None = None,
     affected_target_ids: tuple[str, ...] = (),
 ) -> LinkDocumentValidation:
     """Validate selected semantics; baseline only exempts unchanged existing warnings.
@@ -100,7 +190,7 @@ def validate_link_document(
         targets = tuple(ReferenceTarget.model_validate(t) for t in targets)
         target_facts = tuple(LinkTargetFacts.model_validate(t) for t in target_facts)
         if baseline is not None:
-            baseline = LinkDocument.model_validate(baseline)
+            baseline = LinkValidationBaseline.model_validate(baseline)
     except ValidationError, TypeError, ValueError:
         add("link_facts_invalid")
         return result()
@@ -118,21 +208,22 @@ def validate_link_document(
     ) != len(target_facts):
         add("link_facts_invalid")
         return result()
-    if baseline is not None and (
-        baseline.document_id != document.document_id
-        or baseline.source_path != expected_path
-        or baseline.path_mode != document.path_mode
-        or baseline.inventory != "complete"
-        or baseline.status != "supported"
-    ):
-        add("link_unbound")
+    try:
+        baseline = _validated_baseline(baseline, document, expected_path)
+    except ValueError as error:
+        add(
+            str(error)
+            if str(error)
+            in ("link_unbound", "link_facts_invalid", "link_meaning_mismatch")
+            else "link_facts_invalid"
+        )
         baseline = None
     own_targets = tuple(t for t in targets if t.canonical_path == expected_path)
     try:
         validate_targets(own_targets)
     except ValueError:
         add("link_facts_invalid")
-    old = () if baseline is None else baseline.occurrences
+    old = () if baseline is None else baseline.document.occurrences
     for occurrence in document.occurrences:
         declared = occurrence.meaning
         actual = resolve_occurrence(occurrence, targets, target_facts, inventory)
@@ -170,17 +261,11 @@ def validate_link_document(
                 validate_link_target_state(state, targets)
             except ValueError:
                 add("link_membership_invalid", occurrence.occurrence_id)
+                continue
             if state.structure is not None and appearance_issues(state.structure):
-                # Available selected bytes plus the same resolved historical version
-                # prove retention. A changed version or missing proof cannot do so.
-                retained = actual.target_version is not None and any(
-                    previous.meaning.status == "resolved"
-                    and previous.meaning.target_id == actual.target_id
-                    and previous.meaning.target_identity == actual.target_identity
-                    and previous.meaning.path == actual.path
-                    and previous.meaning.target_version == actual.target_version
-                    for previous in old
-                )
+                # Prior bytes and normalized lookup context independently establish
+                # the old diagnostic; neither cached version nor bytes alone suffice.
+                retained = _retained_appearance(baseline, actual, state)
                 add(
                     "link_appearance_warning"
                     if retained

@@ -7,6 +7,7 @@ from brz2obsidian.contracts import (
     AttachmentCandidateValidation,
     AttachmentSelection,
     AttachmentValidationFinding,
+    LinkValidationBaseline,
     ReconciliationInput,
 )
 
@@ -277,7 +278,14 @@ def validate_attachment_candidate(
             targets=candidate.targets,
             target_facts=candidate.target_facts,
             inventory=context.inventory,
-            baseline=old,
+            baseline=LinkValidationBaseline(
+                schema_id="brz2obsidian.link-validation-baseline",
+                schema_version=1,
+                document=old,
+                targets=context.current_targets,
+                target_facts=context.current_target_facts,
+                inventory=context.inventory,
+            ),
             affected_target_ids=tuple(outputs),
         )
         link_findings.extend(validation.findings)

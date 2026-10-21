@@ -826,7 +826,9 @@ def test_public_link_candidate_validation_rechecks_selected_meaning_and_separate
         inventory="complete",
     )
 
-    def validate(document, states=(state,), baseline=old):
+    old_proof = baseline_for(old, (target,), (state,))
+
+    def validate(document, states=(state,), baseline=old_proof):
         return validate_link_document(
             document,
             expected_content=document.content,
@@ -1267,7 +1269,7 @@ def test_known_gaps_intentional_absence_and_unsafe_affected_warning_remain_disti
             targets=(target,),
             target_facts=(state,),
             inventory="complete",
-            baseline=doc,
+            baseline=baseline_for(doc, (target,), (state,)),
             affected_target_ids=("note:guide",),
         )
         assert result.valid is valid
@@ -1296,7 +1298,7 @@ def test_known_gaps_intentional_absence_and_unsafe_affected_warning_remain_disti
         targets=(unsafe,),
         target_facts=(state,),
         inventory="complete",
-        baseline=doc,
+        baseline=baseline_for(doc, (unsafe,), (state,)),
         affected_target_ids=("note:guide",),
     )
     assert not affected.valid
@@ -1307,7 +1309,7 @@ def test_known_gaps_intentional_absence_and_unsafe_affected_warning_remain_disti
         targets=(unsafe,),
         target_facts=(state,),
         inventory="complete",
-        baseline=doc,
+        baseline=baseline_for(doc, (unsafe,), (state,)),
     )
     assert unrelated.valid and all(not f.blocking for f in unrelated.findings)
 
@@ -1910,7 +1912,11 @@ def test_link_document_validation_refuses_unbound_partial_unsupported_and_duplic
     assert not validate(inventory="partial").valid
     assert not validate(target_facts=(state, state)).valid
     assert not validate(targets=(target, target)).valid
-    assert not validate(baseline=doc.model_copy(update={"document_id": "other"})).valid
+    assert not validate(
+        baseline=baseline_for(
+            doc.model_copy(update={"document_id": "other"}), (target,), (state,)
+        )
+    ).valid
     unsupported = interpret_links(
         ExactContent(data=b"[[unclosed"),
         document_id="owner",
@@ -2116,7 +2122,7 @@ def test_unchanged_unrelated_appearance_warning_is_reported_without_waiving_memb
             targets=(note, category),
             target_facts=(selected_state,),
             inventory="complete",
-            baseline=doc,
+            baseline=baseline_for(doc, (note, category), (state,)),
             affected_target_ids=("resource:unrelated",),
         )
 
@@ -2138,6 +2144,10 @@ def test_unchanged_unrelated_appearance_warning_is_reported_without_waiving_memb
     assert not blocked.valid and "link_membership_invalid" in {
         f.code for f in blocked.findings
     }
+    malformed = state.structure.model_copy(update={"appearance_field": "missing"})
+    refused = validate(state.model_copy(update={"structure": malformed}))
+    assert not refused.valid
+    assert "link_membership_invalid" in {f.code for f in refused.findings}
 
 
 def test_new_invalid_appearance_in_changed_affected_target_cannot_claim_existing_warning():
@@ -2200,12 +2210,168 @@ def test_new_invalid_appearance_in_changed_affected_target_cannot_claim_existing
             affected_target_ids=(note.target_id,),
         )
 
-    newly_harmful = validate(old_doc)
+    newly_harmful = validate(baseline_for(old_doc, (note, category), (old_state,)))
     assert not newly_harmful.valid
     assert "link_membership_invalid" in {f.code for f in newly_harmful.findings}
-    # Identical available target version proves a retained issue, even when its file is affected.
-    retained = validate(selected)
+    # Independently bound prior semantics prove the retained issue, even for an affected file.
+    retained = validate(baseline_for(selected, (note, category), (new_state,)))
     assert retained.valid and [(f.code, f.blocking) for f in retained.findings] == [
         ("link_appearance_warning", False)
     ]
     assert not validate(None).valid
+
+
+def test_same_bytes_do_not_prove_retained_appearance_after_registry_alias_removal():
+    from brz2obsidian.contracts import ExactContent
+    from brz2obsidian.core import validate_link_document
+    from brz2obsidian.obsidian import interpret_link_target, interpret_links
+    from tests.reconciliation.test_memberships import target
+
+    old_category = target("a", "category", "[[A]]", "[[Alias]]")
+    category = target("a", "category", "[[A]]")
+    note = target_for_links("note:target", "Notes/Target.md")
+    raw = ExactContent(
+        data=b'---\ncategories:\n  - "[[A]]"\nappearance_category: "[[Alias]]"\n---\nText.\n'
+    )
+    old_state = interpret_link_target(
+        raw,
+        target_id=note.target_id,
+        existence="present",
+        memberships=("a",),
+        membership_targets=(old_category,),
+    )
+    state = interpret_link_target(
+        raw,
+        target_id=note.target_id,
+        existence="present",
+        memberships=("a",),
+        membership_targets=(category,),
+    )
+    token = ExactContent(data=b"[[Notes/Target.md]]")
+    old_doc = interpret_links(
+        token,
+        document_id="owner",
+        source_path="Owner.md",
+        path_mode="vault",
+        targets=(note, old_category),
+        target_facts=(old_state,),
+        inventory="complete",
+    )
+    selected = interpret_links(
+        token,
+        document_id="owner",
+        source_path="Owner.md",
+        path_mode="vault",
+        targets=(note, category),
+        target_facts=(state,),
+        inventory="complete",
+    )
+    assert old_doc.occurrences[0].meaning == selected.occurrences[0].meaning
+    result = validate_link_document(
+        selected,
+        expected_content=token,
+        expected_path="Owner.md",
+        targets=(note, category),
+        target_facts=(state,),
+        inventory="complete",
+        baseline=baseline_for(old_doc, (note, old_category), (old_state,)),
+        affected_target_ids=(note.target_id, category.target_id),
+    )
+    assert not result.valid
+    assert "link_membership_invalid" in {f.code for f in result.findings}
+
+
+def baseline_for(document, targets, states, *, inventory="complete"):
+    from brz2obsidian.contracts import LinkValidationBaseline
+
+    return LinkValidationBaseline(
+        schema_id="brz2obsidian.link-validation-baseline",
+        schema_version=1,
+        document=document,
+        targets=targets,
+        target_facts=states,
+        inventory=inventory,
+    )
+
+
+def test_retained_appearance_uses_prior_semantics_across_prose_edits_and_refuses_bad_proof():
+    from brz2obsidian.contracts import ExactContent
+    from brz2obsidian.core import validate_link_document
+    from brz2obsidian.obsidian import interpret_link_target, interpret_links
+    from tests.reconciliation.test_memberships import target
+
+    category = target("a", "category", "[[A]]")
+    note = target_for_links("note:target", "Notes/Target.md")
+    prefix = b'---\ncategories:\n  - "[[A]]"\nappearance_category: "[[Absent]]"\n---\n'
+    old_state, state = (
+        interpret_link_target(
+            ExactContent(data=prefix + prose),
+            target_id=note.target_id,
+            existence="present",
+            memberships=("a",),
+            membership_targets=(category,),
+        )
+        for prose in (b"Original prose.\n", b"Locally revised prose.\n")
+    )
+    token = ExactContent(data=b"[[Notes/Target.md]]")
+    old_doc, selected = (
+        interpret_links(
+            token,
+            document_id="owner",
+            source_path="Owner.md",
+            path_mode="vault",
+            targets=(note, category),
+            target_facts=(value,),
+            inventory="complete",
+        )
+        for value in (old_state, state)
+    )
+    assert (
+        old_doc.occurrences[0].meaning.target_version
+        != selected.occurrences[0].meaning.target_version
+    )
+    proof = baseline_for(old_doc, (note, category), (old_state,))
+
+    def validate(baseline):
+        return validate_link_document(
+            selected,
+            expected_content=token,
+            expected_path="Owner.md",
+            targets=(note, category),
+            target_facts=(state,),
+            inventory="complete",
+            baseline=baseline,
+            affected_target_ids=(note.target_id,),
+        )
+
+    retained = validate(proof)
+    assert retained.valid
+    assert [(f.code, f.blocking) for f in retained.findings] == [
+        ("link_appearance_warning", False)
+    ]
+    assert not validate(None).valid
+    assert not validate(proof.model_copy(update={"target_facts": ()})).valid
+    assert not validate(proof.model_copy(update={"inventory": "partial"})).valid
+    assert not validate(
+        proof.model_copy(update={"targets": (note, category, category)})
+    ).valid
+    owner = target_for_links("note:owner", "Owner.md")
+    assert not validate(
+        proof.model_copy(update={"targets": (note, category, owner)})
+    ).valid
+
+    occurrence = old_doc.occurrences[0]
+    forged = occurrence.model_copy(
+        update={
+            "meaning": occurrence.meaning.model_copy(update={"target_id": "unrelated"})
+        }
+    )
+    corrupt = proof.model_copy(
+        update={"document": old_doc.model_copy(update={"occurrences": (forged,)})}
+    )
+    assert not validate(corrupt).valid
+    # Historical embedded membership spellings must agree with the historical registry.
+    contradictory = category.model_copy(update={"representations": ("[[Other]]",)})
+    assert not validate(
+        proof.model_copy(update={"targets": (note, contradictory)})
+    ).valid

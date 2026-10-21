@@ -42,7 +42,7 @@ syntax expectations, not native viewer acceptance.
 One registry entry represents each stable target ID and canonical file. A
 membership or relationship producer may refer to the same file with a compatible
 `note`, `category` or `relationship` role when stable ID, imported identity,
-canonical path and validated target facts agree. Producers do not concatenate
+canonical path, validated target safety, status and exact spelling set agree. Producers do not concatenate
 role records into duplicate registry entries. Per-list and per-section semantic
 duplicates remain invalid. Resource/version target IDs are distinct from their
 canonical imported owner plus content facet. Inventory associations and actions
@@ -65,11 +65,19 @@ targets, target_facts, inventory, baseline=None, affected_target_ids=())` return
 exact bindings, selected lookup meaning, target identity/path safety, fragment
 and membership facts. A baseline may retain an unchanged unrelated warning;
 affected unsafe state and newly harmful meaning block validation. Retained
-appearance-not-member diagnostics require proof from a resolved baseline occurrence
-with the same stable target ID, identity, path and nonnull available content version
-to remain nonblocking. Changed target versions or missing prior proof cannot claim
-a retained warning. Membership identity and target safety remain mandatory. Cached external status cannot hide a retained internal query. The baseline
-must describe the same document/path/mode. Normalized syntax facts are supplied
+appearance-not-member diagnostics require a closed versioned
+`LinkValidationBaseline(document, targets, target_facts, inventory)` from actual
+prior interpreted facts. The validator re-resolves historical occurrences using
+that registry, verifies exact old target/structure bindings and membership
+spellings, and recomputes the old diagnostic. The same target identity/path and
+appearance value may retain an independently established issue across unrelated
+prose edits. Equal payload versions alone do not prove unchanged meaning when
+registry aliases or membership facts change. Missing or contradictory prior
+proof cannot establish a retained warning. Selected membership identity and
+target safety remain mandatory. Cached external status cannot hide a retained
+internal query. The prior document must have the same document/path/mode.
+Attachment composition supplies the baseline from its actual current context;
+review actions do not supply substitute historical evidence. Normalized syntax facts are supplied
 by the bounded outer interpreter, rather than reconstructed by the core.
 
 `core.validate_attachment_candidate(facts, selection, candidate)` additionally
