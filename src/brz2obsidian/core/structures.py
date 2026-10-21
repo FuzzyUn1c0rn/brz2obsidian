@@ -10,8 +10,9 @@ from brz2obsidian.core.memberships import (
 )
 from brz2obsidian.core.sections import (
     result_sections,
+    validate_section_combination,
     validate_section_document,
-    validate_sections,
+    validate_section_facts,
 )
 
 
@@ -21,8 +22,10 @@ def _value(document, field):
     return field.kind, field.scalar_type, field.value
 
 
-def validate_structure_facts(subject, baseline_identity, incoming_identity):
-    """Check exact binding and declared identity, independently of merge support.
+def validate_structure_facts(
+    subject, baseline_identity, incoming_identity, *, source_version
+):
+    """Check exact normalized binding and target/identity safety before any policy.
 
     Opaque documents need whole-file review; absent parsed fields in those facts
     do not establish missing imported identity. Supported documents must agree.
@@ -67,6 +70,21 @@ def validate_structure_facts(subject, baseline_identity, incoming_identity):
         identities[0] != identities[1] or identities[0] != identities[2]
     ):
         return "structure_identity_conflict"
+    # Preservation selects exact current bytes. Combination validates its targets
+    # separately; an unsafe unchosen incoming alternative cannot veto safe keep.
+    try:
+        if comparison.alignment == "supported":
+            bodies = tuple(d.content.data[d.body.start : d.body.end] for d in documents)
+            if (
+                _apply(bodies[0], comparison.local_edits) != bodies[1]
+                or _apply(bodies[0], comparison.source_edits) != bodies[2]
+            ):
+                return "structure_unbound"
+        for index, document in enumerate(documents):
+            validate_memberships(document, target_safety=index == 1)
+        validate_section_facts(subject, baseline_identity, source_version)
+    except ValueError as error:
+        return str(error)
     return None
 
 
@@ -79,7 +97,9 @@ def structure_proposal(
     def unresolved(rule):
         return ("unresolved", None, rule, True), None
 
-    problem = validate_structure_facts(subject, baseline_identity, incoming_identity)
+    problem = validate_structure_facts(
+        subject, baseline_identity, incoming_identity, source_version=source_version
+    )
     if problem is not None:
         return unresolved(problem)
     if (
@@ -102,7 +122,7 @@ def structure_proposal(
         membership_replacements, memberships = combine_memberships(
             documents, comparison
         )
-        validate_sections(subject, baseline_identity, source_version)
+        validate_section_combination(comparison)
     except ValueError as error:
         return unresolved(str(error))
     if len({d.appearance_field for d in documents}) != 1:

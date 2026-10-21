@@ -3,7 +3,7 @@
 from brz2obsidian.core.reference_targets import validate_targets
 
 
-def validate_memberships(document):
+def validate_memberships(document, *, target_safety=True):
     fields = {f.key: f for f in document.fields}
     sets = {}
     for membership in document.memberships:
@@ -15,11 +15,11 @@ def validate_memberships(document):
         raw = membership.prefix + b"".join(e.raw for e in membership.entries)
         if document.content.data[field.span.start : field.span.end] != raw:
             raise ValueError("structure_unbound")
-        validate_targets(tuple(e.target for e in membership.entries))
+        if target_safety:
+            validate_targets(tuple(e.target for e in membership.entries))
         for entry in membership.entries:
             if (
-                entry.target.status != "safe"
-                or entry.target.kind != membership.kind
+                entry.target.kind != membership.kind
                 or entry.representation not in entry.target.representations
             ):
                 raise ValueError("structure_conflict")

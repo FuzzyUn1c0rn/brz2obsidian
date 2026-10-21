@@ -169,7 +169,10 @@ def reconcile(facts: ReconciliationInput) -> UpdateProposal:
             None
             if subject.structure is None
             else validate_structure_facts(
-                subject, facts.baseline_identity, facts.incoming_identity
+                subject,
+                facts.baseline_identity,
+                facts.incoming_identity,
+                source_version=facts.format_operation.baseline_source_version,
             )
         )
         policy_allowed = (

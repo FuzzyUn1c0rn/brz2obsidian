@@ -4,7 +4,10 @@ from brz2obsidian.contracts import StructureSpan
 from brz2obsidian.core.reference_targets import validate_targets
 
 
-def validate_section_document(document, bases):
+def validate_section_document(document, bases, *, target_safety=True):
+    ids = [s.section_id for s in document.owned_sections]
+    if len(set(ids)) != len(ids) or not set(ids) <= set(bases):
+        raise ValueError("structure_unbound")
     end = document.body.start
     for section in document.owned_sections:
         if (
@@ -16,7 +19,8 @@ def validate_section_document(document, bases):
             or len(section.targets) != len(section.entries)
         ):
             raise ValueError("structure_unbound")
-        validate_targets(section.targets)
+        if target_safety:
+            validate_targets(section.targets)
         if any(
             t.kind != section.kind or entry not in t.representations
             for entry, t in zip(section.entries, section.targets, strict=True)
@@ -25,14 +29,11 @@ def validate_section_document(document, bases):
         end = section.span.end
 
 
-def validate_sections(subject, baseline_identity, source_version):
+def validate_section_facts(subject, baseline_identity, source_version):
     comparison = subject.structure
     documents = (comparison.original, comparison.current, comparison.incoming)
     bases = {b.section_id: b for b in comparison.section_bases}
     if len(bases) != len(comparison.section_bases):
-        raise ValueError("structure_unbound")
-    expected = tuple(s.section_id for s in documents[0].owned_sections)
-    if set(expected) != set(bases) or len(set(expected)) != len(expected):
         raise ValueError("structure_unbound")
     for basis in bases.values():
         if (
@@ -41,15 +42,33 @@ def validate_sections(subject, baseline_identity, source_version):
             or basis.source_version != source_version
             or basis.item_id != subject.item_id
             or basis.facet != subject.facet
+            or basis.span.end > len(basis.original.data)
+            or not basis.heading
+            or basis.span.start + len(basis.heading) > basis.span.end
+            or basis.original.data[
+                basis.span.start : basis.span.start + len(basis.heading)
+            ]
+            != basis.heading
         ):
             raise ValueError("structure_unbound")
-    for document in documents:
-        if tuple(s.section_id for s in document.owned_sections) != expected:
-            raise ValueError("structure_conflict")
-        validate_section_document(document, bases)
+    for index, document in enumerate(documents):
+        validate_section_document(document, bases, target_safety=index == 1)
     for section in documents[0].owned_sections:
         if section.span != bases[section.section_id].span:
             raise ValueError("structure_unbound")
+
+
+def validate_section_combination(comparison):
+    documents = (comparison.original, comparison.current, comparison.incoming)
+    bases = {b.section_id: b for b in comparison.section_bases}
+    for document in documents:
+        validate_section_document(document, bases)
+    expected = tuple(s.section_id for s in documents[0].owned_sections)
+    if set(expected) != {b.section_id for b in comparison.section_bases} or any(
+        tuple(s.section_id for s in document.owned_sections) != expected
+        for document in documents
+    ):
+        raise ValueError("structure_conflict")
     for changed, edits in (
         (documents[1], comparison.local_edits),
         (documents[2], comparison.source_edits),

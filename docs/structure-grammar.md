@@ -196,3 +196,20 @@ the earlier preservation path, including opaque current structures. Scoped
 structure assumptions include selected target validation, mapping meaning and
 bound generation records, without unused registry entries or informational
 source labels. Saved decisions, publication and revalidation remain separate.
+
+
+Normalized membership/section fact binding and applicable reference target/identity
+safety run in the shared `validate_structure_facts` boundary before preservation
+policy or explicit keep admission, as well as before combination. A remembered
+source-version choice cannot waive a newly unsafe/outside selected current target, unbound field
+or section bytes, unknown section-to-basis reference, or changed generation
+source binding. Invalid supplied references produce typed unresolved/refusal
+results. Exact fact binding is global; target semantics follow the selected
+outcome. Declared supported side edits must still reproduce their exact bound
+bodies; this verifies supplied facts without rerunning automatic alignment.
+An unsafe incoming-only alternative still refuses combination, while
+a safe exact current keep remains admissible. Combination and result validation
+check their own applicable targets. This check does not rerun grammar/alignment or turn a source removal,
+remap, section divergence or other combination conflict into a safety failure.
+Safe exact whole-file keep remains available for those conflicts and opaque
+current structures; unrelated existing appearance warnings remain nonblocking.

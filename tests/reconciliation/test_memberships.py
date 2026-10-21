@@ -788,3 +788,204 @@ def test_case_variant_duplicate_owned_heading_cannot_hide_in_unchanged_source_ga
     incoming = original.replace(b"[[Old]]", b"[[Source]]")
     change = reconcile(owned_request(current, incoming)).changes[0]
     assert change.disposition == "unresolved" and change.result is None
+
+
+def test_real_keep_memory_and_explicit_keep_cannot_bypass_affected_target_safety():
+    from tests.reconciliation.test_absence import choose, remembered
+
+    original = b'---\ncategories:\n  - "[[A]]"\n---\nText.\n'
+    current = b'---\ncategories:\n  - "[[A]]"\n---\nLocal prose.\n'
+    incoming = b'---\ncategories:\n  - "[[A]]"\n  - "[[B]]"\n---\nText.\n'
+    a, b = target("a", "category", "[[A]]"), target("b", "category", "[[B]]")
+    safe = membership_request(original, current, incoming, targets=(a, b))
+    memory = remembered(safe)
+    outside = a.model_copy(
+        update={"target": a.target.model_copy(update={"containment": "outside"})}
+    )
+    unsafe = membership_request(original, current, incoming, targets=(outside, b))
+    assert reconcile(unsafe).changes[0].disposition == "unresolved"
+    replayed = reconcile(unsafe.model_copy(update={"source_version_memory": (memory,)}))
+    assert not replayed.ready and replayed.changes[0].disposition == "unresolved"
+    assert replayed.changes[0].result is None
+    assert replayed.changes[0].preservation_review.matched_memory_ids == ()
+    offered = reconcile(unsafe)
+    attempted = choose(unsafe, offered, "keep_vault")
+    refused = reconcile(
+        unsafe.model_copy(update={"preservation_decisions": (attempted,)})
+    )
+    assert not refused.ready and refused.changes[0].disposition == "refused"
+    assert refused.changes[0].result is None and refused.source_version_memory == ()
+
+
+def test_keep_memory_cannot_bypass_unbound_section_reference_or_target_facts():
+    from tests.reconciliation.test_absence import remembered
+
+    current = b"Authored intro.\n## Related\n\n- [[Local|Alias]]\n\n## Resources\n\n- [[file.pdf]]\n"
+    incoming = b"Intro.\n## Related\n\n- [[Old]]\n\n## Resources\n\n- [[new.pdf]]\n"
+    safe = owned_request(current, incoming)
+    memory = remembered(safe)
+    comparison = safe.subjects[0].structure
+    local = comparison.current
+    section = local.owned_sections[0]
+    unknown = local.model_copy(
+        update={
+            "owned_sections": (
+                section.model_copy(update={"section_id": "missing-basis"}),
+            )
+            + local.owned_sections[1:]
+        }
+    )
+    unbound = local.model_copy(
+        update={
+            "owned_sections": (
+                section.model_copy(update={"raw": section.raw + b"invented"}),
+            )
+            + local.owned_sections[1:]
+        }
+    )
+    unsafe_target = section.targets[0].model_copy(
+        update={
+            "target": section.targets[0].target.model_copy(
+                update={"containment": "outside"}
+            )
+        }
+    )
+    unsafe = local.model_copy(
+        update={
+            "owned_sections": (
+                section.model_copy(update={"targets": (unsafe_target,)}),
+            )
+            + local.owned_sections[1:]
+        }
+    )
+    variants = [
+        comparison.model_copy(update={"current": d}) for d in (unknown, unbound, unsafe)
+    ]
+    variants.append(
+        comparison.model_copy(
+            update={
+                "section_bases": tuple(
+                    b.model_copy(update={"source_version": "unrelated"})
+                    for b in comparison.section_bases
+                )
+            }
+        )
+    )
+    variants.append(comparison.model_copy(update={"local_edits": ()}))
+    for invalid in variants:
+        facts = safe.model_copy(
+            update={
+                "subjects": (
+                    safe.subjects[0].model_copy(update={"structure": invalid}),
+                ),
+                "source_version_memory": (memory,),
+            }
+        )
+        result = reconcile(facts)
+        assert not result.ready and result.changes[0].disposition == "unresolved"
+        assert result.changes[0].result is None
+        assert result.changes[0].preservation_review.matched_memory_ids == ()
+        assert result.source_version_memory == (memory,)
+
+
+def test_shared_safety_guard_keeps_safe_conflicts_opaque_bytes_and_existing_warning():
+    from tests.reconciliation.test_absence import remembered
+
+    original = b"Intro.\n## Related\n\n- [[Old]]\n\n## Resources\n\n- [[file.pdf]]\n"
+    local = original.replace(b"[[Old]]", b"[[Local]]")
+    incoming = original.replace(b"[[Old]]", b"[[Source]]")
+    conflict = owned_request(local, incoming)
+    assert reconcile(conflict).changes[0].disposition == "unresolved"
+    conflict_memory = remembered(conflict)
+    kept = reconcile(
+        conflict.model_copy(update={"source_version_memory": (conflict_memory,)})
+    )
+    assert kept.ready and kept.changes[0].result.data == local
+    assert kept.changes[0].structure_result is None
+
+    old = b'---\ncategories:\n  - "[[A]]"\nappearance_category: "[[Absent]]"\n---\nText.\n'
+    source = b'---\ncategories:\n  - "[[A]]"\n  - "[[B]]"\nappearance_category: "[[A]]"\n---\nText.\n'
+    targets = (target("a", "category", "[[A]]"), target("b", "category", "[[B]]"))
+    safe = membership_request(old, old, source, targets=targets)
+    assert reconcile(safe).changes[0].structure_result.issues == (
+        "appearance_not_member",
+    )
+    memory = remembered(safe)
+    for current in (old, b"opaque local\xff\x00"):
+        facts = membership_request(old, current, source, targets=targets)
+        result = reconcile(
+            facts.model_copy(update={"source_version_memory": (memory,)})
+        )
+        assert result.ready and result.changes[0].result.data == current
+        assert result.changes[0].disposition == "preserve_vault"
+        assert result.changes[0].structure_result is None
+
+
+def test_unsafe_incoming_only_target_refuses_combination_but_allows_safe_exact_keep():
+    from tests.reconciliation.test_absence import choose, remembered
+
+    original = b'---\ncategories:\n  - "[[A]]"\n---\nText.\n'
+    current = b'---\ncategories:\n  - "[[A]]"\n---\nLocal prose.\n'
+    incoming = b'---\ncategories:\n  - "[[A]]"\n  - "[[B]]"\n---\nText.\n'
+    a, b = target("a", "category", "[[A]]"), target("b", "category", "[[B]]")
+    safe = membership_request(original, current, incoming, targets=(a, b))
+    memory = remembered(safe)
+    outside = b.model_copy(
+        update={"target": b.target.model_copy(update={"containment": "outside"})}
+    )
+    facts = membership_request(original, current, incoming, targets=(a, outside))
+    offered = reconcile(facts)
+    assert offered.changes[0].disposition == "unresolved" and not offered.ready
+    kept = reconcile(facts.model_copy(update={"source_version_memory": (memory,)}))
+    assert kept.ready and kept.changes[0].result.data == current
+    assert kept.changes[0].structure_result is None
+    explicit = reconcile(
+        facts.model_copy(
+            update={"preservation_decisions": (choose(facts, offered, "keep_vault"),)}
+        )
+    )
+    assert explicit.ready and explicit.changes[0].result.data == current
+    assert explicit.changes[0].incoming.data == incoming
+
+    local_section = b"Authored intro.\n## Related\n\n- [[Local|Alias]]\n\n## Resources\n\n- [[file.pdf]]\n"
+    source_section = (
+        b"Intro.\n## Related\n\n- [[Old]]\n\n## Resources\n\n- [[new.pdf]]\n"
+    )
+    section_facts = owned_request(local_section, source_section)
+    section_memory = remembered(section_facts)
+    comparison = section_facts.subjects[0].structure
+    document = comparison.incoming
+    resource = document.owned_sections[1]
+    bad_target = resource.targets[0].model_copy(
+        update={
+            "target": resource.targets[0].target.model_copy(
+                update={"containment": "outside"}
+            )
+        }
+    )
+    document = document.model_copy(
+        update={
+            "owned_sections": (
+                document.owned_sections[0],
+                resource.model_copy(update={"targets": (bad_target,)}),
+            )
+        }
+    )
+    section_facts = section_facts.model_copy(
+        update={
+            "subjects": (
+                section_facts.subjects[0].model_copy(
+                    update={
+                        "structure": comparison.model_copy(
+                            update={"incoming": document}
+                        )
+                    }
+                ),
+            )
+        }
+    )
+    assert reconcile(section_facts).changes[0].disposition == "unresolved"
+    kept_section = reconcile(
+        section_facts.model_copy(update={"source_version_memory": (section_memory,)})
+    )
+    assert kept_section.ready and kept_section.changes[0].result.data == local_section
