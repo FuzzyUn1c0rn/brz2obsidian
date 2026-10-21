@@ -1660,3 +1660,70 @@ def test_consent_scope_set_order_retains_exact_original_consent(ordering):
     assert result.preflight == fresh_checks
     assert result.producer_facts.subjects == fresh.subjects
     assert validate_review(result).status == "accepted"
+
+
+@pytest.mark.parametrize(
+    "role,domain", (("note", "content"), ("configuration", "configuration"))
+)
+def test_unchanged_declined_restoration_retains_exact_original_memory_and_absence(
+    role, domain
+):
+    from brz2obsidian.core import (
+        prepare_review,
+        refresh_review,
+        resolve_review,
+        validate_review,
+    )
+    from tests.reconciliation.test_absence import facts_for
+
+    initial = facts_for(existence="absent", incoming=b"incoming\n")
+    facts = with_review_links(
+        initial.model_copy(
+            update={
+                "subjects": (
+                    initial.subjects[0].model_copy(update={"output_role": role}),
+                )
+            }
+        )
+    )
+    plan = prepare_review(facts, preflight=preflight())
+    token = action(
+        plan,
+        domain="restoration",
+        choice="decline_restoration",
+        decision_id="original:decline",
+    )
+    admitted = resolve_review(plan, token)
+    assert admitted.status == "accepted" and admitted.plan.ready
+    approved = admitted.plan
+    original = approved.approvals[0]
+    memory = original.source_memory
+    assert original.result is None and not original.source_accepted
+    assert memory.choice == "decline_restoration"
+    assert memory.review_domain == domain
+    assert memory.reviewed_incoming.data == b"incoming\n"
+    assert memory.provenance.generation == 1
+    for generation in (2, 3):
+        fresh = facts.model_copy(update={"generation": generation})
+        result = refresh_review(approved, fresh, preflight=preflight()).plan
+        assert result.ready
+        assert result.approvals == (original,)
+        assert result.actions == (token,)
+        assert result.approvals[0].source_memory == memory
+        assert result.approvals[0].source_memory.provenance.generation == 1
+        assert result.producer_facts.source_version_memory == ()
+        assert result.producer_facts.subjects[0].current.existence == "absent"
+        assert result.producer_facts.identity_inventory[0].current.existence == "absent"
+        assert result.history.events[-1].changed_keys == ()
+        assert result.history.events[-1].invalidated_keys == ()
+        assert resolve_review(result, token).code == "decision_id_reused"
+        assert validate_review(result).status == "accepted"
+        approved = result
+    if role == "note":
+        unknown = facts_for(existence="unknown", incoming=b"incoming\n")
+        uncertain = refresh_review(
+            approved,
+            with_review_links(unknown.model_copy(update={"generation": 4})),
+            preflight=preflight(),
+        ).plan
+        assert uncertain.approvals == () and not uncertain.ready

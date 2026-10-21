@@ -297,3 +297,10 @@ used alias or changing a target meaning still invalidates its consumers. The
 original normalized records retain their supplied order in history. Current and
 incoming evidence remain separate stages. Authored bytes, occurrence order,
 membership entries, allocation choices and history event order remain meaningful.
+
+
+An unchanged explicit restoration decline retains its exact original approval,
+source-version memory and content/configuration domain across refresh. Fresh
+complete inventory and observed absence remain required; changed source/context,
+unknown absence or affected safety dependencies reopen review. Retention emits
+no new memory and grants no restoration authority.

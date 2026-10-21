@@ -34,6 +34,30 @@ def _approval_safe(facts, change, approval, origin, attachment_applicability=())
         return any(
             a.decision_id == approval.decision_id for a in attachment_applicability
         )
+    if approval.choice == "decline_restoration":
+        subject = next(
+            s
+            for s in facts.subjects
+            if (s.item_id, s.facet) == (change.item_id, change.facet)
+        )
+        # Fresh producer/graph validation establishes safety; retain the original
+        # reviewed absence policy without emitting another memory or decision.
+        return (
+            approval.domain == "restoration"
+            and change.disposition == "restoration"
+            and facts.inventory == "complete"
+            and subject.current.existence == "absent"
+            and change.current is None
+            and change.result is None
+            and approval.result is None
+            and change.target_path == approval.target_path
+            and approval.source_memory is not None
+            and approval.source_memory.source_version == change.source_version
+            and approval.source_memory.review_domain
+            == (
+                "configuration" if subject.output_role == "configuration" else "content"
+            )
+        )
     if origin.candidate is not None:
         return validate_text_candidate(
             facts,
