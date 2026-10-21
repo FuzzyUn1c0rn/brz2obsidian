@@ -190,6 +190,17 @@ def current_observation_problem(facts):
             or entries[0].current.content != document.content
         ):
             return "current_link_context_unbound"
+        if any(
+            resolve_occurrence(
+                o,
+                context.current_targets,
+                context.current_target_facts,
+                context.inventory,
+            )
+            != o.meaning
+            for o in document.occurrences
+        ):
+            return "current_link_context_unbound"
     _, _, targets, states = consumed_context(
         context.current_documents,
         context.current_targets,

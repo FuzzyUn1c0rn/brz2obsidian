@@ -1558,6 +1558,15 @@ def linked_note_request(*, incoming_path="Notes/Opening.md"):
         incoming_target_facts=(state,),
         current_documents=(
             document(facts.subjects[0].current.content, "Notes/Opening.md"),
+            interpret_links(
+                state.content,
+                document_id="guide",
+                source_path="Docs/Guide.md",
+                path_mode="vault",
+                targets=(target,),
+                target_facts=(state,),
+                inventory="complete",
+            ),
         ),
         incoming_documents=(document(facts.subjects[0].incoming, incoming_path),),
     )
@@ -2253,3 +2262,255 @@ def test_complete_inventory_proves_gap_or_intentional_absence_without_inventing_
         )
         refused = prepare_review(false_absence, preflight=preflight())
         assert not refused.ready and "current_link_context_unbound" in refused.blockers
+
+
+def test_inventory_backlink_coverage_cannot_be_removed_with_interpretation_or_registry():
+    from brz2obsidian.contracts import ExactContent
+    from brz2obsidian.core import prepare_review, resolve_review
+    from brz2obsidian.obsidian import interpret_link_target, interpret_links
+    from tests.reconciliation.test_attachments import target_for_links
+    from tests.reconciliation.test_identity import inventory_item
+
+    facts = linked_note_request()
+    subject = facts.subjects[0]
+    subject = subject.model_copy(
+        update={
+            "path": "Source/Opening.md",
+            "source_target": subject.source_target.model_copy(
+                update={"normalized_path": "source/opening.md"}
+            ),
+        }
+    )
+    context = facts.link_context
+    own = target_for_links("opening", "Notes/Opening.md").model_copy(
+        update={"identity": facts.identity_inventory[0].identity}
+    )
+    moved = own.model_copy(
+        update={"canonical_path": "Source/Opening.md", "target": subject.source_target}
+    )
+    backlink = target_for_links("backlink", "Docs/Backlink.md")
+    actual = ExactContent(data=b"Keep [[Notes/Opening]].")
+    old_state = interpret_link_target(
+        subject.current.content,
+        target_id="opening",
+        existence="present",
+        memberships=(),
+    )
+    new_state = interpret_link_target(
+        subject.incoming, target_id="opening", existence="present", memberships=()
+    )
+    back_state = interpret_link_target(
+        actual, target_id="backlink", existence="present", memberships=()
+    )
+    old_targets = context.current_targets + (own, backlink)
+    new_targets = context.incoming_targets + (moved, backlink)
+    old_states = context.current_target_facts + (old_state, back_state)
+    new_states = context.incoming_target_facts + (new_state, back_state)
+
+    def document(content, document_id, path, targets, states):
+        return interpret_links(
+            content,
+            document_id=document_id,
+            source_path=path,
+            path_mode="vault",
+            targets=targets,
+            target_facts=states,
+            inventory="complete",
+        )
+
+    docs = (
+        document(
+            subject.current.content,
+            "opening",
+            "Notes/Opening.md",
+            old_targets,
+            old_states,
+        ),
+        document(actual, "backlink", "Docs/Backlink.md", old_targets, old_states),
+        document(
+            ExactContent(data=b"Guide body."),
+            "guide",
+            "Docs/Guide.md",
+            old_targets,
+            old_states,
+        ),
+    )
+    inventory = facts.identity_inventory + (
+        inventory_item(
+            "backlink",
+            None,
+            "Docs/Backlink.md",
+            actual.data,
+            state="missing",
+            facet=None,
+        ),
+    )
+    for omission in (
+        "none",
+        "document",
+        "document_target_state",
+        "referenced_current_target",
+    ):
+        current_docs = (
+            docs
+            if omission in ("none", "referenced_current_target")
+            else tuple(d for d in docs if d.document_id != "backlink")
+        )
+        targets = (
+            old_targets
+            if omission != "document_target_state"
+            else tuple(t for t in old_targets if t.target_id != "backlink")
+        )
+        states = (
+            old_states
+            if omission != "document_target_state"
+            else tuple(t for t in old_states if t.target_id != "backlink")
+        )
+        if omission == "referenced_current_target":
+            targets = tuple(t for t in targets if t.target_id != "opening")
+            states = tuple(t for t in states if t.target_id != "opening")
+        observed = facts.model_copy(
+            update={
+                "subjects": (subject,),
+                "identity_inventory": inventory,
+                "link_context": context.model_copy(
+                    update={
+                        "current_targets": targets,
+                        "incoming_targets": new_targets,
+                        "current_target_facts": states,
+                        "incoming_target_facts": new_states,
+                        "current_documents": current_docs,
+                        "incoming_documents": (
+                            document(
+                                subject.incoming,
+                                "opening",
+                                "Source/Opening.md",
+                                new_targets,
+                                new_states,
+                            ),
+                        ),
+                    }
+                ),
+            }
+        )
+        plan = prepare_review(observed, preflight=preflight())
+        renamed = resolve_review(
+            plan,
+            action(
+                plan,
+                domain="rename",
+                choice="source_path",
+                decision_id="rename:coverage",
+            ),
+        ).plan
+        selected = resolve_review(
+            renamed, action(renamed, decision_id="content:coverage")
+        )
+        assert not selected.plan.ready
+        expected = (
+            "selected_link_context_conflict"
+            if omission == "none"
+            else "current_link_context_unbound"
+            if omission == "referenced_current_target"
+            else "current_link_coverage_unavailable"
+        )
+        assert expected in selected.plan.blockers
+        assert (
+            observed.identity_inventory[-1].current.content.data
+            == b"Keep [[Notes/Opening]]."
+        )
+
+
+def test_unknown_potential_backlink_does_not_require_parsing_for_no_effect_opaque_preservation():
+    from brz2obsidian.core import prepare_review
+    from tests.reconciliation.test_identity import inventory_item
+
+    facts = request(original=b"original", current=b"authored\xff", incoming=b"original")
+    empty = linked_note_request().link_context.model_copy(
+        update={
+            "current_targets": (),
+            "incoming_targets": (),
+            "current_target_facts": (),
+            "incoming_target_facts": (),
+            "current_documents": (),
+            "incoming_documents": (),
+        }
+    )
+    facts = facts.model_copy(
+        update={
+            "identity_inventory": facts.identity_inventory
+            + (
+                inventory_item(
+                    "opaque",
+                    None,
+                    "Notes/Opaque.md",
+                    b"unknown\xff",
+                    state="missing",
+                    facet=None,
+                ),
+            ),
+            "link_context": empty,
+        }
+    )
+    plan = prepare_review(facts, preflight=preflight())
+    assert plan.ready and plan.proposal.changes[0].disposition == "preserve_vault"
+    assert (
+        plan.proposal.changes[0].result.data == b"authored\xff" and plan.approvals == ()
+    )
+
+
+def test_configuration_byte_effect_requires_potential_backlink_coverage_but_current_keep_does_not():
+    from brz2obsidian.core import prepare_review, resolve_review
+    from brz2obsidian.obsidian import inspect_text_candidate
+    from tests.reconciliation.test_identity import inventory_item
+
+    facts = linked_note_request()
+    subject = facts.subjects[0].model_copy(update={"output_role": "configuration"})
+    facts = facts.model_copy(
+        update={
+            "subjects": (subject,),
+            "identity_inventory": facts.identity_inventory
+            + (
+                inventory_item(
+                    "opaque",
+                    None,
+                    "Notes/Opaque.md",
+                    b"opaque\xffpotential links",
+                    state="missing",
+                    facet=None,
+                ),
+            ),
+        }
+    )
+    plan = prepare_review(facts, preflight=preflight())
+    kept = resolve_review(
+        plan,
+        action(
+            plan, domain="configuration", choice="current", decision_id="config:keep"
+        ),
+    )
+    assert kept.status == "accepted" and kept.plan.ready
+    candidate = inspect_text_candidate(
+        subject.incoming,
+        identity=facts.identity_inventory[0].identity,
+        target=subject.source_target,
+        output_format=7,
+        source_path="Notes/Opening.md",
+        document_id="opening",
+        path_mode="vault",
+        link_targets=facts.link_context.incoming_targets,
+        link_target_facts=facts.link_context.incoming_target_facts,
+        link_inventory="complete",
+    )
+    changed = resolve_review(
+        plan,
+        action(
+            plan,
+            domain="configuration",
+            choice="incoming",
+            decision_id="config:incoming",
+            candidate=candidate,
+        ),
+    )
+    assert changed.status == "accepted" and not changed.plan.ready
+    assert "current_link_coverage_unavailable" in changed.plan.blockers

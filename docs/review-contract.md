@@ -171,3 +171,18 @@ Unresolved competing writes or affected meaning changes block the complete plan;
 comparison and approved alternative bytes remain inspectable and unchanged.
 Remembered text preservation revalidates consumed current targets rather than
 silently trusting a previous review.
+
+
+Affected-link coverage derives from the independent observed inventory, rather
+than the subset of supplied registry or document records. When selected bytes,
+paths or normalized target meaning change, every present potential note in that
+bounded inventory needs an exact bound, supported, complete link document.
+Omitted documents, opaque potential backlinks or omitted registry layers leave
+coverage unavailable and block whole-plan readiness. An explicit validated safe
+resource record with matching owner/facet and observed payload can exclude a
+binary file; omission cannot establish a resource classification. Supplied
+current queries are independently re-resolved before they establish meaning.
+Known absence/status facts still distinguish a source gap or intentionally
+uncreated target. Exact source-unchanged preservation introduces no new effect
+requiring interpretation of opaque current files. Keeping configuration current
+likewise does not introduce the discarded incoming file's effects.

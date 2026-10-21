@@ -1,5 +1,6 @@
 """Derive effective selected files and check cross-choice link coherence."""
 
+from brz2obsidian.core.identity import _target_context, _target_safe
 from brz2obsidian.core.link_meanings import resolve_occurrence
 from brz2obsidian.core.link_validation import validate_link_document
 from brz2obsidian.core.review_links import current_baseline, known_result_document
@@ -33,7 +34,7 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
         writes[target.target_id] = (content, path)
         current = targets.get(target.target_id)
         old_state = states.get(target.target_id)
-        if current != target or old_state is None or old_state.content != content:
+        if current != target or old_state != state:
             changed_ids.add(target.target_id)
         targets[target.target_id] = target
         if state is None or state.content != content:
@@ -182,6 +183,31 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
         if approval is not None or change.provenance.rule == "remembered_keep":
             explicit_documents.add(document.document_id)
 
+    selected_change = bool(changed_ids)
+    for change in proposal.changes:
+        approval = approved.get(change.change_id)
+        if approval is not None and approval.attachment_candidate is not None:
+            for output in approval.attachment_candidate.outputs:
+                selected_change |= not any(
+                    e.current.path == output.path
+                    and e.current.content == output.content
+                    for e in facts.identity_inventory
+                )
+            continue
+        content = change.result if approval is None else approval.result
+        if content is not None:
+            subject = next(
+                s
+                for s in facts.subjects
+                if (s.item_id, s.facet) == (change.item_id, change.facet)
+            )
+            path = change.target_path if approval is None else approval.target_path
+            selected_change |= (
+                path != subject.current.path or content != subject.current.content
+            )
+    if selected_change and not current_note_coverage(facts):
+        add("current_link_coverage_unavailable")
+
     final_targets = tuple(targets.values())
     final_states = tuple(states.values())
     for document in documents.values():
@@ -247,3 +273,65 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
         if not validation.valid:
             add("selected_link_context_conflict")
     return tuple(blockers)
+
+
+def current_note_coverage(facts):
+    """An omitted registry entry cannot hide an independently observed potential note."""
+    context = facts.link_context
+    for entry in facts.identity_inventory:
+        if entry.current.existence != "present":
+            continue
+        resources = tuple(
+            t
+            for t in context.current_targets
+            if t.kind == "resource" and t.canonical_path == entry.current.path
+        )
+        resource = False
+        if len(resources) == 1:
+            (target,) = resources
+            states = tuple(
+                s
+                for s in context.current_target_facts
+                if s.target_id == target.target_id
+            )
+            declared_note = any(
+                s.attachment is None
+                and s.facet == entry.facet
+                and entry.identity is not None
+                and s.item_id == entry.identity.item_id
+                and facts.incoming_identity.collection_id
+                == entry.identity.collection_id
+                and facts.incoming_identity.module_id == entry.identity.module_id
+                for s in facts.subjects
+            )
+            resource = (
+                not declared_note
+                and target.status == "safe"
+                and target.target is not None
+                and (target.identity is None or target.identity == entry.identity)
+                and _target_safe(
+                    target.canonical_path,
+                    target.target,
+                    _target_context(
+                        target.canonical_path, facts.identity_inventory, entry.entry_id
+                    ),
+                )
+                and len(states) == 1
+                and states[0].existence == "present"
+                and states[0].content == entry.current.content
+            )
+        if resource:
+            continue
+        documents = tuple(
+            d
+            for d in context.current_documents
+            if d.source_path == entry.current.path
+            and d.content == entry.current.content
+        )
+        if (
+            len(documents) != 1
+            or documents[0].status != "supported"
+            or documents[0].inventory != "complete"
+        ):
+            return False
+    return True
