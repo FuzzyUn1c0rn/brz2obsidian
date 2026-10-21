@@ -315,18 +315,35 @@ def main():
         )
         result["test_counts"] = pytest["counts"]
         coverage = [str(python), "-m", "coverage"]
-        for name, extra in (
-            ("combine", ["--keep", str(output)]),
-            ("json", ["--show-contexts", "-o", str(output / "coverage.json")]),
-            ("html", ["-d", str(output / "html")]),
+        for name, command in (
+            (
+                "combine",
+                [*coverage, "combine", "--rcfile", str(config), "--keep", str(output)],
+            ),
+            (
+                "json",
+                [
+                    str(python),
+                    str(root / "tools" / "coverage_report.py"),
+                    "--rcfile",
+                    str(config),
+                    "--output",
+                    str(output / "coverage.json"),
+                ],
+            ),
+            (
+                "html",
+                [
+                    *coverage,
+                    "html",
+                    "--rcfile",
+                    str(config),
+                    "-d",
+                    str(output / "html"),
+                ],
+            ),
         ):
-            execute(
-                [*coverage, name, "--rcfile", str(config), *extra],
-                root,
-                output,
-                name,
-                deadline,
-            )
+            execute(command, root, output, name, deadline)
         result.update(
             metrics(
                 json.loads((output / "coverage.json").read_text(encoding="utf-8")), root

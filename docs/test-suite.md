@@ -16,6 +16,13 @@ requires the GUI development environment, actual GUI test execution, at least
 coverage JSON and HTML identify the actual coverage and remaining gaps; the
 issue records the qualified candidate and measured baseline.
 
+`coverage.json` retains exact contexts once per file, declared by
+`meta.context_scope="file"`. Function/class regions retain their ordinary summaries,
+executed/missing lines and branch arcs without repeating the full-file context map.
+All production files, including unexecuted modules, remain in the denominator.
+Raw coverage data and HTML contexts remain available. Reporting uses the same
+global deadline and validates the check receipt before and after reports.
+
 For everyday development, run the smallest affected selection through
 `tools/check.py`. Use `tools/coverage_suite.py --test <file-or-node>` when a new
 coverage measurement helps the decision. Focused measurements are partial suite

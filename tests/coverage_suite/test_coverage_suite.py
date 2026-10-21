@@ -19,7 +19,7 @@ def coverage_checkout(tmp_path):
     pytest.importorskip("PySide6")
     root = tmp_path / "coverage example"
     (root / "tools").mkdir(parents=True)
-    for name in ("check.py", "check_pytest.py"):
+    for name in ("check.py", "check_pytest.py", "coverage_report.py"):
         shutil.copy2(ROOT / "tools" / name, root / "tools" / name)
     for package, yes, no in (
         ("brz2obsidian", "yes", "no"),
@@ -106,14 +106,30 @@ def summary(root):
 def test_default_command_validates_four_checks_and_reports_all_production(
     coverage_checkout,
 ):
+    decisions = coverage_checkout / "src" / "brz2obsidian" / "decisions.py"
+    with decisions.open("a", encoding="utf-8") as handle:
+        handle.write(
+            "\n\nclass Decision:\n    def choose(self, value):\n        return choose(value)\n"
+        )
+    (decisions.parent / "unexecuted.py").write_text("answer = 42\n", encoding="utf-8")
+    tests = coverage_checkout / "tests" / "test_decisions.py"
+    tests.write_text(
+        tests.read_text(encoding="utf-8").replace(
+            '    assert choose(True) == "yes"\n',
+            '    assert choose(True) == "yes"\n'
+            "    from brz2obsidian.decisions import Decision\n\n"
+            '    assert Decision().choose(True) == "yes"\n',
+        ),
+        encoding="utf-8",
+    )
     result = invoke(coverage_checkout)
     assert result.returncode == 0, result.stdout + result.stderr
     report, output = summary(coverage_checkout)
     assert report["status"] == "passed"
     assert report["measurement"] == "default suite"
-    assert report["lines"] == {"covered": 8, "total": 8, "percent": 100.0}
+    assert report["lines"] == {"covered": 11, "total": 12, "percent": 100 * 11 / 12}
     assert report["branches"] == {"covered": 4, "total": 4, "percent": 100.0}
-    assert report["production_files"] == 4
+    assert report["production_files"] == 5
     assert report["elapsed_seconds"] < 60
     assert 0 < report["pytest_seconds"] < report["runner_seconds"]
     assert report["test_counts"]["passed"] == 3
@@ -131,6 +147,26 @@ def test_default_command_validates_four_checks_and_reports_all_production(
     assert "VALID:" in (output / "validate.log").read_text(encoding="utf-8")
     assert any("test_yes" in row["context"] for row in report["contexts"])
     assert (output / "html" / "index.html").is_file()
+    raw = json.loads((output / "coverage.json").read_text(encoding="utf-8"))
+    files = {Path(name).as_posix(): details for name, details in raw["files"].items()}
+    decision = files["src/brz2obsidian/decisions.py"]
+    assert raw["meta"]["show_contexts"] is True
+    assert raw["meta"]["context_scope"] == "file"
+    assert decision["contexts"]["3"] == ["test_decisions.test_yes"]
+    assert decision["contexts"]["4"] == ["test_decisions.test_all_choices"]
+    assert decision["contexts"]["9"] == ["test_decisions.test_yes"]
+    assert decision["contexts"]["1"] == [""]
+    assert sorted(decision["executed_branches"]) == [[2, 3], [2, 4]]
+    assert decision["missing_branches"] == []
+    assert decision["functions"]["choose"]["summary"]["covered_branches"] == 2
+    assert decision["functions"]["Decision.choose"]["executed_lines"] == [9]
+    assert decision["classes"]["Decision"]["executed_lines"] == [9]
+    assert decision["classes"]["Decision"]["summary"]["num_statements"] == 1
+    for regions in (decision["functions"], decision["classes"]):
+        assert all("contexts" not in region for region in regions.values())
+    unexecuted = files["src/brz2obsidian/unexecuted.py"]
+    assert unexecuted["contexts"] == {} and unexecuted["executed_lines"] == []
+    assert unexecuted["missing_lines"] == [1]
 
 
 def test_focused_measurement_uses_all_source_denominator_and_rejects_threshold(

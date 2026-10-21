@@ -564,6 +564,8 @@ def reconciliation_subject_id(module_id, collection_id, item_id, facet):
 
 class ReconciliationContract(Contract):
     model_config = ConfigDict(
+        # Legacy workers need not build review validators until first use.
+        defer_build=True,
         strict=True,
         frozen=True,
         extra="forbid",
