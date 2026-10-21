@@ -67,6 +67,10 @@ def configuration_change(subject):
         subject.output_role == "configuration"
         and subject.incoming is not None
         and (
+            subject.baseline.content is None
+            or subject.baseline.content.data != subject.incoming.data
+        )
+        and (
             subject.current.content is None
             or subject.current.content.data != subject.incoming.data
         )

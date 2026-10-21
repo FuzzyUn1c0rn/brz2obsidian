@@ -332,3 +332,20 @@ def test_unrelated_established_output_and_whole_source_churn_leave_facet_depende
     later = reconcile(facts.model_copy(update={"format_operation": revised})).changes[0]
     assert first.change_id == later.change_id
     assert first.assumptions == later.assumptions
+
+
+def test_unchanged_source_preserves_opaque_local_configuration_without_new_choice():
+    facts = request(current=b"local config\xff\x00", incoming=b"original\r\n")
+    config = facts.subjects[0].model_copy(
+        update={"output_role": "configuration", "interpretation": "opaque"}
+    )
+    result = reconcile(facts.model_copy(update={"subjects": (config,)}))
+    (change,) = result.changes
+    assert change.disposition == "preserve_vault"
+    assert change.result.data == b"local config\xff\x00"
+    assert change.original.data == change.incoming.data == b"original\r\n"
+    assert change.format_review is None
+    assert not change.requires_decision
+    assert change.provenance.rule == "source_unchanged"
+    assert result.local_changes == (change.subject_id,)
+    assert result.ready and result.readiness == "ready"
