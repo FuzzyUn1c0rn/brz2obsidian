@@ -98,6 +98,20 @@ def resolve_link_meaning(query, display, fragment, targets, target_facts, invent
     return result("resolved", target, state)
 
 
+def resolve_occurrence(occurrence, targets, target_facts, inventory):
+    """Only a query-free external fact can bypass internal target resolution."""
+    if occurrence.query is None and occurrence.meaning.status == "external":
+        return occurrence.meaning
+    return resolve_link_meaning(
+        occurrence.query,
+        occurrence.meaning.display_text,
+        occurrence.meaning.fragment,
+        targets,
+        target_facts,
+        inventory,
+    )
+
+
 def _semantic(value):
     if hasattr(value, "model_dump"):
         if hasattr(value, "data"):
@@ -411,16 +425,12 @@ def validate_current_link_context(facts, subject):
         )
         # A declared occurrence cannot omit a known affected query by falsifying its cached meaning.
         resolved = tuple(
-            resolve_link_meaning(
-                o.query,
-                o.meaning.display_text,
-                o.meaning.fragment,
+            resolve_occurrence(
+                o,
                 context.current_targets,
                 context.current_target_facts,
                 context.inventory,
             )
-            if o.meaning.status != "external"
-            else o.meaning
             for o in doc.occurrences
         )
         affected |= any(

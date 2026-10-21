@@ -1723,6 +1723,7 @@ class LinkValidationFinding(ReconciliationContract):
         "link_harmed",
         "existing_link_warning",
         "link_membership_invalid",
+        "link_appearance_warning",
     ]
     document_id: str
     occurrence_id: str | None

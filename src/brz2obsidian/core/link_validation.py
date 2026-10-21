@@ -13,7 +13,7 @@ from brz2obsidian.contracts import (
     ReferenceTarget,
 )
 
-from .link_meanings import SAFE_LINK_STATUSES, resolve_link_meaning
+from .link_meanings import SAFE_LINK_STATUSES, resolve_occurrence
 from .memberships import appearance_issues, validate_memberships
 from .reference_targets import validate_targets
 
@@ -41,8 +41,6 @@ def validate_link_target_state(state, targets):
             ):
                 raise ValueError("link_membership_invalid")
     validate_memberships(state.structure)
-    if appearance_issues(state.structure):
-        raise ValueError("link_membership_invalid")
     for membership in state.structure.memberships:
         for entry in membership.entries:
             matching = tuple(t for t in targets if t.target_id == entry.target_id)
@@ -137,18 +135,7 @@ def validate_link_document(
     old = () if baseline is None else baseline.occurrences
     for occurrence in document.occurrences:
         declared = occurrence.meaning
-        actual = (
-            declared
-            if declared.status == "external" and occurrence.query is None
-            else resolve_link_meaning(
-                occurrence.query,
-                declared.display_text,
-                declared.fragment,
-                targets,
-                target_facts,
-                inventory,
-            )
-        )
+        actual = resolve_occurrence(occurrence, targets, target_facts, inventory)
         if actual != declared:
             add("link_meaning_mismatch", occurrence.occurrence_id)
             continue
@@ -183,6 +170,9 @@ def validate_link_document(
                 validate_link_target_state(state, targets)
             except ValueError:
                 add("link_membership_invalid", occurrence.occurrence_id)
+            if state.structure is not None and appearance_issues(state.structure):
+                # Appearance diagnostics do not weaken membership/identity/target safety.
+                add("link_appearance_warning", occurrence.occurrence_id, False)
         if actual.status not in SAFE_LINK_STATUSES:
             add("link_harmed", occurrence.occurrence_id)
     return result()

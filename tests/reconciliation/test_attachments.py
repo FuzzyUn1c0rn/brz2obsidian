@@ -2001,3 +2001,140 @@ def test_affected_document_target_safety_is_checked_before_preservation_or_link_
     assert "link_current_unsafe" in {f.code for f in result.findings}
     selection, candidate = attachment_candidate(facts, "current")
     assert not validate_attachment_candidate(facts, selection, candidate).valid
+
+
+def test_corrupt_external_cache_cannot_hide_retained_internal_query_from_current_preservation():
+    from brz2obsidian.obsidian import interpret_link_target, interpret_links
+
+    facts = linked_attachment_request(
+        raw=b"[[Assets/data.bin#Absent|Unsafe affected fragment]]"
+    )
+    subject = facts.subjects[0]
+    subject = subject.model_copy(
+        update={
+            "incoming": subject.baseline.content,
+            "attachment": subject.attachment.model_copy(
+                update={"affected_documents": ()}
+            ),
+        }
+    )
+    context = facts.link_context
+    incoming_state = interpret_link_target(
+        subject.incoming,
+        target_id="resource:payload",
+        existence="present",
+        memberships=(),
+    )
+    incoming_states = (incoming_state,) + context.incoming_target_facts[1:]
+    old = context.current_documents[0]
+    incoming_doc = interpret_links(
+        old.content,
+        document_id=old.document_id,
+        source_path=old.source_path,
+        path_mode=old.path_mode,
+        targets=context.incoming_targets,
+        target_facts=incoming_states,
+        inventory="complete",
+    )
+    context = context.model_copy(
+        update={
+            "incoming_target_facts": incoming_states,
+            "incoming_documents": (incoming_doc,),
+        }
+    )
+    facts = facts.model_copy(update={"subjects": (subject,), "link_context": context})
+    before = reconcile(facts)
+    assert not before.ready and before.changes[0].disposition == "refused"
+    assert "link_current_unsafe" in {f.code for f in before.findings}
+    (occurrence,) = old.occurrences
+    assert (
+        occurrence.query.value == "Assets/data.bin"
+        and occurrence.meaning.fragment.value == "Absent"
+    )
+    external = occurrence.meaning.model_copy(
+        update={
+            "status": "external",
+            "target_id": None,
+            "target_identity": None,
+            "path": None,
+            "target_version": None,
+            "candidates": (),
+        }
+    )
+    corrupted = old.model_copy(
+        update={"occurrences": (occurrence.model_copy(update={"meaning": external}),)}
+    )
+    result = reconcile(
+        facts.model_copy(
+            update={
+                "link_context": context.model_copy(
+                    update={"current_documents": (corrupted,)}
+                )
+            }
+        )
+    )
+    assert not result.ready
+    assert (
+        result.changes[0].disposition == "refused" and result.changes[0].result is None
+    )
+    assert "link_context_invalid" in {f.code for f in result.findings}
+
+
+def test_unchanged_unrelated_appearance_warning_is_reported_without_waiving_membership_safety():
+    from brz2obsidian.contracts import ExactContent
+    from brz2obsidian.core import validate_link_document
+    from brz2obsidian.obsidian import interpret_link_target, interpret_links
+    from tests.reconciliation.test_memberships import target
+
+    category = target("a", "category", "[[A]]")
+    note = target_for_links("note:target", "Notes/Target.md")
+    raw = ExactContent(
+        data=b'---\ncategories:\n  - "[[A]]"\nappearance_category: "[[Absent]]"\n---\nText.\n'
+    )
+    state = interpret_link_target(
+        raw,
+        target_id=note.target_id,
+        existence="present",
+        memberships=("a",),
+        membership_targets=(category,),
+    )
+    doc = interpret_links(
+        ExactContent(data=b"[[Notes/Target.md]]"),
+        document_id="owner",
+        source_path="Owner.md",
+        path_mode="vault",
+        targets=(note, category),
+        target_facts=(state,),
+        inventory="complete",
+    )
+
+    def validate(selected_state):
+        return validate_link_document(
+            doc,
+            expected_content=doc.content,
+            expected_path="Owner.md",
+            targets=(note, category),
+            target_facts=(selected_state,),
+            inventory="complete",
+            baseline=doc,
+            affected_target_ids=("resource:unrelated",),
+        )
+
+    result = validate(state)
+    assert result.valid
+    assert [(f.code, f.blocking) for f in result.findings] == [
+        ("link_appearance_warning", False)
+    ]
+    # The same byte-bound warning cannot excuse unsafe category membership targets.
+    membership = state.structure.memberships[0]
+    unsafe = category.model_copy(
+        update={"target": category.target.model_copy(update={"containment": "outside"})}
+    )
+    entry = membership.entries[0].model_copy(update={"target": unsafe})
+    structure = state.structure.model_copy(
+        update={"memberships": (membership.model_copy(update={"entries": (entry,)}),)}
+    )
+    blocked = validate(state.model_copy(update={"structure": structure}))
+    assert not blocked.valid and "link_membership_invalid" in {
+        f.code for f in blocked.findings
+    }

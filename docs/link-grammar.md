@@ -64,7 +64,10 @@ targets, target_facts, inventory, baseline=None, affected_target_ids=())` return
 `LinkDocumentValidation(valid, findings)`. It revalidates immutable records,
 exact bindings, selected lookup meaning, target identity/path safety, fragment
 and membership facts. A baseline may retain an unchanged unrelated warning;
-affected unsafe state and newly harmful meaning block validation. The baseline
+affected unsafe state and newly harmful meaning block validation. Retained
+appearance-not-member diagnostics are reported as nonblocking appearance warnings,
+consistent with structure review; membership identity and target safety remain
+mandatory. Cached external status cannot hide a retained internal query. The baseline
 must describe the same document/path/mode. Normalized syntax facts are supplied
 by the bounded outer interpreter, rather than reconstructed by the core.
 
