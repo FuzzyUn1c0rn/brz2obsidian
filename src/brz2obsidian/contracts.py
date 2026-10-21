@@ -2131,3 +2131,104 @@ class ReviewTransition(ReconciliationContract):
         "dependency_graph_invalid",
     ]
     plan: ReviewPlan
+
+
+class SavedReview(ReconciliationContract):
+    """Exact historical review value; no claim of currently observed state."""
+
+    schema_id: Literal["brz2obsidian.saved-review"]
+    schema_version: Literal[1]
+    plan: ReviewPlan
+
+
+class LoadedReview(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.loaded-review"]
+    schema_version: Literal[1]
+    saved: SavedReview
+    readiness: Literal["revalidation_required"]
+    ready: Literal[False]
+
+    @field_validator("ready", mode="before")
+    @classmethod
+    def explicit_unready_boolean(cls, value):
+        if type(value) is not bool:
+            raise ValueError("Loaded readiness must be an explicit Boolean")
+        return value
+
+
+class ReviewSaveResult(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.review-save-result"]
+    schema_version: Literal[1]
+    status: Literal["saved", "refused"]
+    code: Literal["saved", "invalid_review"]
+    record: SavedReview | None
+
+    @model_validator(mode="after")
+    def coherent_saved_value(self):
+        if (self.status == "saved") != (self.record is not None) or (
+            self.status == "saved"
+        ) != (self.code == "saved"):
+            raise ValueError("Save success requires exactly its saved record")
+        return self
+
+
+class ReviewLoadResult(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.review-load-result"]
+    schema_version: Literal[1]
+    status: Literal["loaded", "refused"]
+    code: Literal[
+        "loaded",
+        "invalid_record",
+        "invalid_review",
+        "unsupported_schema",
+        "unsupported_version",
+    ]
+    loaded: LoadedReview | None
+    ready: Literal[False]
+
+    @field_validator("ready", mode="before")
+    @classmethod
+    def explicit_unready_boolean(cls, value):
+        if type(value) is not bool:
+            raise ValueError("Load readiness must be an explicit Boolean")
+        return value
+
+    @model_validator(mode="after")
+    def coherent_loaded_value(self):
+        if (self.status == "loaded") != (self.loaded is not None) or (
+            self.status == "loaded"
+        ) != (self.code == "loaded"):
+            raise ValueError("Load success requires an unready loaded value")
+        return self
+
+
+class ReviewResumeResult(ReconciliationContract):
+    schema_id: Literal["brz2obsidian.review-resume-result"]
+    schema_version: Literal[1]
+    status: Literal["resumed", "stale", "refused"]
+    code: Literal[
+        "unchanged",
+        "refreshed",
+        "invalid_loaded",
+        "invalid_current_facts",
+        "wrong_proposal",
+        "generation_changed",
+        "choice_not_admitted",
+        "invalid_review",
+        "dependency_graph_invalid",
+    ]
+    loaded: LoadedReview | None
+    plan: ReviewPlan | None
+    ready: bool
+
+    @model_validator(mode="after")
+    def current_authority_only_after_resume(self):
+        if (self.status == "resumed") != (self.plan is not None) or self.ready != (
+            self.plan is not None and self.plan.ready
+        ):
+            raise ValueError("Only a resumed current plan can confer readiness")
+        if (self.status == "resumed") != (self.code in ("unchanged", "refreshed")) or (
+            self.status == "resumed" and self.loaded is None
+        ):
+            raise ValueError("Resume success needs its loaded provenance")
+        return self

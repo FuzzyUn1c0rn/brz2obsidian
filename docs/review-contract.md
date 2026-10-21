@@ -304,3 +304,54 @@ source-version memory and content/configuration domain across refresh. Fresh
 complete inventory and observed absence remain required; changed source/context,
 unknown absence or affected safety dependencies reopen review. Retention emits
 no new memory and grants no restoration authority.
+
+
+## Exact save, load and current resume
+
+`core.save_review(plan)` reconstructs canonical history before returning a
+version 1 `SavedReview` in a typed save result. Serialize that record with
+`record.model_dump_json()`; `core.load_review(raw)` accepts its JSON string or
+UTF8 bytes. Every saved byte payload uses the shared Base64 representation,
+including opaque content, exact line endings and binary alternatives. The value
+retains the original proposal/generation, comparisons, paths, alternatives,
+actions, refresh history, applicability, memory and unresolved requirements.
+An immutable content reference still needs its available matching bytes; an OID
+or digest alone does not supply an original or result.
+
+The raw entry point rejects duplicate keys at every nesting level before model
+decoding can overwrite them. Missing, unknown or ill-typed interpretation fields,
+invalid UTF8/Base64, malformed or excessively nested JSON and unsupported schema
+IDs/versions return typed refusal without echoing the payload. Record version 1
+is separate from output format 7 and worker protocol 3. Loading does not migrate a
+record, change an output format, invent historical bytes or assert publication,
+rollback or recovery.
+
+Successful load returns a closed `LoadedReview` with literal Boolean
+`ready=False` and `readiness="revalidation_required"`. Its saved historical plan
+remains inspectable, including its previous ready flag; that flag is not current
+operation authority. Raw `ReviewPlan` deserialization and `validate_review` only
+validate supplied historical facts. They do not replace the loaded-current gate.
+
+`core.resume_review(loaded, facts, *, preflight)` revalidates the supplied wrapper
+and reconstructs its complete history before using current normalized facts.
+Exact same facts and preflight retain the proposal, generation, decisions and
+history unchanged. Any difference requires the same proposal identity and the
+next supplied generation, then delegates to `refresh_review`. Even equivalent
+raw reordering advances this explicit refresh epoch while the semantic dependency
+graph can retain unaffected decisions. Original actions/candidates are never
+retokenized to the new epoch. Stale saved actions cannot grant new approval.
+
+A typed refused/stale resume has no current plan and `ready=False`; it cannot
+return the historically ready plan as current work. Accepted current facts can
+produce a resumed plan that remains review-required or refused: missing evidence,
+unsafe association/target/link scope, active/incomplete/recovery state, unsupported
+records and any required choice or consent still block the whole operation.
+The immutable loaded snapshot remains unready throughout. Revalidation consumes
+caller-supplied observations; these pure functions perform no filesystem, Git,
+process or clock observation and do not authenticate external facts.
+
+Content and configuration keep/declined-restoration memory retain their original
+source bytes, domain/context and provenance across round-trip. Repeated source
+may be suppressed only under revalidated current safety; a relevant later change
+reopens review. Retained memory is neither consent for a format operation nor
+pristine-baseline or completed identity-repair evidence.

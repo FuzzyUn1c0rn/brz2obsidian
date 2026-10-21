@@ -53,6 +53,7 @@ matrix. These checks protect observable migration and filesystem safety outcomes
 
 | Family | Default responsibility | Trigger for additional focused checks |
 | --- | --- | --- |
+| Editable-vault reconciliation | Exact-byte proposals, owner/facet identity, formats/onboarding, structures/memberships, absence/memory, binary/link safety, review/consent, selective refresh and saved-review resume at their public in-memory boundaries | Changed normalized fact, interpretation, decision dependency, history, codec or readiness: select its owning `tests/reconciliation` family plus actual affected consumers. Opaque and malformed inputs, partial evidence and unaffected retained decisions remain independent outcomes. |
 | Core and rendering | Source-neutral planning, names, references, resources, tags, categories, strict facts and exact output examples | A changed planning rule, renderer, classification or resource obligation: select its owning public-module cases and affected output examples. |
 | BRZ source | Admission/read failures, exact reference spans, Markdown inserts, exclusion, and representative real conversion | Changed source predicates or formats: select their source-admission vectors. Add downstream checks for a distinct diagnostic, publication or output consequence. |
 | Local API source | Capture integrity, transport failures, payload roles, SVG/ICO/JPEG examples, external references, relationship discovery/reversal and qualified missing-TXT behavior | Changed HTTP, profile, codec, join or capture rule: select its positive, near-miss and tamper families at the source/session boundary. Codec-specific variant controls remain important even when their branches overlap. |
@@ -115,3 +116,21 @@ failures, source ownership/attachment combinations and some platform/UI errors.
 Use the generated missing-branch lists and the table above when those behaviors
 change. The 80% checkpoint does not establish every edge case, native appearance
 or a separately assigned source/user acceptance verdict.
+
+
+The maintained manifest includes the ten owning public reconciliation files:
+proposals, identity, formats, structure, memberships, absence, attachments,
+resolution, refresh and resume. Each is selected once. Their shared value setup
+and replay contexts overlap, while their independently expected byte/meaning,
+provenance and refusal outcomes remain distinct. They exercise bounded pure and
+in-memory outer/core compositions, without repeating the historical Workflow/CLI
+matrices. Focused measurements guide additions and actual consolidation.
+
+The final assembled S1 check uses this maintained default once at its frozen
+head, including all four checks, actual GUI, all-production branch coverage and
+the total 600-second budget. A separately assigned fresh refresh/resume check may
+use the matching runner directly; the default supplies line/branch/context/time
+measurement. Exact-snapshot receipt reuse across assigned candidate/integration
+or aggregate assessments requires explicit requirements and rationale, and never
+substitutes for required independent fresh execution or full manual scope. An
+unchanged head does not need duplicate broad execution for record bookkeeping.

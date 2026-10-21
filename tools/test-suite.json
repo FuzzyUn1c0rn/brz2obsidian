@@ -119,6 +119,16 @@
     "tests/sources/test_local_api_relationship_candidates.py::test_reverse_hierarchy_requires_authoritative_endpoints_and_complete_joins",
     "tests/cli/test_api_cli_contract.py::test_profile3_stage_diagnostics_reach_cli_without_source_hints[inspect-True-resource]",
     "tests/cli/test_api_cli_contract.py::test_profile3_stage_diagnostics_reach_cli_without_source_hints[convert-False-search]",
-    "tests/cli/test_api_cli_contract.py::test_profile3_stage_diagnostics_reach_cli_without_source_hints[convert-True-relationship]"
+    "tests/cli/test_api_cli_contract.py::test_profile3_stage_diagnostics_reach_cli_without_source_hints[convert-True-relationship]",
+    "tests/reconciliation/test_proposals.py",
+    "tests/reconciliation/test_identity.py",
+    "tests/reconciliation/test_formats.py",
+    "tests/reconciliation/test_structure.py",
+    "tests/reconciliation/test_memberships.py",
+    "tests/reconciliation/test_absence.py",
+    "tests/reconciliation/test_attachments.py",
+    "tests/reconciliation/test_resolution.py",
+    "tests/reconciliation/test_refresh.py",
+    "tests/reconciliation/test_resume.py"
   ]
 }
