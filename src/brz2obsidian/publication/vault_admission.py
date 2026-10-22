@@ -11,6 +11,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
+from contextlib import ExitStack
 from pathlib import Path
 
 from brz2obsidian.application.vault_contracts import (
@@ -22,6 +23,11 @@ from brz2obsidian.application.vault_contracts import (
 )
 from brz2obsidian.contracts import ReviewConsentRequirement, ReviewPreflight
 from brz2obsidian.publication.git_read import OUTPUT_BUDGET, read_git
+from brz2obsidian.publication.vault_attributes import (
+    AttributeCapabilityUnavailable,
+    assigned_markers,
+    index_extensions,
+)
 from brz2obsidian.publication.vault_native import observe_file, verify_directory
 
 HOOKS = frozenset(
@@ -69,6 +75,7 @@ CAPABILITIES = frozenset(
         "mktree",
         "commit-tree",
         "update-ref",
+        "update-index",
         "for-each-ref",
     )
 )
@@ -134,6 +141,10 @@ def _safe_relative(value):
             and part == part.rstrip(" .")
             and part.split(".")[0].casefold() not in reserved
             and ":" not in part
+            and (
+                os.name != "nt"
+                or not any(ord(char) < 32 or char in '?*<>|"' for char in part)
+            )
             for part in value.split("/")
         )
     )
@@ -181,6 +192,14 @@ class _Inspection:
         self.capabilities = ()
         self.option_key = None
         self.tracked_paths = set()
+        self.index_stages = ()
+        self.resources = ExitStack()
+        self.attribute_raw = None
+        self.attribute_input = b""
+        self.attribute_reader = None
+        self.attribute_assigned = set()
+        self.ignore_observation = None
+        self.ignored_paths = set()
         self.findings = []
         self.inventory = []
         self.prefixes = {}
@@ -231,7 +250,7 @@ class _Inspection:
             VaultFinding(code=code, policy=policy, message=message, paths=tuple(paths))
         )
 
-    def git(self, *args, input=None, allowed=(0,)):
+    def git(self, *args, input=None, allowed=(0,), environment=None):
         prefix = [self.executable, "--no-pager", "--no-replace-objects"]
         if self.suppress_monitor:
             prefix += ["-c", "core.fsmonitor=false"]
@@ -239,10 +258,24 @@ class _Inspection:
             prefix += ["--git-dir=" + self.policy_view, "--work-tree=" + str(self.root)]
             for key, value in self.view_config:
                 prefix += ["-c", key + "=" + value]
+        effective_environment = (
+            environment if environment is not None else self.view_env or self.env
+        )
+        if args and args[0] in ("ls-files", "check-attr", "check-ignore"):
+            # These internal queries use exact paths/trusted magic, independently
+            # of optional command-line pathspec interpretation in the caller.
+            effective_environment = dict(effective_environment)
+            for name in (
+                "GIT_LITERAL_PATHSPECS",
+                "GIT_GLOB_PATHSPECS",
+                "GIT_NOGLOB_PATHSPECS",
+                "GIT_ICASE_PATHSPECS",
+            ):
+                effective_environment.pop(name, None)
         result = read_git(
             [*prefix, "-C", str(self.root), *args],
             input=input,
-            env=self.view_env or self.env,
+            env=effective_environment,
         )
         if result.returncode not in allowed:
             raise OSError("Git could not establish a complete observation")
@@ -356,6 +389,27 @@ class _Inspection:
                     "Use a self-contained repository without linked worktrees or submodules.",
                 )
                 return False
+            if (gitdir / "index").exists():
+                info, _, raw, _ = observe_file(
+                    gitdir, gitdir / "index", prefix_limit=OUTPUT_BUDGET + 1
+                )
+                if info.st_size > OUTPUT_BUDGET or len(raw) != info.st_size:
+                    raise OSError("Git index exceeds its safe observation budget")
+                extensions = index_extensions(raw)
+                if extensions is None:
+                    self.finding(
+                        "unsupported_format",
+                        "git",
+                        "This index object format needs compatibility qualification before preparation.",
+                    )
+                    return False
+                if any(name in (b"link", b"sdir") for name in extensions):
+                    self.finding(
+                        "index_layout",
+                        "layout",
+                        "Split and sparse index storage need compatibility qualification before preparation.",
+                    )
+                    return False
             for directory, names, files in _walk(gitdir):
                 verify_directory(Path(directory))
                 for name in (*names, *files):
@@ -508,9 +562,12 @@ class _Inspection:
                 ("mktree", ("-z", "--batch")),
                 ("commit-tree", ("-p", "-F")),
                 ("update-ref", ("--stdin", "-z", "--no-deref")),
+                ("update-index", ("--index-info", "--info-only", "-z")),
             )
             for command, options in checks:
-                help_text = self.text(command, "-h", allowed=(0, 129))
+                help_text = self.text(command, "-h", allowed=(0, 129)).replace(
+                    "--[no-]", "--"
+                )
                 if any(option not in help_text for option in options):
                     self.finding(
                         "git_capability",
@@ -574,7 +631,13 @@ class _Inspection:
         values = raw.decode("utf-8").split("\0")
         for i in range(0, len(values) - 2, 3):
             key, _, value = values[i + 2].partition("\n")
-            self.config[key.lower()] = value
+            section, _, rest = key.partition(".")
+            subsection, separator, variable = rest.rpartition(".")
+            normalized = section.lower() + "."
+            normalized += (
+                subsection + "." + variable.lower() if separator else rest.lower()
+            )
+            self.config[normalized] = value
         c = self.config
         if c.get("attr.tree"):
             self.finding(
@@ -658,8 +721,9 @@ class _Inspection:
                     )
                 else:
                     for hook in hooks.iterdir():
+                        name = hook.name.casefold() if os.name == "nt" else hook.name
                         if (
-                            hook.name.removesuffix(".exe") in HOOKS
+                            name.removesuffix(".exe") in HOOKS
                             and hook.is_file()
                             and (os.name == "nt" or os.access(hook, os.X_OK))
                         ):
@@ -789,6 +853,7 @@ class _Inspection:
             )
         if self.findings:
             return False
+        self.index_stages = tuple(stages)
         self.tracked_paths = {
             entry.split(b"\t", 1)[1].decode("utf-8") for entry in stages
         }
@@ -921,20 +986,31 @@ class _Inspection:
                     )
                 )
         self.inventory.sort(key=lambda f: f.path)
-        ignored = (
-            set(
-                self.text(
-                    "check-ignore",
-                    "--no-index",
-                    "--stdin",
-                    "-z",
-                    input="".join(f.path + "\0" for f in self.inventory).encode(),
-                    allowed=(0, 1),
-                ).split("\0")
-            )
-            if self.inventory
-            else set()
+        ignore_paths = sorted(
+            {f.path for f in self.inventory}
+            | {subject.path for subject in self.subjects}
         )
+        ignore_input = "".join(path + "\0" for path in ignore_paths).encode("utf-8")
+        ignored_raw = (
+            self.git(
+                "check-ignore",
+                "--no-index",
+                "--stdin",
+                "-z",
+                input=ignore_input,
+                allowed=(0, 1),
+            )
+            if ignore_paths
+            else b""
+        )
+        if ignored_raw and not ignored_raw.endswith(b"\0"):
+            raise OSError("Malformed effective exclusion observation")
+        ignored = set(ignored_raw.decode("utf-8").split("\0")) - {""}
+        if not ignored.issubset(set(ignore_paths)):
+            raise OSError("Incomplete effective exclusion observation")
+        self.ignore_observation = (ignore_input, ignored_raw) if ignore_paths else None
+        self.ignored_paths = ignored
+        self.policy.append(ignored_raw.hex())
         self.inventory = [
             f.model_copy(update={"excluded": True, "exclusion": "git_ignore"})
             if f.path in ignored and not f.tracked and f.exclusion is None
@@ -982,62 +1058,141 @@ class _Inspection:
             {f.path for f in self.inventory if not f.excluded}
             | {s.path for s in self.subjects}
         )
+        self.attribute_input = "".join(p + "\0" for p in paths).encode("utf-8")
         raw = self.git(
             "check-attr",
             "-z",
+            "--all",
             "--stdin",
+            input=self.attribute_input,
+        )
+        self.attribute_raw = raw
+        self.policy.append(raw.hex())
+        values = raw.decode("utf-8").split("\0")
+        if not values or values[-1] or (len(values) - 1) % 3:
+            raise OSError("Malformed effective attribute observation")
+        relevant = {
             "text",
+            "crlf",
             "eol",
             "working-tree-encoding",
             "ident",
             "filter",
             "diff",
             "merge",
-            input="".join(p + "\0" for p in paths).encode(),
+        }
+        observed = {}
+        for i in range(0, len(values) - 1, 3):
+            path, attribute, value = values[i : i + 3]
+            if path not in paths or (path, attribute) in observed:
+                raise OSError("Inconsistent effective attribute observation")
+            if attribute in relevant:
+                observed[path, attribute] = value
+        # --all omits true unspecified markers, so a returned 'unspecified' is
+        # already a string. Only the boolean-looking spellings need typed query.
+        ambiguous = {
+            attribute
+            for (_, attribute), value in observed.items()
+            if value in ("set", "unset")
+        }
+        assigned = set()
+        if ambiguous:
+            directory = self.temporary_base()
+            if directory is None:
+                return
+            self.attribute_reader = self.resources.enter_context(
+                assigned_markers(
+                    self.executable,
+                    environment=self.view_env or self.env,
+                    stages=self.index_stages,
+                    paths=paths,
+                    attributes=ambiguous,
+                    directory=directory,
+                    query=self.git,
+                )
+            )
+            assigned = self.attribute_reader()
+            self.attribute_assigned = assigned
+            self.capabilities += ("typed-attribute-pathspec",)
+        attrs = {
+            key: value
+            if value not in ("set", "unset") or key in assigned
+            else value == "set"
+            for key, value in observed.items()
+        }
+        self.policy.append(
+            [
+                (path, attribute, value)
+                for (path, attribute), value in sorted(attrs.items())
+            ]
         )
-        self.policy.append(raw.hex())
-        attrs = raw.decode("utf-8").split("\0")
-        builtin = (
-            self.config.get("core.autocrlf", "false").lower() not in FALSE
-            or "core.eol" in self.config
-        )
-        for i in range(0, len(attrs) - 2, 3):
-            path, attribute, value = attrs[i : i + 3]
-            if attribute in (
-                "text",
-                "eol",
-                "working-tree-encoding",
-                "ident",
-            ) and value not in ("unspecified", "unset"):
-                builtin = True
-            if attribute == "filter" and value not in ("unspecified", "unset"):
+        builtin = False
+        merge_names = {
+            key[len("merge.") : key.rfind(".")]
+            for key in self.config
+            if key.startswith("merge.") and key.count(".") >= 2
+        }
+        for path in paths:
+
+            def value(attribute, current_path=path):
+                return attrs.get((current_path, attribute))
+
+            def newline_action(setting):
+                if setting is True:
+                    return "text"
+                if setting is False:
+                    return "binary"
+                return setting if setting in ("input", "auto") else None
+
+            action = newline_action(value("text"))
+            if action is None:
+                action = newline_action(value("crlf"))
+            if action != "binary" and value("eol") in ("lf", "crlf"):
+                action = "text"
+            if (
+                action is None
+                and self.config.get("core.autocrlf", "false").lower() not in FALSE
+            ):
+                action = "text"
+            encoding = value("working-tree-encoding")
+            if isinstance(encoding, bool):
                 self.finding(
-                    "lfs" if value == "lfs" else "custom_filter",
+                    "encoding_policy",
+                    "storage",
+                    "A boolean encoding attribute is not a usable Git storage policy.",
+                    (path,),
+                )
+            builtin |= (
+                action not in (None, "binary")
+                or value("ident") is True
+                or (
+                    isinstance(encoding, str)
+                    and bool(encoding)
+                    and encoding.replace("-", "").casefold() != "utf8"
+                )
+            )
+            driver = value("filter")
+            if isinstance(driver, str):
+                self.finding(
+                    "lfs" if driver == "lfs" else "custom_filter",
                     "storage",
                     "Applicable custom/LFS storage is unsupported; preserve repository policy.",
                     (path,),
                 )
-            if attribute == "merge" and value not in (
-                "unspecified",
-                "unset",
-                "set",
-                "text",
-                "binary",
-                "union",
-            ):
+            driver = value("merge")
+            if driver is None:
+                driver = self.config.get("merge.default")
+            if isinstance(driver, str) and driver in merge_names:
                 self.finding(
                     "custom_driver",
                     "execution",
                     "An applicable custom merge driver is unsupported.",
                     (path,),
                 )
-            if (
-                attribute == "diff"
-                and value not in ("unspecified", "unset", "set")
-                and any(
-                    k in self.config
-                    for k in (f"diff.{value}.command", f"diff.{value}.textconv")
-                )
+            driver = value("diff")
+            if isinstance(driver, str) and any(
+                key in self.config
+                for key in (f"diff.{driver}.command", f"diff.{driver}.textconv")
             ):
                 self.finding(
                     "custom_driver",
@@ -1096,20 +1251,7 @@ class _Inspection:
                 )
             )
         excluded = {f.path for f in self.inventory if f.exclusion == "git_ignore"}
-        ignored_subjects = (
-            set(
-                self.text(
-                    "check-ignore",
-                    "--no-index",
-                    "--stdin",
-                    "-z",
-                    input="".join(s.path + "\0" for s in self.subjects).encode(),
-                    allowed=(0, 1),
-                ).split("\0")
-            )
-            if self.subjects
-            else set()
-        )
+        ignored_subjects = self.ignored_paths
         included = [
             s.subject_id
             for s in self.subjects
@@ -1120,6 +1262,34 @@ class _Inspection:
             self.consents.append(consent("tracking", "ordinary", included))
 
     def recheck(self):
+        if self.attribute_raw is not None:
+
+            def current_attributes():
+                return self.git(
+                    "check-attr", "-z", "--all", "--stdin", input=self.attribute_input
+                )
+
+            if current_attributes() != self.attribute_raw:
+                raise OSError("Effective attributes changed during inspection")
+            if self.attribute_reader is not None and (
+                self.attribute_reader() != self.attribute_assigned
+                or current_attributes() != self.attribute_raw
+            ):
+                raise OSError("Effective attribute identity changed during inspection")
+        if self.ignore_observation is not None:
+            input, expected = self.ignore_observation
+            if (
+                self.git(
+                    "check-ignore",
+                    "--no-index",
+                    "--stdin",
+                    "-z",
+                    input=input,
+                    allowed=(0, 1),
+                )
+                != expected
+            ):
+                raise OSError("Effective exclusions changed during inspection")
         observed = {}
         for directory, names, files in _walk(self.root):
             base = Path(directory)
@@ -1197,6 +1367,14 @@ class _Inspection:
             return self.finish()
         if not self.layout():
             return self.finish()
+        if _exists(self.root / ".brz2obsidian"):
+            self.finding(
+                "converter_operation",
+                "operation",
+                "Converter metadata requires recovery discovery even when local history is missing.",
+            )
+            self.operation = "recovery_required"
+            return self.finish()
         if not self.executable:
             self.finding(
                 "git_unavailable",
@@ -1250,48 +1428,46 @@ class _Inspection:
                 temp_base = self.temporary_base()
                 if temp_base is None:
                     return self.finish()
-                with tempfile.TemporaryDirectory(
-                    prefix="brz2obsidian-policy-", dir=temp_base
-                ) as view:
-                    path = Path(view)
-                    (path / "objects").mkdir()
-                    (path / "refs").mkdir()
-                    (path / "HEAD").write_bytes(b"ref: refs/heads/inspection\n")
-                    empty_config = path / "empty-config"
-                    empty_config.write_bytes(b"")
-                    self.policy_view = view
-                    self.view_env = {
-                        k: v
-                        for k, v in self.env.items()
-                        if not k.startswith("GIT_CONFIG_")
+                view = self.resources.enter_context(
+                    tempfile.TemporaryDirectory(
+                        prefix="brz2obsidian-policy-", dir=temp_base
+                    )
+                )
+                path = Path(view)
+                (path / "objects").mkdir()
+                (path / "refs").mkdir()
+                (path / "HEAD").write_bytes(b"ref: refs/heads/inspection\n")
+                empty_config = path / "empty-config"
+                empty_config.write_bytes(b"")
+                self.policy_view = view
+                self.view_env = {
+                    k: v for k, v in self.env.items() if not k.startswith("GIT_CONFIG_")
+                }
+                self.view_env.update(
+                    {
+                        "GIT_CONFIG_NOSYSTEM": "1",
+                        "GIT_CONFIG_GLOBAL": str(empty_config),
+                        "GIT_CONFIG_SYSTEM": str(empty_config),
                     }
-                    self.view_env.update(
-                        {
-                            "GIT_CONFIG_NOSYSTEM": "1",
-                            "GIT_CONFIG_GLOBAL": str(empty_config),
-                            "GIT_CONFIG_SYSTEM": str(empty_config),
-                        }
+                )
+                self.view_config = tuple(
+                    (k, v)
+                    for k, v in self.config.items()
+                    if k
+                    in (
+                        "core.attributesfile",
+                        "core.excludesfile",
+                        "core.ignorecase",
+                        "core.symlinks",
+                        "core.autocrlf",
+                        "core.eol",
                     )
-                    self.view_config = tuple(
-                        (k, v)
-                        for k, v in self.config.items()
-                        if k
-                        in (
-                            "core.attributesfile",
-                            "core.excludesfile",
-                            "core.ignorecase",
-                            "core.symlinks",
-                            "core.autocrlf",
-                            "core.eol",
-                        )
-                    )
-                    if self.qualify_options():
-                        self.git("ls-files", "--stage", "-z")
-                        self.authored()
-                        if self.complete:
-                            self.attributes()
-                    self.policy_view = None
-                    self.view_env = None
+                )
+                if self.qualify_options():
+                    self.git("ls-files", "--stage", "-z")
+                    self.authored()
+                    if self.complete:
+                        self.attributes()
             else:
                 self.authored()
                 if self.complete:
@@ -1382,7 +1558,16 @@ def inspect_vault(vault, *, subjects=(), git_executable=None):
     """Observe current storage; caller assertions cannot grant trusted proof."""
     inspection = _Inspection(vault, subjects, git_executable)
     try:
-        return inspection.run()
+        with inspection.resources:
+            return inspection.run()
+    except AttributeCapabilityUnavailable:
+        inspection.complete = False
+        inspection.finding(
+            "git_capability",
+            "git",
+            "Install Git with the required lossless attribute-query capability before preparation.",
+        )
+        return inspection.finish()
     except OSError, UnicodeError, ValueError, subprocess.SubprocessError:
         inspection.complete = False
         inspection.finding(

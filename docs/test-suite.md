@@ -146,7 +146,10 @@ unchanged head does not need duplicate broad execution for record bookkeeping.
 The maintained selection includes both owning read-only vault admission files
 once. `test_vault_admission.py` owns effective policy, scoped choices, authored
 inventory, actual Windows access/path/process controls and typed unavailable
-results through `Operations.inspect_vault`. `test_vault_admission_layouts.py`
+results through `Operations.inspect_vault`. The same public family owns literal
+attribute marker/driver distinctions, indexed/macro/default-attribute fallback,
+external-policy coherence, typed fingerprints and actual split/orphan/index
+version controls. `test_vault_admission_layouts.py`
 owns actual linked worktrees, bare repositories, unmerged stages, SHA-256 and
 reftable qualification refusals. Their independent bytes/index/refs/config
 oracles remain explicit; repeated successful preparation is consolidated where
@@ -155,3 +158,10 @@ include pytest context, alongside production line/branch/context measurements.
 The focused #271 checks also cover the inward-import boundary and an existing
 minimal Operations consumer. These checks establish admission; later S2 leaves
 own capture, apply, recovery and the final measured ordinary bundle.
+
+Measured focused fixture changes retain their independent outcomes: native Git
+CMD delegation reduced the old-format control from 3.56 to 0.87 seconds, the
+typed-matcher failure from 14.03 to 3.04 seconds and the actual file writer from
+15.14–15.82 to 5.71 seconds. The writer still changes the actual owned file once,
+retains its literal new bytes and compares other files/index/refs. These are
+focused observations, not a projected whole-S2 bundle qualification.

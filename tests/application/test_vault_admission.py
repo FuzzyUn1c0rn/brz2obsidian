@@ -140,6 +140,7 @@ def storage(root):
             stat.S_IMODE(p.stat().st_mode),
             p.stat().st_dev,
             p.stat().st_ino,
+            p.stat().st_mtime_ns,
             p.read_bytes(),
         )
         for p in root.rglob("*")
@@ -228,6 +229,44 @@ def test_effective_builtin_storage_and_inclusion_are_distinct_scoped_current_cho
     assert [c.kind for c in tracked.preflight.consents] == ["storage"]
 
 
+def test_legacy_crlf_storage_choice_respects_effective_text_precedence(vault):
+    from brz2obsidian.application.vault_contracts import VaultSubject
+
+    git(vault, "config", "core.autocrlf", "false")
+    (vault / "note.md").write_bytes(b"literal\r\n")
+    subject = VaultSubject(path="note.md", subject_id="selected-note")
+    disabled_fingerprint = None
+    for attributes, expected in (
+        (b"*.md crlf\n", True),
+        (b"*.md crlf=input\n", True),
+        (b"*.md crlf=input -text\n", False),
+        (b"*.md crlf=input text=unset\n", True),
+        (b"*.md -crlf\n", False),
+        (b"* -text\n*.md ident=unset\n", False),
+        (b"* -text\n*.md working-tree-encoding=unset\n", True),
+    ):
+        (vault / ".gitattributes").write_bytes(attributes)
+        before = storage(vault)
+        result = inspect(vault, subjects=(subject,))
+        assert result.status == "supported"
+        assert bool(result.preflight.consents) is expected
+        if attributes == b"*.md crlf=input -text\n":
+            disabled_fingerprint = result.policy_fingerprint
+        if attributes == b"*.md crlf=input text=unset\n":
+            assert result.policy_fingerprint != disabled_fingerprint
+        if expected:
+            assert result.preflight.consents[0].subjects == ("selected-note",)
+            assert result.preflight.consents[0].policy == "builtin_transform"
+        assert storage(vault) == before
+    git(vault, "config", "core.autocrlf", "true")
+    (vault / ".gitattributes").write_bytes(b"* -text\n*.md crlf=input\n")
+    before = storage(vault)
+    disabled = inspect(vault, subjects=(subject,))
+    assert disabled.status == "supported"
+    assert disabled.preflight.consents == ()
+    assert storage(vault) == before
+
+
 @pytest.mark.parametrize(
     "policy,config,attributes,expected",
     [
@@ -251,6 +290,60 @@ def test_effective_builtin_storage_and_inclusion_are_distinct_scoped_current_cho
             b"*.md merge=secret\n",
             "custom_driver",
         ),
+        (
+            "default merge",
+            ("merge.secret.driver", "CANARY"),
+            b"",
+            "custom_driver",
+        ),
+        (
+            "override builtin merge",
+            ("merge.text.driver", "CANARY"),
+            b"*.md merge=text\n",
+            "custom_driver",
+        ),
+        (
+            "literal unset filter",
+            ("filter.unset.clean", "CANARY"),
+            b"*.md filter=unset\n",
+            "custom_filter",
+        ),
+        (
+            "literal unset diff",
+            ("diff.unset.textconv", "CANARY"),
+            b"*.md diff=unset\n",
+            "custom_driver",
+        ),
+        (
+            "literal unset merge",
+            ("merge.unset.driver", "CANARY"),
+            b"*.md merge=unset\n",
+            "custom_driver",
+        ),
+        (
+            "mixed case active diff",
+            ("diff.Secret.textconv", "CANARY"),
+            b"*.md diff=Secret\n",
+            "custom_driver",
+        ),
+        (
+            "mixed case unused diff",
+            ("diff.Secret.textconv", "CANARY"),
+            b"*.md diff=secret\n",
+            None,
+        ),
+        (
+            "literal unspecified filter",
+            ("filter.unspecified.clean", "CANARY"),
+            b"*.md filter=unspecified\n",
+            "custom_filter",
+        ),
+        (
+            "boolean merge bypasses custom default",
+            ("merge.text.driver", "CANARY"),
+            b"* -merge\n*.md merge\n",
+            None,
+        ),
         ("fsmonitor", ("core.fsmonitor", "CANARY"), b"", "fsmonitor"),
     ],
 )
@@ -272,11 +365,16 @@ def test_applicable_execution_policy_refuses_without_running_canaries(
     (vault / ".gitattributes").write_bytes(attributes)
     if config:
         git(vault, "config", config[0], canary if config[1] == "CANARY" else config[1])
+    if policy == "default merge":
+        git(vault, "config", "merge.default", "secret")
+    elif policy == "boolean merge bypasses custom default":
+        git(vault, "config", "merge.default", "text")
     before = storage(vault)
     result = inspect(vault)
-    assert result.status == "refused", policy
-    assert expected in {f.code for f in result.findings}
-    assert result.admitted_actions == ()
+    assert result.status == ("refused" if expected else "supported"), policy
+    if expected:
+        assert expected in {f.code for f in result.findings}
+    assert result.admitted_actions == (() if expected else ("review_history",))
     assert not marker.exists()
     assert storage(vault) == before
     assert "secret" not in result.model_dump_json()
@@ -288,6 +386,7 @@ def test_inactive_samples_unused_definitions_and_binary_are_supported_but_active
     (vault / "asset.bin").write_bytes(b"\x00\xff\x80")
     (vault / ".gitattributes").write_bytes(b"asset.bin -text -diff -merge\n")
     git(vault, "config", "filter.unused.clean", "!touch SHOULD_NOT_RUN")
+    git(vault, "config", "filter.unset.clean", "unused missing program")
     (vault / ".git" / "hooks" / "notes.lock").write_bytes(b"inactive hook notes")
     assert inspect(vault).status == "supported"
     (vault / "asset.bin").write_bytes(
@@ -301,11 +400,25 @@ def test_inactive_samples_unused_definitions_and_binary_are_supported_but_active
     (vault / "asset.bin").write_bytes(b"\x00\xff\x80")
     hook = vault / ".git" / "hooks" / "reference-transaction"
     hook.write_bytes(b"#!/bin/sh\necho canary > EXECUTED\n")
+    git(vault, "hook", "run", "reference-transaction", "--", "committed")
+    assert (vault / "EXECUTED").read_bytes() == b"canary\n"
+    (vault / "EXECUTED").unlink()
     before = storage(vault)
     result = inspect(vault)
     assert result.status == "refused"
     assert "active_hook" in {f.code for f in result.findings}
     assert storage(vault) == before
+    if os.name == "nt":
+        hook.rename(hook.with_name("REFERENCE-TRANSACTION"))
+        # Qualify actual Windows Git lookup of the uppercase physical name.
+        git(vault, "hook", "run", "reference-transaction", "--", "committed")
+        assert (vault / "EXECUTED").read_bytes() == b"canary\n"
+        (vault / "EXECUTED").unlink()
+        uppercase_before = storage(vault)
+        uppercase = inspect(vault)
+        assert uppercase.status == "refused"
+        assert "active_hook" in {f.code for f in uppercase.findings}
+        assert storage(vault) == uppercase_before
 
 
 def test_empty_configured_hook_location_is_inactive(vault):
@@ -327,6 +440,7 @@ def test_empty_configured_hook_location_is_inactive(vault):
         ("lock", "foreign_lock", "recovery_first"),
         ("converter", "converter_operation", "recovery_first"),
         ("sparse", "sparse_checkout", "refused"),
+        ("split", "index_layout", "refused"),
         ("skip", "index_flags", "refused"),
         ("assume", "index_flags", "refused"),
         ("shallow", "incomplete_store", "refused"),
@@ -358,6 +472,12 @@ def test_storage_layout_and_operation_states_are_precisely_refused_without_repai
         )
     elif case == "sparse":
         git(vault, "config", "core.sparseCheckout", "true")
+    elif case == "split":
+        git(vault, "update-index", "--split-index")
+        shared = tuple(store.glob("sharedindex.*"))
+        assert shared
+        for path in shared:
+            os.utime(path, (1000000000, 1000000000))
     elif case in ("skip", "assume"):
         git(
             vault,
@@ -423,6 +543,22 @@ def test_storage_layout_and_operation_states_are_precisely_refused_without_repai
         ("resolve_operation",) if status == "recovery_first" else ()
     )
     assert storage(vault) == before
+    if case == "split":
+        git(vault, "update-index", "--no-split-index")
+        assert tuple(store.glob("sharedindex.*"))
+        ordinary_before = storage(vault)
+        assert inspect(vault).status == "supported"
+        assert storage(vault) == ordinary_before
+        (vault / "intent.md").write_bytes(b"intent-to-add authored bytes")
+        git(vault, "add", "-N", "intent.md")
+        git(vault, "update-index", "--index-version=3")
+        version_three_before = storage(vault)
+        assert inspect(vault).status == "supported"
+        assert storage(vault) == version_three_before
+        git(vault, "update-index", "--index-version=4")
+        version_four_before = storage(vault)
+        assert inspect(vault).status == "supported"
+        assert storage(vault) == version_four_before
 
 
 def test_no_repository_is_supported_but_missing_git_is_typed_and_safe(vault):
@@ -439,6 +575,17 @@ def test_no_repository_is_supported_but_missing_git_is_typed_and_safe(vault):
     assert unavailable.findings[0].code == "git_unavailable"
     assert unavailable.admitted_actions == ()
     assert (root / "note.md").read_bytes() == b"authored"
+    marker = root / ".brz2obsidian" / "intent.json"
+    marker.parent.mkdir()
+    marker.write_bytes(b"surviving incomplete intent without repository")
+    before = storage(root)
+    interrupted = inspect(root)
+    assert interrupted.status == "recovery_first"
+    assert interrupted.admitted_actions == ("resolve_operation",)
+    assert interrupted.preflight.operation_status == "recovery_required"
+    assert interrupted.preflight.state_status == "unknown"
+    assert storage(root) == before
+    assert not (root / ".git").exists()
 
 
 def test_actual_junction_hardlink_and_selected_readonly_paths_are_refused(vault):
@@ -608,7 +755,21 @@ def test_new_subject_under_denied_parent_and_unsafe_metadata_aliases_refuse(vaul
             check=False,
         )
         assert restore.returncode == 0
-    for path in (".GIT/config", "note. ", "NUL.md", "a/../b", "a:b", "a\\b"):
+    for path in (
+        ".GIT/config",
+        "note. ",
+        "NUL.md",
+        "a/../b",
+        "a:b",
+        "a\\b",
+        "incoming/new?.md",
+        "incoming/new*.md",
+        "incoming/new<.md",
+        "incoming/new>.md",
+        "incoming/new|.md",
+        'incoming/new".md',
+        "incoming/new\x01.md",
+    ):
         bad = inspect(vault, subjects=({"path": path, "subject_id": "unsafe"},))
         assert bad.status == "refused"
         assert bad.findings[0].code == "unsafe_subject"
@@ -662,6 +823,66 @@ def test_effective_system_global_repository_and_info_rules_are_observed(
     assert "custom_filter" in {f.code for f in refused.findings}
 
 
+def test_typed_attribute_policy_preserves_index_fallback_and_inactive_missing_subjects(
+    vault, monkeypatch
+):
+    from brz2obsidian.application.vault_contracts import VaultSubject
+
+    xdg = vault.parent / "xdg"
+    (xdg / "git").mkdir(parents=True)
+    (xdg / "git" / "attributes").write_bytes(b"* text=unset\n")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+    git(vault, "config", "core.autocrlf", "false")
+    (vault / "note.md").write_bytes(b"tracked authored bytes")
+    git(vault, "add", "note.md")
+    (vault / ".gitattributes").write_bytes(
+        b"[attr]protected filter=unset\n*.md protected\n"
+    )
+    git(vault, "add", ".gitattributes")
+    (vault / ".gitattributes").unlink()
+    (vault / ".gitignore").write_bytes(b"ignored.md\n")
+    (vault / "ignored.md").write_bytes(b"ignored authored bytes")
+    git(vault, "config", "filter.unset.clean", "missing inactive program")
+    subjects = (
+        VaultSubject(path="incoming/new.md", subject_id="new"),
+        VaultSubject(path="ignored.md", subject_id="ignored"),
+    )
+    before = storage(vault)
+    assigned = inspect(vault, subjects=subjects)
+    assert assigned.status == "refused"
+    assert {
+        path
+        for finding in assigned.findings
+        if finding.code == "custom_filter"
+        for path in finding.paths
+    } == {
+        "note.md",
+        "ignored.md",
+        "incoming/new.md",
+    }
+    assert storage(vault) == before
+    assert not (vault / "incoming").exists()
+    for rule in (b"*.md -filter\n", b"*.md !filter !merge !diff\n"):
+        (vault / ".git" / "info" / "attributes").write_bytes(rule)
+        before = storage(vault)
+        inactive = inspect(vault, subjects=subjects)
+        assert inactive.status == "supported"
+        assert inactive.policy_fingerprint != assigned.policy_fingerprint
+        assert [choice.kind for choice in inactive.preflight.consents] == ["tracking"]
+        assert storage(vault) == before
+    # A missing incoming .gitattributes must retain actual absence, even while
+    # a typed query needs a synthetic index entry for its name.
+    git(vault, "update-index", "--force-remove", ".gitattributes")
+    (vault / ".git" / "info" / "attributes").write_bytes(b"* -filter -diff -merge\n")
+    before = storage(vault)
+    absent = inspect(
+        vault, subjects=(VaultSubject(path=".gitattributes", subject_id="new-rules"),)
+    )
+    assert absent.status == "supported"
+    assert storage(vault) == before
+    assert not (vault / ".gitattributes").exists()
+
+
 def test_oversized_effective_policy_returns_safe_unknown_without_unbounded_output(
     vault, monkeypatch
 ):
@@ -683,22 +904,41 @@ def test_no_repository_requires_actual_format_option_support(vault):
     import shutil
 
     root = fixture_root("old-option")
-    script = root.parent / (root.name + "-git.py")
-    script.write_text(
-        "import subprocess,sys\nif '--show-ref-format' in sys.argv:\n print('--show-ref-format')\nelse:\n raise SystemExit(subprocess.call(["
-        + repr(shutil.which("git"))
-        + ",*sys.argv[1:]]))\n",
-        encoding="utf-8",
+    wrapper = root.parent / "old-option-git.cmd"
+    scan = (
+        "@echo off\r\nsetlocal\r\n"
+        'set "old_format="\r\nset "typed_attribute="\r\n'
+        ":scan\r\n"
+        'if "%~1"=="" goto scanned\r\n'
+        'if "%~1"=="--show-ref-format" set "old_format=yes"\r\n'
+        'set "argument=%~1"\r\n'
+        'if not "%argument:attr:=%"=="%argument%" set "typed_attribute=yes"\r\n'
+        "shift\r\ngoto scan\r\n:scanned\r\n"
     )
-    wrapper = root.parent / (root.name + "-git.cmd")
+    delegate = '"' + shutil.which("git") + '" %*\r\nexit /b %ERRORLEVEL%\r\n'
     wrapper.write_text(
-        '@echo off\r\n"' + sys.executable + '" "' + str(script) + '" %*\r\n',
+        scan
+        + "if defined old_format (\r\necho --show-ref-format\r\nexit /b 0\r\n)\r\n"
+        + delegate,
         encoding="utf-8",
     )
-    result = inspect(root, git_executable=str(wrapper))
+    result = inspect(root, git_executable=wrapper)
     assert result.status == "refused"
     assert "git_capability" in {f.code for f in result.findings}
     assert result.admitted_actions == ()
+    assert not (root / ".git").exists()
+    wrapper.write_text(
+        scan + "if defined typed_attribute exit /b 0\r\n" + delegate,
+        encoding="utf-8",
+    )
+    (root / ".gitattributes").write_bytes(b"* -filter\n")
+    (root / "note.md").write_bytes(b"preserved")
+    before = storage(root)
+    unsupported_typed = inspect(root, git_executable=wrapper)
+    assert unsupported_typed.status == "refused"
+    assert "git_capability" in {finding.code for finding in unsupported_typed.findings}
+    assert unsupported_typed.admitted_actions == ()
+    assert storage(root) == before
     assert not (root / ".git").exists()
 
 
@@ -807,6 +1047,13 @@ def test_unknown_access_environment_and_resource_observations_never_claim_deleti
     assert graft_redirect.findings[0].code == "redirected_environment"
     assert graft_file.read_bytes() == b"external history must not be consulted\n"
     monkeypatch.delenv("GIT_GRAFT_FILE")
+    (vault / ".gitattributes").write_bytes(b"*.md filter=unset\n")
+    monkeypatch.setenv("GIT_LITERAL_PATHSPECS", "1")
+    literal = inspect(vault)
+    assert literal.status == "refused"
+    assert "custom_filter" in {f.code for f in literal.findings}
+    monkeypatch.delenv("GIT_LITERAL_PATHSPECS")
+    (vault / ".gitattributes").unlink()
     # Filesystem-space observation is a system seam; no real volume is filled.
     usage = namedtuple("Usage", "total used free")
     monkeypatch.setattr("shutil.disk_usage", lambda _: usage(100, 100, 0))
@@ -902,27 +1149,81 @@ def test_actual_concurrent_authored_change_is_unknown_and_keeps_new_user_bytes(v
     import shutil
 
     (vault / "note.md").write_bytes(b"observed before race")
-    script = vault.parent / "race-git.py"
+    marker = vault.parent / "file-writer-ran"
+    script = vault.parent / "file-writer.py"
     script.write_text(
-        "import pathlib,subprocess,sys\ncode=subprocess.call(["
-        + repr(shutil.which("git"))
-        + ",*sys.argv[1:]])\nif 'check-attr' in sys.argv: pathlib.Path("
+        "from pathlib import Path\nPath("
         + repr(str(vault / "note.md"))
-        + ").write_bytes(b'raced by another process\\n')\nraise SystemExit(code)\n",
+        + ").write_bytes(b'raced by another process\\n')\nPath("
+        + repr(str(marker))
+        + ").write_bytes(b'changed')\n",
         encoding="utf-8",
     )
     wrapper = vault.parent / "race-git.cmd"
     wrapper.write_text(
-        '@echo off\r\n"' + sys.executable + '" "' + str(script) + '" %*\r\n',
+        '@echo off\r\nsetlocal\r\nset "is_attribute="\r\n'
+        '"' + shutil.which("git") + '" %*\r\n'
+        'set "git_exit=%ERRORLEVEL%"\r\n'
+        ':scan\r\nif "%~1"=="" goto scanned\r\n'
+        'if "%~1"=="check-attr" set "is_attribute=yes"\r\n'
+        "shift\r\ngoto scan\r\n:scanned\r\n"
+        'if defined is_attribute if not exist "'
+        + str(marker)
+        + '" "'
+        + sys.executable
+        + '" "'
+        + str(script)
+        + '"\r\n'
+        "exit /b %git_exit%\r\n",
         encoding="utf-8",
     )
     before = storage(vault)
-    result = inspect(vault, git_executable=str(wrapper))
+    result = inspect(vault, git_executable=wrapper)
     assert result.status in ("refused", "unknown")
     assert not result.inventory_complete
     assert result.admitted_actions == ()
     assert "observation_unavailable" in {f.code for f in result.findings}
+    assert marker.read_bytes() == b"changed"
     assert (vault / "note.md").read_bytes() == b"raced by another process\n"
     assert {p: data for p, data in storage(vault).items() if p != "note.md"} == {
         p: data for p, data in before.items() if p != "note.md"
     }
+
+
+def test_actual_external_attribute_change_never_combines_incompatible_policy_states(
+    vault,
+):
+    import shutil
+
+    (vault / "note.md").write_bytes(b"preserved authored bytes")
+    attributes = vault.parent / "external-attributes"
+    attributes.write_bytes(b"*.md filter=unset\n")
+    git(vault, "config", "core.attributesFile", str(attributes))
+    marker = vault.parent / "policy-writer-ran"
+    wrapper = vault.parent / "policy-race-git.cmd"
+    wrapper.write_text(
+        "@echo off\r\n"
+        '"' + shutil.which("git") + '" %*\r\n'
+        'set "git_exit=%ERRORLEVEL%"\r\n'
+        ":scan\r\n"
+        'if "%~1"=="" goto scanned\r\n'
+        'if "%~1"=="check-attr" set "is_attribute=yes"\r\n'
+        "shift\r\n"
+        "goto scan\r\n"
+        ":scanned\r\n"
+        'if defined is_attribute if not exist "' + str(marker) + '" (\r\n'
+        '>"' + str(attributes) + '" echo *.md filter=secret\r\n'
+        '>"' + str(marker) + '" echo changed\r\n'
+        ")\r\n"
+        "exit /b %git_exit%\r\n",
+        encoding="utf-8",
+    )
+    before = storage(vault)
+    result = inspect(vault, git_executable=wrapper)
+    assert attributes.read_bytes() == b"*.md filter=secret\r\n"
+    assert marker.read_bytes() == b"changed\r\n"
+    assert result.status in ("refused", "unknown")
+    assert not result.inventory_complete
+    assert result.admitted_actions == ()
+    assert "observation_unavailable" in {finding.code for finding in result.findings}
+    assert storage(vault) == before

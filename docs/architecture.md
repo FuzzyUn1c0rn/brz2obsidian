@@ -414,6 +414,9 @@ adapter. Immutable inward application values reuse S1 preflight and scoped
 consent requirements. Discovery observes effective policy, current authored
 bytes and repository facts without changing the inspected vault or granting
 capture/publication authority. Native handle and bounded child-process modules
-own Windows access/identity and read-command resource handling. See
+own Windows access/identity and read-command resource handling. A separate outer
+attribute helper qualifies index extensions and lossless typed queries using
+owned ephemeral control indexes, retaining real policy context and final
+coherence checks. See
 [vault admission](vault-admission.md) for policy, capability limits and the
 accepted C01-C17 evidence map.

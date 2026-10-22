@@ -132,7 +132,7 @@ def verify_directory(path, *, writable=False):
     return f"{before.st_dev}:{before.st_ino}:{owner}"
 
 
-def observe_file(root, path, *, writable=False):
+def observe_file(root, path, *, writable=False, prefix_limit=1024):
     """Hash bounded chunks from the same physical verified native file handle."""
     root, path = Path(root).absolute(), Path(path).absolute()
     path.relative_to(root)
@@ -180,8 +180,8 @@ def observe_file(root, path, *, writable=False):
             with os.fdopen(fd, "rb") as stream:
                 opened = os.fstat(stream.fileno())
                 while block := stream.read(1024 * 1024):
-                    if not prefix:
-                        prefix = block[:1024]
+                    if len(prefix) < prefix_limit:
+                        prefix += block[: prefix_limit - len(prefix)]
                     content.update(block)
                 finished = os.fstat(stream.fileno())
     else:
@@ -189,8 +189,8 @@ def observe_file(root, path, *, writable=False):
         with os.fdopen(fd, "rb") as stream:
             opened = os.fstat(stream.fileno())
             while block := stream.read(1024 * 1024):
-                if not prefix:
-                    prefix = block[:1024]
+                if len(prefix) < prefix_limit:
+                    prefix += block[: prefix_limit - len(prefix)]
                 content.update(block)
             finished = os.fstat(stream.fileno())
         owner = str(opened.st_uid)

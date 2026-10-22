@@ -32,11 +32,15 @@ existing operation, preserving its files, refs and foreign locks.
 `policy_scope="before_initialization"` explicitly marks provisional discovery.
 Git requires a repository for its attribute/ignore interpreters. Admission uses
 an app-owned empty temporary Git directory with the actual vault as its worktree;
-it creates no authored blobs, index or target history. The view freezes the
+it creates no authored blobs, target index or target history. The view freezes the
 actual pre-initialization scalar attribute/ignore configuration so its temporary
 name cannot activate unrelated `includeIf` rules. Physical temp containment and
 native access are established before allocation, without `gettempdir()` access
-probe files. Cleanup removes only this owned external view.
+probe files. Cleanup removes only this owned external view. A separate typed-query helper
+may build ephemeral ordinary indexes in another owned empty Git directory; these
+hold control names and already observed mode/OID/path rows, without authored
+payload or object writes. Both namespaces survive through the final policy
+recheck and close on success or failure.
 
 After reviewed target initialization, #272 must rediscover actual Git policy
 before the first authored capture. Actual `includeIf gitdir`/`onbranch` policy
@@ -46,6 +50,19 @@ and must be disclosed truthfully by that operation's result.
 
 ## Policy and recovery coverage
 
+Git's printed attribute states can share spellings with assigned strings. The
+adapter uses `check-attr --all` and the documented typed attribute pathspec
+matcher to retain their identities. An isolated probe checks literal strings
+against genuine true/false/reset markers before the real policy query. Its
+configuration, global/system attributes and probe index are independent of
+actual authored rules. The later ordinary index preserves original indexed
+attribute OIDs and adds only missing observed/selected names; actual Git context resolves
+current global/info/nested rules and index fallback. Internal exact-path queries
+neutralize inherited pathspec interpretation switches. Final raw/typed/raw and
+batched ignore rechecks reject changed or incompatible observations. Policy
+fingerprints include the decoded identities, rather than their printed words.
+See [Git's typed matcher](https://github.com/git-for-windows/git/blob/v2.55.0.windows.5/pathspec.c#L720-L748).
+
 Storage requirements disclose that converter snapshots retain exact on-disk
 bytes despite applicable built-in newline, encoding or keyword transformations.
 Tracking requirements separately identify selected ignored authored subjects.
@@ -53,6 +70,13 @@ Both bind the vault/repository, effective policy and subjects. Tracked ignore
 matches remain tracked. Unrelated ignored authored paths remain untouched and
 appear as recovery gaps. Known cache/temp directories are explicitly disclosed
 in `exclusions` and remain outside the authored inventory.
+
+Built-in transformation applicability follows modern text/legacy crlf precedence,
+explicit negative text, encoding and ident semantics. Merge selection retains
+case-sensitive driver subsections, configured defaults and overrides of built-in
+names, while genuine boolean merge states retain their built-in behavior. See
+[conversion precedence](https://github.com/git-for-windows/git/blob/v2.55.0.windows.5/convert.c#L1246-L1285)
+and [merge-driver selection](https://github.com/git-for-windows/git/blob/v2.55.0.windows.5/merge-ll.c#L341-L369).
 
 Applicable custom filters/encryption/LFS, active recognized hooks (including
 reference-transaction), custom merge/diff/textconv programs and unsupported
@@ -74,6 +98,11 @@ layout, cached option proof binds the freshly reported version, both the selecte
 launcher and underlying Git binary hashes, and execution paths. Other layouts or
 explicit executables repeat option proof.
 Unqualified object/ref formats refuse pending focused compatibility evidence.
+Before any Git index consumer, a bounded native-handle read validates the index
+checksum, entry extents and actual extensions. Split/sparse indexes refuse;
+orphan shared-index files alone do not. Actual ordinary index versions 2/3/4,
+including intent-to-add and compressed paths, have public controls. A SHA-256
+index remains explicitly unqualified rather than being treated as extension-free.
 
 File hashes stream in 1 MiB chunks. Ignore/attribute inputs are batched. Git
 control input plus combined stdout/stderr has a 16 MiB budget; directory/control
@@ -112,7 +141,7 @@ and fixtures are preserved.
 | Criterion | Owning public evidence |
 | --- | --- |
 | A1: complete C admission observations | Both `test_vault_admission.py` and `test_vault_admission_layouts.py`; C mapping below |
-| A2: effective policy/nonexecution | system/global/repository/info rules, qualified canaries, active/inactive hooks, trace sinks |
+| A2: effective policy/nonexecution | system/global/repository/info rules, literal driver identities, default/override/case selection, qualified canaries, active/inactive hooks, trace sinks and external-policy writer |
 | A3: actual advanced/incomplete layouts | real linked/bare/unmerged/format controls and storage-layout matrix |
 | A4: authored inventory/path/access | exact unborn/dirty inventory, actual Windows ACL/junction/hardlink/read-only controls, caches and concurrent file race |
 | A5: scoped storage/tracking choices | builtin/inclusion requirements, tracked ignores, changed policy, conditional post-init rediscovery |
@@ -124,19 +153,19 @@ and fixtures are preserved.
 | C02 | unborn root, committed dirty root and detached HEAD with exact unchanged state |
 | C03 | same-file partial staging, literal staged blob and raw index preservation |
 | C04 | ordinary refs/remotes, unused definitions and cache exclusions |
-| C05 | built-in exact-byte storage requirement and changed-policy binding |
-| C06 | actual custom/missing filter canaries, effective global/info bindings |
+| C05 | built-in/legacy exact-byte storage, modern-text precedence, literal encoding/ident distinctions and typed-policy binding |
+| C06 | actual custom/missing/reserved-name filter canaries, genuine negative/reset contrast and global/info/index-fallback bindings |
 | C07 | LFS attribute/pointer refusal without payload execution |
-| C08 | custom merge/diff/textconv/monitor canaries, active reference hook, inactive samples/empty hook location |
-| C09 | Git markers/foreign locks/converter metadata and actual unmerged stages; no abort/delete |
+| C08 | merge-default/built-in override/mixed-case driver canaries, genuine boolean contrast, active uppercase Windows reference hook and inactive locations |
+| C09 | Git markers/foreign locks/converter metadata even without local Git, actual unmerged stages; no abort/delete |
 | C10 | repository/global/info ignores, tracked matches, distinct selected inclusion and unrelated gaps |
 | C11 | actual main+linked worktrees and redirected metadata |
 | C12 | parent/root-within-parent and nested repositories; actual bare root |
-| C13 | actual sparse configuration, skip-worktree and assume-unchanged flags |
+| C13 | actual sparse configuration, split-index early gate/orphan contrast, skip-worktree and assume-unchanged flags |
 | C14 | actual shallow/promisor/alternate/grafted ancestry, missing/corrupt objects and SHA-256/reftable refusals |
 | C15 | actual junction/hardlink/read-only/ACL denial and concurrent bytes; synthetic low-space fact at the filesystem seam |
 | C16 | exact 18 MB binary inventory remains supported; #273 owns binary apply and #278 measured resource qualification |
-| C17 | installed Git/capabilities, actual missing executable and old-style unsupported-option wrapper |
+| C17 | installed Git/capabilities, missing executable and actual unsupported format/typed-matcher wrappers with setup findings |
 
 R27 maps to the C10 scoped inclusion requirements and disclosed recovery gaps;
 #272/#273 own the approved or declined execution. R30 maps to C17 capability
