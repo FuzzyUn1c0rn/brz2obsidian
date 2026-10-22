@@ -490,6 +490,12 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
             "brz2obsidian.application.diagnostics",
             "brz2obsidian.application.wiring",
             "brz2obsidian.publication.filesystem",
+            "brz2obsidian.publication.vault_admission",
+        },
+        # Read-only vault preparation shares inward application facts through
+        # this outer adapter; the reusable publication modules stay independent.
+        "publication/vault_admission.py": {
+            "brz2obsidian.application.vault_contracts",
         },
         "application/protocol.py": {"brz2obsidian.application.contracts"},
         "application/runner.py": {

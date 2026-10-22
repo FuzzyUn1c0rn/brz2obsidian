@@ -141,3 +141,17 @@ measurement. Exact-snapshot receipt reuse across assigned candidate/integration
 or aggregate assessments requires explicit requirements and rationale, and never
 substitutes for required independent fresh execution or full manual scope. An
 unchanged head does not need duplicate broad execution for record bookkeeping.
+
+
+The maintained selection includes both owning read-only vault admission files
+once. `test_vault_admission.py` owns effective policy, scoped choices, authored
+inventory, actual Windows access/path/process controls and typed unavailable
+results through `Operations.inspect_vault`. `test_vault_admission_layouts.py`
+owns actual linked worktrees, bare repositories, unmerged stages, SHA-256 and
+reftable qualification refusals. Their independent bytes/index/refs/config
+oracles remain explicit; repeated successful preparation is consolidated where
+it does not distinguish an outcome. Git setup and public inspection timings
+include pytest context, alongside production line/branch/context measurements.
+The focused #271 checks also cover the inward-import boundary and an existing
+minimal Operations consumer. These checks establish admission; later S2 leaves
+own capture, apply, recovery and the final measured ordinary bundle.

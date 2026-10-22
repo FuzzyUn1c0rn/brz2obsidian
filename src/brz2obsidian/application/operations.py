@@ -57,6 +57,18 @@ class Operations:
         self.checker = checker
         self.credentials = credentials
 
+    def inspect_vault(
+        self,
+        vault: Path | str,
+        *,
+        subjects=(),
+        git_executable: Path | str | None = None,
+    ):
+        """Read-only current Git, policy and authored-inventory observations."""
+        from brz2obsidian.publication.vault_admission import inspect_vault
+
+        return inspect_vault(vault, subjects=subjects, git_executable=git_executable)
+
     def _selected_workflow(self, selection):
         if isinstance(selection, LocalApiSourceSelection):
             from brz2obsidian.application.wiring import selected_api_workflow

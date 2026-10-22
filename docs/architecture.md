@@ -405,3 +405,15 @@ succeeded. It cannot establish source-gap predicates or preservation completenes
 Exact text edits now carry the closed source-neutral kind `literal_text` or `markdown_insert`; reference spans carry the validated `table_cell` presentation context for native-safe alias serialization. Snapshot/policy, renderer and migration result/record versions advance together to 7; the reviewed TheBrain module/profile is 10. The source adapter recognizes scoped active ToCs, evidenced table metadata and canonical callouts, composes literal edits before reference tracing, and supplies exact edit/declaration evidence. The generic core validates coordinates and digests without interpreting proprietary insert syntax. The renderer uses those adapted documents and escapes generated alias pipes in declared table cells.
 
 Formatting-loss findings use an explicit reviewed `formatting_loss` warning disposition. Table widths/justification, title emoji fallbacks and retained unsupported variants share existing warning authorization, safe UI messages, CLI issues and linked migration reports. Native standard callout colours/icons are accepted and produce no loss warning.
+
+
+## Read-only authored-vault admission
+
+`Operations.inspect_vault` lazily composes the outer Git/filesystem admission
+adapter. Immutable inward application values reuse S1 preflight and scoped
+consent requirements. Discovery observes effective policy, current authored
+bytes and repository facts without changing the inspected vault or granting
+capture/publication authority. Native handle and bounded child-process modules
+own Windows access/identity and read-command resource handling. See
+[vault admission](vault-admission.md) for policy, capability limits and the
+accepted C01-C17 evidence map.
