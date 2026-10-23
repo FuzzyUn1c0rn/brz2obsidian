@@ -60,12 +60,14 @@ from brz2obsidian.publication.vault_apply import (
     _prepare_parents,
     _proposed_directory,
     _release,
+    _review_fact_paths_match,
     _review_subjects,
     _same_file,
     owns_operation,
 )
 from brz2obsidian.publication.vault_history import (
     _Git,
+    _inspect_retained_history,
     capture_checkpoint,
     inspect_history,
 )
@@ -132,19 +134,43 @@ def _lease_free(root, operation_id):
     return True
 
 
-def _review_observation(root, observed, *, direction, authority, next_generation=None):
+def _review_observation(
+    root, observed, *, direction, authority, next_generation=None, undo_target=None
+):
     """Bind original S1 facts to independently observed current vault bytes."""
     git = _Git(root)
     original, intent, origin_commit, retained = authority
-    if intent.operation_id != observed.operation_id:
+    if intent.operation_id != observed.operation_id and not any(
+        graph.receipt is not None and graph.origin_intent_commit == origin_commit
+        for graph in retained.graphs
+    ):
         raise OSError("Validated operation authority changed")
     selected = select_review_effects(original)
     if selected.status != "selected":
         raise OSError("Original prepared review is not selected")
     selected_files = {row.path: row.content for row in selected.files}
-    produced = {row.path: row for row in intent.proposed}
+    ownership_proposed = {
+        row.path: row
+        for row in (
+            undo_target.graph.authorities[-1][1].proposed
+            if undo_target is not None
+            else intent.proposed
+        )
+    }
+    query_plan, query_effects = original, selected
+    pending = retained.checkpoint
+    if (
+        retained.unpublished_prepared == pending.locator.commit
+        and pending.manifest.undo_of_receipt_commit is not None
+        and pending.review is not None
+    ):
+        # Policy fingerprints include the selected subject/query domain.
+        # Reobserve precisely the saved Undo scope, including real Owner
+        # document facets that were dependent outputs of the original apply.
+        query_plan = pending.review.saved.plan
+        query_effects = select_review_effects(query_plan)
     admission = _inspect_vault_for_recovery(
-        root, retained, subjects=_review_subjects(original, selected)
+        root, retained, subjects=_review_subjects(query_plan, query_effects)
     )
     if (
         not admission.inventory_complete
@@ -307,7 +333,7 @@ def _review_observation(root, observed, *, direction, authority, next_generation
                     and item.identity == retained_target.identity
                     and item.facet == "content"
                 )
-                row = produced.get(path)
+                row = ownership_proposed.get(path)
                 content = selected_files[path]
                 if (
                     len(retained_document) != 1
@@ -536,16 +562,52 @@ def _review_observation(root, observed, *, direction, authority, next_generation
     # Only that validated movement is neutralized: changed policy, consents,
     # current bytes, or a broken graph still reach the ordinary refresh rules.
     original_prepared = retained.owned[intent.prepared_commit][0]
-    same_policy = admission.policy_fingerprint == original_prepared.policy_fingerprint
-    preflight = admission.preflight.model_copy(
+    preflight = _review_preflight(admission, original_prepared, original, retained)
+    return original, intent, origin_commit, git, facts, preflight, current, retained
+
+
+def _review_preflight(admission, prepared, original, retained):
+    same_policy = admission.policy_fingerprint == prepared.policy_fingerprint
+    pending = retained.checkpoint
+    pending_undo = (
+        retained.unpublished_prepared == pending.locator.commit
+        and pending.manifest.undo_of_receipt_commit is not None
+        and pending.review is not None
+        and admission.policy_fingerprint == pending.manifest.policy_fingerprint
+    )
+    state_fingerprint = (
+        pending.review.saved.plan.preflight.state_fingerprint
+        if pending_undo
+        else original.preflight.state_fingerprint
+        if same_policy and retained.graph.receipt is None
+        else admission.preflight.state_fingerprint
+    )
+    return admission.preflight.model_copy(
         update={
             "operation_status": "idle",
-            "state_fingerprint": original.preflight.state_fingerprint
-            if same_policy
-            else admission.preflight.state_fingerprint,
+            "state_fingerprint": state_fingerprint,
         }
     )
-    return original, intent, origin_commit, git, facts, preflight, current, retained
+
+
+def _current_review_matches(review, admission):
+    inventory = {row.path: row for row in admission.inventory}
+
+    def matches(path, content):
+        row = inventory.get(path)
+        return (
+            row is None
+            if content is None
+            else (
+                row is not None
+                and row.size == len(content.data)
+                and row.sha256 == hashlib.sha256(content.data).hexdigest()
+            )
+        )
+
+    return _review_fact_paths_match(
+        review.producer_facts, matches, lambda path, content: True
+    )
 
 
 def _finish_review(root, observed, *, previous=None, authority=None):
@@ -681,7 +743,7 @@ def _restore_link_context(original, facts, before, affected, git):
     )
 
 
-def _restore_review(root, observed, *, previous=None, authority=None):
+def _restore_review(root, observed, *, previous=None, authority=None, undo_target=None):
     original, intent, origin_commit, git, facts, preflight, current, retained = (
         _review_observation(
             root,
@@ -689,10 +751,13 @@ def _restore_review(root, observed, *, previous=None, authority=None):
             direction="restore",
             authority=authority,
             next_generation=(previous.proposal.generation + 1 if previous else None),
+            undo_target=undo_target,
         )
     )
     before = {row.path: row for row in intent.before}
     produced = {row.path: row for row in intent.proposed}
+    source_prepared = retained.owned[intent.prepared_commit][0]
+    produced_source = {row.path: row for row in source_prepared.source}
     subjects = []
     baseline_outputs = []
     output_references = {}
@@ -763,6 +828,10 @@ def _restore_review(root, observed, *, previous=None, authority=None):
         generated = subject.incoming or (
             subject.baseline.content if subject.baseline.status == "known" else None
         )
+        if intent.kind == "undo" and intent.undo_of_receipt_commit is not None:
+            # An Undo's directional incoming bytes can be authored preimage.
+            # Its generated baseline remains the actual retained source role.
+            generated = _owned_content(git, produced_source.get(subject.path))
         subjects.append(
             subject.model_copy(
                 update={
@@ -790,7 +859,6 @@ def _restore_review(root, observed, *, previous=None, authority=None):
         for subject in subjects
         for path in ((subject.path,) if subject.path in intent.affected_paths else ())
     } | set(output_references)
-    source_prepared = retained.owned[intent.prepared_commit][0]
     source_lineage = retained.owned[source_prepared.previous][0]
     generated_files = {row.path: row for row in source_lineage.source}
     original_files = {
@@ -919,6 +987,28 @@ def _restore_review(root, observed, *, previous=None, authority=None):
                 "current_target_facts": tuple(current_states),
                 "incoming_targets": tuple(incoming_refs),
                 "incoming_target_facts": tuple(incoming_states),
+            }
+        )
+    if context is not None and output_references:
+        # Retained selected outputs can qualify an actual current link that
+        # the pre-operation lookup could not resolve. Bind its meaning only
+        # after all exact owned output references/states have joined lookup.
+        context = context.model_copy(
+            update={
+                "current_documents": tuple(
+                    document
+                    if document.status != "supported" or not document.occurrences
+                    else interpret_links(
+                        document.content,
+                        document_id=document.document_id,
+                        source_path=document.source_path,
+                        path_mode=document.path_mode,
+                        targets=context.current_targets,
+                        target_facts=context.current_target_facts,
+                        inventory="complete",
+                    )
+                    for document in context.current_documents
+                ),
             }
         )
     facts = facts.model_copy(
@@ -1329,28 +1419,34 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
     executor = executor if executor is not None else _NativeExecutor()
     current_status = observed
     try:
+        before_lease = _inspect_vault_for_recovery(root, authority, subjects=subjects)
+        origin = authority.graph.authorities[-1][1]
+        original_prepared, original_saved = authority.owned[origin.prepared_commit]
+        if (
+            before_lease.status != "supported"
+            or not _current_review_matches(saved.review, before_lease)
+            or _review_preflight(
+                before_lease, original_prepared, original_saved.saved.plan, authority
+            )
+            != saved.review.preflight
+        ):
+            return _refuse_known_recovery(
+                observed, "recovery_review_stale", start=start
+            )
         _adopt(root, operation_id)
         acquired = True
         if not owns_operation(root, operation_id):
             raise OSError("Recovery operation lease is unavailable")
-        current_status, current_authority = _inspect_update_observation(root)
-        if (
-            current_authority is None
-            or current_authority.graph.commit != authority.graph.commit
-            or current_status.operation_id != operation_id
-            or current_status.intent_commit != saved.intent_commit
-            or (
-                isinstance(current_authority.graph.intent, VaultRecoveryIntent)
-                and current_status.direction != saved.direction
-            )
-        ):
-            return _refuse_known_recovery(
-                current_status, "recovery_authority_changed", start=start
-            )
-        history = inspect_history(
-            root, subjects=subjects, active_operation=operation_id
+        current_status, current_authority = observed, authority
+        history = _inspect_retained_history(
+            root, current_authority, subjects=subjects, active_operation=operation_id
         )
-        if history.status != "intact" or history.admission.status != "supported":
+        if (
+            history.status != "intact"
+            or history.admission.status != "supported"
+            or history.admission.inventory != before_lease.inventory
+            or history.admission.policy_fingerprint != before_lease.policy_fingerprint
+        ):
             return _refuse_known_recovery(
                 current_status, "recovery_admission_required", start=start
             )
@@ -1497,6 +1593,7 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
                     proposed=proposed_root,
                     active_operation=operation_id,
                     recovery_direction=saved.direction,
+                    _observation=(current_status, current_authority),
                 )
                 reused_preparation = (
                     prepared.status == "unchanged"
@@ -1672,8 +1769,12 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
                 ):
                     raise OSError("Removed recovery path remains visible")
                 phase = "result"
-                current = inspect_history(
-                    root, subjects=subjects, active_operation=operation_id
+                result_observation = _inspect_update_observation(root)
+                current = _inspect_retained_history(
+                    root,
+                    result_observation[1],
+                    subjects=subjects,
+                    active_operation=operation_id,
                 )
                 result_checkpoint = capture_checkpoint(
                     root,
@@ -1687,6 +1788,7 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
                     expected_prepared=prepared_commit,
                     active_operation=operation_id,
                     operation_intent_commit=recovery_commit,
+                    _observation=result_observation,
                 )
                 if result_checkpoint.status != "captured":
                     failure_code = "result_" + result_checkpoint.code

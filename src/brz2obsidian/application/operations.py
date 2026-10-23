@@ -142,6 +142,26 @@ class Operations:
             vault, preparation, cancel=cancel, executor=self.vault_executor
         )
 
+    def prepare_undo(self, vault, *, previous=None):
+        """Inspect latest eligibility and prepare or refresh its whole Undo review."""
+        from brz2obsidian.publication.vault_undo import prepare_undo
+
+        return prepare_undo(vault, previous=previous)
+
+    def resolve_undo(self, vault, preparation, action):
+        """Record one decision against the current latest-Undo facts."""
+        from brz2obsidian.publication.vault_undo import resolve_undo
+
+        return resolve_undo(vault, preparation, action)
+
+    def execute_undo(self, vault, preparation, *, cancel=None):
+        """Publish an eligible reviewed Undo through the existing operation executor."""
+        from brz2obsidian.publication.vault_undo import execute_undo
+
+        return execute_undo(
+            vault, preparation, cancel=cancel, executor=self.vault_executor
+        )
+
     def read_update_details(self, vault, *, offset=0, limit=100):
         """Page safe before/result comparisons from validated owned intent."""
         from brz2obsidian.publication.vault_apply import read_update_details

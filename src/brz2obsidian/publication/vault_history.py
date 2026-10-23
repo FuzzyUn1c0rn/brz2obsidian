@@ -8,6 +8,7 @@ import shutil
 import stat
 import tempfile
 from pathlib import Path
+from typing import NamedTuple
 
 from brz2obsidian.application.checkpoint_contracts import (
     CheckpointFile,
@@ -147,6 +148,7 @@ def _semantic(
     recovery_origin_intent_commit=None,
     recovery_previous_operation_commit=None,
     recovery_direction=None,
+    undo_of_receipt_commit=None,
 ):
     return _semantic_meaning(
         association,
@@ -163,6 +165,7 @@ def _semantic(
         recovery_origin_intent_commit,
         recovery_previous_operation_commit,
         recovery_direction,
+        undo_of_receipt_commit,
     )
 
 
@@ -181,6 +184,7 @@ def _semantic_meaning(
     recovery_origin_intent_commit=None,
     recovery_previous_operation_commit=None,
     recovery_direction=None,
+    undo_of_receipt_commit=None,
 ):
     parts = (
         association.model_dump(mode="json"),
@@ -195,6 +199,8 @@ def _semantic_meaning(
         meaning,
     )
     # Unmarked #272 storage retains its original semantic fingerprint.
+    if undo_of_receipt_commit is not None:
+        return digest((*parts, "undo-prepared", undo_of_receipt_commit))
     if recovery_origin_intent_commit is not None:
         return digest(
             (
@@ -657,7 +663,21 @@ def _load_review_payload(git, manifest, verified):
     return restored, references
 
 
-def _read(root, git, *, targets=None, linked_intents=None):
+class _CheckpointRole(NamedTuple):
+    """Validated scalar lineage; raw control bodies remain per-generation."""
+
+    commit: str
+    previous: str | None
+    generation: int
+    boundary: str
+    operation_intent_commit: str | None
+    undo_of_receipt_commit: str | None
+    recovery_origin_intent_commit: str | None
+    recovery_previous_operation_commit: str | None
+    recovery_direction: str | None
+
+
+def _read(root, git, *, targets=None, linked_intents=None, checkpoint_roles=None):
     locator_path = root / ".brz2obsidian/locator.json"
     if not locator_path.exists():
         if (root / ".brz2obsidian").exists() or git.call(
@@ -891,12 +911,27 @@ def _read(root, git, *, targets=None, linked_intents=None):
                 manifest.recovery_origin_intent_commit,
                 manifest.recovery_previous_operation_commit,
                 manifest.recovery_direction,
+                manifest.undo_of_receipt_commit,
             )
             != manifest.semantic_fingerprint
         ):
             raise OSError("Retained checkpoint semantic interpretation disagrees")
         if linked_intents is not None and manifest.operation_intent_commit is not None:
             linked_intents.append(manifest.operation_intent_commit)
+        if checkpoint_roles is not None:
+            checkpoint_roles.append(
+                _CheckpointRole(
+                    current,
+                    manifest.previous,
+                    manifest.generation,
+                    manifest.boundary,
+                    manifest.operation_intent_commit,
+                    manifest.undo_of_receipt_commit,
+                    manifest.recovery_origin_intent_commit,
+                    manifest.recovery_previous_operation_commit,
+                    manifest.recovery_direction,
+                )
+            )
         if tip_manifest is None:
             tip_manifest, tip_review = manifest, review
         if targets is not None and current in targets:
@@ -928,6 +963,27 @@ def _read(root, git, *, targets=None, linked_intents=None):
             raise OSError("Operation checkpoint is outside the retained owned chain")
         return result, target_records
     return result
+
+
+def _inspect_retained_history(vault, observation, *, subjects=(), active_operation):
+    """Reobserve current admission beneath this call's already validated graph."""
+    from brz2obsidian.publication.vault_apply import _OperationObservation
+
+    if not isinstance(observation, _OperationObservation) or active_operation is None:
+        raise OSError("Current operation observation and owned lease are required")
+    admission, checkpoint = _observe_vault(
+        vault,
+        subjects=subjects,
+        active_operation=active_operation,
+        recovery_observation=observation,
+    )
+    return VaultHistoryInspection(
+        schema_id="brz2obsidian.vault-history-inspection",
+        schema_version=1,
+        status="intact" if checkpoint is not None else "unavailable",
+        admission=admission,
+        checkpoint=checkpoint,
+    )
 
 
 def inspect_history(vault, *, subjects=(), git_executable=None, active_operation=None):
@@ -1007,6 +1063,8 @@ def capture_checkpoint(
     source_binding=None,
     operation_intent_commit=None,
     recovery_direction=None,
+    undo_of_receipt_commit=None,
+    _observation=None,
 ):
     root, source = Path(vault).absolute(), Path(source).absolute()
     objects = False
@@ -1016,6 +1074,18 @@ def capture_checkpoint(
     retained = False
     commit = ref = None
     try:
+        if _observation is not None:
+            from brz2obsidian.application.vault_update_contracts import VaultApplyResult
+            from brz2obsidian.publication.vault_apply import _OperationObservation
+
+            if (
+                type(_observation) is not tuple
+                or len(_observation) != 2
+                or not isinstance(_observation[0], VaultApplyResult)
+                or not isinstance(_observation[1], _OperationObservation)
+                or active_operation is None
+            ):
+                return result("refused", "current_operation_observation_required")
         subjects = tuple(VaultSubject.model_validate(s) for s in subjects)
         if (
             boundary not in ("local", "prepared", "result")
@@ -1036,13 +1106,29 @@ def capture_checkpoint(
                 or review is None
                 or recovery_direction not in ("finish", "restore")
             )
+            or undo_of_receipt_commit is not None
+            and (
+                boundary != "prepared"
+                or active_operation is None
+                or review is None
+                or recovery_direction is not None
+            )
         ):
             return result("refused", "invalid_checkpoint_boundary")
-        observed_history = inspect_history(
-            root,
-            subjects=subjects,
-            git_executable=git_executable,
-            active_operation=active_operation,
+        observed_history = (
+            inspect_history(
+                root,
+                subjects=subjects,
+                git_executable=git_executable,
+                active_operation=active_operation,
+            )
+            if _observation is None
+            else _inspect_retained_history(
+                root,
+                _observation[1],
+                subjects=subjects,
+                active_operation=active_operation,
+            )
         )
         current = observed_history.admission
         if (
@@ -1086,7 +1172,34 @@ def capture_checkpoint(
             else None
         )
         target_direction = recovery_direction or retained_recovery_direction
-        if target_direction is not None:
+        undo_receipt = undo_of_receipt_commit or (
+            prior.manifest.undo_of_receipt_commit
+            if boundary == "result" and prior.status == "valid"
+            else None
+        )
+        if undo_receipt is not None:
+            from brz2obsidian.publication.vault_undo import _capture_target
+
+            undo_target = _capture_target(
+                root,
+                receipt_commit=undo_receipt,
+                active_operation=active_operation,
+                prior=prior,
+                boundary=boundary,
+                retained=_observation,
+            )
+            authority = undo_target.observation
+            original = undo_target.intent
+            recovery_origin_plan = undo_target.plan
+            target_origin_commit = undo_target.graph.origin_intent_commit
+            target_direction = "restore"
+            recovery_target = (
+                {row.path: row for row in original.before},
+                undo_target.lineage.source,
+            )
+            if identity != undo_target.lineage.identity:
+                return result("refused", "undo_source_identity_changed")
+        elif target_direction is not None:
             from brz2obsidian.application.vault_update_contracts import (
                 VaultRecoveryIntent,
             )
@@ -1095,7 +1208,11 @@ def capture_checkpoint(
                 owns_operation,
             )
 
-            status, authority = _inspect_update_observation(root)
+            status, authority = (
+                _inspect_update_observation(root)
+                if _observation is None
+                else _observation
+            )
             if (
                 authority is None
                 or status.operation_id != active_operation
@@ -1106,6 +1223,7 @@ def capture_checkpoint(
             ):
                 return result("refused", "recovery_authority_required")
             original = authority.graph.authorities[-1][1]
+            target_origin_commit = authority.graph.origin_intent_commit
             origin_loaded = authority.owned[original.prepared_commit][1]
             if origin_loaded is None:
                 return result("refused", "recovery_review_required")
@@ -1192,9 +1310,16 @@ def capture_checkpoint(
             }
             for subject in saved.plan.facts.subjects:
                 proof = subject.operation_reversal
-                if proof is None or subject.path in original.affected_paths:
+                if subject.path in original.affected_paths:
                     continue
                 origin_subject = origin_subjects.get((subject.item_id, subject.facet))
+                if proof is None:
+                    if origin_subject is None or subject.path != origin_subject.path:
+                        return result("refused", "recovery_review_required")
+                    retained_recovery_incoming[(subject.item_id, subject.facet)] = (
+                        origin_subject.incoming
+                    )
+                    continue
                 approval = origin_approvals.get(proof.origin_change_id)
                 if (
                     origin_subject is None
@@ -1206,9 +1331,7 @@ def capture_checkpoint(
                     or proof.direction != target_direction
                     or proof.operation_generation != original.generation
                     or proof.history_fingerprint
-                    != _operation_history_fingerprint(
-                        authority.graph.origin_intent_commit, original
-                    )
+                    != _operation_history_fingerprint(target_origin_commit, original)
                 ):
                     return result("refused", "recovery_review_required")
                 try:
@@ -1543,6 +1666,7 @@ def capture_checkpoint(
                 recovery_origin_intent_commit,
                 recovery_previous_operation_commit,
                 recovery_direction,
+                undo_of_receipt_commit,
             )
             if (
                 prior.status == "valid"
@@ -1686,6 +1810,7 @@ def capture_checkpoint(
                 recovery_origin_intent_commit=recovery_origin_intent_commit,
                 recovery_previous_operation_commit=recovery_previous_operation_commit,
                 recovery_direction=recovery_direction,
+                undo_of_receipt_commit=undo_of_receipt_commit,
                 review_object=review_oid,
                 review_size=len(review_raw) if review_raw is not None else None,
                 review_sha256=hashlib.sha256(review_raw).hexdigest()

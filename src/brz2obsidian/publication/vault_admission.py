@@ -884,7 +884,11 @@ class _Inspection:
             )
             self.operation = "active"
         if self.recovery_observation is not None:
-            from brz2obsidian.publication.vault_apply import _OperationObservation
+            from brz2obsidian.application.checkpoint_contracts import CheckpointLocator
+            from brz2obsidian.publication.vault_apply import (
+                _OperationObservation,
+                owns_operation,
+            )
             from brz2obsidian.publication.vault_recovery import _lease_free
 
             retained = self.recovery_observation
@@ -906,10 +910,50 @@ class _Inspection:
                 .decode()
                 .strip()
             )
+            _, _, locator_raw, _ = observe_file(
+                self.root,
+                self.root / ".brz2obsidian" / "locator.json",
+                prefix_limit=65537,
+            )
+            if len(locator_raw) > 65536:
+                raise OSError("Current locator exceeds its bounded control size")
+            current_locator = CheckpointLocator.model_validate_json(locator_raw)
+            operation_refs = {}
+            for line in (
+                self.git(
+                    "for-each-ref",
+                    "--format=%(refname) %(objectname)",
+                    "refs/brz2obsidian/imports",
+                )
+                .decode("ascii")
+                .splitlines()
+            ):
+                name, oid = line.split(" ")
+                parts = name.split("/")
+                if len(parts) == 6 and parts[4] == "operations":
+                    operation_refs[name] = oid
+            expected_refs = {
+                "refs/brz2obsidian/imports/"
+                + graph.intent.association_id
+                + "/operations/"
+                + graph.intent.operation_id: graph.commit
+                for graph in (retained.graphs or (retained.graph,))
+            }
+            held = (
+                owns_operation(self.root, self.active_operation)
+                if self.active_operation is not None
+                else False
+            )
             if (
                 current != retained.graph.commit
                 or checkpoint_tip != locator.commit
-                or not _lease_free(self.root, operation.operation_id)
+                or current_locator != locator
+                or operation_refs != expected_refs
+                or (
+                    not held
+                    if self.active_operation is not None
+                    else not _lease_free(self.root, operation.operation_id)
+                )
                 or locator.association.association_id != operation.association_id
                 or locator.association.vault_anchor != verify_directory(self.root)
                 or locator.association.git_anchor
@@ -1759,6 +1803,13 @@ def inspect_vault(vault, *, subjects=(), git_executable=None, active_operation=N
     )[0]
 
 
-def _inspect_vault_for_recovery(vault, observation, *, subjects=()):
+def _inspect_vault_for_recovery(
+    vault, observation, *, subjects=(), active_operation=None
+):
     """Observe policy and bytes beneath one validated, stopped operation graph."""
-    return _observe_vault(vault, subjects=subjects, recovery_observation=observation)[0]
+    return _observe_vault(
+        vault,
+        subjects=subjects,
+        recovery_observation=observation,
+        active_operation=active_operation,
+    )[0]

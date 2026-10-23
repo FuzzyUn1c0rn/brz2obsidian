@@ -77,12 +77,19 @@ class CheckpointManifest(ReconciliationContract):
     recovery_direction: Literal["finish", "restore"] | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    undo_of_receipt_commit: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{40}$", exclude_if=lambda value: value is None
+    )
     review_object: str | None
     review_size: int | None = Field(ge=0)
     review_sha256: str | None = Field(pattern=r"^[0-9a-f]{64}$")
 
     @model_validator(mode="after")
     def inventories(self):
+        if self.undo_of_receipt_commit is not None and (
+            self.boundary != "prepared" or self.recovery_direction is not None
+        ):
+            raise ValueError("Only an initial Undo preparation can bind its target")
         if self.operation_intent_commit is not None and self.boundary != "result":
             raise ValueError("Only an actual result may bind an application intent")
         if (

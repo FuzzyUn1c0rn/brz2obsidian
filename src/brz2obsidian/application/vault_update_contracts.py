@@ -39,9 +39,14 @@ class VaultOperationIntent(ReconciliationContract):
     before_metadata: tuple[VaultPathMetadata, ...]
     result_metadata: tuple[VaultPathMetadata, ...]
     created_directories: tuple[VaultPathMetadata, ...]
+    undo_of_receipt_commit: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{40}$", exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def complete_transition(self):
+        if self.undo_of_receipt_commit is not None and self.kind != "undo":
+            raise ValueError("Only Undo can bind a completed target receipt")
         for rows in (self.before, self.proposed):
             paths = [row.path for row in rows]
             if paths != sorted(set(paths)):
