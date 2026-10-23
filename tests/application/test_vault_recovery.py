@@ -10,6 +10,7 @@ from tests.application.test_vault_apply import (
     _binary_link_case,
     _ready_case,
     _renamed_case,
+    _restored_note_case,
 )
 from tests.application.test_vault_checkpoints import user_state
 from tests.reconciliation.test_resolution import action
@@ -599,6 +600,55 @@ def test_stopped_rename_before_first_move_observes_real_old_path_identity():
     assert not (vault / "Authored/Name.md").exists()
     assert (vault / "Notes/Opening.md").read_bytes() == b"new\r\n"
     assert (vault / "Local.bin").read_bytes() == b"user \xff\n"
+    assert Operations().inspect_update_status(vault).status == "applied"
+    after = user_state(vault)
+    for key in ("index", "head", "config", "stages"):
+        assert after[key] == before[key]
+
+
+def test_created_note_stop_retains_same_identity_for_finish_and_restore():
+    from brz2obsidian.publication.vault_replace import move_file
+
+    vault, source, _, reviewed, before = _restored_note_case()
+
+    class StopAfterCreatedNote:
+        def directory(self, stage, target):
+            move_file(stage, target, replace=False)
+
+        def move(self, stage, target, *, replace):
+            move_file(stage, target, replace=replace)
+            raise OSError("Stopped after the reviewed note became visible")
+
+        def remove(self, target, destination):
+            raise AssertionError("The reviewed creation has no removal")
+
+    stopped = _apply(
+        Operations(vault_executor=StopAfterCreatedNote()),
+        vault,
+        source,
+        review=reviewed,
+        vault_id="vault-one",
+        import_id="import-one",
+    )
+    assert stopped.status == "content_complete" and stopped.recovery_required
+    assert (vault / "Notes/Opening.md").read_bytes() == b"new note\n"
+    retained = user_state(vault)
+
+    finish = Operations().prepare_recovery(vault, direction="finish")
+    restore = Operations().prepare_recovery(vault, direction="restore")
+    for offered in (finish, restore):
+        assert offered.status == "offered" and offered.review is not None, offered.code
+        assert offered.operation_id == stopped.operation_id
+        assert offered.review.facts.subjects[0].current.path == "Notes/Opening.md"
+        assert offered.review.facts.subjects[0].current.content.data == b"new note\n"
+    assert finish.review.ready, finish.review.blockers
+    assert restore.review.facts.subjects[0].operation_reversal is not None
+    assert user_state(vault) == retained
+
+    completed = Operations().execute_recovery(vault, finish)
+    assert completed.status == "applied" and completed.receipt_commit, completed.code
+    assert (vault / "Notes/Opening.md").read_bytes() == b"new note\n"
+    assert (vault / "Unrelated.md").read_bytes() == b"user remains\n"
     assert Operations().inspect_update_status(vault).status == "applied"
     after = user_state(vault)
     for key in ("index", "head", "config", "stages"):

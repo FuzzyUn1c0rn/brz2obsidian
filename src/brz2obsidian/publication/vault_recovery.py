@@ -305,7 +305,6 @@ def _review_observation(root, observed, *, direction, authority, next_generation
                     for item in identity_inventory
                     if item.identity_state == "valid"
                     and item.identity == retained_target.identity
-                    and item.current.path != path
                     and item.facet == "content"
                 )
                 row = produced.get(path)
@@ -318,7 +317,7 @@ def _review_observation(root, observed, *, direction, authority, next_generation
                     or row is None
                     or row.size != len(content.data)
                     or row.sha256 != hashlib.sha256(content.data).hexdigest()
-                    or path in known_identity_paths
+                    or (path in known_identity_paths and owner[0].current.path != path)
                 ):
                     raise OSError("Operation-owned recovery note lacks retained proof")
                 index = next(
@@ -345,13 +344,12 @@ def _review_observation(root, observed, *, direction, authority, next_generation
                 if parsed.status != "supported":
                     raise OSError("Operation-owned recovery note interpretation failed")
                 documents.append(parsed)
-                relocated = owner[0].model_copy(
-                    update={
-                        "current": observed_document,
-                        "target": retained_target.target,
-                    }
-                )
-                if direction == "finish":
+                if owner[0].current.path == path:
+                    # A created note already has the sole retained item at
+                    # this physical path. Its ordinary inventory row below
+                    # receives the observed bytes; no second identity exists.
+                    pass
+                elif direction == "finish":
                     if current[owner[0].current.path].existence != "absent":
                         raise OSError("Both renamed recovery endpoints are present")
                     # The approved rename has one logical current location.
@@ -364,15 +362,22 @@ def _review_observation(root, observed, *, direction, authority, next_generation
                             for i, item in enumerate(identity_inventory)
                             if item.entry_id == owner[0].entry_id
                         )
-                    ] = relocated
+                    ] = owner[0].model_copy(
+                        update={
+                            "current": observed_document,
+                            "target": retained_target.target,
+                        }
+                    )
                 else:
                     # Restore reviews both physical endpoints under the
                     # operation-bound reversal proof.
                     identity_inventory.append(
-                        relocated.model_copy(
+                        owner[0].model_copy(
                             update={
                                 "entry_id": "recovery-output:"
-                                + hashlib.sha256(path.encode()).hexdigest()
+                                + hashlib.sha256(path.encode()).hexdigest(),
+                                "current": observed_document,
+                                "target": retained_target.target,
                             }
                         )
                     )

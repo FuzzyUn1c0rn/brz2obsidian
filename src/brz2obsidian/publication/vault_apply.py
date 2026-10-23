@@ -612,6 +612,24 @@ def _recovery_prepared_matches(
                     new_path = subject.path
                     if (
                         intent.direction == "finish"
+                        and old_path == new_path
+                        and subject.current.path == new_path
+                        and origin_subject.current.existence == "absent"
+                        and subject.path == origin_subject.path
+                        and subject.source_target == origin_subject.source_target
+                        and new_path in origin.affected_paths
+                        and new_path not in produced
+                        and new_path in origin_files
+                        and matches(target.get(new_path), origin_files[new_path])
+                    ):
+                        # A selected original creation has one real identity
+                        # at the same path after publication. Its absence in
+                        # the original before inventory is the reviewed
+                        # physical effect, not an arbitrary source version.
+                        covered.add(new_path)
+                        continue
+                    if (
+                        intent.direction == "finish"
                         and old_path != new_path
                         and subject.path == origin_subject.path
                         and subject.source_target == origin_subject.source_target
