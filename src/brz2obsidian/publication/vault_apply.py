@@ -320,8 +320,9 @@ def inspect_update_status(vault):
             ):
                 operations.append((parts[3], parts[5], oid))
         if not operations:
-            history = _read(root, git)
-            if history.status != "absent":
+            linked_intents = []
+            _read(root, git, linked_intents=linked_intents)
+            if linked_intents:
                 return _outcome(
                     "unknown",
                     "operation_record_missing",

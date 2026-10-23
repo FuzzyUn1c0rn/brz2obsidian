@@ -1074,6 +1074,10 @@ def test_prepared_roots_precede_intent_and_actual_result_requires_complete_match
         git(vault, "cat-file", "blob", actual.commit + ":preimage/note.md")
         == b"before\n"
     )
+    storage_status = operations.inspect_update_status(vault)
+    assert storage_status.status == "refused"
+    assert storage_status.code == "operation_absent"
+    assert not storage_status.recovery_required
 
 
 def test_selected_new_path_can_be_retained_after_unchanged_rules_and_complete_result():
