@@ -311,7 +311,7 @@ def _source_matches(root, expected):
 
 
 def _capture_resources(root, source, proposed, temp_base, vault_size, saved):
-    """Reserve ordinary spool and Git capacity before writing captured bytes."""
+    """Observe ordinary spool and Git capacity before writing captured bytes."""
 
     def scope_size(path):
         verify_directory(path)
@@ -358,7 +358,10 @@ def _capture_resources(root, source, proposed, temp_base, vault_size, saved):
     )
     review_size = sum(len(value) for value in unique.values())
     margin = 64 * 1024 * 1024
-    spool_need = input_size + margin
+    # Review bytes absent from raw roles are also spooled before their Git
+    # objects are written. Counting every unique review byte is a conservative
+    # upper bound and leaves the margin for the compact shape/control files.
+    spool_need = input_size + review_size + margin
     git_need = input_size + review_size + margin
     if os.stat(root).st_dev == os.stat(temp_base).st_dev:
         enough_space = shutil.disk_usage(root).free >= spool_need + git_need
@@ -1510,7 +1513,7 @@ def capture_checkpoint(
 def initialize_vault(vault, *, decision, git_executable=None):
     root = Path(vault).absolute()
     current = inspect_vault(root, git_executable=git_executable)
-    status, created = "refused", False
+    status, created, attempted = "refused", False, False
     try:
         decision = VaultInitializationDecision.model_validate(decision)
         if (
@@ -1530,6 +1533,7 @@ def initialize_vault(vault, *, decision, git_executable=None):
                 ) as name:
                     template = Path(name)
                     git.suppress_hooks(template)
+                    attempted = True
                     git.call(
                         "init", "-q", "--template=" + str(template / "empty-hooks")
                     )
@@ -1537,7 +1541,7 @@ def initialize_vault(vault, *, decision, git_executable=None):
                 current = inspect_vault(root, git_executable=git_executable)
                 status = "initialized_review_required"
     except OSError, ValueError, TypeError:
-        created = (root / ".git").exists()
+        created = attempted and (root / ".git").exists()
         current = inspect_vault(root, git_executable=git_executable)
         status = "failed"
     return VaultInitializationResult(

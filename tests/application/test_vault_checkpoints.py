@@ -229,6 +229,64 @@ def test_checkpoint_resource_preflight_refuses_before_any_owned_write(monkeypatc
     assert not (vault / ".brz2obsidian").exists()
 
 
+def test_historical_review_spool_counts_against_same_volume_peak_before_owned_write(
+    monkeypatch,
+):
+    import brz2obsidian.publication.vault_history as history
+    from brz2obsidian.core import prepare_review, resolve_review
+    from tests.reconciliation.test_proposals import request
+    from tests.reconciliation.test_resolution import (
+        action,
+        preflight,
+        with_review_links,
+    )
+
+    vault, source = fixture_case()
+    git(vault, "init", "-q")
+    (vault / "Notes").mkdir()
+    (source / "Notes").mkdir()
+    current, incoming = b"authored", b"source-v2"
+    baseline = b"B" * (512 * 1024)
+    (vault / "Notes/Opening.md").write_bytes(current)
+    (source / "Notes/Opening.md").write_bytes(incoming)
+    git(vault, "add", "--", "Notes/Opening.md")
+    facts = with_review_links(
+        request(original=baseline, current=current, incoming=incoming)
+    )
+    initial = prepare_review(facts, preflight=preflight())
+    reviewed = resolve_review(initial, action(initial, choice="current")).plan
+    assert reviewed.ready
+    operations = Operations()
+    before = user_state(vault)
+    admission = inspect(operations, vault)
+    assert admission.status == "supported"
+    assert os.stat(vault).st_dev == os.stat(tempfile.gettempdir()).st_dev
+    actual_usage = shutil.disk_usage(vault)
+    input_size = len(current) + len(incoming)
+    # The 768 KiB allowance above input and margins can hold one copy of the
+    # unmatched 512 KiB baseline, but not both its spool and Git object copy.
+    free = 2 * input_size + 2 * 64 * 1024 * 1024 + 768 * 1024
+    monkeypatch.setattr(
+        history.shutil, "disk_usage", lambda _path: actual_usage._replace(free=free)
+    )
+    refused = capture(
+        operations,
+        vault,
+        source,
+        vault_id="review-resource-vault",
+        import_id="review-resource-import",
+        identity=facts.incoming_identity,
+        admission=admission,
+        review=reviewed,
+    )
+    assert refused.status == "refused"
+    assert refused.code == "insufficient_checkpoint_resources"
+    assert refused.object_storage == "not_started" and not refused.objects_written
+    assert user_state(vault) == before
+    assert git(vault, "for-each-ref", "refs/brz2obsidian/imports") == b""
+    assert not (vault / ".brz2obsidian").exists()
+
+
 def test_intact_owned_history_noop_and_independent_user_ancestry_rewrite():
     vault, source = fixture_case()
     git(vault, "init", "-q")
@@ -649,6 +707,62 @@ def test_reviewed_initialization_rediscovery_cannot_capture_newly_applicable_pol
     assert not (vault / ".brz2obsidian").exists()
     assert (vault / "note.md").read_bytes() == b"user bytes\r\n"
     assert git(vault, "for-each-ref") == b""
+
+
+def test_invalid_initialization_decisions_cannot_claim_preexisting_repository_creation():
+    vault, _ = fixture_case()
+    git(vault, "init", "-q")
+    (vault / "authored.md").write_bytes(b"existing authored bytes\r\n")
+    git(vault, "add", "--", "authored.md")
+    operations = Operations()
+    observed = inspect(operations, vault)
+    assert observed.repository.kind == "root"
+    before = user_state(vault)
+    for decision in (
+        {"schema_id": "future-decision", "schema_version": 2},
+        {"schema_id": "brz2obsidian.vault-initialization-decision"},
+    ):
+        result = operations.initialize_vault(vault, decision=decision)
+        assert result.status == "failed"
+        assert result.repository_created is False
+        assert result.history_retained is False
+        assert user_state(vault) == before
+        assert not (vault / ".brz2obsidian").exists()
+
+
+def test_failed_init_after_actual_repository_creation_reports_partial_change(
+    monkeypatch,
+):
+    import brz2obsidian.publication.vault_history as history
+
+    vault, _ = fixture_case()
+    (vault / "authored.md").write_bytes(b"existing authored bytes\r\n")
+    operations = Operations()
+    before = inspect(operations, vault)
+    assert before.status == "supported" and before.repository.kind == "none"
+    original_call = history._Git.call
+
+    def fail_after_init(git, *args, **kwargs):
+        value = original_call(git, *args, **kwargs)
+        if args[0] == "init":
+            raise OSError("Init response was lost after the repository was created")
+        return value
+
+    monkeypatch.setattr(history._Git, "call", fail_after_init)
+    result = operations.initialize_vault(
+        vault,
+        decision={
+            "schema_id": "brz2obsidian.vault-initialization-decision",
+            "schema_version": 1,
+            "observation_fingerprint": before.observation_fingerprint,
+            "choice": "initialize",
+        },
+    )
+    assert result.status == "failed" and result.repository_created is True
+    assert result.admission.repository.kind == "root"
+    assert (vault / "authored.md").read_bytes() == b"existing authored bytes\r\n"
+    assert git(vault, "for-each-ref") == b""
+    assert not (vault / ".brz2obsidian").exists()
 
 
 def test_actual_s1_storage_and_inclusion_choices_bind_raw_capture_and_decline_stops():
