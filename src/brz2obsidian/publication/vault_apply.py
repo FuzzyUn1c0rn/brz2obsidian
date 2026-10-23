@@ -7,6 +7,7 @@ import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from typing import NamedTuple
 from uuid import uuid4
 
 from brz2obsidian.application.checkpoint_contracts import CheckpointManifest
@@ -19,6 +20,7 @@ from brz2obsidian.application.vault_update_contracts import (
     VaultOperationReceipt,
     VaultOperationStop,
     VaultPathMetadata,
+    VaultRecoveryIntent,
     VaultUpdateDetailPage,
 )
 from brz2obsidian.core import select_review_effects
@@ -274,7 +276,128 @@ def _terminal_result_in_history(git, checkpoint, intent, receipt):
     )
 
 
-def _prepared_for_intent(intent, manifest, loaded):
+class _OperationGraph(NamedTuple):
+    intent: VaultOperationIntent | VaultRecoveryIntent
+    intent_commit: str
+    origin_intent_commit: str
+    authorities: tuple
+    receipt: VaultOperationReceipt | None
+    stopped: VaultOperationStop | None
+    commit: str
+
+
+def _operation_graph(git, commit):
+    """Read one operation's exact retained authority chain, including stops."""
+    tip = commit
+    authorities = []
+    stops = []
+    expected_authority = None
+    top_receipt = top_stop = None
+    active_commit = None
+    while True:
+        entry = git.call("ls-tree", "--name-only", commit).decode().splitlines()
+        if expected_authority is not None and entry not in (
+            ["intent.json"],
+            ["recovery.json"],
+        ):
+            raise OSError("Stop does not directly retain an authority")
+        expected_authority = None
+        if entry == ["receipt.json"]:
+            receipt, parents = _read_record(
+                git, commit, "receipt.json", VaultOperationReceipt
+            )
+            if active_commit is not None or parents != (
+                receipt.intent_commit,
+                receipt.result_commit,
+            ):
+                raise OSError("Receipt has invalid real edges or is being replayed")
+            top_receipt = receipt
+            commit = receipt.intent_commit
+            active_commit = commit
+            expected_authority = commit
+            continue
+        if entry == ["stop.json"]:
+            stopped, parents = _read_record(
+                git, commit, "stop.json", VaultOperationStop
+            )
+            if parents != (stopped.intent_commit,):
+                raise OSError("Stop has invalid real parent")
+            stops.append(stopped)
+            expected_authority = stopped.intent_commit
+            if active_commit is None:
+                top_stop = stopped
+                active_commit = stopped.intent_commit
+            commit = stopped.intent_commit
+            continue
+        if entry == ["recovery.json"]:
+            intent, parents = _read_record(
+                git, commit, "recovery.json", VaultRecoveryIntent
+            )
+            if parents != (intent.previous_operation_commit, intent.prepared_commit):
+                raise OSError("Recovery has invalid real parents")
+            authorities.append((commit, intent))
+            if active_commit is None:
+                active_commit = commit
+            commit = intent.previous_operation_commit
+            continue
+        if entry != ["intent.json"]:
+            raise OSError("Unknown operation record graph")
+        origin, parents = _read_record(git, commit, "intent.json", VaultOperationIntent)
+        if parents != (origin.prepared_commit,) or origin.direction != "finish":
+            raise OSError("Original operation lacks its prepared finish authority")
+        authorities.append((commit, origin))
+        if active_commit is None:
+            active_commit = commit
+        break
+    by_commit = dict(authorities)
+    for stopped in stops:
+        authority = by_commit[stopped.intent_commit]
+        if (
+            stopped.operation_id != authority.operation_id
+            or stopped.kind != authority.kind
+            or stopped.generation != authority.generation
+            or stopped.direction != authority.direction
+            or stopped.acknowledged_after_files > len(authority.affected_paths)
+        ):
+            raise OSError("Stop identity disagrees with its authority")
+    for index, (_, authority) in enumerate(authorities[:-1]):
+        previous = authorities[index + 1][1]
+        if (
+            authority.origin_intent_commit != commit
+            or authority.operation_id != origin.operation_id
+            or authority.kind != origin.kind
+            or authority.association_id != origin.association_id
+            or authority.generation <= previous.generation
+            or isinstance(previous, VaultRecoveryIntent)
+            and authority.direction != previous.direction
+        ):
+            raise OSError(
+                "Recovery ancestry identity, generation or direction disagrees"
+            )
+    intent = authorities[0][1]
+    if top_receipt is not None and (
+        top_receipt.operation_id != intent.operation_id
+        or top_receipt.kind != intent.kind
+        or top_receipt.generation != intent.generation
+        or top_receipt.direction != intent.direction
+        or top_receipt.prepared_commit != intent.prepared_commit
+        or top_receipt.published_paths != intent.affected_paths
+    ):
+        raise OSError("Terminal receipt identity disagrees with active authority")
+    return _OperationGraph(
+        intent, active_commit, commit, tuple(authorities), top_receipt, top_stop, tip
+    )
+
+
+def _read_operation_intent(git, commit):
+    """Read an original/recovery authority after validating its complete ancestry."""
+    graph = _operation_graph(git, commit)
+    if graph.intent_commit != commit:
+        raise OSError("Expected an operation authority commit")
+    return graph.intent
+
+
+def _prepared_for_intent(intent, manifest, loaded, *, origin=None):
     """A retained prepared review authorizes exactly its selected transition."""
     if loaded is None:
         return False
@@ -297,6 +420,15 @@ def _prepared_for_intent(intent, manifest, loaded):
     before = {row.path: row for row in intent.before}
     proposed = {row.path: row for row in intent.proposed}
     source = {row.path: row for row in manifest.source}
+    if isinstance(intent, VaultRecoveryIntent):
+        if origin is None or plan.proposal.generation != intent.review_generation:
+            return False
+        source = {
+            row.path: row
+            for row in (
+                origin.proposed if intent.direction == "finish" else origin.before
+            )
+        }
 
     def matches(row, content):
         return (
@@ -335,6 +467,59 @@ def _prepared_for_intent(intent, manifest, loaded):
     )
 
 
+def _operation_history_fingerprint(origin_commit, origin):
+    return hashlib.sha256((origin_commit + origin.association_id).encode()).hexdigest()
+
+
+def _recovery_prepared_matches(
+    intent, origin, origin_commit, manifest, loaded, lineage
+):
+    """Bind reviewed operation targets separately from truthful source lineage."""
+    if manifest.source != lineage.source or manifest.identity != lineage.identity:
+        return False
+    if not set(intent.affected_paths).issubset(origin.affected_paths):
+        return False
+    target = {
+        row.path: row
+        for row in (origin.proposed if intent.direction == "finish" else origin.before)
+    }
+    produced = {
+        row.path: row
+        for row in (origin.before if intent.direction == "finish" else origin.proposed)
+    }
+
+    def matches(row, content):
+        if row is None:
+            return content is None
+        return (
+            content is not None
+            and row.size == len(content.data)
+            and row.sha256 == hashlib.sha256(content.data).hexdigest()
+        )
+
+    for subject in loaded.saved.plan.producer_facts.subjects:
+        proof = subject.operation_reversal
+        if proof is None:
+            if subject.path in origin.affected_paths and (
+                (subject.path in target) != (subject.path in produced)
+            ):
+                return False
+            continue
+        if (
+            proof.path not in origin.affected_paths
+            or proof.operation_id != origin.operation_id
+            or proof.operation_kind != origin.kind
+            or proof.direction != intent.direction
+            or proof.operation_generation != origin.generation
+            or proof.history_fingerprint
+            != _operation_history_fingerprint(origin_commit, origin)
+            or not matches(produced.get(proof.path), proof.produced)
+            or not matches(target.get(proof.path), proof.target)
+        ):
+            return False
+    return True
+
+
 def _terminal_files_match(root, intent):
     proposed = {row.path: row for row in intent.proposed}
     metadata = {row.path: row for row in intent.result_metadata}
@@ -345,7 +530,24 @@ def _terminal_files_match(root, intent):
     )
 
 
+class _OperationObservation(NamedTuple):
+    graph: _OperationGraph
+    checkpoint: object
+    owned: dict
+
+
+def _inspect_update_observation(vault):
+    """Return fresh status and validated graph facts for this one public call."""
+    observations = []
+    status = _inspect_update_status(vault, observations=observations)
+    return status, observations[0] if observations else None
+
+
 def inspect_update_status(vault):
+    return _inspect_update_observation(vault)[0]
+
+
+def _inspect_update_status(vault, *, observations):
     """Discover the latest owned intent independently of the current locator."""
     start = time.monotonic()
     root = Path(vault).absolute()
@@ -381,95 +583,73 @@ def inspect_update_status(vault):
                 )
             return _outcome("refused", "operation_absent", start=start)
         records = []
+        graphs = []
         for association, operation_id, commit in operations:
-            entry = git.call("ls-tree", "--name-only", commit).decode().splitlines()
-            if entry == ["receipt.json"]:
-                receipt, parents = _read_record(
-                    git, commit, "receipt.json", VaultOperationReceipt
-                )
-                if len(parents) != 2 or parents != (
-                    receipt.intent_commit,
-                    receipt.result_commit,
-                ):
-                    raise OSError("Terminal receipt has wrong real parent edges")
-                intent, intent_parents = _read_record(
-                    git, receipt.intent_commit, "intent.json", VaultOperationIntent
-                )
-                if intent_parents != (intent.prepared_commit,):
-                    raise OSError("Prepared intent has wrong real parent edge")
-                if (
-                    receipt.operation_id != operation_id
-                    or intent.operation_id != operation_id
-                    or intent.association_id != association
-                    or receipt.generation != intent.generation
-                    or receipt.direction != intent.direction
-                    or receipt.prepared_commit != intent.prepared_commit
-                    or receipt.published_paths != intent.affected_paths
-                ):
-                    raise OSError("Terminal intent/receipt identity changed")
-                records.append((intent.generation, intent, receipt, None, commit))
-            elif entry == ["stop.json"]:
-                stopped, parents = _read_record(
-                    git, commit, "stop.json", VaultOperationStop
-                )
-                if parents != (stopped.intent_commit,):
-                    raise OSError("Stopped intent has wrong real parent edge")
-                intent, intent_parents = _read_record(
-                    git, stopped.intent_commit, "intent.json", VaultOperationIntent
-                )
-                if (
-                    intent_parents != (intent.prepared_commit,)
-                    or stopped.operation_id != intent.operation_id
-                    or stopped.operation_id != operation_id
-                    or intent.association_id != association
-                    or stopped.generation != intent.generation
-                    or stopped.direction != intent.direction
-                    or stopped.acknowledged_after_files > len(intent.affected_paths)
-                ):
-                    raise OSError("Stopped intent identity changed")
-                records.append((intent.generation, intent, None, stopped, commit))
-            elif entry == ["intent.json"]:
-                intent, parents = _read_record(
-                    git, commit, "intent.json", VaultOperationIntent
-                )
-                if (
-                    parents != (intent.prepared_commit,)
-                    or intent.operation_id != operation_id
-                    or intent.association_id != association
-                ):
-                    raise OSError("Prepared intent identity changed")
-                records.append((intent.generation, intent, None, None, commit))
-            else:
-                raise OSError("Unknown operation record graph")
+            graph = _operation_graph(git, commit)
+            intent, receipt, stopped = graph.intent, graph.receipt, graph.stopped
+            if (
+                intent.operation_id != operation_id
+                or intent.association_id != association
+            ):
+                raise OSError("Operation ref identity changed")
+            graphs.append(graph)
+            records.append((intent.generation, intent, receipt, stopped, commit))
         records.sort(key=lambda row: row[0])
         if len({row[0] for row in records}) != len(records):
             raise OSError("Multiple operation intents claim one generation")
-        targets = {row[1].prepared_commit for row in records}
+        targets = {
+            authority.prepared_commit
+            for graph in graphs
+            for _, authority in graph.authorities
+        }
         targets.update(row[2].result_commit for row in records if row[2] is not None)
+        # These declarations are trusted only after the single complete _read
+        # validates every requested commit and its retained ancestry.
+        origins = {}
+        for graph in graphs:
+            if len(graph.authorities) > 1:
+                origin = graph.authorities[-1][1]
+                declared = CheckpointManifest.model_validate_json(
+                    git.call("show", f"{origin.prepared_commit}:manifest.json")
+                )
+                if declared.previous is None:
+                    raise OSError("Recovery origin lacks prior source lineage")
+                origins[graph.origin_intent_commit] = declared.previous
+                targets.add(declared.previous)
         linked_intents = []
         checkpoint, owned = _read(
             root, git, targets=targets, linked_intents=linked_intents
         )
-        rooted_intents = {
-            row[2].intent_commit
-            if row[2] is not None
-            else row[3].intent_commit
-            if row[3] is not None
-            else row[4]
-            for row in records
-        }
+        rooted_intents = {commit for graph in graphs for commit, _ in graph.authorities}
         if len(linked_intents) != len(set(linked_intents)) or not set(
             linked_intents
         ).issubset(rooted_intents):
             raise OSError(
                 "Application result has a missing or duplicate operation root"
             )
+        for graph in graphs:
+            origin = graph.authorities[-1][1]
+            for _, authority in graph.authorities:
+                prepared, saved = owned[authority.prepared_commit]
+                if not _prepared_for_intent(authority, prepared, saved, origin=origin):
+                    raise OSError("Operation intent lacks a selected prepared review")
+                if isinstance(authority, VaultRecoveryIntent):
+                    lineage_commit = (
+                        origin.prepared_commit
+                        if authority.direction == "finish"
+                        else origins[graph.origin_intent_commit]
+                    )
+                    if not _recovery_prepared_matches(
+                        authority,
+                        origin,
+                        graph.origin_intent_commit,
+                        prepared,
+                        saved,
+                        owned[lineage_commit][0],
+                    ):
+                        raise OSError("Recovery target or source lineage changed")
         for _, candidate, terminal, _, _ in records:
             prepared, saved = owned[candidate.prepared_commit]
-            if candidate.direction != "finish" or not _prepared_for_intent(
-                candidate, prepared, saved
-            ):
-                raise OSError("Operation intent lacks a selected prepared review")
             if terminal is not None:
                 result, _ = owned[terminal.result_commit]
                 if not (
@@ -484,6 +664,13 @@ def inspect_update_status(vault):
                 ):
                     raise OSError("Terminal receipt lacks its exact result checkpoint")
         _, intent, receipt, stopped, commit = records[-1]
+        active_graph = next(graph for graph in graphs if graph.commit == commit)
+        observations.append(_OperationObservation(active_graph, checkpoint, owned))
+        review_generation = (
+            intent.review_generation
+            if isinstance(intent, VaultRecoveryIntent)
+            else None
+        )
         try:
             manifest = checkpoint.manifest
             if (
@@ -520,6 +707,9 @@ def inspect_update_status(vault):
                 "operation_checkpoint_invalid",
                 start=start,
                 operation_id=intent.operation_id,
+                kind=intent.kind,
+                direction=intent.direction,
+                review_generation=review_generation,
                 generation=intent.generation,
                 phase="intent",
                 publication="unknown",
@@ -527,11 +717,7 @@ def inspect_update_status(vault):
                 planned=len(intent.affected_paths),
                 changed=None,
                 checkpoint=intent.prepared_commit,
-                intent=receipt.intent_commit
-                if receipt is not None
-                else stopped.intent_commit
-                if stopped is not None
-                else commit,
+                intent=active_graph.intent_commit,
                 receipt=commit if receipt is not None else None,
                 stop=commit if stopped is not None else None,
                 recovery=True,
@@ -547,6 +733,9 @@ def inspect_update_status(vault):
                     receipt.status,
                     start=start,
                     operation_id=intent.operation_id,
+                    kind=intent.kind,
+                    direction=intent.direction,
+                    review_generation=review_generation,
                     generation=intent.generation,
                     phase="terminal",
                     publication="complete",
@@ -570,6 +759,9 @@ def inspect_update_status(vault):
                     "terminal_cleanup_required",
                     start=start,
                     operation_id=intent.operation_id,
+                    kind=intent.kind,
+                    direction=intent.direction,
+                    review_generation=review_generation,
                     generation=intent.generation,
                     phase="terminal",
                     publication="complete",
@@ -589,6 +781,9 @@ def inspect_update_status(vault):
                 "terminal_requires_recovery",
                 start=start,
                 operation_id=intent.operation_id,
+                kind=intent.kind,
+                direction=intent.direction,
+                review_generation=review_generation,
                 generation=intent.generation,
                 phase="terminal",
                 publication="unknown",
@@ -629,7 +824,13 @@ def inspect_update_status(vault):
                 else "unknown"
             )
         directory_states = _directory_states(root, intent)
+        protected_states = [
+            "before" if _same_file(root, prior[path]) else "unknown"
+            for path in intent.protected_paths
+        ]
         all_states = states + directory_states
+        if "unknown" in protected_states:
+            all_states.append("unknown")
         if "unknown" in all_states:
             status, publication, code = "unknown", "unknown", "unknown_current_bytes"
         elif not all_states:
@@ -659,15 +860,18 @@ def inspect_update_status(vault):
             else code,
             start=start,
             operation_id=intent.operation_id,
+            kind=intent.kind,
+            direction=intent.direction,
+            review_generation=review_generation,
             generation=intent.generation,
             phase="publication",
             publication=publication,
             history="intent",
             planned=len(intent.affected_paths),
             published=states.count("after"),
-            changed="after" in all_states,
+            changed=None if "unknown" in all_states else "after" in all_states,
             checkpoint=intent.prepared_commit,
-            intent=stopped.intent_commit if stopped is not None else commit,
+            intent=active_graph.intent_commit,
             stop=commit if stopped is not None else None,
             recovery=True,
         )
@@ -708,20 +912,19 @@ def read_update_details(vault, *, offset=0, limit=100):
             next_offset=next_offset,
         )
 
-    observed = inspect_update_status(vault)
+    observed, observation = _inspect_update_observation(vault)
     if observed.status in ("unknown", "refused") or observed.intent_commit is None:
         return page("unavailable", "operation_authority_unavailable")
     try:
-        git = _Git(Path(vault).absolute())
-        intent, parents = _read_record(
-            git, observed.intent_commit, "intent.json", VaultOperationIntent
-        )
+        if observation is None:
+            return page("unavailable", "operation_authority_unavailable")
+        intent = observation.graph.intent
         if (
-            parents != (intent.prepared_commit,)
-            or intent.operation_id != observed.operation_id
+            intent.operation_id != observed.operation_id
             or intent.generation != observed.generation
             or intent.prepared_commit != observed.checkpoint_commit
-            or intent.direction != "finish"
+            or intent.kind != observed.kind
+            or intent.direction != observed.direction
         ):
             return page("unavailable", "operation_authority_changed")
         before = {row.path: row for row in intent.before}
@@ -917,6 +1120,9 @@ def _outcome(
     *,
     start,
     operation_id=None,
+    kind="apply",
+    direction=None,
+    review_generation=None,
     generation=None,
     phase="admission",
     publication="not_started",
@@ -938,7 +1144,9 @@ def _outcome(
         status=status,
         code=code,
         operation_id=operation_id,
-        kind="apply",
+        kind=kind,
+        direction=direction,
+        review_generation=review_generation,
         generation=generation,
         phase=phase,
         publication=publication,

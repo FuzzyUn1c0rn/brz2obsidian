@@ -27,7 +27,7 @@ class VaultOperationIntent(ReconciliationContract):
     schema_id: Literal["brz2obsidian.vault-operation-intent"]
     schema_version: Literal[1]
     operation_id: str = Field(pattern=r"^[0-9a-f]{32}$")
-    kind: Literal["apply"]
+    kind: Literal["apply", "undo"]
     generation: int = Field(ge=1)
     direction: Literal["finish", "restore"]
     association_id: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -90,13 +90,22 @@ class VaultOperationIntent(ReconciliationContract):
         return self
 
 
+class VaultRecoveryIntent(VaultOperationIntent):
+    """A selected recovery transition rooted in one original operation."""
+
+    schema_id: Literal["brz2obsidian.vault-recovery-intent"]
+    origin_intent_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+    previous_operation_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+    review_generation: int = Field(ge=1)
+
+
 class VaultOperationReceipt(ReconciliationContract):
     schema_id: Literal["brz2obsidian.vault-operation-receipt"]
     schema_version: Literal[1]
     operation_id: str = Field(pattern=r"^[0-9a-f]{32}$")
-    kind: Literal["apply"]
+    kind: Literal["apply", "undo"]
     generation: int = Field(ge=1)
-    status: Literal["applied", "no_content_change"]
+    status: Literal["applied", "no_content_change", "undone", "restored"]
     direction: Literal["finish", "restore"]
     intent_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
     prepared_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
@@ -109,7 +118,13 @@ class VaultOperationReceipt(ReconciliationContract):
             raise ValueError("Published paths must be unique and sorted")
         for path in self.published_paths:
             self.relative_vault_path(path)
-        if (self.status == "no_content_change") != (not self.published_paths):
+        if self.direction == "restore":
+            expected = "restored"
+        elif self.kind == "undo":
+            expected = "undone"
+        else:
+            expected = "applied" if self.published_paths else "no_content_change"
+        if self.status != expected:
             raise ValueError("Receipt status must reflect actual file publication")
         return self
 
@@ -118,7 +133,7 @@ class VaultOperationStop(ReconciliationContract):
     schema_id: Literal["brz2obsidian.vault-operation-stop"]
     schema_version: Literal[1]
     operation_id: str = Field(pattern=r"^[0-9a-f]{32}$")
-    kind: Literal["apply"]
+    kind: Literal["apply", "undo"]
     generation: int = Field(ge=1)
     direction: Literal["finish", "restore"]
     status: Literal["cancelled"]
@@ -137,11 +152,15 @@ class VaultApplyResult(ReconciliationContract):
         "content_complete",
         "applied",
         "no_content_change",
+        "undone",
+        "restored",
         "unknown",
     ]
     code: str
     operation_id: str | None
-    kind: Literal["apply"]
+    kind: Literal["apply", "undo"]
+    direction: Literal["finish", "restore"] | None = None
+    review_generation: int | None = Field(default=None, ge=1)
     generation: int | None = Field(ge=1)
     phase: Literal[
         "admission", "prepared", "intent", "publication", "result", "terminal"
@@ -164,7 +183,7 @@ class VaultApplyResult(ReconciliationContract):
 
     @model_validator(mode="after")
     def truthful_terminal(self):
-        if self.status in ("applied", "no_content_change") and (
+        if self.status in ("applied", "no_content_change", "undone", "restored") and (
             self.phase != "terminal"
             or self.publication != "complete"
             or self.history != "terminal"
@@ -173,6 +192,16 @@ class VaultApplyResult(ReconciliationContract):
             or self.recovery_required
         ):
             raise ValueError("Applied requires complete files, result and receipt")
+        if self.status == "restored" and self.direction != "restore":
+            raise ValueError("Restored requires saved restoration direction")
+        if self.status == "undone" and (
+            self.kind != "undo" or self.direction != "finish"
+        ):
+            raise ValueError("Undone requires a finished undo")
+        if self.status in ("applied", "no_content_change") and (
+            self.kind != "apply" or self.direction == "restore"
+        ):
+            raise ValueError("Applied requires a finished apply")
         if self.status == "no_content_change" and (
             self.planned_files or self.published_files or self.authored_files_changed
         ):
