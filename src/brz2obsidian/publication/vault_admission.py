@@ -281,6 +281,7 @@ class _Inspection:
         self.recovery_observation = recovery_observation
         self.validated_active_operation = False
         self.linked_intents = []
+        self.checkpoint_roles = []
         self.executable = (
             str(executable) if executable is not None else shutil.which("git")
         )
@@ -978,13 +979,12 @@ class _Inspection:
                     "--format=%(refname) %(objectname)",
                     "refs/brz2obsidian/imports",
                 )
-                .decode("ascii")
                 .splitlines()
             ):
-                name, oid = line.split(" ")
-                parts = name.split("/")
-                if len(parts) == 6 and parts[4] == "operations":
-                    operation_refs[name] = oid
+                name, oid = line.split(b" ")
+                parts = name.split(b"/")
+                if len(parts) == 6 and parts[4] == b"operations":
+                    operation_refs[name.decode("ascii")] = oid.decode("ascii")
             expected_refs = {
                 "refs/brz2obsidian/imports/"
                 + graph.intent.association_id
@@ -1015,6 +1015,7 @@ class _Inspection:
                 raise OSError("Recovery authority or converter lease changed")
             self.validated_active_operation = True
             self.history = retained.checkpoint
+            self.checkpoint_roles = retained.checkpoint_roles
             self.operation = "idle"
         elif (gitdir / "brz2obsidian").exists():
             owned = False
@@ -1033,6 +1034,7 @@ class _Inspection:
                     self.root,
                     _Git(self.root, self.executable),
                     linked_intents=self.linked_intents,
+                    checkpoint_roles=self.checkpoint_roles,
                 )
                 if self.history.status != "valid":
                     raise OSError("Current converter history unavailable")
@@ -1052,6 +1054,7 @@ class _Inspection:
                     self.root,
                     _Git(self.root, self.executable),
                     linked_intents=self.linked_intents,
+                    checkpoint_roles=self.checkpoint_roles,
                 )
                 if self.history.status != "valid":
                     raise OSError("Current converter history unavailable")
@@ -1081,9 +1084,9 @@ class _Inspection:
         if not self.validated_active_operation:
             operation_refs = [
                 line
-                for line in refs.decode("ascii").splitlines()
-                if line.split(" ", 1)[0].startswith("refs/brz2obsidian/imports/")
-                and "/operations/" in line.split(" ", 1)[0]
+                for line in refs.splitlines()
+                if line.split(b" ", 1)[0].startswith(b"refs/brz2obsidian/imports/")
+                and b"/operations/" in line.split(b" ", 1)[0]
             ]
             if operation_refs or self.linked_intents:
                 from brz2obsidian.publication.vault_apply import inspect_update_status
@@ -1656,6 +1659,60 @@ class _Inspection:
                     self.attributes()
         return self.finish()
 
+    def _state_fingerprint(self, locator):
+        return _digest(
+            (
+                self.repo.kind,
+                self.repo.git_directory,
+                self.operation,
+                locator.model_dump(mode="json")
+                if locator is not None
+                else "history-not-yet-validated",
+            )
+        )
+
+    def _review_locator(self):
+        """Keep memo dependencies on their proved parent, after full validation."""
+        locator = self.history.locator
+        roles = self.checkpoint_roles
+        if (
+            self.operation != "idle"
+            or not roles
+            or roles[0].memo_fingerprint is None
+            or roles[0].commit != locator.commit
+            or roles[0].generation != locator.generation
+        ):
+            return locator
+        parent = context = None
+        for role in reversed(roles):
+            actual = locator.model_copy(
+                update={"commit": role.commit, "generation": role.generation}
+            )
+            selected = actual
+            if (
+                parent is not None
+                and role.previous == parent.commit
+                and role.boundary == parent.boundary == "local"
+                and role.memo_fingerprint is not None
+                and role.memo_fingerprint == parent.memo_fingerprint
+                and role.operation_intent_commit is None
+                and role.undo_of_receipt_commit is None
+                and role.recovery_origin_intent_commit is None
+                and role.recovery_previous_operation_commit is None
+                and role.recovery_direction is None
+            ):
+                physical_parent = locator.model_copy(
+                    update={"commit": parent.commit, "generation": parent.generation}
+                )
+                if role.review_parent_fingerprint == self._state_fingerprint(context):
+                    selected = context
+                elif role.review_parent_fingerprint == self._state_fingerprint(
+                    physical_parent
+                ):
+                    selected = physical_parent
+            parent, context = role, selected
+        return context
+
     def finish(self):
         gaps = tuple(f.path for f in self.inventory if f.exclusion == "git_ignore")
         policy = _digest(
@@ -1722,15 +1779,10 @@ class _Inspection:
             if self.repo.kind == "none"
             else ("review_history",)
         )
-        authority = _digest(
-            (
-                self.repo.kind,
-                self.repo.git_directory,
-                self.operation,
-                self.history.locator.model_dump(mode="json")
-                if self.history is not None and self.history.status == "valid"
-                else "history-not-yet-validated",
-            )
+        authority = self._state_fingerprint(
+            self._review_locator()
+            if self.history is not None and self.history.status == "valid"
+            else None
         )
         preflight = ReviewPreflight(
             schema_id="brz2obsidian.review-preflight",

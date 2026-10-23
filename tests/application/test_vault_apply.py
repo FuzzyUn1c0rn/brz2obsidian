@@ -349,6 +349,10 @@ def test_ready_whole_review_applies_exact_note_and_retains_unrelated_user_state(
 
 def test_selected_current_bytes_report_no_content_change_with_terminal_history():
     vault, source, operations, reviewed, before = _ready_case()
+    user_ref = "refs/brz2obsidian/imports/user-\u00e9"
+    user_oid = git(vault, "rev-parse", "HEAD")
+    git(vault, "update-ref", user_ref, user_oid.decode("ascii").strip())
+    before = user_state(vault)
     offered = prepare_review(reviewed.facts, preflight=reviewed.preflight)
     kept = resolve_review(
         offered, action(offered, choice="current", decision_id="keep:current")
@@ -369,7 +373,26 @@ def test_selected_current_bytes_report_no_content_change_with_terminal_history()
     assert outcome.history == "terminal" and outcome.receipt_commit
     assert not outcome.authored_files_changed and not outcome.recovery_required
     assert (vault / "Notes/Opening.md").read_bytes() == b"authored opening\r\n"
-    assert user_state(vault)["index"] == before["index"]
+    after = user_state(vault)
+    for key in ("index", "head", "config", "stages", "authored"):
+        assert after[key] == before[key]
+    checkpoint_ref = next(
+        row.split(b" ", 1)[0]
+        for row in before["refs"]
+        if row.split(b" ", 1)[0].endswith(b"/checkpoints")
+    )
+    allowed_refs = {
+        checkpoint_ref,
+        checkpoint_ref.rsplit(b"/", 1)[0]
+        + b"/operations/"
+        + outcome.operation_id.encode("ascii"),
+    }
+    assert tuple(
+        row for row in after["refs"] if row.split(b" ", 1)[0] not in allowed_refs
+    ) == tuple(
+        row for row in before["refs"] if row.split(b" ", 1)[0] not in allowed_refs
+    )
+    assert git(vault, "rev-parse", user_ref) == user_oid
     restarted = Operations().inspect_update_status(vault)
     assert restarted.status == "no_content_change"
     assert restarted.receipt_commit == outcome.receipt_commit
@@ -552,6 +575,21 @@ def test_cancel_after_intent_retains_stop_and_requires_exact_recovery():
     assert outcome.generation == restarted.generation
     assert restarted.stop_commit == outcome.stop_commit
     assert operations.inspect_history(vault).admission.status == "recovery_first"
+
+    user_ref = "refs/brz2obsidian/imports/user-\u00e9"
+    user_oid = git(vault, "rev-parse", "HEAD")
+    git(vault, "update-ref", user_ref, user_oid.decode("ascii").strip())
+    retained = user_state(vault)
+    owner = vault / ".git/brz2obsidian/owner.json"
+    owner_bytes = owner.read_bytes()
+    offered = Operations().prepare_recovery(vault, direction="finish")
+    assert offered.status == "offered", offered.code
+    assert offered.operation_id == outcome.operation_id
+    assert offered.intent_commit == outcome.intent_commit
+    assert offered.review is not None
+    assert user_state(vault) == retained
+    assert git(vault, "rev-parse", user_ref) == user_oid
+    assert owner.read_bytes() == owner_bytes
 
 
 def test_valid_schema_stop_with_wrong_direction_is_not_operation_authority():

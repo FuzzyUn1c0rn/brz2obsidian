@@ -214,6 +214,7 @@ def command_for(python, run_dir, check, chosen):
     argv += [
         "pytest",
         "-q",
+        "--durations=20",
         "-p",
         "tools.check_pytest",
         "--basetemp",

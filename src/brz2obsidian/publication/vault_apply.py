@@ -959,15 +959,17 @@ def _inspect_update_status(vault, *, observations, trusted_association=None):
             "refs/brz2obsidian/imports",
         )
         operations = []
-        for line in raw.decode("ascii").splitlines():
-            ref, oid = line.split(" ")
-            parts = ref.split("/")
+        for line in raw.splitlines():
+            ref, oid = line.split(b" ")
+            parts = ref.split(b"/")
             if (
                 len(parts) == 6
-                and parts[:3] == ["refs", "brz2obsidian", "imports"]
-                and parts[4] == "operations"
+                and parts[:3] == [b"refs", b"brz2obsidian", b"imports"]
+                and parts[4] == b"operations"
             ):
-                operations.append((parts[3], parts[5], oid))
+                operations.append(
+                    tuple(value.decode("ascii") for value in (parts[3], parts[5], oid))
+                )
         if not operations:
             linked_intents = []
             _read(

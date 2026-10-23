@@ -676,6 +676,20 @@ class _CheckpointRole(NamedTuple):
     recovery_origin_intent_commit: str | None
     recovery_previous_operation_commit: str | None
     recovery_direction: str | None
+    memo_fingerprint: str | None = None
+    review_parent_fingerprint: str | None = None
+
+
+def _review_parent_fingerprint(review):
+    preflight = review.saved.plan.preflight
+    if (
+        preflight.operation_status == "idle"
+        and preflight.state_status == "supported"
+        and preflight.state_schema == "brz2obsidian.checkpoint-manifest"
+        and preflight.state_version == 1
+    ):
+        return preflight.state_fingerprint
+    return None
 
 
 class _LooseBlobCheck:
@@ -807,6 +821,7 @@ def _read(
     blobs, controls, reviewed, verified = {}, {}, {}, set()
     current, generation = locator.commit, locator.generation
     tip_manifest = tip_review = None
+    memo_roles = False
     target_records = {}
     visited = set()
     while current is not None:
@@ -947,6 +962,7 @@ def _read(
                     manifest.review_sha256,
                     _review_meaning(review.saved),
                     references,
+                    _review_parent_fingerprint(review),
                 )
             elif reviewed[manifest.review_object][:2] != (
                 manifest.review_size,
@@ -1001,6 +1017,12 @@ def _read(
             raise OSError("Retained checkpoint semantic interpretation disagrees")
         if linked_intents is not None and manifest.operation_intent_commit is not None:
             linked_intents.append(manifest.operation_intent_commit)
+        if tip_manifest is None:
+            memo_roles = (
+                checkpoint_roles is not None
+                and manifest.boundary == "local"
+                and manifest.review_object is not None
+            )
         if checkpoint_roles is not None:
             checkpoint_roles.append(
                 _CheckpointRole(
@@ -1013,6 +1035,25 @@ def _read(
                     manifest.recovery_origin_intent_commit,
                     manifest.recovery_previous_operation_commit,
                     manifest.recovery_direction,
+                    digest(
+                        manifest.model_dump(
+                            mode="json",
+                            exclude={
+                                "generation",
+                                "previous",
+                                "semantic_fingerprint",
+                                "review_content",
+                                "review_object",
+                                "review_size",
+                                "review_sha256",
+                            },
+                        )
+                    )
+                    if memo_roles
+                    else None,
+                    reviewed[manifest.review_object][4]
+                    if memo_roles and manifest.review_object is not None
+                    else None,
                 )
             )
         if tip_manifest is None:
