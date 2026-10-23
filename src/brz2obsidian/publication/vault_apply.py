@@ -375,6 +375,15 @@ def _operation_graph(git, commit):
                 "Recovery ancestry identity, generation or direction disagrees"
             )
     intent = authorities[0][1]
+    expected_status = (
+        "restored"
+        if intent.direction == "restore"
+        else "undone"
+        if intent.kind == "undo"
+        else "applied"
+        if origin.affected_paths
+        else "no_content_change"
+    )
     if top_receipt is not None and (
         top_receipt.operation_id != intent.operation_id
         or top_receipt.kind != intent.kind
@@ -382,6 +391,7 @@ def _operation_graph(git, commit):
         or top_receipt.direction != intent.direction
         or top_receipt.prepared_commit != intent.prepared_commit
         or top_receipt.published_paths != intent.affected_paths
+        or top_receipt.status != expected_status
     ):
         raise OSError("Terminal receipt identity disagrees with active authority")
     return _OperationGraph(
@@ -397,7 +407,7 @@ def _read_operation_intent(git, commit):
     return graph.intent
 
 
-def _prepared_for_intent(intent, manifest, loaded, *, origin=None):
+def _prepared_for_intent(intent, manifest, loaded, *, origin=None, origin_commit=None):
     """A retained prepared review authorizes exactly its selected transition."""
     if loaded is None:
         return False
@@ -421,7 +431,14 @@ def _prepared_for_intent(intent, manifest, loaded, *, origin=None):
     proposed = {row.path: row for row in intent.proposed}
     source = {row.path: row for row in manifest.source}
     if isinstance(intent, VaultRecoveryIntent):
-        if origin is None or plan.proposal.generation != intent.review_generation:
+        if (
+            origin is None
+            or plan.proposal.generation != intent.review_generation
+            or manifest.recovery_origin_intent_commit != origin_commit
+            or manifest.recovery_previous_operation_commit
+            != intent.previous_operation_commit
+            or manifest.recovery_direction != intent.direction
+        ):
             return False
         source = {
             row.path: row
@@ -429,6 +446,8 @@ def _prepared_for_intent(intent, manifest, loaded, *, origin=None):
                 origin.proposed if intent.direction == "finish" else origin.before
             )
         }
+    elif manifest.recovery_direction is not None:
+        return False
 
     def matches(row, content):
         return (
@@ -607,15 +626,14 @@ def _inspect_update_status(vault, *, observations):
         # validates every requested commit and its retained ancestry.
         origins = {}
         for graph in graphs:
-            if len(graph.authorities) > 1:
-                origin = graph.authorities[-1][1]
-                declared = CheckpointManifest.model_validate_json(
-                    git.call("show", f"{origin.prepared_commit}:manifest.json")
-                )
-                if declared.previous is None:
-                    raise OSError("Recovery origin lacks prior source lineage")
-                origins[graph.origin_intent_commit] = declared.previous
-                targets.add(declared.previous)
+            origin = graph.authorities[-1][1]
+            declared = CheckpointManifest.model_validate_json(
+                git.call("show", f"{origin.prepared_commit}:manifest.json")
+            )
+            if declared.previous is None:
+                raise OSError("Operation origin lacks prior source lineage")
+            origins[graph.origin_intent_commit] = declared.previous
+            targets.add(declared.previous)
         linked_intents = []
         checkpoint, owned = _read(
             root, git, targets=targets, linked_intents=linked_intents
@@ -631,7 +649,13 @@ def _inspect_update_status(vault, *, observations):
             origin = graph.authorities[-1][1]
             for _, authority in graph.authorities:
                 prepared, saved = owned[authority.prepared_commit]
-                if not _prepared_for_intent(authority, prepared, saved, origin=origin):
+                if not _prepared_for_intent(
+                    authority,
+                    prepared,
+                    saved,
+                    origin=origin,
+                    origin_commit=graph.origin_intent_commit,
+                ):
                     raise OSError("Operation intent lacks a selected prepared review")
                 if isinstance(authority, VaultRecoveryIntent):
                     lineage_commit = (

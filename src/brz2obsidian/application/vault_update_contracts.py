@@ -119,12 +119,16 @@ class VaultOperationReceipt(ReconciliationContract):
         for path in self.published_paths:
             self.relative_vault_path(path)
         if self.direction == "restore":
-            expected = "restored"
+            expected = ("restored",)
         elif self.kind == "undo":
-            expected = "undone"
+            expected = ("undone",)
         else:
-            expected = "applied" if self.published_paths else "no_content_change"
-        if self.status != expected:
+            expected = (
+                ("applied",)
+                if self.published_paths
+                else ("applied", "no_content_change")
+            )
+        if self.status not in expected:
             raise ValueError("Receipt status must reflect actual file publication")
         return self
 
