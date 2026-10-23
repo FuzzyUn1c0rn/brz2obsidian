@@ -29,7 +29,7 @@ from brz2obsidian.contracts import (
     SourceMemoryProvenance,
     reconciliation_subject_id,
 )
-from brz2obsidian.core import load_review, save_review
+from brz2obsidian.core import load_review, save_review, select_review_effects
 from brz2obsidian.publication.git_payload import verify_blobs
 from brz2obsidian.publication.git_read import OUTPUT_BUDGET, read_git
 from brz2obsidian.publication.vault_admission import (
@@ -875,10 +875,13 @@ def _read(root, git):
     )
 
 
-def inspect_history(vault, *, subjects=(), git_executable=None):
+def inspect_history(vault, *, subjects=(), git_executable=None, active_operation=None):
     root = Path(vault).absolute()
     admission, history = _observe_vault(
-        root, subjects=subjects, git_executable=git_executable
+        root,
+        subjects=subjects,
+        git_executable=git_executable,
+        active_operation=active_operation,
     )
     status = "unavailable"
     try:
@@ -945,6 +948,8 @@ def capture_checkpoint(
     proposed=None,
     expected_prepared=None,
     git_executable=None,
+    active_operation=None,
+    source_binding=None,
 ):
     root, source = Path(vault).absolute(), Path(source).absolute()
     objects = False
@@ -962,7 +967,10 @@ def capture_checkpoint(
         ):
             return result("refused", "invalid_checkpoint_boundary")
         observed_history = inspect_history(
-            root, subjects=subjects, git_executable=git_executable
+            root,
+            subjects=subjects,
+            git_executable=git_executable,
+            active_operation=active_operation,
         )
         current = observed_history.admission
         if (
@@ -1069,9 +1077,27 @@ def capture_checkpoint(
             scopes = {
                 reconciliation_subject_id(
                     identity.module_id, identity.collection_id, s.item_id, s.facet
-                ): (s.path, s.current.path)
+                ): {s.path, s.current.path}
                 for s in saved.plan.facts.subjects
             }
+            for item in saved.plan.facts.identity_inventory:
+                if item.identity_state != "valid" or item.identity is None:
+                    continue
+                subject_id = reconciliation_subject_id(
+                    item.identity.module_id,
+                    item.identity.collection_id,
+                    item.identity.item_id,
+                    item.facet,
+                )
+                if subject_id in scopes:
+                    scopes[subject_id].add(item.current.path)
+            if boundary != "local":
+                selected_effects = select_review_effects(saved.plan)
+                if selected_effects.status == "selected":
+                    for effect in selected_effects.files:
+                        if effect.subject_id not in scopes:
+                            return result("refused", "review_scope_changed")
+                        scopes[effect.subject_id].add(effect.path)
             if any(
                 s.subject_id not in scopes or s.path not in scopes[s.subject_id]
                 for s in subjects
@@ -1105,6 +1131,19 @@ def capture_checkpoint(
             directory = Path(name)
             git.suppress_hooks(directory)
             source_files, source_spools = _spool(source, directory)
+            if source_binding is not None:
+                from brz2obsidian.application.source_payload_contracts import (
+                    ReviewedSourceBinding,
+                )
+
+                binding = ReviewedSourceBinding.model_validate(source_binding)
+                observed_rows = tuple(
+                    (row.path, row.mode, row.size, row.sha256) for row in binding.files
+                )
+                if tuple(
+                    row[:4] for row in source_files
+                ) != observed_rows or binding.source_anchor != verify_directory(source):
+                    return result("refused", "source_payload_changed")
             vault_files, vault_spools = _spool(
                 root,
                 directory,
@@ -1153,12 +1192,25 @@ def capture_checkpoint(
                     )
             inputs = source_spools + vault_spools + proposed_spools
             if saved is not None:
+                selected_review = (
+                    boundary == "prepared"
+                    and select_review_effects(saved.plan).status == "selected"
+                )
+                identified = {
+                    (item.identity.item_id, item.facet)
+                    for item in saved.plan.facts.identity_inventory
+                    if item.identity_state == "valid" and item.identity is not None
+                }
                 for subject in saved.plan.facts.subjects:
                     for expected, path, inventory in (
                         (subject.incoming, subject.path, source_files),
                     ) + (
                         ()
                         if retaining_prepared
+                        or (
+                            selected_review
+                            and (subject.item_id, subject.facet) in identified
+                        )
                         else (
                             (
                                 subject.current.content,
@@ -1169,6 +1221,24 @@ def capture_checkpoint(
                     ):
                         observed = next(
                             (row for row in inventory if row[0] == path), None
+                        )
+                        if (
+                            (expected is None) != (observed is None)
+                            or expected is not None
+                            and (
+                                len(expected.data) != observed[2]
+                                or hashlib.sha256(expected.data).hexdigest()
+                                != observed[3]
+                            )
+                        ):
+                            return result("refused", "review_bytes_changed")
+                if selected_review:
+                    for item in saved.plan.facts.identity_inventory:
+                        if item.identity_state != "valid":
+                            continue
+                        expected, path = item.current.content, item.current.path
+                        observed = next(
+                            (row for row in vault_files if row[0] == path), None
                         )
                         if (
                             (expected is None) != (observed is None)

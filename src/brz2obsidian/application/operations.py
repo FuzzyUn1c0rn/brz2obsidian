@@ -52,10 +52,13 @@ from brz2obsidian.publication.filesystem import preflight_destination
 class Operations:
     """Explicitly injected migration and checker composition for headless callers."""
 
-    def __init__(self, workflow=None, *, checker=None, credentials=None):
+    def __init__(
+        self, workflow=None, *, checker=None, credentials=None, vault_executor=None
+    ):
         self.workflow = workflow
         self.checker = checker
         self.credentials = credentials
+        self.vault_executor = vault_executor
 
     def inspect_vault(
         self,
@@ -81,6 +84,12 @@ class Operations:
 
         return capture_checkpoint(vault, source, **kwargs)
 
+    def observe_reviewed_source(self, source, review):
+        """Bind the complete converted payload to this prepared S1 review."""
+        from brz2obsidian.publication.source_payload import observe_reviewed_source
+
+        return observe_reviewed_source(source, review)
+
     def inspect_history(self, vault, **kwargs):
         """Compose fresh admission with validated owned history or onboarding absence."""
         from brz2obsidian.publication.vault_history import inspect_history
@@ -92,6 +101,26 @@ class Operations:
         from brz2obsidian.publication.vault_history import read_checkpoint
 
         return read_checkpoint(vault, **kwargs)
+
+    def apply_reviewed_update(self, vault, source, **kwargs):
+        """Apply one whole current S1 review through owned existing-vault history."""
+        from brz2obsidian.publication.vault_apply import apply_reviewed_update
+
+        return apply_reviewed_update(
+            vault, source, executor=self.vault_executor, **kwargs
+        )
+
+    def inspect_update_status(self, vault):
+        """Read authoritative owned intent or terminal receipt after restart."""
+        from brz2obsidian.publication.vault_apply import inspect_update_status
+
+        return inspect_update_status(vault)
+
+    def read_update_details(self, vault, *, offset=0, limit=100):
+        """Page safe before/result comparisons from validated owned intent."""
+        from brz2obsidian.publication.vault_apply import read_update_details
+
+        return read_update_details(vault, offset=offset, limit=limit)
 
     def _selected_workflow(self, selection):
         if isinstance(selection, LocalApiSourceSelection):

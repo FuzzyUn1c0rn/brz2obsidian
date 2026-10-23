@@ -7,6 +7,8 @@ the accepted S1 `ReviewPlan` supply scope and consent. A loaded historical revie
 always requires current revalidation before it can authorize a new operation.
 The [vault admission policy](vault-admission.md) describes supported Git layouts
 and the unchanged-target prerequisite during a running vault-changing operation.
+The [reviewed application boundary](vault-application.md) consumes a prepared
+checkpoint and retains separate intent, result and terminal records.
 
 ## Owned history
 

@@ -2113,6 +2113,47 @@ class ReviewPlan(ReconciliationContract):
     ready: bool
 
 
+class SelectedReviewFile(ReconciliationContract):
+    """One exact selected result, before outer inventory and disk admission."""
+
+    path: str
+    subject_id: str = Field(min_length=1)
+    content: ExactContent
+
+
+class SelectedReviewEffects(ReconciliationContract):
+    """Pure selected files and explicit displaced paths from one valid review."""
+
+    schema_id: Literal["brz2obsidian.selected-review-effects"]
+    schema_version: Literal[1]
+    status: Literal["selected", "refused"]
+    code: Literal["selected", "invalid_plan", "review_not_ready", "effect_conflict"]
+    proposal_id: str | None
+    generation: int | None
+    files: tuple[SelectedReviewFile, ...]
+    remove_paths: tuple[str, ...]
+
+    @model_validator(mode="after")
+    def consistent_effects(self):
+        selected = self.status == "selected"
+        if selected != (self.code == "selected") or selected != (
+            self.proposal_id is not None and self.generation is not None
+        ):
+            raise ValueError("Selected effect status and identity must agree")
+        paths = tuple(file.path for file in self.files)
+        if paths != tuple(sorted(set(paths))) or self.remove_paths != tuple(
+            sorted(set(self.remove_paths))
+        ):
+            raise ValueError("Selected effect paths must be unique and sorted")
+        if set(paths) & set(self.remove_paths):
+            raise ValueError("A selected file cannot also be removed")
+        for path in self.remove_paths:
+            self.relative_vault_path(path)
+        if not selected and (self.files or self.remove_paths):
+            raise ValueError("Refused effects cannot authorize files")
+        return self
+
+
 class ReviewTransition(ReconciliationContract):
     schema_id: Literal["brz2obsidian.review-transition"]
     schema_version: Literal[1]

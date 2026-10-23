@@ -231,10 +231,11 @@ def _file_digest(path):
 
 
 class _Inspection:
-    def __init__(self, vault, subjects, executable):
+    def __init__(self, vault, subjects, executable, active_operation=None):
         self.root = Path(vault).absolute()
         self.subjects = ()
         self.request_subjects = subjects
+        self.active_operation = active_operation
         self.executable = (
             str(executable) if executable is not None else shutil.which("git")
         )
@@ -399,13 +400,11 @@ class _Inspection:
                     "Review subjects must name safe vault-relative paths.",
                 )
                 return False
-        if len({s.path for s in self.subjects}) != len(self.subjects) or len(
-            {s.subject_id for s in self.subjects}
-        ) != len(self.subjects):
+        if len({s.path for s in self.subjects}) != len(self.subjects):
             self.finding(
                 "duplicate_subject",
                 "inventory",
-                "Review subjects must identify unique paths and source facets.",
+                "Review subjects must identify unique paths.",
             )
             return False
         gitdir = root / ".git"
@@ -875,12 +874,28 @@ class _Inspection:
             )
             self.operation = "active"
         if (gitdir / "brz2obsidian").exists():
-            self.finding(
-                "converter_operation",
-                "operation",
-                "Converter operation/history metadata requires validated recovery discovery first.",
-            )
-            self.operation = "recovery_required"
+            owned = False
+            if self.active_operation is not None:
+                try:
+                    from brz2obsidian.publication.vault_apply import owns_operation
+
+                    owned = owns_operation(self.root, self.active_operation)
+                except OSError, ValueError, TypeError:
+                    pass
+            if owned:
+                from brz2obsidian.publication.vault_history import _Git, _read
+
+                self.history = _read(self.root, _Git(self.root, self.executable))
+                if self.history.status != "valid":
+                    raise OSError("Current converter history unavailable")
+                self.operation = "idle"
+            else:
+                self.finding(
+                    "converter_operation",
+                    "operation",
+                    "Converter operation/history metadata requires validated recovery discovery first.",
+                )
+                self.operation = "recovery_required"
         elif (self.root / ".brz2obsidian").exists():
             from brz2obsidian.publication.vault_history import _Git, _read
 
@@ -949,6 +964,27 @@ class _Inspection:
         }
         refs = self.git("for-each-ref", "--format=%(refname) %(objectname)")
         self.storage_state.append(refs.hex())
+        if self.active_operation is None:
+            for line in refs.decode("ascii").splitlines():
+                ref, _, oid = line.partition(" ")
+                if "/operations/" not in ref or not ref.startswith(
+                    "refs/brz2obsidian/imports/"
+                ):
+                    continue
+                try:
+                    names = (
+                        self.git("ls-tree", "--name-only", oid).decode().splitlines()
+                    )
+                except OSError, UnicodeError:
+                    names = []
+                if names != ["receipt.json"]:
+                    self.finding(
+                        "converter_operation",
+                        "operation",
+                        "Retained operation intent needs validated recovery before another update.",
+                    )
+                    self.operation = "recovery_required"
+                    break
         with (gitdir / "HEAD").open("rb") as stream:
             head_raw = stream.read(65537)
         if len(head_raw) > 65536:
@@ -1317,11 +1353,11 @@ class _Inspection:
                 kind=kind,
                 requirement="required",
                 policy=policy,
-                fingerprint=_digest((fingerprint, kind, selected)),
+                fingerprint=_digest((fingerprint, kind, sorted(set(selected)))),
                 disclosure="Retain exact on-disk bytes under the reviewed storage policy."
                 if kind == "storage"
                 else "Include the selected excluded authored paths in converter history.",
-                subjects=tuple(sorted(selected)),
+                subjects=tuple(sorted(set(selected))),
             )
 
         if builtin:
@@ -1334,12 +1370,12 @@ class _Inspection:
             )
         excluded = {f.path for f in self.inventory if f.exclusion == "git_ignore"}
         ignored_subjects = self.ignored_paths
-        included = [
+        included = {
             s.subject_id
             for s in self.subjects
             if (s.path in excluded or s.path in ignored_subjects)
             and s.path not in {f.path for f in self.inventory if f.tracked}
-        ]
+        }
         if included:
             self.consents.append(consent("tracking", "ordinary", included))
 
@@ -1623,9 +1659,9 @@ class _Inspection:
         )
 
 
-def _observe_vault(vault, *, subjects=(), git_executable=None):
+def _observe_vault(vault, *, subjects=(), git_executable=None, active_operation=None):
     """Observe current storage; caller assertions cannot grant trusted proof."""
-    inspection = _Inspection(vault, subjects, git_executable)
+    inspection = _Inspection(vault, subjects, git_executable, active_operation)
     try:
         with inspection.resources:
             return inspection.run(), inspection.history
@@ -1647,6 +1683,11 @@ def _observe_vault(vault, *, subjects=(), git_executable=None):
         return inspection.finish(), None
 
 
-def inspect_vault(vault, *, subjects=(), git_executable=None):
+def inspect_vault(vault, *, subjects=(), git_executable=None, active_operation=None):
     """Fresh admission; internal composition may consume the same validated history."""
-    return _observe_vault(vault, subjects=subjects, git_executable=git_executable)[0]
+    return _observe_vault(
+        vault,
+        subjects=subjects,
+        git_executable=git_executable,
+        active_operation=active_operation,
+    )[0]
