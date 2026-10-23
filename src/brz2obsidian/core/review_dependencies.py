@@ -7,6 +7,7 @@ from brz2obsidian.contracts import ProposalAssumption, ReviewDependencyNode
 
 from .dependency_graph import validate_dependencies
 from .link_meanings import _semantic, resolve_occurrence
+from .reversals import reversal_subject, selected_reversal_outputs
 from .review_attachments import applicable_approvals
 from .review_effects import current_note_coverage
 from .review_links import consumed_context
@@ -96,7 +97,13 @@ def review_dependencies(plan):
         derived(
             key,
             "content",
-            (path, content),
+            (path, content)
+            if reversal_subject(plan.producer_facts, change).operation_reversal is None
+            else (
+                path,
+                content,
+                selected_reversal_outputs(plan.producer_facts, change, approval),
+            ),
             tuple(a.key for a in change.assumptions) + tuple(producer_keys),
             "selected",
         )
@@ -125,6 +132,9 @@ def review_dependencies(plan):
                 for t in context.current_targets + context.incoming_targets
                 if t.canonical_path in (change.path, change.target_path)
             }
+            subject = reversal_subject(plan.producer_facts, change)
+            if subject.operation_reversal is not None:
+                own.update(r.target_id for r in subject.operation_reversal.outputs)
             for doc in context.current_documents:
                 occurrences = tuple(
                     o
@@ -191,9 +201,14 @@ def review_dependencies(plan):
             dependencies.update(a.key for a in approval.assumptions)
         if context is not None:
             for other in plan.proposal.changes:
+                other_subject = reversal_subject(plan.producer_facts, other)
+                paths = {other.path, other.target_path}
+                if other_subject.operation_reversal is not None:
+                    paths.update(
+                        r.path for r in other_subject.operation_reversal.outputs
+                    )
                 if any(
-                    t.target_id in target_ids
-                    and t.canonical_path in (other.path, other.target_path)
+                    t.target_id in target_ids and t.canonical_path in paths
                     for t in context.current_targets + context.incoming_targets
                 ):
                     dependencies.add(selected[other.subject_id])

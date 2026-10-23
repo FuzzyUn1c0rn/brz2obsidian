@@ -936,24 +936,14 @@ class StructureComparison(ReconciliationContract):
     section_bases: tuple[GeneratedSectionBasis, ...]
 
 
-class OperationReversalTarget(ReconciliationContract):
-    """Outer-validated operation versions for reversing a file existence change.
+class OperationReversalOutput(ReconciliationContract):
+    """One retained selected output; its target ID is not a source item identity."""
 
-    The retained operation epoch and proof stay stable across review refreshes.
-    Outer history revalidates complete preimage/proposed existence and bytes
-    before publication. These operation versions do not redefine source originals.
-    """
-
-    schema_id: Literal["brz2obsidian.operation-reversal-target"]
-    schema_version: Literal[1]
-    operation_id: str = Field(min_length=1)
-    operation_kind: Literal["apply", "undo"]
-    direction: Literal["finish", "restore"]
-    operation_generation: int = Field(ge=1)
-    history_fingerprint: str = Field(min_length=1)
     path: str = Field(min_length=1)
+    target_id: str = Field(min_length=1)
     produced_existence: Literal["present", "absent"]
     produced: ExactContent | None
+    current: CurrentContent
     target_existence: Literal["present", "absent"]
     target: ExactContent | None
 
@@ -963,10 +953,59 @@ class OperationReversalTarget(ReconciliationContract):
             (self.produced_existence == "present") != (self.produced is not None)
             or (self.target_existence == "present") != (self.target is not None)
             or self.produced_existence == self.target_existence
+            or self.current.existence == "unknown"
+            or self.current.path != self.path
         ):
             raise ValueError(
                 "Operation reversal requires an exact proven existence change"
             )
+        return self
+
+
+class OperationReversalTarget(ReconciliationContract):
+    """Outer-validated selected-output ownership and exact operation versions.
+
+    Origin IDs join the retained canonical decision; they are not authority by
+    themselves. Outer history verifies membership and complete inventories again
+    before publication. No output row creates a source item or facet.
+    """
+
+    schema_id: Literal["brz2obsidian.operation-reversal-target"]
+    schema_version: Literal[1]
+    operation_id: str = Field(min_length=1)
+    operation_kind: Literal["apply", "undo"]
+    direction: Literal["finish", "restore"]
+    operation_generation: int = Field(ge=1)
+    history_fingerprint: str = Field(min_length=1)
+    origin_change_id: str = Field(min_length=1)
+    origin_decision_id: str = Field(min_length=1)
+    owned_targets: tuple[ReferenceTarget, ...]
+    outputs: tuple[OperationReversalOutput, ...]
+
+    @model_validator(mode="after")
+    def selected_output_membership(self):
+        owned = [(t.target_id, t.canonical_path) for t in self.owned_targets]
+        rows = [(r.target_id, r.path) for r in self.outputs]
+        if (
+            not rows
+            or len(set(owned)) != len(owned)
+            or len({t[1] for t in owned}) != len(owned)
+            or len({r[1] for r in rows}) != len(rows)
+            or not set(rows) <= set(owned)
+        ):
+            raise ValueError(
+                "Operation reversal requires unique retained owned output joins"
+            )
+        for stage in ("produced", "target"):
+            present = [
+                r.target_id
+                for r in self.outputs
+                if getattr(r, stage + "_existence") == "present"
+            ]
+            if len(set(present)) != len(present):
+                raise ValueError(
+                    "One logical reversal target cannot occupy multiple present paths"
+                )
         return self
 
 
@@ -986,20 +1025,6 @@ class ReconciliationSubject(ReconciliationContract):
     operation_reversal: OperationReversalTarget | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
-
-    @model_validator(mode="after")
-    def bound_operation_reversal(self):
-        proof = self.operation_reversal
-        if proof is not None and (
-            (None if self.incoming is None else self.incoming.data)
-            != (None if proof.target is None else proof.target.data)
-            or self.path != proof.path
-            or self.current.path != proof.path
-        ):
-            raise ValueError(
-                "Operation reversal requires exact target content and path"
-            )
-        return self
 
 
 class ReconciliationInput(ReconciliationContract):
@@ -1367,6 +1392,7 @@ class IdentityReview(ReconciliationContract):
 
     status: Literal["matched", "unresolved", "association_proposed", "stale", "refused"]
     reason: Literal[
+        "operation_owned",
         "unique_identity",
         "duplicate_identity",
         "identity_unavailable",
@@ -1382,7 +1408,9 @@ class IdentityReview(ReconciliationContract):
     repair_required: bool
     disassociate_entry_ids: tuple[str, ...]
     decision_id: str | None
-    provenance: Literal["unique_identity", "explicit_user", "unresolved"]
+    provenance: Literal[
+        "unique_identity", "operation_owned", "explicit_user", "unresolved"
+    ]
     assumptions: tuple[ProposalAssumption, ...]
 
 
@@ -1615,6 +1643,7 @@ class AttachmentAlternative(ReconciliationContract):
     choice: Literal["current", "incoming", "both"]
     outputs: tuple[AttachmentOutput, ...]
     eligible: bool
+    operation_bound: bool = Field(default=False, exclude_if=lambda value: not value)
     unavailable_reasons: tuple[
         Literal[
             "content_unavailable",
@@ -1629,9 +1658,12 @@ class AttachmentAlternative(ReconciliationContract):
     @model_validator(mode="after")
     def explicit_availability(self):
         if self.eligible:
-            if self.unavailable_reasons or len(self.outputs) != (
-                2 if self.choice == "both" else 1
-            ):
+            complete = (
+                bool(self.outputs) and self.choice in ("current", "incoming")
+                if self.operation_bound
+                else len(self.outputs) == (2 if self.choice == "both" else 1)
+            )
+            if self.unavailable_reasons or not complete:
                 raise ValueError(
                     "Eligible alternatives require their complete exact outputs"
                 )

@@ -1,11 +1,8 @@
 """Pure exact-file projection from a canonical whole S1 review."""
 
-from brz2obsidian.contracts import (
-    ReviewPlan,
-    SelectedReviewEffects,
-    SelectedReviewFile,
-)
+from brz2obsidian.contracts import ReviewPlan, SelectedReviewEffects, SelectedReviewFile
 from brz2obsidian.core.resolution import validate_review
+from brz2obsidian.core.reversals import reversal_subject, selected_reversal_outputs
 from brz2obsidian.core.review_attachments import applicable_approvals
 
 
@@ -54,13 +51,24 @@ def select_review_effects(plan: ReviewPlan) -> SelectedReviewEffects:
 
     def add(path, content, subject_id):
         previous = files.get(path)
-        if previous is not None and previous[0] != content:
+        if previous is not None and previous[0].data != content.data:
             raise ValueError("Conflicting selected file bytes")
         files[path] = content, min(previous[1], subject_id) if previous else subject_id
 
     try:
         for change in plan.proposal.changes:
             approval = approvals.get(change.change_id)
+            rows = selected_reversal_outputs(plan.producer_facts, change, approval)
+            for row, content in rows:
+                if content is None:
+                    if (
+                        row.current.existence == "present"
+                        and approval is not None
+                        and approval.choice == "reverse"
+                    ):
+                        removals.add(row.path)
+                else:
+                    add(row.path, content, change.subject_id)
             if approval is not None and approval.attachment_candidate is not None:
                 candidate = approval.attachment_candidate
                 for output in candidate.outputs:
@@ -82,9 +90,13 @@ def select_review_effects(plan: ReviewPlan) -> SelectedReviewEffects:
                         )
                 continue
             content = change.result if approval is None else approval.result
+            subject = reversal_subject(plan.producer_facts, change)
+            if subject.operation_reversal is not None:
+                content = next(
+                    (data for row, data in rows if row.path == subject.current.path),
+                    subject.current.content,
+                )
             if content is None:
-                if approval is not None and approval.choice == "reverse":
-                    removals.add(change.path)
                 continue
             path = change.target_path if approval is None else approval.target_path
             add(path, content, change.subject_id)

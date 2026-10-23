@@ -29,6 +29,7 @@ from .preservation import (
     preservation_decision,
     preservation_policy,
 )
+from .reversals import content_bytes, primary_reversal_content, reversal_safe
 from .review_links import text_link_assumptions
 from .structures import (
     structure_assumption,
@@ -246,10 +247,7 @@ def _reconcile(facts: ReconciliationInput, *, _applicability=()) -> UpdatePropos
         problems = _findings(facts, subject, subject_id, safety) + list(
             binding.findings
         )
-        if subject.operation_reversal is not None and (
-            subject.current.path != subject.operation_reversal.path
-            or binding.target_path != subject.operation_reversal.path
-        ):
+        if not reversal_safe(facts, subject, binding.target_path):
             problems.append(
                 ReconciliationFinding(
                     code="unsafe_assumption",
@@ -276,22 +274,28 @@ def _reconcile(facts: ReconciliationInput, *, _applicability=()) -> UpdatePropos
         )
         if subject.operation_reversal is not None:
             proof = subject.operation_reversal
-            already_target = (
-                subject.current.existence == proof.target_existence
-                and _bytes(subject.current.content) == _bytes(proof.target)
+            already_target = all(
+                row.current.existence == row.target_existence
+                and content_bytes(row.current.content) == content_bytes(row.target)
+                for row in proof.outputs
             )
+            primary = primary_reversal_content(subject)
             disposition, result, rule, requires_decision = (
                 "local_deleted"
-                if already_target and proof.target_existence == "absent"
+                if already_target and primary is None
                 else "no_change"
                 if already_target
                 else "operation_reversal",
-                subject.current.content if already_target else None,
+                primary if already_target else None,
                 "operation_reversal",
                 not already_target,
             )
             preservation_review = None
-            if proof.target_existence == "absent":
+            if not any(
+                row.target is not None
+                and content_bytes(row.target) != content_bytes(row.current.content)
+                for row in proof.outputs
+            ):
                 binary_review = None
         structured_result = None
         if (
@@ -387,11 +391,11 @@ def _reconcile(facts: ReconciliationInput, *, _applicability=()) -> UpdatePropos
                 facet=subject.facet,
                 path=subject.current.path,
                 target_path=binding.target_path,
-                original=subject.baseline.content
-                if subject.operation_reversal is None
-                else subject.operation_reversal.produced,
+                original=subject.baseline.content,
                 current=subject.current.content,
-                incoming=subject.incoming,
+                incoming=subject.incoming
+                if subject.operation_reversal is None
+                else primary_reversal_content(subject, reverse=True),
                 result=result,
                 disposition=disposition,
                 requires_decision=requires_decision,

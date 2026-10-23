@@ -33,6 +33,8 @@ def _allocation_path(subject, ordinal):
 def attachment_review(facts, subject, subject_id):
     if subject.attachment is None:
         return None, ()
+    if subject.operation_reversal is not None:
+        return _operation_attachment_review(facts, subject, subject_id)
     association = subject.attachment.current_target_id
     prospective = []
     for other in facts.subjects:
@@ -178,3 +180,97 @@ def attachment_review(facts, subject, subject_id):
         if facts.link_context is None
         else facts.link_context.inventory,
     ), assumptions
+
+
+def _operation_attachment_review(facts, subject, subject_id):
+    """Offer the proved complete present outputs; omission never implies removal."""
+    from .reversals import content_bytes
+
+    proof = subject.operation_reversal
+    if not any(
+        row.target is not None
+        and content_bytes(row.target) != content_bytes(row.current.content)
+        for row in proof.outputs
+    ):
+        return None, ()
+    alternatives = []
+    for choice in ("current", "incoming"):
+        present = {}
+        if subject.current.content is not None:
+            present[subject.current.path] = (
+                subject.attachment.current_target_id,
+                subject.current.content,
+            )
+        for row in proof.outputs:
+            content = row.current.content if choice == "current" else row.target
+            if content is None:
+                present.pop(row.path, None)
+            else:
+                present[row.path] = row.target_id, content
+        outputs = tuple(
+            AttachmentOutput(
+                target_id=target_id,
+                path=path,
+                content=content,
+                content_version=_hash(content),
+            )
+            for path, (target_id, content) in sorted(
+                present.items(),
+                key=lambda entry: (entry[0] != subject.current.path, entry[0]),
+            )
+        )
+        alternatives.append(
+            AttachmentAlternative(
+                choice=choice,
+                outputs=outputs,
+                eligible=bool(outputs),
+                operation_bound=True,
+                unavailable_reasons=() if outputs else ("content_unavailable",),
+            )
+        )
+    assumption = ProposalAssumption(
+        key=f"attachment:{subject_id}",
+        kind="attachment",
+        fingerprint=sha256(
+            json.dumps(proof.model_dump(mode="json"), sort_keys=True).encode()
+        ).hexdigest(),
+        depends_on=(
+            f"{subject_id}:reversal",
+            f"{subject_id}:current",
+            f"{subject_id}:inventory",
+        ),
+    )
+    reviews, scoped = {}, []
+    for target_id in sorted(
+        {subject.attachment.current_target_id} | {r.target_id for r in proof.outputs}
+    ):
+        view = subject.model_copy(
+            update={
+                "attachment": subject.attachment.model_copy(
+                    update={"current_target_id": target_id}
+                )
+            }
+        )
+        links, dependencies = associated_link_reviews(facts, view, subject_id, ())
+        scoped.extend(a.fingerprint for a in dependencies)
+        reviews.update({(r.document_id, r.occurrence_id): r for r in links})
+    link = ProposalAssumption(
+        key=f"links:{subject_id}",
+        kind="link",
+        fingerprint=sha256(json.dumps(scoped).encode()).hexdigest(),
+        depends_on=(assumption.key, f"{subject_id}:inventory"),
+    )
+    return AttachmentReview(
+        incoming_source_path=subject.path,
+        alternatives=tuple(alternatives),
+        assumptions=(assumption, link),
+        links=tuple(
+            r.model_copy(update={"assumptions": (link,)})
+            for _, r in sorted(
+                reviews.items(), key=lambda entry: (entry[0][0], entry[0][1] or "")
+            )
+        ),
+        link_inventory="unknown"
+        if facts.link_context is None
+        else facts.link_context.inventory,
+    ), (assumption, link)

@@ -120,7 +120,11 @@ def validate_attachment_candidate(
         add("attachment_payload_mismatch")
         return result()
     context = facts.link_context
-    association = alternative.outputs[0].target_id
+    association = (
+        subject.attachment.current_target_id
+        if subject.operation_reversal is not None
+        else alternative.outputs[0].target_id
+    )
     expected_ids = {t.target_id for t in context.current_targets} | {
         o.target_id for o in alternative.outputs
     }
@@ -167,7 +171,14 @@ def validate_attachment_candidate(
                 add("attachment_target_invalid")
             for entry in facts.identity_inventory:
                 if _paths_collide(output.path, entry.current.path) and not (
-                    target_id == association and entry.current.path == change.path
+                    target_id == association
+                    and entry.current.path == change.path
+                    or subject.operation_reversal is not None
+                    and any(
+                        r.path == output.path == entry.current.path
+                        and r.target_id == target_id
+                        for r in subject.operation_reversal.outputs
+                    )
                 ):
                     add("attachment_target_invalid")
         else:
@@ -200,7 +211,23 @@ def validate_attachment_candidate(
                 (s for s in context.current_target_facts if s.target_id == target_id),
                 None,
             )
-            if prior != state:
+            absent = subject.operation_reversal is not None and any(
+                r.target_id == target_id and r.target is None
+                for r in subject.operation_reversal.outputs
+            )
+            if (
+                absent
+                and (
+                    state.existence != "missing"
+                    or state.content is not None
+                    or state.structure is not None
+                    or state.fragments
+                    or state.anchors
+                    or state.memberships
+                )
+                or not absent
+                and prior != state
+            ):
                 add("attachment_target_invalid")
     choices = {(c.document_id, c.occurrence_id): c for c in selection.link_choices}
     if len(choices) != len(selection.link_choices):

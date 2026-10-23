@@ -429,6 +429,8 @@ def current_keep_needs_proof(facts, change):
 
 
 def current_lookup_coverage(facts):
+    from .reversals import reversal_physical_entry
+
     context = facts.link_context
     if context is None or context.inventory != "complete":
         return False
@@ -442,6 +444,8 @@ def current_lookup_coverage(facts):
             for t in context.current_targets
             if t.canonical_path == entry.current.path and t.kind != "tag"
         )
+        if not records and reversal_physical_entry(facts, entry):
+            continue
         if len(records) != 1:
             return False
         states = tuple(
@@ -464,6 +468,10 @@ def current_lookup_coverage(facts):
 
 
 def bound_resource_record(facts, entry, target, state):
+    from .reversals import reversal_resource_record
+
+    if reversal_resource_record(facts, entry, target, state):
+        return True
     associated = any(
         sub.attachment is not None
         and sub.attachment.current_target_id == target.target_id

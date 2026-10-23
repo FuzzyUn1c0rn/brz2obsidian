@@ -11,6 +11,12 @@ from brz2obsidian.contracts import (
 )
 
 from .resolution import _plan, _transition, validate_review
+from .reversals import (
+    content_bytes,
+    primary_reversal_content,
+    reversal_subject,
+    reversal_text_comparison,
+)
 from .review_attachments import retained_attachment_view
 from .review_dependencies import review_dependencies
 from .review_links import selected_current_links_safe
@@ -30,12 +36,23 @@ def _closure(changed, nodes):
 
 
 def _approval_safe(facts, change, approval, origin, attachment_applicability=()):
-    if approval.choice == "reverse" and approval.result is None:
+    if (
+        approval.choice == "reverse"
+        and approval.attachment_candidate is None
+        and origin.candidate is None
+    ):
+        subject = reversal_subject(facts, change)
         return (
             approval.domain == "reversal"
             and change.disposition == "operation_reversal"
-            and change.result is None
-            and approval.result is None
+            and subject.operation_reversal is not None
+            and content_bytes(approval.result)
+            == content_bytes(primary_reversal_content(subject, reverse=True))
+            and not any(
+                r.target is not None
+                and content_bytes(r.target) != content_bytes(r.current.content)
+                for r in subject.operation_reversal.outputs
+            )
             and change.target_path == approval.target_path
         )
     if approval.attachment_candidate is not None:
@@ -69,7 +86,9 @@ def _approval_safe(facts, change, approval, origin, attachment_applicability=())
     if origin.candidate is not None:
         return validate_text_candidate(
             facts,
-            change,
+            reversal_text_comparison(facts, change)
+            if approval.domain == "reversal"
+            else change,
             origin.candidate,
             "incoming"
             if approval.domain == "reversal" and approval.choice == "reverse"

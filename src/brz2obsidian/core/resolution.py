@@ -24,6 +24,11 @@ from brz2obsidian.core.attachment_validation import validate_attachment_candidat
 from brz2obsidian.core.link_meanings import _semantic
 from brz2obsidian.core.memberships import used_mappings
 from brz2obsidian.core.reconciliation import _reconcile
+from brz2obsidian.core.reversals import (
+    primary_reversal_content,
+    reversal_subject,
+    reversal_text_comparison,
+)
 from brz2obsidian.core.review_attachments import (
     applicable_approvals,
     attachment_candidate_assumption,
@@ -858,7 +863,13 @@ def _resolve_action(plan, action):
     reversal_present = (
         action.domain == "reversal"
         and action.choice == "reverse"
-        and change.incoming is not None
+        and reversal_subject(plan.producer_facts, change).attachment is None
+        and any(
+            r.target is not None
+            for r in reversal_subject(
+                plan.producer_facts, change
+            ).operation_reversal.outputs
+        )
     )
     if (
         action.choice in ("incoming", "edited") or reversal_present
@@ -866,7 +877,9 @@ def _resolve_action(plan, action):
         return _transition(plan, "refused", "invalid_candidate")
     if action.candidate is not None and not validate_text_candidate(
         plan.producer_facts,
-        change,
+        reversal_text_comparison(plan.producer_facts, change)
+        if action.domain == "reversal" and action.choice in ("reverse", "edited")
+        else change,
         action.candidate,
         "incoming" if reversal_present else action.choice,
         mapping_choice=action.domain == "mapping",
@@ -912,7 +925,9 @@ def _resolve_action(plan, action):
         change_id=change.change_id,
         domain=action.domain,
         choice=action.choice,
-        result=change.incoming
+        result=primary_reversal_content(
+            reversal_subject(plan.producer_facts, change), reverse=True
+        )
         if action.choice == "reverse"
         else change.result
         if action.choice == "approve"

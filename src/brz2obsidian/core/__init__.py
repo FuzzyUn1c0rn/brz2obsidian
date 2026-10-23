@@ -6,6 +6,7 @@ from .reconciliation import reconcile
 from .refresh import refresh_review
 from .resolution import prepare_review, resolve_review, validate_review
 from .resume import load_review, resume_review, save_review
+from .reversals import review_owned_targets
 from .selected_effects import select_review_effects
 
 __all__ = [
@@ -17,6 +18,7 @@ __all__ = [
     "refresh_review",
     "resolve_review",
     "resume_review",
+    "review_owned_targets",
     "save_review",
     "select_review_effects",
     "validate_attachment_candidate",

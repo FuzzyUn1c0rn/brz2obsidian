@@ -11,6 +11,13 @@ from brz2obsidian.core.review_links import (
     known_result_document,
 )
 
+from .reversals import (
+    content_bytes,
+    reversal_subject,
+    reversal_target,
+    selected_reversal_outputs,
+)
+
 
 def selected_effect_blockers(facts, proposal, actions, approvals):
     context = facts.link_context
@@ -51,7 +58,10 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
 
     def write(target, content, path, state):
         previous = writes.get(target.target_id)
-        if previous is not None and previous != (content, path):
+        if previous is not None and (content_bytes(previous[0]), previous[1]) != (
+            content_bytes(content),
+            path,
+        ):
             add("selected_output_conflict")
             return
         writes[target.target_id] = (content, path)
@@ -65,41 +75,80 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
         else:
             states[target.target_id] = state
 
-    # An approved reversal changes existence in the same selected graph as bytes.
-    # Retain the target's lookup identity so inbound references resolve missing.
+    # Project operation output rows into the same selected semantic target graph.
     for change in proposal.changes:
         approval = approved.get(change.change_id)
-        if (
-            approval is None
-            or approval.choice != "reverse"
-            or approval.result is not None
-        ):
+        if approval is None and change.requires_decision:
             continue
-        own = tuple(
-            t for t in context.current_targets if t.canonical_path == change.path
-        )
-        if len(own) != 1:
-            add("selected_link_context_conflict")
-            continue
-        (target,) = own
-        state = LinkTargetFacts(
-            schema_id="brz2obsidian.link-target-facts",
-            schema_version=1,
-            target_id=target.target_id,
-            existence="missing",
-            content=None,
-            fragments=(),
-            anchors=(),
-            structure=None,
-            memberships=(),
-            interpretation="supported",
-        )
-        write(target, None, change.path, state)
-        documents = {
-            key: document
-            for key, document in documents.items()
-            if document.source_path != change.path
-        }
+        selected = selected_reversal_outputs(facts, change, approval)
+        action = None if approval is None else action_by_id.get(approval.decision_id)
+        candidate = None if action is None else action.candidate
+        groups = {}
+        for row, content in selected:
+            groups.setdefault(row.target_id, []).append((row, content))
+        for target_id, members in groups.items():
+            present = [
+                (row, content) for row, content in members if content is not None
+            ]
+            if len(present) > 1:
+                add("selected_link_context_conflict")
+                continue
+            subject = reversal_subject(facts, change)
+            if present:
+                row, content = present[0]
+                target = reversal_target(subject.operation_reversal, row)
+                state = next(
+                    (
+                        s
+                        for s in (
+                            () if candidate is None else candidate.link_target_facts
+                        )
+                        + context.current_target_facts
+                        + context.incoming_target_facts
+                        if s.target_id == target_id
+                        and s.content is not None
+                        and s.content.data == content.data
+                    ),
+                    None,
+                )
+            else:
+                row = members[0][0]
+                content = None
+                target = targets.get(
+                    target_id, reversal_target(subject.operation_reversal, row)
+                )
+                state = LinkTargetFacts(
+                    schema_id="brz2obsidian.link-target-facts",
+                    schema_version=1,
+                    target_id=target_id,
+                    existence="missing",
+                    content=None,
+                    fragments=(),
+                    anchors=(),
+                    structure=None,
+                    memberships=(),
+                    interpretation="supported",
+                )
+            write(target, content, target.canonical_path, state)
+            absent = {r.path for r, data in members if data is None}
+            documents = {
+                key: doc
+                for key, doc in documents.items()
+                if doc.source_path not in absent
+            }
+            if (
+                candidate is not None
+                and present
+                and candidate.links.source_path == row.path
+                and candidate.content.data == content.data
+            ):
+                documents = {
+                    key: doc
+                    for key, doc in documents.items()
+                    if doc.source_path != row.path
+                }
+                documents[candidate.links.document_id] = candidate.links
+                explicit_documents.add(candidate.links.document_id)
 
     # Binary selections establish exact offered output versions first.
     for approval in approvals:
@@ -155,6 +204,8 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
             for s in facts.subjects
             if (s.item_id, s.facet) == (change.item_id, change.facet)
         )
+        if subject.operation_reversal is not None:
+            continue
         if subject.attachment is not None:
             continue
         selected_path = change.target_path if approval is None else approval.target_path

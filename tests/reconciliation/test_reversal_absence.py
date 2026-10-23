@@ -3,69 +3,104 @@
 import pytest
 
 from tests.reconciliation.test_proposals import request
-from tests.reconciliation.test_resolution import action, preflight, with_review_links
+from tests.reconciliation.test_resolution import action, preflight
+from tests.reconciliation.test_resolution import with_review_links as _with_review_links
 
 
-def reversal_facts(*, current=b"created\r\n", produced=b"created\r\n"):
-    from brz2obsidian.contracts import ExactContent, OperationReversalTarget
+def with_review_links(facts, **kwargs):
+    return observe_rows(_with_review_links(facts, **kwargs))
 
-    facts = request(original=produced, current=current, incoming=produced)
+
+def single_proof(facts, *, produced, target):
+    from brz2obsidian.contracts import OperationReversalOutput, OperationReversalTarget
+
     subject = facts.subjects[0]
-    proof = OperationReversalTarget(
+    owned = next(
+        t
+        for t in facts.link_context.current_targets
+        if t.canonical_path == subject.current.path
+    )
+    return OperationReversalTarget(
         schema_id="brz2obsidian.operation-reversal-target",
         schema_version=1,
         operation_id="operation:created",
         operation_kind="apply",
         direction="restore",
         operation_generation=1,
-        history_fingerprint="validated:before-absent/proposed-created",
-        path=subject.path,
-        produced_existence="present",
-        produced=ExactContent(data=produced),
-        target=None,
-        target_existence="absent",
+        history_fingerprint="validated:before/proposed",
+        origin_change_id="origin:change",
+        origin_decision_id="origin:decision",
+        owned_targets=(owned,),
+        outputs=(
+            OperationReversalOutput(
+                path=subject.current.path,
+                target_id=owned.target_id,
+                produced_existence="absent" if produced is None else "present",
+                produced=produced,
+                current=subject.current,
+                target_existence="absent" if target is None else "present",
+                target=target,
+            ),
+        ),
     )
-    facts = facts.model_copy(
-        update={
-            "subjects": (
-                subject.model_copy(
-                    update={"incoming": None, "operation_reversal": proof}
-                ),
+
+
+def observe_rows(facts):
+    subjects = []
+    for subject in facts.subjects:
+        proof = subject.operation_reversal
+        if proof is not None:
+            rows = tuple(
+                row.model_copy(
+                    update={
+                        "current": next(
+                            (
+                                e.current
+                                for e in facts.identity_inventory
+                                if e.current.path == row.path
+                            ),
+                            row.current,
+                        )
+                    }
+                )
+                for row in proof.outputs
             )
-        }
+            subject = subject.model_copy(
+                update={
+                    "operation_reversal": proof.model_copy(update={"outputs": rows})
+                }
+            )
+        subjects.append(subject)
+    return facts.model_copy(update={"subjects": tuple(subjects)})
+
+
+def reversal_facts(*, current=b"created\r\n", produced=b"created\r\n"):
+    from brz2obsidian.contracts import ExactContent
+
+    facts = request(original=produced, current=current, incoming=produced)
+    subject = facts.subjects[0].model_copy(update={"incoming": None})
+    facts = with_review_links(facts.model_copy(update={"subjects": (subject,)}))
+    proof = single_proof(facts, produced=ExactContent(data=produced), target=None)
+    return facts.model_copy(
+        update={"subjects": (subject.model_copy(update={"operation_reversal": proof}),)}
     )
-    return with_review_links(facts)
 
 
 def restoration_facts():
-    from brz2obsidian.contracts import ExactContent
     from tests.reconciliation.test_absence import facts_for
 
-    facts = facts_for(
-        original=b"Original generated source\r\n",
-        current=b"unused",
-        incoming=b"Authored retained preimage\r\n",
-        existence="absent",
+    facts = with_review_links(
+        facts_for(
+            original=b"Original generated source\r\n",
+            current=b"unused",
+            incoming=b"Authored retained preimage\r\n",
+            existence="absent",
+        )
     )
     subject = facts.subjects[0]
-    proof = (
-        reversal_facts()
-        .subjects[0]
-        .operation_reversal.model_copy(
-            update={
-                "produced_existence": "absent",
-                "produced": None,
-                "target_existence": "present",
-                "target": ExactContent(data=b"Authored retained preimage\r\n"),
-            }
-        )
-    )
-    return with_review_links(
-        facts.model_copy(
-            update={
-                "subjects": (subject.model_copy(update={"operation_reversal": proof}),),
-            }
-        )
+    proof = single_proof(facts, produced=None, target=subject.incoming)
+    return facts.model_copy(
+        update={"subjects": (subject.model_copy(update={"operation_reversal": proof}),)}
     )
 
 
@@ -74,7 +109,7 @@ def target_candidate(facts):
 
     context = facts.link_context
     return inspect_text_candidate(
-        facts.subjects[0].operation_reversal.target,
+        facts.subjects[0].operation_reversal.outputs[0].target,
         identity=facts.identity_inventory[0].identity,
         target=facts.subjects[0].source_target,
         output_format=7,
@@ -178,13 +213,7 @@ def test_binary_reversal_keeps_third_bytes_or_explicitly_removes_created_path():
 
     facts = attachment_request()
     subject = facts.subjects[0]
-    proof = (
-        reversal_facts()
-        .subjects[0]
-        .operation_reversal.model_copy(
-            update={"path": subject.path, "produced": subject.baseline.content}
-        )
-    )
+    proof = single_proof(facts, produced=subject.baseline.content, target=None)
     facts = with_review_links(
         facts.model_copy(
             update={
@@ -217,8 +246,12 @@ def test_already_absent_reversal_is_ready_without_a_file_effect():
     from brz2obsidian.core import prepare_review, resolve_review, select_review_effects
     from tests.reconciliation.test_absence import facts_for
 
-    facts = facts_for(original=b"created\r\n", existence="absent", incoming=None)
-    proof = reversal_facts().subjects[0].operation_reversal
+    facts = with_review_links(
+        facts_for(original=b"created\r\n", existence="absent", incoming=None)
+    )
+    from brz2obsidian.contracts import ExactContent
+
+    proof = single_proof(facts, produced=ExactContent(data=b"created\r\n"), target=None)
     subject = facts.subjects[0].model_copy(update={"operation_reversal": proof})
     facts = with_review_links(facts.model_copy(update={"subjects": (subject,)}))
     plan = prepare_review(facts, preflight=preflight())
@@ -267,13 +300,9 @@ def test_reversal_refresh_preserves_unaffected_approval_and_requires_new_current
     )
     from tests.reconciliation.test_refresh import edit_first, two_items
 
-    facts = two_items()
+    facts = with_review_links(two_items())
     first = facts.subjects[0]
-    proof = (
-        reversal_facts()
-        .subjects[0]
-        .operation_reversal.model_copy(update={"produced": first.baseline.content})
-    )
+    proof = single_proof(facts, produced=first.baseline.content, target=None)
     facts = with_review_links(
         facts.model_copy(
             update={
@@ -295,7 +324,9 @@ def test_reversal_refresh_preserves_unaffected_approval_and_requires_new_current
     unaffected = plan.approvals[1]
     loaded = load_review(save_review(plan).record.model_dump_json())
     assert loaded.status == "loaded" and not loaded.ready
-    refreshed = resume_review(loaded.loaded, edit_first(facts), preflight=preflight())
+    refreshed = resume_review(
+        loaded.loaded, observe_rows(edit_first(facts)), preflight=preflight()
+    )
     assert refreshed.status == "resumed" and not refreshed.plan.ready
     assert refreshed.plan.proposal.generation == 2
     assert refreshed.plan.approvals == (unaffected,)
@@ -384,25 +415,28 @@ def test_reversal_accepts_validated_edited_note_as_present_exact_bytes():
     assert selected.remove_paths == ()
 
 
-@pytest.mark.parametrize("change", ["incoming", "other_path"])
+@pytest.mark.parametrize("change", ["current_path", "foreign_target"])
 def test_operation_reversal_refuses_unbound_subject_facts(change):
     from pydantic import ValidationError
 
-    from brz2obsidian.contracts import ExactContent
     from brz2obsidian.core import prepare_review
 
     facts = reversal_facts()
     subject = facts.subjects[0]
-    updates = {
-        "incoming": {"incoming": ExactContent(data=b"source")},
-        "other_path": {"path": "Notes/Other.md"},
-    }[change]
-    with pytest.raises(ValidationError, match="Operation reversal requires"):
+    proof = subject.operation_reversal
+    row = proof.outputs[0]
+    if change == "current_path":
+        row = row.model_copy(
+            update={"current": row.current.model_copy(update={"path": "Other.md"})}
+        )
+    else:
+        row = row.model_copy(update={"target_id": "foreign:target"})
+    subject = subject.model_copy(
+        update={"operation_reversal": proof.model_copy(update={"outputs": (row,)})}
+    )
+    with pytest.raises(ValidationError):
         prepare_review(
-            facts.model_copy(
-                update={"subjects": (subject.model_copy(update=updates),)}
-            ),
-            preflight=preflight(),
+            facts.model_copy(update={"subjects": (subject,)}), preflight=preflight()
         )
 
 
@@ -419,9 +453,9 @@ def test_operation_reversal_refuses_unbound_subject_facts(change):
 def test_reversal_requires_proven_existence_and_exact_present_versions(change):
     from pydantic import ValidationError
 
-    from brz2obsidian.contracts import ExactContent, OperationReversalTarget
+    from brz2obsidian.contracts import ExactContent, OperationReversalOutput
 
-    proof = restoration_facts().subjects[0].operation_reversal
+    proof = restoration_facts().subjects[0].operation_reversal.outputs[0]
     updates = {
         "unknown_produced": {"produced_existence": "unknown"},
         "unavailable_produced": {"produced_existence": "present", "produced": None},
@@ -430,7 +464,7 @@ def test_reversal_requires_proven_existence_and_exact_present_versions(change):
         "no_flip": {"target_existence": "absent", "target": None},
     }[change]
     with pytest.raises(ValidationError):
-        OperationReversalTarget.model_validate(proof.model_copy(update=updates))
+        OperationReversalOutput.model_validate(proof.model_copy(update=updates))
 
 
 def test_reversal_can_keep_actual_absence_without_suppressing_later_source_versions():
@@ -456,21 +490,14 @@ def test_binary_removed_by_operation_can_be_restored_to_exact_before_bytes():
 
     facts = attachment_request()
     subject = facts.subjects[0]
-    proof = (
-        restoration_facts()
-        .subjects[0]
-        .operation_reversal.model_copy(
-            update={"path": subject.path, "target": ExactContent(data=b"\x00prior\xff")}
-        )
-    )
+    target_content = ExactContent(data=b"\x00prior\xff")
     current = subject.current.model_copy(
         update={"existence": "absent", "content": None}
     )
     subject = subject.model_copy(
         update={
-            "incoming": proof.target,
+            "incoming": target_content,
             "current": current,
-            "operation_reversal": proof,
         }
     )
     facts = facts.model_copy(
@@ -496,7 +523,7 @@ def test_binary_removed_by_operation_can_be_restored_to_exact_before_bytes():
                     ),
                     "incoming_target_facts": (
                         interpret_link_target(
-                            proof.target,
+                            target_content,
                             target_id="resource:payload",
                             existence="present",
                             memberships=(),
@@ -505,6 +532,10 @@ def test_binary_removed_by_operation_can_be_restored_to_exact_before_bytes():
                 }
             )
         }
+    )
+    proof = single_proof(facts, produced=None, target=target_content)
+    facts = facts.model_copy(
+        update={"subjects": (subject.model_copy(update={"operation_reversal": proof}),)}
     )
     offered = prepare_review(facts, preflight=preflight())
     kept = resolve_review(offered, action(offered, domain="reversal", choice="current"))
@@ -604,7 +635,7 @@ def test_present_target_already_holds_without_manufacturing_an_operation_choice(
 
     facts = restoration_facts()
     subject = facts.subjects[0]
-    target = subject.operation_reversal.target
+    target = subject.operation_reversal.outputs[0].target
     if different_locator:
         target = target.model_copy(
             update={
@@ -618,7 +649,13 @@ def test_present_target_already_holds_without_manufacturing_an_operation_choice(
         subject = subject.model_copy(
             update={
                 "operation_reversal": subject.operation_reversal.model_copy(
-                    update={"target": target},
+                    update={
+                        "outputs": (
+                            subject.operation_reversal.outputs[0].model_copy(
+                                update={"target": target}
+                            ),
+                        )
+                    },
                 )
             }
         )
@@ -641,7 +678,9 @@ def test_present_target_already_holds_without_manufacturing_an_operation_choice(
     )
     plan = prepare_review(facts, preflight=preflight())
     assert plan.ready and plan.requirements == ()
-    assert plan.proposal.changes[0].original is None
+    assert (
+        plan.producer_facts.subjects[0].operation_reversal.outputs[0].produced is None
+    )
     selected = select_review_effects(plan)
     assert [(f.path, f.content.data) for f in selected.files] == [
         ("Notes/Opening.md", b"Authored retained preimage\r\n")
@@ -691,13 +730,9 @@ def test_whole_review_can_remove_created_target_with_exact_reviewed_owner_revers
     from tests.reconciliation.test_identity import with_subjects
     from tests.reconciliation.test_refresh import two_items
 
-    facts = two_items()
+    facts = with_review_links(two_items())
     first, second = facts.subjects
-    proof = (
-        reversal_facts()
-        .subjects[0]
-        .operation_reversal.model_copy(update={"produced": first.baseline.content})
-    )
+    proof = single_proof(facts, produced=first.baseline.content, target=None)
     first = first.model_copy(update={"incoming": None, "operation_reversal": proof})
     owner_before = ExactContent(data=b"Imported [[Notes/Opening]]\r\n")
     second = second.model_copy(
@@ -709,7 +744,7 @@ def test_whole_review_can_remove_created_target_with_exact_reviewed_owner_revers
     )
     facts = with_review_links(
         with_subjects(
-            facts,
+            facts.model_copy(update={"link_context": None}),
             (first, second),
             (
                 facts.identity_inventory[0],

@@ -88,6 +88,11 @@ def consent_requirements(preflight, proposal, approvals):
                             for a in approved.assumptions
                             if a.kind == "candidate"
                         ],
+                    )
+                    + (
+                        ()
+                        if change.disposition != "operation_reversal"
+                        else (None if approved is None else approved.choice,)
                     ),
                 )
             )

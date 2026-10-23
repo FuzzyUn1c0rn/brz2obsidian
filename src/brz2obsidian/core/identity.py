@@ -272,6 +272,19 @@ def bind_identity(facts, subject, subject_id, *, applicability=()):
         if len(matches) == 1 and matches[0].identity_state == "valid"
         else None
     )
+    operation_owned = False
+    if len(matches) > 1 and subject.operation_reversal is not None:
+        from .reversals import reversal_physical_entry
+
+        primary = tuple(
+            item for item in matches if item.current.path == subject.current.path
+        )
+        if len(primary) == 1 and all(
+            item.identity_state == "valid" and reversal_physical_entry(facts, item)
+            for item in matches
+        ):
+            selected = primary[0]
+            operation_owned = True
     safety = tuple(
         sorted(
             (
@@ -355,7 +368,9 @@ def bind_identity(facts, subject, subject_id, *, applicability=()):
     candidate_by_id = {candidate.entry_id: candidate for candidate in candidates}
     status = "matched" if selected is not None else "unresolved"
     reason = (
-        "unique_identity"
+        "operation_owned"
+        if operation_owned
+        else "unique_identity"
         if selected is not None
         else "duplicate_identity"
         if len(matches) > 1
@@ -364,7 +379,11 @@ def bind_identity(facts, subject, subject_id, *, applicability=()):
     decision_id, disassociate, provenance = (
         None,
         (),
-        "unique_identity" if selected else "unresolved",
+        "operation_owned"
+        if operation_owned
+        else "unique_identity"
+        if selected
+        else "unresolved",
     )
     findings = []
 
@@ -453,7 +472,7 @@ def bind_identity(facts, subject, subject_id, *, applicability=()):
         selected is None
         or selected.identity_state != "valid"
         or selected.facet != subject.facet
-        or len(matches) != 1
+        or (len(matches) != 1 and not operation_owned)
     )
     if (
         selected is not None
