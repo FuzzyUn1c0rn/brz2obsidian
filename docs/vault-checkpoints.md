@@ -37,8 +37,17 @@ and semantic fingerprint. A direct storage result is unmarked and retains the
 earlier semantic meaning; its boundary alone does not claim application
 authority. Admission requires a matching validated operation root for each
 marked result, even when later local checkpoints follow it.
-Volatile review IDs and operation/history proof tokens do not create duplicate
-history, but this duplicate check grants no general current apply authority.
+An interrupted operation may also retain a `prepared` checkpoint with its
+validated recovery origin, predecessor operation commit and selected direction.
+The operation ref remains at its prior authority until the new recovery intent
+is retained. Fresh history discovery checks those three markers and the saved
+review against the same original graph before a retry may reuse an equivalent
+preparation; an unmarked storage preparation retains its existing meaning.
+Volatile review IDs and incidental proof tokens do not create duplicate
+history. A recovery preparation's validated origin, predecessor operation
+commit and direction are part of its meaning, so a later stopped recovery
+can retain a distinct preparation even when no further file moved. Duplicate
+history still grants no general current apply authority.
 
 Exact S1 `SavedReview` values are kept in a compact reachable transport:
 `review.json` names byte values by SHA-256, using existing role blobs where

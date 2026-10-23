@@ -64,8 +64,9 @@ remains valid storage without claiming an apply or terminal receipt.
 
 An earlier [disposable ordinary Windows mechanism probe](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/273#issuecomment-6363943793)
 observed the Git-intent, flush, move and readback primitives on the current
-local NTFS host. Exact production-executor native qualification is a separate
-acceptance step. The probe does not establish survival of a hardware power
+local NTFS host. The [#273 production-executor qualification](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/273#issuecomment-6367761700)
+then checked its own ordinary publication sequence and retained result on
+that host. These observations do not establish survival of a hardware power
 cut, continuous multi-file visibility, or support for arbitrary security
 metadata, encrypted files or remote volumes. The executor refuses capabilities
 it cannot retain. The accepted ordinary resource envelope and S2 aggregate
@@ -75,14 +76,35 @@ qualification belong to issue #278.
 
 Converter ownership uses an exact `.git/brz2obsidian` marker. A foreign marker
 or retained incomplete intent sends admission to recovery first; the operation
-does not delete foreign ownership. The intent ref is authoritative even when a
-locator is absent or unreadable. `inspect_update_status` validates the real
+does not delete foreign ownership. The intent ref remains discoverable when a
+locator is absent or unreadable, but recovery cannot proceed without validated
+checkpoint association and history. Matching-history repair belongs to issue
+#276. `inspect_update_status` validates the real
 intent, prepared checkpoint, result and receipt graph before interpreting
 current files. It compares each affected path with exact before/result bytes
 and metadata and checks created directories. Unknown third-version bytes remain
 unknown for recovery; an acknowledged file count alone proves no publication
 state. A later valid local checkpoint can follow a completed apply without
 erasing its terminal history.
+
+`Operations.prepare_recovery`, `refresh_recovery`, `resolve_recovery` and
+`execute_recovery` use the same retained graph and current admission. The first
+stopped operation offers `finish` or `restore`; a recovery intent saves the
+selected direction, its review generation and its exact predecessor. A second
+stop follows that saved direction. Recovery reviews later edits to affected
+files and associated links, and requires an explicit choice before replacing or
+removing changed bytes. A completed `restore` reports `restored`; finishing an
+interrupted Undo reports `undone`. The result concerns the reviewed file
+inventory. Empty parent directories created during an earlier operation may
+remain, and later content in them is preserved. Source lineage remains the
+retained generated source, separate from authored preimage bytes.
+
+A recovery preparation retained before its new intent is still an unpublished
+checkpoint: the preceding operation ref remains authoritative. Fresh inspection
+validates its origin, predecessor, direction, review and current inventory;
+retry can reuse that exact preparation when its meaning is unchanged. It does
+not turn the preparation into a completed operation or choose a direction on
+the caller's behalf.
 
 `VaultApplyResult` reports a bounded phase, elapsed time, operation identity,
 kind and generation, planned/published counts, publication and history state,

@@ -496,7 +496,8 @@ def _review_shape(saved):
             return {_REVIEW_BYTES_KEY: sha}
         if hasattr(type(value), "model_fields"):
             return {
-                name: project(getattr(value, name)) for name in _stored_model_fields(value)
+                name: project(getattr(value, name))
+                for name in _stored_model_fields(value)
             }
         if isinstance(value, (tuple, list)):
             return [project(item) for item in value]
@@ -1086,11 +1087,13 @@ def capture_checkpoint(
         )
         target_direction = recovery_direction or retained_recovery_direction
         if target_direction is not None:
+            from brz2obsidian.application.vault_update_contracts import (
+                VaultRecoveryIntent,
+            )
             from brz2obsidian.publication.vault_apply import (
                 _inspect_update_observation,
                 owns_operation,
             )
-            from brz2obsidian.application.vault_update_contracts import VaultRecoveryIntent
 
             status, authority = _inspect_update_observation(root)
             if (
@@ -1132,11 +1135,14 @@ def capture_checkpoint(
             ):
                 return result("refused", "recovery_result_authority_changed")
             recovery_target = (
-                {row.path: row for row in (
-                    original.proposed
-                    if target_direction == "finish"
-                    else original.before
-                )},
+                {
+                    row.path: row
+                    for row in (
+                        original.proposed
+                        if target_direction == "finish"
+                        else original.before
+                    )
+                },
                 source_manifest.source,
             )
             if recovery_direction is not None:
@@ -1341,8 +1347,7 @@ def capture_checkpoint(
             if recovery_target is not None and tuple(
                 row[:4] for row in source_files
             ) != tuple(
-                (row.path, row.mode, row.size, row.sha256)
-                for row in recovery_target[1]
+                (row.path, row.mode, row.size, row.sha256) for row in recovery_target[1]
             ):
                 return result("refused", "recovery_source_lineage_changed")
             if source_binding is not None:
@@ -1416,36 +1421,32 @@ def capture_checkpoint(
                     if item.identity_state == "valid" and item.identity is not None
                 }
                 for subject in saved.plan.facts.subjects:
-                    retained_incoming = retained_recovery_incoming.get(
-                        (subject.item_id, subject.facet)
-                    )
+                    key = (subject.item_id, subject.facet)
+                    retained_incoming = key in retained_recovery_incoming
                     if (
-                        (subject.item_id, subject.facet)
-                        in retained_recovery_incoming
-                        and subject.incoming != retained_incoming
+                        retained_incoming
+                        and subject.incoming != retained_recovery_incoming[key]
                     ):
                         return result("refused", "review_bytes_changed")
-                    for expected, path, inventory in (
-                        (
-                            subject.incoming,
-                            subject.path,
-                            ()
-                            if (subject.item_id, subject.facet)
-                            in retained_recovery_incoming
-                            else source_files
-                            if recovery_target is None
-                            else tuple(
-                                (row.path, row.mode, row.size, row.sha256, None)
-                                for row in recovery_target[0].values()
-                            ),
-                        ),
-                    ) + (
+                    incoming_checks = (
                         ()
-                        if retaining_prepared
-                        or (
-                            selected_review
-                            and (subject.item_id, subject.facet) in identified
+                        if retained_incoming
+                        else (
+                            (
+                                subject.incoming,
+                                subject.path,
+                                source_files
+                                if recovery_target is None
+                                else tuple(
+                                    (row.path, row.mode, row.size, row.sha256, None)
+                                    for row in recovery_target[0].values()
+                                ),
+                            ),
                         )
+                    )
+                    current_checks = (
+                        ()
+                        if retaining_prepared or (selected_review and key in identified)
                         else (
                             (
                                 subject.current.content,
@@ -1453,13 +1454,8 @@ def capture_checkpoint(
                                 vault_files,
                             ),
                         )
-                    ):
-                        if (
-                            path == subject.path
-                            and (subject.item_id, subject.facet)
-                            in retained_recovery_incoming
-                        ):
-                            continue
+                    )
+                    for expected, path, inventory in incoming_checks + current_checks:
                         observed = next(
                             (row for row in inventory if row[0] == path), None
                         )

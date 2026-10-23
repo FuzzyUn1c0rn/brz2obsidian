@@ -85,14 +85,21 @@ class CheckpointManifest(ReconciliationContract):
     def inventories(self):
         if self.operation_intent_commit is not None and self.boundary != "result":
             raise ValueError("Only an actual result may bind an application intent")
-        if len(
-            {
-                self.recovery_origin_intent_commit is None,
-                self.recovery_previous_operation_commit is None,
-                self.recovery_direction is None,
-            }
-        ) != 1 or self.recovery_direction is not None and self.boundary != "prepared":
-            raise ValueError("Only a recovery preparation may bind its origin and direction")
+        if (
+            len(
+                {
+                    self.recovery_origin_intent_commit is None,
+                    self.recovery_previous_operation_commit is None,
+                    self.recovery_direction is None,
+                }
+            )
+            != 1
+            or self.recovery_direction is not None
+            and self.boundary != "prepared"
+        ):
+            raise ValueError(
+                "Only a recovery preparation may bind its origin and direction"
+            )
         if (self.review_object is None) != (self.review_size is None) or (
             self.review_object is None
         ) != (self.review_sha256 is None):

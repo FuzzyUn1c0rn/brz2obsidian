@@ -51,7 +51,9 @@ def _apply(operations, vault, source, *, review, source_binding=None, **kwargs):
     )
 
 
-def _ready_case(*, storage_transform=False, tracking_ignore=False):
+def _ready_case(
+    *, storage_transform=False, tracking_ignore=False, unaffected_auto=False
+):
     vault, source = fixture_case()
     git(vault, "init", "-q")
     git(vault, "config", "core.autocrlf", "false")
@@ -65,13 +67,73 @@ def _ready_case(*, storage_transform=False, tracking_ignore=False):
     git(vault, "update-ref", "refs/notes/user-proof", "HEAD")
     (source / "Notes").mkdir()
     (source / "Notes/Opening.md").write_bytes(b"original\r\n")
-    facts = with_review_links(
-        request(
-            original=b"original\r\n",
-            current=b"authored opening\r\n",
-            incoming=b"incoming opening\n",
-        )
+    facts = request(
+        original=b"original\r\n",
+        current=b"authored opening\r\n",
+        incoming=b"incoming opening\n",
     )
+    if unaffected_auto:
+        from brz2obsidian.contracts import FormatBaselineOutput
+
+        (vault / "Notes/Unchanged.md").write_bytes(b"unchanged note\n")
+        (source / "Notes/Unchanged.md").write_bytes(b"unchanged note\n")
+        extra = request(
+            original=b"unchanged note\n",
+            current=b"unchanged note\n",
+            incoming=b"unchanged note\n",
+        )
+        current = extra.subjects[0].current.model_copy(
+            update={"path": "Notes/Unchanged.md"}
+        )
+        target = extra.subjects[0].source_target.model_copy(
+            update={"normalized_path": "notes/unchanged.md"}
+        )
+        subject = extra.subjects[0].model_copy(
+            update={
+                "item_id": "entry:unchanged",
+                "path": "Notes/Unchanged.md",
+                "current": current,
+                "source_target": target,
+                "title": "Unchanged",
+            }
+        )
+        entry = extra.identity_inventory[0].model_copy(
+            update={
+                "entry_id": "unchanged-entry",
+                "identity": extra.identity_inventory[0].identity.model_copy(
+                    update={"item_id": "entry:unchanged"}
+                ),
+                "current": current,
+                "target": target,
+                "title": "Unchanged",
+            }
+        )
+        baseline = facts.format_operation.established_baseline
+        operation = facts.format_operation.model_copy(
+            update={
+                "established_baseline": baseline.model_copy(
+                    update={
+                        "outputs": baseline.outputs
+                        + (
+                            FormatBaselineOutput(
+                                item_id=subject.item_id,
+                                facet=subject.facet,
+                                content=ExactContent(data=b"unchanged note\n"),
+                            ),
+                        )
+                    }
+                )
+            }
+        )
+        facts = facts.model_copy(
+            update={
+                "subjects": facts.subjects + (subject,),
+                "identity_inventory": facts.identity_inventory + (entry,),
+                "format_operation": operation,
+            }
+        )
+        git(vault, "add", "Notes/Unchanged.md")
+    facts = with_review_links(facts)
     operations = Operations()
     initial = operations.inspect_history(vault).admission
     seeded = operations.capture_checkpoint(
@@ -992,7 +1054,7 @@ def test_owned_cleanup_failure_after_terminal_receipt_reports_complete_content(
     assert Operations().inspect_update_status(vault).status == "applied"
 
 
-def _binary_link_case():
+def _binary_link_case(*, payload_current=b"\x00authored"):
     from brz2obsidian.contracts import ExactContent, LinkOccurrenceChoice
     from brz2obsidian.obsidian import interpret_link_target, interpret_links
     from tests.reconciliation.test_attachments import (
@@ -1009,7 +1071,7 @@ def _binary_link_case():
     (source / "Notes").mkdir()
     (vault / "Assets/data.bin").write_bytes(b"\x00original")
     (source / "Assets/data.bin").write_bytes(b"\x00original")
-    facts = linked_attachment_request()
+    facts = linked_attachment_request(payload_current=payload_current)
     old_document = facts.link_context.current_documents[0]
     (vault / "Notes/Owner.md").write_bytes(old_document.content.data)
     (source / "Notes/Owner.md").write_bytes(old_document.content.data)
@@ -1025,7 +1087,7 @@ def _binary_link_case():
         admission=operations.inspect_history(vault).admission,
     )
     assert seeded.status == "captured"
-    (vault / "Assets/data.bin").write_bytes(b"\x00authored")
+    (vault / "Assets/data.bin").write_bytes(payload_current)
     (source / "Assets/data.bin").write_bytes(b"abc")
     offered = prepare_review(
         facts, preflight=operations.inspect_history(vault).admission.preflight
@@ -1435,7 +1497,7 @@ def _restored_note_case():
     return vault, source, operations, reviewed, before
 
 
-def test_approved_rename_publishes_new_path_and_only_removes_displaced_note():
+def _renamed_case(*, local_name="Local.md"):
     from tests.reconciliation.test_identity import inventory_item
 
     vault, source = fixture_case()
@@ -1443,8 +1505,8 @@ def test_approved_rename_publishes_new_path_and_only_removes_displaced_note():
     git(vault, "config", "core.autocrlf", "false")
     (vault / "Notes").mkdir()
     (vault / "Notes/Opening.md").write_bytes(b"base\r\n")
-    (vault / "Local.md").write_bytes(b"user \xff\n")
-    git(vault, "add", "Notes/Opening.md", "Local.md")
+    (vault / local_name).write_bytes(b"user \xff\n")
+    git(vault, "add", "Notes/Opening.md", local_name)
     git(vault, "commit", "-qm", "user baseline")
     (source / "Notes").mkdir()
     (source / "Notes/Opening.md").write_bytes(b"base\r\n")
@@ -1484,6 +1546,11 @@ def test_approved_rename_publishes_new_path_and_only_removes_displaced_note():
     ).plan
     assert reviewed.ready
     before = user_state(vault)
+    return vault, source, operations, reviewed, before
+
+
+def test_approved_rename_publishes_new_path_and_only_removes_displaced_note():
+    vault, source, operations, reviewed, before = _renamed_case()
 
     outcome = _apply(
         operations,

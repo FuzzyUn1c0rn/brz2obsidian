@@ -901,16 +901,17 @@ class _Inspection:
             locator = retained.checkpoint.locator
             if retained.checkpoint.status != "valid" or locator is None:
                 raise OSError("Recovery checkpoint association is unavailable")
-            checkpoint_tip = self.git(
-                "rev-parse", "--verify", locator.association.ref
-            ).decode().strip()
+            checkpoint_tip = (
+                self.git("rev-parse", "--verify", locator.association.ref)
+                .decode()
+                .strip()
+            )
             if (
                 current != retained.graph.commit
                 or checkpoint_tip != locator.commit
                 or not _lease_free(self.root, operation.operation_id)
                 or locator.association.association_id != operation.association_id
-                or locator.association.vault_anchor
-                != verify_directory(self.root)
+                or locator.association.vault_anchor != verify_directory(self.root)
                 or locator.association.git_anchor
                 != verify_directory(self.root / ".git")
             ):
@@ -1034,9 +1035,7 @@ class _Inspection:
                     "no_content_change",
                     "restored",
                     "undone",
-                ) or (
-                    status.recovery_required
-                ):
+                ) or (status.recovery_required):
                     self.finding(
                         "converter_operation",
                         "operation",
@@ -1762,6 +1761,4 @@ def inspect_vault(vault, *, subjects=(), git_executable=None, active_operation=N
 
 def _inspect_vault_for_recovery(vault, observation, *, subjects=()):
     """Observe policy and bytes beneath one validated, stopped operation graph."""
-    return _observe_vault(
-        vault, subjects=subjects, recovery_observation=observation
-    )[0]
+    return _observe_vault(vault, subjects=subjects, recovery_observation=observation)[0]

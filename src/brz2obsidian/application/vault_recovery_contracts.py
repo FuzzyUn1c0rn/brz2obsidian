@@ -32,7 +32,9 @@ class VaultRecoveryPreparation(ReconciliationContract):
                 self.intent_commit,
             )
         ):
-            raise ValueError("Recovery offer requires exact retained operation identity")
+            raise ValueError(
+                "Recovery offer requires exact retained operation identity"
+            )
         if (self.status == "offered") != bool(
             self.available_directions
         ) or self.available_directions not in (
@@ -50,6 +52,9 @@ class VaultRecoveryPreparation(ReconciliationContract):
             raise ValueError("Recovery review needs a selected offered direction")
         if (self.direction is None) != (self.review is None):
             raise ValueError("Selected recovery direction requires its reviewed facts")
-        if self.direction is not None and self.direction not in self.available_directions:
+        if (
+            self.direction is not None
+            and self.direction not in self.available_directions
+        ):
             raise ValueError("Selected recovery direction is not offered")
         return self
