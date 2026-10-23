@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -109,13 +110,29 @@ def pytest_requirement(scope="full", selectors=None, **extra):
 
 def test_focused_check_uses_selected_checkout_and_publishes_valid_receipt(checkout):
     original_path = os.environ.get("PYTHONPATH")
+    selected = checkout / "tests" / "test_selected.py"
+    selected.write_text(
+        selected.read_text() + "    import time\n    time.sleep(0.02)\n",
+        encoding="utf-8",
+    )
+    (checkout / "tests" / "test_excluded.py").write_text(
+        "def test_excluded():\n    raise AssertionError('excluded case executed')\n",
+        encoding="utf-8",
+    )
     result, path, receipt = run(
         checkout, "--check", "pytest", "--test", "tests/test_selected.py"
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "1 passed" in result.stdout
+    assert re.search(
+        r"\d+\.\d+s call\s+tests/test_selected.py::test_selected", result.stdout
+    )
+    assert "excluded case executed" not in result.stdout
     assert receipt["aggregate"] == "passed"
     assert receipt["checks"][0]["counts"]["passed"] == 1
+    assert receipt["checks"][0]["counts"]["executed_nodes"] == [
+        "tests/test_selected.py::test_selected"
+    ]
     expected = requirements(
         checkout,
         [pytest_requirement("focused", ["tests/test_selected.py"])],
