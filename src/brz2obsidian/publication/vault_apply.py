@@ -895,7 +895,9 @@ def _inspect_update_status(vault, *, observations):
                 and checkpoint.status == "valid"
                 and manifest.boundary == "prepared"
                 and checkpoint.locator.commit != intent.prepared_commit
-                and _unpublished_recovery_matches(active_graph, checkpoint, owned, origins)
+                and _unpublished_recovery_matches(
+                    active_graph, checkpoint, owned, origins
+                )
             )
             if (
                 checkpoint.status != "valid"

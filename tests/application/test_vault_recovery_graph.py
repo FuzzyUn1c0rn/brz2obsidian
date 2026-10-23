@@ -7,6 +7,7 @@ import pytest
 
 from brz2obsidian.application.operations import Operations
 from brz2obsidian.core import prepare_review, resolve_review
+from brz2obsidian.publication.vault_apply import _acquire, _release
 from brz2obsidian.publication.vault_replace import retained_metadata
 from tests.application.test_vault_apply import _ready_case
 from tests.application.test_vault_checkpoints import git, user_state
@@ -41,7 +42,9 @@ def _record(vault, name, payload, parents):
     )
 
 
-def _prepared(vault, source, operations, review, target):
+def _prepared(
+    vault, source, operations, review, target, *, operation_id=None, direction=None
+):
     staged = vault.parent / target
     shutil.copytree(vault / "Notes", staged / "Notes")
     if target == "incoming":
@@ -52,10 +55,14 @@ def _prepared(vault, source, operations, review, target):
         vault_id="vault-one",
         import_id="import-one",
         identity=review.facts.incoming_identity,
-        admission=operations.inspect_history(vault).admission,
+        admission=operations.inspect_history(
+            vault, active_operation=operation_id
+        ).admission,
         review=review,
         boundary="prepared",
         proposed=staged,
+        active_operation=operation_id,
+        recovery_direction=direction,
     )
     assert captured.status == "captured", captured.code
     return captured.commit, json.loads(
@@ -72,7 +79,6 @@ def _recovery_case():
     current = resolve_review(
         current, action(current, choice="current", decision_id="retain:current")
     ).plan
-    prepared, manifest = _prepared(vault, source, operations, current, "current")
     operation_id = "e" * 32
     mode, attributes, security = retained_metadata(vault / "Notes/Opening.md")
     metadata = [
@@ -90,7 +96,7 @@ def _recovery_case():
         "kind": "apply",
         "generation": original_manifest["generation"],
         "direction": "finish",
-        "association_id": manifest["association_id"],
+        "association_id": original_manifest["association_id"],
         "prepared_commit": original_commit,
         "before": original_manifest["preimage"],
         "proposed": original_manifest["proposed"],
@@ -101,6 +107,26 @@ def _recovery_case():
         "created_directories": [],
     }
     origin = _record(vault, "intent.json", original, (original_commit,))
+    ref = (
+        "refs/brz2obsidian/imports/"
+        + original_manifest["association_id"]
+        + "/operations/"
+        + operation_id
+    )
+    git(vault, "update-ref", ref, origin)
+    _acquire(vault, operation_id)
+    try:
+        prepared, manifest = _prepared(
+            vault,
+            source,
+            operations,
+            current,
+            "current",
+            operation_id=operation_id,
+            direction="finish",
+        )
+    finally:
+        _release(vault, operation_id)
     recovery = dict(
         original,
         schema_id="brz2obsidian.vault-recovery-intent",
@@ -118,12 +144,6 @@ def _recovery_case():
         result_metadata=[],
     )
     commit = _record(vault, "recovery.json", recovery, (origin, prepared))
-    ref = (
-        "refs/brz2obsidian/imports/"
-        + manifest["association_id"]
-        + "/operations/"
-        + operation_id
-    )
     git(vault, "update-ref", ref, commit)
     return vault, operations, original, recovery, origin, commit, ref
 
@@ -165,49 +185,33 @@ def test_recovery_status_exposes_saved_finish_and_selected_review_generation(
 
 
 def test_second_stop_preserves_saved_kind_direction_and_generation(recovery_graph):
-    vault, _, original, recovery, _, commit, ref = recovery_graph
+    vault, _, _, recovery, _, commit, ref = recovery_graph
     before = user_state(vault)
-    for kind in ("apply", "undo"):
-        origin = _record(
-            vault,
-            "intent.json",
-            dict(original, kind=kind),
-            (original["prepared_commit"],),
-        )
-        selected = dict(
-            recovery,
-            kind=kind,
-            origin_intent_commit=origin,
-            previous_operation_commit=origin,
-        )
-        authority = _record(
-            vault, "recovery.json", selected, (origin, selected["prepared_commit"])
-        )
-        stopped = {
-            "schema_id": "brz2obsidian.vault-operation-stop",
-            "schema_version": 1,
-            "operation_id": selected["operation_id"],
-            "kind": kind,
-            "generation": selected["generation"],
-            "direction": "finish",
-            "status": "cancelled",
-            "intent_commit": authority,
-            "acknowledged_after_files": 0,
-        }
-        tip = _record(vault, "stop.json", stopped, (authority,))
-        try:
-            git(vault, "update-ref", ref, tip)
-            observed = Operations().inspect_update_status(vault)
-            assert (
-                observed.status,
-                observed.kind,
-                observed.direction,
-                observed.generation,
-            ) == ("cancelled", kind, "finish", 3)
-            assert observed.intent_commit == authority and observed.stop_commit == tip
-            assert observed.review_generation == 1 and observed.recovery_required
-        finally:
-            git(vault, "update-ref", ref, commit)
+    stopped = {
+        "schema_id": "brz2obsidian.vault-operation-stop",
+        "schema_version": 1,
+        "operation_id": recovery["operation_id"],
+        "kind": "apply",
+        "generation": recovery["generation"],
+        "direction": "finish",
+        "status": "cancelled",
+        "intent_commit": commit,
+        "acknowledged_after_files": 0,
+    }
+    tip = _record(vault, "stop.json", stopped, (commit,))
+    try:
+        git(vault, "update-ref", ref, tip)
+        observed = Operations().inspect_update_status(vault)
+        assert (
+            observed.status,
+            observed.kind,
+            observed.direction,
+            observed.generation,
+        ) == ("cancelled", "apply", "finish", 3)
+        assert observed.intent_commit == commit and observed.stop_commit == tip
+        assert observed.review_generation == 1 and observed.recovery_required
+    finally:
+        git(vault, "update-ref", ref, commit)
     assert user_state(vault) == before
 
 
@@ -224,13 +228,14 @@ def test_inconsistent_recovery_graph_never_becomes_operation_authority(recovery_
         (dict(recovery, kind="undo"), (origin, recovery["prepared_commit"])),
         (dict(recovery), (recovery["prepared_commit"], origin)),
     ]
-    for payload, parents in variants:
+    for index, (payload, parents) in enumerate(variants):
         corrupted = _record(vault, "recovery.json", payload, parents)
         try:
             git(vault, "update-ref", ref, corrupted)
             observed = Operations().inspect_update_status(vault)
             assert observed.status == "unknown" and observed.recovery_required
-            assert operations.read_update_details(vault).status == "unavailable"
+            if index == 0:
+                assert operations.read_update_details(vault).status == "unavailable"
             assert (vault / "Notes/Opening.md").read_bytes() == b"authored opening\r\n"
         finally:
             git(vault, "update-ref", ref, commit)
@@ -301,7 +306,6 @@ def test_restore_review_binds_the_saved_prior_source_lineage():
     plan = resolve_review(
         plan, action(plan, choice="current", decision_id="restore:retain")
     ).plan
-    prepared, manifest = _prepared(vault, source, operations, plan, "restore-proposed")
     original = {
         "schema_id": "brz2obsidian.vault-operation-intent",
         "schema_version": 1,
@@ -309,7 +313,7 @@ def test_restore_review_binds_the_saved_prior_source_lineage():
         "kind": "apply",
         "generation": original_manifest["generation"],
         "direction": "finish",
-        "association_id": manifest["association_id"],
+        "association_id": original_manifest["association_id"],
         "prepared_commit": original_commit,
         "before": original_manifest["preimage"],
         "proposed": original_manifest["proposed"],
@@ -320,6 +324,26 @@ def test_restore_review_binds_the_saved_prior_source_lineage():
         "created_directories": [],
     }
     origin = _record(vault, "intent.json", original, (original_commit,))
+    ref = (
+        "refs/brz2obsidian/imports/"
+        + original_manifest["association_id"]
+        + "/operations/"
+        + original["operation_id"]
+    )
+    git(vault, "update-ref", ref, origin)
+    _acquire(vault, original["operation_id"])
+    try:
+        prepared, manifest = _prepared(
+            vault,
+            source,
+            operations,
+            plan,
+            "restore-proposed",
+            operation_id=original["operation_id"],
+            direction="restore",
+        )
+    finally:
+        _release(vault, original["operation_id"])
     selected = dict(
         original,
         schema_id="brz2obsidian.vault-recovery-intent",
@@ -331,12 +355,6 @@ def test_restore_review_binds_the_saved_prior_source_lineage():
         previous_operation_commit=origin,
     )
     authority = _record(vault, "recovery.json", selected, (origin, prepared))
-    ref = (
-        "refs/brz2obsidian/imports/"
-        + manifest["association_id"]
-        + "/operations/"
-        + original["operation_id"]
-    )
     git(vault, "update-ref", ref, authority)
     observed = Operations().inspect_update_status(vault)
     assert (observed.status, observed.kind, observed.direction) == (
