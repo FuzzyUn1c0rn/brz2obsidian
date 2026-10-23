@@ -172,6 +172,41 @@ def _exists(path):
         return False
 
 
+def _existing_git_operation_blockers(gitdir):
+    """Observe the existing Git operation and lock blockers without history reads."""
+    markers = (
+        "MERGE_HEAD",
+        "CHERRY_PICK_HEAD",
+        "REVERT_HEAD",
+        "REBASE_HEAD",
+        "BISECT_START",
+        "rebase-merge",
+        "rebase-apply",
+        "sequencer",
+    )
+    locks = [
+        gitdir / name
+        for name in (
+            "index.lock",
+            "HEAD.lock",
+            "packed-refs.lock",
+            "config.lock",
+            "shallow.lock",
+            "gc.pid",
+            "gc.log.lock",
+            "maintenance.lock",
+        )
+    ]
+    locks.extend(
+        path
+        for prefix in ("refs", "logs", "objects")
+        for path in (gitdir / prefix).rglob("*.lock")
+    )
+    return any(_exists(gitdir / name) for name in markers), any(
+        _exists(path) for path in locks
+    )
+
+
 def _safe_relative(value):
     p = Path(value)
     reserved = {
@@ -808,6 +843,51 @@ class _Inspection:
                             break
         return not self.findings
 
+    def index_state(self):
+        """Observe the ordinary raw index policy without reading checkpoint history."""
+        gitdir = Path(self.repo.git_directory)
+        index_records = self.git("ls-files", "--stage", "-v", "-z")
+        entries = [entry for entry in index_records.split(b"\0") if entry]
+        if any(entry[1:2] != b" " or b"\t" not in entry for entry in entries):
+            raise OSError("Malformed index observations")
+        stages = [entry[2:] for entry in entries]
+        self.storage_state.extend(
+            (
+                index_records.hex(),
+                _file_digest(gitdir / "index")
+                if (gitdir / "index").exists()
+                else "index-absent",
+            )
+        )
+        if any(entry.split(b"\t", 1)[0].split()[-1] != b"0" for entry in stages):
+            self.finding(
+                "unmerged_index",
+                "operation",
+                "Finish the existing unmerged Git index before converter work.",
+            )
+            self.operation = "active"
+        if any(entry[:1].islower() or entry[:1] == b"S" for entry in entries):
+            self.finding(
+                "index_flags",
+                "layout",
+                "Skip-worktree and assume-unchanged entries are initially unsupported.",
+            )
+        if any(
+            entry.startswith((b"160000 ", b"040000 ", b"120000 ")) for entry in stages
+        ):
+            self.finding(
+                "index_layout",
+                "layout",
+                "Submodule, sparse-directory and symbolic-link entries are initially unsupported.",
+            )
+        if self.findings:
+            return False
+        self.index_stages = tuple(stages)
+        self.tracked_paths = {
+            entry.split(b"\t", 1)[1].decode("utf-8") for entry in stages
+        }
+        return True
+
     def repository(self):
         if self.repo.kind == "none":
             return True
@@ -841,42 +921,15 @@ class _Inspection:
         self.repo = self.repo.model_copy(
             update={"object_format": object_format, "ref_format": ref_format}
         )
-        markers = (
-            "MERGE_HEAD",
-            "CHERRY_PICK_HEAD",
-            "REVERT_HEAD",
-            "REBASE_HEAD",
-            "BISECT_START",
-            "rebase-merge",
-            "rebase-apply",
-            "sequencer",
-        )
-        if any((gitdir / name).exists() for name in markers):
+        git_operation, foreign_lock = _existing_git_operation_blockers(gitdir)
+        if git_operation:
             self.finding(
                 "git_operation",
                 "operation",
                 "Finish the existing Git operation before preparing converter work.",
             )
             self.operation = "active"
-        locks = [
-            gitdir / name
-            for name in (
-                "index.lock",
-                "HEAD.lock",
-                "packed-refs.lock",
-                "config.lock",
-                "shallow.lock",
-                "gc.pid",
-                "gc.log.lock",
-                "maintenance.lock",
-            )
-        ]
-        locks.extend(
-            p
-            for prefix in ("refs", "logs", "objects")
-            for p in (gitdir / prefix).rglob("*.lock")
-        )
-        if any(_exists(path) for path in locks):
+        if foreign_lock:
             self.finding(
                 "foreign_lock",
                 "operation",
@@ -1021,46 +1074,8 @@ class _Inspection:
                     "Current converter history requires recovery discovery before dependent work.",
                 )
                 self.operation = "recovery_required"
-        index_records = self.git("ls-files", "--stage", "-v", "-z")
-        entries = [entry for entry in index_records.split(b"\0") if entry]
-        if any(entry[1:2] != b" " or b"\t" not in entry for entry in entries):
-            raise OSError("Malformed index observations")
-        stages = [entry[2:] for entry in entries]
-        self.storage_state.extend(
-            (
-                index_records.hex(),
-                _file_digest(gitdir / "index")
-                if (gitdir / "index").exists()
-                else "index-absent",
-            )
-        )
-        if any(entry.split(b"\t", 1)[0].split()[-1] != b"0" for entry in stages):
-            self.finding(
-                "unmerged_index",
-                "operation",
-                "Finish the existing unmerged Git index before converter work.",
-            )
-            self.operation = "active"
-        if any(entry[:1].islower() or entry[:1] == b"S" for entry in entries):
-            self.finding(
-                "index_flags",
-                "layout",
-                "Skip-worktree and assume-unchanged entries are initially unsupported.",
-            )
-        if any(
-            entry.startswith((b"160000 ", b"040000 ", b"120000 ")) for entry in stages
-        ):
-            self.finding(
-                "index_layout",
-                "layout",
-                "Submodule, sparse-directory and symbolic-link entries are initially unsupported.",
-            )
-        if self.findings:
+        if not self.index_state():
             return False
-        self.index_stages = tuple(stages)
-        self.tracked_paths = {
-            entry.split(b"\t", 1)[1].decode("utf-8") for entry in stages
-        }
         refs = self.git("for-each-ref", "--format=%(refname) %(objectname)")
         self.storage_state.append(refs.hex())
         if not self.validated_active_operation:

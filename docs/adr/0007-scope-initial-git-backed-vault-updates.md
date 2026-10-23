@@ -38,3 +38,13 @@ historical content from current notes or the migration record. The
 records the complete conditional matrix and human answers from 2026-10-20;
 prototype discrepancies return there for explicit human revision before affected
 implementation specifications become ready.
+
+The user subsequently chose to defer history cleanup for this version to reduce
+complexity. Retain all saved converter history and explain that disk use grows
+with further versions. Do not add history-cleanup proposals, pruning, a
+retention boundary or a cleanup UI in this version. This supersedes the
+initial-release cleanup expectation in ADR 0003; its future cleanup safety
+policy remains recorded. Required baselines/metadata, independent user Git
+history, interruption recovery, matching-history repair and latest Undo
+remain required. Attachment-file cleanup is a separate scope. See the
+[2026-10-23 history-cleanup deferral](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/254#issuecomment-6373494255).
