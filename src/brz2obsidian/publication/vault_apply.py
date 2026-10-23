@@ -23,7 +23,7 @@ from brz2obsidian.application.vault_update_contracts import (
     VaultRecoveryIntent,
     VaultUpdateDetailPage,
 )
-from brz2obsidian.core import select_review_effects
+from brz2obsidian.core import review_owned_targets, select_review_effects
 from brz2obsidian.publication.git_payload import verify_blobs
 from brz2obsidian.publication.vault_admission import _safe_relative
 from brz2obsidian.publication.vault_history import (
@@ -407,7 +407,9 @@ def _read_operation_intent(git, commit):
     return graph.intent
 
 
-def _prepared_for_intent(intent, manifest, loaded, *, origin=None, origin_commit=None):
+def _prepared_for_intent(
+    intent, manifest, loaded, *, origin=None, origin_commit=None, origin_plan=None
+):
     """A retained prepared review authorizes exactly its selected transition."""
     if loaded is None:
         return False
@@ -430,9 +432,11 @@ def _prepared_for_intent(intent, manifest, loaded, *, origin=None, origin_commit
     before = {row.path: row for row in intent.before}
     proposed = {row.path: row for row in intent.proposed}
     source = {row.path: row for row in manifest.source}
+    retained_incoming = {}
     if isinstance(intent, VaultRecoveryIntent):
         if (
             origin is None
+            or origin_plan is None
             or plan.proposal.generation != intent.review_generation
             or manifest.recovery_origin_intent_commit != origin_commit
             or manifest.recovery_previous_operation_commit
@@ -446,6 +450,19 @@ def _prepared_for_intent(intent, manifest, loaded, *, origin=None, origin_commit
                 origin.proposed if intent.direction == "finish" else origin.before
             )
         }
+        original_subjects = {
+            (subject.item_id, subject.facet): subject
+            for subject in origin_plan.producer_facts.subjects
+        }
+        for subject in plan.producer_facts.subjects:
+            proof = subject.operation_reversal
+            if proof is not None and subject.path not in origin.affected_paths:
+                original_subject = original_subjects.get(
+                    (subject.item_id, subject.facet)
+                )
+                if original_subject is None or subject.path != original_subject.path:
+                    return False
+                retained_incoming[subject.path] = original_subject.incoming
     elif manifest.recovery_direction is not None:
         return False
 
@@ -465,6 +482,8 @@ def _prepared_for_intent(intent, manifest, loaded, *, origin=None, origin_commit
     def saved_incoming(path, expected):
         if not _safe_relative(path):
             return False
+        if path in retained_incoming:
+            return expected == retained_incoming[path]
         row = source.get(path)
         return row is None if expected is None else matches(row, expected)
 
@@ -491,7 +510,7 @@ def _operation_history_fingerprint(origin_commit, origin):
 
 
 def _recovery_prepared_matches(
-    intent, origin, origin_commit, manifest, loaded, lineage
+    intent, origin, origin_commit, manifest, loaded, lineage, origin_plan
 ):
     """Bind reviewed operation targets separately from truthful source lineage."""
     if manifest.source != lineage.source or manifest.identity != lineage.identity:
@@ -506,6 +525,12 @@ def _recovery_prepared_matches(
         row.path: row
         for row in (origin.before if intent.direction == "finish" else origin.proposed)
     }
+    current = {row.path: row for row in intent.before}
+    origin_subjects = {
+        (subject.item_id, subject.facet): subject
+        for subject in origin_plan.producer_facts.subjects
+    }
+    covered = set()
 
     def matches(row, content):
         if row is None:
@@ -519,24 +544,54 @@ def _recovery_prepared_matches(
     for subject in loaded.saved.plan.producer_facts.subjects:
         proof = subject.operation_reversal
         if proof is None:
-            if subject.path in origin.affected_paths and (
-                (subject.path in target) != (subject.path in produced)
-            ):
-                return False
+            if (subject.item_id, subject.facet) in origin_subjects:
+                paths = {subject.path, subject.current.path}
+                paths.update(
+                    item.current.path
+                    for item in loaded.saved.plan.producer_facts.identity_inventory
+                    if item.identity is not None
+                    and (item.identity.item_id, item.facet)
+                    == (subject.item_id, subject.facet)
+                )
+                for path in paths & set(origin.affected_paths):
+                    if (path in target) != (path in produced):
+                        return False
+                    covered.add(path)
             continue
+        change = next(
+            (
+                change
+                for change in origin_plan.proposal.changes
+                if change.change_id == proof.origin_change_id
+            ),
+            None,
+        )
         if (
-            proof.path not in origin.affected_paths
+            change is None
+            or (change.item_id, change.facet) != (subject.item_id, subject.facet)
             or proof.operation_id != origin.operation_id
             or proof.operation_kind != origin.kind
             or proof.direction != intent.direction
             or proof.operation_generation != origin.generation
             or proof.history_fingerprint
             != _operation_history_fingerprint(origin_commit, origin)
-            or not matches(produced.get(proof.path), proof.produced)
-            or not matches(target.get(proof.path), proof.target)
         ):
             return False
-    return True
+        if proof.owned_targets != review_owned_targets(
+            origin_plan, proof.origin_change_id, proof.origin_decision_id
+        ):
+            return False
+        for row in proof.outputs:
+            if (
+                row.path not in origin.affected_paths
+                or not matches(produced.get(row.path), row.produced)
+                or not matches(current.get(row.path), row.current.content)
+                or not matches(target.get(row.path), row.target)
+                or row.path in covered
+            ):
+                return False
+            covered.add(row.path)
+    return covered == set(origin.affected_paths)
 
 
 def _terminal_files_match(root, intent):
@@ -647,7 +702,11 @@ def _inspect_update_status(vault, *, observations):
             )
         for graph in graphs:
             origin = graph.authorities[-1][1]
-            for _, authority in graph.authorities:
+            origin_saved = owned[origin.prepared_commit][1]
+            if origin_saved is None:
+                raise OSError("Operation origin lacks its retained review")
+            origin_plan = origin_saved.saved.plan
+            for _, authority in reversed(graph.authorities):
                 prepared, saved = owned[authority.prepared_commit]
                 if not _prepared_for_intent(
                     authority,
@@ -655,6 +714,7 @@ def _inspect_update_status(vault, *, observations):
                     saved,
                     origin=origin,
                     origin_commit=graph.origin_intent_commit,
+                    origin_plan=origin_plan,
                 ):
                     raise OSError("Operation intent lacks a selected prepared review")
                 if isinstance(authority, VaultRecoveryIntent):
@@ -670,6 +730,7 @@ def _inspect_update_status(vault, *, observations):
                         prepared,
                         saved,
                         owned[lineage_commit][0],
+                        origin_plan,
                     ):
                         raise OSError("Recovery target or source lineage changed")
         for _, candidate, terminal, _, _ in records:
