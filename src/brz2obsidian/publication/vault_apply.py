@@ -143,6 +143,53 @@ def _release(root, operation_id):
     directory.rmdir()
 
 
+def _park(root, operation_id):
+    """Drop this process's lock after a stop; retain the recovery marker."""
+    active = _ACTIVE.pop((str(root), operation_id), None)
+    if active is not None:
+        active[1].close()
+
+
+def _adopt(root, operation_id):
+    """Claim only the validated stopped converter lease in this process."""
+    root = Path(root).absolute()
+    directory = _lock_path(root)
+    if not os.path.lexists(directory):
+        _acquire(root, operation_id)
+        return
+    if (str(root), operation_id) in _ACTIVE:
+        raise OSError("Operation still holds an in-process lease")
+    if not directory.is_dir() or set(os.listdir(directory)) != {"owner.json", "held"}:
+        raise OSError("Stopped operation marker is torn")
+    verify_directory(directory)
+    _, _, raw, _ = observe_file(directory, directory / "owner.json", prefix_limit=4097)
+    owner = VaultOperationLock.model_validate_json(raw)
+    if (
+        len(raw) > 4096
+        or owner.operation_id != operation_id
+        or owner.vault_anchor != verify_directory(root)
+        or owner.git_anchor != verify_directory(root / ".git")
+    ):
+        raise OSError("Stopped operation owner is inconsistent")
+    stream = (directory / "held").open("r+b")
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _ACTIVE[str(root), operation_id] = (os.getpid(), stream)
+        if not owns_operation(root, operation_id):
+            raise OSError("Stopped operation lease changed during adoption")
+    except OSError, ValueError, TypeError:
+        _ACTIVE.pop((str(root), operation_id), None)
+        stream.close()
+        raise
+
+
 def _journal(git, name, record, *, parents=(), previous=None, ref=None):
     payload = record.model_dump_json().encode()
     sha = hashlib.sha256(payload).hexdigest()
@@ -1442,6 +1489,8 @@ def _apply_reviewed_update(
             message="Existing-vault operation requires exact recovery inspection.",
         )
     finally:
+        if acquired and intent_commit is not None:
+            _park(root, operation_id)
         if acquired and intent_commit is None:
             pending_exception = sys.exc_info()[0]
             try:
