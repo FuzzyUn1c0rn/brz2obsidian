@@ -973,14 +973,11 @@ class _Inspection:
                 raise OSError("Current locator exceeds its bounded control size")
             current_locator = CheckpointLocator.model_validate_json(locator_raw)
             operation_refs = {}
-            for line in (
-                self.git(
-                    "for-each-ref",
-                    "--format=%(refname) %(objectname)",
-                    "refs/brz2obsidian/imports",
-                )
-                .splitlines()
-            ):
+            for line in self.git(
+                "for-each-ref",
+                "--format=%(refname) %(objectname)",
+                "refs/brz2obsidian/imports",
+            ).splitlines():
                 name, oid = line.split(b" ")
                 parts = name.split(b"/")
                 if len(parts) == 6 and parts[4] == b"operations":
