@@ -141,6 +141,12 @@ Retain the printed `RECEIPT:` path and outcomes, including failed/interrupted
 runs. Keep receipts and logs intact in their original directories; follow
 [workspace housekeeping](workspace.md) when retiring temporary evidence.
 
+The pytest child also writes `pytest-timings.jsonl` in that run directory. Each
+completed report records its node ID, setup/call/teardown phase, duration and
+outcome. Reports flush individually so an interrupted process retains completed
+timings. An incomplete log, including a possible partial final line after abrupt
+termination, does not establish completion or replace receipt validation.
+
 | Run exit | Meaning |
 | --- | --- |
 | `0` | All requested checks passed |

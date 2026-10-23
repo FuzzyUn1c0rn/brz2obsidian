@@ -14,6 +14,14 @@ COUNTS = {
 }
 GUI = set()
 EXECUTED = set()
+TIMINGS = None
+
+
+def pytest_sessionstart():
+    global TIMINGS
+    TIMINGS = Path(os.environ["BRZ_CHECK_COUNTS"]).with_name(
+        "pytest-timings.jsonl"
+    ).open("w", encoding="utf-8", buffering=1)
 
 
 def pytest_collection_modifyitems(items):
@@ -29,6 +37,17 @@ def pytest_collectreport(report):
 
 
 def pytest_runtest_logreport(report):
+    TIMINGS.write(
+        json.dumps(
+            {
+                "nodeid": report.nodeid,
+                "when": report.when,
+                "duration": report.duration,
+                "outcome": report.outcome,
+            }
+        )
+        + "\n"
+    )
     if report.when == "call":
         if not report.skipped:
             EXECUTED.add(report.nodeid)
@@ -44,6 +63,10 @@ def pytest_runtest_logreport(report):
 
 
 def pytest_sessionfinish():
-    Path(os.environ["BRZ_CHECK_COUNTS"]).write_text(
-        json.dumps({**COUNTS, "executed_nodes": sorted(EXECUTED)}), encoding="utf-8"
-    )
+    try:
+        Path(os.environ["BRZ_CHECK_COUNTS"]).write_text(
+            json.dumps({**COUNTS, "executed_nodes": sorted(EXECUTED)}), encoding="utf-8"
+        )
+    finally:
+        if TIMINGS is not None:
+            TIMINGS.close()

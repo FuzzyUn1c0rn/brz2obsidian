@@ -133,6 +133,16 @@ def test_focused_check_uses_selected_checkout_and_publishes_valid_receipt(checko
     assert receipt["checks"][0]["counts"]["executed_nodes"] == [
         "tests/test_selected.py::test_selected"
     ]
+    timings = [
+        json.loads(line)
+        for line in (path.parent / "pytest-timings.jsonl").read_text().splitlines()
+    ]
+    assert [row["nodeid"] for row in timings] == [
+        "tests/test_selected.py::test_selected"
+    ] * 3
+    assert [row["when"] for row in timings] == ["setup", "call", "teardown"]
+    assert all(row["outcome"] == "passed" for row in timings)
+    assert timings[1]["duration"] > 0
     expected = requirements(
         checkout,
         [pytest_requirement("focused", ["tests/test_selected.py"])],
@@ -224,7 +234,9 @@ def test_interrupted_execution_retains_partial_identity_and_original_output(chec
     import signal
 
     (checkout / "tests" / "test_selected.py").write_text(
-        "from pathlib import Path\nimport time\ndef test_wait():\n    Path('tmp/started').write_text('started')\n    time.sleep(30)\n"
+        "from pathlib import Path\nimport time\n"
+        "def test_completed():\n    time.sleep(0.01)\n"
+        "def test_wait():\n    Path('tmp/started').write_text('started')\n    time.sleep(30)\n"
     )
     argv = [
         sys.executable,
@@ -265,6 +277,20 @@ def test_interrupted_execution_retains_partial_identity_and_original_output(chec
     assert receipt["checks"][0]["status"] == "interrupted"
     assert receipt["checks"][1]["status"] == "not_run"
     assert (paths[0].parent / "partial.json").is_file()
+    timings = [
+        json.loads(line)
+        for line in (paths[0].parent / "pytest-timings.jsonl")
+        .read_text()
+        .splitlines()
+    ]
+    completed = [
+        row
+        for row in timings
+        if row["nodeid"] == "tests/test_selected.py::test_completed"
+    ]
+    assert [row["when"] for row in completed] == ["setup", "call", "teardown"]
+    assert all(row["outcome"] == "passed" for row in completed)
+    assert completed[1]["duration"] > 0
 
 
 def test_failed_pytest_keeps_original_exception_and_later_dependency_pass(checkout):
