@@ -100,10 +100,10 @@ def _validation(
 
 
 def _supported_layout(root):
-    """Reuse the ordinary local layout and Git policy gates before raw reads."""
+    """Reuse the ordinary layout, Git policy and raw index gates before raw reads."""
     inspection = _Inspection(root, (), None)
     if not inspection.layout() or inspection.repo.kind != "root":
-        return False
+        return False, "target_unsupported"
     locations = inspection.locations()
     if (
         locations is None
@@ -116,8 +116,17 @@ def _supported_layout(root):
         )
         or locations[4:] != ["sha1", "files"]
     ):
-        return False
-    return inspection.configuration()
+        return False, "target_unsupported"
+    if not inspection.configuration():
+        return False, "target_unsupported"
+    if not inspection.index_state():
+        return (
+            False,
+            "git_operation_busy"
+            if any(row.code == "unmerged_index" for row in inspection.findings)
+            else "target_unsupported",
+        )
+    return True, None
 
 
 def _operation_blocker(root):
@@ -135,7 +144,14 @@ def validate_history_copy(vault, copy):
     root, supplied = Path(vault).absolute(), Path(copy).absolute()
     if (root / ".git").exists():
         try:
-            if not _supported_layout(root):
+            supported, layout_code = _supported_layout(root)
+            if not supported:
+                if layout_code == "git_operation_busy":
+                    return _validation(
+                        "refused",
+                        "git_operation_busy",
+                        message="Resolve the unmerged Git index before repairing history.",
+                    )
                 raise OSError("Unsupported target Git layout or policy")
         except OSError, ValueError, TypeError, UnicodeError:
             return _validation(
@@ -273,7 +289,8 @@ def validate_history_copy(vault, copy):
             raise OSError("Target physical association changed")
         verify_directory(supplied)
         verify_directory(supplied / ".git")
-        if not _supported_layout(supplied) or _operation_blocker(supplied):
+        copy_supported, _ = _supported_layout(supplied)
+        if not copy_supported or _operation_blocker(supplied):
             raise OSError("Supplied Git store is not self-contained")
         supplied_git = _Git(supplied)
         copied = _read(supplied, supplied_git, trusted_association=association)
@@ -507,7 +524,7 @@ def execute_history_repair(vault, copy, preparation):
         margin = 64 * 1024 * 1024
         enough = (
             shutil.disk_usage(root.parent).free
-            >= (2 * total + damaged_bytes if same_volume else total) + margin
+            >= (2 * total + 2 * damaged_bytes if same_volume else total) + margin
             and shutil.disk_usage(object_directory).free >= total + margin
             and (same_volume or not current.damaged_objects)
         )

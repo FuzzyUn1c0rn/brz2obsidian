@@ -1,6 +1,7 @@
 """Public matching-history repair over real local Git stores and exact bytes."""
 
 import json
+import os
 import shutil
 import stat
 from pathlib import Path
@@ -89,6 +90,47 @@ def test_older_copy_refusal_then_exact_missing_history_dependency_repair(monkeyp
     damaged_bytes = _all_file_bytes(vault)
     damaged_git = user_state(vault)
 
+    target_index = vault / ".git/index"
+    original_index = target_index.read_bytes()
+    mode, oid, _, _ = git(
+        vault, "ls-files", "--stage", "--", "Notes/Opening.md"
+    ).split()
+    git(
+        vault,
+        "update-index",
+        "--index-info",
+        input=(
+            b"0 "
+            + b"0" * 40
+            + b"\tNotes/Opening.md\n"
+            + mode
+            + b" "
+            + oid
+            + b" 1\tNotes/Opening.md\n"
+        ),
+    )
+    assert b" 1\tNotes/Opening.md" in git(vault, "ls-files", "--stage")
+    unmerged_target = _all_file_bytes(vault)
+    unmerged = Operations().validate_history_copy(vault, matching)
+    assert unmerged.status == "refused" and unmerged.code == "git_operation_busy"
+    assert _all_file_bytes(vault) == unmerged_target
+    assert _all_file_bytes(matching) == matching_bytes
+    target_index.write_bytes(original_index)
+    assert _all_file_bytes(vault) == damaged_bytes
+    assert user_state(vault) == damaged_git
+
+    copy_index = matching / ".git/index"
+    original_copy_index = copy_index.read_bytes()
+    git(matching, "update-index", "--skip-worktree", "Notes/Opening.md")
+    assert git(matching, "ls-files", "-v", "Notes/Opening.md").startswith(b"S ")
+    flagged_copy = _all_file_bytes(matching)
+    flagged = Operations().validate_history_copy(vault, matching)
+    assert flagged.status == "refused" and flagged.code == "copy_invalid"
+    assert _all_file_bytes(vault) == damaged_bytes
+    assert _all_file_bytes(matching) == flagged_copy
+    copy_index.write_bytes(original_copy_index)
+    assert _all_file_bytes(matching) == matching_bytes
+
     candidate = Operations().validate_history_copy(vault, matching)
     assert (
         candidate.status == "matching" and candidate.code == "exact_missing_dependency"
@@ -143,11 +185,16 @@ def test_older_copy_refusal_then_exact_missing_history_dependency_repair(monkeyp
         vault, matching, damaged_candidate
     )
     assert damaged_preparation.status == "prepared"
+    assert os.stat(vault.parent).st_dev == os.stat(vault / ".git/objects").st_dev
+    declared_size = damaged_candidate.damaged_objects[0].size
+    damaged_loose_size = blob_path.stat().st_size
+    assert damaged_loose_size > 0
+    old_peak_estimate = 64 * 1024 * 1024 + 2 * declared_size + damaged_loose_size
     with monkeypatch.context() as patch:
         patch.setattr(
             vault_repair.shutil,
             "disk_usage",
-            lambda path: SimpleNamespace(free=0),
+            lambda path: SimpleNamespace(free=old_peak_estimate),
         )
         insufficient = Operations().execute_history_repair(
             vault, matching, damaged_preparation

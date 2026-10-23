@@ -843,6 +843,51 @@ class _Inspection:
                             break
         return not self.findings
 
+    def index_state(self):
+        """Observe the ordinary raw index policy without reading checkpoint history."""
+        gitdir = Path(self.repo.git_directory)
+        index_records = self.git("ls-files", "--stage", "-v", "-z")
+        entries = [entry for entry in index_records.split(b"\0") if entry]
+        if any(entry[1:2] != b" " or b"\t" not in entry for entry in entries):
+            raise OSError("Malformed index observations")
+        stages = [entry[2:] for entry in entries]
+        self.storage_state.extend(
+            (
+                index_records.hex(),
+                _file_digest(gitdir / "index")
+                if (gitdir / "index").exists()
+                else "index-absent",
+            )
+        )
+        if any(entry.split(b"\t", 1)[0].split()[-1] != b"0" for entry in stages):
+            self.finding(
+                "unmerged_index",
+                "operation",
+                "Finish the existing unmerged Git index before converter work.",
+            )
+            self.operation = "active"
+        if any(entry[:1].islower() or entry[:1] == b"S" for entry in entries):
+            self.finding(
+                "index_flags",
+                "layout",
+                "Skip-worktree and assume-unchanged entries are initially unsupported.",
+            )
+        if any(
+            entry.startswith((b"160000 ", b"040000 ", b"120000 ")) for entry in stages
+        ):
+            self.finding(
+                "index_layout",
+                "layout",
+                "Submodule, sparse-directory and symbolic-link entries are initially unsupported.",
+            )
+        if self.findings:
+            return False
+        self.index_stages = tuple(stages)
+        self.tracked_paths = {
+            entry.split(b"\t", 1)[1].decode("utf-8") for entry in stages
+        }
+        return True
+
     def repository(self):
         if self.repo.kind == "none":
             return True
@@ -985,46 +1030,8 @@ class _Inspection:
                     "Current converter history requires recovery discovery before dependent work.",
                 )
                 self.operation = "recovery_required"
-        index_records = self.git("ls-files", "--stage", "-v", "-z")
-        entries = [entry for entry in index_records.split(b"\0") if entry]
-        if any(entry[1:2] != b" " or b"\t" not in entry for entry in entries):
-            raise OSError("Malformed index observations")
-        stages = [entry[2:] for entry in entries]
-        self.storage_state.extend(
-            (
-                index_records.hex(),
-                _file_digest(gitdir / "index")
-                if (gitdir / "index").exists()
-                else "index-absent",
-            )
-        )
-        if any(entry.split(b"\t", 1)[0].split()[-1] != b"0" for entry in stages):
-            self.finding(
-                "unmerged_index",
-                "operation",
-                "Finish the existing unmerged Git index before converter work.",
-            )
-            self.operation = "active"
-        if any(entry[:1].islower() or entry[:1] == b"S" for entry in entries):
-            self.finding(
-                "index_flags",
-                "layout",
-                "Skip-worktree and assume-unchanged entries are initially unsupported.",
-            )
-        if any(
-            entry.startswith((b"160000 ", b"040000 ", b"120000 ")) for entry in stages
-        ):
-            self.finding(
-                "index_layout",
-                "layout",
-                "Submodule, sparse-directory and symbolic-link entries are initially unsupported.",
-            )
-        if self.findings:
+        if not self.index_state():
             return False
-        self.index_stages = tuple(stages)
-        self.tracked_paths = {
-            entry.split(b"\t", 1)[1].decode("utf-8") for entry in stages
-        }
         refs = self.git("for-each-ref", "--format=%(refname) %(objectname)")
         self.storage_state.append(refs.hex())
         if not self.validated_active_operation:
