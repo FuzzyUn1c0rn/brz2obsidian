@@ -426,6 +426,20 @@ def _read_operation_intent(git, commit):
     return graph.intent
 
 
+class _UnpublishedRecovery(NamedTuple):
+    """Validated checkpoint transition facts, with no published operation root."""
+
+    generation: int
+    association_id: str
+    before: tuple
+    proposed: tuple
+    prepared_commit: str
+    direction: str
+    review_generation: int
+    previous_operation_commit: str
+    affected_paths: tuple
+
+
 def _prepared_for_intent(
     intent, manifest, loaded, *, origin=None, origin_commit=None, origin_plan=None
 ):
@@ -452,7 +466,7 @@ def _prepared_for_intent(
     proposed = {row.path: row for row in intent.proposed}
     source = {row.path: row for row in manifest.source}
     retained_incoming = {}
-    if isinstance(intent, VaultRecoveryIntent):
+    if isinstance(intent, (VaultRecoveryIntent, _UnpublishedRecovery)):
         if (
             origin is None
             or origin_plan is None
@@ -656,6 +670,61 @@ def _recovery_prepared_matches(
     return covered == set(origin.affected_paths)
 
 
+def _unpublished_recovery_matches(graph, checkpoint, owned, origins):
+    """An exact retained preparation does not advance operation authority."""
+    manifest, loaded = checkpoint.manifest, checkpoint.review
+    if (
+        loaded is None
+        or manifest.recovery_direction is None
+        or manifest.generation <= graph.intent.generation
+        or isinstance(graph.intent, VaultRecoveryIntent)
+        and manifest.recovery_direction != graph.intent.direction
+    ):
+        return False
+    origin = graph.authorities[-1][1]
+    before = {row.path: row for row in manifest.vault}
+    proposed = {row.path: row for row in manifest.proposed}
+    transition = _UnpublishedRecovery(
+        manifest.generation,
+        origin.association_id,
+        manifest.vault,
+        manifest.proposed,
+        checkpoint.locator.commit,
+        manifest.recovery_direction,
+        loaded.saved.plan.proposal.generation,
+        graph.commit,
+        tuple(
+            sorted(
+                path
+                for path in before.keys() | proposed.keys()
+                if before.get(path) != proposed.get(path)
+            )
+        ),
+    )
+    original_plan = owned[origin.prepared_commit][1].saved.plan
+    lineage_commit = (
+        origin.prepared_commit
+        if transition.direction == "finish"
+        else origins[graph.origin_intent_commit]
+    )
+    return _prepared_for_intent(
+        transition,
+        manifest,
+        loaded,
+        origin=origin,
+        origin_commit=graph.origin_intent_commit,
+        origin_plan=original_plan,
+    ) and _recovery_prepared_matches(
+        transition,
+        origin,
+        graph.origin_intent_commit,
+        manifest,
+        loaded,
+        owned[lineage_commit][0],
+        original_plan,
+    )
+
+
 def _terminal_files_match(root, intent):
     proposed = {row.path: row for row in intent.proposed}
     metadata = {row.path: row for row in intent.result_metadata}
@@ -670,6 +739,7 @@ class _OperationObservation(NamedTuple):
     graph: _OperationGraph
     checkpoint: object
     owned: dict
+    unpublished_prepared: str | None = None
 
 
 def _inspect_update_observation(vault):
@@ -820,12 +890,20 @@ def _inspect_update_status(vault, *, observations):
         )
         try:
             manifest = checkpoint.manifest
+            unpublished_prepared = (
+                receipt is None
+                and checkpoint.status == "valid"
+                and manifest.boundary == "prepared"
+                and checkpoint.locator.commit != intent.prepared_commit
+                and _unpublished_recovery_matches(active_graph, checkpoint, owned, origins)
+            )
             if (
                 checkpoint.status != "valid"
                 or manifest.association_id != intent.association_id
                 or manifest.generation < intent.generation
                 or (
                     manifest.boundary == "prepared"
+                    and not unpublished_prepared
                     and (
                         checkpoint.locator.commit != intent.prepared_commit
                         or manifest.preimage != intent.before
@@ -848,6 +926,10 @@ def _inspect_update_status(vault, *, observations):
                 )
             ):
                 raise OSError("Operation intent and owned checkpoint disagree")
+            if unpublished_prepared:
+                observations[-1] = _OperationObservation(
+                    active_graph, checkpoint, owned, checkpoint.locator.commit
+                )
         except OSError, ValueError, TypeError, UnicodeError:
             return _outcome(
                 "unknown",
