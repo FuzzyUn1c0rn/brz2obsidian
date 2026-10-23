@@ -52,9 +52,20 @@ a distinct choice because they affect the whole vault.
 
 Use the Windows app as the primary conflict-review interface. The CLI supports
 inspecting a proposal and applying a fully resolved plan under the same rules,
-and reports unresolved conflicts. Allow vault editing during review, then recheck
-affected files before application and invalidate stale approvals. Require a brief
-pause in editing while applying changes.
+and reports unresolved conflicts. Allow vault editing during review outside an
+active conversion or vault-changing operation. Before
+starting or resuming publication, recheck current inputs and affected assumptions,
+invalidate stale approvals selectively and retain unaffected decisions.
+
+From conversion start until it finishes or stops, the user, Obsidian, sync tools
+and other programs must leave the target vault's authored content and relevant
+settings unchanged. The same prerequisite applies during vault-changing recovery,
+Undo, repair and cleanup. Concurrent target-vault editing is unsupported. Explain
+this in existing operation guidance without another acknowledgement dialog or
+checkbox, as recorded in the
+[2026-10-23 user amendment](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/254#issuecomment-6360422317).
+Pre-existing edits and edits between stopped or completed operations remain
+supported, including current review, recovery and later-edit Undo protection.
 
 For conflicting attachments, offer the vault version, the incoming version or
 both. Keeping both preserves the current file at its existing path and assigns

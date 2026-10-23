@@ -6,6 +6,7 @@ import os
 import subprocess
 import tempfile
 import time
+import zlib
 from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
@@ -307,6 +308,146 @@ def test_missing_required_blob_refuses_read_and_capture_without_repair(captured)
         _assert_intact(operations, vault, result.commit)
 
 
+@pytest.mark.parametrize("kind", ("older-payload", "metadata"))
+def test_retained_graph_rejects_parseable_object_bytes_under_the_wrong_oid(
+    captured, kind
+):
+    operations, container, vault, source, result = captured
+    source_note = source / "Note.md"
+    with _restored(captured):
+        original_source = source_note.read_bytes()
+        object_path = original = backup = None
+        try:
+            source_note.write_bytes(b"different second source version\n")
+            second = _capture(operations, vault, source)
+            assert second.status == "captured" and second.commit != result.commit
+            assert _git(
+                vault, "rev-list", "--parents", "-n", "1", second.commit
+            ).decode().split() == [second.commit, result.commit]
+            if kind == "older-payload":
+                oid = _blob(_SOURCE["Note.md"])
+                replacement = b"corrupt older source bytes\n"
+                assert (
+                    oid
+                    not in _git(
+                        vault, "ls-tree", "-r", second.commit + ":source"
+                    ).decode()
+                )
+            else:
+                oid = (
+                    _git(vault, "rev-parse", second.commit + ":manifest.json")
+                    .decode()
+                    .strip()
+                )
+                replacement = _git(vault, "cat-file", "blob", oid).replace(
+                    b"literal-settings", b"changed-settings"
+                )
+                assert (
+                    json.loads(replacement)["identity"]["settings_digest"]
+                    == "changed-settings"
+                )
+            object_path = vault / ".git/objects" / oid[:2] / oid[2:]
+            original = object_path.read_bytes()
+            backup = container / ("wrong-oid-backup-" + uuid4().hex)
+            object_path.rename(backup)
+            corrupt = zlib.compress(
+                b"blob " + str(len(replacement)).encode() + b"\0" + replacement
+            )
+            object_path.write_bytes(corrupt)
+            assert _git(vault, "cat-file", "blob", oid) == replacement
+            assert _blob(replacement) != oid
+            _assert_refused_without_repair(operations, container, vault, source)
+        finally:
+            if object_path is not None and original is not None:
+                if backup is not None and backup.exists():
+                    object_path.unlink(missing_ok=True)
+                    backup.rename(object_path)
+                assert object_path.read_bytes() == original
+            source_note.write_bytes(original_source)
+
+
+def test_older_required_role_cannot_be_removed_from_a_coherent_parent_chain(captured):
+    operations, container, vault, source, result = captured
+    with _restored(captured):
+        source_note = source / "Note.md"
+        original_source = source_note.read_bytes()
+        try:
+            source_note.write_bytes(b"unique second source\n")
+            second = _capture(operations, vault, source)
+            assert second.status == "captured"
+            old_rows = [
+                row
+                for row in _git(vault, "ls-tree", "-z", result.commit).split(b"\0")
+                if row and row.split(b"\t", 1)[1] != b"source"
+            ]
+            old_tree = (
+                _git(vault, "mktree", "-z", input=b"\0".join(old_rows) + b"\0")
+                .decode()
+                .strip()
+            )
+            old_commit = (
+                _git(
+                    vault,
+                    "commit-tree",
+                    old_tree,
+                    input=b"older missing semantic role\n",
+                )
+                .decode()
+                .strip()
+            )
+            manifest = json.loads(
+                _git(vault, "cat-file", "blob", second.commit + ":manifest.json")
+            )
+            manifest["previous"] = old_commit
+            oid = _git(
+                vault,
+                "hash-object",
+                "-w",
+                "--stdin",
+                input=json.dumps(manifest).encode(),
+            ).strip()
+            new_rows = [
+                b"100644 blob " + oid + b"\tmanifest.json"
+                if row.split(b"\t", 1)[1] == b"manifest.json"
+                else row
+                for row in _git(vault, "ls-tree", "-z", second.commit).split(b"\0")
+                if row
+            ]
+            new_tree = (
+                _git(vault, "mktree", "-z", input=b"\0".join(new_rows) + b"\0")
+                .decode()
+                .strip()
+            )
+            new_commit = (
+                _git(
+                    vault,
+                    "commit-tree",
+                    new_tree,
+                    "-p",
+                    old_commit,
+                    input=b"coherent latest generation\n",
+                )
+                .decode()
+                .strip()
+            )
+            locator_path = vault / ".brz2obsidian/locator.json"
+            locator = json.loads(locator_path.read_bytes())
+            locator["commit"] = new_commit
+            _git(vault, "update-ref", result.ref, new_commit)
+            locator_path.write_text(json.dumps(locator), encoding="utf-8")
+            assert _git(
+                vault, "rev-list", "--parents", "-n", "1", new_commit
+            ).decode().split() == [new_commit, old_commit]
+            assert b"source" not in [row.split(b"\t", 1)[1] for row in old_rows]
+            assert json.loads(
+                _git(vault, "cat-file", "blob", old_commit + ":manifest.json")
+            )["source"]
+            _git(vault, "fsck", "--full", "--no-reflogs", "--no-progress")
+            _assert_refused_without_repair(operations, container, vault, source)
+        finally:
+            source_note.write_bytes(original_source)
+
+
 @pytest.mark.parametrize(
     "record", ("manifest.json", "association.json", "locator.json")
 )
@@ -387,10 +528,15 @@ def test_public_checkpoint_records_are_closed_strict_version_one_values(record, 
         "vault": [],
         "preimage": [],
         "proposed": [],
+        "review_content": [],
         "recovery_gaps": [],
         "semantic_fingerprint": "a" * 64,
+        "policy_fingerprint": "b" * 64,
+        "policy_continuity_fingerprint": "c" * 64,
         "previous": None,
         "review_object": None,
+        "review_size": None,
+        "review_sha256": None,
     }
     locator = {
         "schema_id": "brz2obsidian.checkpoint-locator",
@@ -440,6 +586,50 @@ def test_json_blob_names_cannot_replace_required_source_graph_edge(captured):
         assert {row["object_id"] for row in manifest["source"]} == {
             _blob(data) for data in _SOURCE.values()
         }
+        _assert_refused_without_repair(operations, container, vault, source)
+
+
+def test_owned_role_refuses_extra_reachable_non_blob_node(captured):
+    operations, container, vault, source, result = captured
+    with _restored(captured):
+        user_commit = _git(vault, "rev-parse", "HEAD").strip()
+        source_rows = [
+            row
+            for row in _git(vault, "ls-tree", "-z", result.commit + ":source").split(
+                b"\0"
+            )
+            if row
+        ]
+        source_rows.append(b"160000 commit " + user_commit + b"\tforeign-submodule")
+        source_tree = _git(
+            vault, "mktree", "-z", input=b"\0".join(source_rows) + b"\0"
+        ).strip()
+        assert b"160000 commit " + user_commit + b"\tforeign-submodule" in _git(
+            vault, "ls-tree", "-z", source_tree.decode()
+        )
+        root_rows = [
+            b"040000 tree " + source_tree + b"\tsource"
+            if row.split(b"\t", 1)[1] == b"source"
+            else row
+            for row in _git(vault, "ls-tree", "-z", result.commit).split(b"\0")
+            if row
+        ]
+        tree = (
+            _git(vault, "mktree", "-z", input=b"\0".join(root_rows) + b"\0")
+            .strip()
+            .decode()
+        )
+        commit = (
+            _git(vault, "commit-tree", tree, input=b"extra graph node\n")
+            .strip()
+            .decode()
+        )
+        locator = vault / ".brz2obsidian/locator.json"
+        value = json.loads(locator.read_bytes())
+        value["commit"] = commit
+        _git(vault, "update-ref", result.ref, commit)
+        locator.write_text(json.dumps(value), encoding="utf-8")
+        assert _git(vault, "cat-file", "-t", user_commit.decode()) == b"commit\n"
         _assert_refused_without_repair(operations, container, vault, source)
 
 

@@ -52,6 +52,7 @@ class VaultAdmission(ReconciliationContract):
     capabilities: tuple[str, ...]
     policy_scope: Literal["current_repository", "before_initialization", "unknown"]
     policy_fingerprint: str
+    policy_continuity_fingerprint: str
     observation_fingerprint: str
     inventory: tuple[VaultFile, ...]
     inventory_complete: bool

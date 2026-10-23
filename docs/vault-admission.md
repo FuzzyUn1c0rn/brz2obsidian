@@ -12,6 +12,27 @@ with a version-1 `brz2obsidian.vault-admission` envelope. It reuses S1's
 fresh-destination `FilesystemPublisher` retain their established roles.
 The existing worker operation literals and protocol version 3 are unchanged.
 
+## Unchanged-vault operation prerequisite
+
+From conversion start until it finishes or stops, the user, Obsidian, sync tools
+and other programs must leave target authored content and relevant settings
+unchanged. The same prerequisite applies during vault-changing recovery, Undo,
+repair and cleanup. Concurrent target-vault editing is unsupported. Existing
+operation guidance must explain this limitation without an additional
+acknowledgement dialog or checkbox. The
+[2026-10-23 user amendment](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/254#issuecomment-6360422317)
+supersedes earlier active-writer protection requirements and mandatory race gates.
+
+Pre-existing edits, review-time edits outside an active operation and edits
+between stopped or completed operations remain supported. Before starting or
+resuming, validate current review and affected assumptions, refuse detected stale
+facts and selectively invalidate affected decisions while retaining unaffected
+ones. Converter ownership, containment, exact byte/history integrity, ordinary
+atomic-write/flush, interruption recovery and later-edit Undo remain required.
+An observation may detect a change and refuse; it does not reserve the vault or
+guarantee preservation against an edit arriving while the operation runs.
+Existing cache/temp exclusions retain their scope.
+
 ## Interpreting an observation
 
 A supported result admits review of history, or review of initialization when
@@ -39,8 +60,8 @@ native access are established before allocation, without `gettempdir()` access
 probe files. Cleanup removes only this owned external view. A separate typed-query helper
 may build ephemeral ordinary indexes in another owned empty Git directory; these
 hold control names and already observed mode/OID/path rows, without authored
-payload or object writes. Both namespaces survive through the final policy
-recheck and close on success or failure.
+payload or object writes. Both namespaces are owned for the observation and
+close on success or failure.
 
 After reviewed target initialization, #272 must rediscover actual Git policy
 before the first authored capture. Actual `includeIf gitdir`/`onbranch` policy
@@ -58,8 +79,9 @@ configuration, global/system attributes and probe index are independent of
 actual authored rules. The later ordinary index preserves original indexed
 attribute OIDs and adds only missing observed/selected names; actual Git context resolves
 current global/info/nested rules and index fallback. Internal exact-path queries
-neutralize inherited pathspec interpretation switches. Final raw/typed/raw and
-batched ignore rechecks reject changed or incompatible observations. Policy
+neutralize inherited pathspec interpretation switches. Raw/typed attribute and
+batched ignore observations reject incompatible policy. Repeated observations
+can detect changes but do not establish external-writer exclusion. Policy
 fingerprints include the decoded identities, rather than their printed words.
 See [Git's typed matcher](https://github.com/git-for-windows/git/blob/v2.55.0.windows.5/pathspec.c#L720-L748).
 
@@ -141,9 +163,9 @@ and fixtures are preserved.
 | Criterion | Owning public evidence |
 | --- | --- |
 | A1: complete C admission observations | Both `test_vault_admission.py` and `test_vault_admission_layouts.py`; C mapping below |
-| A2: effective policy/nonexecution | system/global/repository/info rules, literal driver identities, default/override/case selection, qualified canaries, active/inactive hooks, trace sinks and external-policy writer |
+| A2: effective policy/nonexecution | system/global/repository/info rules, literal driver identities, default/override/case selection, qualified canaries, active/inactive hooks and trace sinks; external-policy writer remains historical evidence |
 | A3: actual advanced/incomplete layouts | real linked/bare/unmerged/format controls and storage-layout matrix |
-| A4: authored inventory/path/access | exact unborn/dirty inventory, actual Windows ACL/junction/hardlink/read-only controls, caches and concurrent file race |
+| A4: authored inventory/path/access | exact unborn/dirty inventory, actual Windows ACL/junction/hardlink/read-only controls and caches; concurrent file race remains historical evidence |
 | A5: scoped storage/tracking choices | builtin/inclusion requirements, tracked ignores, changed policy, conditional post-init rediscovery |
 | A6: typed facts/coverage/fingerprints | strict record rejection, independent authority/observation fingerprints, current-user-state and unavailable controls |
 
@@ -163,9 +185,16 @@ and fixtures are preserved.
 | C12 | parent/root-within-parent and nested repositories; actual bare root |
 | C13 | actual sparse configuration, split-index early gate/orphan contrast, skip-worktree and assume-unchanged flags |
 | C14 | actual shallow/promisor/alternate/grafted ancestry, missing/corrupt objects and SHA-256/reftable refusals |
-| C15 | actual junction/hardlink/read-only/ACL denial and concurrent bytes; synthetic low-space fact at the filesystem seam |
+| C15 | actual junction/hardlink/read-only/ACL denial; concurrent bytes remains historical evidence; synthetic low-space fact at the filesystem seam |
 | C16 | exact 18 MB binary inventory remains supported; #273 owns binary apply and #278 measured resource qualification |
 | C17 | installed Git/capabilities, missing executable and actual unsupported format/typed-matcher wrappers with setup findings |
+
+Recorded external-policy writer, concurrent file race and concurrent bytes
+observations retain their original results and evidence references for the
+recorded candidates, including successful observations. They are historical
+evidence, not a current concurrent-edit guarantee or mandatory active-writer
+gate. Preserve their original fixture manifests, timings, receipts and source
+references; the amendment changes current acceptance, not past observations.
 
 R27 maps to the C10 scoped inclusion requirements and disclosed recovery gaps;
 #272/#273 own the approved or declined execution. R30 maps to C17 capability

@@ -58,14 +58,19 @@ def _load_result(code, saved=None):
     )
 
 
-def load_review(raw: str | bytes) -> ReviewLoadResult:
+def load_review(raw: str | bytes | SavedReview) -> ReviewLoadResult:
     try:
-        if type(raw) is bytes:
+        if isinstance(raw, SavedReview):
+            saved = SavedReview.model_validate(raw.model_dump(mode="python"))
+        elif type(raw) is bytes:
             raw = raw.decode("utf-8")
-        elif type(raw) is not str:
+            raw.encode("utf-8")
+            saved = SavedReview.model_validate_json(raw)
+        elif type(raw) is str:
+            raw.encode("utf-8")
+            saved = SavedReview.model_validate_json(raw)
+        else:
             return _load_result("invalid_record")
-        raw.encode("utf-8")
-        saved = SavedReview.model_validate_json(raw)
     except ValidationError as error:
         for problem in error.errors():
             if problem["type"] == "literal_error":

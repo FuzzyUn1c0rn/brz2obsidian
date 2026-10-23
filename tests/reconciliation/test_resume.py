@@ -28,6 +28,9 @@ def test_saved_opaque_review_round_trip_preserves_original_authority_but_load_is
     assert reviewed.ready
     saved = save_review(reviewed)
     assert saved.status == "saved" and saved.record is not None
+    decoded = load_review(saved.record)
+    assert decoded.status == "loaded" and decoded.loaded.saved == saved.record
+    assert decoded.ready is False and decoded.loaded.ready is False
     loaded = load_review(saved.record.model_dump_json().encode("utf-8"))
     assert loaded.status == "loaded" and not loaded.ready
     value = loaded.loaded

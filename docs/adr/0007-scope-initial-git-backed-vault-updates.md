@@ -11,6 +11,17 @@ refuse advanced/shared/incomplete repository layouts and applicable custom
 storage or execution rules rather than silently bypassing them. This accepted
 scope remains conditional on engineering evidence.
 
+During conversion, from start until finish or stop, the user, Obsidian, sync tools
+and other programs must leave target authored content and relevant settings
+unchanged. This also applies during vault-changing recovery, Undo, repair and
+cleanup. Concurrent editing is unsupported; existing operation guidance explains
+the prerequisite without an additional acknowledgement dialog or checkbox. The
+[2026-10-23 user amendment](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/254#issuecomment-6360422317)
+removes external-writer protection and its mandatory race workloads. Pre-existing
+and between-operation edits, fresh review before starting/resuming, selective
+invalidation, ordinary byte/history integrity, converter ownership, atomic-write
+and flush requirements, interruption recovery and later-edit Undo remain required.
+
 Converter-owned history retains exact on-disk bytes. Built-in line-ending,
 encoding and keyword transformations require a specific reviewed storage-policy
 choice before snapshots are written; this never grants permission to bypass

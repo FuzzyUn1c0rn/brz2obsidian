@@ -92,6 +92,57 @@ def _digest(value):
     ).hexdigest()
 
 
+def _configured_hook_state(raw, boolean=None):
+    """Preserve ordered event resets and case-sensitive configured hook names."""
+    values = raw.decode("utf-8").split("\0")
+    bindings, parallel, commands, disabled = {}, set(), {}, set()
+    for i in range(0, len(values) - 2, 3):
+        key, separator, value = values[i + 2].partition("\n")
+        section, dot, rest = key.partition(".")
+        name, middle, variable = rest.rpartition(".")
+        if section.lower() != "hook" or not dot or not middle:
+            continue
+        if not separator:
+            raise OSError("Configured hook keys require a value")
+        variable = variable.lower()
+        if variable == "command":
+            commands[name] = value
+        elif variable == "parallel":
+            enabled = boolean(value) if boolean else value.lower() not in FALSE
+            if enabled is not None:
+                (parallel.add if enabled else parallel.discard)(name)
+        elif variable == "event":
+            if value:
+                if name in HOOKS:
+                    raise OSError(
+                        "Known hook event cannot be a configured friendly name"
+                    )
+                bindings.setdefault(name, set()).add(value)
+            else:
+                bindings.pop(name, None)
+        elif variable == "enabled":
+            enabled = boolean(value) if boolean else value.lower() not in FALSE
+            if enabled is False:
+                disabled.add(name)
+            elif enabled is True:
+                disabled.discard(name)
+    friendly = set(commands) | parallel | set(bindings)
+    if any(
+        name not in commands and events and name not in disabled
+        for name, events in bindings.items()
+    ):
+        raise OSError("Configured hook event has no command")
+    active = tuple(
+        (name, event)
+        for name, events in bindings.items()
+        for event in events
+        if event in HOOKS
+        and name not in disabled
+        and (event in friendly or event not in disabled)
+    )
+    return active, friendly, commands
+
+
 def _unsafe(path):
     info = path.lstat()
     return stat.S_ISLNK(info.st_mode) or bool(
@@ -194,20 +245,14 @@ class _Inspection:
         self.tracked_paths = set()
         self.index_stages = ()
         self.resources = ExitStack()
-        self.attribute_raw = None
-        self.attribute_input = b""
-        self.attribute_reader = None
-        self.attribute_assigned = set()
-        self.ignore_observation = None
         self.ignored_paths = set()
         self.findings = []
         self.inventory = []
         self.prefixes = {}
         self.exclusions = set()
-        self.directory_observations = {}
-        self.file_observations = {}
-        self.metadata_observation = None
+        self.file_observations = set()
         self.complete = False
+        self.history = None
         self.repo = VaultRepository(
             kind="unknown",
             root=None,
@@ -477,44 +522,18 @@ class _Inspection:
                         ((base / name).relative_to(root).as_posix(),),
                     )
                     return False
-            self.directory_observations[str(base)] = (
-                verify_directory(base),
-                tuple(sorted(names)),
-                tuple(sorted(files)),
-            )
+            verify_directory(base)
             names[:] = [n for n in names if not self.excluded_directory(base / n)]
-        self.metadata_observation = self.metadata()
         return True
 
     def excluded_directory(self, path):
         relative = path.relative_to(self.root).as_posix()
+        if relative == ".brz2obsidian":
+            return True
         if relative in (*CACHE_PATHS, *TEMP_PATHS):
             self.exclusions.add(relative)
             return True
         return False
-
-    def metadata(self):
-        if self.repo.kind != "root":
-            return ()
-        gitdir = Path(self.repo.git_directory)
-        paths = [
-            gitdir / n
-            for n in (
-                "HEAD",
-                "config",
-                "index",
-                "packed-refs",
-                "info/attributes",
-                "info/exclude",
-            )
-        ]
-        if (gitdir / "refs").exists():
-            paths.extend(p for p in (gitdir / "refs").rglob("*") if p.is_file())
-        return tuple(
-            (str(p.relative_to(gitdir)), observe_file(gitdir, p)[1])
-            for p in sorted(paths)
-            if p.is_file()
-        )
 
     def effective_config(self):
         result = read_git(
@@ -625,9 +644,54 @@ class _Inspection:
             return None
         return values
 
+    def hook_boolean(self, value):
+        text = value.lower()
+        if text in FALSE:
+            return False
+        if text in ("true", "1", "yes", "on"):
+            return True
+        # Ask the qualified Git Boolean parser about this exact raw occurrence;
+        # reading the original key would collapse ordered duplicate values.
+        key = "brz2obsidian.internalbool"
+        parsed = read_git(
+            [
+                self.executable,
+                "--no-pager",
+                "-C",
+                str(self.root),
+                "-c",
+                key + "=" + value,
+                "config",
+                "--type=bool",
+                "--get",
+                key,
+            ],
+            env=self.env,
+        )
+        if (
+            parsed.returncode == 0
+            and not parsed.stderr
+            and parsed.stdout in (b"true\n", b"false\n")
+        ):
+            return parsed.stdout == b"true\n"
+        if (
+            parsed.returncode == 128
+            and parsed.stderr.startswith(b"fatal: bad boolean config value '")
+            and parsed.stderr.rstrip().endswith(b"for 'brz2obsidian.internalbool'")
+        ):
+            return None
+        raise OSError("Git Boolean policy observation unavailable")
+
     def configuration(self):
         raw = self.effective_config()
         self.policy.append(raw.hex())
+        active_hooks, _, _ = _configured_hook_state(raw, self.hook_boolean)
+        if active_hooks:
+            self.finding(
+                "configured_hook",
+                "execution",
+                "Active configured Git hooks require a supported repository policy.",
+            )
         values = raw.decode("utf-8").split("\0")
         for i in range(0, len(values) - 2, 3):
             key, _, value = values[i + 2].partition("\n")
@@ -810,13 +874,39 @@ class _Inspection:
                 "An existing Git lock requires its owner's completion or recovery.",
             )
             self.operation = "active"
-        if (gitdir / "brz2obsidian").exists() or (self.root / ".brz2obsidian").exists():
+        if (gitdir / "brz2obsidian").exists():
             self.finding(
                 "converter_operation",
                 "operation",
                 "Converter operation/history metadata requires validated recovery discovery first.",
             )
             self.operation = "recovery_required"
+        elif (self.root / ".brz2obsidian").exists():
+            from brz2obsidian.publication.vault_history import _Git, _read
+
+            try:
+                self.history = _read(self.root, _Git(self.root, self.executable))
+                if self.history.status != "valid":
+                    raise OSError("Current converter history unavailable")
+                _, _, raw, _ = observe_file(
+                    self.root,
+                    self.root / ".brz2obsidian/locator.json",
+                    prefix_limit=OUTPUT_BUDGET + 1,
+                )
+                from brz2obsidian.application.checkpoint_contracts import (
+                    CheckpointLocator,
+                )
+
+                if CheckpointLocator.model_validate_json(raw) != self.history.locator:
+                    raise OSError("Current locator changed during history discovery")
+                self.operation = "idle"
+            except OSError, ValueError, TypeError:
+                self.finding(
+                    "converter_operation",
+                    "operation",
+                    "Current converter history requires recovery discovery before dependent work.",
+                )
+                self.operation = "recovery_required"
         index_records = self.git("ls-files", "--stage", "-v", "-z")
         entries = [entry for entry in index_records.split(b"\0") if entry]
         if any(entry[1:2] != b" " or b"\t" not in entry for entry in entries):
@@ -958,12 +1048,7 @@ class _Inspection:
                     )
                     return
                 self.prefixes[relative] = prefix
-                self.file_observations[relative] = (
-                    after.st_dev,
-                    after.st_ino,
-                    after.st_size,
-                    after.st_mtime_ns,
-                )
+                self.file_observations.add(relative)
                 exclusion = (
                     "cache"
                     if any(relative.startswith(p + "/") for p in CACHE_PATHS)
@@ -1008,7 +1093,6 @@ class _Inspection:
         ignored = set(ignored_raw.decode("utf-8").split("\0")) - {""}
         if not ignored.issubset(set(ignore_paths)):
             raise OSError("Incomplete effective exclusion observation")
-        self.ignore_observation = (ignore_input, ignored_raw) if ignore_paths else None
         self.ignored_paths = ignored
         self.policy.append(ignored_raw.hex())
         self.inventory = [
@@ -1058,15 +1142,14 @@ class _Inspection:
             {f.path for f in self.inventory if not f.excluded}
             | {s.path for s in self.subjects}
         )
-        self.attribute_input = "".join(p + "\0" for p in paths).encode("utf-8")
+        attribute_input = "".join(p + "\0" for p in paths).encode("utf-8")
         raw = self.git(
             "check-attr",
             "-z",
             "--all",
             "--stdin",
-            input=self.attribute_input,
+            input=attribute_input,
         )
-        self.attribute_raw = raw
         self.policy.append(raw.hex())
         values = raw.decode("utf-8").split("\0")
         if not values or values[-1] or (len(values) - 1) % 3:
@@ -1100,7 +1183,7 @@ class _Inspection:
             directory = self.temporary_base()
             if directory is None:
                 return
-            self.attribute_reader = self.resources.enter_context(
+            attribute_reader = self.resources.enter_context(
                 assigned_markers(
                     self.executable,
                     environment=self.view_env or self.env,
@@ -1111,8 +1194,7 @@ class _Inspection:
                     query=self.git,
                 )
             )
-            assigned = self.attribute_reader()
-            self.attribute_assigned = assigned
+            assigned = attribute_reader()
             self.capabilities += ("typed-attribute-pathspec",)
         attrs = {
             key: value
@@ -1261,68 +1343,6 @@ class _Inspection:
         if included:
             self.consents.append(consent("tracking", "ordinary", included))
 
-    def recheck(self):
-        if self.attribute_raw is not None:
-
-            def current_attributes():
-                return self.git(
-                    "check-attr", "-z", "--all", "--stdin", input=self.attribute_input
-                )
-
-            if current_attributes() != self.attribute_raw:
-                raise OSError("Effective attributes changed during inspection")
-            if self.attribute_reader is not None and (
-                self.attribute_reader() != self.attribute_assigned
-                or current_attributes() != self.attribute_raw
-            ):
-                raise OSError("Effective attribute identity changed during inspection")
-        if self.ignore_observation is not None:
-            input, expected = self.ignore_observation
-            if (
-                self.git(
-                    "check-ignore",
-                    "--no-index",
-                    "--stdin",
-                    "-z",
-                    input=input,
-                    allowed=(0, 1),
-                )
-                != expected
-            ):
-                raise OSError("Effective exclusions changed during inspection")
-        observed = {}
-        for directory, names, files in _walk(self.root):
-            base = Path(directory)
-            if base == self.root:
-                names[:] = [n for n in names if n.casefold() != ".git"]
-            observed[str(base)] = (
-                verify_directory(base),
-                tuple(sorted(names)),
-                tuple(sorted(files)),
-            )
-            names[:] = [n for n in names if not self.excluded_directory(base / n)]
-        if (
-            observed != self.directory_observations
-            or self.metadata_observation is not None
-            and self.metadata() != self.metadata_observation
-        ):
-            raise OSError("Inventory or Git metadata changed during inspection")
-        if self.effective_config().hex() != self.policy[0]:
-            raise OSError("Effective Git configuration changed during inspection")
-        for relative, expected in self.file_observations.items():
-            current = (self.root / relative).lstat()
-            if (
-                _unsafe(self.root / relative)
-                or (
-                    current.st_dev,
-                    current.st_ino,
-                    current.st_size,
-                    current.st_mtime_ns,
-                )
-                != expected
-            ):
-                raise OSError("Authored inventory changed during inspection")
-
     def temporary_base(self):
         # gettempdir() itself creates probe files. Read Python 3.14's candidate
         # list without probing, then establish actual directory capabilities.
@@ -1353,6 +1373,16 @@ class _Inspection:
         )
         return None
 
+    def locator_shape(self):
+        directory = self.root / ".brz2obsidian"
+        if self.repo.kind != "root" or not directory.is_dir():
+            return False
+        verify_directory(directory)
+        return (
+            set(os.listdir(directory)) == {"locator.json"}
+            and (directory / "locator.json").is_file()
+        )
+
     def run(self):
         try:
             self.subjects = tuple(
@@ -1367,7 +1397,7 @@ class _Inspection:
             return self.finish()
         if not self.layout():
             return self.finish()
-        if _exists(self.root / ".brz2obsidian"):
+        if _exists(self.root / ".brz2obsidian") and not self.locator_shape():
             self.finding(
                 "converter_operation",
                 "operation",
@@ -1472,14 +1502,44 @@ class _Inspection:
                 self.authored()
                 if self.complete:
                     self.attributes()
-            if self.complete:
-                self.recheck()
         return self.finish()
 
     def finish(self):
         gaps = tuple(f.path for f in self.inventory if f.exclusion == "git_ignore")
         policy = _digest(
             (str(self.root), self.repo.model_dump(exclude={"head"}), self.policy)
+        )
+        # A selected missing destination can become a file in the prepared
+        # result. Compare the same rule-query domain and selected tracking facts
+        # across that transition, while the full observation still accounts for
+        # every actual authored path and byte.
+        selected_paths = {subject.path for subject in self.subjects}
+        selected_policy = []
+        for path in sorted(selected_paths):
+            tracked = path in self.tracked_paths
+            exclusion = (
+                "cache"
+                if any(path.startswith(prefix + "/") for prefix in CACHE_PATHS)
+                else "temporary"
+                if any(path.startswith(prefix + "/") for prefix in TEMP_PATHS)
+                else "git_ignore"
+                if path in self.ignored_paths and not tracked
+                else None
+            )
+            selected_policy.append((path, exclusion, tracked))
+        continuous_policy = _digest(
+            (
+                str(self.root),
+                self.repo.model_dump(exclude={"head"}),
+                self.policy[:-2],
+                [
+                    (f.path, f.exclusion, f.tracked)
+                    for f in self.inventory
+                    if f.path not in selected_paths
+                ],
+                selected_policy,
+                self.policy[-1:],
+            )
         )
         fingerprint = _digest(
             (
@@ -1515,16 +1575,24 @@ class _Inspection:
                 self.repo.kind,
                 self.repo.git_directory,
                 self.operation,
-                "history-not-yet-validated",
+                self.history.locator.model_dump(mode="json")
+                if self.history is not None and self.history.status == "valid"
+                else "history-not-yet-validated",
             )
         )
         preflight = ReviewPreflight(
             schema_id="brz2obsidian.review-preflight",
             schema_version=1,
             operation_status=self.operation,
-            state_status="unknown",
-            state_schema=None,
-            state_version=None,
+            state_status="supported"
+            if self.history is not None and self.history.status == "valid"
+            else "unknown",
+            state_schema="brz2obsidian.checkpoint-manifest"
+            if self.history is not None and self.history.status == "valid"
+            else None,
+            state_version=1
+            if self.history is not None and self.history.status == "valid"
+            else None,
             state_fingerprint=authority,
             consents=tuple(self.consents),
         )
@@ -1543,6 +1611,7 @@ class _Inspection:
             if self.repo.kind == "none"
             else "unknown",
             policy_fingerprint=policy,
+            policy_continuity_fingerprint=continuous_policy,
             observation_fingerprint=fingerprint,
             inventory=tuple(self.inventory),
             inventory_complete=self.complete,
@@ -1554,12 +1623,12 @@ class _Inspection:
         )
 
 
-def inspect_vault(vault, *, subjects=(), git_executable=None):
+def _observe_vault(vault, *, subjects=(), git_executable=None):
     """Observe current storage; caller assertions cannot grant trusted proof."""
     inspection = _Inspection(vault, subjects, git_executable)
     try:
         with inspection.resources:
-            return inspection.run()
+            return inspection.run(), inspection.history
     except AttributeCapabilityUnavailable:
         inspection.complete = False
         inspection.finding(
@@ -1567,7 +1636,7 @@ def inspect_vault(vault, *, subjects=(), git_executable=None):
             "git",
             "Install Git with the required lossless attribute-query capability before preparation.",
         )
-        return inspection.finish()
+        return inspection.finish(), None
     except OSError, UnicodeError, ValueError, subprocess.SubprocessError:
         inspection.complete = False
         inspection.finding(
@@ -1575,4 +1644,9 @@ def inspect_vault(vault, *, subjects=(), git_executable=None):
             "inventory",
             "A complete safe observation is unavailable; check access, repository integrity and concurrent changes.",
         )
-        return inspection.finish()
+        return inspection.finish(), None
+
+
+def inspect_vault(vault, *, subjects=(), git_executable=None):
+    """Fresh admission; internal composition may consume the same validated history."""
+    return _observe_vault(vault, subjects=subjects, git_executable=git_executable)[0]

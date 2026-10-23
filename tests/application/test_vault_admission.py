@@ -433,6 +433,83 @@ def test_empty_configured_hook_location_is_inactive(vault):
     assert "active_hook" in {f.code for f in result.findings}
 
 
+def test_configured_hook_events_resets_and_effective_disables_are_observed_without_execution(
+    vault,
+):
+    program = vault.parent / "configured-hook.py"
+    marker = vault.parent / "configured-hook.marker"
+    program.write_text(
+        "from pathlib import Path\nPath("
+        + repr(str(marker))
+        + ").write_bytes(b'configured hook ran')\n",
+        encoding="utf-8",
+    )
+    subprocess.run([sys.executable, str(program)], check=True)
+    assert marker.read_bytes() == b"configured hook ran"
+    marker.unlink()
+    command = (
+        '"'
+        + sys.executable.replace("\\", "/")
+        + '" "'
+        + str(program).replace("\\", "/")
+        + '"'
+    )
+    git(vault, "config", "hook.Friendly.command", command)
+    git(vault, "config", "--add", "hook.Friendly.event", "post-index-change")
+    git(vault, "config", "--add", "hook.Friendly.event", "reference-transaction")
+    git(vault, "hook", "run", "reference-transaction", "--", "committed")
+    assert marker.read_bytes() == b"configured hook ran"
+    marker.unlink()
+    before = storage(vault)
+    active = inspect(vault)
+    assert active.status == "refused"
+    assert "configured_hook" in {f.code for f in active.findings}
+    assert not marker.exists() and storage(vault) == before
+    git(vault, "config", "hook.Friendly.enabled", "false")
+    assert inspect(vault).status == "supported"
+    git(vault, "config", "hook.Friendly.enabled", "true")
+    git(vault, "config", "hook.reference-transaction.enabled", "false")
+    assert inspect(vault).status == "refused"  # other event still enabled
+    git(vault, "config", "hook.post-index-change.enabled", "false")
+    assert inspect(vault).status == "supported"
+    git(vault, "config", "--add", "hook.Friendly.event", "")
+    git(vault, "config", "--unset", "hook.reference-transaction.enabled")
+    git(vault, "config", "--unset", "hook.post-index-change.enabled")
+    assert inspect(vault).status == "supported"  # ordered empty resets both
+    git(vault, "config", "--add", "hook.Friendly.event", "reference-transaction")
+    git(vault, "config", "hook.reference-transaction.enabled", "false")
+    git(vault, "config", "hook.reference-transaction.parallel", "false")
+    assert (
+        inspect(vault).status == "supported"
+    )  # false parallel is no friendly definition
+    git(vault, "config", "--unset-all", "hook.Friendly.event")
+    git(vault, "config", "hook.Unbound.enabled", "banana")
+    assert inspect(vault).status == "supported"  # ignored invalid enable value
+    git(vault, "config", "hook.Friendly.event", "not-a-git-event")
+    assert inspect(vault).status == "supported"  # unused configured event
+    git(vault, "config", "--add", "hook.Friendly.event", "reference-transaction")
+    git(vault, "config", "hook.reference-transaction.enabled", "2")
+    assert inspect(vault).status == "refused"
+    git(vault, "config", "--add", "hook.Friendly.event", "")
+    git(vault, "config", "--add", "hook.reference-transaction.event", "")
+    assert inspect(vault).status == "supported"  # empty reset precedes name check
+    git(vault, "config", "hook.Unbound.parallel", "banana")
+    assert inspect(vault).status == "supported"  # invalid parallel is ignored
+    git(vault, "config", "hook.NoCommand.event", "not-a-git-event")
+    assert inspect(vault).status != "supported"  # every enabled binding needs a command
+    git(vault, "config", "hook.NoCommand.enabled", "false")
+    assert (
+        inspect(vault).status == "supported"
+    )  # disabled missing command is warning-only
+    traditional = vault / ".git/hooks/reference-transaction"
+    traditional.write_bytes(b"#!/bin/sh\necho must-not-run\n")
+    git(vault, "config", "hook.reference-transaction.enabled", "false")
+    # Pinned Git source adds traditional hooks separately; the configured
+    # event switch alone does not establish traditional inactivity.
+    assert inspect(vault).status == "refused"
+    assert not marker.exists()
+
+
 @pytest.mark.parametrize(
     "case,expected,status",
     [
@@ -1143,87 +1220,3 @@ def test_fresh_process_policy_view_never_allocates_inside_the_vault(vault):
     assert "unsafe_temp_location" in facts["codes"]
     assert facts["created"] == facts["left"] == facts["created_files"] == []
     assert storage(root) == before
-
-
-def test_actual_concurrent_authored_change_is_unknown_and_keeps_new_user_bytes(vault):
-    import shutil
-
-    (vault / "note.md").write_bytes(b"observed before race")
-    marker = vault.parent / "file-writer-ran"
-    script = vault.parent / "file-writer.py"
-    script.write_text(
-        "from pathlib import Path\nPath("
-        + repr(str(vault / "note.md"))
-        + ").write_bytes(b'raced by another process\\n')\nPath("
-        + repr(str(marker))
-        + ").write_bytes(b'changed')\n",
-        encoding="utf-8",
-    )
-    wrapper = vault.parent / "race-git.cmd"
-    wrapper.write_text(
-        '@echo off\r\nsetlocal\r\nset "is_attribute="\r\n'
-        '"' + shutil.which("git") + '" %*\r\n'
-        'set "git_exit=%ERRORLEVEL%"\r\n'
-        ':scan\r\nif "%~1"=="" goto scanned\r\n'
-        'if "%~1"=="check-attr" set "is_attribute=yes"\r\n'
-        "shift\r\ngoto scan\r\n:scanned\r\n"
-        'if defined is_attribute if not exist "'
-        + str(marker)
-        + '" "'
-        + sys.executable
-        + '" "'
-        + str(script)
-        + '"\r\n'
-        "exit /b %git_exit%\r\n",
-        encoding="utf-8",
-    )
-    before = storage(vault)
-    result = inspect(vault, git_executable=wrapper)
-    assert result.status in ("refused", "unknown")
-    assert not result.inventory_complete
-    assert result.admitted_actions == ()
-    assert "observation_unavailable" in {f.code for f in result.findings}
-    assert marker.read_bytes() == b"changed"
-    assert (vault / "note.md").read_bytes() == b"raced by another process\n"
-    assert {p: data for p, data in storage(vault).items() if p != "note.md"} == {
-        p: data for p, data in before.items() if p != "note.md"
-    }
-
-
-def test_actual_external_attribute_change_never_combines_incompatible_policy_states(
-    vault,
-):
-    import shutil
-
-    (vault / "note.md").write_bytes(b"preserved authored bytes")
-    attributes = vault.parent / "external-attributes"
-    attributes.write_bytes(b"*.md filter=unset\n")
-    git(vault, "config", "core.attributesFile", str(attributes))
-    marker = vault.parent / "policy-writer-ran"
-    wrapper = vault.parent / "policy-race-git.cmd"
-    wrapper.write_text(
-        "@echo off\r\n"
-        '"' + shutil.which("git") + '" %*\r\n'
-        'set "git_exit=%ERRORLEVEL%"\r\n'
-        ":scan\r\n"
-        'if "%~1"=="" goto scanned\r\n'
-        'if "%~1"=="check-attr" set "is_attribute=yes"\r\n'
-        "shift\r\n"
-        "goto scan\r\n"
-        ":scanned\r\n"
-        'if defined is_attribute if not exist "' + str(marker) + '" (\r\n'
-        '>"' + str(attributes) + '" echo *.md filter=secret\r\n'
-        '>"' + str(marker) + '" echo changed\r\n'
-        ")\r\n"
-        "exit /b %git_exit%\r\n",
-        encoding="utf-8",
-    )
-    before = storage(vault)
-    result = inspect(vault, git_executable=wrapper)
-    assert attributes.read_bytes() == b"*.md filter=secret\r\n"
-    assert marker.read_bytes() == b"changed\r\n"
-    assert result.status in ("refused", "unknown")
-    assert not result.inventory_complete
-    assert result.admitted_actions == ()
-    assert "observation_unavailable" in {finding.code for finding in result.findings}
-    assert storage(vault) == before

@@ -69,6 +69,30 @@ class Operations:
 
         return inspect_vault(vault, subjects=subjects, git_executable=git_executable)
 
+    def initialize_vault(self, vault, **kwargs):
+        """Initialize only the currently reviewed root, then rediscover policy."""
+        from brz2obsidian.publication.vault_history import initialize_vault
+
+        return initialize_vault(vault, **kwargs)
+
+    def capture_checkpoint(self, vault, source, **kwargs):
+        """Capture exact current source/vault bytes in converter-owned Git."""
+        from brz2obsidian.publication.vault_history import capture_checkpoint
+
+        return capture_checkpoint(vault, source, **kwargs)
+
+    def inspect_history(self, vault, **kwargs):
+        """Compose fresh admission with validated owned history or onboarding absence."""
+        from brz2obsidian.publication.vault_history import inspect_history
+
+        return inspect_history(vault, **kwargs)
+
+    def read_checkpoint(self, vault, **kwargs):
+        """Validate and read current converter-owned checkpoint history."""
+        from brz2obsidian.publication.vault_history import read_checkpoint
+
+        return read_checkpoint(vault, **kwargs)
+
     def _selected_workflow(self, selection):
         if isinstance(selection, LocalApiSourceSelection):
             from brz2obsidian.application.wiring import selected_api_workflow

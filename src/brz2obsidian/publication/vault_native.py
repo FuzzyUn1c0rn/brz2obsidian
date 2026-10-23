@@ -8,6 +8,38 @@ from contextlib import contextmanager
 from pathlib import Path
 
 
+def available_memory():
+    """Current available commit capacity, without reserving future capacity."""
+    if os.name == "nt":
+
+        class MemoryStatus(ctypes.Structure):
+            _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong)] + [
+                (name, ctypes.c_ulonglong)
+                for name in (
+                    "total_physical",
+                    "available_physical",
+                    "total_page",
+                    "available_page",
+                    "total_virtual",
+                    "available_virtual",
+                    "extended",
+                )
+            ]
+
+        status = MemoryStatus()
+        status.length = ctypes.sizeof(status)
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.GlobalMemoryStatusEx.argtypes = [ctypes.POINTER(MemoryStatus)]
+        kernel.GlobalMemoryStatusEx.restype = ctypes.c_int
+        if not kernel.GlobalMemoryStatusEx(ctypes.byref(status)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return status.available_page
+    try:
+        return os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
+    except (OSError, ValueError, AttributeError) as error:
+        raise OSError("Available review memory cannot be established") from error
+
+
 def _physical(info):
     return not stat.S_ISLNK(info.st_mode) and not (
         getattr(info, "st_file_attributes", 0) & 0x400
@@ -132,7 +164,7 @@ def verify_directory(path, *, writable=False):
     return f"{before.st_dev}:{before.st_ino}:{owner}"
 
 
-def observe_file(root, path, *, writable=False, prefix_limit=1024):
+def observe_file(root, path, *, writable=False, prefix_limit=1024, sink=None):
     """Hash bounded chunks from the same physical verified native file handle."""
     root, path = Path(root).absolute(), Path(path).absolute()
     path.relative_to(root)
@@ -180,6 +212,8 @@ def observe_file(root, path, *, writable=False, prefix_limit=1024):
             with os.fdopen(fd, "rb") as stream:
                 opened = os.fstat(stream.fileno())
                 while block := stream.read(1024 * 1024):
+                    if sink is not None and sink.write(block) != len(block):
+                        raise OSError("Incomplete captured file bytes")
                     if len(prefix) < prefix_limit:
                         prefix += block[: prefix_limit - len(prefix)]
                     content.update(block)
@@ -189,6 +223,8 @@ def observe_file(root, path, *, writable=False, prefix_limit=1024):
         with os.fdopen(fd, "rb") as stream:
             opened = os.fstat(stream.fileno())
             while block := stream.read(1024 * 1024):
+                if sink is not None and sink.write(block) != len(block):
+                    raise OSError("Incomplete captured file bytes")
                 if len(prefix) < prefix_limit:
                     prefix += block[: prefix_limit - len(prefix)]
                 content.update(block)
