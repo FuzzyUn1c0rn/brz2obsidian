@@ -953,6 +953,19 @@ def _inspect_update_status(vault, *, observations):
                 stop=commit if stopped is not None else None,
                 recovery=True,
             )
+        retained_result = (
+            checkpoint.locator.commit
+            if receipt is None
+            and manifest.boundary == "result"
+            and manifest.association_id == intent.association_id
+            and manifest.generation == intent.generation + 1
+            and manifest.previous == intent.prepared_commit
+            and manifest.preimage == intent.before
+            and manifest.proposed == intent.proposed
+            and manifest.vault == intent.proposed
+            and manifest.operation_intent_commit == active_graph.intent_commit
+            else None
+        )
         if receipt is not None:
             complete_history = (
                 checkpoint.status == "valid"
@@ -1097,12 +1110,13 @@ def _inspect_update_status(vault, *, observations):
             generation=intent.generation,
             phase="publication",
             publication=publication,
-            history="intent",
+            history="result" if retained_result is not None else "intent",
             planned=len(intent.affected_paths),
             published=states.count("after"),
             changed=None if "unknown" in all_states else "after" in all_states,
             checkpoint=intent.prepared_commit,
             intent=active_graph.intent_commit,
+            result=retained_result,
             stop=commit if stopped is not None else None,
             recovery=True,
         )
