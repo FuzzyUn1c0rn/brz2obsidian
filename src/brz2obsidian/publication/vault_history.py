@@ -138,6 +138,7 @@ def _semantic(
     boundary,
     policy,
     saved,
+    operation_intent_commit=None,
 ):
     return _semantic_meaning(
         association,
@@ -150,6 +151,7 @@ def _semantic(
         boundary,
         policy,
         _review_meaning(saved),
+        operation_intent_commit,
     )
 
 
@@ -164,20 +166,23 @@ def _semantic_meaning(
     boundary,
     policy,
     meaning,
+    operation_intent_commit=None,
 ):
+    parts = (
+        association.model_dump(mode="json"),
+        identity.model_dump(mode="json"),
+        [
+            [row.model_dump(mode="json") for row in inventory]
+            for inventory in (source, vault, preimage, proposed)
+        ],
+        gaps,
+        boundary,
+        policy,
+        meaning,
+    )
+    # Unmarked #272 storage retains its original semantic fingerprint.
     return digest(
-        (
-            association.model_dump(mode="json"),
-            identity.model_dump(mode="json"),
-            [
-                [row.model_dump(mode="json") for row in inventory]
-                for inventory in (source, vault, preimage, proposed)
-            ],
-            gaps,
-            boundary,
-            policy,
-            meaning,
-        )
+        parts if operation_intent_commit is None else (*parts, operation_intent_commit)
     )
 
 
@@ -620,13 +625,15 @@ def _load_review_payload(git, manifest, verified):
     return restored, references
 
 
-def _read(root, git):
+def _read(root, git, *, targets=None, linked_intents=None):
     locator_path = root / ".brz2obsidian/locator.json"
     if not locator_path.exists():
         if (root / ".brz2obsidian").exists() or git.call(
             "for-each-ref", "--format=%(refname)", "refs/brz2obsidian/imports"
         ):
             raise OSError("Owned graph or metadata has no current locator")
+        if targets is not None:
+            raise OSError("Requested operation checkpoint has no owned history")
         return CheckpointRead(
             schema_id="brz2obsidian.checkpoint-read",
             schema_version=1,
@@ -665,6 +672,7 @@ def _read(root, git):
     blobs, controls, reviewed, verified = {}, {}, {}, set()
     current, generation = locator.commit, locator.generation
     tip_manifest = tip_review = None
+    target_records = {}
     visited = set()
     while current is not None:
         if current in visited:
@@ -828,6 +836,8 @@ def _read(root, git):
                     raise OSError(
                         "Repeated saved review references changed their owned graph"
                     )
+                if targets is not None and current in targets:
+                    review, _ = _load_review_payload(git, manifest, verified)
         meaning = (
             reviewed[manifest.review_object][2]
             if manifest.review_object is not None
@@ -845,12 +855,17 @@ def _read(root, git):
                 manifest.boundary,
                 manifest.policy_fingerprint,
                 meaning,
+                manifest.operation_intent_commit,
             )
             != manifest.semantic_fingerprint
         ):
             raise OSError("Retained checkpoint semantic interpretation disagrees")
+        if linked_intents is not None and manifest.operation_intent_commit is not None:
+            linked_intents.append(manifest.operation_intent_commit)
         if tip_manifest is None:
             tip_manifest, tip_review = manifest, review
+        if targets is not None and current in targets:
+            target_records[current] = manifest, review
         # Each generation is independently checked; retaining its raw control
         # bodies would turn the per-response budget into a lifetime limit.
         controls = {}
@@ -863,7 +878,7 @@ def _read(root, git):
         objects=tuple(row for oid, row in blobs.items() if oid not in verified),
         timeout=120,
     )
-    return CheckpointRead(
+    result = CheckpointRead(
         schema_id="brz2obsidian.checkpoint-read",
         schema_version=1,
         status="valid",
@@ -873,6 +888,11 @@ def _read(root, git):
         review=tip_review,
         message="Complete owned local checkpoint graph validated.",
     )
+    if targets is not None:
+        if set(target_records) != set(targets):
+            raise OSError("Operation checkpoint is outside the retained owned chain")
+        return result, target_records
+    return result
 
 
 def inspect_history(vault, *, subjects=(), git_executable=None, active_operation=None):
@@ -950,6 +970,7 @@ def capture_checkpoint(
     git_executable=None,
     active_operation=None,
     source_binding=None,
+    operation_intent_commit=None,
 ):
     root, source = Path(vault).absolute(), Path(source).absolute()
     objects = False
@@ -964,6 +985,14 @@ def capture_checkpoint(
             boundary not in ("local", "prepared", "result")
             or (boundary == "prepared") != (proposed is not None)
             or (boundary == "result") != (expected_prepared is not None)
+            or operation_intent_commit is not None
+            and (
+                boundary != "result"
+                or active_operation is None
+                or type(operation_intent_commit) is not str
+                or len(operation_intent_commit) != 40
+                or set(operation_intent_commit) - set("0123456789abcdef")
+            )
         ):
             return result("refused", "invalid_checkpoint_boundary")
         observed_history = inspect_history(
@@ -1302,6 +1331,7 @@ def capture_checkpoint(
                 boundary,
                 current.policy_fingerprint,
                 saved,
+                operation_intent_commit,
             )
             if (
                 prior.status == "valid"
@@ -1441,6 +1471,7 @@ def capture_checkpoint(
                 recovery_gaps=gaps,
                 semantic_fingerprint=semantic,
                 previous=previous,
+                operation_intent_commit=operation_intent_commit,
                 review_object=review_oid,
                 review_size=len(review_raw) if review_raw is not None else None,
                 review_sha256=hashlib.sha256(review_raw).hexdigest()

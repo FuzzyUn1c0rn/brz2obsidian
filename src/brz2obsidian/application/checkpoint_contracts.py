@@ -63,12 +63,15 @@ class CheckpointManifest(ReconciliationContract):
     policy_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     policy_continuity_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     previous: str | None
+    operation_intent_commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
     review_object: str | None
     review_size: int | None = Field(ge=0)
     review_sha256: str | None = Field(pattern=r"^[0-9a-f]{64}$")
 
     @model_validator(mode="after")
     def inventories(self):
+        if self.operation_intent_commit is not None and self.boundary != "result":
+            raise ValueError("Only an actual result may bind an application intent")
         if (self.review_object is None) != (self.review_size is None) or (
             self.review_object is None
         ) != (self.review_sha256 is None):

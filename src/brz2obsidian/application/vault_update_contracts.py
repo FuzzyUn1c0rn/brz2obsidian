@@ -38,7 +38,7 @@ class VaultOperationIntent(ReconciliationContract):
     protected_paths: tuple[str, ...]
     before_metadata: tuple[VaultPathMetadata, ...]
     result_metadata: tuple[VaultPathMetadata, ...]
-    created_directories: tuple[VaultPathMetadata, ...] = ()
+    created_directories: tuple[VaultPathMetadata, ...]
 
     @model_validator(mode="after")
     def complete_transition(self):

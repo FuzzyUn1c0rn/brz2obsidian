@@ -236,6 +236,8 @@ class _Inspection:
         self.subjects = ()
         self.request_subjects = subjects
         self.active_operation = active_operation
+        self.validated_active_operation = False
+        self.linked_intents = []
         self.executable = (
             str(executable) if executable is not None else shutil.which("git")
         )
@@ -883,9 +885,14 @@ class _Inspection:
                 except OSError, ValueError, TypeError:
                     pass
             if owned:
+                self.validated_active_operation = True
                 from brz2obsidian.publication.vault_history import _Git, _read
 
-                self.history = _read(self.root, _Git(self.root, self.executable))
+                self.history = _read(
+                    self.root,
+                    _Git(self.root, self.executable),
+                    linked_intents=self.linked_intents,
+                )
                 if self.history.status != "valid":
                     raise OSError("Current converter history unavailable")
                 self.operation = "idle"
@@ -900,7 +907,11 @@ class _Inspection:
             from brz2obsidian.publication.vault_history import _Git, _read
 
             try:
-                self.history = _read(self.root, _Git(self.root, self.executable))
+                self.history = _read(
+                    self.root,
+                    _Git(self.root, self.executable),
+                    linked_intents=self.linked_intents,
+                )
                 if self.history.status != "valid":
                     raise OSError("Current converter history unavailable")
                 _, _, raw, _ = observe_file(
@@ -964,27 +975,26 @@ class _Inspection:
         }
         refs = self.git("for-each-ref", "--format=%(refname) %(objectname)")
         self.storage_state.append(refs.hex())
-        if self.active_operation is None:
-            for line in refs.decode("ascii").splitlines():
-                ref, _, oid = line.partition(" ")
-                if "/operations/" not in ref or not ref.startswith(
-                    "refs/brz2obsidian/imports/"
+        if not self.validated_active_operation:
+            operation_refs = [
+                line
+                for line in refs.decode("ascii").splitlines()
+                if line.split(" ", 1)[0].startswith("refs/brz2obsidian/imports/")
+                and "/operations/" in line.split(" ", 1)[0]
+            ]
+            if operation_refs or self.linked_intents:
+                from brz2obsidian.publication.vault_apply import inspect_update_status
+
+                status = inspect_update_status(self.root)
+                if status.status not in ("applied", "no_content_change") or (
+                    status.recovery_required
                 ):
-                    continue
-                try:
-                    names = (
-                        self.git("ls-tree", "--name-only", oid).decode().splitlines()
-                    )
-                except OSError, UnicodeError:
-                    names = []
-                if names != ["receipt.json"]:
                     self.finding(
                         "converter_operation",
                         "operation",
-                        "Retained operation intent needs validated recovery before another update.",
+                        "Retained operation history needs validated recovery before another update.",
                     )
                     self.operation = "recovery_required"
-                    break
         with (gitdir / "HEAD").open("rb") as stream:
             head_raw = stream.read(65537)
         if len(head_raw) > 65536:

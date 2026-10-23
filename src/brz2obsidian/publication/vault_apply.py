@@ -3,6 +3,7 @@
 import hashlib
 import os
 import shutil
+import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -29,7 +30,6 @@ from brz2obsidian.publication.vault_history import (
     _read,
     capture_checkpoint,
     inspect_history,
-    read_checkpoint,
 )
 from brz2obsidian.publication.vault_native import observe_file, verify_directory
 from brz2obsidian.publication.vault_replace import (
@@ -227,18 +227,64 @@ def _terminal_result_in_history(git, checkpoint, intent, receipt):
     )
 
 
-def _prepared_for_intent(git, intent):
-    manifest = CheckpointManifest.model_validate_json(
-        git.call("show", f"{intent.prepared_commit}:manifest.json")
-    )
-    return (
+def _prepared_for_intent(intent, manifest, loaded):
+    """A retained prepared review authorizes exactly its selected transition."""
+    if loaded is None:
+        return False
+    plan = loaded.saved.plan
+    selected = select_review_effects(plan)
+    if selected.status != "selected":
+        return False
+    if not (
         manifest.boundary == "prepared"
         and manifest.generation == intent.generation
         and manifest.association_id == intent.association_id
+        and manifest.identity == plan.facts.incoming_identity
         and manifest.vault == intent.before
         and manifest.preimage == intent.before
         and manifest.proposed == intent.proposed
         and manifest.review_object is not None
+    ):
+        return False
+
+    before = {row.path: row for row in intent.before}
+    proposed = {row.path: row for row in intent.proposed}
+    source = {row.path: row for row in manifest.source}
+
+    def matches(row, content):
+        return (
+            row is not None
+            and row.size == len(content.data)
+            and row.sha256 == hashlib.sha256(content.data).hexdigest()
+        )
+
+    def saved_current(path, expected):
+        if not _safe_relative(path):
+            return False
+        row = before.get(path)
+        return row is None if expected is None else matches(row, expected)
+
+    def saved_incoming(path, expected):
+        if not _safe_relative(path):
+            return False
+        row = source.get(path)
+        return row is None if expected is None else matches(row, expected)
+
+    if not _review_fact_paths_match(plan.producer_facts, saved_current, saved_incoming):
+        return False
+    selected_files = {row.path: row.content for row in selected.files}
+    removals = set(selected.remove_paths)
+    if any(path not in before or path in proposed for path in removals):
+        return False
+    for path, content in selected_files.items():
+        row = proposed.get(path)
+        if not matches(row, content):
+            return False
+        if path in before and before[path].mode != row.mode:
+            return False
+    return all(
+        before.get(path) == proposed.get(path)
+        for path in (before.keys() | proposed.keys()) - selected_files.keys() - removals
     )
 
 
@@ -274,7 +320,7 @@ def inspect_update_status(vault):
             ):
                 operations.append((parts[3], parts[5], oid))
         if not operations:
-            history = read_checkpoint(root)
+            history = _read(root, git)
             if history.status != "absent":
                 return _outcome(
                     "unknown",
@@ -311,7 +357,6 @@ def inspect_update_status(vault):
                     or receipt.direction != intent.direction
                     or receipt.prepared_commit != intent.prepared_commit
                     or receipt.published_paths != intent.affected_paths
-                    or not _prepared_for_intent(git, intent)
                 ):
                     raise OSError("Terminal intent/receipt identity changed")
                 records.append((intent.generation, intent, receipt, None, commit))
@@ -332,7 +377,6 @@ def inspect_update_status(vault):
                     or stopped.generation != intent.generation
                     or stopped.direction != intent.direction
                     or stopped.acknowledged_after_files > len(intent.affected_paths)
-                    or not _prepared_for_intent(git, intent)
                 ):
                     raise OSError("Stopped intent identity changed")
                 records.append((intent.generation, intent, None, stopped, commit))
@@ -344,7 +388,6 @@ def inspect_update_status(vault):
                     parents != (intent.prepared_commit,)
                     or intent.operation_id != operation_id
                     or intent.association_id != association
-                    or not _prepared_for_intent(git, intent)
                 ):
                     raise OSError("Prepared intent identity changed")
                 records.append((intent.generation, intent, None, None, commit))
@@ -353,9 +396,47 @@ def inspect_update_status(vault):
         records.sort(key=lambda row: row[0])
         if len({row[0] for row in records}) != len(records):
             raise OSError("Multiple operation intents claim one generation")
+        targets = {row[1].prepared_commit for row in records}
+        targets.update(row[2].result_commit for row in records if row[2] is not None)
+        linked_intents = []
+        checkpoint, owned = _read(
+            root, git, targets=targets, linked_intents=linked_intents
+        )
+        rooted_intents = {
+            row[2].intent_commit
+            if row[2] is not None
+            else row[3].intent_commit
+            if row[3] is not None
+            else row[4]
+            for row in records
+        }
+        if len(linked_intents) != len(set(linked_intents)) or not set(
+            linked_intents
+        ).issubset(rooted_intents):
+            raise OSError(
+                "Application result has a missing or duplicate operation root"
+            )
+        for _, candidate, terminal, _, _ in records:
+            prepared, saved = owned[candidate.prepared_commit]
+            if candidate.direction != "finish" or not _prepared_for_intent(
+                candidate, prepared, saved
+            ):
+                raise OSError("Operation intent lacks a selected prepared review")
+            if terminal is not None:
+                result, _ = owned[terminal.result_commit]
+                if not (
+                    result.boundary == "result"
+                    and result.generation == candidate.generation + 1
+                    and result.association_id == candidate.association_id
+                    and result.operation_intent_commit == terminal.intent_commit
+                    and result.previous == candidate.prepared_commit
+                    and result.preimage == candidate.before
+                    and result.proposed == candidate.proposed
+                    and result.vault == candidate.proposed
+                ):
+                    raise OSError("Terminal receipt lacks its exact result checkpoint")
         _, intent, receipt, stopped, commit = records[-1]
         try:
-            checkpoint = _read(root, git)
             manifest = checkpoint.manifest
             if (
                 checkpoint.status != "valid"
@@ -591,7 +672,8 @@ def read_update_details(vault, *, offset=0, limit=100):
             parents != (intent.prepared_commit,)
             or intent.operation_id != observed.operation_id
             or intent.generation != observed.generation
-            or not _prepared_for_intent(git, intent)
+            or intent.prepared_commit != observed.checkpoint_commit
+            or intent.direction != "finish"
         ):
             return page("unavailable", "operation_authority_changed")
         before = {row.path: row for row in intent.before}
@@ -621,6 +703,37 @@ def _same_file(root, row):
     info, digest, _, _ = observe_file(root, path)
     mode = "100755" if info.st_mode & 0o111 else "100644"
     return (mode, info.st_size, digest) == (row.mode, row.size, row.sha256)
+
+
+def _review_fact_paths_match(facts, current, incoming):
+    """Use the same exact S1 fact locators for live and retained inventories."""
+    identified = {
+        (item.identity.item_id, item.facet)
+        for item in facts.identity_inventory
+        if item.identity_state == "valid" and item.identity is not None
+    }
+    for subject in facts.subjects:
+        if not incoming(subject.path, subject.incoming):
+            return False
+        # S1's valid imported identity inventory supplies the actual authored
+        # locator. During a reviewed rename the subject still names its source
+        # target, which may no longer be present in the vault.
+        if (subject.item_id, subject.facet) in identified:
+            continue
+        if subject.current.existence == "unknown" or not current(
+            subject.current.path, subject.current.content
+        ):
+            return False
+    for item in facts.identity_inventory:
+        if item.current.existence == "unknown" or not current(
+            item.current.path, item.current.content
+        ):
+            return False
+    if facts.link_context is not None:
+        for document in facts.link_context.current_documents:
+            if not current(document.source_path, document.content):
+                return False
+    return True
 
 
 def _review_inputs_match(review, admission, source):
@@ -653,34 +766,7 @@ def _review_inputs_match(review, admission, source):
             and sha == hashlib.sha256(expected.data).hexdigest()
         )
 
-    facts = review.producer_facts
-    identified = {
-        (item.identity.item_id, item.facet)
-        for item in facts.identity_inventory
-        if item.identity_state == "valid" and item.identity is not None
-    }
-    for subject in facts.subjects:
-        if not incoming(subject.path, subject.incoming):
-            return False
-        # S1's valid imported identity inventory supplies the actual authored
-        # locator. During a reviewed rename the subject still names its source
-        # target, which may no longer be present in the vault.
-        if (subject.item_id, subject.facet) in identified:
-            continue
-        if subject.current.existence == "unknown" or not current(
-            subject.current.path, subject.current.content
-        ):
-            return False
-    for item in facts.identity_inventory:
-        if item.current.existence == "unknown" or not current(
-            item.current.path, item.current.content
-        ):
-            return False
-    if facts.link_context is not None:
-        for document in facts.link_context.current_documents:
-            if not current(document.source_path, document.content):
-                return False
-    return True
+    return _review_fact_paths_match(review.producer_facts, current, incoming)
 
 
 class _NativeExecutor:
@@ -823,7 +909,12 @@ def _outcome(
     )
 
 
-def apply_reviewed_update(
+class _OwnedCleanupFailure(Exception):
+    def __init__(self, result):
+        self.result = result
+
+
+def _apply_reviewed_update(
     vault,
     source,
     *,
@@ -1199,6 +1290,7 @@ def apply_reviewed_update(
                 boundary="result",
                 expected_prepared=prepared_commit,
                 active_operation=operation_id,
+                operation_intent_commit=intent_commit,
                 subjects=subjects,
             )
             if result_checkpoint.status != "captured":
@@ -1305,16 +1397,17 @@ def apply_reviewed_update(
                 recovery=True,
             )
         authority_unknown = phase == "intent" and intent_commit is None
+        cleanup_pending = not acquired and _lock_path(root).exists()
         publication_unknown = intent_commit is not None
         return _outcome(
             "content_complete"
             if result_commit is not None
             else "unknown"
-            if authority_unknown or publication_unknown
+            if authority_unknown or publication_unknown or cleanup_pending
             else "failed",
-            failure_code,
+            "owned_acquire_failed" if cleanup_pending else failure_code,
             start=start,
-            operation_id=operation_id if acquired else None,
+            operation_id=operation_id if acquired or cleanup_pending else None,
             generation=operation_generation,
             phase=phase,
             publication="complete"
@@ -1344,12 +1437,66 @@ def apply_reviewed_update(
             intent=intent_commit,
             result=result_commit,
             receipt=receipt_commit,
-            recovery=bool(intent_commit) or authority_unknown,
+            recovery=bool(intent_commit) or authority_unknown or cleanup_pending,
             message="Existing-vault operation requires exact recovery inspection.",
         )
     finally:
         if acquired and intent_commit is None:
+            pending_exception = sys.exc_info()[0]
             try:
                 _release(root, operation_id)
             except OSError, ValueError, TypeError:
-                pass
+                if pending_exception is None or issubclass(
+                    pending_exception, (OSError, ValueError, TypeError)
+                ):
+                    raise _OwnedCleanupFailure(
+                        _outcome(
+                            "unknown" if phase == "intent" else "incomplete",
+                            "owned_cleanup_failed",
+                            start=start,
+                            operation_id=operation_id,
+                            generation=operation_generation,
+                            phase=phase,
+                            publication="not_published"
+                            if phase == "intent"
+                            else "not_started",
+                            history="unknown"
+                            if phase == "intent"
+                            else "prepared"
+                            if prepared_commit is not None
+                            else "none",
+                            planned=planned,
+                            published=0,
+                            changed=False,
+                            checkpoint=prepared_commit,
+                            recovery=True,
+                            message="Owned marker cleanup failed; inspect before another operation.",
+                        )
+                    ) from None
+
+
+def apply_reviewed_update(
+    vault,
+    source,
+    *,
+    review,
+    vault_id,
+    import_id,
+    source_binding=None,
+    cancel=None,
+    executor=None,
+):
+    """Retain intent before exact selected publication and verify terminal history."""
+    try:
+        return _apply_reviewed_update(
+            vault,
+            source,
+            review=review,
+            vault_id=vault_id,
+            import_id=import_id,
+            source_binding=source_binding,
+            cancel=cancel,
+            executor=executor,
+        )
+    except _OwnedCleanupFailure as failure:
+        return failure.result

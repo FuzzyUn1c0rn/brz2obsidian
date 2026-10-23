@@ -32,6 +32,11 @@ intent. A `result` boundary requires that exact prepared commit and a complete
 current vault inventory equal to the proposed inventory, while retaining its
 source and preimage roles. A meaningful new boundary may append history;
 equivalent input, settings and review meaning return the existing checkpoint.
+An application-authored result also binds its intent commit into the manifest
+and semantic fingerprint. A direct storage result is unmarked and retains the
+earlier semantic meaning; its boundary alone does not claim application
+authority. Admission requires a matching validated operation root for each
+marked result, even when later local checkpoints follow it.
 Volatile review IDs and operation/history proof tokens do not create duplicate
 history, but this duplicate check grants no general current apply authority.
 

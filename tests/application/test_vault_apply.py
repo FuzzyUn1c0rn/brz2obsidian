@@ -237,6 +237,52 @@ def test_ready_whole_review_applies_exact_note_and_retains_unrelated_user_state(
     assert later_status.status == "applied"
     assert later_status.receipt_commit == outcome.receipt_commit
     assert (vault / "Notes/Local.md").read_bytes() == b"later local edit \xfe\n"
+    operation_ref = (
+        "refs/brz2obsidian/imports/"
+        + checkpoint.locator.association.association_id
+        + "/operations/"
+        + outcome.operation_id
+    )
+    git(vault, "update-ref", "-d", operation_ref, outcome.receipt_commit)
+    missing_root = operations.inspect_history(vault)
+    assert missing_root.admission.status == "recovery_first"
+    assert Operations().inspect_update_status(vault).code == "operation_record_missing"
+    git(vault, "update-ref", operation_ref, outcome.receipt_commit)
+    assert Operations().inspect_update_status(vault).status == "applied"
+
+    # A real receipt-shaped ref still needs its actual result parent and graph.
+    invalid = json.loads(git(vault, "show", f"{outcome.receipt_commit}:receipt.json"))
+    invalid["result_commit"] = outcome.checkpoint_commit
+    blob = git(
+        vault,
+        "hash-object",
+        "-w",
+        "--stdin",
+        input=json.dumps(invalid, separators=(",", ":")).encode(),
+    ).strip()
+    tree = git(
+        vault, "mktree", "-z", input=b"100644 blob " + blob + b"\treceipt.json\0"
+    ).strip()
+    false_terminal = (
+        git(
+            vault,
+            "commit-tree",
+            tree.decode(),
+            "-p",
+            outcome.intent_commit,
+            "-p",
+            outcome.checkpoint_commit,
+            input=b"receipt with a prepared parent in the result role\n",
+        )
+        .strip()
+        .decode()
+    )
+    git(vault, "update-ref", operation_ref, false_terminal, outcome.receipt_commit)
+    assert Operations().inspect_update_status(vault).status == "unknown"
+    blocked = operations.inspect_history(vault)
+    assert blocked.admission.status == "recovery_first"
+    assert (vault / "Notes/Opening.md").read_bytes() == b"incoming opening\n"
+    assert user_state(vault)["index"] == before["index"]
 
 
 def test_selected_current_bytes_report_no_content_change_with_terminal_history():
@@ -306,6 +352,61 @@ def test_prepared_storage_retains_unready_s1_review_with_original_subject_scope(
     assert stored.review is not None and not stored.review.ready
     assert user_state(vault)["index"] == before["index"]
     assert (vault / "Notes/Opening.md").read_bytes() == b"authored opening\r\n"
+
+    from brz2obsidian.application.vault_update_contracts import VaultOperationIntent
+
+    assert stored.manifest.preimage == stored.manifest.proposed
+    operation_id = "f" * 32
+    intent = VaultOperationIntent(
+        schema_id="brz2obsidian.vault-operation-intent",
+        schema_version=1,
+        operation_id=operation_id,
+        kind="apply",
+        generation=stored.manifest.generation,
+        direction="finish",
+        association_id=stored.manifest.association_id,
+        prepared_commit=stored.locator.commit,
+        before=stored.manifest.preimage,
+        proposed=stored.manifest.proposed,
+        affected_paths=(),
+        protected_paths=tuple(row.path for row in stored.manifest.preimage),
+        before_metadata=(),
+        result_metadata=(),
+        created_directories=(),
+    )
+    blob = git(
+        vault,
+        "hash-object",
+        "-w",
+        "--stdin",
+        input=intent.model_dump_json().encode(),
+    ).strip()
+    tree = git(
+        vault, "mktree", "-z", input=b"100644 blob " + blob + b"\tintent.json\0"
+    ).strip()
+    commit = (
+        git(
+            vault,
+            "commit-tree",
+            tree.decode(),
+            "-p",
+            stored.locator.commit,
+            input=b"unready prepared review must not authorize an intent\n",
+        )
+        .strip()
+        .decode()
+    )
+    ref = (
+        "refs/brz2obsidian/imports/"
+        + stored.locator.association.association_id
+        + "/operations/"
+        + operation_id
+    )
+    git(vault, "update-ref", ref, commit)
+    assert Operations().inspect_update_status(vault).status == "unknown"
+    assert operations.inspect_history(vault).admission.status == "recovery_first"
+    assert (vault / "Notes/Opening.md").read_bytes() == b"authored opening\r\n"
+    assert user_state(vault)["index"] == before["index"]
 
 
 def test_scoped_builtin_storage_consent_applies_reviewed_exact_raw_bytes():
@@ -392,6 +493,11 @@ def test_cancel_after_intent_retains_stop_and_requires_exact_recovery():
 
 
 def test_valid_schema_stop_with_wrong_direction_is_not_operation_authority():
+    import pytest
+    from pydantic import ValidationError
+
+    from brz2obsidian.application.vault_update_contracts import VaultOperationIntent
+
     vault, source, operations, reviewed, before = _ready_case()
     calls = 0
 
@@ -410,6 +516,13 @@ def test_valid_schema_stop_with_wrong_direction_is_not_operation_authority():
         cancel=cancel,
     )
     assert outcome.status == "cancelled" and outcome.stop_commit
+    incomplete_intent = json.loads(
+        git(vault, "show", f"{outcome.intent_commit}:intent.json")
+    )
+    assert "created_directories" in incomplete_intent
+    del incomplete_intent["created_directories"]
+    with pytest.raises(ValidationError, match="created_directories"):
+        VaultOperationIntent.model_validate_json(json.dumps(incomplete_intent))
     original = json.loads(git(vault, "show", f"{outcome.stop_commit}:stop.json"))
     assert original["direction"] == "finish"
     original["direction"] = "restore"
@@ -457,6 +570,63 @@ def test_valid_schema_stop_with_wrong_direction_is_not_operation_authority():
     assert (vault / "Notes/Opening.md").read_bytes() == b"authored opening\r\n"
     assert user_state(vault)["index"] == before["index"]
 
+    # Matching restore tokens are still unsupported for an apply/finish writer.
+    changed_intent = json.loads(
+        git(vault, "show", f"{outcome.intent_commit}:intent.json")
+    )
+    changed_intent["direction"] = "restore"
+    blob = git(
+        vault,
+        "hash-object",
+        "-w",
+        "--stdin",
+        input=json.dumps(changed_intent, separators=(",", ":")).encode(),
+    ).strip()
+    tree = git(
+        vault, "mktree", "-z", input=b"100644 blob " + blob + b"\tintent.json\0"
+    ).strip()
+    restore_intent = (
+        git(
+            vault,
+            "commit-tree",
+            tree.decode(),
+            "-p",
+            outcome.checkpoint_commit,
+            input=b"coherent unsupported restore intent\n",
+        )
+        .strip()
+        .decode()
+    )
+    original["intent_commit"] = restore_intent
+    blob = git(
+        vault,
+        "hash-object",
+        "-w",
+        "--stdin",
+        input=json.dumps(original, separators=(",", ":")).encode(),
+    ).strip()
+    tree = git(
+        vault, "mktree", "-z", input=b"100644 blob " + blob + b"\tstop.json\0"
+    ).strip()
+    restore_stop = (
+        git(
+            vault,
+            "commit-tree",
+            tree.decode(),
+            "-p",
+            restore_intent,
+            input=b"coherent unsupported restore stop\n",
+        )
+        .strip()
+        .decode()
+    )
+    git(vault, "update-ref", operation_refs[0], restore_stop, changed)
+    coherent = Operations().inspect_update_status(vault)
+    assert coherent.status == "unknown" and coherent.code == "operation_history_invalid"
+    assert operations.inspect_history(vault).admission.status == "recovery_first"
+    assert (vault / "Notes/Opening.md").read_bytes() == b"authored opening\r\n"
+    assert user_state(vault)["index"] == before["index"]
+
 
 def test_cancel_before_intent_retains_preparation_without_publication():
     vault, source, operations, reviewed, before = _ready_case()
@@ -477,6 +647,155 @@ def test_cancel_before_intent_retains_preparation_without_publication():
     assert user_state(vault)["index"] == before["index"]
     assert Operations().inspect_update_status(vault).status == "unknown"
     assert Operations().read_checkpoint(vault).manifest.boundary == "prepared"
+
+
+def test_bogus_same_owner_id_cannot_hide_retained_incomplete_intent():
+    from pathlib import Path
+
+    from brz2obsidian.application.vault_update_contracts import VaultApplyResult
+
+    vault, source, operations, reviewed, before = _ready_case()
+    review_path = vault.parent / "review-for-stopped-child.json"
+    review_path.write_text(reviewed.model_dump_json(), encoding="utf-8")
+    stopped = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import sys
+from pathlib import Path
+from brz2obsidian.application.operations import Operations
+from brz2obsidian.contracts import ReviewPlan
+
+calls = 0
+def cancel():
+    global calls
+    calls += 1
+    return calls > 1
+
+review = ReviewPlan.model_validate_json(Path(sys.argv[3]).read_bytes())
+outcome = Operations().apply_reviewed_update(
+    sys.argv[1], sys.argv[2], review=review,
+    source_binding=Operations().observe_reviewed_source(sys.argv[2], review),
+    vault_id="vault-one", import_id="import-one", cancel=cancel,
+)
+print(outcome.model_dump_json())
+""",
+            str(vault),
+            str(source),
+            str(review_path),
+        ],
+        capture_output=True,
+        timeout=90,
+        check=True,
+    )
+    outcome = VaultApplyResult.model_validate_json(stopped.stdout)
+    assert (
+        outcome.status == "cancelled" and outcome.intent_commit and outcome.stop_commit
+    )
+    assert (vault / "Notes/Opening.md").read_bytes() == b"authored opening\r\n"
+    marker = Path(vault / ".git/brz2obsidian")
+    assert {path.name for path in marker.iterdir()} == {"owner.json", "held"}
+    owner = json.loads((marker / "owner.json").read_text())
+    assert owner["operation_id"] == outcome.operation_id
+    (marker / "owner.json").unlink()
+    (marker / "held").unlink()
+    marker.rmdir()
+
+    observed = operations.inspect_history(vault, active_operation="bogus-operation")
+    assert observed.admission.status == "recovery_first"
+    assert observed.status == "unavailable"
+    recapture = operations.capture_checkpoint(
+        vault,
+        source,
+        vault_id="vault-one",
+        import_id="import-one",
+        identity=reviewed.facts.incoming_identity,
+        admission=observed.admission,
+        active_operation="bogus-operation",
+    )
+    assert recapture.status == "refused" and not recapture.history_retained
+    assert (vault / "Notes/Opening.md").read_bytes() == b"authored opening\r\n"
+    assert user_state(vault)["index"] == before["index"]
+
+
+def test_pre_intent_owned_cleanup_failure_requires_recovery_without_publication(
+    monkeypatch,
+):
+    from pathlib import Path
+
+    vault, source, operations, reviewed, before = _ready_case()
+    unlink = Path.unlink
+
+    def fail_owner_cleanup(path, *args, **kwargs):
+        if path == vault / ".git/brz2obsidian/owner.json":
+            raise OSError("Injected pre-intent owner cleanup failure")
+        return unlink(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "unlink", fail_owner_cleanup)
+        outcome = _apply(
+            operations,
+            vault,
+            source,
+            review=reviewed,
+            vault_id="vault-one",
+            import_id="import-one",
+            cancel=lambda: True,
+        )
+
+    assert outcome.status == "incomplete" and outcome.code == "owned_cleanup_failed"
+    assert outcome.publication == "not_started" and outcome.history == "prepared"
+    assert outcome.recovery_required and outcome.intent_commit is None
+    assert not outcome.authored_files_changed
+    assert (vault / "Notes/Opening.md").read_bytes() == b"authored opening\r\n"
+    assert user_state(vault)["index"] == before["index"]
+    assert operations.inspect_history(vault).admission.status == "recovery_first"
+    marker = vault / ".git/brz2obsidian"
+    (marker / "owner.json").unlink()
+    (marker / "held").unlink()
+    marker.rmdir()
+
+
+def test_partial_owner_acquisition_cleanup_failure_reports_recovery(monkeypatch):
+    from pathlib import Path
+
+    vault, source, operations, reviewed, before = _ready_case()
+    marker = vault / ".git/brz2obsidian"
+    original_open, original_unlink = Path.open, Path.unlink
+
+    def fail_held(path, mode="r", *args, **kwargs):
+        if path == marker / "held" and mode == "xb":
+            raise OSError("Injected held-file creation failure")
+        return original_open(path, mode, *args, **kwargs)
+
+    def fail_owner_cleanup(path, *args, **kwargs):
+        if path == marker / "owner.json":
+            raise OSError("Injected partial acquisition cleanup failure")
+        return original_unlink(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "open", fail_held)
+        patch.setattr(Path, "unlink", fail_owner_cleanup)
+        outcome = _apply(
+            operations,
+            vault,
+            source,
+            review=reviewed,
+            vault_id="vault-one",
+            import_id="import-one",
+        )
+
+    assert outcome.status == "unknown" and outcome.code == "owned_acquire_failed"
+    assert outcome.publication == "not_started" and outcome.history == "none"
+    assert outcome.recovery_required and outcome.intent_commit is None
+    assert not outcome.authored_files_changed
+    assert {path.name for path in marker.iterdir()} == {"owner.json"}
+    assert operations.inspect_history(vault).admission.status == "recovery_first"
+    assert (vault / "Notes/Opening.md").read_bytes() == b"authored opening\r\n"
+    assert user_state(vault)["index"] == before["index"]
+    (marker / "owner.json").unlink()
+    marker.rmdir()
 
 
 def test_ready_review_requires_actual_source_and_current_fact_bytes():

@@ -56,6 +56,12 @@ and [the move flags](https://learn.microsoft.com/en-us/windows/win32/api/winbase
 The executor uses same-volume moves and does not request the cross-volume
 copy-and-delete option.
 
+An application-authored result manifest records the exact retained intent
+commit and includes that link in its semantic fingerprint. History discovery
+requires the matching validated operation root, including after a later local
+checkpoint. A direct checkpoint-storage result has no application link and
+remains valid storage without claiming an apply or terminal receipt.
+
 An earlier [disposable ordinary Windows mechanism probe](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/273#issuecomment-6363943793)
 observed the Git-intent, flush, move and readback primitives on the current
 local NTFS host. Exact production-executor native qualification is a separate
