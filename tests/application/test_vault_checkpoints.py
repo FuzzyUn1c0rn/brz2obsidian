@@ -246,7 +246,7 @@ def test_historical_review_spool_counts_against_same_volume_peak_before_owned_wr
     (vault / "Notes").mkdir()
     (source / "Notes").mkdir()
     current, incoming = b"authored", b"source-v2"
-    baseline = b"B" * (512 * 1024)
+    baseline = b"B" * 4096
     (vault / "Notes/Opening.md").write_bytes(current)
     (source / "Notes/Opening.md").write_bytes(incoming)
     git(vault, "add", "--", "Notes/Opening.md")
@@ -263,9 +263,10 @@ def test_historical_review_spool_counts_against_same_volume_peak_before_owned_wr
     assert os.stat(vault).st_dev == os.stat(tempfile.gettempdir()).st_dev
     actual_usage = shutil.disk_usage(vault)
     input_size = len(current) + len(incoming)
-    # The 768 KiB allowance above input and margins can hold one copy of the
-    # unmatched 512 KiB baseline, but not both its spool and Git object copy.
-    free = 2 * input_size + 2 * 64 * 1024 * 1024 + 768 * 1024
+    # The synthetic 6144-byte allowance above input and margins covers one
+    # raw 4096-byte review baseline, but not two. This tests conservative
+    # accounting, not the physical Git allocation for compressible bytes.
+    free = 2 * input_size + 2 * 64 * 1024 * 1024 + 6144
     monkeypatch.setattr(
         history.shutil, "disk_usage", lambda _path: actual_usage._replace(free=free)
     )
