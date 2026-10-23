@@ -53,12 +53,31 @@ def _lock_path(root):
 
 def _review_subjects(review, selected):
     paths = {row.path: row.subject_id for row in selected.files}
+    if len(selected.remove_paths) != len(set(selected.remove_paths)):
+        raise ValueError("Selected removal paths are duplicated")
+    claimed_removals = set()
     for change in review.proposal.changes:
-        if change.path in selected.remove_paths:
-            existing = paths.get(change.path)
+        owned = {change.path} & set(selected.remove_paths)
+        subject = next(
+            row
+            for row in review.producer_facts.subjects
+            if (row.item_id, row.facet) == (change.item_id, change.facet)
+        )
+        if subject.operation_reversal is not None:
+            owned.update(
+                row.path
+                for row in subject.operation_reversal.outputs
+                if row.target_existence == "absent"
+                and row.path in selected.remove_paths
+            )
+        for path in owned:
+            existing = paths.get(path)
             if existing is not None and existing != change.subject_id:
                 raise ValueError("Selected removal has conflicting owner")
-            paths[change.path] = change.subject_id
+            if path in claimed_removals:
+                raise ValueError("Selected removal has multiple reviewed owners")
+            claimed_removals.add(path)
+            paths[path] = change.subject_id
     if set(selected.remove_paths) - set(paths):
         raise ValueError("Selected removal has no reviewed owner")
     return tuple(
