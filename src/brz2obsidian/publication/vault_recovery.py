@@ -528,6 +528,10 @@ def _restore_review(root, observed, *, previous=None, authority=None):
             raise OSError("Recovery subject has no unique original change")
         approval = approved.get(changes[0].change_id)
         if approval is None:
+            if subject.path not in intent.affected_paths:
+                # An automatic, unchanged producer has no decision to reverse.
+                # Affected outputs still require retained selected ownership.
+                continue
             raise OSError("Recovery subject lacks original selected approval")
         owned = review_owned_targets(
             original, approval.change_id, approval.decision_id
@@ -598,8 +602,6 @@ def _restore_review(root, observed, *, previous=None, authority=None):
                     item_id=subject.item_id, facet=subject.facet, content=generated
                 )
             )
-    if not subjects:
-        raise OSError("Retained operation has no reviewed recovery subjects")
     covered = {
         path
         for subject in subjects
@@ -682,6 +684,8 @@ def _restore_review(root, observed, *, previous=None, authority=None):
                 content=generated,
             )
         )
+    if not subjects:
+        raise OSError("Retained operation has no reviewed recovery subjects")
     identity_inventory = list(facts.identity_inventory)
     known_paths = {item.current.path for item in identity_inventory}
     context = facts.link_context
@@ -1010,6 +1014,35 @@ def _refuse_known_recovery(observed, code, *, start):
         result=observed.result_commit,
         receipt=observed.receipt_commit,
         stop=observed.stop_commit,
+        recovery=observed.recovery_required,
+    )
+
+
+def _stopped_before_recovery_intent(
+    observed, status, code, *, start, direction, review_generation, prepared=None
+):
+    """A failed preparation leaves the earlier stopped operation authoritative."""
+    retained_prepared = prepared is not None
+    return _outcome(
+        status,
+        code,
+        start=start,
+        operation_id=observed.operation_id,
+        kind=observed.kind,
+        direction=direction,
+        review_generation=review_generation,
+        generation=observed.generation,
+        phase="prepared",
+        publication=observed.publication,
+        history="prepared" if retained_prepared else observed.history,
+        planned=observed.planned_files,
+        published=observed.published_files,
+        changed=observed.authored_files_changed,
+        checkpoint=prepared if retained_prepared else observed.checkpoint_commit,
+        intent=observed.intent_commit,
+        result=observed.result_commit,
+        receipt=observed.receipt_commit,
+        stop=observed.stop_commit,
         recovery=True,
     )
 
@@ -1101,6 +1134,7 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
     generation = None
     cancel_requested = cancel if cancel is not None else lambda: False
     executor = executor if executor is not None else _NativeExecutor()
+    current_status = observed
     try:
         _adopt(root, operation_id)
         acquired = True
@@ -1253,33 +1287,32 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
                     active_operation=operation_id,
                     recovery_direction=saved.direction,
                 )
-                if prepared.status != "captured":
-                    return _outcome(
+                reused_preparation = (
+                    prepared.status == "unchanged"
+                    and prepared.code == "already_retained"
+                    and prepared.history_retained
+                    and prepared.commit == current_authority.unpublished_prepared
+                )
+                if prepared.status != "captured" and not reused_preparation:
+                    return _stopped_before_recovery_intent(
+                        current_status,
                         "refused" if prepared.status == "refused" else "failed",
                         "recovery_prepare_" + prepared.code,
                         start=start,
-                        operation_id=operation_id,
-                        kind=origin.kind,
                         direction=saved.direction,
                         review_generation=saved.review.proposal.generation,
-                        phase=phase,
-                        history="prepared" if prepared.history_retained else "none",
-                        checkpoint=prepared.commit,
+                        prepared=prepared.commit if prepared.history_retained else None,
                     )
                 prepared_commit = prepared.commit
                 if cancel_requested():
-                    return _outcome(
+                    return _stopped_before_recovery_intent(
+                        current_status,
                         "cancelled",
                         "cancelled_before_recovery_intent",
                         start=start,
-                        operation_id=operation_id,
-                        kind=origin.kind,
                         direction=saved.direction,
                         review_generation=saved.review.proposal.generation,
-                        phase=phase,
-                        history="prepared",
-                        planned=planned,
-                        checkpoint=prepared_commit,
+                        prepared=prepared_commit,
                     )
                 tip = inspect_history(
                     root, subjects=subjects, active_operation=operation_id
@@ -1582,10 +1615,19 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
                                 kind=saved.kind,
                                 direction=saved.direction,
                                 review_generation=saved.review.proposal.generation,
-                                phase="cleanup",
+                                generation=current_status.generation,
+                                phase="prepared" if prepared_commit else "admission",
                                 publication="unknown",
-                                history="prepared" if prepared_commit else "unknown",
-                                checkpoint=prepared_commit,
+                                history=(
+                                    "prepared" if prepared_commit else current_status.history
+                                ),
+                                planned=max(planned, current_status.planned_files),
+                                published=current_status.published_files,
+                                checkpoint=(
+                                    prepared_commit or current_status.checkpoint_commit
+                                ),
+                                intent=current_status.intent_commit,
+                                stop=current_status.stop_commit,
                                 changed=None,
                                 recovery=True,
                             )

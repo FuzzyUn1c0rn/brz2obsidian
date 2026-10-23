@@ -29,7 +29,12 @@ from brz2obsidian.contracts import (
     SourceMemoryProvenance,
     reconciliation_subject_id,
 )
-from brz2obsidian.core import load_review, save_review, select_review_effects
+from brz2obsidian.core import (
+    load_review,
+    review_owned_targets,
+    save_review,
+    select_review_effects,
+)
 from brz2obsidian.publication.git_payload import verify_blobs
 from brz2obsidian.publication.git_read import OUTPUT_BUDGET, read_git
 from brz2obsidian.publication.vault_admission import (
@@ -1071,6 +1076,7 @@ def capture_checkpoint(
         if prior.status == "valid" and prior.locator.association != association:
             return result("refused", "association_mismatch")
         recovery_target = None
+        recovery_origin_plan = None
         recovery_origin_intent_commit = None
         recovery_previous_operation_commit = None
         retained_recovery_direction = (
@@ -1097,6 +1103,10 @@ def capture_checkpoint(
             ):
                 return result("refused", "recovery_authority_required")
             original = authority.graph.authorities[-1][1]
+            origin_loaded = authority.owned[original.prepared_commit][1]
+            if origin_loaded is None:
+                return result("refused", "recovery_review_required")
+            recovery_origin_plan = origin_loaded.saved.plan
             original_prepared = authority.owned[original.prepared_commit][0]
             source_manifest = (
                 original_prepared
@@ -1160,6 +1170,54 @@ def capture_checkpoint(
                 != prior.manifest.policy_continuity_fingerprint
             ):
                 return result("refused", "prepared_policy_changed")
+        retained_recovery_incoming = {}
+        if recovery_target is not None and saved is not None:
+            from brz2obsidian.publication.vault_apply import (
+                _operation_history_fingerprint,
+            )
+
+            origin_subjects = {
+                (subject.item_id, subject.facet): subject
+                for subject in recovery_origin_plan.producer_facts.subjects
+            }
+            origin_approvals = {
+                approval.change_id: approval
+                for approval in recovery_origin_plan.approvals
+            }
+            for subject in saved.plan.facts.subjects:
+                proof = subject.operation_reversal
+                if proof is None or subject.path in original.affected_paths:
+                    continue
+                origin_subject = origin_subjects.get((subject.item_id, subject.facet))
+                approval = origin_approvals.get(proof.origin_change_id)
+                if (
+                    origin_subject is None
+                    or subject.path != origin_subject.path
+                    or approval is None
+                    or approval.decision_id != proof.origin_decision_id
+                    or proof.operation_id != original.operation_id
+                    or proof.operation_kind != original.kind
+                    or proof.direction != target_direction
+                    or proof.operation_generation != original.generation
+                    or proof.history_fingerprint
+                    != _operation_history_fingerprint(
+                        authority.graph.origin_intent_commit, original
+                    )
+                ):
+                    return result("refused", "recovery_review_required")
+                try:
+                    owned = review_owned_targets(
+                        recovery_origin_plan,
+                        proof.origin_change_id,
+                        proof.origin_decision_id,
+                    )
+                except ValueError:
+                    return result("refused", "recovery_review_required")
+                if proof.owned_targets != owned:
+                    return result("refused", "recovery_review_required")
+                retained_recovery_incoming[(subject.item_id, subject.facet)] = (
+                    origin_subject.incoming
+                )
         stale_history = False
         included_subjects = set()
         for required in current.preflight.consents:
@@ -1226,6 +1284,27 @@ def capture_checkpoint(
                         if effect.subject_id not in scopes:
                             return result("refused", "review_scope_changed")
                         scopes[effect.subject_id].add(effect.path)
+                    if recovery_target is not None:
+                        # The canonical recovery proof may own an additional
+                        # physical output selected for removal. Its exact
+                        # origin membership is checked by the operation graph.
+                        removals = set(selected_effects.remove_paths)
+                        for subject in saved.plan.facts.subjects:
+                            proof = subject.operation_reversal
+                            if proof is None:
+                                continue
+                            subject_id = reconciliation_subject_id(
+                                identity.module_id,
+                                identity.collection_id,
+                                subject.item_id,
+                                subject.facet,
+                            )
+                            scopes[subject_id].update(
+                                row.path
+                                for row in proof.outputs
+                                if row.target_existence == "absent"
+                                and row.path in removals
+                            )
             if any(
                 s.subject_id not in scopes or s.path not in scopes[s.subject_id]
                 for s in subjects
@@ -1337,11 +1416,23 @@ def capture_checkpoint(
                     if item.identity_state == "valid" and item.identity is not None
                 }
                 for subject in saved.plan.facts.subjects:
+                    retained_incoming = retained_recovery_incoming.get(
+                        (subject.item_id, subject.facet)
+                    )
+                    if (
+                        (subject.item_id, subject.facet)
+                        in retained_recovery_incoming
+                        and subject.incoming != retained_incoming
+                    ):
+                        return result("refused", "review_bytes_changed")
                     for expected, path, inventory in (
                         (
                             subject.incoming,
                             subject.path,
-                            source_files
+                            ()
+                            if (subject.item_id, subject.facet)
+                            in retained_recovery_incoming
+                            else source_files
                             if recovery_target is None
                             else tuple(
                                 (row.path, row.mode, row.size, row.sha256, None)
@@ -1363,6 +1454,12 @@ def capture_checkpoint(
                             ),
                         )
                     ):
+                        if (
+                            path == subject.path
+                            and (subject.item_id, subject.facet)
+                            in retained_recovery_incoming
+                        ):
+                            continue
                         observed = next(
                             (row for row in inventory if row[0] == path), None
                         )
