@@ -815,7 +815,7 @@ def inspect_update_status(vault):
     return _inspect_update_observation(vault)[0]
 
 
-def _inspect_update_status(vault, *, observations):
+def _inspect_update_status(vault, *, observations, trusted_association=None):
     """Discover the latest owned intent independently of the current locator."""
     start = time.monotonic()
     root = Path(vault).absolute()
@@ -838,7 +838,12 @@ def _inspect_update_status(vault, *, observations):
                 operations.append((parts[3], parts[5], oid))
         if not operations:
             linked_intents = []
-            _read(root, git, linked_intents=linked_intents)
+            _read(
+                root,
+                git,
+                linked_intents=linked_intents,
+                trusted_association=trusted_association,
+            )
             if linked_intents:
                 return _outcome(
                     "unknown",
@@ -885,7 +890,11 @@ def _inspect_update_status(vault, *, observations):
             targets.add(declared.previous)
         linked_intents = []
         checkpoint, owned = _read(
-            root, git, targets=targets, linked_intents=linked_intents
+            root,
+            git,
+            targets=targets,
+            linked_intents=linked_intents,
+            trusted_association=trusted_association,
         )
         rooted_intents = {commit for graph in graphs for commit, _ in graph.authorities}
         if len(linked_intents) != len(set(linked_intents)) or not set(

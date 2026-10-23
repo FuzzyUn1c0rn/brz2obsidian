@@ -102,6 +102,24 @@ class Operations:
 
         return read_checkpoint(vault, **kwargs)
 
+    def validate_history_copy(self, vault, copy):
+        """Check a supplied local copy against independent target history."""
+        from brz2obsidian.publication.vault_repair import validate_history_copy
+
+        return validate_history_copy(vault, copy)
+
+    def prepare_history_repair(self, vault, copy, validation):
+        """Recheck a matching-history repair proposal without mutation."""
+        from brz2obsidian.publication.vault_repair import prepare_history_repair
+
+        return prepare_history_repair(vault, copy, validation)
+
+    def execute_history_repair(self, vault, copy, preparation):
+        """Repair exact missing or damaged converter-owned Git payloads."""
+        from brz2obsidian.publication.vault_repair import execute_history_repair
+
+        return execute_history_repair(vault, copy, preparation)
+
     def apply_reviewed_update(self, vault, source, **kwargs):
         """Apply one whole current S1 review through owned existing-vault history."""
         from brz2obsidian.publication.vault_apply import apply_reviewed_update

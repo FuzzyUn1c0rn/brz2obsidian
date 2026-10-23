@@ -86,3 +86,26 @@ The measured small binary checkpoint is a development control; the accepted
 full resource envelope and complete ordinary check budget are qualified by
 stage-2 integration issue #278. Native durability and later apply/recovery/Undo
 behavior have their separate stage-2 owners.
+
+## Matching local history repair
+
+`Operations.validate_history_copy`, `prepare_history_repair` and
+`execute_history_repair` can restore an exact missing or corrupt loose payload
+when the target still has a validated current locator, checkpoint chain,
+association and operation authority. A complete local copy must independently
+match that target-owned current root and contain the exact declared bytes. The
+repair rechecks both repositories, changes only the target's declared Git
+payload objects, and requires a complete target history read afterward. A copy
+with older or different history cannot replace a valid current generation.
+Missing control roots, an unreadable locator, or role bytes needed before the
+target's payload inventory can be established remain unavailable through this
+repair seam; the copy cannot supply missing target authority. A copied vault is
+not automatically a usable backup, and ordinary clone or sync need not include
+converter-owned refs. The typed result distinguishes refusal, verified repair
+and an uncertain attempted write so the caller can retain an honest recovery
+gate.
+
+Under the [accepted history-retention decision](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/254#issuecomment-6373494255),
+converter-owned generations stay reachable. Repeated captures therefore grow
+the local Git object store; this version has no history cleanup action or
+retention boundary.

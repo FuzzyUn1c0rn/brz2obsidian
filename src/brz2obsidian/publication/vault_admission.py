@@ -172,6 +172,41 @@ def _exists(path):
         return False
 
 
+def _existing_git_operation_blockers(gitdir):
+    """Observe the existing Git operation and lock blockers without history reads."""
+    markers = (
+        "MERGE_HEAD",
+        "CHERRY_PICK_HEAD",
+        "REVERT_HEAD",
+        "REBASE_HEAD",
+        "BISECT_START",
+        "rebase-merge",
+        "rebase-apply",
+        "sequencer",
+    )
+    locks = [
+        gitdir / name
+        for name in (
+            "index.lock",
+            "HEAD.lock",
+            "packed-refs.lock",
+            "config.lock",
+            "shallow.lock",
+            "gc.pid",
+            "gc.log.lock",
+            "maintenance.lock",
+        )
+    ]
+    locks.extend(
+        path
+        for prefix in ("refs", "logs", "objects")
+        for path in (gitdir / prefix).rglob("*.lock")
+    )
+    return any(_exists(gitdir / name) for name in markers), any(
+        _exists(path) for path in locks
+    )
+
+
 def _safe_relative(value):
     p = Path(value)
     reserved = {
@@ -841,42 +876,15 @@ class _Inspection:
         self.repo = self.repo.model_copy(
             update={"object_format": object_format, "ref_format": ref_format}
         )
-        markers = (
-            "MERGE_HEAD",
-            "CHERRY_PICK_HEAD",
-            "REVERT_HEAD",
-            "REBASE_HEAD",
-            "BISECT_START",
-            "rebase-merge",
-            "rebase-apply",
-            "sequencer",
-        )
-        if any((gitdir / name).exists() for name in markers):
+        git_operation, foreign_lock = _existing_git_operation_blockers(gitdir)
+        if git_operation:
             self.finding(
                 "git_operation",
                 "operation",
                 "Finish the existing Git operation before preparing converter work.",
             )
             self.operation = "active"
-        locks = [
-            gitdir / name
-            for name in (
-                "index.lock",
-                "HEAD.lock",
-                "packed-refs.lock",
-                "config.lock",
-                "shallow.lock",
-                "gc.pid",
-                "gc.log.lock",
-                "maintenance.lock",
-            )
-        ]
-        locks.extend(
-            p
-            for prefix in ("refs", "logs", "objects")
-            for p in (gitdir / prefix).rglob("*.lock")
-        )
-        if any(_exists(path) for path in locks):
+        if foreign_lock:
             self.finding(
                 "foreign_lock",
                 "operation",

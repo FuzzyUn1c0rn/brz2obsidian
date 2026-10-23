@@ -7,6 +7,7 @@ import os
 import shutil
 import stat
 import tempfile
+import zlib
 from pathlib import Path
 
 from brz2obsidian.application.checkpoint_contracts import (
@@ -657,7 +658,85 @@ def _load_review_payload(git, manifest, verified):
     return restored, references
 
 
-def _read(root, git, *, targets=None, linked_intents=None):
+class _LooseBlobCheck:
+    """Check one bounded loose object without materializing its payload."""
+
+    def __init__(self, oid, size, sha):
+        self.oid = oid
+        self.size = size
+        self.sha = sha
+        self.header = f"blob {size}\0".encode("ascii")
+        self.limit = len(self.header) + size
+        self.decoder = zlib.decompressobj()
+        self.git_hash = hashlib.sha1()
+        self.payload_hash = hashlib.sha256()
+        self.header_bytes = bytearray()
+        self.count = 0
+        self.invalid = False
+
+    def write(self, block):
+        if self.invalid:
+            return len(block)
+        pending = block
+        while pending and not self.invalid:
+            remaining = self.limit - self.count
+            try:
+                decoded = self.decoder.decompress(
+                    pending, min(1024 * 1024, remaining + 1)
+                )
+            except zlib.error:
+                self.invalid = True
+                break
+            if self.decoder.unused_data or self.count + len(decoded) > self.limit:
+                self.invalid = True
+                break
+            self.git_hash.update(decoded)
+            self.count += len(decoded)
+            prefix_needed = max(0, len(self.header) - len(self.header_bytes))
+            self.header_bytes.extend(decoded[:prefix_needed])
+            self.payload_hash.update(decoded[prefix_needed:])
+            if self.header_bytes != self.header[: len(self.header_bytes)]:
+                self.invalid = True
+            if self.decoder.unconsumed_tail == pending and not decoded:
+                self.invalid = True
+            pending = self.decoder.unconsumed_tail
+        return len(block)
+
+    def valid(self):
+        return (
+            not self.invalid
+            and self.decoder.eof
+            and self.count == self.limit
+            and self.header_bytes == self.header
+            and self.git_hash.hexdigest() == self.oid
+            and self.payload_hash.hexdigest() == self.sha
+        )
+
+
+def _damaged_loose_payload(root, row):
+    oid, size, sha, _ = row
+    path = root / ".git/objects" / oid[:2] / oid[2:]
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return False
+    verifier = _LooseBlobCheck(oid, size, sha)
+    observe_file(root / ".git/objects", path, sink=verifier, prefix_limit=0)
+    if verifier.valid():
+        raise OSError("A valid loose object has an uncertain Git read failure")
+    return True
+
+
+def _read(
+    root,
+    git,
+    *,
+    targets=None,
+    linked_intents=None,
+    trusted_association=None,
+    missing_payloads=None,
+    damaged_payloads=None,
+):
     locator_path = root / ".brz2obsidian/locator.json"
     if not locator_path.exists():
         if (root / ".brz2obsidian").exists() or git.call(
@@ -679,10 +758,13 @@ def _read(root, git, *, targets=None, linked_intents=None):
     _, _, raw, _ = observe_file(root, locator_path, prefix_limit=OUTPUT_BUDGET + 1)
     locator = CheckpointLocator.model_validate_json(raw)
     association = locator.association
-    if association.vault_anchor != verify_directory(
-        root
-    ) or association.git_anchor != verify_directory(root / ".git"):
-        raise OSError("Association physical context does not match")
+    if trusted_association is None:
+        if association.vault_anchor != verify_directory(
+            root
+        ) or association.git_anchor != verify_directory(root / ".git"):
+            raise OSError("Association physical context does not match")
+    elif association != trusted_association:
+        raise OSError("Copied association differs from the target-owned association")
     if set(os.listdir(root / ".brz2obsidian")) != {"locator.json"}:
         raise OSError("Unknown converter operation metadata")
     if (
@@ -907,12 +989,86 @@ def _read(root, git, *, targets=None, linked_intents=None):
         current, generation = manifest.previous, generation - 1
     if generation != 0:
         raise OSError("Retained checkpoint chain is incomplete")
-    verify_blobs(
-        [*git.prefix, "cat-file", "--batch"],
-        env=git.env,
-        objects=tuple(row for oid, row in blobs.items() if oid not in verified),
-        timeout=120,
-    )
+    pending = tuple(row for oid, row in blobs.items() if oid not in verified)
+    absent = damaged = ()
+    if (missing_payloads is not None or damaged_payloads is not None) and pending:
+        query = b"".join(row[0].encode("ascii") + b"\n" for row in pending)
+        if len(query) > OUTPUT_BUDGET:
+            raise OSError("Retained payload request exceeds its control budget")
+        try:
+            responses = git.call(
+                "cat-file",
+                "--batch-check=%(objectname) %(objecttype) %(objectsize)",
+                input=query,
+            ).splitlines()
+        except OSError:
+            responses = ()
+        if not responses and damaged_payloads is not None:
+            responses = []
+            for row in pending:
+                oid, size, _, _ = row
+                try:
+                    response = git.call(
+                        "cat-file",
+                        "--batch-check=%(objectname) %(objecttype) %(objectsize)",
+                        input=oid.encode("ascii") + b"\n",
+                    ).strip()
+                except OSError:
+                    response = f"{oid} missing".encode("ascii")
+                responses.append(response)
+        if len(responses) != len(pending):
+            raise OSError("Retained payload inventory has no complete Git response")
+        available, absent, damaged = [], [], []
+        for row, response in zip(pending, responses, strict=True):
+            oid, size, _, _ = row
+            if response == f"{oid} blob {size}".encode("ascii"):
+                available.append(row)
+            elif response == f"{oid} missing".encode("ascii"):
+                if damaged_payloads is not None and _damaged_loose_payload(root, row):
+                    damaged.append(row)
+                else:
+                    absent.append(row)
+            else:
+                raise OSError("Retained payload has a wrong type or size")
+        pending = tuple(available)
+    try:
+        verify_blobs(
+            [*git.prefix, "cat-file", "--batch"],
+            env=git.env,
+            objects=pending,
+            timeout=120,
+        )
+    except OSError:
+        if damaged_payloads is None:
+            raise
+        for row in pending:
+            try:
+                verify_blobs(
+                    [*git.prefix, "cat-file", "--batch"],
+                    env=git.env,
+                    objects=(row,),
+                    timeout=120,
+                )
+            except OSError:
+                if _damaged_loose_payload(root, row):
+                    damaged.append(row)
+                else:
+                    raise
+    if absent or damaged:
+        if missing_payloads is not None:
+            missing_payloads.extend(absent)
+        if damaged_payloads is not None:
+            damaged_payloads.extend(damaged)
+        return CheckpointRead(
+            schema_id="brz2obsidian.checkpoint-read",
+            schema_version=1,
+            status="refused",
+            code="payloads_missing" if not damaged else "payloads_unavailable",
+            locator=locator,
+            manifest=tip_manifest,
+            review=None,
+            message="Retained checkpoint graph names unavailable exact Git payloads.",
+        )
     result = CheckpointRead(
         schema_id="brz2obsidian.checkpoint-read",
         schema_version=1,
