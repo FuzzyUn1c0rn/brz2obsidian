@@ -1014,7 +1014,9 @@ def _read(
                         input=oid.encode("ascii") + b"\n",
                     ).strip()
                 except OSError:
-                    response = f"{oid} missing".encode("ascii")
+                    if not _damaged_loose_payload(root, row):
+                        raise
+                    response = None
                 responses.append(response)
         if len(responses) != len(pending):
             raise OSError("Retained payload inventory has no complete Git response")
@@ -1023,6 +1025,8 @@ def _read(
             oid, size, _, _ = row
             if response == f"{oid} blob {size}".encode("ascii"):
                 available.append(row)
+            elif response is None:
+                damaged.append(row)
             elif response == f"{oid} missing".encode("ascii"):
                 if damaged_payloads is not None and _damaged_loose_payload(root, row):
                     damaged.append(row)

@@ -191,7 +191,39 @@ def test_older_copy_refusal_then_exact_missing_history_dependency_repair(monkeyp
     assert _all_file_bytes(matching) == matching_bytes
     assert Operations().read_checkpoint(vault).manifest.generation == 2
     assert user_state(vault) == damaged_git
-    repaired_bytes = _all_file_bytes(vault)
+
+    git(vault, "repack", "-a", "-d")
+    git(vault, "prune-packed")
+    assert not blob_path.exists()
+    assert git(vault, "cat-file", "blob", old_authored_blob) == b"first authored\r\n"
+    packed_target = _all_file_bytes(vault)
+    packed_git = user_state(vault)
+    original_call = vault_repair._Git.call
+    failed_queries = []
+
+    def unavailable_packed_query(self, *args, **kwargs):
+        query = kwargs.get("input", b"")
+        if (
+            self.root == vault
+            and args[:2]
+            == ("cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)")
+            and old_authored_blob.encode("ascii") in query.splitlines()
+        ):
+            failed_queries.append(query)
+            raise OSError("sampled Git query access failure for a readable packed blob")
+        return original_call(self, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(vault_repair._Git, "call", unavailable_packed_query)
+        inaccessible = Operations().validate_history_copy(vault, matching)
+    assert failed_queries
+    assert inaccessible.status == "unavailable"
+    assert inaccessible.code == "history_invalid"
+    assert _all_file_bytes(vault) == packed_target
+    assert _all_file_bytes(matching) == matching_bytes
+    assert user_state(vault) == packed_git
+    assert Operations().read_checkpoint(vault).status == "valid"
+    repaired_bytes = packed_target
 
     transferred = vault.parent / "notes-only-transfer"
     transferred.mkdir()
