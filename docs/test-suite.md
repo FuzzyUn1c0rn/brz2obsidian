@@ -51,6 +51,13 @@ integrations. It also retains a compact independent preservation audit and
 checks of the measurement/runner infrastructure. These protect distinct
 assertions even when they add no production branches.
 
+The default runner controls check the selected checkout and duration output,
+failed pytest with a later dependency result, and exact parameter evidence.
+Source mutation, large output on both streams, interruption and inherited
+pytest-option controls remain focused checks when their runner protocol changes.
+Their test definitions and independent assertions remain available; omitting them
+from the default does not establish those outcomes afresh for every application edit.
+
 Three selected existing controls address the function-level review's first
 priorities: distinct resource filenames and original bytes after naming
 collisions, preservation of caller-owned replacement capture directories,
@@ -61,6 +68,7 @@ matrix. These checks protect observable migration and filesystem safety outcomes
 | Family | Default responsibility | Trigger for additional focused checks |
 | --- | --- | --- |
 | Editable-vault reconciliation | Exact-byte proposals, owner/facet identity, formats/onboarding, structures/memberships, absence/memory, binary/link safety, review/consent, selective refresh and saved-review resume at their public in-memory boundaries | Changed normalized fact, interpretation, decision dependency, history, codec or readiness: select its owning `tests/reconciliation` family plus actual affected consumers. Opaque and malformed inputs, partial evidence and unaffected retained decisions remain independent outcomes. |
+| Converter-owned vault history | Selected real admission and repository-layout controls, selected output/reversal effects, binary recovery with a terminal-receipt fault, and persisted selective review refresh | Changed capture, retained graph, publication journal, Undo, matching-history repair or ownership: select the owning application controls and affected consumers, including a real process or native check where required. The complete functional leaf assessments retain their explicit source applicability; the default does not repeat each leaf lifecycle. |
 | Core and rendering | Source-neutral planning, names, references, resources, tags, categories, strict facts and exact output examples | A changed planning rule, renderer, classification or resource obligation: select its owning public-module cases and affected output examples. |
 | BRZ source | Admission/read failures, exact reference spans, Markdown inserts, exclusion, and representative real conversion | Changed source predicates or formats: select their source-admission vectors. Add downstream checks for a distinct diagnostic, publication or output consequence. |
 | Local API source | Capture integrity, transport failures, payload roles, SVG/ICO/JPEG examples, external references, relationship discovery/reversal and qualified missing-TXT behavior | Changed HTTP, profile, codec, join or capture rule: select its positive, near-miss and tamper families at the source/session boundary. Codec-specific variant controls remain important even when their branches overlap. |
@@ -143,21 +151,29 @@ substitutes for required independent fresh execution or full manual scope. An
 unchanged head does not need duplicate broad execution for record bookkeeping.
 
 
-The maintained selection includes both owning read-only vault admission files
-once. `test_vault_admission.py` owns effective policy, scoped choices, authored
-inventory, actual Windows access/path/process controls and typed unavailable
-results through `Operations.inspect_vault`. The same public family owns literal
-attribute marker/driver distinctions, indexed/macro/default-attribute fallback,
-external-policy coherence, typed fingerprints and actual split/orphan/index
-version controls. `test_vault_admission_layouts.py`
-owns actual linked worktrees, bare repositories, unmerged stages, SHA-256 and
-reftable qualification refusals. Their independent bytes/index/refs/config
-oracles remain explicit; repeated successful preparation is consolidated where
-it does not distinguish an outcome. Git setup and public inspection timings
-include pytest context, alongside production line/branch/context measurements.
-The focused #271 checks also cover the inward-import boundary and an existing
-minimal Operations consumer. These checks establish admission; later S2 leaves
-own capture, apply, recovery and the final measured ordinary bundle.
+The maintained selection uses explicit cases from `test_vault_admission.py`:
+dirty/staged/Unicode user state, scoped storage choices, configured hooks,
+typed attributes, unavailable resource/access observations, denied parents and
+metadata aliases, plus representative LFS, foreign-lock, index-flag and external
+storage refusals. `test_vault_admission_layouts.py` remains selected once for
+actual linked worktrees, bare repositories, unmerged stages, SHA-256 and reftable
+qualification refusals. Their independent bytes/index/refs/config oracles remain
+explicit. The broader attribute, policy, index-version, access and process
+families remain focused checks when those contracts change. The focused #271
+assessment also owns the inward-import boundary and minimal Operations consumer;
+its original source/evidence binding remains explicit.
+
+Three pure modules, `test_selected_effects.py`, `test_reversal_absence.py` and
+`test_reversal_outputs.py`, add independently expected selected-byte, absence,
+ownership and link effects. The actual binary recovery control retains its
+result after a terminal-receipt failure. The persisted-review control captures
+real Git records, reloads them unready, reobserves current facts and retains
+choices across repeated memo saves. Editing one note invalidates only that
+choice; advancing the actual source/vault baseline invalidates the remaining
+stale choice. These controls compose storage with the existing canonical review.
+Full crash/restart, latest/interrupted Undo, repair and resource observations
+retain their separately qualified evidence and freshness limits; they are not
+replayed as a broad matrix in every default run.
 
 Measured focused fixture changes retain their independent outcomes: native Git
 CMD delegation reduced the old-format control from 3.56 to 0.87 seconds, the
