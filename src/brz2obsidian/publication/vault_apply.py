@@ -526,9 +526,21 @@ def _recovery_prepared_matches(
         for row in (origin.before if intent.direction == "finish" else origin.proposed)
     }
     current = {row.path: row for row in intent.before}
+    original_proposed = {row.path: row for row in origin.proposed}
     origin_subjects = {
         (subject.item_id, subject.facet): subject
         for subject in origin_plan.producer_facts.subjects
+    }
+    origin_files = {
+        row.path: row.content for row in select_review_effects(origin_plan).files
+    }
+    origin_documents = {
+        row.source_path
+        for row in (
+            ()
+            if origin_plan.producer_facts.link_context is None
+            else origin_plan.producer_facts.link_context.current_documents
+        )
     }
     covered = set()
 
@@ -557,6 +569,29 @@ def _recovery_prepared_matches(
                     if (path in target) != (path in produced):
                         return False
                     covered.add(path)
+            elif subject.path in origin.affected_paths:
+                owners = tuple(
+                    item
+                    for item in origin_plan.producer_facts.identity_inventory
+                    if item.identity_state == "valid"
+                    and item.identity is not None
+                    and (item.identity.item_id, item.facet)
+                    == (subject.item_id, subject.facet)
+                    and item.current.path == subject.path
+                    and item.target == subject.source_target
+                )
+                if (
+                    len(owners) != 1
+                    or subject.current.path != subject.path
+                    or subject.path not in origin_documents
+                    or not matches(
+                        original_proposed.get(subject.path),
+                        origin_files.get(subject.path),
+                    )
+                    or (subject.path in target) != (subject.path in produced)
+                ):
+                    return False
+                covered.add(subject.path)
             continue
         change = next(
             (
