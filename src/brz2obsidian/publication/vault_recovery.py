@@ -259,10 +259,17 @@ def _review_observation(root, observed, *, direction, authority, next_generation
             document.source_path for document in context.current_documents
         }
         known_identity_paths = {item.current.path for item in identity_inventory}
+        operation_owned_notes = {
+            target.canonical_path
+            for target in context.incoming_targets
+            if target.kind == "note"
+            and target.canonical_path in intent.affected_paths
+            and target.canonical_path in selected_files
+        }
         for path in sorted(
             row.path
             for row in admission.inventory
-            if selected_removal
+            if (selected_removal or row.path in operation_owned_notes)
             and row.path.endswith(".md")
             and row.path not in known_document_paths
         ):
@@ -274,7 +281,7 @@ def _review_observation(root, observed, *, direction, authority, next_generation
                 for target in context.incoming_targets
                 if target.canonical_path == path and target.kind == "note"
             )
-            if path in intent.affected_paths and retained_targets:
+            if path in operation_owned_notes and retained_targets:
                 # The original selected effect can move one real note identity
                 # from its old physical path to this approved new path. Reuse
                 # that target/document authority for the fresh observation.
@@ -338,16 +345,37 @@ def _review_observation(root, observed, *, direction, authority, next_generation
                 if parsed.status != "supported":
                     raise OSError("Operation-owned recovery note interpretation failed")
                 documents.append(parsed)
-                identity_inventory.append(
-                    owner[0].model_copy(
-                        update={
-                            "entry_id": "recovery-output:"
-                            + hashlib.sha256(path.encode()).hexdigest(),
-                            "current": observed_document,
-                            "target": retained_target.target,
-                        }
-                    )
+                relocated = owner[0].model_copy(
+                    update={
+                        "current": observed_document,
+                        "target": retained_target.target,
+                    }
                 )
+                if direction == "finish":
+                    if current[owner[0].current.path].existence != "absent":
+                        raise OSError("Both renamed recovery endpoints are present")
+                    # The approved rename has one logical current location.
+                    # Its old physical path is absent in the actual inventory;
+                    # finish reviews the exact new-path version under that
+                    # same retained identity.
+                    identity_inventory[
+                        next(
+                            i
+                            for i, item in enumerate(identity_inventory)
+                            if item.entry_id == owner[0].entry_id
+                        )
+                    ] = relocated
+                else:
+                    # Restore reviews both physical endpoints under the
+                    # operation-bound reversal proof.
+                    identity_inventory.append(
+                        relocated.model_copy(
+                            update={
+                                "entry_id": "recovery-output:"
+                                + hashlib.sha256(path.encode()).hexdigest()
+                            }
+                        )
+                    )
                 known_identity_paths.add(path)
                 continue
             # A new authored note has no imported item identity. Its safe
@@ -428,11 +456,68 @@ def _review_observation(root, observed, *, direction, authority, next_generation
                 "incoming_documents": tuple(incoming_documents),
             }
         )
+    original_before = {row.path: row for row in intent.before}
+    original_proposed = {row.path: row for row in intent.proposed}
+
+    def observed_subject_current(subject):
+        observed = current[subject.current.path]
+        if (
+            direction != "finish"
+            or observed.existence != "absent"
+            or subject.current.path != subject.path
+        ):
+            return observed
+        owners = tuple(
+            item
+            for item in original_facts.identity_inventory
+            if item.identity_state == "valid"
+            and item.identity is not None
+            and (
+                item.identity.module_id,
+                item.identity.collection_id,
+            )
+            == (
+                original_facts.incoming_identity.module_id,
+                original_facts.incoming_identity.collection_id,
+            )
+            and (item.identity.item_id, item.facet) == (subject.item_id, subject.facet)
+        )
+        if len(owners) != 1:
+            return observed
+        old_path = owners[0].current.path
+        old = original_before.get(old_path)
+        new = original_proposed.get(subject.path)
+        selected_new = selected_files.get(subject.path)
+        old_current = current.get(old_path)
+        if (
+            old_path != subject.path
+            and old_path in selected.remove_paths
+            and old_path in intent.affected_paths
+            and subject.path in intent.affected_paths
+            and old is not None
+            and owners[0].current.content is not None
+            and old.size == len(owners[0].current.content.data)
+            and old.sha256 == hashlib.sha256(owners[0].current.content.data).hexdigest()
+            and new is not None
+            and selected_new is not None
+            and new.size == len(selected_new.data)
+            and new.sha256 == hashlib.sha256(selected_new.data).hexdigest()
+            and old_current is not None
+            and old_current.existence == "present"
+        ):
+            # The approved rename has not made its first physical move. The
+            # real retained item still lives at its independently observed
+            # old path; the new path is the selected output, currently absent.
+            return old_current
+        return observed
+
     facts = original_facts.model_copy(
         update={
             "generation": next_generation or original.proposal.generation + 1,
             "subjects": tuple(
-                subject.model_copy(update={"current": current[subject.current.path]})
+                subject.model_copy(
+                    update={"current": observed_subject_current(subject)}
+                )
                 for subject in original_facts.subjects
             ),
             "identity_inventory": tuple(

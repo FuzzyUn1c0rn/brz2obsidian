@@ -486,6 +486,125 @@ def test_partial_approved_rename_selects_inverse_for_real_source_identity():
     assert user_state(vault) == retained
 
 
+def test_partial_approved_rename_finishes_with_reviewed_later_new_path_bytes():
+    from brz2obsidian.core import select_review_effects
+    from brz2obsidian.publication.vault_replace import move_file
+
+    vault, source, _, reviewed, before = _renamed_case(local_name="Local.bin")
+
+    class StopAfterActualPublication:
+        def move(self, stage, target, *, replace):
+            move_file(stage, target, replace=replace)
+            raise OSError("Stopped after actual new-path publication")
+
+        def remove(self, target, destination):
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            move_file(target, destination, replace=False)
+
+    stopped = _apply(
+        Operations(vault_executor=StopAfterActualPublication()),
+        vault,
+        source,
+        review=reviewed,
+        vault_id="vault-one",
+        import_id="import-one",
+    )
+    assert stopped.status == "content_complete" and stopped.recovery_required
+    assert not (vault / "Authored/Name.md").exists()
+    assert (vault / "Notes/Opening.md").read_bytes() == b"new\r\n"
+
+    (vault / "Authored/Name.md").write_bytes(b"independent third version\n")
+    ambiguous = Operations().prepare_recovery(vault, direction="finish")
+    assert ambiguous.status == "unavailable" and ambiguous.review is None
+    assert (vault / "Authored/Name.md").read_bytes() == b"independent third version\n"
+    assert (vault / "Notes/Opening.md").read_bytes() == b"new\r\n"
+    (vault / "Authored/Name.md").unlink()
+
+    later = b"new\r\nlater authored note\n"
+    (vault / "Notes/Opening.md").write_bytes(later)
+    retained = user_state(vault)
+    offered = Operations().prepare_recovery(vault, direction="finish")
+    assert offered.status == "offered" and offered.review is not None, offered.code
+    assert offered.review.facts.subjects[0].current.path == "Notes/Opening.md"
+    assert offered.review.facts.subjects[0].current.content.data == later
+    assert offered.review.readiness == "review_required"
+    assert [(r.domain, r.choices) for r in offered.review.requirements] == [
+        ("text", ("current", "incoming", "edited"))
+    ]
+    assert user_state(vault) == retained
+
+    chosen = Operations().resolve_recovery(
+        vault,
+        offered,
+        action(
+            offered.review,
+            domain="text",
+            choice="current",
+            decision_id="recovery:finish-renamed-current",
+        ),
+    )
+    assert chosen.status == "offered" and chosen.review.ready, chosen.code
+    effects = select_review_effects(chosen.review)
+    assert effects.status == "selected" and effects.remove_paths == ()
+    assert [(row.path, row.content.data) for row in effects.files] == [
+        ("Notes/Opening.md", later)
+    ]
+    assert user_state(vault) == retained
+
+    completed = Operations().execute_recovery(vault, chosen)
+    assert completed.status == "applied" and completed.receipt_commit, completed.code
+    assert not (vault / "Authored/Name.md").exists()
+    assert (vault / "Notes/Opening.md").read_bytes() == later
+    assert (vault / "Local.bin").read_bytes() == b"user \xff\n"
+    assert Operations().inspect_update_status(vault).status == "applied"
+    after = user_state(vault)
+    for key in ("index", "head", "config", "stages"):
+        assert after[key] == before[key]
+
+
+def test_stopped_rename_before_first_move_observes_real_old_path_identity():
+    vault, source, operations, reviewed, before = _renamed_case(local_name="Local.bin")
+    calls = 0
+
+    def cancel_before_first_move():
+        nonlocal calls
+        calls += 1
+        return calls == 2
+
+    stopped = _apply(
+        operations,
+        vault,
+        source,
+        review=reviewed,
+        vault_id="vault-one",
+        import_id="import-one",
+        cancel=cancel_before_first_move,
+    )
+    assert stopped.status == "cancelled" and stopped.intent_commit
+    assert stopped.published_files == 0 and stopped.recovery_required
+    assert (vault / "Authored/Name.md").read_bytes() == b"base\r\n"
+    assert not (vault / "Notes/Opening.md").exists()
+    retained = user_state(vault)
+
+    offered = Operations().prepare_recovery(vault, direction="finish")
+    assert offered.status == "offered" and offered.review is not None, offered.code
+    assert offered.review.facts.subjects[0].current.path == "Authored/Name.md"
+    assert offered.review.facts.subjects[0].current.content.data == b"base\r\n"
+    assert offered.review.ready, offered.review.blockers
+    assert user_state(vault) == retained
+    assert retained["index"] == before["index"]
+
+    completed = Operations().execute_recovery(vault, offered)
+    assert completed.status == "applied" and completed.receipt_commit, completed.code
+    assert not (vault / "Authored/Name.md").exists()
+    assert (vault / "Notes/Opening.md").read_bytes() == b"new\r\n"
+    assert (vault / "Local.bin").read_bytes() == b"user \xff\n"
+    assert Operations().inspect_update_status(vault).status == "applied"
+    after = user_state(vault)
+    for key in ("index", "head", "config", "stages"):
+        assert after[key] == before[key]
+
+
 def test_large_retained_binary_is_read_for_a_public_restore_review():
     from hashlib import sha256
 

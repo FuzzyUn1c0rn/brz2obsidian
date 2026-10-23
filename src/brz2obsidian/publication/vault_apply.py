@@ -564,9 +564,9 @@ def _recovery_prepared_matches(
         (subject.item_id, subject.facet): subject
         for subject in origin_plan.producer_facts.subjects
     }
-    origin_files = {
-        row.path: row.content for row in select_review_effects(origin_plan).files
-    }
+    origin_effects = select_review_effects(origin_plan)
+    origin_files = {row.path: row.content for row in origin_effects.files}
+    origin_removals = set(origin_effects.remove_paths)
     origin_documents = {
         row.source_path
         for row in (
@@ -590,6 +590,50 @@ def _recovery_prepared_matches(
         proof = subject.operation_reversal
         if proof is None:
             if (subject.item_id, subject.facet) in origin_subjects:
+                origin_subject = origin_subjects[(subject.item_id, subject.facet)]
+                origin_items = tuple(
+                    item
+                    for item in origin_plan.producer_facts.identity_inventory
+                    if item.identity_state == "valid"
+                    and item.identity is not None
+                    and (
+                        item.identity.module_id,
+                        item.identity.collection_id,
+                    )
+                    == (
+                        origin_plan.producer_facts.incoming_identity.module_id,
+                        origin_plan.producer_facts.incoming_identity.collection_id,
+                    )
+                    and (item.identity.item_id, item.facet)
+                    == (subject.item_id, subject.facet)
+                )
+                if len(origin_items) == 1:
+                    old_path = origin_items[0].current.path
+                    new_path = subject.path
+                    if (
+                        intent.direction == "finish"
+                        and old_path != new_path
+                        and subject.path == origin_subject.path
+                        and subject.source_target == origin_subject.source_target
+                        and subject.current.path
+                        == (old_path if old_path in current else new_path)
+                        and {old_path, new_path}.issubset(origin.affected_paths)
+                        and old_path in origin_removals
+                        and new_path in origin_files
+                        and matches(
+                            produced.get(old_path), origin_items[0].current.content
+                        )
+                        and old_path not in target
+                        and not (old_path in current and new_path in current)
+                        and new_path not in produced
+                        and matches(target.get(new_path), origin_files[new_path])
+                    ):
+                        # The original reviewed rename authorizes both its
+                        # displaced old path and selected new output. The
+                        # recovery review separately binds the later current
+                        # new-path bytes and exact selected overlay.
+                        covered.update((old_path, new_path))
+                        continue
                 paths = {subject.path, subject.current.path}
                 paths.update(
                     item.current.path
