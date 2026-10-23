@@ -30,10 +30,10 @@ def _closure(changed, nodes):
 
 
 def _approval_safe(facts, change, approval, origin, attachment_applicability=()):
-    if approval.choice == "reverse_absence":
+    if approval.choice == "reverse" and approval.result is None:
         return (
             approval.domain == "reversal"
-            and change.disposition == "reversal_absence"
+            and change.disposition == "operation_reversal"
             and change.result is None
             and approval.result is None
             and change.target_path == approval.target_path
@@ -71,7 +71,9 @@ def _approval_safe(facts, change, approval, origin, attachment_applicability=())
             facts,
             change,
             origin.candidate,
-            approval.choice,
+            "incoming"
+            if approval.domain == "reversal" and approval.choice == "reverse"
+            else approval.choice,
             mapping_choice=approval.domain == "mapping",
         )
     if approval.choice == "current":

@@ -936,15 +936,15 @@ class StructureComparison(ReconciliationContract):
     section_bases: tuple[GeneratedSectionBasis, ...]
 
 
-class OperationReversalAbsence(ReconciliationContract):
-    """Outer-validated operation proof that its created path should be absent.
+class OperationReversalTarget(ReconciliationContract):
+    """Outer-validated operation versions for reversing a file existence change.
 
     The retained operation epoch and proof stay stable across review refreshes.
-    Outer history revalidates complete preimage absence and exact produced bytes
-    before publication; the core only reviews the supplied immutable facts.
+    Outer history revalidates complete preimage/proposed existence and bytes
+    before publication. These operation versions do not redefine source originals.
     """
 
-    schema_id: Literal["brz2obsidian.operation-reversal-absence"]
+    schema_id: Literal["brz2obsidian.operation-reversal-target"]
     schema_version: Literal[1]
     operation_id: str = Field(min_length=1)
     operation_kind: Literal["apply", "undo"]
@@ -952,8 +952,22 @@ class OperationReversalAbsence(ReconciliationContract):
     operation_generation: int = Field(ge=1)
     history_fingerprint: str = Field(min_length=1)
     path: str = Field(min_length=1)
-    produced: ExactContent
-    target_existence: Literal["absent"]
+    produced_existence: Literal["present", "absent"]
+    produced: ExactContent | None
+    target_existence: Literal["present", "absent"]
+    target: ExactContent | None
+
+    @model_validator(mode="after")
+    def exact_existence_change(self):
+        if (
+            (self.produced_existence == "present") != (self.produced is not None)
+            or (self.target_existence == "present") != (self.target is not None)
+            or self.produced_existence == self.target_existence
+        ):
+            raise ValueError(
+                "Operation reversal requires an exact proven existence change"
+            )
+        return self
 
 
 class ReconciliationSubject(ReconciliationContract):
@@ -969,22 +983,21 @@ class ReconciliationSubject(ReconciliationContract):
     output_role: Literal["note", "dashboard", "template", "guide", "configuration"]
     structure: StructureComparison | None
     attachment: AttachmentFacts | None
-    reversal_absence: OperationReversalAbsence | None = Field(
+    operation_reversal: OperationReversalTarget | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
 
     @model_validator(mode="after")
-    def bound_reversal_absence(self):
-        proof = self.reversal_absence
+    def bound_operation_reversal(self):
+        proof = self.operation_reversal
         if proof is not None and (
-            self.incoming is not None
-            or self.baseline.status != "known"
-            or self.baseline.content != proof.produced
+            (None if self.incoming is None else self.incoming.data)
+            != (None if proof.target is None else proof.target.data)
             or self.path != proof.path
             or self.current.path != proof.path
         ):
             raise ValueError(
-                "Reversal absence requires exact operation-produced baseline and path"
+                "Operation reversal requires exact target content and path"
             )
         return self
 
@@ -1140,7 +1153,7 @@ class ChangeProvenance(ReconciliationContract):
         "remembered_keep",
         "remembered_decline",
         "preservation_decision",
-        "reversal_absence",
+        "operation_reversal",
     ]
 
 
@@ -1166,7 +1179,7 @@ class ProposedChange(ReconciliationContract):
         "source_absent",
         "local_deleted",
         "restoration",
-        "reversal_absence",
+        "operation_reversal",
     ]
     requires_decision: bool
     provenance: ChangeProvenance
@@ -1196,7 +1209,7 @@ class ProposedChange(ReconciliationContract):
             "identity_resolution",
             "stale",
             "restoration",
-            "reversal_absence",
+            "operation_reversal",
         )
         if self.identity_review.repair_required and self.disposition not in unresolved:
             raise ValueError(
@@ -1999,7 +2012,7 @@ type ReviewDomain = Literal[
 
 
 type ReviewChoice = Literal[
-    "reverse_absence",
+    "reverse",
     "approve",
     "current",
     "incoming",

@@ -69,7 +69,11 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
     # Retain the target's lookup identity so inbound references resolve missing.
     for change in proposal.changes:
         approval = approved.get(change.change_id)
-        if approval is None or approval.choice != "reverse_absence":
+        if (
+            approval is None
+            or approval.choice != "reverse"
+            or approval.result is not None
+        ):
             continue
         own = tuple(
             t for t in context.current_targets if t.canonical_path == change.path
@@ -357,7 +361,7 @@ def selected_effect_active(facts, proposal, approvals):
     approved = {a.change_id: a for a in approvals}
     for change in proposal.changes:
         approval = approved.get(change.change_id)
-        if approval is not None and approval.choice == "reverse_absence":
+        if approval is not None and approval.choice == "reverse":
             return True
         if approval is not None and approval.attachment_candidate is not None:
             if any(

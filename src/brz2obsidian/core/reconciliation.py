@@ -109,12 +109,12 @@ def _assumptions(facts, subject, subject_id, safety):
         )
         for fact in safety
     )
-    if subject.reversal_absence is not None:
+    if subject.operation_reversal is not None:
         assumptions.append(
             ProposalAssumption(
                 key=f"{subject_id}:reversal",
                 kind="operation",
-                fingerprint=_digest(_dump(subject.reversal_absence)),
+                fingerprint=_digest(_dump(subject.operation_reversal)),
                 depends_on=(f"{subject_id}:baseline", f"{subject_id}:identity"),
             )
         )
@@ -246,9 +246,9 @@ def _reconcile(facts: ReconciliationInput, *, _applicability=()) -> UpdatePropos
         problems = _findings(facts, subject, subject_id, safety) + list(
             binding.findings
         )
-        if subject.reversal_absence is not None and (
-            subject.current.path != subject.reversal_absence.path
-            or binding.target_path != subject.reversal_absence.path
+        if subject.operation_reversal is not None and (
+            subject.current.path != subject.operation_reversal.path
+            or binding.target_path != subject.operation_reversal.path
         ):
             problems.append(
                 ReconciliationFinding(
@@ -274,16 +274,25 @@ def _reconcile(facts: ReconciliationInput, *, _applicability=()) -> UpdatePropos
             or format_choice
             or _proposal(subject)
         )
-        if subject.reversal_absence is not None:
+        if subject.operation_reversal is not None:
+            proof = subject.operation_reversal
+            already_target = (
+                subject.current.existence == proof.target_existence
+                and _bytes(subject.current.content) == _bytes(proof.target)
+            )
             disposition, result, rule, requires_decision = (
                 "local_deleted"
-                if subject.current.existence == "absent"
-                else "reversal_absence",
-                None,
-                "reversal_absence",
-                subject.current.existence != "absent",
+                if already_target and proof.target_existence == "absent"
+                else "no_change"
+                if already_target
+                else "operation_reversal",
+                subject.current.content if already_target else None,
+                "operation_reversal",
+                not already_target,
             )
-            preservation_review, binary_review = None, None
+            preservation_review = None
+            if proof.target_existence == "absent":
+                binary_review = None
         structured_result = None
         if (
             subject.structure is not None
@@ -378,7 +387,9 @@ def _reconcile(facts: ReconciliationInput, *, _applicability=()) -> UpdatePropos
                 facet=subject.facet,
                 path=subject.current.path,
                 target_path=binding.target_path,
-                original=subject.baseline.content,
+                original=subject.baseline.content
+                if subject.operation_reversal is None
+                else subject.operation_reversal.produced,
                 current=subject.current.content,
                 incoming=subject.incoming,
                 result=result,
@@ -386,7 +397,7 @@ def _reconcile(facts: ReconciliationInput, *, _applicability=()) -> UpdatePropos
                 requires_decision=requires_decision,
                 provenance=ChangeProvenance(
                     producer="operation-reversal/v1"
-                    if rule == "reversal_absence"
+                    if rule == "operation_reversal"
                     else "identity-review/v1"
                     if rule in ("identity_resolution", "rename_review")
                     else "structure/v1"
