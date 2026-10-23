@@ -575,6 +575,14 @@ def _recovery_prepared_matches(
                     for item in origin_plan.producer_facts.identity_inventory
                     if item.identity_state == "valid"
                     and item.identity is not None
+                    and (
+                        item.identity.module_id,
+                        item.identity.collection_id,
+                    )
+                    == (
+                        origin_plan.producer_facts.incoming_identity.module_id,
+                        origin_plan.producer_facts.incoming_identity.collection_id,
+                    )
                     and (item.identity.item_id, item.facet)
                     == (subject.item_id, subject.facet)
                     and item.current.path == subject.path
