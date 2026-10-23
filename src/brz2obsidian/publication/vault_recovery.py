@@ -20,7 +20,9 @@ from brz2obsidian.contracts import (
     FormatBaselineOutput,
     IdentityInventoryItem,
     IdentityTargetFacts,
+    OperationReversalOutput,
     OperationReversalTarget,
+    ReconciliationSubject,
     ReferenceTarget,
     SupportedFormatBaseline,
 )
@@ -28,6 +30,7 @@ from brz2obsidian.core import (
     prepare_review,
     refresh_review,
     resolve_review,
+    review_owned_targets,
     select_review_effects,
 )
 from brz2obsidian.obsidian import interpret_link_target, interpret_links
@@ -155,7 +158,9 @@ def _review_observation(
     inventory = {row.path: row for row in admission.inventory}
     paths = {
         subject.current.path for subject in original.facts.subjects
-    } | {item.current.path for item in original.facts.identity_inventory}
+    } | {item.current.path for item in original.facts.identity_inventory} | set(
+        intent.affected_paths
+    )
     target_paths = {
         row.path
         for row in (intent.proposed if direction == "finish" else intent.before)
@@ -367,11 +372,11 @@ def _review_observation(
             else admission.preflight.state_fingerprint,
         }
     )
-    return original, intent, origin_commit, git, facts, preflight
+    return original, intent, origin_commit, git, facts, preflight, current, retained
 
 
 def _finish_review(root, observed, *, previous=None, authority=None):
-    original, _, _, _, facts, preflight = _review_observation(
+    original, _, _, _, facts, preflight, _, _ = _review_observation(
         root,
         observed,
         direction="finish",
@@ -387,10 +392,16 @@ def _finish_review(root, observed, *, previous=None, authority=None):
 def _owned_content(git, row):
     if row is None:
         return None
-    data = git.call("cat-file", "blob", row.object_id)
-    if len(data) != row.size or hashlib.sha256(data).hexdigest() != row.sha256:
-        raise OSError("Retained operation payload changed")
-    return ExactContent(data=data)
+    if available_memory() < 9 * row.size + 64 * 1024 * 1024:
+        raise OSError("Insufficient memory to review retained operation payload")
+    sink = io.BytesIO()
+    verify_blobs(
+        [*git.prefix, "cat-file", "--batch"],
+        env=git.env,
+        objects=((row.object_id, row.size, row.sha256, sink),),
+        timeout=max(30, row.size / (8 * 1024 * 1024) + 30),
+    )
+    return ExactContent(data=sink.getvalue())
 
 
 @contextmanager
@@ -492,7 +503,7 @@ def _restore_link_context(original, facts, before, affected, git):
 
 
 def _restore_review(root, observed, *, previous=None, authority=None):
-    original, intent, origin_commit, git, facts, preflight = _review_observation(
+    original, intent, origin_commit, git, facts, preflight, current, retained = _review_observation(
         root,
         observed,
         direction="restore",
@@ -503,13 +514,49 @@ def _restore_review(root, observed, *, previous=None, authority=None):
     produced = {row.path: row for row in intent.proposed}
     subjects = []
     baseline_outputs = []
+    output_references = {}
+    approved = {approval.change_id: approval for approval in original.approvals}
     for subject in facts.subjects:
-        path = subject.path
-        if path not in intent.affected_paths:
+        changes = tuple(
+            change
+            for change in original.proposal.changes
+            if (change.item_id, change.facet) == (subject.item_id, subject.facet)
+        )
+        if not changes and subject.path not in intent.affected_paths:
             continue
-        old = _owned_content(git, before.get(path))
-        new = _owned_content(git, produced.get(path))
-        if old is None and new is None:
+        if len(changes) != 1:
+            raise OSError("Recovery subject has no unique original change")
+        approval = approved.get(changes[0].change_id)
+        if approval is None:
+            raise OSError("Recovery subject lacks original selected approval")
+        owned = review_owned_targets(
+            original, approval.change_id, approval.decision_id
+        )
+        rows = []
+        for reference in owned:
+            path = reference.canonical_path
+            if path not in intent.affected_paths:
+                continue
+            old = _owned_content(git, before.get(path))
+            new = _owned_content(git, produced.get(path))
+            if (old is None) == (new is None):
+                continue
+            rows.append(
+                OperationReversalOutput(
+                    path=path,
+                    target_id=reference.target_id,
+                    produced_existence="absent" if new is None else "present",
+                    produced=new,
+                    current=current[path],
+                    target_existence="absent" if old is None else "present",
+                    target=old,
+                )
+            )
+            output_references[path] = reference
+        if subject.path not in intent.affected_paths and not rows:
+            continue
+        old = _owned_content(git, before.get(subject.path))
+        if old is None and not rows:
             continue
         proof = (
             OperationReversalTarget(
@@ -520,13 +567,12 @@ def _restore_review(root, observed, *, previous=None, authority=None):
                 direction="restore",
                 operation_generation=intent.generation,
                 history_fingerprint=_operation_history_fingerprint(origin_commit, intent),
-                path=path,
-                produced_existence="absent" if new is None else "present",
-                produced=new,
-                target_existence="absent" if old is None else "present",
-                target=old,
+                origin_change_id=approval.change_id,
+                origin_decision_id=approval.decision_id,
+                owned_targets=owned,
+                outputs=tuple(rows),
             )
-            if (old is None) != (new is None)
+            if rows
             else None
         )
         generated = subject.incoming or (
@@ -540,7 +586,7 @@ def _restore_review(root, observed, *, previous=None, authority=None):
                         content=generated,
                         unavailable_digest=None,
                     ),
-                    "incoming": old,
+                    "incoming": old if subject.path in intent.affected_paths else subject.incoming,
                     "operation_reversal": proof,
                     "structure": None,
                 }
@@ -554,6 +600,144 @@ def _restore_review(root, observed, *, previous=None, authority=None):
             )
     if not subjects:
         raise OSError("Retained operation has no reviewed recovery subjects")
+    covered = {
+        path
+        for subject in subjects
+        for path in (
+            (subject.path,) if subject.path in intent.affected_paths else ()
+        )
+    } | set(output_references)
+    source_prepared = retained.owned[intent.prepared_commit][0]
+    source_lineage = retained.owned[source_prepared.previous][0]
+    generated_files = {row.path: row for row in source_lineage.source}
+    original_files = {
+        row.path: row.content
+        for row in select_review_effects(original).files
+    }
+    original_documents = (
+        set()
+        if original.facts.link_context is None
+        else {
+            document.source_path
+            for document in original.facts.link_context.current_documents
+        }
+    )
+    for path in sorted(set(intent.affected_paths) - covered):
+        owners = tuple(
+            item
+            for item in facts.identity_inventory
+            if item.current.path == path
+            and item.identity_state == "valid"
+            and item.identity is not None
+            and item.facet == "content"
+            and (
+                item.identity.module_id,
+                item.identity.collection_id,
+            ) == (
+                original.facts.incoming_identity.module_id,
+                original.facts.incoming_identity.collection_id,
+            )
+        )
+        if (
+            len(owners) != 1
+            or path not in original_documents
+            or path not in original_files
+            or before.get(path) is None
+            or produced.get(path) is None
+            or current[path].content is None
+            or facts.link_context is None
+            or not any(
+                document.source_path == path and document.status == "supported"
+                for document in facts.link_context.current_documents
+            )
+        ):
+            raise OSError("Associated recovery document lacks retained authority")
+        owner = owners[0]
+        generated = _owned_content(git, generated_files.get(path))
+        target = _owned_content(git, before[path])
+        if generated is None or target is None:
+            raise OSError("Associated recovery document source is unavailable")
+        subjects.append(
+            ReconciliationSubject(
+                item_id=owner.identity.item_id,
+                facet=owner.facet,
+                path=path,
+                baseline=ContentVersion(
+                    status="known", content=generated, unavailable_digest=None
+                ),
+                current=current[path],
+                incoming=target,
+                interpretation="supported",
+                title=owner.title,
+                source_target=owner.target,
+                output_role="note",
+                structure=None,
+                attachment=None,
+            )
+        )
+        baseline_outputs.append(
+            FormatBaselineOutput(
+                item_id=owner.identity.item_id,
+                facet=owner.facet,
+                content=generated,
+            )
+        )
+    identity_inventory = list(facts.identity_inventory)
+    known_paths = {item.current.path for item in identity_inventory}
+    context = facts.link_context
+    for path, reference in sorted(output_references.items()):
+        if path not in known_paths:
+            identity_inventory.append(
+                IdentityInventoryItem(
+                    entry_id="recovery-output:" + hashlib.sha256(path.encode()).hexdigest(),
+                    facet=None,
+                    identity_state="missing",
+                    identity=None,
+                    raw_identity=None,
+                    title=Path(path).stem,
+                    current=current[path],
+                    target=reference.target,
+                )
+            )
+            known_paths.add(path)
+        if context is None:
+            continue
+        current_refs = list(context.current_targets)
+        current_states = list(context.current_target_facts)
+        incoming_refs = list(context.incoming_targets)
+        incoming_states = list(context.incoming_target_facts)
+        if reference.target_id not in {target.target_id for target in current_refs}:
+            current_refs.append(reference)
+            current_states.append(
+                interpret_link_target(
+                    current[path].content,
+                    target_id=reference.target_id,
+                    existence="missing" if current[path].content is None else "present",
+                    memberships=(),
+                )
+            )
+        if reference.target_id not in {target.target_id for target in incoming_refs}:
+            target = _owned_content(git, before.get(path))
+            incoming_refs.append(reference)
+            incoming_states.append(
+                interpret_link_target(
+                    target,
+                    target_id=reference.target_id,
+                    existence="missing" if target is None else "present",
+                    memberships=(),
+                )
+            )
+        context = context.model_copy(
+            update={
+                "current_targets": tuple(current_refs),
+                "current_target_facts": tuple(current_states),
+                "incoming_targets": tuple(incoming_refs),
+                "incoming_target_facts": tuple(incoming_states),
+            }
+        )
+    facts = facts.model_copy(
+        update={"identity_inventory": tuple(identity_inventory), "link_context": context}
+    )
     format_operation = facts.format_operation.model_copy(
         update={
             "kind": "source_update"
@@ -583,6 +767,7 @@ def _restore_review(root, observed, *, previous=None, authority=None):
             "baseline_identity": facts.incoming_identity,
             "incoming_identity": facts.baseline_identity,
             "subjects": tuple(subjects),
+            "identity_inventory": tuple(identity_inventory),
             "format_operation": format_operation,
             "link_context": _restore_link_context(
                 original, facts, before, set(intent.affected_paths), git
@@ -803,6 +988,37 @@ def _recovery_result_status(kind, direction, original_effect):
     return "applied" if original_effect else "no_content_change"
 
 
+def _refuse_known_recovery(observed, code, *, start):
+    """A refused new action does not erase the validated stopped operation."""
+    return _outcome(
+        "refused",
+        code,
+        start=start,
+        operation_id=observed.operation_id,
+        kind=observed.kind,
+        direction=observed.direction,
+        review_generation=observed.review_generation,
+        generation=observed.generation,
+        phase=observed.phase,
+        publication=observed.publication,
+        history=observed.history,
+        planned=observed.planned_files,
+        published=observed.published_files,
+        changed=observed.authored_files_changed,
+        checkpoint=observed.checkpoint_commit,
+        intent=observed.intent_commit,
+        result=observed.result_commit,
+        receipt=observed.receipt_commit,
+        stop=observed.stop_commit,
+        recovery=True,
+    )
+
+
+class _OwnedRecoveryCleanupFailure(Exception):
+    def __init__(self, result):
+        self.result = result
+
+
 def _cleanup_verified_terminal(root, saved, *, start):
     observed, authority = _inspect_update_observation(root)
     if (
@@ -869,11 +1085,13 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
         root, observed, authority, direction=saved.direction
     )
     if fresh.status != "offered" or not _same_recovery_review(fresh, saved):
+        if authority is not None and observed.operation_id == saved.operation_id:
+            return _refuse_known_recovery(observed, "recovery_review_stale", start=start)
         return _outcome("refused", "recovery_review_stale", start=start)
     try:
         subjects = _review_subjects(saved.review, selected)
     except (OSError, ValueError, TypeError):
-        return _outcome("refused", "invalid_recovery_scope", start=start)
+        return _refuse_known_recovery(observed, "invalid_recovery_scope", start=start)
     operation_id = saved.operation_id
     acquired = False
     phase = "admission"
@@ -899,12 +1117,12 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
                 and current_status.direction != saved.direction
             )
         ):
-            return _outcome("refused", "recovery_authority_changed", start=start)
+            return _refuse_known_recovery(current_status, "recovery_authority_changed", start=start)
         history = inspect_history(
             root, subjects=subjects, active_operation=operation_id
         )
         if history.status != "intact" or history.admission.status != "supported":
-            return _outcome("refused", "recovery_admission_required", start=start)
+            return _refuse_known_recovery(current_status, "recovery_admission_required", start=start)
         association = history.checkpoint.locator.association
         origin_commit, origin = current_authority.graph.authorities[-1]
         original_prepared = current_authority.owned[origin.prepared_commit][0]
@@ -927,7 +1145,7 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
                 current_authority.graph.origin_intent_commit, origin
             )
         ):
-            return _outcome("refused", "recovery_source_lineage_changed", start=start)
+            return _refuse_known_recovery(current_status, "recovery_source_lineage_changed", start=start)
         accepted_tracking = {
             subject_id
             for requirement in history.admission.preflight.consents
@@ -953,9 +1171,9 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
         selected_files = {row.path: row.content.data for row in selected.files}
         removals = set(selected.remove_paths)
         if any(not _safe_relative(path) for path in (*selected_files, *removals)):
-            return _outcome("refused", "unsafe_recovery_path", start=start)
+            return _refuse_known_recovery(current_status, "unsafe_recovery_path", start=start)
         if any(path not in before for path in removals):
-            return _outcome("refused", "recovery_removal_missing", start=start)
+            return _refuse_known_recovery(current_status, "recovery_removal_missing", start=start)
         changed = {
             path
             for path, data in selected_files.items()
@@ -964,7 +1182,7 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
             or before[path].sha256 != hashlib.sha256(data).hexdigest()
         } | removals
         if not changed.issubset(origin.affected_paths):
-            return _outcome("refused", "recovery_scope_changed", start=start)
+            return _refuse_known_recovery(current_status, "recovery_scope_changed", start=start)
         planned = len(changed)
         stage_need = (
             sum(row.size for path, row in before.items() if path not in removals)
@@ -974,12 +1192,12 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
             + 4096 * (len(before) + len(selected_files) + len(source_manifest.source))
         )
         if shutil.disk_usage(root.parent).free < stage_need:
-            return _outcome("refused", "insufficient_recovery_stage_resources", start=start)
+            return _refuse_known_recovery(current_status, "insufficient_recovery_stage_resources", start=start)
         git = _Git(root)
         with _retained_source(root, git, source_manifest.source) as source:
             with _proposed_directory(root.parent) as proposed_root:
                 if proposed_root.stat().st_dev != root.stat().st_dev:
-                    return _outcome("refused", "same_volume_stage_required", start=start)
+                    return _refuse_known_recovery(current_status, "same_volume_stage_required", start=start)
                 stage_parent_security(root, proposed_root, Path("."))
                 before_metadata = {}
                 result_metadata = {}
@@ -989,7 +1207,7 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
                     target = proposed_root / path
                     stage_parent_security(root, proposed_root, Path(path).parent)
                     if not _same_file(root, row):
-                        return _outcome("refused", "current_bytes_changed", start=start)
+                        return _refuse_known_recovery(current_status, "current_bytes_changed", start=start)
                     if path in changed:
                         before_metadata[path] = retained_metadata(root / path)
                         copy_stage(root / path, target)
@@ -1350,13 +1568,40 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
                 if pending_exception is None or issubclass(
                     pending_exception, (OSError, ValueError, TypeError)
                 ):
-                    raise OSError(
-                        "Owned recovery cleanup failed; exact status requires inspection"
-                    ) from None
+                    try:
+                        stopped = _inspect_update_observation(root)[0]
+                    except (OSError, ValueError, TypeError, UnicodeError):
+                        stopped = None
+                    if stopped is None or stopped.operation_id != operation_id:
+                        raise _OwnedRecoveryCleanupFailure(
+                            _outcome(
+                                "unknown",
+                                "recovery_cleanup_failed",
+                                start=start,
+                                operation_id=operation_id,
+                                kind=saved.kind,
+                                direction=saved.direction,
+                                review_generation=saved.review.proposal.generation,
+                                phase="cleanup",
+                                publication="unknown",
+                                history="prepared" if prepared_commit else "unknown",
+                                checkpoint=prepared_commit,
+                                changed=None,
+                                recovery=True,
+                            )
+                        )
+                    raise _OwnedRecoveryCleanupFailure(
+                        _refuse_known_recovery(
+                            stopped, "recovery_cleanup_failed", start=start
+                        )
+                    )
 
 
 def execute_recovery(vault, preparation, *, cancel=None, executor=None):
     """Apply a selected recovery direction through the shared Operations seam."""
-    return _execute_recovery(
-        vault, preparation, cancel=cancel, executor=executor
-    )
+    try:
+        return _execute_recovery(
+            vault, preparation, cancel=cancel, executor=executor
+        )
+    except _OwnedRecoveryCleanupFailure as failure:
+        return failure.result

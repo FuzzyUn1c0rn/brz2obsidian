@@ -116,6 +116,13 @@ def test_stopped_apply_offers_both_first_recovery_directions_without_mutation():
         ),
     )
     assert stale.status == "refused" and stale.code == "recovery_review_stale"
+    stale_execution = Operations().execute_recovery(vault, kept)
+    assert stale_execution.status == "refused"
+    assert stale_execution.code == "recovery_review_stale"
+    assert stale_execution.recovery_required
+    assert stale_execution.operation_id == stopped.operation_id
+    assert stale_execution.intent_commit == stopped.intent_commit
+    assert user_state(vault) == after_later_edit
     refreshed = Operations().refresh_recovery(vault, kept)
     assert refreshed.status == "offered" and refreshed.direction == "finish"
     assert refreshed.review.proposal.generation == kept.review.proposal.generation + 1
@@ -269,17 +276,46 @@ def test_partial_binary_both_restore_reviews_created_asset_and_owner_as_one_oper
 
     offered = Operations().prepare_recovery(vault, direction="restore")
     assert offered.status == "offered" and offered.review is not None, offered.code
-    assert any(
-        requirement.domain == "reversal"
-        and change.target_path == "Assets/data (incoming-ba7816bf).bin"
-        for requirement in offered.review.requirements
-        for change in offered.review.proposal.changes
-        if change.change_id == requirement.change_id
-    )
+    assert any(requirement.domain == "reversal" for requirement in offered.review.requirements)
+    proof = offered.review.facts.subjects[0].operation_reversal
+    assert proof is not None
+    assert [
+        (row.path, row.produced.data, row.current.content.data, row.target)
+        for row in proof.outputs
+    ] == [("Assets/data (incoming-ba7816bf).bin", b"abc", b"abc", None)]
     assert created.read_bytes() == b"abc"
     assert (vault / "Notes/Owner.md").read_bytes() == original_document
     assert user_state(vault) == retained
     assert retained["index"] == before["index"]
+
+    chosen = Operations().resolve_recovery(
+        vault,
+        offered,
+        action(
+            offered.review,
+            domain="reversal",
+            choice="reverse",
+            decision_id="recovery:remove-generated-version",
+        ),
+    )
+    assert chosen.status == "offered" and chosen.review.ready, (
+        chosen.code,
+        chosen.review.blockers if chosen.review else (),
+        tuple(r.domain for r in chosen.review.requirements) if chosen.review else (),
+    )
+    from brz2obsidian.core import select_review_effects
+
+    effects = select_review_effects(chosen.review)
+    assert effects.status == "selected", effects.code
+    assert effects.remove_paths == ("Assets/data (incoming-ba7816bf).bin",)
+    assert (vault / "Assets/data.bin").read_bytes() == b"\x00authored"
+    completed = Operations().execute_recovery(vault, chosen)
+    assert completed.status == "restored" and completed.receipt_commit, completed.code
+    assert not created.exists()
+    assert (vault / "Assets/data.bin").read_bytes() == b"\x00authored"
+    assert (vault / "Notes/Owner.md").read_bytes() == original_document
+    assert Operations().inspect_update_status(vault).status == "restored"
+    assert user_state(vault)["index"] == before["index"]
 
 
 def test_ready_stopped_apply_finishes_through_retained_direction_and_actual_result():
@@ -394,3 +430,51 @@ def test_fully_published_apply_without_receipt_finishes_as_applied_with_zero_new
         if row.split(b" ", 1)[0] not in owned_refs
     )
     assert retained_user_state["index"] == before["index"]
+
+
+def test_pre_intent_recovery_cleanup_fault_returns_typed_recovery_required(monkeypatch):
+    from pathlib import Path
+
+    vault, source, operations, reviewed, before = _ready_case()
+    calls = 0
+
+    def cancel_original():
+        nonlocal calls
+        calls += 1
+        return calls == 2
+
+    stopped = _apply(
+        operations,
+        vault,
+        source,
+        review=reviewed,
+        vault_id="vault-one",
+        import_id="import-one",
+        cancel=cancel_original,
+    )
+    assert stopped.status == "cancelled" and stopped.intent_commit
+    offered = Operations().prepare_recovery(vault, direction="finish")
+    assert offered.status == "offered" and offered.review.ready
+    owner = vault / ".git/brz2obsidian/owner.json"
+    original_unlink = Path.unlink
+
+    def fail_owned_cleanup(path, *args, **kwargs):
+        if path == owner:
+            raise OSError("Fixture owner cleanup fault")
+        return original_unlink(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "unlink", fail_owned_cleanup)
+        failed = Operations().execute_recovery(vault, offered, cancel=lambda: True)
+
+    assert failed.code == "recovery_cleanup_failed"
+    assert failed.recovery_required and failed.operation_id == stopped.operation_id
+    assert failed.intent_commit == stopped.intent_commit
+    assert failed.publication == "unknown" and failed.published_files == 0
+    assert (vault / "Notes/Opening.md").read_bytes() == b"authored opening\r\n"
+    assert user_state(vault)["index"] == before["index"]
+    assert Operations().inspect_history(vault).admission.status == "recovery_first"
+    marker = owner.parent
+    owner.unlink()
+    (marker / "held").unlink()
+    marker.rmdir()
