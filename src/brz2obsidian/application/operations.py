@@ -116,6 +116,32 @@ class Operations:
 
         return inspect_update_status(vault)
 
+    def prepare_recovery(self, vault, *, direction=None):
+        """Read a retained incomplete operation and offer its first direction."""
+        from brz2obsidian.publication.vault_recovery import prepare_recovery
+
+        return prepare_recovery(vault, direction=direction)
+
+    def refresh_recovery(self, vault, preparation):
+        """Reobserve a stopped operation and invalidate changed S1 decisions."""
+        from brz2obsidian.publication.vault_recovery import refresh_recovery
+
+        return refresh_recovery(vault, preparation)
+
+    def resolve_recovery(self, vault, preparation, action):
+        """Record an explicit decision against current recovery review facts."""
+        from brz2obsidian.publication.vault_recovery import resolve_recovery
+
+        return resolve_recovery(vault, preparation, action)
+
+    def execute_recovery(self, vault, preparation, *, cancel=None):
+        """Publish one retained reviewed recovery direction and its exact result."""
+        from brz2obsidian.publication.vault_recovery import execute_recovery
+
+        return execute_recovery(
+            vault, preparation, cancel=cancel, executor=self.vault_executor
+        )
+
     def read_update_details(self, vault, *, offset=0, limit=100):
         """Page safe before/result comparisons from validated owned intent."""
         from brz2obsidian.publication.vault_apply import read_update_details

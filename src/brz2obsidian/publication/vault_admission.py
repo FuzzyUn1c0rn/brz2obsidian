@@ -231,11 +231,19 @@ def _file_digest(path):
 
 
 class _Inspection:
-    def __init__(self, vault, subjects, executable, active_operation=None):
+    def __init__(
+        self,
+        vault,
+        subjects,
+        executable,
+        active_operation=None,
+        recovery_observation=None,
+    ):
         self.root = Path(vault).absolute()
         self.subjects = ()
         self.request_subjects = subjects
         self.active_operation = active_operation
+        self.recovery_observation = recovery_observation
         self.validated_active_operation = False
         self.linked_intents = []
         self.executable = (
@@ -875,7 +883,42 @@ class _Inspection:
                 "An existing Git lock requires its owner's completion or recovery.",
             )
             self.operation = "active"
-        if (gitdir / "brz2obsidian").exists():
+        if self.recovery_observation is not None:
+            from brz2obsidian.publication.vault_apply import _OperationObservation
+            from brz2obsidian.publication.vault_recovery import _lease_free
+
+            retained = self.recovery_observation
+            if not isinstance(retained, _OperationObservation):
+                raise OSError("Recovery observation has no validated authority")
+            operation = retained.graph.intent
+            ref = (
+                "refs/brz2obsidian/imports/"
+                + operation.association_id
+                + "/operations/"
+                + operation.operation_id
+            )
+            current = self.git("rev-parse", "--verify", ref).decode().strip()
+            locator = retained.checkpoint.locator
+            if retained.checkpoint.status != "valid" or locator is None:
+                raise OSError("Recovery checkpoint association is unavailable")
+            checkpoint_tip = self.git(
+                "rev-parse", "--verify", locator.association.ref
+            ).decode().strip()
+            if (
+                current != retained.graph.commit
+                or checkpoint_tip != locator.commit
+                or not _lease_free(self.root, operation.operation_id)
+                or locator.association.association_id != operation.association_id
+                or locator.association.vault_anchor
+                != verify_directory(self.root)
+                or locator.association.git_anchor
+                != verify_directory(self.root / ".git")
+            ):
+                raise OSError("Recovery authority or converter lease changed")
+            self.validated_active_operation = True
+            self.history = retained.checkpoint
+            self.operation = "idle"
+        elif (gitdir / "brz2obsidian").exists():
             owned = False
             if self.active_operation is not None:
                 try:
@@ -986,7 +1029,12 @@ class _Inspection:
                 from brz2obsidian.publication.vault_apply import inspect_update_status
 
                 status = inspect_update_status(self.root)
-                if status.status not in ("applied", "no_content_change") or (
+                if status.status not in (
+                    "applied",
+                    "no_content_change",
+                    "restored",
+                    "undone",
+                ) or (
                     status.recovery_required
                 ):
                     self.finding(
@@ -1669,9 +1717,18 @@ class _Inspection:
         )
 
 
-def _observe_vault(vault, *, subjects=(), git_executable=None, active_operation=None):
+def _observe_vault(
+    vault,
+    *,
+    subjects=(),
+    git_executable=None,
+    active_operation=None,
+    recovery_observation=None,
+):
     """Observe current storage; caller assertions cannot grant trusted proof."""
-    inspection = _Inspection(vault, subjects, git_executable, active_operation)
+    inspection = _Inspection(
+        vault, subjects, git_executable, active_operation, recovery_observation
+    )
     try:
         with inspection.resources:
             return inspection.run(), inspection.history
@@ -1700,4 +1757,11 @@ def inspect_vault(vault, *, subjects=(), git_executable=None, active_operation=N
         subjects=subjects,
         git_executable=git_executable,
         active_operation=active_operation,
+    )[0]
+
+
+def _inspect_vault_for_recovery(vault, observation, *, subjects=()):
+    """Observe policy and bytes beneath one validated, stopped operation graph."""
+    return _observe_vault(
+        vault, subjects=subjects, recovery_observation=observation
     )[0]

@@ -1073,7 +1073,13 @@ def capture_checkpoint(
         recovery_target = None
         recovery_origin_intent_commit = None
         recovery_previous_operation_commit = None
-        if recovery_direction is not None:
+        retained_recovery_direction = (
+            prior.manifest.recovery_direction
+            if boundary == "result" and prior.status == "valid"
+            else None
+        )
+        target_direction = recovery_direction or retained_recovery_direction
+        if target_direction is not None:
             from brz2obsidian.publication.vault_apply import (
                 _inspect_update_observation,
                 owns_operation,
@@ -1087,33 +1093,45 @@ def capture_checkpoint(
                 or not status.recovery_required
                 or not owns_operation(root, active_operation)
                 or isinstance(authority.graph.intent, VaultRecoveryIntent)
-                and authority.graph.intent.direction != recovery_direction
+                and authority.graph.intent.direction != target_direction
             ):
                 return result("refused", "recovery_authority_required")
             original = authority.graph.authorities[-1][1]
             original_prepared = authority.owned[original.prepared_commit][0]
             source_manifest = (
                 original_prepared
-                if recovery_direction == "finish"
+                if target_direction == "finish"
                 else authority.owned[original_prepared.previous][0]
             )
             if (
                 original.operation_id != active_operation
                 or original.association_id != association_id
                 or source_manifest.identity != identity
-                or select_review_effects(review).status != "selected"
+                or recovery_direction is not None
+                and select_review_effects(review).status != "selected"
             ):
                 return result("refused", "recovery_review_required")
+            if retained_recovery_direction is not None and (
+                not isinstance(authority.graph.intent, VaultRecoveryIntent)
+                or authority.graph.intent.prepared_commit != expected_prepared
+                or status.intent_commit != operation_intent_commit
+                or prior.manifest.recovery_origin_intent_commit
+                != authority.graph.origin_intent_commit
+                or prior.manifest.recovery_previous_operation_commit
+                != authority.graph.intent.previous_operation_commit
+            ):
+                return result("refused", "recovery_result_authority_changed")
             recovery_target = (
                 {row.path: row for row in (
                     original.proposed
-                    if recovery_direction == "finish"
+                    if target_direction == "finish"
                     else original.before
                 )},
                 source_manifest.source,
             )
-            recovery_origin_intent_commit = authority.graph.origin_intent_commit
-            recovery_previous_operation_commit = authority.graph.commit
+            if recovery_direction is not None:
+                recovery_origin_intent_commit = authority.graph.origin_intent_commit
+                recovery_previous_operation_commit = authority.graph.commit
         if boundary == "result" and (
             prior.status != "valid"
             or prior.locator.commit != expected_prepared
