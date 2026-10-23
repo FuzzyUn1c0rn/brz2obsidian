@@ -1078,6 +1078,7 @@ def capture_checkpoint(
                 _inspect_update_observation,
                 owns_operation,
             )
+            from brz2obsidian.application.vault_update_contracts import VaultRecoveryIntent
 
             status, authority = _inspect_update_observation(root)
             if (
@@ -1085,10 +1086,11 @@ def capture_checkpoint(
                 or status.operation_id != active_operation
                 or not status.recovery_required
                 or not owns_operation(root, active_operation)
-                or status.direction not in (None, recovery_direction)
+                or isinstance(authority.graph.intent, VaultRecoveryIntent)
+                and authority.graph.intent.direction != recovery_direction
             ):
                 return result("refused", "recovery_authority_required")
-            original = authority.graph.authorities[0][1]
+            original = authority.graph.authorities[-1][1]
             original_prepared = authority.owned[original.prepared_commit][0]
             source_manifest = (
                 original_prepared
