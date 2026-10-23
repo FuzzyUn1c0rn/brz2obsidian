@@ -54,6 +54,8 @@ def _domain(facts, change):
         return "identity"
     if change.rename_review is not None and change.rename_review.requires_decision:
         return "rename"
+    if subject.reversal_absence is not None:
+        return "reversal"
     if change.disposition == "restoration":
         return "restoration"
     if subject.output_role == "configuration":
@@ -89,6 +91,17 @@ def _observed_absence(facts, change, domain):
 
 
 def _choices(facts, change, domain):
+    if domain == "reversal":
+        if change.disposition != "reversal_absence" or change.current is None:
+            return ()
+        subject = next(
+            s
+            for s in facts.subjects
+            if (s.item_id, s.facet) == (change.item_id, change.facet)
+        )
+        return ("current", "reverse_absence") + (
+            ("edited",) if subject.attachment is None else ()
+        )
     if domain == "identity":
         return ("associate",)
     if domain == "rename":
@@ -811,7 +824,7 @@ def _resolve_action(plan, action):
     if action.domain != _domain(plan.producer_facts, change):
         return _transition(plan, "refused", "choice_not_admitted")
     if (
-        action.domain not in ("text", "configuration", "mapping", "format")
+        action.domain not in ("text", "configuration", "mapping", "format", "reversal")
         or (
             action.choice == "approve"
             and (
@@ -819,7 +832,7 @@ def _resolve_action(plan, action):
                 or not compatible_result_eligible(plan.producer_facts, change)
             )
         )
-        or action.choice not in ("approve", "current", "incoming", "edited")
+        or action.choice not in _choices(plan.producer_facts, change, action.domain)
     ):
         return _transition(plan, "refused", "choice_not_admitted")
     if action.selected_entry_id is not None or action.disassociate_entry_ids:
@@ -839,6 +852,8 @@ def _resolve_action(plan, action):
     ):
         return _transition(plan, "refused", "invalid_candidate")
     if action.choice == "approve" and action.candidate is not None:
+        return _transition(plan, "refused", "choice_not_admitted")
+    if action.choice == "reverse_absence" and action.candidate is not None:
         return _transition(plan, "refused", "choice_not_admitted")
     memory = None
     if action.choice == "current":
@@ -873,7 +888,7 @@ def _resolve_action(plan, action):
         domain=action.domain,
         choice=action.choice,
         result=change.result
-        if action.choice == "approve"
+        if action.choice in ("approve", "reverse_absence")
         else change.current
         if action.choice == "current"
         else action.candidate.content,

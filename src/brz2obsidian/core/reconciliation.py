@@ -109,6 +109,15 @@ def _assumptions(facts, subject, subject_id, safety):
         )
         for fact in safety
     )
+    if subject.reversal_absence is not None:
+        assumptions.append(
+            ProposalAssumption(
+                key=f"{subject_id}:reversal",
+                kind="operation",
+                fingerprint=_digest(_dump(subject.reversal_absence)),
+                depends_on=(f"{subject_id}:baseline", f"{subject_id}:identity"),
+            )
+        )
     return tuple(assumptions) + dependencies
 
 
@@ -237,6 +246,18 @@ def _reconcile(facts: ReconciliationInput, *, _applicability=()) -> UpdatePropos
         problems = _findings(facts, subject, subject_id, safety) + list(
             binding.findings
         )
+        if subject.reversal_absence is not None and (
+            subject.current.path != subject.reversal_absence.path
+            or binding.target_path != subject.reversal_absence.path
+        ):
+            problems.append(
+                ReconciliationFinding(
+                    code="unsafe_assumption",
+                    subject_id=subject_id,
+                    blocking=True,
+                    assumption_keys=(f"{subject_id}:reversal",),
+                )
+            )
         if link_problem is not None:
             problems.append(
                 ReconciliationFinding(
@@ -253,6 +274,16 @@ def _reconcile(facts: ReconciliationInput, *, _applicability=()) -> UpdatePropos
             or format_choice
             or _proposal(subject)
         )
+        if subject.reversal_absence is not None:
+            disposition, result, rule, requires_decision = (
+                "local_deleted"
+                if subject.current.existence == "absent"
+                else "reversal_absence",
+                None,
+                "reversal_absence",
+                subject.current.existence != "absent",
+            )
+            preservation_review, binary_review = None, None
         structured_result = None
         if (
             subject.structure is not None
@@ -354,7 +385,9 @@ def _reconcile(facts: ReconciliationInput, *, _applicability=()) -> UpdatePropos
                 disposition=disposition,
                 requires_decision=requires_decision,
                 provenance=ChangeProvenance(
-                    producer="identity-review/v1"
+                    producer="operation-reversal/v1"
+                    if rule == "reversal_absence"
+                    else "identity-review/v1"
                     if rule in ("identity_resolution", "rename_review")
                     else "structure/v1"
                     if rule.startswith("structure_")

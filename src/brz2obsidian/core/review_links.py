@@ -377,6 +377,13 @@ def selected_current_links_safe(facts, change):
         return True
     if context is None:
         return not current_keep_needs_proof(facts, change)
+    subject = next(
+        s
+        for s in facts.subjects
+        if (s.item_id, s.facet) == (change.item_id, change.facet)
+    )
+    if subject.reversal_absence is not None and subject.attachment is not None:
+        return current_lookup_coverage(facts)
     if current_keep_needs_proof(facts, change) and not current_lookup_coverage(facts):
         return False
     documents = tuple(

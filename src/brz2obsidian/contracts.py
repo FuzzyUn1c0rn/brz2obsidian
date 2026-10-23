@@ -936,6 +936,26 @@ class StructureComparison(ReconciliationContract):
     section_bases: tuple[GeneratedSectionBasis, ...]
 
 
+class OperationReversalAbsence(ReconciliationContract):
+    """Outer-validated operation proof that its created path should be absent.
+
+    The retained operation epoch and proof stay stable across review refreshes.
+    Outer history revalidates complete preimage absence and exact produced bytes
+    before publication; the core only reviews the supplied immutable facts.
+    """
+
+    schema_id: Literal["brz2obsidian.operation-reversal-absence"]
+    schema_version: Literal[1]
+    operation_id: str = Field(min_length=1)
+    operation_kind: Literal["apply", "undo"]
+    direction: Literal["finish", "restore"]
+    operation_generation: int = Field(ge=1)
+    history_fingerprint: str = Field(min_length=1)
+    path: str = Field(min_length=1)
+    produced: ExactContent
+    target_existence: Literal["absent"]
+
+
 class ReconciliationSubject(ReconciliationContract):
     item_id: str = Field(min_length=1)
     facet: str = Field(min_length=1)
@@ -949,6 +969,24 @@ class ReconciliationSubject(ReconciliationContract):
     output_role: Literal["note", "dashboard", "template", "guide", "configuration"]
     structure: StructureComparison | None
     attachment: AttachmentFacts | None
+    reversal_absence: OperationReversalAbsence | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    @model_validator(mode="after")
+    def bound_reversal_absence(self):
+        proof = self.reversal_absence
+        if proof is not None and (
+            self.incoming is not None
+            or self.baseline.status != "known"
+            or self.baseline.content != proof.produced
+            or self.path != proof.path
+            or self.current.path != proof.path
+        ):
+            raise ValueError(
+                "Reversal absence requires exact operation-produced baseline and path"
+            )
+        return self
 
 
 class ReconciliationInput(ReconciliationContract):
@@ -1074,6 +1112,7 @@ class ChangeProvenance(ReconciliationContract):
         "format-review/v1",
         "structure/v1",
         "preservation/v1",
+        "operation-reversal/v1",
     ]
     rule: Literal[
         "unknown_original",
@@ -1101,6 +1140,7 @@ class ChangeProvenance(ReconciliationContract):
         "remembered_keep",
         "remembered_decline",
         "preservation_decision",
+        "reversal_absence",
     ]
 
 
@@ -1126,6 +1166,7 @@ class ProposedChange(ReconciliationContract):
         "source_absent",
         "local_deleted",
         "restoration",
+        "reversal_absence",
     ]
     requires_decision: bool
     provenance: ChangeProvenance
@@ -1155,6 +1196,7 @@ class ProposedChange(ReconciliationContract):
             "identity_resolution",
             "stale",
             "restoration",
+            "reversal_absence",
         )
         if self.identity_review.repair_required and self.disposition not in unresolved:
             raise ValueError(
@@ -1941,6 +1983,7 @@ class ReviewedTextCandidate(ReconciliationContract):
 
 
 type ReviewDomain = Literal[
+    "reversal",
     "text",
     "compatible_group",
     "configuration",
@@ -1956,6 +1999,7 @@ type ReviewDomain = Literal[
 
 
 type ReviewChoice = Literal[
+    "reverse_absence",
     "approve",
     "current",
     "incoming",

@@ -83,6 +83,8 @@ def select_review_effects(plan: ReviewPlan) -> SelectedReviewEffects:
                 continue
             content = change.result if approval is None else approval.result
             if content is None:
+                if approval is not None and approval.choice == "reverse_absence":
+                    removals.add(change.path)
                 continue
             path = change.target_path if approval is None else approval.target_path
             add(path, content, change.subject_id)

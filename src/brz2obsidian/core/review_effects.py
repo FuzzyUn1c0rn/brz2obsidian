@@ -1,5 +1,6 @@
 """Derive effective selected files and check cross-choice link coherence."""
 
+from brz2obsidian.contracts import LinkTargetFacts
 from brz2obsidian.core.link_meanings import resolve_occurrence
 from brz2obsidian.core.link_validation import validate_link_document
 from brz2obsidian.core.review_links import (
@@ -63,6 +64,38 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
             states.pop(target.target_id, None)
         else:
             states[target.target_id] = state
+
+    # An approved reversal changes existence in the same selected graph as bytes.
+    # Retain the target's lookup identity so inbound references resolve missing.
+    for change in proposal.changes:
+        approval = approved.get(change.change_id)
+        if approval is None or approval.choice != "reverse_absence":
+            continue
+        own = tuple(
+            t for t in context.current_targets if t.canonical_path == change.path
+        )
+        if len(own) != 1:
+            add("selected_link_context_conflict")
+            continue
+        (target,) = own
+        state = LinkTargetFacts(
+            schema_id="brz2obsidian.link-target-facts",
+            schema_version=1,
+            target_id=target.target_id,
+            existence="missing",
+            content=None,
+            fragments=(),
+            anchors=(),
+            structure=None,
+            memberships=(),
+            interpretation="supported",
+        )
+        write(target, None, change.path, state)
+        documents = {
+            key: document
+            for key, document in documents.items()
+            if document.source_path != change.path
+        }
 
     # Binary selections establish exact offered output versions first.
     for approval in approvals:
@@ -324,6 +357,8 @@ def selected_effect_active(facts, proposal, approvals):
     approved = {a.change_id: a for a in approvals}
     for change in proposal.changes:
         approval = approved.get(change.change_id)
+        if approval is not None and approval.choice == "reverse_absence":
+            return True
         if approval is not None and approval.attachment_candidate is not None:
             if any(
                 not any(

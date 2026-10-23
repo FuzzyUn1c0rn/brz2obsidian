@@ -30,6 +30,14 @@ def _closure(changed, nodes):
 
 
 def _approval_safe(facts, change, approval, origin, attachment_applicability=()):
+    if approval.choice == "reverse_absence":
+        return (
+            approval.domain == "reversal"
+            and change.disposition == "reversal_absence"
+            and change.result is None
+            and approval.result is None
+            and change.target_path == approval.target_path
+        )
     if approval.attachment_candidate is not None:
         return any(
             a.decision_id == approval.decision_id for a in attachment_applicability
