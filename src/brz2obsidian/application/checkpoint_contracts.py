@@ -64,6 +64,19 @@ class CheckpointManifest(ReconciliationContract):
     policy_continuity_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     previous: str | None
     operation_intent_commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
+    recovery_origin_intent_commit: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{40}$",
+        exclude_if=lambda value: value is None,
+    )
+    recovery_previous_operation_commit: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{40}$",
+        exclude_if=lambda value: value is None,
+    )
+    recovery_direction: Literal["finish", "restore"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     review_object: str | None
     review_size: int | None = Field(ge=0)
     review_sha256: str | None = Field(pattern=r"^[0-9a-f]{64}$")
@@ -72,6 +85,14 @@ class CheckpointManifest(ReconciliationContract):
     def inventories(self):
         if self.operation_intent_commit is not None and self.boundary != "result":
             raise ValueError("Only an actual result may bind an application intent")
+        if len(
+            {
+                self.recovery_origin_intent_commit is None,
+                self.recovery_previous_operation_commit is None,
+                self.recovery_direction is None,
+            }
+        ) != 1 or self.recovery_direction is not None and self.boundary != "prepared":
+            raise ValueError("Only a recovery preparation may bind its origin and direction")
         if (self.review_object is None) != (self.review_size is None) or (
             self.review_object is None
         ) != (self.review_sha256 is None):

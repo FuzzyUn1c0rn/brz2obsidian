@@ -99,7 +99,7 @@ def _review_meaning(saved):
         if isinstance(value, SafetyFact) and value.kind in {"operation", "history"}:
             return {
                 name: meaning(getattr(value, name))
-                for name in type(value).model_fields
+                for name in _stored_model_fields(value)
                 if name != "fingerprint"
             }
         if isinstance(value, ExactContent):
@@ -112,7 +112,7 @@ def _review_meaning(saved):
         if hasattr(type(value), "model_fields"):
             return {
                 name: meaning(getattr(value, name))
-                for name in type(value).model_fields
+                for name in _stored_model_fields(value)
                 if name not in proof_fields
             }
         if isinstance(value, dict):
@@ -139,6 +139,9 @@ def _semantic(
     policy,
     saved,
     operation_intent_commit=None,
+    recovery_origin_intent_commit=None,
+    recovery_previous_operation_commit=None,
+    recovery_direction=None,
 ):
     return _semantic_meaning(
         association,
@@ -152,6 +155,9 @@ def _semantic(
         policy,
         _review_meaning(saved),
         operation_intent_commit,
+        recovery_origin_intent_commit,
+        recovery_previous_operation_commit,
+        recovery_direction,
     )
 
 
@@ -167,6 +173,9 @@ def _semantic_meaning(
     policy,
     meaning,
     operation_intent_commit=None,
+    recovery_origin_intent_commit=None,
+    recovery_previous_operation_commit=None,
+    recovery_direction=None,
 ):
     parts = (
         association.model_dump(mode="json"),
@@ -181,6 +190,16 @@ def _semantic_meaning(
         meaning,
     )
     # Unmarked #272 storage retains its original semantic fingerprint.
+    if recovery_origin_intent_commit is not None:
+        return digest(
+            (
+                *parts,
+                "recovery-prepared",
+                recovery_origin_intent_commit,
+                recovery_previous_operation_commit,
+                recovery_direction,
+            )
+        )
     return digest(
         parts if operation_intent_commit is None else (*parts, operation_intent_commit)
     )
@@ -452,6 +471,13 @@ def _control_objects(git, requested, cache):
 _REVIEW_BYTES_KEY = "__brz2obsidian_review_blob__"
 
 
+def _stored_model_fields(value):
+    """Mirror intentional field omission without copying large review payloads."""
+    for name, field in type(value).model_fields.items():
+        if field.exclude_if is None or not field.exclude_if(getattr(value, name)):
+            yield name
+
+
 def _review_shape(saved):
     """Keep exact S1 values while naming each distinct byte value once."""
     payloads = {}
@@ -465,7 +491,7 @@ def _review_shape(saved):
             return {_REVIEW_BYTES_KEY: sha}
         if hasattr(type(value), "model_fields"):
             return {
-                name: project(getattr(value, name)) for name in type(value).model_fields
+                name: project(getattr(value, name)) for name in _stored_model_fields(value)
             }
         if isinstance(value, (tuple, list)):
             return [project(item) for item in value]
@@ -856,6 +882,9 @@ def _read(root, git, *, targets=None, linked_intents=None):
                 manifest.policy_fingerprint,
                 meaning,
                 manifest.operation_intent_commit,
+                manifest.recovery_origin_intent_commit,
+                manifest.recovery_previous_operation_commit,
+                manifest.recovery_direction,
             )
             != manifest.semantic_fingerprint
         ):
@@ -971,6 +1000,7 @@ def capture_checkpoint(
     active_operation=None,
     source_binding=None,
     operation_intent_commit=None,
+    recovery_direction=None,
 ):
     root, source = Path(vault).absolute(), Path(source).absolute()
     objects = False
@@ -992,6 +1022,13 @@ def capture_checkpoint(
                 or type(operation_intent_commit) is not str
                 or len(operation_intent_commit) != 40
                 or set(operation_intent_commit) - set("0123456789abcdef")
+            )
+            or recovery_direction is not None
+            and (
+                boundary != "prepared"
+                or active_operation is None
+                or review is None
+                or recovery_direction not in ("finish", "restore")
             )
         ):
             return result("refused", "invalid_checkpoint_boundary")
@@ -1033,6 +1070,48 @@ def capture_checkpoint(
             return result("refused", "current_history_unavailable")
         if prior.status == "valid" and prior.locator.association != association:
             return result("refused", "association_mismatch")
+        recovery_target = None
+        recovery_origin_intent_commit = None
+        recovery_previous_operation_commit = None
+        if recovery_direction is not None:
+            from brz2obsidian.publication.vault_apply import (
+                _inspect_update_observation,
+                owns_operation,
+            )
+
+            status, authority = _inspect_update_observation(root)
+            if (
+                authority is None
+                or status.operation_id != active_operation
+                or not status.recovery_required
+                or not owns_operation(root, active_operation)
+                or status.direction not in (None, recovery_direction)
+            ):
+                return result("refused", "recovery_authority_required")
+            original = authority.graph.authorities[0][1]
+            original_prepared = authority.owned[original.prepared_commit][0]
+            source_manifest = (
+                original_prepared
+                if recovery_direction == "finish"
+                else authority.owned[original_prepared.previous][0]
+            )
+            if (
+                original.operation_id != active_operation
+                or original.association_id != association_id
+                or source_manifest.identity != identity
+                or select_review_effects(review).status != "selected"
+            ):
+                return result("refused", "recovery_review_required")
+            recovery_target = (
+                {row.path: row for row in (
+                    original.proposed
+                    if recovery_direction == "finish"
+                    else original.before
+                )},
+                source_manifest.source,
+            )
+            recovery_origin_intent_commit = authority.graph.origin_intent_commit
+            recovery_previous_operation_commit = authority.graph.commit
         if boundary == "result" and (
             prior.status != "valid"
             or prior.locator.commit != expected_prepared
@@ -1160,6 +1239,13 @@ def capture_checkpoint(
             directory = Path(name)
             git.suppress_hooks(directory)
             source_files, source_spools = _spool(source, directory)
+            if recovery_target is not None and tuple(
+                row[:4] for row in source_files
+            ) != tuple(
+                (row.path, row.mode, row.size, row.sha256)
+                for row in recovery_target[1]
+            ):
+                return result("refused", "recovery_source_lineage_changed")
             if source_binding is not None:
                 from brz2obsidian.application.source_payload_contracts import (
                     ReviewedSourceBinding,
@@ -1232,7 +1318,16 @@ def capture_checkpoint(
                 }
                 for subject in saved.plan.facts.subjects:
                     for expected, path, inventory in (
-                        (subject.incoming, subject.path, source_files),
+                        (
+                            subject.incoming,
+                            subject.path,
+                            source_files
+                            if recovery_target is None
+                            else tuple(
+                                (row.path, row.mode, row.size, row.sha256, None)
+                                for row in recovery_target[0].values()
+                            ),
+                        ),
                     ) + (
                         ()
                         if retaining_prepared
@@ -1332,6 +1427,9 @@ def capture_checkpoint(
                 current.policy_fingerprint,
                 saved,
                 operation_intent_commit,
+                recovery_origin_intent_commit,
+                recovery_previous_operation_commit,
+                recovery_direction,
             )
             if (
                 prior.status == "valid"
@@ -1472,6 +1570,9 @@ def capture_checkpoint(
                 semantic_fingerprint=semantic,
                 previous=previous,
                 operation_intent_commit=operation_intent_commit,
+                recovery_origin_intent_commit=recovery_origin_intent_commit,
+                recovery_previous_operation_commit=recovery_previous_operation_commit,
+                recovery_direction=recovery_direction,
                 review_object=review_oid,
                 review_size=len(review_raw) if review_raw is not None else None,
                 review_sha256=hashlib.sha256(review_raw).hexdigest()
