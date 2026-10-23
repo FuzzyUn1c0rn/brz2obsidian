@@ -279,9 +279,7 @@ def test_interrupted_execution_retains_partial_identity_and_original_output(chec
     assert (paths[0].parent / "partial.json").is_file()
     timings = [
         json.loads(line)
-        for line in (paths[0].parent / "pytest-timings.jsonl")
-        .read_text()
-        .splitlines()
+        for line in (paths[0].parent / "pytest-timings.jsonl").read_text().splitlines()
     ]
     completed = [
         row

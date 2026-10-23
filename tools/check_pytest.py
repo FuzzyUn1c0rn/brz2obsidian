@@ -19,9 +19,11 @@ TIMINGS = None
 
 def pytest_sessionstart():
     global TIMINGS
-    TIMINGS = Path(os.environ["BRZ_CHECK_COUNTS"]).with_name(
-        "pytest-timings.jsonl"
-    ).open("w", encoding="utf-8", buffering=1)
+    TIMINGS = (
+        Path(os.environ["BRZ_CHECK_COUNTS"])
+        .with_name("pytest-timings.jsonl")
+        .open("w", encoding="utf-8", buffering=1)
+    )
 
 
 def pytest_collection_modifyitems(items):
