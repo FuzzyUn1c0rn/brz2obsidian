@@ -485,8 +485,33 @@ def bound_resource_record(facts, entry, target, state):
         and sub.current.content == entry.current.content
         for sub in facts.subjects
     )
+    context = facts.link_context
+    local = (
+        facts.inventory == "complete"
+        and entry.identity_state == "missing"
+        and entry.identity is None
+        and entry.raw_identity is None
+        and entry.facet is None
+        and entry.current.existence == "present"
+        and entry.current.content is not None
+        and not entry.current.path.casefold().endswith(".md")
+        and entry.target == target.target
+        and state.target_id == target.target_id
+        and context is not None
+        and context.inventory == "complete"
+        and not any(
+            document.source_path == entry.current.path
+            for document in context.current_documents + context.incoming_documents
+        )
+        and not any(
+            other.target_id != target.target_id
+            and other.canonical_path is not None
+            and _paths_collide(other.canonical_path, entry.current.path)
+            for other in context.current_targets
+        )
+    )
     return (
-        associated
+        (associated or local)
         and target.kind == "resource"
         and target.identity is None
         and target.canonical_path == entry.current.path
