@@ -12,6 +12,11 @@ import pytest
 from brz2obsidian.application.operations import Operations
 from brz2obsidian.contracts import ReferenceTarget
 from brz2obsidian.core import prepare_review, resolve_review
+from brz2obsidian.obsidian import (
+    align_structure,
+    inspect_text_candidate,
+    interpret_structure,
+)
 from brz2obsidian.publication.vault_replace import move_file
 from tests.reconciliation.test_local_resources import manual_resource_facts
 from tests.reconciliation.test_resolution import action
@@ -62,6 +67,20 @@ def make_stopped_case(*, include_tag=False):
     vault.mkdir(mode=0o700)
     source.mkdir()
     facts = manual_resource_facts()
+    subject = facts.subjects[0]
+    structure = align_structure(
+        *(
+            interpret_structure(content, output_format=7)
+            for content in (
+                subject.baseline.content,
+                subject.current.content,
+                subject.incoming,
+            )
+        )
+    )
+    facts = facts.model_copy(
+        update={"subjects": (subject.model_copy(update={"structure": structure}),)}
+    )
     if include_tag:
         tag = ReferenceTarget(
             schema_id="brz2obsidian.reference-target",
@@ -117,7 +136,24 @@ def make_stopped_case(*, include_tag=False):
     offered = prepare_review(
         facts, preflight=operations.inspect_history(vault).admission.preflight
     )
-    reviewed = resolve_review(offered, action(offered)).plan
+    context = facts.link_context
+    candidate = inspect_text_candidate(
+        subject.incoming,
+        identity=facts.identity_inventory[0].identity,
+        target=subject.source_target,
+        output_format=7,
+        source_path=subject.path,
+        document_id="opening",
+        path_mode="vault",
+        link_targets=context.incoming_targets,
+        link_target_facts=context.incoming_target_facts,
+        link_inventory=context.inventory,
+    )
+    transition = resolve_review(
+        offered, action(offered, choice="incoming", candidate=candidate)
+    )
+    assert transition.status == "accepted", transition.code
+    reviewed = transition.plan
     assert reviewed.ready, (reviewed.requirements, reviewed.blockers)
 
     class StopAfterActualMove:
@@ -177,6 +213,8 @@ def test_recovery_reinterprets_unchanged_backlink_after_target_version_changed(
     content_complete_case,
 ):
     vault, evidence = content_complete_case
+    later = b"New [[Guide]].\nLater tracked writing."
+    (vault / "Notes/Opening.md").write_bytes(later)
     before = inventory(vault)
     offered = Operations().prepare_recovery(vault, direction="finish")
     assert inventory(vault) == before
@@ -200,10 +238,18 @@ def test_recovery_reinterprets_unchanged_backlink_after_target_version_changed(
     ) == (
         "resolved",
         "Notes/Opening.md",
-        hashlib.sha256(b"New [[Guide]].").hexdigest(),
+        hashlib.sha256(later).hexdigest(),
     )
     resource_digest = hashlib.sha256(b"\x00\xffmanual").hexdigest()
     assert resource.meaning.target_version == resource_digest
+    kept = Operations().resolve_recovery(
+        vault,
+        offered,
+        action(offered.review, choice="current", decision_id="recovery-current"),
+    )
+    assert inventory(vault) == before
+    assert kept.status == "offered" and kept.review.ready, kept.code
+    assert kept.review.approvals[0].result.data == later
 
 
 def test_recovery_accepts_known_tag_without_file_state_in_both_directions(

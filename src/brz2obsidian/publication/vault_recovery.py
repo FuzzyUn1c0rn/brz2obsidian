@@ -40,7 +40,12 @@ from brz2obsidian.core import (
     review_owned_targets,
     select_review_effects,
 )
-from brz2obsidian.obsidian import interpret_link_target, interpret_links
+from brz2obsidian.obsidian import (
+    align_structure,
+    interpret_link_target,
+    interpret_links,
+    interpret_structure,
+)
 from brz2obsidian.publication.git_payload import verify_blobs
 from brz2obsidian.publication.vault_admission import (
     _inspect_vault_for_recovery,
@@ -579,14 +584,46 @@ def _review_observation(
             return old_current
         return observed
 
+    def observed_subject(subject):
+        observed = observed_subject_current(subject)
+        comparison = subject.structure
+        if comparison is not None and observed.content is not None:
+            targets = (
+                context.current_targets
+                if context is not None
+                else tuple(
+                    entry.target
+                    for membership in comparison.current.memberships
+                    for entry in membership.entries
+                )
+                + tuple(
+                    target
+                    for section in comparison.current.owned_sections
+                    for target in section.targets
+                )
+            )
+            current_structure = interpret_structure(
+                observed.content,
+                output_format=comparison.current.output_format,
+                membership_targets=targets,
+                section_bases=comparison.section_bases,
+                section_targets=targets,
+            )
+            comparison = align_structure(
+                comparison.original,
+                current_structure,
+                comparison.incoming,
+                prior_mappings=comparison.prior_mappings,
+                incoming_mappings=comparison.incoming_mappings,
+                section_bases=comparison.section_bases,
+            )
+        return subject.model_copy(update={"current": observed, "structure": comparison})
+
     facts = original_facts.model_copy(
         update={
             "generation": next_generation or original.proposal.generation + 1,
             "subjects": tuple(
-                subject.model_copy(
-                    update={"current": observed_subject_current(subject)}
-                )
-                for subject in original_facts.subjects
+                observed_subject(subject) for subject in original_facts.subjects
             ),
             "identity_inventory": tuple(
                 item.model_copy(update={"current": current[item.current.path]})
