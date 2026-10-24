@@ -22,6 +22,104 @@ def _all_file_bytes(root):
     }
 
 
+def test_one_capture_matching_copy_restores_missing_declared_source_blob():
+    vault, source = fixture_case()
+    git(vault, "init", "-q")
+    git(vault, "config", "core.autocrlf", "false")
+    (vault / "Notes").mkdir()
+    note = vault / "Notes/Opening.md"
+    note.write_bytes(b"committed authored\r\n")
+    (vault / "user.bin").write_bytes(b"\x00committed\xff")
+    git(vault, "add", "Notes/Opening.md", "user.bin")
+    git(vault, "commit", "-qm", "user baseline")
+    git(vault, "update-ref", "refs/notes/user-proof", "HEAD")
+    git(vault, "update-ref", "refs/brz2obsidian/user-independent", "HEAD")
+    note.write_bytes(b"staged authored\n")
+    git(vault, "add", "Notes/Opening.md")
+    authored_note = b"staged authored\nlater writing\r\n"
+    note.write_bytes(authored_note)
+    (vault / "Unrelated.bin").write_bytes(b"untracked \x00\xff\n")
+    (source / "Notes").mkdir()
+    (source / "Assets").mkdir()
+    (source / "Notes/Opening.md").write_bytes(b"generated note\n")
+    generated_blob = b"\xff\x00generated source asset\n"
+    (source / "Assets/raw.bin").write_bytes(generated_blob)
+
+    before_user = user_state(vault)
+    operations = Operations()
+    captured = operations.capture_checkpoint(
+        vault,
+        source,
+        vault_id="vault-one",
+        import_id="import-one",
+        identity=request().incoming_identity,
+        admission=operations.inspect_history(vault).admission,
+    )
+    assert captured.status == "captured" and captured.commit and captured.ref
+    assert captured.authored_files_changed is False
+    assert user_state(vault, owned_ref=captured.ref) == before_user
+    original = Operations().read_checkpoint(vault)
+    assert original.status == "valid" and original.manifest.generation == 1
+    assert {row.path for row in original.manifest.source} == {
+        "Assets/raw.bin",
+        "Notes/Opening.md",
+    }
+    assert {row.path for row in original.manifest.vault} == {
+        "Notes/Opening.md",
+        "Unrelated.bin",
+        "user.bin",
+    }
+    source_blob = next(
+        row.object_id
+        for row in original.manifest.source
+        if row.path == "Assets/raw.bin"
+    )
+    assert source_blob.encode() not in git(vault, "ls-files", "--stage")
+    assert source_blob.encode() not in git(vault, "ls-tree", "-r", "HEAD")
+    assert git(vault, "cat-file", "blob", source_blob) == generated_blob
+
+    matching = vault.parent / "complete-current-copy"
+    shutil.copytree(vault, matching)
+    copy_bytes = _all_file_bytes(matching)
+    object_path = vault / ".git/objects" / source_blob[:2] / source_blob[2:]
+    assert object_path.is_file()
+    object_path.chmod(stat.S_IWRITE)
+    object_path.unlink()
+    damaged_bytes = _all_file_bytes(vault)
+    damaged_user = user_state(vault)
+    assert Operations().read_checkpoint(vault).status == "refused"
+
+    validation = Operations().validate_history_copy(vault, matching)
+    assert validation.status == "matching"
+    assert validation.code == "exact_missing_dependency"
+    assert validation.target_generation == validation.copy_generation == 1
+    assert validation.target_commit == validation.copy_commit == captured.commit
+    assert tuple(row.object_id for row in validation.missing_objects) == (source_blob,)
+    assert validation.damaged_objects == ()
+    preparation = Operations().prepare_history_repair(vault, matching, validation)
+    assert preparation.status == "prepared"
+    assert _all_file_bytes(vault) == damaged_bytes
+    assert _all_file_bytes(matching) == copy_bytes
+
+    repaired = Operations().execute_history_repair(vault, matching, preparation)
+    assert repaired.status == "repaired" and repaired.history_retained is True
+    assert repaired.object_storage == "verified" and repaired.objects_written == 1
+    assert repaired.authored_files_changed is False
+    current = Operations().read_checkpoint(vault)
+    assert current.status == "valid"
+    assert current.locator.commit == captured.commit
+    assert current.manifest == original.manifest
+    assert git(vault, "cat-file", "blob", source_blob) == generated_blob
+    assert note.read_bytes() == authored_note
+    assert (vault / "Unrelated.bin").read_bytes() == b"untracked \x00\xff\n"
+    assert user_state(vault) == damaged_user
+    assert _all_file_bytes(matching) == copy_bytes
+    after_bytes = _all_file_bytes(vault)
+    assert object_path.relative_to(vault).as_posix() in after_bytes
+    after_bytes.pop(object_path.relative_to(vault).as_posix())
+    assert after_bytes == damaged_bytes
+
+
 def test_older_copy_refusal_then_exact_missing_history_dependency_repair(monkeypatch):
     vault, source = fixture_case()
     git(vault, "init", "-q")
