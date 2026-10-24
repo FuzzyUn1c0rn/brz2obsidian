@@ -23,6 +23,14 @@ All production files, including unexecuted modules, remain in the denominator.
 Raw coverage data and HTML contexts remain available. Reporting uses the same
 global deadline and validates the check receipt before and after reports.
 
+The maintained command uses two pytest-xdist workers, grouping module functions
+and class methods together with `loadscope`. It disables scope reordering and
+worker restarts. Manifest order is preserved within each worker; global serial
+order is not guaranteed. The existing 600-second deadline includes the worker
+processes and combined production coverage. Focused measurements and direct
+runner checks remain serial by default; `--workers 2` explicitly selects parallel
+execution, and `--workers 1` can select serial maintained-suite execution.
+
 For everyday development, run the smallest affected selection through
 `tools/check.py`. Use `tools/coverage_suite.py --test <file-or-node>` when a new
 coverage measurement helps the decision. Focused measurements are partial suite
