@@ -70,6 +70,14 @@ changes, missing coverage, insufficient branches or deadline exhaustion prevent
 success. Timeout cleanup may take additional seconds; an over-budget attempt
 never qualifies. Retain failed and interrupted evidence as well as later passes.
 
+The maintained selection uses four pytest-xdist workers with module/class scope
+groups. Focused measurements use one process unless `--workers 2`, `--workers 3`
+or `--workers 4` is explicit. `--workers 1` selects serial execution for the
+maintained command. Parallel execution preserves relative file order within each
+worker; it does not promise global serial order. Worker restarts are disabled,
+and the shared 600-second
+deadline includes worker startup, shutdown and merged coverage reports.
+
 
 ## Choosing verification
 
@@ -111,6 +119,14 @@ coverage command. Handoff regressions in `.agents/skills/implement-spec-enhanced
 separate focused selection. Invalid, zero-test or entirely skipped selections
 do not establish passing pytest coverage.
 
+The runner defaults to serial pytest. `run --workers 2`, `run --workers 3` or
+`run --workers 4` uses the same scope grouping and disabled restarts as the
+maintained coverage command. Its receipt records the worker count, exact worker
+arguments and actual pytest-xdist/execnet
+versions. Only the controller writes shared counts and timings; collected tests
+are counted once, and GUI counts come from actual worker reports. Serial
+receipts retain their existing selection shape and argument reconstruction.
+
 | Environment | Requirement |
 | --- | --- |
 | `base` | PySide6 absent; Qt-dependent tests skip |
@@ -140,6 +156,12 @@ Each run creates `tmp/checks/<run>/` with `receipt.json`, logs and isolated cach
 Retain the printed `RECEIPT:` path and outcomes, including failed/interrupted
 runs. Keep receipts and logs intact in their original directories; follow
 [workspace housekeeping](workspace.md) when retiring temporary evidence.
+
+The pytest child also writes `pytest-timings.jsonl` in that run directory. Each
+completed report records its node ID, setup/call/teardown phase, duration and
+outcome. Reports flush individually so an interrupted process retains completed
+timings. An incomplete log, including a possible partial final line after abrupt
+termination, does not establish completion or replace receipt validation.
 
 | Run exit | Meaning |
 | --- | --- |

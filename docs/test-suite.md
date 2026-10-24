@@ -16,11 +16,32 @@ requires the GUI development environment, actual GUI test execution, at least
 coverage JSON and HTML identify the actual coverage and remaining gaps; the
 issue records the qualified candidate and measured baseline.
 
+`coverage.json` retains exact contexts once per file, declared by
+`meta.context_scope="file"`. Function/class regions retain their ordinary summaries,
+executed/missing lines and branch arcs without repeating the full-file context map.
+All production files, including unexecuted modules, remain in the denominator.
+Raw coverage data and HTML contexts remain available. Reporting uses the same
+global deadline and validates the check receipt before and after reports.
+
+The maintained command uses four pytest-xdist workers, grouping module functions
+and class methods together with `loadscope`. It disables scope reordering and
+worker restarts. Manifest order is preserved within each worker; global serial
+order is not guaranteed. The existing 600-second deadline includes the worker
+processes and combined production coverage. Focused measurements and direct
+runner checks remain serial by default; `--workers 2`, `--workers 3` or
+`--workers 4` selects parallel execution, and `--workers 1` can select serial
+maintained-suite execution.
+
 For everyday development, run the smallest affected selection through
 `tools/check.py`. Use `tools/coverage_suite.py --test <file-or-node>` when a new
 coverage measurement helps the decision. Focused measurements are partial suite
 evidence; neither command requires running the default bundle after every edit.
 See [the runner and measurement contract](testing.md#automated-check-runner).
+
+Ruff excludes the retained experiment sources under
+`prototypes/editable-vault-wayfinder/` from routine lint and format checks.
+Those files preserve historical experiments and their as-run evidence;
+production code, tests and tools remain within both checks.
 
 The historical exhaustive suite is retired by the user's 2026-10-17 decision.
 Older full-suite or fresh full BASE/GUI ticket requirements are withdrawn.
@@ -39,6 +60,14 @@ integrations. It also retains a compact independent preservation audit and
 checks of the measurement/runner infrastructure. These protect distinct
 assertions even when they add no production branches.
 
+The default runner controls check the selected checkout and duration output,
+failed pytest with a later dependency result, exact parameter evidence, and
+interrupted execution with its retained completed prefix. Source mutation,
+large output on both streams and inherited pytest-option controls remain
+focused checks when their runner protocol changes.
+Their test definitions and independent assertions remain available; omitting them
+from the default does not establish those outcomes afresh for every application edit.
+
 Three selected existing controls address the function-level review's first
 priorities: distinct resource filenames and original bytes after naming
 collisions, preservation of caller-owned replacement capture directories,
@@ -48,6 +77,8 @@ matrix. These checks protect observable migration and filesystem safety outcomes
 
 | Family | Default responsibility | Trigger for additional focused checks |
 | --- | --- | --- |
+| Editable-vault reconciliation | Exact-byte proposals, owner/facet identity, formats/onboarding, structures/memberships, absence/memory, binary/link safety, review/consent, selective refresh and saved-review resume at their public in-memory boundaries | Changed normalized fact, interpretation, decision dependency, history, codec or readiness: select its owning `tests/reconciliation` family plus actual affected consumers. Opaque and malformed inputs, partial evidence and unaffected retained decisions remain independent outcomes. |
+| Converter-owned vault history | Real admission/layout and initialization, exact source binding, latest reviewed Undo with later writing, binary recovery and prepared-before-intent retry, malformed journal/owned-graph refusal, matching-history repair, persisted selective refresh, and closed wire meanings | Changed capture, retained graph, publication journal, Undo, matching-history repair or ownership: select the owning application controls and affected consumers, including a real process or native check where required. The complete functional leaf assessments retain their explicit source applicability; the default does not repeat each leaf lifecycle. |
 | Core and rendering | Source-neutral planning, names, references, resources, tags, categories, strict facts and exact output examples | A changed planning rule, renderer, classification or resource obligation: select its owning public-module cases and affected output examples. |
 | BRZ source | Admission/read failures, exact reference spans, Markdown inserts, exclusion, and representative real conversion | Changed source predicates or formats: select their source-admission vectors. Add downstream checks for a distinct diagnostic, publication or output consequence. |
 | Local API source | Capture integrity, transport failures, payload roles, SVG/ICO/JPEG examples, external references, relationship discovery/reversal and qualified missing-TXT behavior | Changed HTTP, profile, codec, join or capture rule: select its positive, near-miss and tamper families at the source/session boundary. Codec-specific variant controls remain important even when their branches overlap. |
@@ -78,6 +109,35 @@ that an older family or matrix remains executable. Broaden for a failure, a new
 affected consumer, an unresolved concern or a named acceptance requirement.
 Budget additional ordinary checks together with the default bundle when both
 are required.
+
+The longer S2 module groups start early: latest Undo, repair, recovery and
+reviewed apply occupy the first four scopes. The short wire-contract group,
+persisted review refresh and BOM controls follow. The standard scheduler queues
+another scope only while a worker has at most two pending tests: the initial
+Undo scope receives the wire controls, repair receives refresh, recovery
+receives BOM, and the three-case apply scope initially receives no extra work.
+All selected cases remain present. This ordering addresses the late apply tail
+observed in the failed three-worker measurement; the fresh complete bundle must
+still establish its elapsed time and coverage.
+
+The SOURCE-only one-object repair control remains focused when payload roles,
+baseline projection or repair change. Larger selected repair sequences exercise
+the declared-object engine and target/copy/user-Git preservation, but do not
+repeat that control's source-only blob exclusion from the user index/HEAD,
+full-manifest equality and exact one-object delta. Zero-additional-move recovery,
+first-move failure versus uncertain discovery after a real move, empty-role
+metadata/review write failures, and extra legacy-CRLF/global-policy variants also
+retain their distinct focused assertions and original evidence. Their omission
+does not establish those outcomes afresh. Real interrupted-Undo process evidence
+retains its separately reviewed source applicability.
+
+Selection planning uses Coverage's report-normalized arcs and exact context
+filters. Removing the two native-move failure controls also omits one measured
+exception-fallback branch; this is an explicit focused responsibility, not zero
+lost coverage. Raw arc filters that disagree with report normalization cannot
+justify a selection. Failed measurement wrappers remain failed even when their
+pytest assertions passed. Only the fresh maintained bundle establishes its
+current coverage, actual GUI execution, all four checks and elapsed-time gate.
 
 ## How the selection changes
 
@@ -110,3 +170,53 @@ failures, source ownership/attachment combinations and some platform/UI errors.
 Use the generated missing-branch lists and the table above when those behaviors
 change. The 80% checkpoint does not establish every edge case, native appearance
 or a separately assigned source/user acceptance verdict.
+
+
+The maintained manifest includes the ten owning public reconciliation files:
+proposals, identity, formats, structure, memberships, absence, attachments,
+resolution, refresh and resume. Each is selected once. Their shared value setup
+and replay contexts overlap, while their independently expected byte/meaning,
+provenance and refusal outcomes remain distinct. They exercise bounded pure and
+in-memory outer/core compositions, without repeating the historical Workflow/CLI
+matrices. Focused measurements guide additions and actual consolidation.
+
+The final assembled S1 check uses this maintained default once at its frozen
+head, including all four checks, actual GUI, all-production branch coverage and
+the total 600-second budget. A separately assigned fresh refresh/resume check may
+use the matching runner directly; the default supplies line/branch/context/time
+measurement. Exact-snapshot receipt reuse across assigned candidate/integration
+or aggregate assessments requires explicit requirements and rationale, and never
+substitutes for required independent fresh execution or full manual scope. An
+unchanged head does not need duplicate broad execution for record bookkeeping.
+
+
+The maintained selection uses explicit cases from `test_vault_admission.py`:
+dirty/staged/Unicode user state, scoped storage choices, configured hooks,
+typed attributes, unavailable resource/access observations, denied parents and
+metadata aliases, plus representative LFS, foreign-lock, index-flag and external
+storage refusals. `test_vault_admission_layouts.py` remains selected once for
+actual linked worktrees, bare repositories, unmerged stages, SHA-256 and reftable
+qualification refusals. Their independent bytes/index/refs/config oracles remain
+explicit. The broader attribute, policy, index-version, access and process
+families remain focused checks when those contracts change. The focused #271
+assessment also owns the inward-import boundary and minimal Operations consumer;
+its original source/evidence binding remains explicit.
+
+Three pure modules, `test_selected_effects.py`, `test_reversal_absence.py` and
+`test_reversal_outputs.py`, add independently expected selected-byte, absence,
+ownership and link effects. The actual binary recovery control retains its
+result after a terminal-receipt failure. The persisted-review control captures
+real Git records, reloads them unready, reobserves current facts and retains
+choices across repeated memo saves. Editing one note invalidates only that
+choice; advancing the actual source/vault baseline invalidates the remaining
+stale choice. These controls compose storage with the existing canonical review.
+Full crash/restart, latest/interrupted Undo, repair and resource observations
+retain their separately qualified evidence and freshness limits; they are not
+replayed as a broad matrix in every default run.
+
+Measured focused fixture changes retain their independent outcomes: native Git
+CMD delegation reduced the old-format control from 3.56 to 0.87 seconds, the
+typed-matcher failure from 14.03 to 3.04 seconds and the actual file writer from
+15.14–15.82 to 5.71 seconds. The writer still changes the actual owned file once,
+retains its literal new bytes and compares other files/index/refs. These are
+focused observations, not a projected whole-S2 bundle qualification.

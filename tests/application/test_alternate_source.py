@@ -470,6 +470,9 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
             "brz2obsidian.vault_check.contracts",
             "brz2obsidian.application.wiring",
         },
+        "application/checkpoint_contracts.py": {
+            "brz2obsidian.application.vault_contracts",
+        },
         "application/checking.py": {
             "brz2obsidian.application.contracts",
             "brz2obsidian.vault_check",
@@ -490,6 +493,49 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
             "brz2obsidian.application.diagnostics",
             "brz2obsidian.application.wiring",
             "brz2obsidian.publication.filesystem",
+            "brz2obsidian.publication.source_payload",
+            "brz2obsidian.publication.vault_admission",
+            "brz2obsidian.publication.vault_apply",
+            "brz2obsidian.publication.vault_history",
+            "brz2obsidian.publication.vault_recovery",
+            "brz2obsidian.publication.vault_repair",
+            "brz2obsidian.publication.vault_undo",
+        },
+        # Vault publication roles consume pure reviewed contracts and inward
+        # interpretation; Operations owns their outer composition.
+        "publication/source_payload.py": {
+            "brz2obsidian.application.source_payload_contracts",
+        },
+        "publication/vault_admission.py": {
+            "brz2obsidian.application.checkpoint_contracts",
+            "brz2obsidian.application.vault_contracts",
+        },
+        "publication/vault_apply.py": {
+            "brz2obsidian.application.checkpoint_contracts",
+            "brz2obsidian.application.source_payload_contracts",
+            "brz2obsidian.application.vault_contracts",
+            "brz2obsidian.application.vault_update_contracts",
+            "brz2obsidian.core",
+        },
+        "publication/vault_history.py": {
+            "brz2obsidian.application.checkpoint_contracts",
+            "brz2obsidian.application.source_payload_contracts",
+            "brz2obsidian.application.vault_contracts",
+            "brz2obsidian.application.vault_update_contracts",
+            "brz2obsidian.core",
+        },
+        "publication/vault_recovery.py": {
+            "brz2obsidian.application.vault_recovery_contracts",
+            "brz2obsidian.application.vault_update_contracts",
+            "brz2obsidian.core",
+            "brz2obsidian.obsidian",
+        },
+        "publication/vault_repair.py": {
+            "brz2obsidian.application.vault_repair_contracts",
+        },
+        "publication/vault_undo.py": {
+            "brz2obsidian.application.vault_undo_contracts",
+            "brz2obsidian.core",
         },
         "application/protocol.py": {"brz2obsidian.application.contracts"},
         "application/runner.py": {
@@ -499,6 +545,9 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
         "application/transport.py": {
             "brz2obsidian.application.contracts",
             "brz2obsidian.application.protocol",
+        },
+        "application/vault_update_contracts.py": {
+            "brz2obsidian.application.checkpoint_contracts",
         },
     }
     for area, permitted in allowed.items():

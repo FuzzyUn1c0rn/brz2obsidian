@@ -1,0 +1,36 @@
+<!doctype html>
+<!-- Three standalone UI variants of the Windows import/update task sheet. Synthetic data and in-memory mutations only. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>brz2obsidian · Editable vault review prototype</title>
+  <link rel="stylesheet" href="prototype.css">
+</head>
+<body>
+  <div class="demo-tools">
+    <strong>GUI PROTOTYPE</strong><span>Synthetic data · no vault or repository writes</span>
+    <label>Scenario <select id="scenario" aria-label="Prototype scenario">
+      <option value="review">Large update · unresolved review</option>
+      <option value="select">Choose archive and vault</option>
+      <option value="onboard">Older vault · absent history</option>
+      <option value="stale">Reopen saved review · vault changed</option>
+      <option value="ready">Resolved review · before applying</option>
+      <option value="recovery">Interrupted update · later edit</option>
+      <option value="complete">Completed update · review Undo</option>
+      <option value="support">Support check · history unavailable</option>
+    </select></label>
+    <button id="reset">Reset scenario</button>
+  </div>
+  <main id="app"></main>
+  <aside id="state-panel" class="state-panel" aria-label="Visible prototype state"></aside>
+  <div id="switcher" class="switcher" aria-label="Prototype variant switcher">
+    <button id="previous" aria-label="Previous variant">←</button>
+    <span id="variant-name"></span>
+    <button id="next" aria-label="Next variant">→</button>
+  </div>
+  <div id="notice" role="status" aria-live="polite"></div>
+  <dialog id="support-dialog"></dialog>
+  <script src="prototype.js"></script>
+</body>
+</html>

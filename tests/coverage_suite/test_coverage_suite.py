@@ -1,5 +1,6 @@
 """Exercise maintained coverage orchestration through its public command."""
 
+import importlib.metadata
 import json
 import shutil
 import subprocess
@@ -19,7 +20,7 @@ def coverage_checkout(tmp_path):
     pytest.importorskip("PySide6")
     root = tmp_path / "coverage example"
     (root / "tools").mkdir(parents=True)
-    for name in ("check.py", "check_pytest.py"):
+    for name in ("check.py", "check_pytest.py", "coverage_report.py"):
         shutil.copy2(ROOT / "tools" / name, root / "tools" / name)
     for package, yes, no in (
         ("brz2obsidian", "yes", "no"),
@@ -33,25 +34,60 @@ def coverage_checkout(tmp_path):
             encoding="utf-8",
         )
     (root / "tests").mkdir()
+    (root / "tmp").mkdir()
     (root / "tests" / "test_decisions.py").write_text(
         (
-            "import pytest\n\n"
+            "import os\nfrom pathlib import Path\n\n"
             "from brz2obsidian.decisions import choose\n\n\n"
-            "def test_yes():\n    assert choose(True) == 'yes'\n\n\n"
-            "def test_all_choices():\n"
-            "    from brz2obsidian_ui.decisions import choose as ui_choose\n\n"
+            "def test_yes():\n    assert choose(True) == 'yes'\n"
+            "    Path('tmp/yes-pid').write_text(str(os.getpid()))\n"
+        ).replace("'", '"'),
+        encoding="utf-8",
+    )
+    (root / "tests" / "test_other.py").write_text(
+        (
+            "import os\nfrom pathlib import Path\n\n"
+            "from brz2obsidian.decisions import choose\n\n\n"
+            "def test_no():\n"
             "    assert choose(False) == 'no'\n"
-            "    assert ui_choose(True) == 'open'\n"
-            "    assert ui_choose(False) == 'closed'\n\n\n"
+            "    Path('tmp/other-pid').write_text(str(os.getpid()))\n"
+        ).replace("'", '"'),
+        encoding="utf-8",
+    )
+    (root / "tests" / "test_ui.py").write_text(
+        (
+            "import os\nfrom pathlib import Path\n\n"
+            "from brz2obsidian_ui.decisions import choose\n\n\n"
+            "def test_ui_choices():\n"
+            "    assert choose(True) == 'open'\n"
+            "    assert choose(False) == 'closed'\n"
+            "    Path('tmp/ui-pid').write_text(str(os.getpid()))\n"
+        ).replace("'", '"'),
+        encoding="utf-8",
+    )
+    (root / "tests" / "test_gui.py").write_text(
+        (
+            "import os\nfrom pathlib import Path\n\nimport pytest\n\n\n"
             "@pytest.mark.gui\ndef test_gui():\n"
             "    from PySide6.QtWidgets import QApplication\n\n"
             "    app = QApplication.instance() or QApplication([])\n"
             "    assert app.platformName() == 'offscreen'\n"
+            "    Path('tmp/gui-pid').write_text(str(os.getpid()))\n"
         ).replace("'", '"'),
         encoding="utf-8",
     )
     (root / "tools" / "test-suite.json").write_text(
-        json.dumps({"schema_version": 1, "selectors": ["tests/test_decisions.py"]}),
+        json.dumps(
+            {
+                "schema_version": 1,
+                "selectors": [
+                    "tests/test_decisions.py",
+                    "tests/test_other.py",
+                    "tests/test_gui.py",
+                    "tests/test_ui.py",
+                ],
+            }
+        ),
         encoding="utf-8",
     )
     (root / "pyproject.toml").write_text(
@@ -106,18 +142,65 @@ def summary(root):
 def test_default_command_validates_four_checks_and_reports_all_production(
     coverage_checkout,
 ):
+    decisions = coverage_checkout / "src" / "brz2obsidian" / "decisions.py"
+    with decisions.open("a", encoding="utf-8") as handle:
+        handle.write(
+            "\n\nclass Decision:\n    def choose(self, value):\n        return choose(value)\n"
+        )
+    (decisions.parent / "unexecuted.py").write_text("answer = 42\n", encoding="utf-8")
+    tests = coverage_checkout / "tests" / "test_decisions.py"
+    tests.write_text(
+        tests.read_text(encoding="utf-8").replace(
+            '    assert choose(True) == "yes"\n',
+            '    assert choose(True) == "yes"\n'
+            "    from brz2obsidian.decisions import Decision\n\n"
+            '    assert Decision().choose(True) == "yes"\n',
+        ),
+        encoding="utf-8",
+    )
     result = invoke(coverage_checkout)
     assert result.returncode == 0, result.stdout + result.stderr
     report, output = summary(coverage_checkout)
     assert report["status"] == "passed"
     assert report["measurement"] == "default suite"
-    assert report["lines"] == {"covered": 8, "total": 8, "percent": 100.0}
+    assert report["lines"] == {"covered": 11, "total": 12, "percent": 100 * 11 / 12}
     assert report["branches"] == {"covered": 4, "total": 4, "percent": 100.0}
-    assert report["production_files"] == 4
+    assert report["production_files"] == 5
     assert report["elapsed_seconds"] < 60
     assert 0 < report["pytest_seconds"] < report["runner_seconds"]
-    assert report["test_counts"]["passed"] == 3
+    assert report["test_counts"]["passed"] == 4
+    assert report["test_counts"]["collected"] == 4
     assert report["test_counts"]["gui_executed"] == 1
+    assert report["test_counts"]["executed_nodes"] == [
+        "tests/test_decisions.py::test_yes",
+        "tests/test_gui.py::test_gui",
+        "tests/test_other.py::test_no",
+        "tests/test_ui.py::test_ui_choices",
+    ]
+    assert (
+        len(
+            {
+                (coverage_checkout / "tmp" / name).read_text()
+                for name in ("yes-pid", "other-pid", "gui-pid", "ui-pid")
+            }
+        )
+        == 4
+    )
+    receipt = json.loads(Path(report["receipt"]).read_text(encoding="utf-8"))
+    selected = next(row for row in receipt["checks"] if row["id"] == "pytest")
+    assert selected["selection"]["workers"] == 4
+    parallel = selected["argv"].index("-n")
+    assert selected["argv"][parallel : parallel + 5] == [
+        "-n",
+        "4",
+        "--dist=loadscope",
+        "--no-loadscope-reorder",
+        "--max-worker-restart=0",
+    ]
+    for package in ("pytest-xdist", "execnet"):
+        assert receipt["interpreter"]["tools"][package] == importlib.metadata.version(
+            package
+        )
     requirements = json.loads(
         (output / "requirements.json").read_text(encoding="utf-8")
     )
@@ -131,6 +214,29 @@ def test_default_command_validates_four_checks_and_reports_all_production(
     assert "VALID:" in (output / "validate.log").read_text(encoding="utf-8")
     assert any("test_yes" in row["context"] for row in report["contexts"])
     assert (output / "html" / "index.html").is_file()
+    raw = json.loads((output / "coverage.json").read_text(encoding="utf-8"))
+    files = {Path(name).as_posix(): details for name, details in raw["files"].items()}
+    decision = files["src/brz2obsidian/decisions.py"]
+    assert raw["meta"]["show_contexts"] is True
+    assert raw["meta"]["context_scope"] == "file"
+    assert decision["contexts"]["3"] == ["test_decisions.test_yes"]
+    assert decision["contexts"]["4"] == ["test_other.test_no"]
+    assert decision["contexts"]["9"] == ["test_decisions.test_yes"]
+    assert decision["contexts"]["1"] == [""]
+    assert sorted(decision["executed_branches"]) == [[2, 3], [2, 4]]
+    assert decision["missing_branches"] == []
+    ui_decision = files["src/brz2obsidian_ui/decisions.py"]
+    assert ui_decision["contexts"]["3"] == ["test_ui.test_ui_choices"]
+    assert ui_decision["contexts"]["4"] == ["test_ui.test_ui_choices"]
+    assert decision["functions"]["choose"]["summary"]["covered_branches"] == 2
+    assert decision["functions"]["Decision.choose"]["executed_lines"] == [9]
+    assert decision["classes"]["Decision"]["executed_lines"] == [9]
+    assert decision["classes"]["Decision"]["summary"]["num_statements"] == 1
+    for regions in (decision["functions"], decision["classes"]):
+        assert all("contexts" not in region for region in regions.values())
+    unexecuted = files["src/brz2obsidian/unexecuted.py"]
+    assert unexecuted["contexts"] == {} and unexecuted["executed_lines"] == []
+    assert unexecuted["missing_lines"] == [1]
 
 
 def test_focused_measurement_uses_all_source_denominator_and_rejects_threshold(
@@ -151,6 +257,16 @@ def test_focused_measurement_uses_all_source_denominator_and_rejects_threshold(
     assert report["measurement"] == "focused selection; partial suite evidence"
     assert report["branches"] == {"covered": 1, "total": 4, "percent": 25.0}
     assert report["lines"] == {"covered": 3, "total": 8, "percent": 37.5}
+    receipt = json.loads(Path(report["receipt"]).read_text(encoding="utf-8"))
+    selected = receipt["checks"][0]
+    assert set(selected["selection"]) == {
+        "scope",
+        "selectors",
+        "keyword",
+        "marker",
+        "require_gui",
+    }
+    assert "-n" not in selected["argv"]
     assert "branch threshold" in report["error"]
     requirements = json.loads(
         (output / "requirements.json").read_text(encoding="utf-8")

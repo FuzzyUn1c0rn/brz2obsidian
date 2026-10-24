@@ -33,6 +33,7 @@ def arguments():
     parser.add_argument("--manifest", type=Path, default=Path("tools/test-suite.json"))
     parser.add_argument("--test", action="append", default=[])
     parser.add_argument("--require-gui", action="store_true")
+    parser.add_argument("--workers", type=int, choices=(1, 2, 3, 4))
     parser.add_argument("--check", action="append", choices=CHECKS)
     parser.add_argument("--timeout", type=float, default=600)
     parser.add_argument("--min-branch", type=float)
@@ -216,6 +217,7 @@ def main():
             else (None if args.test else 80)
         )
         result["minimum_branch_percent"] = threshold
+        workers = args.workers if args.workers is not None else (1 if args.test else 4)
         output.mkdir(parents=True, exist_ok=False)
         requirement = {
             "id": "pytest",
@@ -262,6 +264,8 @@ def main():
             str(python),
             "--environment",
             "gui",
+            "--workers",
+            str(workers),
         ]
         for check in checks:
             command += ["--check", check]
@@ -315,18 +319,35 @@ def main():
         )
         result["test_counts"] = pytest["counts"]
         coverage = [str(python), "-m", "coverage"]
-        for name, extra in (
-            ("combine", ["--keep", str(output)]),
-            ("json", ["--show-contexts", "-o", str(output / "coverage.json")]),
-            ("html", ["-d", str(output / "html")]),
+        for name, command in (
+            (
+                "combine",
+                [*coverage, "combine", "--rcfile", str(config), "--keep", str(output)],
+            ),
+            (
+                "json",
+                [
+                    str(python),
+                    str(root / "tools" / "coverage_report.py"),
+                    "--rcfile",
+                    str(config),
+                    "--output",
+                    str(output / "coverage.json"),
+                ],
+            ),
+            (
+                "html",
+                [
+                    *coverage,
+                    "html",
+                    "--rcfile",
+                    str(config),
+                    "-d",
+                    str(output / "html"),
+                ],
+            ),
         ):
-            execute(
-                [*coverage, name, "--rcfile", str(config), *extra],
-                root,
-                output,
-                name,
-                deadline,
-            )
+            execute(command, root, output, name, deadline)
         result.update(
             metrics(
                 json.loads((output / "coverage.json").read_text(encoding="utf-8")), root

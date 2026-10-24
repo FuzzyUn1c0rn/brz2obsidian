@@ -52,10 +52,139 @@ from brz2obsidian.publication.filesystem import preflight_destination
 class Operations:
     """Explicitly injected migration and checker composition for headless callers."""
 
-    def __init__(self, workflow=None, *, checker=None, credentials=None):
+    def __init__(
+        self, workflow=None, *, checker=None, credentials=None, vault_executor=None
+    ):
         self.workflow = workflow
         self.checker = checker
         self.credentials = credentials
+        self.vault_executor = vault_executor
+
+    def inspect_vault(
+        self,
+        vault: Path | str,
+        *,
+        subjects=(),
+        git_executable: Path | str | None = None,
+    ):
+        """Read-only current Git, policy and authored-inventory observations."""
+        from brz2obsidian.publication.vault_admission import inspect_vault
+
+        return inspect_vault(vault, subjects=subjects, git_executable=git_executable)
+
+    def initialize_vault(self, vault, **kwargs):
+        """Initialize only the currently reviewed root, then rediscover policy."""
+        from brz2obsidian.publication.vault_history import initialize_vault
+
+        return initialize_vault(vault, **kwargs)
+
+    def capture_checkpoint(self, vault, source, **kwargs):
+        """Capture exact current source/vault bytes in converter-owned Git."""
+        from brz2obsidian.publication.vault_history import capture_checkpoint
+
+        return capture_checkpoint(vault, source, **kwargs)
+
+    def observe_reviewed_source(self, source, review):
+        """Bind the complete converted payload to this prepared S1 review."""
+        from brz2obsidian.publication.source_payload import observe_reviewed_source
+
+        return observe_reviewed_source(source, review)
+
+    def inspect_history(self, vault, **kwargs):
+        """Compose fresh admission with validated owned history or onboarding absence."""
+        from brz2obsidian.publication.vault_history import inspect_history
+
+        return inspect_history(vault, **kwargs)
+
+    def read_checkpoint(self, vault, **kwargs):
+        """Validate and read current converter-owned checkpoint history."""
+        from brz2obsidian.publication.vault_history import read_checkpoint
+
+        return read_checkpoint(vault, **kwargs)
+
+    def validate_history_copy(self, vault, copy):
+        """Check a supplied local copy against independent target history."""
+        from brz2obsidian.publication.vault_repair import validate_history_copy
+
+        return validate_history_copy(vault, copy)
+
+    def prepare_history_repair(self, vault, copy, validation):
+        """Recheck a matching-history repair proposal without mutation."""
+        from brz2obsidian.publication.vault_repair import prepare_history_repair
+
+        return prepare_history_repair(vault, copy, validation)
+
+    def execute_history_repair(self, vault, copy, preparation):
+        """Repair exact missing or damaged converter-owned Git payloads."""
+        from brz2obsidian.publication.vault_repair import execute_history_repair
+
+        return execute_history_repair(vault, copy, preparation)
+
+    def apply_reviewed_update(self, vault, source, **kwargs):
+        """Apply one whole current S1 review through owned existing-vault history."""
+        from brz2obsidian.publication.vault_apply import apply_reviewed_update
+
+        return apply_reviewed_update(
+            vault, source, executor=self.vault_executor, **kwargs
+        )
+
+    def inspect_update_status(self, vault):
+        """Read authoritative owned intent or terminal receipt after restart."""
+        from brz2obsidian.publication.vault_apply import inspect_update_status
+
+        return inspect_update_status(vault)
+
+    def prepare_recovery(self, vault, *, direction=None):
+        """Read a retained incomplete operation and offer its first direction."""
+        from brz2obsidian.publication.vault_recovery import prepare_recovery
+
+        return prepare_recovery(vault, direction=direction)
+
+    def refresh_recovery(self, vault, preparation):
+        """Reobserve a stopped operation and invalidate changed S1 decisions."""
+        from brz2obsidian.publication.vault_recovery import refresh_recovery
+
+        return refresh_recovery(vault, preparation)
+
+    def resolve_recovery(self, vault, preparation, action):
+        """Record an explicit decision against current recovery review facts."""
+        from brz2obsidian.publication.vault_recovery import resolve_recovery
+
+        return resolve_recovery(vault, preparation, action)
+
+    def execute_recovery(self, vault, preparation, *, cancel=None):
+        """Publish one retained reviewed recovery direction and its exact result."""
+        from brz2obsidian.publication.vault_recovery import execute_recovery
+
+        return execute_recovery(
+            vault, preparation, cancel=cancel, executor=self.vault_executor
+        )
+
+    def prepare_undo(self, vault, *, previous=None):
+        """Inspect latest eligibility and prepare or refresh its whole Undo review."""
+        from brz2obsidian.publication.vault_undo import prepare_undo
+
+        return prepare_undo(vault, previous=previous)
+
+    def resolve_undo(self, vault, preparation, action):
+        """Record one decision against the current latest-Undo facts."""
+        from brz2obsidian.publication.vault_undo import resolve_undo
+
+        return resolve_undo(vault, preparation, action)
+
+    def execute_undo(self, vault, preparation, *, cancel=None):
+        """Publish an eligible reviewed Undo through the existing operation executor."""
+        from brz2obsidian.publication.vault_undo import execute_undo
+
+        return execute_undo(
+            vault, preparation, cancel=cancel, executor=self.vault_executor
+        )
+
+    def read_update_details(self, vault, *, offset=0, limit=100):
+        """Page safe before/result comparisons from validated owned intent."""
+        from brz2obsidian.publication.vault_apply import read_update_details
+
+        return read_update_details(vault, offset=offset, limit=limit)
 
     def _selected_workflow(self, selection):
         if isinstance(selection, LocalApiSourceSelection):

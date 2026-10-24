@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -109,13 +110,39 @@ def pytest_requirement(scope="full", selectors=None, **extra):
 
 def test_focused_check_uses_selected_checkout_and_publishes_valid_receipt(checkout):
     original_path = os.environ.get("PYTHONPATH")
+    selected = checkout / "tests" / "test_selected.py"
+    selected.write_text(
+        selected.read_text() + "    import time\n    time.sleep(0.02)\n",
+        encoding="utf-8",
+    )
+    (checkout / "tests" / "test_excluded.py").write_text(
+        "def test_excluded():\n    raise AssertionError('excluded case executed')\n",
+        encoding="utf-8",
+    )
     result, path, receipt = run(
         checkout, "--check", "pytest", "--test", "tests/test_selected.py"
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "1 passed" in result.stdout
+    assert re.search(
+        r"\d+\.\d+s call\s+tests/test_selected.py::test_selected", result.stdout
+    )
+    assert "excluded case executed" not in result.stdout
     assert receipt["aggregate"] == "passed"
     assert receipt["checks"][0]["counts"]["passed"] == 1
+    assert receipt["checks"][0]["counts"]["executed_nodes"] == [
+        "tests/test_selected.py::test_selected"
+    ]
+    timings = [
+        json.loads(line)
+        for line in (path.parent / "pytest-timings.jsonl").read_text().splitlines()
+    ]
+    assert [row["nodeid"] for row in timings] == [
+        "tests/test_selected.py::test_selected"
+    ] * 3
+    assert [row["when"] for row in timings] == ["setup", "call", "teardown"]
+    assert all(row["outcome"] == "passed" for row in timings)
+    assert timings[1]["duration"] > 0
     expected = requirements(
         checkout,
         [pytest_requirement("focused", ["tests/test_selected.py"])],
@@ -207,7 +234,9 @@ def test_interrupted_execution_retains_partial_identity_and_original_output(chec
     import signal
 
     (checkout / "tests" / "test_selected.py").write_text(
-        "from pathlib import Path\nimport time\ndef test_wait():\n    Path('tmp/started').write_text('started')\n    time.sleep(30)\n"
+        "from pathlib import Path\nimport os\nimport time\n"
+        "def test_completed():\n    time.sleep(0.01)\n"
+        "def test_wait():\n    Path('tmp/started').write_text(str(os.getpid()))\n    time.sleep(30)\n"
     )
     argv = [
         sys.executable,
@@ -223,6 +252,8 @@ def test_interrupted_execution_retains_partial_identity_and_original_output(chec
         "tests/test_selected.py",
         "--check",
         "dependency",
+        "--workers",
+        "2",
     ]
     process = subprocess.Popen(
         argv,
@@ -230,16 +261,58 @@ def test_interrupted_execution_retains_partial_identity_and_original_output(chec
         stderr=subprocess.PIPE,
         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
     )
+
+    def ready_to_interrupt():
+        if not (checkout / "tmp" / "started").exists():
+            return False
+        logs = list((checkout / "tmp" / "checks").glob("*/pytest-timings.jsonl"))
+        if not logs:
+            return False
+        text = logs[0].read_text(encoding="utf-8")
+        lines = text.splitlines()
+        reports = []
+        for index, line in enumerate(lines):
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                if index == len(lines) - 1 and not text.endswith("\n"):
+                    break
+                raise
+            if row["nodeid"] == "tests/test_selected.py::test_completed":
+                reports.append(row["when"])
+        return reports == ["setup", "call", "teardown"]
+
     deadline = time.monotonic() + 20
     while (
-        not (checkout / "tmp" / "started").exists()
+        not ready_to_interrupt()
         and time.monotonic() < deadline
         and process.poll() is None
     ):
         time.sleep(0.05)
-    assert (checkout / "tmp" / "started").exists()
-    process.send_signal(signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGTERM)
-    stdout, stderr = process.communicate(timeout=15)
+    assert ready_to_interrupt()
+    handle = None
+    if os.name == "nt":
+        import ctypes
+
+        kernel = ctypes.windll.kernel32
+        kernel.OpenProcess.argtypes = (ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong)
+        kernel.OpenProcess.restype = ctypes.c_void_p
+        kernel.WaitForSingleObject.argtypes = (ctypes.c_void_p, ctypes.c_ulong)
+        kernel.WaitForSingleObject.restype = ctypes.c_ulong
+        kernel.CloseHandle.argtypes = (ctypes.c_void_p,)
+        pid = int((checkout / "tmp" / "started").read_text())
+        handle = kernel.OpenProcess(0x00100000, 0, pid)
+        assert handle, "The waiting worker must be alive before interruption"
+    try:
+        process.send_signal(
+            signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGTERM
+        )
+        stdout, stderr = process.communicate(timeout=15)
+        if handle:
+            assert kernel.WaitForSingleObject(handle, 2000) == 0
+    finally:
+        if handle:
+            kernel.CloseHandle(handle)
     assert process.returncode == 3, (stdout + stderr).decode("utf-8", errors="replace")
     paths = list((checkout / "tmp" / "checks").glob("*/receipt.json"))
     assert len(paths) == 1
@@ -248,6 +321,18 @@ def test_interrupted_execution_retains_partial_identity_and_original_output(chec
     assert receipt["checks"][0]["status"] == "interrupted"
     assert receipt["checks"][1]["status"] == "not_run"
     assert (paths[0].parent / "partial.json").is_file()
+    timings = [
+        json.loads(line)
+        for line in (paths[0].parent / "pytest-timings.jsonl").read_text().splitlines()
+    ]
+    completed = [
+        row
+        for row in timings
+        if row["nodeid"] == "tests/test_selected.py::test_completed"
+    ]
+    assert [row["when"] for row in completed] == ["setup", "call", "teardown"]
+    assert all(row["outcome"] == "passed" for row in completed)
+    assert completed[1]["duration"] > 0
 
 
 def test_failed_pytest_keeps_original_exception_and_later_dependency_pass(checkout):
@@ -255,7 +340,9 @@ def test_failed_pytest_keeps_original_exception_and_later_dependency_pass(checko
         "def test_failure():\n    raise OSError(13, 'original é permission diagnostic')\n",
         encoding="utf-8",
     )
-    result, path, receipt = run(checkout, "--check", "pytest", "--check", "dependency")
+    result, path, receipt = run(
+        checkout, "--check", "pytest", "--check", "dependency", "--workers", "2"
+    )
     assert result.returncode == 1
     assert receipt["aggregate"] == "failed"
     assert [row["status"] for row in receipt["checks"]] == ["failed", "passed"]
@@ -295,6 +382,8 @@ def test_inherited_pytest_options_cannot_narrow_declared_selection(
         "PYTEST_ADDOPTS", "-k nonexistent_test --basetemp=tmp/unsafe-shared"
     )
     monkeypatch.setenv("PYTEST_PLUGINS", "missing_injected_plugin")
+    monkeypatch.setenv("PYTEST_XDIST_WORKER", "gw9")
+    monkeypatch.setenv("PYTEST_XDIST_WORKER_COUNT", "2")
     result, _, receipt = run(
         checkout, "--check", "pytest", "--test", "tests/test_selected.py"
     )

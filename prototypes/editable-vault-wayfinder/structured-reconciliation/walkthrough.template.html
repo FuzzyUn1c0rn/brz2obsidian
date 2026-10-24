@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Structured note reconciliation — evidence replay</title>
+<style>
+:root{font:16px/1.5 system-ui;color:#203443;background:#f5f7fa}body{margin:auto;max-width:1180px;padding:32px}h1{font-size:30px}h2{font-size:19px;margin-top:0}button{padding:9px 12px;border:1px solid #a5b8c5;border-radius:6px;background:white;color:inherit;cursor:pointer}button:focus-visible{outline:3px solid #177a9f;outline-offset:3px}button[aria-selected=true]{background:#216b8b;color:white}button:disabled{opacity:.45;cursor:default}.tabs{display:flex;gap:7px;flex-wrap:wrap}.panel{padding:20px;background:white;border:1px solid #cad5df;border-radius:8px;margin:20px 0}.state{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.versions{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}pre{font:13px/1.5 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;max-height:450px;overflow:auto;background:#f6f8fa;padding:12px}.label{font-size:13px;color:#4e6577}.notice{border-left:4px solid #216b8b;padding-left:14px}@media(max-width:750px){.versions,.state{grid-template-columns:1fr}body{padding:16px}}
+</style>
+<h1>Can these note edits be proposed together?</h1>
+<p>This disposable logic prototype replays bounded observations from actual converter-generated notes. Explore independent edits, conflicts, moved identities and unknown original bytes. The Python experiment produced the observations below; this page replays them in memory and performs no vault or Git operation.</p>
+<p class="notice">A compatible proposal still needs whole-update review. The duplicate-property example shows why a clean Git text merge alone cannot establish meaning. Unsupported structures stay unresolved with the exact vault bytes retained.</p>
+<div class="tabs" id="tabs" role="tablist" aria-label="Guided cases"></div>
+<section class="panel"><h2 id="title"></h2><p id="question"></p><div class="state"><div><div class="label">Observed decision</div><strong id="outcome"></strong></div><div><div class="label">Review state</div><strong id="review"></strong></div><div><div class="label">Current vault path</div><strong id="path"></strong></div></div><p id="reason"></p><p id="expectation"></p></section>
+<section class="panel"><h2>Free play</h2><div class="tabs"><button data-action="compare">Inspect the three versions</button><button data-action="propose">Show observed proposal</button><button data-action="keep">Keep the vault version</button><button data-action="later">Add later writing</button><button data-action="reset">Reset this case</button></div><p id="event" aria-live="polite"></p></section>
+<section class="panel"><h2>Guided walkthrough</h2><p id="guide"></p><div class="tabs"><button id="step1" data-action="compare">1 · Compare versions</button><button id="step2" data-action="propose">2 · Inspect decision</button><button id="step3" data-action="later">3 · Change affected bytes</button></div></section>
+<p id="details" class="notice"></p>
+<section class="versions"><article class="panel"><h2 id="base-title">Original generated note</h2><pre id="base"></pre></article><article class="panel"><h2>Current vault note</h2><pre id="vault"></pre></article><article class="panel"><h2 id="incoming-title">Incoming generated note</h2><pre id="incoming"></pre></article><article class="panel"><h2>Observed result / retained vault</h2><pre id="result"></pre></article><article class="panel" id="candidate-panel" hidden><h2>Rejected Git text-merge candidate — never published</h2><pre id="candidate"></pre></article></section>
+<p id="binding"></p>
+<script>
+const evidence = __EVIDENCE__;
+// Pure in-memory replay reducer. It does not replace experiment.py's merge decision.
+function initial(index=0){return{index,step:0,resolution:null,later:false,event:'Select a guided step or try the free-play actions.'}}
+function reduce(state,action){
+ if(action.type==='select')return initial(action.index);
+ if(action.type==='reset')return initial(state.index);
+ if(action.type==='compare')return{...state,step:1,event:'Compare original, current vault and incoming bytes. No files changed.'};
+ if(action.type==='propose')return{...state,step:2,event:'The displayed result is the recorded experiment observation. Unresolved cases retain exact vault bytes.'};
+ if(action.type==='keep')return{...state,resolution:'keep-vault',step:2,event:'Illustrative explicit choice: keep the reviewed vault bytes for this incoming source version. This page does not persist that choice.'};
+ if(action.type==='later')return{...state,later:true,step:3,event:'Later writing invalidates the illustrative review. Preserve it and review the affected change again.'};
+ return state;
+}
+let state=initial();
+const el=id=>document.getElementById(id);
+function show(){
+ const c=evidence.cases[state.index];
+ el('tabs').replaceChildren(...evidence.cases.map((v,i)=>{const b=document.createElement('button');b.textContent=v.id;b.setAttribute('role','tab');b.setAttribute('aria-selected',String(i===state.index));b.onclick=()=>dispatch({type:'select',index:i});return b}));
+ el('title').textContent=c.id+' · '+c.scenario;
+ el('question').textContent='Expected before execution: '+c.expected;
+ el('outcome').textContent=c.status;
+ el('review').textContent=state.later?'Stale — renewed review needed':state.resolution?'Explicit illustrative choice':'Whole-update review still required';
+ el('path').textContent=c.path||'Affected item / explicit identity resolution';
+ el('reason').textContent=c.reason||'Independent compatible changes can be proposed. This observed subset does not establish arbitrary Markdown merge support.';
+ el('expectation').textContent='Recorded semantic checks: '+(c.pass?'PASS':'FAIL')+' · Native link meaning is documented separately in README.md.';
+ el('event').textContent=state.event;
+ el('guide').textContent=c.status.includes('unresolved')?'Inspect both edits, then observe preservation and stale-review protection. No side silently wins.':'Inspect the independent changes, inspect the proposal, then change affected bytes and observe stale review.';
+ el('step2').disabled=state.step<1;el('step3').disabled=state.step<2;
+ el('details').textContent=c.details||'';el('details').hidden=!c.details;
+ el('base-title').textContent=c.baseTitle||'Original generated note';
+ el('incoming-title').textContent=c.incomingTitle||'Incoming generated note';
+ el('base').textContent=c.base||(c.status==='onboarding-review'?'No trustworthy original bytes available.':'Original-note detail is not embedded in this replay; see the recorded evidence.');
+ el('vault').textContent=(c.vault||(['keep-deleted','restoration-review'].includes(c.status)?'Locally deleted; the note stays deleted pending any required restoration review.':'Current-note detail is not embedded in this replay; see the recorded evidence.'))+(state.later?'\n\nLater authored writing.\n':'');
+ el('incoming').textContent=c.incoming||(c.status==='source-absent-preserved'?'Source item absent; the current note and resources are retained.':'Incoming-note detail is not embedded in this replay; see the recorded evidence.');
+ el('result').textContent=state.resolution==='keep-vault'?el('vault').textContent:c.result||'No publication. Review remains required.';
+ el('candidate-panel').hidden=!c.candidate;el('candidate').textContent=c.candidate||'';
+ el('binding').textContent='Replay bound to '+evidence.run+' · experiment SHA-256 '+evidence.sha+'. No browser persistence, publication or production update feature.';
+}
+function dispatch(action){state=reduce(state,action);show()}
+document.querySelectorAll('[data-action]').forEach(b=>b.onclick=()=>dispatch({type:b.dataset.action}));show();
+</script></html>
