@@ -39,15 +39,16 @@ SAFE_FINDINGS = {
 
 
 def finding_for_check(issue, outcome):
+    path = None if issue.artifact == "." else issue.artifact
     message = SAFE_FINDINGS[issue.code]
-    if issue.code == "read_failure" and issue.artifact in (None, "."):
+    if issue.code == "read_failure" and path is None:
         message = "Couldn’t read the vault. Check folder access."
     return Finding(
         code=issue.code,
         severity="error" if outcome == "failed" else "warning",
         message=message,
         field="vault",
-        path=issue.artifact,
+        path=path,
     )
 
 

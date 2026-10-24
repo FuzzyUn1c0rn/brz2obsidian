@@ -312,14 +312,20 @@ def test_checker_findings_use_approved_concise_copy_and_keep_detailed_guidance(
 
 
 @pytest.mark.parametrize(
-    "artifact,message",
+    "artifact,message,expected_path",
     [
-        (None, "Couldn’t read the vault. Check folder access."),
-        (".", "Couldn’t read the vault. Check folder access."),
-        ("Broken.md", "Couldn’t read this file. Check access and text encoding."),
+        (None, "Couldn’t read the vault. Check folder access.", None),
+        (".", "Couldn’t read the vault. Check folder access.", None),
+        (
+            "Broken.md",
+            "Couldn’t read this file. Check access and text encoding.",
+            "Broken.md",
+        ),
     ],
 )
-def test_checker_distinguishes_root_and_file_read_failures(tmp_path, artifact, message):
+def test_checker_distinguishes_root_and_file_read_failures(
+    tmp_path, artifact, message, expected_path
+):
     from brz2obsidian.vault_check.contracts import (
         VaultCheckCounts,
         VaultCheckIdentity,
@@ -343,7 +349,7 @@ def test_checker_distinguishes_root_and_file_read_failures(tmp_path, artifact, m
     result = Operations(checker=lambda _path: raw).check_vault(tmp_path)
 
     assert result.findings[0].message == message
-    assert result.findings[0].path == artifact
+    assert result.findings[0].path == expected_path
     assert (
         "Check the path, permissions and text encoding, then check again."
         in result.diagnostic_text
