@@ -84,7 +84,7 @@ def _ordinary_streams(path):
         kernel.FindClose(handle)
 
 
-def _windows_security(path, *, copy_to=None):
+def _windows_security(path, *, copy_to=None, _include_control=False):
     advapi = ctypes.WinDLL("advapi32", use_last_error=True)
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
     get = advapi.GetNamedSecurityInfoW
@@ -135,16 +135,33 @@ def _windows_security(path, *, copy_to=None):
         if not get_control(descriptor, ctypes.byref(control), ctypes.byref(revision)):
             raise ctypes.WinError(ctypes.get_last_error())
         observed = ctypes.wstring_at(text)
+        expected = observed, control.value
         if copy_to is not None:
-            if _windows_security(copy_to) == observed:
-                return observed
+            if _windows_security(copy_to, _include_control=True) == expected:
+                return expected if _include_control else observed
             protection = 0x80000000 if control.value & 0x1000 else 0x20000000
             code = set_info(str(copy_to), 1, 4 | protection, None, None, dacl, None)
             if code:
                 raise OSError(code, "File DACL could not be retained")
-            if _windows_security(copy_to) != observed:
+            current = _windows_security(copy_to, _include_control=True)
+            if (
+                control.value & 0x1000
+                and not control.value & 0x0400
+                and "D:P(" in observed
+                and current[1] == control.value | 0x0400
+                and current[0] == observed.replace("D:P(", "D:PAI(", 1)
+            ):
+                # Repair only the high-level setter's proven AI-only conversion.
+                # This documented legacy file setter does not propagate to children.
+                exact = advapi.SetFileSecurityW
+                exact.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p]
+                exact.restype = wintypes.BOOL
+                if not exact(str(copy_to), 4, descriptor):
+                    raise ctypes.WinError(ctypes.get_last_error())
+                current = _windows_security(copy_to, _include_control=True)
+            if current != expected:
                 raise OSError("Replacement owner, group or DACL changed")
-        return observed
+        return expected if _include_control else observed
     finally:
         if text:
             kernel.LocalFree(text)
