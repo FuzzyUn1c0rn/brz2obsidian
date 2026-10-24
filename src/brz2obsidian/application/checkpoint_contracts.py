@@ -4,8 +4,14 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
+from brz2obsidian.application.source_payload_contracts import ReviewedSourceBinding
 from brz2obsidian.application.vault_contracts import VaultAdmission
-from brz2obsidian.contracts import LoadedReview, OutputIdentity, ReconciliationContract
+from brz2obsidian.contracts import (
+    LoadedReview,
+    OutputIdentity,
+    ReconciliationContract,
+    SourceIdentity,
+)
 
 
 class VaultInitializationDecision(ReconciliationContract):
@@ -83,9 +89,24 @@ class CheckpointManifest(ReconciliationContract):
     review_object: str | None
     review_size: int | None = Field(ge=0)
     review_sha256: str | None = Field(pattern=r"^[0-9a-f]{64}$")
+    observed_source: SourceIdentity | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    reviewed_source: ReviewedSourceBinding | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def inventories(self):
+        if (
+            self.observed_source is not None
+            and self.reviewed_source is not None
+            and self.observed_source.module_version
+            != self.reviewed_source.incoming_identity.module_version
+        ):
+            raise ValueError(
+                "Source observation must bind the reviewed incoming module"
+            )
         if self.undo_of_receipt_commit is not None and (
             self.boundary != "prepared" or self.recovery_direction is not None
         ):
@@ -151,6 +172,9 @@ class CheckpointResult(ReconciliationContract):
     object_storage: Literal["not_started", "possible", "verified"]
     authored_files_changed: Literal[False]
     message: str
+    locator: CheckpointLocator | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class CheckpointRead(ReconciliationContract):

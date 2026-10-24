@@ -1399,7 +1399,10 @@ def test_terminal_ref_failure_retains_complete_bytes_and_result_checkpoint(monke
     assert outcome.result_commit and not outcome.receipt_commit
     assert (vault / "Notes/Opening.md").read_bytes() == b"incoming opening\n"
     assert user_state(vault)["index"] == before["index"]
-    assert operations.inspect_history(vault).admission.status == "recovery_first"
+    blocked = operations.inspect_history(vault).admission
+    assert blocked.status == "recovery_first"
+    assert not blocked.inventory_complete
+    assert blocked.inventory == ()
     locator = json.loads((vault / ".brz2obsidian/locator.json").read_text())
     association = locator["association"]["association_id"]
     checkpoint_ref = f"refs/brz2obsidian/imports/{association}/checkpoints"

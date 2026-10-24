@@ -155,6 +155,11 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
         candidate = approval.attachment_candidate
         if candidate is None:
             continue
+        change = next(c for c in proposal.changes if c.change_id == approval.change_id)
+        relevant = {link.document_id for link in change.attachment_review.links}
+        relevant.update(
+            choice.document_id for choice in approval.attachment_selection.link_choices
+        )
         for output in candidate.outputs:
             target = next(
                 t for t in candidate.targets if t.target_id == output.target_id
@@ -166,10 +171,11 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
             write(target, output.content, output.path, state)
         for document in candidate.documents:
             prior = original_documents.get(document.document_id)
-            if prior is None or (prior.content, prior.source_path) != (
+            changed = prior is None or (prior.content, prior.source_path) != (
                 document.content,
                 document.source_path,
-            ):
+            )
+            if changed:
                 matching = tuple(
                     t
                     for t in candidate.targets
@@ -189,7 +195,8 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
                 )
                 write(target, document.content, document.source_path, state)
                 explicit_documents.add(document.document_id)
-            proof_documents[document.document_id] = document
+            if changed or document.document_id in relevant:
+                proof_documents[document.document_id] = document
     documents.update(proof_documents)
 
     for change in proposal.changes:

@@ -7,7 +7,14 @@ from datetime import date
 from hashlib import sha256
 from typing import BinaryIO, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    field_validator,
+    model_validator,
+)
 
 
 class Contract(BaseModel):
@@ -2279,6 +2286,12 @@ class LoadedReview(ReconciliationContract):
     saved: SavedReview
     readiness: Literal["revalidation_required"]
     ready: Literal[False]
+    _historical_effects: SelectedReviewEffects | None = PrivateAttr(default=None)
+
+    @property
+    def historical_effects(self) -> SelectedReviewEffects | None:
+        """Derived historical comparison only; never current write authority."""
+        return self._historical_effects
 
     @field_validator("ready", mode="before")
     @classmethod

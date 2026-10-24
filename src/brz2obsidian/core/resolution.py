@@ -785,6 +785,11 @@ def _resolve_action(plan, action):
         if (
             action.choice == "current"
             and plan.producer_facts.format_operation.kind == "source_update"
+            and not (
+                change.current is not None
+                and change.incoming is not None
+                and change.current.data == change.incoming.data
+            )
         ):
             memory = _preserved_memory(plan, change, action)
             if memory is None:
@@ -906,9 +911,14 @@ def _resolve_action(plan, action):
             for s in plan.producer_facts.subjects
             if (s.item_id, s.facet) == (change.item_id, change.facet)
         )
-        if action.domain in ("text", "mapping") or (
-            action.domain == "configuration"
+        if (
+            action.domain in ("text", "mapping")
+            or action.domain == "configuration"
             and plan.producer_facts.format_operation.kind == "source_update"
+        ) and not (
+            change.current is not None
+            and change.incoming is not None
+            and change.current.data == change.incoming.data
         ):
             memory = _preserved_memory(plan, change, action)
             if memory is None:

@@ -937,6 +937,36 @@ class _Inspection:
                 "An existing Git lock requires its owner's completion or recovery.",
             )
             self.operation = "active"
+        terminal_status = None
+        terminal_observation_missing = False
+        if (
+            self.recovery_observation is None
+            and not (gitdir / "brz2obsidian").exists()
+            and (self.root / ".brz2obsidian").exists()
+        ):
+            operation_refs = [
+                line
+                for line in self.git(
+                    "for-each-ref",
+                    "--format=%(refname) %(objectname)",
+                    "refs/brz2obsidian/imports",
+                ).splitlines()
+                if b"/operations/" in line.split(b" ", 1)[0]
+            ]
+            if operation_refs:
+                from brz2obsidian.publication.vault_apply import (
+                    _inspect_update_observation,
+                )
+
+                terminal_status, observation = _inspect_update_observation(self.root)
+                terminal_observation_missing = observation is None
+                if (
+                    terminal_status.status
+                    in ("applied", "no_content_change", "restored", "undone")
+                    and not terminal_status.recovery_required
+                    and observation is not None
+                ):
+                    self.recovery_observation = observation
         if self.recovery_observation is not None:
             from brz2obsidian.application.checkpoint_contracts import CheckpointLocator
             from brz2obsidian.publication.vault_apply import (
@@ -1088,13 +1118,20 @@ class _Inspection:
             if operation_refs or self.linked_intents:
                 from brz2obsidian.publication.vault_apply import inspect_update_status
 
-                status = inspect_update_status(self.root)
-                if status.status not in (
-                    "applied",
-                    "no_content_change",
-                    "restored",
-                    "undone",
-                ) or (status.recovery_required):
+                status = terminal_status
+                if status is None:
+                    status = inspect_update_status(self.root)
+                if (
+                    terminal_observation_missing
+                    or status.status
+                    not in (
+                        "applied",
+                        "no_content_change",
+                        "restored",
+                        "undone",
+                    )
+                    or (status.recovery_required)
+                ):
                     self.finding(
                         "converter_operation",
                         "operation",

@@ -15,6 +15,7 @@ from brz2obsidian.contracts import (
 
 from .refresh import refresh_review
 from .resolution import validate_review
+from .selected_effects import _project_review_effects
 
 
 def save_review(plan: ReviewPlan) -> ReviewSaveResult:
@@ -39,8 +40,8 @@ def save_review(plan: ReviewPlan) -> ReviewSaveResult:
     )
 
 
-def _load_result(code, saved=None):
-    return ReviewLoadResult(
+def _load_result(code, saved=None, effects=None):
+    result = ReviewLoadResult(
         schema_id="brz2obsidian.review-load-result",
         schema_version=1,
         status="loaded" if saved is not None else "refused",
@@ -56,6 +57,9 @@ def _load_result(code, saved=None):
         else None,
         ready=False,
     )
+    if result.loaded is not None:
+        result.loaded._historical_effects = effects
+    return result
 
 
 def load_review(raw: str | bytes | SavedReview) -> ReviewLoadResult:
@@ -86,7 +90,7 @@ def load_review(raw: str | bytes | SavedReview) -> ReviewLoadResult:
     except ValueError:
         return _load_result("invalid_review")
     return (
-        _load_result("loaded", saved)
+        _load_result("loaded", saved, _project_review_effects(validated.plan))
         if validated.status == "accepted"
         else _load_result("invalid_review")
     )

@@ -468,7 +468,9 @@ def _prepared_for_intent(
     if loaded is None:
         return False
     plan = loaded.saved.plan
-    selected = select_review_effects(plan)
+    selected = loaded.historical_effects
+    if selected is None:
+        selected = select_review_effects(plan)
     if selected.status != "selected":
         return False
     if not (
@@ -513,13 +515,32 @@ def _prepared_for_intent(
             for subject in origin_plan.producer_facts.subjects
         }
         for subject in plan.producer_facts.subjects:
-            if subject.path not in origin.affected_paths:
+            retained_source_incoming = (
+                direction == "finish" and subject.operation_reversal is None
+            )
+            if subject.path not in origin.affected_paths or retained_source_incoming:
                 original_subject = original_subjects.get(
                     (subject.item_id, subject.facet)
                 )
                 if original_subject is None or subject.path != original_subject.path:
                     return False
-                retained_incoming[subject.path] = original_subject.incoming
+                expected = original_subject.incoming
+                if retained_source_incoming and subject.path in origin.affected_paths:
+                    source_row = next(
+                        (row for row in manifest.source if row.path == subject.path),
+                        None,
+                    )
+                    if (
+                        (expected is None) != (source_row is None)
+                        or expected is not None
+                        and (
+                            len(expected.data) != source_row.size
+                            or hashlib.sha256(expected.data).hexdigest()
+                            != source_row.sha256
+                        )
+                    ):
+                        return False
+                retained_incoming[subject.path] = expected
     elif (
         manifest.recovery_direction is not None
         or manifest.undo_of_receipt_commit is not None
@@ -1750,6 +1771,7 @@ def _apply_reviewed_update(
     vault_id,
     import_id,
     source_binding=None,
+    observed_source=None,
     cancel=None,
     executor=None,
     undo_target=None,
@@ -1994,6 +2016,7 @@ def _apply_reviewed_update(
                 active_operation=operation_id,
                 subjects=subjects,
                 source_binding=binding,
+                observed_source=observed_source,
                 undo_of_receipt_commit=(
                     undo_target.receipt_commit if undo_target else None
                 ),
@@ -2408,6 +2431,7 @@ def apply_reviewed_update(
     vault_id,
     import_id,
     source_binding=None,
+    observed_source=None,
     cancel=None,
     executor=None,
 ):
@@ -2420,6 +2444,7 @@ def apply_reviewed_update(
             vault_id=vault_id,
             import_id=import_id,
             source_binding=source_binding,
+            observed_source=observed_source,
             cancel=cancel,
             executor=executor,
         )

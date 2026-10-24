@@ -60,6 +60,60 @@ class Operations:
         self.credentials = credentials
         self.vault_executor = vault_executor
 
+    def prepare_update(self, vault, source):
+        """Prepare an ordinary source update using physical validated facts."""
+        from .update_lifecycle import prepare_update
+
+        return prepare_update(self, vault, source)
+
+    def read_checkpoint_payload(self, vault, **kwargs):
+        """Read finite exact-byte pages from currently validated owned history."""
+        from brz2obsidian.publication.checkpoint_payload import read_checkpoint_payload
+
+        return read_checkpoint_payload(vault, **kwargs)
+
+    def apply_update(self, preparation, *, cancel=None):
+        """Reobserve and apply exactly one complete current source review."""
+        from .update_lifecycle import apply_update
+
+        return apply_update(self, preparation, cancel=cancel)
+
+    def resolve_update(self, preparation, action, *, edited=None):
+        """Resolve one offered S1 choice, binding edited text to its actual target."""
+        from .update_lifecycle import resolve_update
+
+        return resolve_update(self, preparation, action, edited=edited)
+
+    def refresh_update(self, preparation, *, source=None):
+        """Reobserve current files or a newly supplied BRZ and retain safe choices."""
+        from .update_lifecycle import refresh_update
+
+        return refresh_update(self, preparation, source=source)
+
+    def save_update(self, preparation):
+        """Retain a current unresolved or complete review in owned Git history."""
+        from .update_lifecycle import save_update
+
+        return save_update(self, preparation)
+
+    def load_update(self, vault):
+        """Load a saved review as explicitly unready historical evidence."""
+        from .update_lifecycle import load_update
+
+        return load_update(self, vault)
+
+    def resume_update(self, vault):
+        """Materialize saved inputs and revalidate against fresh physical facts."""
+        from .update_lifecycle import resume_update
+
+        return resume_update(self, vault)
+
+    def inspect_update_review(self, preparation, **kwargs):
+        """Read bounded comparisons for exactly the requested review generation."""
+        from .update_lifecycle import inspect_update_review
+
+        return inspect_update_review(self, preparation, **kwargs)
+
     def inspect_vault(
         self,
         vault: Path | str,
@@ -186,16 +240,19 @@ class Operations:
 
         return read_update_details(vault, offset=offset, limit=limit)
 
+    def _configured_workflow(self):
+        if self.workflow is None:
+            from brz2obsidian.application.wiring import default_workflow
+
+            self.workflow = default_workflow()
+        return self.workflow
+
     def _selected_workflow(self, selection):
         if isinstance(selection, LocalApiSourceSelection):
             from brz2obsidian.application.wiring import selected_api_workflow
 
             return selected_api_workflow(selection, self.credentials)
-        if self.workflow is None:
-            from brz2obsidian.application.wiring import default_workflow
-
-            self.workflow = default_workflow()
-        return self.workflow, Path(selection.path).absolute()
+        return self._configured_workflow(), Path(selection.path).absolute()
 
     def list_brains(self, config: ApiAcquisitionConfig) -> BrainListResult:
         from brz2obsidian.application.wiring import list_api_brains

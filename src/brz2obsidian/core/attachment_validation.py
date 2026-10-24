@@ -14,6 +14,7 @@ from brz2obsidian.contracts import (
 from .identity import _paths_collide
 from .link_validation import validate_link_document
 from .reference_targets import validate_targets
+from .review_links import consumed_context
 from .structures import validate_structure_facts
 
 
@@ -130,14 +131,72 @@ def validate_attachment_candidate(
     }
     targets = {t.target_id: t for t in candidate.targets}
     states = {s.target_id: s for s in candidate.target_facts}
+    output_ids = {o.target_id for o in alternative.outputs}
+    required_states = {s.target_id for s in context.current_target_facts} | output_ids
     if (
         len(targets) != len(candidate.targets)
         or set(targets) != expected_ids
         or len(states) != len(candidate.target_facts)
-        or set(states) != {t.target_id for t in candidate.targets if t.kind != "tag"}
+        or set(states) != required_states
+        or not required_states <= set(targets)
+        or any(
+            targets[state_id].kind == "tag"
+            for state_id in states
+            if state_id in targets
+        )
     ):
         add("attachment_context_incomplete")
         return result()
+    unobserved = tuple(
+        target
+        for target in candidate.targets
+        if target.kind != "tag" and target.target_id not in required_states
+    )
+    if unobserved:
+        consumed_ids = set(output_ids)
+        for choice in selection.link_choices:
+            for meaning in (choice.old, choice.selected):
+                if meaning is not None:
+                    consumed_ids.update(meaning.candidates)
+                    if meaning.target_id is not None:
+                        consumed_ids.add(meaning.target_id)
+        for documents, registry, observed in (
+            (
+                context.current_documents,
+                context.current_targets,
+                context.current_target_facts,
+            ),
+            (
+                context.incoming_documents,
+                context.incoming_targets,
+                context.incoming_target_facts,
+            ),
+            (candidate.documents, candidate.targets, candidate.target_facts),
+        ):
+            _, _, used_targets, _ = consumed_context(
+                documents,
+                registry,
+                observed,
+                context.inventory,
+                target_ids=tuple(consumed_ids),
+            )
+            consumed_ids.update(target.target_id for target in used_targets)
+        current_targets = {
+            target.target_id: target for target in context.current_targets
+        }
+        for target in unobserved:
+            if (
+                target.kind != "resource"
+                or target.identity is not None
+                or current_targets.get(target.target_id) != target
+                or target.target_id in consumed_ids
+                or any(
+                    entry.current.path == target.canonical_path
+                    for entry in facts.identity_inventory
+                )
+            ):
+                add("attachment_context_incomplete")
+                return result()
     try:
         validate_targets(
             tuple(

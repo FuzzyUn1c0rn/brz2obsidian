@@ -471,7 +471,27 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
             "brz2obsidian.application.wiring",
         },
         "application/checkpoint_contracts.py": {
+            "brz2obsidian.application.source_payload_contracts",
             "brz2obsidian.application.vault_contracts",
+        },
+        "application/checkpoint_payload_contracts.py": {
+            "brz2obsidian.application.checkpoint_contracts",
+        },
+        "application/update_contracts.py": {
+            "brz2obsidian.application.checkpoint_contracts",
+            "brz2obsidian.application.source_payload_contracts",
+            "brz2obsidian.application.vault_contracts",
+            "brz2obsidian.application.vault_update_contracts",
+        },
+        "application/update_facts.py": {"brz2obsidian.obsidian"},
+        "application/update_lifecycle.py": {
+            "brz2obsidian.application.checkpoint_payload_contracts",
+            "brz2obsidian.application.contracts",
+            "brz2obsidian.application.update_contracts",
+            "brz2obsidian.application.update_facts",
+            "brz2obsidian.application.vault_contracts",
+            "brz2obsidian.obsidian",
+            "brz2obsidian.publication.vault_native",
         },
         "application/checking.py": {
             "brz2obsidian.application.contracts",
@@ -491,7 +511,9 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
             "brz2obsidian.application.contracts",
             "brz2obsidian.application.conversion",
             "brz2obsidian.application.diagnostics",
+            "brz2obsidian.application.update_lifecycle",
             "brz2obsidian.application.wiring",
+            "brz2obsidian.publication.checkpoint_payload",
             "brz2obsidian.publication.filesystem",
             "brz2obsidian.publication.source_payload",
             "brz2obsidian.publication.vault_admission",
@@ -505,6 +527,10 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
         # interpretation; Operations owns their outer composition.
         "publication/source_payload.py": {
             "brz2obsidian.application.source_payload_contracts",
+        },
+        "publication/checkpoint_payload.py": {
+            "brz2obsidian.application.checkpoint_contracts",
+            "brz2obsidian.application.checkpoint_payload_contracts",
         },
         "publication/vault_admission.py": {
             "brz2obsidian.application.checkpoint_contracts",

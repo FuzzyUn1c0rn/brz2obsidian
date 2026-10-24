@@ -28,7 +28,11 @@ def select_review_effects(plan: ReviewPlan) -> SelectedReviewEffects:
         return _refused("invalid_plan")
     if transition.status != "accepted":
         return _refused("invalid_plan")
-    plan = transition.plan
+    return _project_review_effects(transition.plan)
+
+
+def _project_review_effects(plan: ReviewPlan) -> SelectedReviewEffects:
+    """Project a canonical plan already validated in this synchronous call."""
     if not plan.ready or plan.requirements or plan.blockers:
         return _refused("review_not_ready")
 
