@@ -5,6 +5,7 @@ import json
 import pytest
 
 from brz2obsidian.application.checkpoint_contracts import CheckpointManifest
+from brz2obsidian.application.vault_recovery_contracts import VaultRecoveryPreparation
 from brz2obsidian.application.vault_repair_contracts import (
     HistoryCopyValidation,
     HistoryRepairResult,
@@ -13,6 +14,7 @@ from brz2obsidian.application.vault_update_contracts import (
     VaultApplyResult,
     VaultOperationIntent,
     VaultOperationReceipt,
+    VaultUpdateDetailPage,
 )
 
 
@@ -384,3 +386,343 @@ def test_checkpoint_wire_roles_do_not_exchange_durable_provenance(
         assert restored.model_dump()[name] == expected
     with pytest.raises(ValueError):
         wire(CheckpointManifest, value | contradiction)
+
+
+@pytest.mark.parametrize(
+    "contradiction",
+    [
+        {"before": [file_claim("Notes/Kept.md", "1")] * 2},
+        {
+            "proposed": [file_claim("New/Restored.md", "2")] * 2
+            + [file_claim("Notes/Kept.md", "1")]
+        },
+        {"affected_paths": ["New/Restored.md"] * 2},
+        {"protected_paths": ["Notes/Kept.md"] * 2},
+        {"created_directories": [metadata("New")] * 2},
+        {"kind": "apply"},
+    ],
+    ids=[
+        "repeated-before-file",
+        "repeated-proposed-file",
+        "repeated-affected-path",
+        "repeated-protected-path",
+        "repeated-created-parent",
+        "apply-cannot-claim-undo-target",
+    ],
+)
+def test_operation_wire_has_one_fact_per_role_and_a_bound_undo_target(contradiction):
+    value = {
+        "schema_id": "brz2obsidian.vault-operation-intent",
+        "schema_version": 1,
+        "operation_id": "a" * 32,
+        "kind": "undo",
+        "generation": 2,
+        "direction": "finish",
+        "association_id": "b" * 64,
+        "prepared_commit": "3" * 40,
+        "undo_of_receipt_commit": "4" * 40,
+        "before": [file_claim("Notes/Kept.md", "1")],
+        "proposed": [
+            file_claim("New/Restored.md", "2"),
+            file_claim("Notes/Kept.md", "1"),
+        ],
+        "affected_paths": ["New/Restored.md"],
+        "protected_paths": ["Notes/Kept.md"],
+        "before_metadata": [],
+        "result_metadata": [metadata("New/Restored.md")],
+        "created_directories": [metadata("New")],
+    }
+    accepted = wire(VaultOperationIntent, value)
+    reopened = VaultOperationIntent.model_validate_json(accepted.model_dump_json())
+    assert reopened.kind == "undo" and reopened.undo_of_receipt_commit == "4" * 40
+    assert tuple(row.path for row in reopened.before) == ("Notes/Kept.md",)
+    assert reopened.affected_paths == ("New/Restored.md",)
+    assert reopened.protected_paths == ("Notes/Kept.md",)
+    assert tuple(row.path for row in reopened.created_directories) == ("New",)
+    with pytest.raises(ValueError):
+        wire(VaultOperationIntent, value | contradiction)
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "repeated-published-path",
+        "applied-cannot-claim-undo",
+        "published-exceeds-planned",
+        "terminal-needs-terminal-history",
+        "page-exceeds-limit",
+        "page-exceeds-total",
+        "page-skips-continuation",
+        "available-page-needs-operation",
+    ],
+)
+def test_result_and_detail_wire_claims_are_truthful_and_bounded(case):
+    if case == "repeated-published-path":
+        model = VaultOperationReceipt
+        value = {
+            "schema_id": "brz2obsidian.vault-operation-receipt",
+            "schema_version": 1,
+            "operation_id": "a" * 32,
+            "kind": "apply",
+            "generation": 2,
+            "status": "applied",
+            "direction": "finish",
+            "intent_commit": "1" * 40,
+            "prepared_commit": "2" * 40,
+            "result_commit": "3" * 40,
+            "published_paths": ["Note.md"],
+        }
+        accepted = wire(model, value)
+        assert accepted.status == "applied"
+        assert accepted.published_paths == ("Note.md",)
+        contradiction = {"published_paths": ["Note.md", "Note.md"]}
+    elif case.startswith("page-") or case == "available-page-needs-operation":
+        model = VaultUpdateDetailPage
+        detail = {
+            "path": "Note.md",
+            "before_size": 1,
+            "before_sha256": "a" * 64,
+            "after_size": 2,
+            "after_sha256": "b" * 64,
+        }
+        value = {
+            "schema_id": "brz2obsidian.vault-update-detail-page",
+            "schema_version": 1,
+            "status": "available",
+            "code": "literal-comparison",
+            "operation_id": "a" * 32,
+            "offset": 0,
+            "limit": 1,
+            "total": 2,
+            "items": [detail],
+            "next_offset": 1,
+        }
+        accepted = wire(model, value)
+        assert accepted.operation_id == "a" * 32
+        assert tuple(item.path for item in accepted.items) == ("Note.md",)
+        assert (accepted.offset, accepted.limit, accepted.total) == (0, 1, 2)
+        assert accepted.next_offset == 1
+        contradiction = {
+            "page-exceeds-limit": {"items": [detail, detail | {"path": "Other.md"}]},
+            "page-exceeds-total": {"offset": 2},
+            "page-skips-continuation": {"next_offset": 2},
+            "available-page-needs-operation": {"operation_id": None},
+        }[case]
+    else:
+        model = VaultApplyResult
+        value = {
+            "schema_id": "brz2obsidian.vault-apply-result",
+            "schema_version": 1,
+            "status": "applied",
+            "code": "literal-terminal-result",
+            "operation_id": "a" * 32,
+            "kind": "apply",
+            "direction": "finish",
+            "generation": 2,
+            "phase": "terminal",
+            "publication": "complete",
+            "history": "terminal",
+            "planned_files": 1,
+            "published_files": 1,
+            "authored_files_changed": True,
+            "checkpoint_commit": "2" * 40,
+            "intent_commit": "1" * 40,
+            "result_commit": "3" * 40,
+            "receipt_commit": "4" * 40,
+            "recovery_required": False,
+            "elapsed_ms": 0,
+            "message": "Literal complete result",
+        }
+        accepted = wire(model, value)
+        assert (accepted.status, accepted.kind, accepted.history) == (
+            "applied",
+            "apply",
+            "terminal",
+        )
+        assert accepted.planned_files == accepted.published_files == 1
+        contradiction = {
+            "applied-cannot-claim-undo": {"kind": "undo"},
+            "published-exceeds-planned": {"published_files": 2},
+            "terminal-needs-terminal-history": {"history": "intent"},
+        }[case]
+    reopened = model.model_validate_json(accepted.model_dump_json())
+    assert reopened == accepted
+    with pytest.raises(ValueError):
+        wire(model, value | contradiction)
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "partial-review-metadata",
+        "repeated-source-file",
+        "review-content-without-review",
+        "content-path-must-name-digest",
+        "content-is-not-executable",
+    ],
+)
+def test_checkpoint_review_wire_metadata_has_one_complete_meaning(case):
+    content = file_claim("e" * 64, "e")
+    value = {
+        "schema_id": "brz2obsidian.checkpoint-manifest",
+        "schema_version": 1,
+        "association_id": "a" * 64,
+        "generation": 1,
+        "boundary": "local",
+        "identity": {
+            "collection_id": "literal-collection",
+            "module_id": "literal-module",
+            "module_version": "1",
+            "profile_id": "literal-profile",
+            "profile_version": "1",
+            "output_format": 1,
+            "settings_digest": "literal-settings",
+        },
+        "source": [file_claim("Note.md", "1")],
+        "vault": [],
+        "preimage": [],
+        "proposed": [],
+        "review_content": [content],
+        "recovery_gaps": [],
+        "semantic_fingerprint": "b" * 64,
+        "policy_fingerprint": "c" * 64,
+        "policy_continuity_fingerprint": "d" * 64,
+        "previous": None,
+        "review_object": "5" * 40,
+        "review_size": 3,
+        "review_sha256": "f" * 64,
+    }
+    accepted = wire(CheckpointManifest, value)
+    reopened = CheckpointManifest.model_validate_json(accepted.model_dump_json())
+    assert (reopened.review_object, reopened.review_size, reopened.review_sha256) == (
+        "5" * 40,
+        3,
+        "f" * 64,
+    )
+    assert tuple(row.path for row in reopened.source) == ("Note.md",)
+    assert (
+        reopened.review_content[0].path == reopened.review_content[0].sha256 == "e" * 64
+    )
+    assert reopened.review_content[0].mode == "100644"
+    contradiction = {
+        "partial-review-metadata": {"review_size": None},
+        "repeated-source-file": {"source": [file_claim("Note.md", "1")] * 2},
+        "review-content-without-review": {
+            "review_object": None,
+            "review_size": None,
+            "review_sha256": None,
+        },
+        "content-path-must-name-digest": {
+            "review_content": [content | {"path": "f" * 64}]
+        },
+        "content-is-not-executable": {"review_content": [content | {"mode": "100755"}]},
+    }[case]
+    with pytest.raises(ValueError):
+        wire(CheckpointManifest, value | contradiction)
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "repeated-damaged-dependency",
+        "offered-operation-is-identified",
+        "offered-directions-are-unique",
+        "unavailable-cannot-carry-review",
+        "review-needs-selected-direction",
+        "selected-direction-needs-review",
+        "selected-direction-is-offered",
+    ],
+)
+def test_repair_and_recovery_wire_claims_keep_exact_dependencies_and_authority(case):
+    if case == "repeated-damaged-dependency":
+        model = HistoryCopyValidation
+        value = {
+            "schema_id": "brz2obsidian.history-copy-validation",
+            "schema_version": 1,
+            "status": "matching",
+            "code": "exact_damaged_dependency",
+            "target_generation": 1,
+            "copy_generation": 1,
+            "target_commit": "3" * 40,
+            "copy_commit": "3" * 40,
+            "association_id": "a" * 64,
+            "missing_objects": [],
+            "damaged_objects": [DAMAGED],
+            "message": "One literal damaged dependency",
+        }
+        accepted = wire(model, value)
+        assert accepted.status == "matching"
+        assert accepted.missing_objects == ()
+        assert tuple(row.object_id for row in accepted.damaged_objects) == ("2" * 40,)
+        contradiction = {"damaged_objects": [DAMAGED, DAMAGED]}
+    else:
+        from brz2obsidian.core import prepare_review
+        from tests.reconciliation.test_proposals import request
+        from tests.reconciliation.test_resolution import preflight
+
+        # A real public S1 value supplies the review's shape, not Git authority.
+        review = prepare_review(request(), preflight=preflight()).model_dump(
+            mode="json"
+        )
+        model = VaultRecoveryPreparation
+        value = {
+            "schema_id": "brz2obsidian.vault-recovery-preparation",
+            "schema_version": 1,
+            "status": "offered",
+            "code": "literal-retained-operation",
+            "operation_id": "a" * 32,
+            "kind": "apply",
+            "generation": 2,
+            "intent_commit": "1" * 40,
+            "available_directions": ["finish", "restore"],
+            "direction": None,
+            "review": None,
+        }
+        if case == "unavailable-cannot-carry-review":
+            value |= {
+                "status": "unavailable",
+                "operation_id": None,
+                "kind": None,
+                "generation": None,
+                "intent_commit": None,
+                "available_directions": [],
+            }
+            contradiction = {"review": review}
+        elif case == "selected-direction-is-offered":
+            value |= {
+                "available_directions": ["finish"],
+                "direction": "finish",
+                "review": review,
+            }
+            contradiction = {"direction": "restore"}
+        else:
+            contradiction = {
+                "offered-operation-is-identified": {"operation_id": None},
+                "offered-directions-are-unique": {
+                    "available_directions": ["finish", "finish"]
+                },
+                "review-needs-selected-direction": {"review": review},
+                "selected-direction-needs-review": {"direction": "finish"},
+            }[case]
+        accepted = wire(model, value)
+        if case == "unavailable-cannot-carry-review":
+            assert accepted.status == "unavailable" and accepted.operation_id is None
+            assert accepted.available_directions == () and accepted.review is None
+        else:
+            assert accepted.status == "offered"
+            assert (accepted.operation_id, accepted.kind, accepted.generation) == (
+                "a" * 32,
+                "apply",
+                2,
+            )
+            if case == "selected-direction-is-offered":
+                assert accepted.available_directions == ("finish",)
+                assert accepted.direction == "finish"
+                assert accepted.review.proposal.generation == 1
+            else:
+                assert accepted.available_directions == ("finish", "restore")
+                assert accepted.direction is None and accepted.review is None
+    reopened = model.model_validate_json(accepted.model_dump_json())
+    assert reopened == accepted
+    with pytest.raises(ValueError):
+        wire(model, value | contradiction)

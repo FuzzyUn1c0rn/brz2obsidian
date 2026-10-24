@@ -60,9 +60,10 @@ checks of the measurement/runner infrastructure. These protect distinct
 assertions even when they add no production branches.
 
 The default runner controls check the selected checkout and duration output,
-failed pytest with a later dependency result, and exact parameter evidence.
-Source mutation, large output on both streams, interruption and inherited
-pytest-option controls remain focused checks when their runner protocol changes.
+failed pytest with a later dependency result, exact parameter evidence, and
+interrupted execution with its retained completed prefix. Source mutation,
+large output on both streams and inherited pytest-option controls remain
+focused checks when their runner protocol changes.
 Their test definitions and independent assertions remain available; omitting them
 from the default does not establish those outcomes afresh for every application edit.
 
@@ -76,7 +77,7 @@ matrix. These checks protect observable migration and filesystem safety outcomes
 | Family | Default responsibility | Trigger for additional focused checks |
 | --- | --- | --- |
 | Editable-vault reconciliation | Exact-byte proposals, owner/facet identity, formats/onboarding, structures/memberships, absence/memory, binary/link safety, review/consent, selective refresh and saved-review resume at their public in-memory boundaries | Changed normalized fact, interpretation, decision dependency, history, codec or readiness: select its owning `tests/reconciliation` family plus actual affected consumers. Opaque and malformed inputs, partial evidence and unaffected retained decisions remain independent outcomes. |
-| Converter-owned vault history | Selected real admission and repository-layout controls, selected output/reversal effects, binary recovery with a terminal-receipt fault, and persisted selective review refresh | Changed capture, retained graph, publication journal, Undo, matching-history repair or ownership: select the owning application controls and affected consumers, including a real process or native check where required. The complete functional leaf assessments retain their explicit source applicability; the default does not repeat each leaf lifecycle. |
+| Converter-owned vault history | Real admission/layout and initialization, exact source binding, latest reviewed Undo with later writing, binary recovery and prepared-before-intent retry, malformed journal/owned-graph refusal, matching-history repair, persisted selective refresh, and closed wire meanings | Changed capture, retained graph, publication journal, Undo, matching-history repair or ownership: select the owning application controls and affected consumers, including a real process or native check where required. The complete functional leaf assessments retain their explicit source applicability; the default does not repeat each leaf lifecycle. |
 | Core and rendering | Source-neutral planning, names, references, resources, tags, categories, strict facts and exact output examples | A changed planning rule, renderer, classification or resource obligation: select its owning public-module cases and affected output examples. |
 | BRZ source | Admission/read failures, exact reference spans, Markdown inserts, exclusion, and representative real conversion | Changed source predicates or formats: select their source-admission vectors. Add downstream checks for a distinct diagnostic, publication or output consequence. |
 | Local API source | Capture integrity, transport failures, payload roles, SVG/ICO/JPEG examples, external references, relationship discovery/reversal and qualified missing-TXT behavior | Changed HTTP, profile, codec, join or capture rule: select its positive, near-miss and tamper families at the source/session boundary. Codec-specific variant controls remain important even when their branches overlap. |
@@ -107,6 +108,31 @@ that an older family or matrix remains executable. Broaden for a failure, a new
 affected consumer, an unresolved concern or a named acceptance requirement.
 Budget additional ordinary checks together with the default bundle when both
 are required.
+
+The longer S2 module groups start early: latest Undo, recovery and repair are
+followed by the short wire-contract group and persisted review refresh. The
+standard scheduler queues additional module groups only while a worker has at
+most two pending tests. This ordering reduces an avoidable late repair tail;
+it does not establish the complete bundle's elapsed time before measurement.
+
+The SOURCE-only one-object repair control remains focused when payload roles,
+baseline projection or repair change. Larger selected repair sequences exercise
+the declared-object engine and target/copy/user-Git preservation, but do not
+repeat that control's source-only blob exclusion from the user index/HEAD,
+full-manifest equality and exact one-object delta. Zero-additional-move recovery,
+first-move failure versus uncertain discovery after a real move, empty-role
+metadata/review write failures, and extra legacy-CRLF/global-policy variants also
+retain their distinct focused assertions and original evidence. Their omission
+does not establish those outcomes afresh. Real interrupted-Undo process evidence
+retains its separately reviewed source applicability.
+
+Selection planning uses Coverage's report-normalized arcs and exact context
+filters. Removing the two native-move failure controls also omits one measured
+exception-fallback branch; this is an explicit focused responsibility, not zero
+lost coverage. Raw arc filters that disagree with report normalization cannot
+justify a selection. Failed measurement wrappers remain failed even when their
+pytest assertions passed. Only the fresh maintained bundle establishes its
+current coverage, actual GUI execution, all four checks and elapsed-time gate.
 
 ## How the selection changes
 
