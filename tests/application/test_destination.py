@@ -31,6 +31,76 @@ def test_preliminary_destination_is_readonly_and_discloses_unchecked_scope(tmp_p
 
 
 @pytest.mark.parametrize(
+    "name,expected",
+    [
+        ("   ", "Enter a vault name."),
+        ("bad?name", "Remove “?” from the vault name."),
+        ("bad<name", "Remove “<” from the vault name."),
+        ("bad>name", "Remove “>” from the vault name."),
+        ('bad"name', 'Remove “"” from the vault name.'),
+        ("bad:name", "Remove “:” from the vault name."),
+        ("bad/name", "Remove “/” from the vault name."),
+        ("bad\\name", "Remove “\\” from the vault name."),
+        ("bad|name", "Remove “|” from the vault name."),
+        ("bad*name", "Remove “*” from the vault name."),
+        ("hidden\x01name", "Remove hidden control characters."),
+        ("CON", "“CON” is reserved. Choose another name."),
+        ("folder.", "Remove the final dot."),
+        ("folder ", "Remove the space at the end."),
+    ],
+)
+def test_invalid_vault_name_has_specific_concise_guidance(tmp_path, name, expected):
+    result = validate_destination(tmp_path, name)
+
+    assert result.outcome == "invalid"
+    assert result.field_errors[0].message == expected
+
+
+def test_immediate_vault_name_validation_does_not_touch_destination(tmp_path):
+    from brz2obsidian.application.operations import validate_vault_name
+
+    assert validate_vault_name("bad?name").message == (
+        "Remove “?” from the vault name."
+    )
+    assert validate_vault_name("A valid name") is None
+    assert validate_vault_name("A\u200dname") is None
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_destination_preflight_uses_approved_concise_messages(tmp_path):
+    (tmp_path / "occupied").mkdir()
+    (tmp_path / "occupied" / "keep.md").write_text("keep", encoding="utf-8")
+    result = validate_destination(tmp_path, "occupied")
+    assert result.field_errors[0].message == "Choose a new or empty vault folder."
+
+    missing = validate_destination(tmp_path / "missing", "Vault")
+    assert missing.field_errors[0].message == (
+        "Choose an existing, readable parent folder."
+    )
+
+    incomplete = validate_destination(Path("relative-parent"), "Vault")
+    assert incomplete.field_errors[0].message == (
+        "Choose a parent folder using its full path."
+    )
+
+
+def test_destination_check_failure_has_single_actionable_message(tmp_path, monkeypatch):
+    from brz2obsidian.publication import filesystem
+
+    def fail_check(_path):
+        raise OSError("private failure detail")
+
+    monkeypatch.setattr(filesystem, "_safe_ancestors", fail_check)
+    result = validate_destination(tmp_path, "Vault")
+
+    assert result.outcome == "failed"
+    assert result.field_errors[0].message == (
+        "Couldn’t check the destination. Choose it again."
+    )
+    assert "private failure detail" not in result.model_dump_json()
+
+
+@pytest.mark.parametrize(
     "target_kind", ["absent", "empty", "populated", "file", "missing_parent"]
 )
 def test_existing_parent_and_fresh_target_are_observed_without_mutation(

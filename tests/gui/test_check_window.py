@@ -108,7 +108,7 @@ def test_real_check_outcome_titles_findings_and_unavailable_counts(
     assert "conversion failure" not in text.lower()
     if state == "failed":
         assert "Inventory files: unavailable" in text
-        assert "Check the path" in text
+        assert "Check folder access" in text
     window.close()
     until(app, lambda: not window.isVisible())
     window.shutdown()
