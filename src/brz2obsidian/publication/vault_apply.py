@@ -2203,18 +2203,20 @@ def _apply_reviewed_update(
             if any(os.path.lexists(root / path) for path in set(prior) - set(proposed)):
                 raise OSError("Removed path remains visible")
             phase = "result"
-            result_observation = (
-                _inspect_update_observation(root) if undo_target else None
-            )
-            current = (
-                inspect_history(root, subjects=subjects, active_operation=operation_id)
-                if result_observation is None
-                else _inspect_retained_history(
-                    root,
-                    result_observation[1],
-                    subjects=subjects,
-                    active_operation=operation_id,
-                )
+            result_observation = _inspect_update_observation(root)
+            authority = result_observation[1]
+            if (
+                authority is None
+                or result_observation[0].operation_id != operation_id
+                or result_observation[0].intent_commit != intent_commit
+                or authority.graph.intent.prepared_commit != prepared_commit
+            ):
+                raise OSError("Actual result operation observation changed")
+            current = _inspect_retained_history(
+                root,
+                authority,
+                subjects=subjects,
+                active_operation=operation_id,
             )
             result_checkpoint = capture_checkpoint(
                 root,

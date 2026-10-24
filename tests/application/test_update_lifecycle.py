@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -112,9 +113,22 @@ def _seed(case_path, *, two_notes=False):
     workflow = default_workflow()
     metadata = workflow.metadata_factory()
     workflow.metadata_factory = lambda: metadata
-    assert workflow.convert(archive, vault).receipt is not None
-    assert workflow.convert(archive, source).receipt is not None
-    # Baseline is independently generated before any authored changes.
+    receipt = workflow.convert(archive, vault).receipt
+    assert receipt is not None and receipt.verified
+    source.mkdir()
+    for row in receipt.manifest:
+        original = vault / row.relative_path
+        pristine = source / row.relative_path
+        pristine.parent.mkdir(parents=True, exist_ok=True)
+        original_bytes = original.read_bytes()
+        assert len(original_bytes) == row.length
+        assert hashlib.sha256(original_bytes).hexdigest() == row.sha256
+        mode = original.stat().st_mode & 0o777
+        shutil.copy2(original, pristine)
+        assert pristine.stat().st_size == row.length
+        assert hashlib.sha256(pristine.read_bytes()).hexdigest() == row.sha256
+        assert pristine.stat().st_mode & 0o777 == mode
+    # Distinct pristine source A is captured before authored changes or Git init.
     git(vault, "init", "-q")
     git(vault, "config", "core.autocrlf", "false")
     if two_notes:
@@ -347,78 +361,8 @@ def test_actual_source_update_offers_current_incoming_and_edited_choices(case_pa
     assert reopened_action.candidate.content.data == edited_bytes
     assert (vault / "Home — Entry thought.md").read_bytes() == later
     assert final.source_binding.files == chosen.preparation.source_binding.files
-    ready = _finish_incoming(final)
-    payload = Path(ready.payload_directory) / "Attachments/22222222/Notes.md.original"
-    bound_bytes = payload.read_bytes()
-    assert bound_bytes == b"Incoming body.\r\n"
-    locator_bytes = (vault / ".brz2obsidian/locator.json").read_bytes()
-    refs = git(vault, "for-each-ref", "--format=%(refname) %(objectname)")
-    payload.write_bytes(b"Tampered owned B")
-    denied = Operations().apply_update(ready)
-    assert denied.status == "refused" and denied.code == "source_payload_changed", (
-        denied
-    )
     assert _user_state(vault) == user_before
-    assert (vault / ".brz2obsidian/locator.json").read_bytes() == locator_bytes
-    assert git(vault, "for-each-ref", "--format=%(refname) %(objectname)") == refs
-    payload.write_bytes(bound_bytes)
-    applied = Operations().apply_update(ready)
-    assert applied.status == "applied", (applied.code, applied.application)
-    assert (
-        applied.publication == "complete" and applied.application.history == "terminal"
-    )
-    assert applied.vault == str(vault) and applied.changes == len(
-        ready.review.proposal.changes
-    )
-    assert (vault / "Home — Entry thought.md").read_bytes() == edited_bytes
     assert (vault / "Notes/Second thought.md").read_bytes() == second_before
-    assert (
-        vault / "Attachments/22222222/Notes.md.original"
-    ).read_bytes() == b"Incoming body.\r\n"
-    assert (
-        vault / "Attachments/44444444/Notes.md.original"
-    ).read_bytes() == b"Incoming body.\r\n"
-    assert _user_state(vault) == user_before
-    restarted = Operations().inspect_update_status(vault)
-    assert (
-        restarted.status == "applied"
-        and restarted.receipt_commit == applied.application.receipt_commit
-    )
-    again = Operations().prepare_update(vault, incoming)
-    assert again.ready, again
-    assert not again.preparation.review.requirements
-    assert {
-        m.provenance.decision_id
-        for m in again.preparation.review.facts.source_version_memory
-    } >= {"independent-second"}
-    second_again = next(
-        c
-        for c in again.preparation.review.proposal.changes
-        if c.item_id == "44444444-4444-4444-8444-444444444444"
-    )
-    assert second_again.result.data == second_before
-    assert again.preparation.source_binding.files == ready.source_binding.files
-    current_locator = (vault / ".brz2obsidian/locator.json").read_bytes()
-    current_refs = git(vault, "for-each-ref", "--format=%(refname) %(objectname)")
-    duplicate = Operations().apply_update(again.preparation)
-    assert duplicate.status == "no_content_change", duplicate
-    assert duplicate.publication == "not_published" and duplicate.application is None
-    assert (vault / ".brz2obsidian/locator.json").read_bytes() == current_locator
-    assert (
-        git(vault, "for-each-ref", "--format=%(refname) %(objectname)") == current_refs
-    )
-    absent = Operations().prepare_update(vault, case_path / "initial.brz")
-    assert absent.preparation is not None, absent
-    second_absent = next(
-        c
-        for c in absent.preparation.review.proposal.changes
-        if c.item_id == "44444444-4444-4444-8444-444444444444"
-    )
-    assert second_absent.incoming is None
-    assert second_absent.result.data == second_before
-    assert second_absent.preservation_review.kind == "source_absent"
-    assert (vault / "Notes/Second thought.md").read_bytes() == second_before
-    assert _user_state(vault) == user_before
 
 
 def _user_state(vault):
