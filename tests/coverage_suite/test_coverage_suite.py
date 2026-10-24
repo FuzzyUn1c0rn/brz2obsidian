@@ -167,12 +167,15 @@ def test_default_command_validates_four_checks_and_reports_all_production(
         "tests/test_gui.py::test_gui",
         "tests/test_other.py::test_all_choices",
     ]
-    assert len(
-        {
-            (coverage_checkout / "tmp" / name).read_text()
-            for name in ("yes-pid", "other-pid", "gui-pid")
-        }
-    ) == 3
+    assert (
+        len(
+            {
+                (coverage_checkout / "tmp" / name).read_text()
+                for name in ("yes-pid", "other-pid", "gui-pid")
+            }
+        )
+        == 3
+    )
     receipt = json.loads(Path(report["receipt"]).read_text(encoding="utf-8"))
     selected = next(row for row in receipt["checks"] if row["id"] == "pytest")
     assert selected["selection"]["workers"] == 3
