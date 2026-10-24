@@ -61,14 +61,26 @@ def _refused(code, history=None, *, action="inspect_history"):
     )
 
 
-def _history(operations, vault):
-    history = operations.inspect_history(vault)
+def _history(operations, vault, observed=None):
+    history = (
+        operations.inspect_history(vault) if observed is None else observed.history
+    )
     if history.admission.status == "recovery_first":
+        checkpoint = history.checkpoint
+        locator = (
+            checkpoint.locator
+            if checkpoint is not None and checkpoint.status == "valid"
+            else None
+        )
         return history, UpdateResult(
             status="recovery_required",
             code="recovery_first",
             next_actions=("review_recovery",),
             history_retained=True,
+            recovery_gaps=history.admission.recovery_gaps,
+            vault=history.admission.vault,
+            checkpoint=locator,
+            checkpoint_commit=locator.commit if locator is not None else None,
         )
     if history.status == "absent" or history.admission.repository.kind == "none":
         return history, _refused(
@@ -127,7 +139,7 @@ def _read_physical(root, rows):
     return result
 
 
-def _read_source(operations, vault, checkpoint):
+def _read_source(operations, vault, checkpoint, observed=None):
     # One finite request verifies the current complete owned manifest once.
     from .checkpoint_payload_contracts import CheckpointPayloadRequest
 
@@ -135,15 +147,19 @@ def _read_source(operations, vault, checkpoint):
     budget = sum(row.size for row in rows)
     if budget > available_memory() // 4:
         raise ValueError("comparison_resources_unavailable")
-    result = operations.read_checkpoint_payload(
-        vault,
-        locator=checkpoint.locator,
-        role="source",
-        requests=tuple(
+    arguments = {
+        "locator": checkpoint.locator,
+        "role": "source",
+        "requests": tuple(
             CheckpointPayloadRequest(path=row.path, offset=0, limit=row.size)
             for row in rows
         ),
-        byte_limit=budget,
+        "byte_limit": budget,
+    }
+    result = (
+        operations.read_checkpoint_payload(vault, **arguments)
+        if observed is None
+        else observed.read_payload(**arguments)
     )
     if result.status != "available":
         raise ValueError(result.code)
@@ -508,9 +524,12 @@ def _subjects(facts, review=None):
     return tuple(paths[key] for key in sorted(paths))
 
 
-def _scoped(operations, history, facts, review=None):
-    scoped = operations.inspect_history(
-        history.admission.vault, subjects=_subjects(facts, review)
+def _scoped(operations, history, facts, review=None, observed=None):
+    subjects = _subjects(facts, review)
+    scoped = (
+        operations.inspect_history(history.admission.vault, subjects=subjects)
+        if observed is None
+        else observed.inspect(subjects=subjects)
     )
     if (
         scoped.status != "intact"
@@ -522,7 +541,7 @@ def _scoped(operations, history, facts, review=None):
     return scoped if scoped.admission.preflight.consents else history
 
 
-def _scope_review(operations, history, facts, plan):
+def _scope_review(operations, history, facts, plan, observed=None):
     current = plan
     if facts != plan.facts:
         provisional = refresh_review(
@@ -533,7 +552,7 @@ def _scope_review(operations, history, facts, plan):
         if provisional.status != "accepted":
             raise ValueError("current_selected_scope_unavailable")
         current = provisional.plan
-    return _scoped(operations, history, facts, current)
+    return _scoped(operations, history, facts, current, observed)
 
 
 def _materialize(payload, modes=None, *, directory=None):
@@ -727,14 +746,28 @@ def refresh_update(operations, preparation, *, source=None):
         preparation = UpdatePreparation.model_validate(preparation)
         if source is None:
             return _reobserve(operations, preparation)[1]
-        history, stopped = _history(operations, preparation.vault)
+        with operations.inspect_update_inputs(preparation.vault) as observed:
+            return _refresh_source_update(
+                operations, preparation, observed, source=source
+            )
+    except OSError, ValueError, TypeError, AttributeError:
+        return _refused("current_inputs_unavailable", action="refresh_update")
+
+
+def _refresh_source_update(operations, preparation, observed, *, source):
+    try:
+        history, stopped = _history(operations, preparation.vault, observed)
         if stopped is not None:
             return stopped
         if history.checkpoint.locator.association != preparation.locator.association:
             return _refused("association_mismatch", history)
-        retained = _read_source(operations, preparation.vault, history.checkpoint)
+        retained = _read_source(
+            operations, preparation.vault, history.checkpoint, observed
+        )
         baseline = _baseline(history.checkpoint, retained)
-        directory, incoming, observed, reused = _render(operations, source, baseline)
+        directory, incoming, observed_source, reused = _render(
+            operations, source, baseline
+        )
         facts = _observed_facts(
             history,
             baseline,
@@ -745,7 +778,9 @@ def refresh_update(operations, preparation, *, source=None):
                 history.checkpoint, preparation.review.proposal.proposal_id
             ),
         )
-        history = _scope_review(operations, history, facts, preparation.review)
+        history = _scope_review(
+            operations, history, facts, preparation.review, observed
+        )
         transition = refresh_review(
             preparation.review, facts, preflight=history.admission.preflight
         )
@@ -757,7 +792,7 @@ def refresh_update(operations, preparation, *, source=None):
             directory,
             binding,
             transition.plan,
-            observed,
+            observed_source,
             reused,
             source_ref=str(Path(source).absolute()),
         )
@@ -771,11 +806,10 @@ def refresh_update(operations, preparation, *, source=None):
 
 def save_update(operations, preparation):
     try:
-        history, current = _reobserve(operations, preparation)
+        history, current, baseline = _reobserve(operations, preparation)
         if history is None or current.status == "stale_review":
             return current
         prepared = current.preparation
-        baseline = _read_source(operations, prepared.vault, history.checkpoint)
         association = prepared.locator.association
         with tempfile.TemporaryDirectory(prefix="brz2obsidian-baseline-") as owned:
             source = _materialize(
@@ -847,7 +881,15 @@ def load_update(operations, vault):
 
 def resume_update(operations, vault):
     try:
-        history, stopped = _history(operations, vault)
+        with operations.inspect_update_inputs(vault) as observed:
+            return _resume_update(operations, vault, observed)
+    except OSError, ValueError, TypeError, AttributeError:
+        return _refused("current_inputs_unavailable", action="refresh_update")
+
+
+def _resume_update(operations, vault, observed):
+    try:
+        history, stopped = _history(operations, vault, observed)
         if stopped is not None:
             return stopped
         checkpoint = history.checkpoint
@@ -869,7 +911,7 @@ def resume_update(operations, vault):
         ) != tuple((r.path, r.size, r.sha256) for r in binding.files):
             return _refused("saved_payload_mismatch", history)
         directory = _materialize(incoming, {r.path: r.mode for r in binding.files})
-        baseline = _read_source(operations, vault, checkpoint)
+        baseline = _read_source(operations, vault, checkpoint, observed)
         facts = _observed_facts(
             history,
             baseline,
@@ -878,7 +920,7 @@ def resume_update(operations, vault):
             generation=plan.proposal.generation,
             source_memory=plan.facts.source_version_memory,
         )
-        history = _scope_review(operations, history, facts, plan)
+        history = _scope_review(operations, history, facts, plan, observed)
         if facts != plan.facts or history.admission.preflight != plan.preflight:
             facts = facts.model_copy(update={"generation": facts.generation + 1})
         resumed = resume_review(loaded, facts, preflight=history.admission.preflight)
@@ -1021,11 +1063,19 @@ def inspect_update_review(
 
 
 def prepare_update(operations, vault, source):
-    history, stopped = _history(operations, vault)
+    try:
+        with operations.inspect_update_inputs(vault) as observed:
+            return _prepare_update(operations, vault, source, observed)
+    except OSError, ValueError, TypeError, AttributeError:
+        return _refused("current_inputs_unavailable", action="refresh_update")
+
+
+def _prepare_update(operations, vault, source, observed):
+    history, stopped = _history(operations, vault, observed)
     if stopped is not None:
         return stopped
     try:
-        retained = _read_source(operations, vault, history.checkpoint)
+        retained = _read_source(operations, vault, history.checkpoint, observed)
         baseline = _baseline(history.checkpoint, retained)
         directory, incoming, observed_source, retained_provenance = _render(
             operations, source, baseline
@@ -1049,7 +1099,7 @@ def prepare_update(operations, vault, source):
             generation=1,
             source_memory=memory,
         )
-        history = _scoped(operations, history, facts)
+        history = _scoped(operations, history, facts, observed=observed)
         review = prepare_review(facts, preflight=history.admission.preflight)
         binding = operations.observe_reviewed_source(directory, review)
         return _prepared(
@@ -1072,25 +1122,37 @@ def prepare_update(operations, vault, source):
 
 
 def _reobserve(operations, preparation):
-    preparation = UpdatePreparation.model_validate(preparation)
-    history, stopped = _history(operations, preparation.vault)
+    try:
+        preparation = UpdatePreparation.model_validate(preparation)
+        with operations.inspect_update_inputs(preparation.vault) as observed:
+            return _reobserve_inputs(operations, preparation, observed)
+    except OSError, ValueError, TypeError, AttributeError:
+        return (
+            None,
+            _refused("current_inputs_unavailable", action="refresh_update"),
+            None,
+        )
+
+
+def _reobserve_inputs(operations, preparation, observed):
+    history, stopped = _history(operations, preparation.vault, observed)
     if stopped is not None:
-        return None, stopped
+        return (None, stopped, None)
     if history.checkpoint.locator.association != preparation.locator.association:
-        return None, _refused("association_mismatch", history)
+        return (None, _refused("association_mismatch", history), None)
     directory = Path(preparation.payload_directory).absolute()
     if (
         directory.name != "incoming"
         or directory.parent.parent != Path(tempfile.gettempdir())
         or not directory.parent.name.startswith("brz2obsidian-update-")
     ):
-        return None, _refused("owned_payload_required", history)
+        return (None, _refused("owned_payload_required", history), None)
     if validate_review(preparation.review).status != "accepted":
-        return None, _refused("invalid_review", history)
+        return (None, _refused("invalid_review", history), None)
     actual = operations.observe_reviewed_source(directory, preparation.review)
     if actual != preparation.source_binding:
-        return None, _refused("source_payload_changed", history)
-    retained = _read_source(operations, preparation.vault, history.checkpoint)
+        return (None, _refused("source_payload_changed", history), None)
+    retained = _read_source(operations, preparation.vault, history.checkpoint, observed)
     baseline = _baseline(history.checkpoint, retained)
     if preparation.source_ref is not None:
         incoming_record = json.loads(
@@ -1118,8 +1180,10 @@ def _reobserve(operations, preparation):
             fresh_source != preparation.observed_source
             or fresh_binding.files != actual.files
         ):
-            return None, _refused(
-                "incoming_source_changed", history, action="refresh_update"
+            return (
+                None,
+                _refused("incoming_source_changed", history, action="refresh_update"),
+                None,
             )
     else:
         saved_binding = history.checkpoint.manifest.reviewed_source
@@ -1130,7 +1194,11 @@ def _reobserve(operations, preparation):
             or history.checkpoint.manifest.observed_source
             != preparation.observed_source
         ):
-            return None, _refused("persisted_source_authority_required", history)
+            return (
+                None,
+                _refused("persisted_source_authority_required", history),
+                None,
+            )
     incoming = _read_physical(directory, actual.files)
     try:
         facts = _observed_facts(
@@ -1144,10 +1212,16 @@ def _reobserve(operations, preparation):
             ),
         )
     except _ExcludedDependency:
-        return None, _refused(
-            "excluded_dependency_requires_tracking", history, action="review_tracking"
+        return (
+            None,
+            _refused(
+                "excluded_dependency_requires_tracking",
+                history,
+                action="review_tracking",
+            ),
+            None,
         )
-    history = _scope_review(operations, history, facts, preparation.review)
+    history = _scope_review(operations, history, facts, preparation.review, observed)
     review = preparation.review
     changed = facts != review.facts or history.admission.preflight != review.preflight
     if changed:
@@ -1156,7 +1230,7 @@ def _reobserve(operations, preparation):
             review, facts, preflight=history.admission.preflight
         )
         if transition.status != "accepted":
-            return None, _refused(transition.code, history)
+            return (None, _refused(transition.code, history), None)
         review = transition.plan
         actual = operations.observe_reviewed_source(directory, review)
     result = _prepared(
@@ -1170,12 +1244,12 @@ def _reobserve(operations, preparation):
         status="stale_review" if changed else "prepared_review",
         code="current_facts_changed" if changed else "current",
     )
-    return history, result
+    return (history, result, retained)
 
 
 def apply_update(operations, preparation, *, cancel=None):
     try:
-        history, current = _reobserve(operations, preparation)
+        history, current, _ = _reobserve(operations, preparation)
         if history is None or current.status == "stale_review":
             return current
         if current.code == "separate_configuration_operation_required":

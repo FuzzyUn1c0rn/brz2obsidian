@@ -150,6 +150,12 @@ class Operations:
 
         return inspect_history(vault, **kwargs)
 
+    def inspect_update_inputs(self, vault, **kwargs):
+        """Read current update inputs within one single-use lexical observation."""
+        from brz2obsidian.publication.vault_history import inspect_update_inputs
+
+        return inspect_update_inputs(vault, **kwargs)
+
     def read_checkpoint(self, vault, **kwargs):
         """Validate and read current converter-owned checkpoint history."""
         from brz2obsidian.publication.vault_history import read_checkpoint

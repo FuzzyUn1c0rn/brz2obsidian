@@ -1286,13 +1286,25 @@ def _inspect_retained_history(vault, observation, *, subjects=(), active_operati
     )
 
 
-def inspect_history(vault, *, subjects=(), git_executable=None, active_operation=None):
+def _inspect_history(
+    vault,
+    *,
+    subjects=(),
+    git_executable=None,
+    active_operation=None,
+    checkpoint_observation=None,
+    recovery_observation=None,
+    _capture=None,
+):
     root = Path(vault).absolute()
     admission, history = _observe_vault(
         root,
         subjects=subjects,
         git_executable=git_executable,
         active_operation=active_operation,
+        checkpoint_observation=checkpoint_observation,
+        recovery_observation=recovery_observation,
+        _capture=_capture,
     )
     status = "unavailable"
     try:
@@ -1327,6 +1339,157 @@ def inspect_history(vault, *, subjects=(), git_executable=None, active_operation
         admission=admission,
         checkpoint=history,
     )
+
+
+def inspect_history(vault, *, subjects=(), git_executable=None, active_operation=None):
+    return _inspect_history(
+        vault,
+        subjects=subjects,
+        git_executable=git_executable,
+        active_operation=active_operation,
+    )
+
+
+class _UpdateRead:
+    """Single-use lexical reader; never accepted by capture or apply."""
+
+    def __init__(self, vault, *, git_executable=None):
+        self._root = Path(vault).absolute()
+        self._executable = git_executable
+        self._used = False
+        self._open = False
+        self._history = None
+        self._bound_history = None
+        self._inspection = None
+        self._idle = None
+        self._terminal = None
+
+    def __enter__(self):
+        from .vault_admission import _IdleCheckpointObservation
+
+        if self._used:
+            raise OSError("Update input reader cannot be reused")
+        self._used = True
+        try:
+            self._open = True
+            captured = []
+            self._history = _inspect_history(
+                self._root,
+                git_executable=self._executable,
+                _capture=lambda inspection, admission: captured.append(
+                    (inspection, admission)
+                ),
+            )
+            if (
+                self._history.status == "intact"
+                and self._history.admission.status == "supported"
+                and self._history.admission.inventory_complete
+                and captured
+            ):
+                inspection, admission = captured[0]
+                if (
+                    inspection.history is None
+                    or inspection.history.locator != self._history.checkpoint.locator
+                    or inspection.history.manifest != self._history.checkpoint.manifest
+                ):
+                    raise OSError(
+                        "History did not originate in the completed inspection"
+                    )
+                self._inspection = inspection
+                self._bound_history = VaultHistoryInspection(
+                    schema_id="brz2obsidian.vault-history-inspection",
+                    schema_version=1,
+                    status="intact",
+                    admission=admission,
+                    checkpoint=inspection.history,
+                )
+                self._terminal = inspection.recovery_observation
+                if self._terminal is None:
+                    self._idle = _IdleCheckpointObservation(inspection, admission)
+                self._check()
+            return self
+        except BaseException:
+            self.__exit__()
+            raise
+
+    def __exit__(self, *exc):
+        self._open = False
+        self._history = None
+        self._bound_history = None
+        self._inspection = None
+        self._idle = None
+        self._terminal = None
+
+    @property
+    def history(self):
+        """Immutable entry snapshot; byte and scope reads recheck current facts."""
+        if not self._open:
+            raise OSError("Update input reader is closed")
+        return self._history
+
+    def _check(self):
+        from .vault_admission import _check_read_snapshot
+
+        if not self._open or self._inspection is None:
+            raise OSError("Completed current input observation required")
+        _check_read_snapshot(
+            self._root,
+            _Git(self._root, self._inspection.executable),
+            self._inspection.history,
+            self._inspection.current_refs,
+            terminal=self._terminal,
+        )
+
+    def _current_history(self):
+        self._check()
+        return self._bound_history
+
+    def read_payload(self, *, locator, requests, byte_limit, role="source"):
+        from .checkpoint_payload import _read_checkpoint_payload
+
+        return _read_checkpoint_payload(
+            self._root,
+            locator=locator,
+            requests=requests,
+            byte_limit=byte_limit,
+            role=role,
+            git_executable=(
+                self._inspection.executable
+                if self._inspection is not None
+                else self._executable
+            ),
+            _read_history=self._current_history,
+            _guard=self._check,
+        )
+
+    def inspect(self, *, subjects):
+        from .vault_admission import _same_current_domain
+
+        self._check()
+        captured = []
+        scoped = _inspect_history(
+            self._root,
+            subjects=subjects,
+            git_executable=self._executable,
+            checkpoint_observation=self._idle,
+            recovery_observation=self._terminal,
+            _capture=lambda inspection, admission: captured.append(
+                (inspection, admission)
+            ),
+        )
+        self._check()
+        if (
+            scoped.status != "intact"
+            or scoped.admission.status != "supported"
+            or not captured
+            or not _same_current_domain(self._inspection, captured[0][0])
+        ):
+            raise OSError("Current scoped admission changed or is incomplete")
+        return scoped
+
+
+def inspect_update_inputs(vault, *, git_executable=None):
+    return _UpdateRead(vault, git_executable=git_executable)
 
 
 def read_checkpoint(vault, *, git_executable=None):

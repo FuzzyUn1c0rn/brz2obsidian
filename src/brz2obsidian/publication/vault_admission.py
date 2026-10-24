@@ -265,6 +265,127 @@ def _file_digest(path):
     return value.hexdigest()
 
 
+class _IdleCheckpointObservation:
+    """Private completed idle inspection; never accepted by a public writer."""
+
+    def __init__(self, inspection, admission):
+        from brz2obsidian.application.checkpoint_contracts import CheckpointRead
+
+        checkpoint = inspection.history
+        if (
+            admission.status != "supported"
+            or not admission.inventory_complete
+            or not inspection.complete
+            or not isinstance(checkpoint, CheckpointRead)
+            or checkpoint.status != "valid"
+            or checkpoint.locator is None
+            or inspection.linked_intents
+            or inspection.recovery_observation is not None
+            or _exists(inspection.root / ".git" / "brz2obsidian")
+            or any(
+                line.split(b" ", 1)[0].startswith(b"refs/brz2obsidian/imports/")
+                and b"/operations/" in line.split(b" ", 1)[0]
+                for line in inspection.current_refs.splitlines()
+            )
+        ):
+            raise OSError("Completed idle checkpoint inspection required")
+        self.root = inspection.root
+        self.executable = inspection.executable
+        self.checkpoint = checkpoint
+        self.roles = tuple(inspection.checkpoint_roles)
+        self.refs = inspection.current_refs
+
+
+def _check_read_snapshot(root, git, checkpoint, refs, *, terminal=None):
+    """Current physical association/ref/lease guard; not a graph replacement."""
+    from brz2obsidian.application.checkpoint_contracts import CheckpointLocator
+
+    locator = checkpoint.locator
+    if checkpoint.status != "valid" or locator is None:
+        raise OSError("Validated current checkpoint required")
+    _, _, raw, _ = observe_file(
+        root, root / ".brz2obsidian/locator.json", prefix_limit=65537
+    )
+    if len(raw) > 65536:
+        raise OSError("Current locator exceeds its bounded control size")
+    current = CheckpointLocator.model_validate_json(raw)
+    current_refs = git.call("for-each-ref", "--format=%(refname) %(objectname)")
+    association = locator.association
+    if (
+        current != locator
+        or verify_directory(root) != association.vault_anchor
+        or verify_directory(root / ".git") != association.git_anchor
+        or current_refs != refs
+        or git.call("rev-parse", "--verify", association.ref).decode().strip()
+        != locator.commit
+        or any(_existing_git_operation_blockers(root / ".git"))
+    ):
+        raise OSError("Current checkpoint association or references changed")
+    if terminal is None:
+        if _exists(root / ".git" / "brz2obsidian") or any(
+            line.split(b" ", 1)[0].startswith(b"refs/brz2obsidian/imports/")
+            and b"/operations/" in line.split(b" ", 1)[0]
+            for line in current_refs.splitlines()
+        ):
+            raise OSError("Idle checkpoint acquired operation evidence")
+    else:
+        from brz2obsidian.publication.vault_apply import _OperationObservation
+        from brz2obsidian.publication.vault_recovery import _lease_free
+
+        if (
+            not isinstance(terminal, _OperationObservation)
+            or terminal.checkpoint != checkpoint
+            or not _lease_free(root, terminal.graph.intent.operation_id)
+        ):
+            raise OSError("Validated terminal operation lease changed")
+
+
+def _accept_idle_checkpoint(self):
+    from brz2obsidian.publication.vault_history import _Git
+
+    retained = self.checkpoint_observation
+    if (
+        not isinstance(retained, _IdleCheckpointObservation)
+        or retained.root != self.root
+        or retained.executable != self.executable
+    ):
+        raise OSError("Same-vault completed idle observation required")
+    _check_read_snapshot(
+        self.root, _Git(self.root, self.executable), retained.checkpoint, retained.refs
+    )
+    self.history = retained.checkpoint
+    self.checkpoint_roles = list(retained.roles)
+    self.operation = "idle"
+
+
+def _same_current_domain(initial, current):
+    """Same global/storage/current-path authority; extra selected queries may vary."""
+    old_ignore_paths = set(initial.ignore_query_paths)
+    old_attribute_paths = set(initial.attribute_query_paths)
+    if (
+        not initial.complete
+        or not current.complete
+        or initial.inventory != current.inventory
+        or initial.storage_state != current.storage_state
+        or initial.policy[0] != current.policy[0]
+        or not old_ignore_paths.issubset(current.ignore_query_paths)
+        or not old_attribute_paths.issubset(current.attribute_query_paths)
+        or initial.ignored_paths != current.ignored_paths.intersection(old_ignore_paths)
+    ):
+        return False
+
+    def relevant(mapping):
+        return {
+            key: value
+            for key, value in mapping.items()
+            if key[0] in old_attribute_paths
+        }
+
+    return initial.attribute_rows == relevant(
+        current.attribute_rows
+    ) and initial.typed_attributes == relevant(current.typed_attributes)
+
+
 class _Inspection:
     def __init__(
         self,
@@ -273,12 +394,19 @@ class _Inspection:
         executable,
         active_operation=None,
         recovery_observation=None,
+        checkpoint_observation=None,
     ):
         self.root = Path(vault).absolute()
         self.subjects = ()
         self.request_subjects = subjects
         self.active_operation = active_operation
         self.recovery_observation = recovery_observation
+        self.checkpoint_observation = checkpoint_observation
+        self.current_refs = None
+        self.ignore_query_paths = ()
+        self.attribute_query_paths = ()
+        self.attribute_rows = {}
+        self.typed_attributes = {}
         self.validated_active_operation = False
         self.linked_intents = []
         self.checkpoint_roles = []
@@ -941,6 +1069,7 @@ class _Inspection:
         terminal_observation_missing = False
         if (
             self.recovery_observation is None
+            and self.checkpoint_observation is None
             and not (gitdir / "brz2obsidian").exists()
             and (self.root / ".brz2obsidian").exists()
         ):
@@ -967,7 +1096,9 @@ class _Inspection:
                     and observation is not None
                 ):
                     self.recovery_observation = observation
-        if self.recovery_observation is not None:
+        if self.checkpoint_observation is not None:
+            _accept_idle_checkpoint(self)
+        elif self.recovery_observation is not None:
             from brz2obsidian.application.checkpoint_contracts import CheckpointLocator
             from brz2obsidian.publication.vault_apply import (
                 _OperationObservation,
@@ -1107,6 +1238,7 @@ class _Inspection:
         if not self.index_state():
             return False
         refs = self.git("for-each-ref", "--format=%(refname) %(objectname)")
+        self.current_refs = refs
         self.storage_state.append(refs.hex())
         if not self.validated_active_operation:
             operation_refs = [
@@ -1264,6 +1396,7 @@ class _Inspection:
             {f.path for f in self.inventory}
             | {subject.path for subject in self.subjects}
         )
+        self.ignore_query_paths = tuple(ignore_paths)
         ignore_input = "".join(path + "\0" for path in ignore_paths).encode("utf-8")
         ignored_raw = (
             self.git(
@@ -1331,6 +1464,7 @@ class _Inspection:
             {f.path for f in self.inventory if not f.excluded}
             | {s.path for s in self.subjects}
         )
+        self.attribute_query_paths = tuple(paths)
         attribute_input = "".join(p + "\0" for p in paths).encode("utf-8")
         raw = self.git(
             "check-attr",
@@ -1358,6 +1492,7 @@ class _Inspection:
             path, attribute, value = values[i : i + 3]
             if path not in paths or (path, attribute) in observed:
                 raise OSError("Inconsistent effective attribute observation")
+            self.attribute_rows[path, attribute] = value
             if attribute in relevant:
                 observed[path, attribute] = value
         # --all omits true unspecified markers, so a returned 'unspecified' is
@@ -1391,6 +1526,7 @@ class _Inspection:
             else value == "set"
             for key, value in observed.items()
         }
+        self.typed_attributes = dict(attrs)
         self.policy.append(
             [
                 (path, attribute, value)
@@ -1868,14 +2004,24 @@ def _observe_vault(
     git_executable=None,
     active_operation=None,
     recovery_observation=None,
+    checkpoint_observation=None,
+    _capture=None,
 ):
     """Observe current storage; caller assertions cannot grant trusted proof."""
     inspection = _Inspection(
-        vault, subjects, git_executable, active_operation, recovery_observation
+        vault,
+        subjects,
+        git_executable,
+        active_operation,
+        recovery_observation,
+        checkpoint_observation,
     )
     try:
         with inspection.resources:
-            return inspection.run(), inspection.history
+            admission = inspection.run()
+            if _capture is not None:
+                _capture(inspection, admission)
+            return admission, inspection.history
     except AttributeCapabilityUnavailable:
         inspection.complete = False
         inspection.finding(

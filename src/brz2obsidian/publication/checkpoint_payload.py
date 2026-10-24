@@ -43,6 +43,29 @@ class _Page:
 def read_checkpoint_payload(
     vault, *, locator, requests, byte_limit, role="source", git_executable=None
 ):
+    """Return finite pages only after an independent current history inspection."""
+    return _read_checkpoint_payload(
+        vault,
+        locator=locator,
+        requests=requests,
+        byte_limit=byte_limit,
+        role=role,
+        git_executable=git_executable,
+        _read_history=lambda: inspect_history(vault, git_executable=git_executable),
+    )
+
+
+def _read_checkpoint_payload(
+    vault,
+    *,
+    locator,
+    requests,
+    byte_limit,
+    role="source",
+    git_executable=None,
+    _read_history,
+    _guard=None,
+):
     """Return exact byte pages bound to the *current* validated checkpoint.
 
     ``requests`` is a nonempty finite tuple. Its declared page limits must fit
@@ -92,7 +115,7 @@ def read_checkpoint_payload(
         if sum(row.limit for row in requests) > available_memory() // 4:
             return result("insufficient_memory")
         root = Path(vault).absolute()
-        observed = inspect_history(root, git_executable=git_executable)
+        observed = _read_history()
         checkpoint = observed.checkpoint
         if (
             observed.status != "intact"
@@ -137,6 +160,8 @@ def read_checkpoint_payload(
             != locator.commit
         ):
             return result("stale_locator")
+        if _guard is not None:
+            _guard()
         chunks = tuple(
             CheckpointPayloadChunk(
                 path=row.path,

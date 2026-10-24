@@ -1,6 +1,8 @@
 """Small public immutable reviews keep semantic variants off real BRZ/Git paths."""
 
 import hashlib
+from contextlib import nullcontext
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -19,6 +21,22 @@ from brz2obsidian.contracts import SourceIdentity
 from brz2obsidian.core import prepare_review
 from tests.reconciliation.test_proposals import request
 from tests.reconciliation.test_resolution import action, preflight, with_review_links
+
+
+@pytest.fixture(autouse=True)
+def controlled_public_input_reader(monkeypatch):
+    def inputs(operations, vault):
+        return nullcontext(
+            SimpleNamespace(
+                history=operations.inspect_history(vault),
+                read_payload=lambda **kwargs: operations.read_checkpoint_payload(
+                    vault, **kwargs
+                ),
+                inspect=lambda **kwargs: operations.inspect_history(vault, **kwargs),
+            )
+        )
+
+    monkeypatch.setattr(Operations, "inspect_update_inputs", inputs)
 
 
 def preparation(facts=None):
@@ -80,6 +98,196 @@ def preparation(facts=None):
         ),
         retained_source_provenance=False,
         review=plan,
+    )
+
+
+def test_matching_source_refresh_keeps_reader_and_fresh_observed_identity(
+    tmp_path, monkeypatch
+):
+    import json
+
+    from brz2obsidian.application import SourceModuleBinding, Workflow
+    from brz2obsidian.application.vault_contracts import VaultFile
+    from brz2obsidian.contracts import OutputIdentity
+    from brz2obsidian.obsidian import ObsidianRenderer
+    from brz2obsidian.publication import FilesystemPublisher
+    from brz2obsidian.publication.vault_native import observe_file
+    from tests.application.test_module_seams import METADATA
+    from tests.support.folio_source import FOLIO_POLICY, FolioSourceModule
+
+    source = tmp_path / "folio.json"
+    data = {
+        "collection": "refresh-collection",
+        "start": "entry:opening",
+        "entries": [
+            {
+                "key": "entry:opening",
+                "seed": "00000001000040008000000000000000",
+                "title": "Opening",
+            }
+        ],
+        "connections": [],
+        "assets": [],
+        "documents": [],
+    }
+    source.write_text(json.dumps(data))
+    workflow = Workflow(
+        SourceModuleBinding(FolioSourceModule(), FOLIO_POLICY),
+        ObsidianRenderer(),
+        FilesystemPublisher(),
+        metadata_factory=lambda: METADATA,
+    )
+    vault = tmp_path / "vault"
+    converted = workflow.convert(source, vault)
+    assert converted.receipt is not None
+    payload = {
+        r.relative_path: (vault / r.relative_path).read_bytes()
+        for r in converted.receipt.manifest
+    }
+    rows = tuple(
+        SourcePayloadFile(
+            path=p, mode="100644", size=len(raw), sha256=hashlib.sha256(raw).hexdigest()
+        )
+        for p, raw in sorted(payload.items())
+    )
+    inventory = []
+    for row in rows:
+        info, sha, _, physical = observe_file(vault, vault / row.path, prefix_limit=0)
+        inventory.append(
+            VaultFile(
+                path=row.path,
+                mode=row.mode,
+                size=info.st_size,
+                sha256=sha,
+                identity=physical,
+                tracked=True,
+                excluded=False,
+                exclusion=None,
+            )
+        )
+    identity = OutputIdentity(
+        collection_id="refresh-collection",
+        module_id="synthetic-folio",
+        module_version="3",
+        profile_id="synthetic-folio-reviewed",
+        profile_version="3",
+        output_format=7,
+        settings_digest=hashlib.sha256(b"{}").hexdigest(),
+    )
+    association = VaultAssociation(
+        schema_id="brz2obsidian.vault-association",
+        schema_version=1,
+        association_id="a" * 64,
+        vault_id="vault",
+        import_id="import",
+        collection_id=identity.collection_id,
+        module_id=identity.module_id,
+        vault_anchor="observed-vault",
+        git_anchor="observed-git",
+        ref="refs/brz2obsidian/imports/" + "a" * 64 + "/checkpoints",
+    )
+    locator = CheckpointLocator(
+        schema_id="brz2obsidian.checkpoint-locator",
+        schema_version=1,
+        association=association,
+        generation=1,
+        commit="b" * 40,
+    )
+    history = SimpleNamespace(
+        status="intact",
+        admission=SimpleNamespace(
+            vault=str(vault),
+            status="supported",
+            inventory=tuple(inventory),
+            preflight=preflight(),
+            findings=(),
+            recovery_gaps=(),
+            repository=SimpleNamespace(kind="root"),
+        ),
+        checkpoint=SimpleNamespace(
+            status="valid",
+            locator=locator,
+            review=None,
+            manifest=SimpleNamespace(boundary="local", identity=identity, source=rows),
+        ),
+    )
+    operations = Operations(workflow=workflow)
+    scopes = []
+
+    def inspection(*args, **kwargs):
+        if "subjects" in kwargs:
+            scopes.append(tuple(s.path for s in kwargs["subjects"]))
+        return history
+
+    monkeypatch.setattr(operations, "inspect_history", inspection)
+    monkeypatch.setattr(
+        operations,
+        "read_checkpoint_payload",
+        lambda *args, **kwargs: SimpleNamespace(
+            status="available",
+            chunks=tuple(
+                SimpleNamespace(path=p, data=raw) for p, raw in payload.items()
+            ),
+        ),
+    )
+    prepared = operations.prepare_update(vault, source)
+    assert prepared.preparation is not None, prepared
+    data["new_source_evidence"] = "literal changed observation"
+    source.write_text(json.dumps(data))
+    refreshed = operations.refresh_update(prepared.preparation, source=source)
+    assert refreshed.preparation is not None, refreshed
+    assert (
+        refreshed.preparation.observed_source.source_sha256
+        == hashlib.sha256(source.read_bytes()).hexdigest()
+    )
+    assert refreshed.preparation.observed_source != prepared.preparation.observed_source
+    assert (
+        refreshed.preparation.review.facts.incoming_identity.collection_id
+        == "refresh-collection"
+    )
+    assert len(scopes) == 2 and "Home — Opening.md" in scopes[-1]
+
+
+@pytest.mark.parametrize(
+    ("status", "has_locator"),
+    (
+        ("valid", True),
+        ("refused", True),
+        ("valid", False),
+        ("absent", False),
+        (None, False),
+    ),
+)
+def test_recovery_gate_discloses_gaps_vault_and_only_valid_available_checkpoint(
+    monkeypatch, status, has_locator
+):
+    locator = preparation().locator
+    checkpoint = (
+        SimpleNamespace(status=status, locator=locator if has_locator else None)
+        if status is not None
+        else None
+    )
+    history = SimpleNamespace(
+        status="unavailable",
+        checkpoint=checkpoint,
+        admission=SimpleNamespace(
+            status="recovery_first",
+            vault="observed-vault",
+            recovery_gaps=("Ignored/private.bin",),
+            findings=(),
+        ),
+    )
+    operations = Operations()
+    monkeypatch.setattr(operations, "inspect_history", lambda vault: history)
+    result = operations.prepare_update("observed-vault", "unused.brz")
+    assert result.status == "recovery_required" and result.code == "recovery_first"
+    assert result.next_actions == ("review_recovery",)
+    assert result.vault == "observed-vault"
+    assert result.recovery_gaps == ("Ignored/private.bin",)
+    expected = locator if status == "valid" and has_locator else None
+    assert result.checkpoint == expected
+    assert result.checkpoint_commit == (
+        expected.commit if expected is not None else None
     )
 
 

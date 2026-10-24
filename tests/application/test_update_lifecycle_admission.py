@@ -3,6 +3,7 @@
 import hashlib
 import json
 import tempfile
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -33,6 +34,22 @@ from tests.reconciliation.test_resolution import action, preflight
 COLLECTION = "11111111-1111-4111-8111-111111111111"
 ITEM = "22222222-2222-4222-8222-222222222222"
 NOTE = "Notes/Opening.md"
+
+
+@pytest.fixture(autouse=True)
+def controlled_public_input_reader(monkeypatch):
+    def inputs(operations, vault):
+        return nullcontext(
+            SimpleNamespace(
+                history=operations.inspect_history(vault),
+                read_payload=lambda **kwargs: operations.read_checkpoint_payload(
+                    vault, **kwargs
+                ),
+                inspect=lambda **kwargs: operations.inspect_history(vault, **kwargs),
+            )
+        )
+
+    monkeypatch.setattr(Operations, "inspect_update_inputs", inputs)
 
 
 def note(body):
