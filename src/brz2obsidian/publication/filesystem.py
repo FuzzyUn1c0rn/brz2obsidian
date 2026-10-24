@@ -34,6 +34,26 @@ def _windows_component(part):
     )
 
 
+def vault_name_error(vault_name: str) -> str | None:
+    """Return concise feedback for an invalid single Windows folder name."""
+    if not vault_name.strip():
+        return "Enter a vault name."
+    if vault_name.endswith("."):
+        return "Remove the final dot."
+    if vault_name.endswith(" "):
+        return "Remove the space at the end."
+    if any(ord(char) < 32 for char in vault_name):
+        return "Remove hidden control characters."
+    invalid_character = next(
+        (char for char in vault_name if char in '<>:"/\\|?*'), None
+    )
+    if invalid_character is not None:
+        return f"Remove “{invalid_character}” from the vault name."
+    if ntpath.isreserved(vault_name):
+        return f"“{vault_name}” is reserved. Choose another name."
+    return None
+
+
 @dataclass(frozen=True)
 class DestinationError:
     code: str
@@ -57,12 +77,13 @@ def preflight_destination(parent: Path, vault_name: str) -> DestinationPreflight
     """
     errors = []
     checked = ["vault_name_component", "parent_directory"]
-    if not _windows_component(vault_name) or not vault_name.strip():
+    name_error = vault_name_error(vault_name)
+    if name_error is not None or not _windows_component(vault_name):
         errors.append(
             DestinationError(
                 "invalid_vault_name",
                 "vault_name",
-                "The destination cannot be used because its vault folder name is not valid for Windows. Enter one nonblank folder name without reserved names, separators or a trailing dot or space.",
+                name_error or "Enter a valid vault name.",
             )
         )
     if not parent.is_absolute():
@@ -70,7 +91,7 @@ def preflight_destination(parent: Path, vault_name: str) -> DestinationPreflight
             DestinationError(
                 "invalid_parent",
                 "parent",
-                "The destination cannot be checked because its parent folder does not use a full path. Choose an existing parent folder with an absolute path (for example, C:\\Vaults).",
+                "Choose a parent folder using its full path.",
             )
         )
     destination = parent / vault_name if not errors else None
@@ -82,7 +103,7 @@ def preflight_destination(parent: Path, vault_name: str) -> DestinationPreflight
                 DestinationError(
                     "parent_unavailable",
                     "parent",
-                    "The destination cannot be used because its parent folder is unavailable. Choose an existing parent folder that you can read.",
+                    "Choose an existing, readable parent folder.",
                 )
             )
         if destination is not None:
@@ -95,9 +116,9 @@ def preflight_destination(parent: Path, vault_name: str) -> DestinationPreflight
             DestinationError(
                 code,
                 field,
-                "The destination cannot be used because it is occupied or could not be confirmed empty. Choose an absent or empty destination folder. Existing contents are never removed."
+                "Choose a new or empty vault folder."
                 if code == "destination_not_empty"
-                else "The destination cannot be used because its path contains a folder redirect. Choose a parent and destination without symbolic links or reparse points (Windows folder redirects).",
+                else "Choose a folder without redirects.",
             )
         )
     except OSError:
@@ -105,7 +126,7 @@ def preflight_destination(parent: Path, vault_name: str) -> DestinationPreflight
             DestinationError(
                 "destination_read_failure",
                 field,
-                "The destination could not be checked. Check folder access and choose it again.",
+                "Couldn’t check the destination. Choose it again.",
             )
         )
         return DestinationPreflight(destination, tuple(errors), tuple(checked), True)

@@ -46,7 +46,10 @@ from brz2obsidian.application.contracts import (
 from brz2obsidian.application.conversion import convert
 from brz2obsidian.application.diagnostics import finding_for
 from brz2obsidian.contracts import Counts, MigrationFailed, MigrationRefused
-from brz2obsidian.publication.filesystem import preflight_destination
+from brz2obsidian.publication.filesystem import (
+    preflight_destination,
+    vault_name_error,
+)
 
 
 class Operations:
@@ -371,6 +374,19 @@ def validate_destination(parent: Path, vault_name: str) -> DestinationValidation
         checked=preliminary.checked,
         pending=pending,
         diagnostic_text=text,
+    )
+
+
+def validate_vault_name(vault_name: str) -> Finding | None:
+    """Validate a name immediately, without touching destination filesystems."""
+    message = vault_name_error(vault_name)
+    if message is None:
+        return None
+    return Finding(
+        code="invalid_vault_name",
+        severity="error",
+        message=message,
+        field="vault_name",
     )
 
 
@@ -1054,7 +1070,7 @@ class ApplicationSession:
                             code="destination_validation_failure",
                             severity="error",
                             field="destination",
-                            message="The destination check did not complete reliably. Edit or choose the destination again when ready.",
+                            message="Couldn’t check the destination. Choose it again.",
                         ),
                     ),
                     pending=("destination_feasibility", "write_success"),

@@ -241,8 +241,9 @@ def test_brz_file_access_and_invalid_archive_have_different_explanations(tmp_pat
 
     missing = tmp_path / "missing.brz"
     result = Operations().inspect(missing)
-    assert "BRZ archive could not be found" in result.findings[0].message
-    assert "Choose an existing BRZ archive" in result.findings[0].message
+    assert result.findings[0].message == (
+        "Archive not found. Choose an existing BRZ file."
+    )
     raw = default_workflow().inspect(missing)
     assert raw.issues[0].rule_id == "diagnostic.archive_missing"
     invalid = tmp_path / "invalid.brz"
@@ -259,17 +260,15 @@ def test_destination_and_vault_check_explain_the_operation_and_next_action(
     from brz2obsidian.cli import main
 
     destination = validate_destination(tmp_path, "invalid/name")
-    assert "destination cannot be used" in destination.field_errors[0].message
-    assert "folder name" in destination.field_errors[0].message
-    assert "Enter" in destination.field_errors[0].message
+    assert destination.field_errors[0].message == "Remove “/” from the vault name."
     note = tmp_path / "Broken.md"
     note.write_text("---\nkey: [unterminated\n---\nNOTE_BODY_CANARY", encoding="utf-8")
     result = Operations().check_vault(tmp_path)
     assert result.outcome == "issues"
-    assert "Vault check found" in result.findings[0].message
-    assert "properties at the start of a note" in result.findings[0].message
+    assert result.findings[0].message == "Invalid note properties. Check their format."
+    assert "with one value per key and no executable tags" in result.diagnostic_text
     assert result.findings[0].path == "Broken.md"
-    assert "Correct" in result.findings[0].message
+    assert "Correct the properties" in result.diagnostic_text
     assert result.findings[0].message in result.diagnostic_text
     assert main(["check-vault", str(tmp_path)]) == 2
     output = capsys.readouterr()

@@ -16,6 +16,7 @@
     "tests/sources/test_local_api_complete_tables.py",
     "tests/application/test_readable_errors.py",
     "tests/gui/test_readable_errors_window.py",
+    "tests/gui/test_validation_feedback.py",
     "tests/application/test_graph_modules.py",
     "tests/application/test_reference_module_seams.py",
     "tests/application/test_resource_module_seams.py",
