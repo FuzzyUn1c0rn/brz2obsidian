@@ -232,14 +232,21 @@ def _review_observation(
     if context is not None:
         target_by_id = {target.target_id: target for target in context.current_targets}
         state_by_id = {state.target_id: state for state in context.current_target_facts}
+        file_target_ids = {
+            target.target_id
+            for target in context.current_targets
+            if target.kind != "tag"
+        }
         if (
             len(target_by_id) != len(context.current_targets)
             or len(state_by_id) != len(context.current_target_facts)
-            or set(target_by_id) != set(state_by_id)
+            or file_target_ids != set(state_by_id)
         ):
             raise OSError("Current recovery target lookup is incomplete")
         target_facts = []
         for target in context.current_targets:
+            if target.kind == "tag":
+                continue
             old = state_by_id[target.target_id]
             observed_target = current.get(target.canonical_path)
             if observed_target is None or (
@@ -259,24 +266,7 @@ def _review_observation(
                         memberships=(),
                     )
                 )
-        documents = []
-        for document in context.current_documents:
-            observed_document = current[document.source_path]
-            if observed_document.content is None:
-                continue
-            documents.append(
-                document
-                if observed_document.content == document.content
-                else interpret_links(
-                    observed_document.content,
-                    document_id=document.document_id,
-                    source_path=document.source_path,
-                    path_mode=document.path_mode,
-                    targets=context.current_targets,
-                    target_facts=tuple(target_facts),
-                    inventory="complete",
-                )
-            )
+        new_documents = []
         current_targets = list(context.current_targets)
         incoming_targets = list(context.incoming_targets)
         incoming_target_facts = list(context.incoming_target_facts)
@@ -352,7 +342,12 @@ def _review_observation(
                     if target.target_id == retained_target.target_id
                 )
                 current_targets[index] = retained_target
-                target_facts[index] = interpret_link_target(
+                state_index = next(
+                    i
+                    for i, state in enumerate(target_facts)
+                    if state.target_id == retained_target.target_id
+                )
+                target_facts[state_index] = interpret_link_target(
                     observed_document.content,
                     target_id=retained_target.target_id,
                     existence="present",
@@ -369,7 +364,7 @@ def _review_observation(
                 )
                 if parsed.status != "supported":
                     raise OSError("Operation-owned recovery note interpretation failed")
-                documents.append(parsed)
+                new_documents.append(parsed)
                 if owner[0].current.path == path:
                     # A created note already has the sole retained item at
                     # this physical path. Its ordinary inventory row below
@@ -462,7 +457,7 @@ def _review_observation(
             incoming_targets.append(reference)
             target_facts.append(state)
             incoming_target_facts.append(state)
-            documents.append(parsed)
+            new_documents.append(parsed)
             incoming_documents.append(parsed)
             identity_inventory.append(
                 IdentityInventoryItem(
@@ -477,11 +472,53 @@ def _review_observation(
                 )
             )
             known_identity_paths.add(path)
+        lookup_targets = tuple(current_targets)
+        lookup_states = tuple(target_facts)
+        lookup_unchanged = (
+            lookup_targets == context.current_targets
+            and lookup_states == context.current_target_facts
+            and context.inventory == "complete"
+        )
+        documents = []
+        for document in context.current_documents:
+            observed_document = current[document.source_path]
+            if observed_document.content is None:
+                continue
+            documents.append(
+                document
+                if (
+                    lookup_unchanged
+                    and observed_document.content == document.content
+                    and observed_document.path == document.source_path
+                    and document.inventory == "complete"
+                )
+                else interpret_links(
+                    observed_document.content,
+                    document_id=document.document_id,
+                    source_path=observed_document.path,
+                    path_mode=document.path_mode,
+                    targets=lookup_targets,
+                    target_facts=lookup_states,
+                    inventory="complete",
+                )
+            )
+        documents.extend(
+            interpret_links(
+                document.content,
+                document_id=document.document_id,
+                source_path=document.source_path,
+                path_mode=document.path_mode,
+                targets=lookup_targets,
+                target_facts=lookup_states,
+                inventory="complete",
+            )
+            for document in new_documents
+        )
         context = context.model_copy(
             update={
-                "current_targets": tuple(current_targets),
+                "current_targets": lookup_targets,
                 "incoming_targets": tuple(incoming_targets),
-                "current_target_facts": tuple(target_facts),
+                "current_target_facts": lookup_states,
                 "incoming_target_facts": tuple(incoming_target_facts),
                 "current_documents": tuple(documents),
                 "incoming_documents": tuple(incoming_documents),
@@ -690,6 +727,8 @@ def _restore_link_context(original, facts, before, affected, git):
         raise OSError("Current recovery lookup is ambiguous")
     target_states = []
     for target in context.current_targets:
+        if target.kind == "tag":
+            continue
         path = target.canonical_path
         if path in affected:
             content = _owned_content(git, before.get(path))
