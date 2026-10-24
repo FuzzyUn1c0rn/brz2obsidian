@@ -315,6 +315,7 @@ def test_checker_findings_use_approved_concise_copy_and_keep_detailed_guidance(
     "artifact,message",
     [
         (None, "Couldn’t read the vault. Check folder access."),
+        (".", "Couldn’t read the vault. Check folder access."),
         ("Broken.md", "Couldn’t read this file. Check access and text encoding."),
     ],
 )

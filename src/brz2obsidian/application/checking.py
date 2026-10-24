@@ -40,7 +40,7 @@ SAFE_FINDINGS = {
 
 def finding_for_check(issue, outcome):
     message = SAFE_FINDINGS[issue.code]
-    if issue.code == "read_failure" and issue.artifact is None:
+    if issue.code == "read_failure" and issue.artifact in (None, "."):
         message = "Couldn’t read the vault. Check folder access."
     return Finding(
         code=issue.code,
