@@ -382,6 +382,8 @@ def test_inherited_pytest_options_cannot_narrow_declared_selection(
         "PYTEST_ADDOPTS", "-k nonexistent_test --basetemp=tmp/unsafe-shared"
     )
     monkeypatch.setenv("PYTEST_PLUGINS", "missing_injected_plugin")
+    monkeypatch.setenv("PYTEST_XDIST_WORKER", "gw9")
+    monkeypatch.setenv("PYTEST_XDIST_WORKER_COUNT", "2")
     result, _, receipt = run(
         checkout, "--check", "pytest", "--test", "tests/test_selected.py"
     )
