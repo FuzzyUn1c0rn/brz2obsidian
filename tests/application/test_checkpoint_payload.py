@@ -118,8 +118,16 @@ def test_byte_page_cannot_claim_eof_while_its_suffix_is_omitted():
     fields = literal_page()
     chunk = CheckpointPayloadChunk(**fields)
     assert chunk.data == b"\nB\x00" and chunk.next_offset == 5
-    with pytest.raises(ValidationError):
-        CheckpointPayloadChunk(**(fields | {"eof": True}))
+    # Each literal counterexample contradicts one independent range statement.
+    for contradiction in (
+        {"size": 4, "next_offset": None},
+        {"eof": True},
+        {"omitted": False},
+        {"next_offset": 4},
+        {"data": b"", "next_offset": 2},
+    ):
+        with pytest.raises(ValidationError):
+            CheckpointPayloadChunk(**(fields | contradiction))
 
 
 def test_refused_read_cannot_release_a_verified_page_and_codes_are_closed():
@@ -154,10 +162,24 @@ def test_refused_read_cannot_release_a_verified_page_and_codes_are_closed():
     }
     available = CheckpointPayloadRead(**fields)
     assert available.chunks[0].data == b"\nB\x00"
-    with pytest.raises(ValidationError):
-        CheckpointPayloadRead(
-            **(fields | {"status": "refused", "code": "history_unavailable"})
-        )
+    refused = {
+        "status": "refused",
+        "code": "history_unavailable",
+        "locator": None,
+        "chunks": (),
+    }
+    assert CheckpointPayloadRead(**(fields | refused)).chunks == ()
+    # Separate contradictions keep one check from masking another check.
+    for contradiction in (
+        {"code": "history_unavailable"},
+        {"locator": None},
+        {"chunks": ()},
+        refused | {"code": "verified"},
+        refused | {"chunks": fields["chunks"]},
+        refused | {"locator": locator},
+    ):
+        with pytest.raises(ValidationError):
+            CheckpointPayloadRead(**(fields | contradiction))
     with pytest.raises(ValidationError):
         CheckpointPayloadRead(**(fields | {"code": "invented"}))
 
@@ -270,7 +292,7 @@ def test_current_identity_role_path_and_finite_range_are_required(retained):
             {"requests": (CheckpointPayloadRequest(path="Note.md", limit=1),)},
             "path_unavailable",
         ),
-        ({"role": "preimage"}, "path_unavailable"),
+        ({"role": "proposed"}, "path_unavailable"),
         (
             {
                 "requests": (

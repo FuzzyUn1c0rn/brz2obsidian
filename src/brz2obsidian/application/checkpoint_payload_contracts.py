@@ -39,6 +39,7 @@ class CheckpointPayloadChunk(ReconciliationContract):
         end = self.offset + len(self.data)
         if (
             end > self.size
+            or (not self.data and end < self.size)
             or self.eof != (end == self.size)
             or self.omitted != (self.offset != 0 or len(self.data) != self.size)
             or self.next_offset != (end if end < self.size else None)
