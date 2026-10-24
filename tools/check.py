@@ -266,7 +266,7 @@ def parse():
     run.add_argument("-k", dest="keyword")
     run.add_argument("-m", dest="marker")
     run.add_argument("--require-gui", action="store_true")
-    run.add_argument("--workers", type=int, choices=(1, 2, 3), default=1)
+    run.add_argument("--workers", type=int, choices=(1, 2, 3, 4), default=1)
     validate = commands.add_parser(
         "validate",
         help="Validate completed evidence against independent scope requirements",
@@ -740,7 +740,7 @@ def validate(args):
                     "workers" in chosen
                     and (
                         type(chosen["workers"]) is not int
-                        or chosen["workers"] not in (2, 3)
+                        or chosen["workers"] not in (2, 3, 4)
                     )
                 )
                 or not isinstance(chosen["selectors"], list)

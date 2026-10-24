@@ -48,12 +48,20 @@ def coverage_checkout(tmp_path):
         (
             "import os\nfrom pathlib import Path\n\n"
             "from brz2obsidian.decisions import choose\n\n\n"
-            "def test_all_choices():\n"
-            "    from brz2obsidian_ui.decisions import choose as ui_choose\n\n"
+            "def test_no():\n"
             "    assert choose(False) == 'no'\n"
-            "    assert ui_choose(True) == 'open'\n"
-            "    assert ui_choose(False) == 'closed'\n"
             "    Path('tmp/other-pid').write_text(str(os.getpid()))\n"
+        ).replace("'", '"'),
+        encoding="utf-8",
+    )
+    (root / "tests" / "test_ui.py").write_text(
+        (
+            "import os\nfrom pathlib import Path\n\n"
+            "from brz2obsidian_ui.decisions import choose\n\n\n"
+            "def test_ui_choices():\n"
+            "    assert choose(True) == 'open'\n"
+            "    assert choose(False) == 'closed'\n"
+            "    Path('tmp/ui-pid').write_text(str(os.getpid()))\n"
         ).replace("'", '"'),
         encoding="utf-8",
     )
@@ -76,6 +84,7 @@ def coverage_checkout(tmp_path):
                     "tests/test_decisions.py",
                     "tests/test_other.py",
                     "tests/test_gui.py",
+                    "tests/test_ui.py",
                 ],
             }
         ),
@@ -159,30 +168,31 @@ def test_default_command_validates_four_checks_and_reports_all_production(
     assert report["production_files"] == 5
     assert report["elapsed_seconds"] < 60
     assert 0 < report["pytest_seconds"] < report["runner_seconds"]
-    assert report["test_counts"]["passed"] == 3
-    assert report["test_counts"]["collected"] == 3
+    assert report["test_counts"]["passed"] == 4
+    assert report["test_counts"]["collected"] == 4
     assert report["test_counts"]["gui_executed"] == 1
     assert report["test_counts"]["executed_nodes"] == [
         "tests/test_decisions.py::test_yes",
         "tests/test_gui.py::test_gui",
-        "tests/test_other.py::test_all_choices",
+        "tests/test_other.py::test_no",
+        "tests/test_ui.py::test_ui_choices",
     ]
     assert (
         len(
             {
                 (coverage_checkout / "tmp" / name).read_text()
-                for name in ("yes-pid", "other-pid", "gui-pid")
+                for name in ("yes-pid", "other-pid", "gui-pid", "ui-pid")
             }
         )
-        == 3
+        == 4
     )
     receipt = json.loads(Path(report["receipt"]).read_text(encoding="utf-8"))
     selected = next(row for row in receipt["checks"] if row["id"] == "pytest")
-    assert selected["selection"]["workers"] == 3
+    assert selected["selection"]["workers"] == 4
     parallel = selected["argv"].index("-n")
     assert selected["argv"][parallel : parallel + 5] == [
         "-n",
-        "3",
+        "4",
         "--dist=loadscope",
         "--no-loadscope-reorder",
         "--max-worker-restart=0",
@@ -210,11 +220,14 @@ def test_default_command_validates_four_checks_and_reports_all_production(
     assert raw["meta"]["show_contexts"] is True
     assert raw["meta"]["context_scope"] == "file"
     assert decision["contexts"]["3"] == ["test_decisions.test_yes"]
-    assert decision["contexts"]["4"] == ["test_other.test_all_choices"]
+    assert decision["contexts"]["4"] == ["test_other.test_no"]
     assert decision["contexts"]["9"] == ["test_decisions.test_yes"]
     assert decision["contexts"]["1"] == [""]
     assert sorted(decision["executed_branches"]) == [[2, 3], [2, 4]]
     assert decision["missing_branches"] == []
+    ui_decision = files["src/brz2obsidian_ui/decisions.py"]
+    assert ui_decision["contexts"]["3"] == ["test_ui.test_ui_choices"]
+    assert ui_decision["contexts"]["4"] == ["test_ui.test_ui_choices"]
     assert decision["functions"]["choose"]["summary"]["covered_branches"] == 2
     assert decision["functions"]["Decision.choose"]["executed_lines"] == [9]
     assert decision["classes"]["Decision"]["executed_lines"] == [9]
