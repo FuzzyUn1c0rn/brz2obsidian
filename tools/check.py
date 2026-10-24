@@ -192,8 +192,8 @@ def selection(args):
         "marker": args.marker,
         "require_gui": args.require_gui,
     }
-    if args.workers == 2:
-        chosen["workers"] = 2
+    if args.workers > 1:
+        chosen["workers"] = args.workers
     return chosen
 
 
@@ -230,10 +230,10 @@ def command_for(python, run_dir, check, chosen):
         argv += ["-k", chosen["keyword"]]
     if chosen["marker"]:
         argv += ["-m", chosen["marker"]]
-    if chosen.get("workers", 1) == 2:
+    if chosen.get("workers", 1) > 1:
         argv += [
             "-n",
-            "2",
+            str(chosen["workers"]),
             "--dist=loadscope",
             "--no-loadscope-reorder",
             "--max-worker-restart=0",
@@ -266,7 +266,7 @@ def parse():
     run.add_argument("-k", dest="keyword")
     run.add_argument("-m", dest="marker")
     run.add_argument("--require-gui", action="store_true")
-    run.add_argument("--workers", type=int, choices=(1, 2), default=1)
+    run.add_argument("--workers", type=int, choices=(1, 2, 3), default=1)
     validate = commands.add_parser(
         "validate",
         help="Validate completed evidence against independent scope requirements",
@@ -333,7 +333,7 @@ print(json.dumps(info))
             for check in checks
         }
     )
-    if workers == 2:
+    if workers > 1:
         packages += ["pytest-xdist", "execnet"]
     result = subprocess.run(
         [str(python), "-c", code, json.dumps(packages)],
@@ -430,11 +430,7 @@ def run(args):
     root = args.checkout.resolve()
     checks = list(dict.fromkeys(args.check or CHECKS))
     if (
-        args.test
-        or args.keyword
-        or args.marker
-        or args.require_gui
-        or args.workers == 2
+        args.test or args.keyword or args.marker or args.require_gui or args.workers > 1
     ) and "pytest" not in checks:
         raise Invalid("Test selectors require the pytest check")
     for node in args.test:
@@ -742,7 +738,10 @@ def validate(args):
                 )
                 or (
                     "workers" in chosen
-                    and (type(chosen["workers"]) is not int or chosen["workers"] != 2)
+                    and (
+                        type(chosen["workers"]) is not int
+                        or chosen["workers"] not in (2, 3)
+                    )
                 )
                 or not isinstance(chosen["selectors"], list)
                 or any(not isinstance(node, str) for node in chosen["selectors"])
@@ -779,7 +778,7 @@ def validate(args):
             raise Invalid("Executed tool version missing")
         if (
             row["id"] == "pytest"
-            and chosen.get("workers", 1) == 2
+            and chosen.get("workers", 1) > 1
             and any(
                 not interpreter["tools"].get(package)
                 for package in ("pytest-xdist", "execnet")

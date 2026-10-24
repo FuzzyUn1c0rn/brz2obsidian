@@ -70,10 +70,11 @@ changes, missing coverage, insufficient branches or deadline exhaustion prevent
 success. Timeout cleanup may take additional seconds; an over-budget attempt
 never qualifies. Retain failed and interrupted evidence as well as later passes.
 
-The maintained selection uses two pytest-xdist workers with module/class scope
-groups. Focused measurements use one process unless `--workers 2` is explicit.
-`--workers 1` selects serial execution for the maintained command. Parallel
-execution preserves relative file order within each worker; it does not promise
+The maintained selection uses three pytest-xdist workers with module/class scope
+groups. Focused measurements use one process unless `--workers 2` or
+`--workers 3` is explicit. `--workers 1` selects serial execution for the
+maintained command. Parallel execution preserves relative file order within
+each worker; it does not promise
 global serial order. Worker restarts are disabled, and the shared 600-second
 deadline includes worker startup, shutdown and merged coverage reports.
 
@@ -118,9 +119,10 @@ coverage command. Handoff regressions in `.agents/skills/implement-spec-enhanced
 separate focused selection. Invalid, zero-test or entirely skipped selections
 do not establish passing pytest coverage.
 
-The runner defaults to serial pytest. `run --workers 2` uses the same scope
-grouping and disabled restarts as the maintained coverage command. Its receipt
-records `workers: 2`, the exact worker arguments and actual pytest-xdist/execnet
+The runner defaults to serial pytest. `run --workers 2` or `run --workers 3` uses
+the same scope grouping and disabled restarts as the maintained coverage command.
+Its receipt
+records the worker count, exact worker arguments and actual pytest-xdist/execnet
 versions. Only the controller writes shared counts and timings; collected tests
 are counted once, and GUI counts come from actual worker reports. Serial
 receipts retain their existing selection shape and argument reconstruction.
