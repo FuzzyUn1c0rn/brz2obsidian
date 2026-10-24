@@ -23,13 +23,14 @@ All production files, including unexecuted modules, remain in the denominator.
 Raw coverage data and HTML contexts remain available. Reporting uses the same
 global deadline and validates the check receipt before and after reports.
 
-The maintained command uses three pytest-xdist workers, grouping module functions
+The maintained command uses four pytest-xdist workers, grouping module functions
 and class methods together with `loadscope`. It disables scope reordering and
 worker restarts. Manifest order is preserved within each worker; global serial
 order is not guaranteed. The existing 600-second deadline includes the worker
 processes and combined production coverage. Focused measurements and direct
-runner checks remain serial by default; `--workers 2` or `--workers 3` selects
-parallel execution, and `--workers 1` can select serial maintained-suite execution.
+runner checks remain serial by default; `--workers 2`, `--workers 3` or
+`--workers 4` selects parallel execution, and `--workers 1` can select serial
+maintained-suite execution.
 
 For everyday development, run the smallest affected selection through
 `tools/check.py`. Use `tools/coverage_suite.py --test <file-or-node>` when a new
@@ -109,11 +110,15 @@ affected consumer, an unresolved concern or a named acceptance requirement.
 Budget additional ordinary checks together with the default bundle when both
 are required.
 
-The longer S2 module groups start early: latest Undo, recovery and repair are
-followed by the short wire-contract group and persisted review refresh. The
-standard scheduler queues additional module groups only while a worker has at
-most two pending tests. This ordering reduces an avoidable late repair tail;
-it does not establish the complete bundle's elapsed time before measurement.
+The longer S2 module groups start early: latest Undo, repair, recovery and
+reviewed apply occupy the first four scopes. The short wire-contract group,
+persisted review refresh and BOM controls follow. The standard scheduler queues
+another scope only while a worker has at most two pending tests: the initial
+Undo scope receives the wire controls, repair receives refresh, recovery
+receives BOM, and the three-case apply scope initially receives no extra work.
+All selected cases remain present. This ordering addresses the late apply tail
+observed in the failed three-worker measurement; the fresh complete bundle must
+still establish its elapsed time and coverage.
 
 The SOURCE-only one-object repair control remains focused when payload roles,
 baseline projection or repair change. Larger selected repair sequences exercise
