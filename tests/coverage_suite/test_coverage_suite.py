@@ -1,5 +1,6 @@
 """Exercise maintained coverage orchestration through its public command."""
 
+import importlib.metadata
 import json
 import shutil
 import subprocess
@@ -33,16 +34,26 @@ def coverage_checkout(tmp_path):
             encoding="utf-8",
         )
     (root / "tests").mkdir()
+    (root / "tmp").mkdir()
     (root / "tests" / "test_decisions.py").write_text(
         (
-            "import pytest\n\n"
+            "import os\nfrom pathlib import Path\n\n"
             "from brz2obsidian.decisions import choose\n\n\n"
-            "def test_yes():\n    assert choose(True) == 'yes'\n\n\n"
+            "def test_yes():\n    assert choose(True) == 'yes'\n"
+            "    Path('tmp/yes-pid').write_text(str(os.getpid()))\n"
+        ).replace("'", '"'),
+        encoding="utf-8",
+    )
+    (root / "tests" / "test_other.py").write_text(
+        (
+            "import os\nfrom pathlib import Path\n\nimport pytest\n\n"
+            "from brz2obsidian.decisions import choose\n\n\n"
             "def test_all_choices():\n"
             "    from brz2obsidian_ui.decisions import choose as ui_choose\n\n"
             "    assert choose(False) == 'no'\n"
             "    assert ui_choose(True) == 'open'\n"
-            "    assert ui_choose(False) == 'closed'\n\n\n"
+            "    assert ui_choose(False) == 'closed'\n"
+            "    Path('tmp/other-pid').write_text(str(os.getpid()))\n\n\n"
             "@pytest.mark.gui\ndef test_gui():\n"
             "    from PySide6.QtWidgets import QApplication\n\n"
             "    app = QApplication.instance() or QApplication([])\n"
@@ -51,7 +62,12 @@ def coverage_checkout(tmp_path):
         encoding="utf-8",
     )
     (root / "tools" / "test-suite.json").write_text(
-        json.dumps({"schema_version": 1, "selectors": ["tests/test_decisions.py"]}),
+        json.dumps(
+            {
+                "schema_version": 1,
+                "selectors": ["tests/test_decisions.py", "tests/test_other.py"],
+            }
+        ),
         encoding="utf-8",
     )
     (root / "pyproject.toml").write_text(
@@ -133,7 +149,31 @@ def test_default_command_validates_four_checks_and_reports_all_production(
     assert report["elapsed_seconds"] < 60
     assert 0 < report["pytest_seconds"] < report["runner_seconds"]
     assert report["test_counts"]["passed"] == 3
+    assert report["test_counts"]["collected"] == 3
     assert report["test_counts"]["gui_executed"] == 1
+    assert report["test_counts"]["executed_nodes"] == [
+        "tests/test_decisions.py::test_yes",
+        "tests/test_other.py::test_all_choices",
+        "tests/test_other.py::test_gui",
+    ]
+    assert (coverage_checkout / "tmp" / "yes-pid").read_text() != (
+        coverage_checkout / "tmp" / "other-pid"
+    ).read_text()
+    receipt = json.loads(Path(report["receipt"]).read_text(encoding="utf-8"))
+    selected = next(row for row in receipt["checks"] if row["id"] == "pytest")
+    assert selected["selection"]["workers"] == 2
+    parallel = selected["argv"].index("-n")
+    assert selected["argv"][parallel : parallel + 5] == [
+        "-n",
+        "2",
+        "--dist=loadscope",
+        "--no-loadscope-reorder",
+        "--max-worker-restart=0",
+    ]
+    for package in ("pytest-xdist", "execnet"):
+        assert receipt["interpreter"]["tools"][package] == importlib.metadata.version(
+            package
+        )
     requirements = json.loads(
         (output / "requirements.json").read_text(encoding="utf-8")
     )
@@ -153,7 +193,7 @@ def test_default_command_validates_four_checks_and_reports_all_production(
     assert raw["meta"]["show_contexts"] is True
     assert raw["meta"]["context_scope"] == "file"
     assert decision["contexts"]["3"] == ["test_decisions.test_yes"]
-    assert decision["contexts"]["4"] == ["test_decisions.test_all_choices"]
+    assert decision["contexts"]["4"] == ["test_other.test_all_choices"]
     assert decision["contexts"]["9"] == ["test_decisions.test_yes"]
     assert decision["contexts"]["1"] == [""]
     assert sorted(decision["executed_branches"]) == [[2, 3], [2, 4]]
@@ -187,6 +227,16 @@ def test_focused_measurement_uses_all_source_denominator_and_rejects_threshold(
     assert report["measurement"] == "focused selection; partial suite evidence"
     assert report["branches"] == {"covered": 1, "total": 4, "percent": 25.0}
     assert report["lines"] == {"covered": 3, "total": 8, "percent": 37.5}
+    receipt = json.loads(Path(report["receipt"]).read_text(encoding="utf-8"))
+    selected = receipt["checks"][0]
+    assert set(selected["selection"]) == {
+        "scope",
+        "selectors",
+        "keyword",
+        "marker",
+        "require_gui",
+    }
+    assert "-n" not in selected["argv"]
     assert "branch threshold" in report["error"]
     requirements = json.loads(
         (output / "requirements.json").read_text(encoding="utf-8")

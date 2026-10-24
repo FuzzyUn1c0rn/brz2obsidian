@@ -33,6 +33,7 @@ def arguments():
     parser.add_argument("--manifest", type=Path, default=Path("tools/test-suite.json"))
     parser.add_argument("--test", action="append", default=[])
     parser.add_argument("--require-gui", action="store_true")
+    parser.add_argument("--workers", type=int, choices=(1, 2))
     parser.add_argument("--check", action="append", choices=CHECKS)
     parser.add_argument("--timeout", type=float, default=600)
     parser.add_argument("--min-branch", type=float)
@@ -216,6 +217,7 @@ def main():
             else (None if args.test else 80)
         )
         result["minimum_branch_percent"] = threshold
+        workers = args.workers if args.workers is not None else (1 if args.test else 2)
         output.mkdir(parents=True, exist_ok=False)
         requirement = {
             "id": "pytest",
@@ -262,6 +264,8 @@ def main():
             str(python),
             "--environment",
             "gui",
+            "--workers",
+            str(workers),
         ]
         for check in checks:
             command += ["--check", check]

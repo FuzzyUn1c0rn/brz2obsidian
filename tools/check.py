@@ -185,13 +185,16 @@ def evidence(path, root):
 
 
 def selection(args):
-    return {
+    chosen = {
         "scope": "focused" if args.test or args.keyword or args.marker else "full",
         "selectors": [selector_spelling(node) for node in args.test],
         "keyword": args.keyword,
         "marker": args.marker,
         "require_gui": args.require_gui,
     }
+    if args.workers == 2:
+        chosen["workers"] = 2
+    return chosen
 
 
 def selector_spelling(node):
@@ -227,6 +230,14 @@ def command_for(python, run_dir, check, chosen):
         argv += ["-k", chosen["keyword"]]
     if chosen["marker"]:
         argv += ["-m", chosen["marker"]]
+    if chosen.get("workers", 1) == 2:
+        argv += [
+            "-n",
+            "2",
+            "--dist=loadscope",
+            "--no-loadscope-reorder",
+            "--max-worker-restart=0",
+        ]
     return argv
 
 
@@ -255,6 +266,7 @@ def parse():
     run.add_argument("-k", dest="keyword")
     run.add_argument("-m", dest="marker")
     run.add_argument("--require-gui", action="store_true")
+    run.add_argument("--workers", type=int, choices=(1, 2), default=1)
     validate = commands.add_parser(
         "validate",
         help="Validate completed evidence against independent scope requirements",
@@ -291,7 +303,7 @@ def child_environment(root, run_dir):
     return env
 
 
-def probe(python, root, env, checks, mode):
+def probe(python, root, env, checks, mode, workers):
     if not python.is_absolute() or not python.is_file():
         raise Invalid(
             "Select an existing absolute project virtual-environment interpreter with --python; bootstrap the project .venv first"
@@ -321,6 +333,8 @@ print(json.dumps(info))
             for check in checks
         }
     )
+    if workers == 2:
+        packages += ["pytest-xdist", "execnet"]
     result = subprocess.run(
         [str(python), "-c", code, json.dumps(packages)],
         cwd=root,
@@ -416,7 +430,11 @@ def run(args):
     root = args.checkout.resolve()
     checks = list(dict.fromkeys(args.check or CHECKS))
     if (
-        args.test or args.keyword or args.marker or args.require_gui
+        args.test
+        or args.keyword
+        or args.marker
+        or args.require_gui
+        or args.workers == 2
     ) and "pytest" not in checks:
         raise Invalid("Test selectors require the pytest check")
     for node in args.test:
@@ -491,7 +509,7 @@ def run(args):
             != receipt["runner"]["sha256"]
         ):
             raise Invalid("Invoked runner differs from assessed checkout runner")
-        info, mode = probe(python, root, env, checks, args.environment)
+        info, mode = probe(python, root, env, checks, args.environment, args.workers)
         info["git_version"] = git(root, "--version").decode("utf-8").strip()
         receipt["interpreter"] = info
         receipt["environment"] = mode
@@ -711,7 +729,21 @@ def validate(args):
             if (
                 not isinstance(chosen, dict)
                 or set(chosen)
-                != {"scope", "selectors", "keyword", "marker", "require_gui"}
+                not in (
+                    {"scope", "selectors", "keyword", "marker", "require_gui"},
+                    {
+                        "scope",
+                        "selectors",
+                        "keyword",
+                        "marker",
+                        "require_gui",
+                        "workers",
+                    },
+                )
+                or (
+                    "workers" in chosen
+                    and (type(chosen["workers"]) is not int or chosen["workers"] != 2)
+                )
                 or not isinstance(chosen["selectors"], list)
                 or any(not isinstance(node, str) for node in chosen["selectors"])
                 or any(
@@ -745,6 +777,15 @@ def validate(args):
         )
         if not interpreter["tools"].get(tool):
             raise Invalid("Executed tool version missing")
+        if (
+            row["id"] == "pytest"
+            and chosen.get("workers", 1) == 2
+            and any(
+                not interpreter["tools"].get(package)
+                for package in ("pytest-xdist", "execnet")
+            )
+        ):
+            raise Invalid("Parallel execution tool version missing")
         for item in row["evidence"]:
             path = (args.receipt.parent / item["path"]).resolve()
             if (
