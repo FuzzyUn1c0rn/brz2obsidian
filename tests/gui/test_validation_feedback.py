@@ -30,7 +30,10 @@ def test_api_errors_identify_the_field_and_clear_after_correction():
         control(window, QComboBox, "Source kind").setCurrentIndex(1)
         until(app, lambda: window.snapshot.source_kind == "local-api")
         address = control(window, QLineEdit, "Local API address")
-        address.setText("https://example.com/api")
+        address.setFocus()
+        address.selectAll()
+        app.clipboard().setText("https://example.com/api")
+        QTest.keyClick(address, Qt.Key.Key_V, Qt.KeyboardModifier.ControlModifier)
         until(app, lambda: window.snapshot.api_config is None)
         errors = [
             w
@@ -127,10 +130,38 @@ def test_api_limits_have_specific_feedback_and_reveal_collapsed_fields():
 def test_vault_name_paste_feedback_is_immediate_and_conversion_waits_for_correction(
     tmp_path,
 ):
-    from brz2obsidian.application.contracts import InspectCommand, SelectSource
+    from brz2obsidian.application.contracts import (
+        InspectCommand,
+        SelectSource,
+        WorkerResponse,
+    )
+    from brz2obsidian.application.operations import inspect, validate_destination
+    from brz2obsidian.application.transport import Terminal
+
+    class LocalWorker:
+        """Keep Qt/session asynchrony; process composition has its own checks."""
+
+        def run(self, request):
+            arguments = request.arguments
+            if request.operation == "inspect":
+                result = inspect(arguments.source_selection)
+            else:
+                assert request.operation == "validate_destination"
+                result = validate_destination(
+                    Path(arguments.parent), arguments.vault_name
+                )
+            return Terminal(
+                phase="completed",
+                process_status=0 if result.outcome in ("valid", "clean") else 1,
+                response=WorkerResponse(
+                    request_id=request.request_id,
+                    operation=request.operation,
+                    result=result,
+                ),
+            )
 
     app = QApplication.instance() or QApplication([])
-    window = MainWindow()
+    window = MainWindow(supervisor=LocalWorker())
     window.show()
     try:
         name = control(window, QLineEdit, "Vault name")
