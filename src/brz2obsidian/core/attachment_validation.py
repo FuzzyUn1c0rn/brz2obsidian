@@ -14,7 +14,7 @@ from brz2obsidian.contracts import (
 from .identity import _paths_collide
 from .link_validation import validate_link_document
 from .reference_targets import validate_targets
-from .review_links import consumed_context
+from .review_links import consumed_context, onboarding_current_context
 from .structures import validate_structure_facts
 
 
@@ -78,6 +78,10 @@ def validate_attachment_candidate(
         )
         or change.identity_review.status != "matched"
         or change.format_review is not None
+        and not (
+            facts.format_operation.kind == "onboarding"
+            and selection.choice == "current"
+        )
         or change.target_path != change.path
         or change.disposition in ("stale", "refused", "identity_resolution")
     ):
@@ -357,6 +361,24 @@ def validate_attachment_candidate(
                         document_id,
                         occurrence.occurrence_id,
                     )
+        if (
+            doc.status != "supported"
+            and selection.choice == "current"
+            and not selection.link_choices
+            and onboarding_current_context(facts)
+            and doc == old
+            and len(candidate.outputs) == 1
+            and len(candidate.documents) == len(context.current_documents)
+            and {d.document_id: d for d in candidate.documents}
+            == {d.document_id: d for d in context.current_documents}
+            and len(candidate.targets) == len(context.current_targets)
+            and {t.target_id: t for t in candidate.targets}
+            == {t.target_id: t for t in context.current_targets}
+            and len(candidate.target_facts) == len(context.current_target_facts)
+            and {s.target_id: s for s in candidate.target_facts}
+            == {s.target_id: s for s in context.current_target_facts}
+        ):
+            continue
         validation = validate_link_document(
             doc,
             expected_content=doc.content,

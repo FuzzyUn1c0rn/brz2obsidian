@@ -66,6 +66,12 @@ class Operations:
 
         return prepare_update(self, vault, source)
 
+    def prepare_onboarding(self, vault, source=None, *, original_source=None):
+        """Review legacy content without promoting authored bytes to originals."""
+        from .onboarding import prepare_onboarding
+
+        return prepare_onboarding(self, vault, source, original_source=original_source)
+
     def read_checkpoint_payload(self, vault, **kwargs):
         """Read finite exact-byte pages from currently validated owned history."""
         from brz2obsidian.publication.checkpoint_payload import read_checkpoint_payload

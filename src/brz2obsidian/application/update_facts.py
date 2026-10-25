@@ -246,6 +246,8 @@ def assemble_facts(
     generation,
     source_memory=(),
     current_inventory=(),
+    originals_known=True,
+    onboarding=False,
 ):
     old_record, new_record = record(baseline), record(incoming)
     old_identity, identity = output_identity(old_record), output_identity(new_record)
@@ -281,7 +283,9 @@ def assemble_facts(
         path, role, title = new.get(key, old.get(key))
         old_path = old.get(key, (path, role, title))[0]
         original = (
-            ExactContent(data=baseline[old_path]) if old_path in baseline else None
+            ExactContent(data=baseline[old_path])
+            if originals_known and old_path in baseline
+            else None
         )
         received = ExactContent(data=incoming[path]) if key in new else None
         matches = [
@@ -405,9 +409,11 @@ def assemble_facts(
         format_operation=FormatOperation(
             schema_id="brz2obsidian.format-operation",
             schema_version=1,
-            kind="source_update",
-            recorded_generation="supported",
-            baseline_source_version=old_record["source_identity"]["snapshot_digest"],
+            kind="onboarding" if onboarding else "source_update",
+            recorded_generation="supported" if originals_known else "unknown",
+            baseline_source_version=old_record["source_identity"]["snapshot_digest"]
+            if originals_known
+            else None,
             target_source_version=new_record["source_identity"]["snapshot_digest"],
             established_baseline=SupportedFormatBaseline(
                 schema_id="brz2obsidian.supported-format-baseline",
@@ -415,7 +421,9 @@ def assemble_facts(
                 identity=old_identity,
                 source_version=old_record["source_identity"]["snapshot_digest"],
                 outputs=tuple(outputs),
-            ),
+            )
+            if originals_known
+            else None,
         ),
         link_context=None,
     )

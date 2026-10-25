@@ -748,7 +748,8 @@ def test_unavailable_recorded_generation_routes_before_payload_access(
             findings=(),
         ),
         checkpoint=SimpleNamespace(
-            manifest=SimpleNamespace(identity=identity, source=()),
+            manifest=SimpleNamespace(identity=identity, source=(), boundary="local"),
+            review=None,
             locator=preparation().locator,
         ),
     )

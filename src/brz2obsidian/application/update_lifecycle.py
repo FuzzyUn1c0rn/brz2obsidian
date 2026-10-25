@@ -61,7 +61,7 @@ def _refused(code, history=None, *, action="inspect_history"):
     )
 
 
-def _history(operations, vault, observed=None):
+def _history(operations, vault, observed=None, *, onboarding=False):
     history = (
         operations.inspect_history(vault) if observed is None else observed.history
     )
@@ -88,6 +88,14 @@ def _history(operations, vault, observed=None):
         )
     if history.status != "intact" or history.admission.status != "supported":
         return history, _refused("history_unavailable", history)
+    onboarding_pending = (
+        history.checkpoint.review is not None
+        and history.checkpoint.manifest.boundary != "result"
+        and history.checkpoint.review.saved.plan.facts.format_operation.kind
+        == "onboarding"
+    )
+    if onboarding and onboarding_pending:
+        return history, None
     identity = history.checkpoint.manifest.identity
     if identity.output_format != 7:
         return history, _refused(
@@ -109,6 +117,10 @@ def _history(operations, vault, observed=None):
     if identity.settings_digest != hashlib.sha256(b"{}").hexdigest():
         return history, _refused(
             "configuration_transition_required", history, action="review_configuration"
+        )
+    if onboarding_pending:
+        return history, _refused(
+            "onboarding_review_required", history, action="resume_update"
         )
     return history, None
 
@@ -311,6 +323,8 @@ class _UpdateRenderer:
         self.baseline = baseline
 
     def render(self, plan, metadata):
+        if ".obsidian/bookmarks.json" not in self.baseline:
+            return self.delegate.render(plan, metadata)
         home = next(
             (
                 row.relative_path
@@ -416,6 +430,7 @@ def _prepared(
     retained_provenance=False,
     *,
     source_ref=None,
+    original_source_ref=None,
     status="prepared_review",
     code="prepared",
 ):
@@ -438,10 +453,12 @@ def _prepared(
     preparation = UpdatePreparation(
         schema_id="brz2obsidian.update-preparation",
         schema_version=1,
+        kind=review.facts.format_operation.kind,
         vault=history.admission.vault,
-        locator=history.checkpoint.locator,
+        locator=history.checkpoint.locator if history.checkpoint is not None else None,
         payload_directory=str(directory),
         source_ref=source_ref,
+        original_source_ref=original_source_ref,
         source_binding=binding,
         observed_source=observed_source,
         retained_source_provenance=retained_provenance,
@@ -451,6 +468,7 @@ def _prepared(
         review=review,
     )
     result = UpdateResult(
+        kind=preparation.kind,
         status=status,
         code=code,
         operation_id=review.proposal.proposal_id,
@@ -467,8 +485,11 @@ def _prepared(
         if review.ready
         else ("resolve_update", "save_update"),
         recovery_gaps=history.admission.recovery_gaps,
-        history_retained=True,
-        checkpoint_commit=history.checkpoint.locator.commit,
+        history_retained=history.status == "intact",
+        checkpoint_commit=preparation.locator.commit if preparation.locator else None,
+        findings=("older_checkpoints_unavailable", "older_undo_unavailable")
+        if preparation.kind == "onboarding"
+        else (),
     )
     return _configuration_route(result)
 
@@ -532,9 +553,10 @@ def _scoped(operations, history, facts, review=None, observed=None):
         else observed.inspect(subjects=subjects)
     )
     if (
-        scoped.status != "intact"
+        scoped.status != history.status
         or scoped.admission.status != "supported"
-        or scoped.checkpoint.locator != history.checkpoint.locator
+        or (scoped.checkpoint.locator if scoped.checkpoint else None)
+        != (history.checkpoint.locator if history.checkpoint else None)
         or scoped.admission.inventory != history.admission.inventory
     ):
         raise ValueError("current_scoped_admission_required")
@@ -593,6 +615,10 @@ def _producer_memory(checkpoint, proposal_id=None):
 
 
 def _configuration_route(result):
+    if result.kind == "onboarding":
+        from .onboarding import route_onboarding
+
+        result = route_onboarding(result)
     prepared = result.preparation
     if (
         prepared is None
@@ -716,6 +742,7 @@ def resolve_update(operations, preparation, action, *, edited=None):
             update={"review": result_plan, "source_binding": binding}
         )
         result = UpdateResult(
+            kind=preparation.kind,
             status="stale_review"
             if transition.status == "stale"
             else "refused"
@@ -730,8 +757,10 @@ def resolve_update(operations, preparation, action, *, edited=None):
             ready=transition.status == "accepted" and result_plan.ready,
             changes=len(result_plan.proposal.changes),
             unresolved=len(result_plan.requirements),
-            history_retained=True,
-            checkpoint_commit=preparation.locator.commit,
+            history_retained=preparation.locator is not None,
+            checkpoint_commit=preparation.locator.commit
+            if preparation.locator
+            else None,
             next_actions=("apply_update",)
             if result_plan.ready
             else ("resolve_update", "save_update"),
@@ -810,6 +839,10 @@ def save_update(operations, preparation):
         if history is None or current.status == "stale_review":
             return current
         prepared = current.preparation
+        if prepared.kind == "onboarding":
+            from .onboarding import save_onboarding
+
+            return save_onboarding(operations, history, current)
         association = prepared.locator.association
         with tempfile.TemporaryDirectory(prefix="brz2obsidian-baseline-") as owned:
             source = _materialize(
@@ -856,7 +889,7 @@ def save_update(operations, preparation):
 
 
 def load_update(operations, vault):
-    history, stopped = _history(operations, vault)
+    history, stopped = _history(operations, vault, onboarding=True)
     if stopped is not None:
         return stopped
     checkpoint = history.checkpoint
@@ -864,6 +897,7 @@ def load_update(operations, vault):
         return _refused("saved_update_unavailable", history)
     plan = checkpoint.review.saved.plan
     return UpdateResult(
+        kind=plan.facts.format_operation.kind,
         status="unresolved",
         code="revalidation_required",
         operation_id=plan.proposal.proposal_id,
@@ -889,7 +923,7 @@ def resume_update(operations, vault):
 
 def _resume_update(operations, vault, observed):
     try:
-        history, stopped = _history(operations, vault, observed)
+        history, stopped = _history(operations, vault, observed, onboarding=True)
         if stopped is not None:
             return stopped
         checkpoint = history.checkpoint
@@ -898,6 +932,10 @@ def _resume_update(operations, vault, observed):
         loaded = checkpoint.review
         binding = checkpoint.manifest.reviewed_source
         plan = loaded.saved.plan
+        if plan.facts.format_operation.kind == "onboarding":
+            from .onboarding import resume_onboarding
+
+            return resume_onboarding(operations, history, observed)
         incoming = {
             s.path: s.incoming.data
             for s in plan.facts.subjects
@@ -984,7 +1022,27 @@ def inspect_update_review(
         ):
             return refused("review_identity_changed")
         checkpoint = operations.read_checkpoint(preparation.vault)
-        if checkpoint.status != "valid" or checkpoint.locator != preparation.locator:
+        if preparation.kind == "onboarding" and preparation.locator is None:
+            history = operations.inspect_history(preparation.vault)
+            if (
+                checkpoint.status != "absent"
+                or checkpoint.locator is not None
+                or history.status != "absent"
+                or history.admission.status != "supported"
+                or not history.admission.inventory_complete
+                or history.admission.inventory != preparation.current_inventory
+            ):
+                return refused("association_or_history_changed")
+            directory = Path(preparation.payload_directory).absolute()
+            if (
+                directory.name != "incoming"
+                or directory.parent.parent != Path(tempfile.gettempdir())
+                or not directory.parent.name.startswith("brz2obsidian-update-")
+                or operations.observe_reviewed_source(directory, plan)
+                != preparation.source_binding
+            ):
+                return refused("source_payload_changed")
+        elif checkpoint.status != "valid" or checkpoint.locator != preparation.locator:
             return refused("association_or_history_changed")
         if (
             any(
@@ -1058,7 +1116,7 @@ def inspect_update_review(
             items=tuple(items),
             omitted=any(row.omitted for row in items) or following < total,
         )
-    except ValueError, TypeError, AttributeError:
+    except OSError, ValueError, TypeError, AttributeError:
         return refused("invalid_review")
 
 
@@ -1124,6 +1182,10 @@ def _prepare_update(operations, vault, source, observed):
 def _reobserve(operations, preparation):
     try:
         preparation = UpdatePreparation.model_validate(preparation)
+        if preparation.kind == "onboarding":
+            from .onboarding import reobserve_onboarding
+
+            return reobserve_onboarding(operations, preparation)
         with operations.inspect_update_inputs(preparation.vault) as observed:
             return _reobserve_inputs(operations, preparation, observed)
     except OSError, ValueError, TypeError, AttributeError:
@@ -1254,6 +1316,18 @@ def apply_update(operations, preparation, *, cancel=None):
             return current
         if current.code == "separate_configuration_operation_required":
             return current
+        if current.kind == "onboarding" and current.preparation is not None:
+            from .onboarding import transition_required
+
+            if transition_required(current.preparation.review.facts):
+                return current.model_copy(
+                    update={
+                        "status": "unresolved",
+                        "code": "format_transition_required",
+                        "ready": False,
+                        "next_actions": ("save_update", "review_format_transition"),
+                    }
+                )
         if not current.ready:
             return current.model_copy(
                 update={"status": "unresolved", "code": "review_not_ready"}
@@ -1266,6 +1340,15 @@ def apply_update(operations, preparation, *, cancel=None):
                     "code": "cancelled_before_publication",
                     "ready": False,
                     "publication": "not_published",
+                }
+            )
+        if prepared.kind == "onboarding" and prepared.locator is None:
+            return current.model_copy(
+                update={
+                    "status": "unresolved",
+                    "code": "first_checkpoint_required",
+                    "ready": False,
+                    "next_actions": ("save_update",),
                 }
             )
         association = prepared.locator.association
@@ -1320,7 +1403,8 @@ def apply_update(operations, preparation, *, cancel=None):
             for row in selected.files
         )
         if (
-            selected.status == "selected"
+            prepared.kind == "source_update"
+            and selected.status == "selected"
             and not selected.remove_paths
             and source_rows == retained_source
             and vault_rows == retained_vault
@@ -1358,6 +1442,7 @@ def apply_update(operations, preparation, *, cancel=None):
             "unknown": "publication_unknown",
         }.get(applied.status, applied.status)
         return UpdateResult(
+            kind=prepared.kind,
             status=status,
             code=applied.code,
             operation_id=applied.operation_id,
@@ -1366,7 +1451,7 @@ def apply_update(operations, preparation, *, cancel=None):
             vault=prepared.vault,
             summary=applied.message,
             next_actions=("review_recovery",) if applied.recovery_required else (),
-            history_retained=applied.history != "none",
+            history_retained=current.history_retained or applied.history != "none",
             checkpoint_commit=applied.result_commit or applied.checkpoint_commit,
             publication=applied.publication,
             application=applied,

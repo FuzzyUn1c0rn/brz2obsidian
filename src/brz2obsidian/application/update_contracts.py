@@ -20,10 +20,12 @@ from brz2obsidian.contracts import (
 class UpdatePreparation(ReconciliationContract):
     schema_id: Literal["brz2obsidian.update-preparation"]
     schema_version: Literal[1]
+    kind: Literal["source_update", "onboarding"] = "source_update"
     vault: str
-    locator: CheckpointLocator
+    locator: CheckpointLocator | None
     payload_directory: str
     source_ref: str | None = None
+    original_source_ref: str | None = None
     source_binding: ReviewedSourceBinding
     observed_source: SourceIdentity
     retained_source_provenance: bool
@@ -34,8 +36,19 @@ class UpdatePreparation(ReconciliationContract):
 
     @model_validator(mode="after")
     def same_review_association(self):
-        association = self.locator.association
-        scope = association.collection_id, association.module_id
+        if self.kind != self.review.facts.format_operation.kind:
+            raise ValueError("Preparation kind differs from its review")
+        if self.locator is None and self.kind != "onboarding":
+            raise ValueError("Ordinary updates require retained history")
+        if self.original_source_ref is not None and self.kind != "onboarding":
+            raise ValueError("Historical reference qualification belongs to onboarding")
+        identity = self.review.facts.incoming_identity
+        association = self.locator.association if self.locator is not None else None
+        scope = (
+            (association.collection_id, association.module_id)
+            if association is not None
+            else (identity.collection_id, identity.module_id)
+        )
         for facts in (self.review.facts, self.review.producer_facts):
             if any(
                 (identity.collection_id, identity.module_id) != scope
@@ -76,7 +89,7 @@ class UpdateResult(ReconciliationContract):
     ]
     code: str
     operation_id: str | None = None
-    kind: Literal["source_update"] = "source_update"
+    kind: Literal["source_update", "onboarding"] = "source_update"
     generation: int | None = Field(default=None, ge=1)
     preparation: UpdatePreparation | None = None
     loaded: LoadedReview | None = None

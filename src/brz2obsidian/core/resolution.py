@@ -774,7 +774,9 @@ def _resolve_action(plan, action):
         ):
             return _transition(plan, "refused", "attachment_invalid")
         if action.domain in ("configuration", "format") and (
-            change.format_review is None or not change.format_review.target_eligible
+            change.format_review is None
+            or action.choice != "current"
+            and not change.format_review.target_eligible
         ):
             return _transition(plan, "refused", "unsafe_producer_choice")
         if not validate_attachment_candidate(
@@ -862,7 +864,9 @@ def _resolve_action(plan, action):
     if action.selected_entry_id is not None or action.disassociate_entry_ids:
         return _transition(plan, "refused", "choice_not_admitted")
     if action.domain in ("configuration", "format") and (
-        change.format_review is None or not change.format_review.target_eligible
+        change.format_review is None
+        or action.choice != "current"
+        and not change.format_review.target_eligible
     ):
         return _transition(plan, "refused", "unsafe_producer_choice")
     reversal_present = (
