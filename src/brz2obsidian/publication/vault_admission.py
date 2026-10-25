@@ -1874,7 +1874,7 @@ class _Inspection:
                 physical_parent = locator.model_copy(
                     update={"commit": parent.commit, "generation": parent.generation}
                 )
-                if role.review_parent_fingerprint == self._state_fingerprint(context):
+                if role.review_parent_fingerprint == self._review_state(context)[0]:
                     selected = context
                 elif role.review_parent_fingerprint == self._state_fingerprint(
                     physical_parent
@@ -1882,6 +1882,48 @@ class _Inspection:
                     selected = physical_parent
             parent, context = role, selected
         return context
+
+    def _review_state(self, locator):
+        supported = self.history is not None and self.history.status == "valid"
+        if supported and self.operation == "idle" and locator is not None:
+            role = next(
+                (
+                    role
+                    for role in self.checkpoint_roles
+                    if role.commit == locator.commit
+                    and role.generation == locator.generation
+                ),
+                None,
+            )
+            if (
+                role is not None
+                and role.onboarding_absence
+                and role.boundary == "local"
+                and role.generation == 1
+                and role.previous is None
+                and role.operation_intent_commit is None
+                and role.undo_of_receipt_commit is None
+                and role.recovery_origin_intent_commit is None
+                and role.recovery_previous_operation_commit is None
+                and role.recovery_direction is None
+            ):
+                from .vault_history import digest
+
+                absence = digest(
+                    (
+                        "currently-absent",
+                        verify_directory(self.root),
+                        verify_directory(self.root / ".git"),
+                    )
+                )
+                if role.review_parent_fingerprint == absence:
+                    return absence, "absent", None, None
+        return (
+            self._state_fingerprint(locator),
+            "supported" if supported else "unknown",
+            "brz2obsidian.checkpoint-manifest" if supported else None,
+            1 if supported else None,
+        )
 
     def finish(self):
         gaps = tuple(f.path for f in self.inventory if f.exclusion == "git_ignore")
@@ -1949,7 +1991,7 @@ class _Inspection:
             if self.repo.kind == "none"
             else ("review_history",)
         )
-        authority = self._state_fingerprint(
+        authority, state_status, state_schema, state_version = self._review_state(
             self._review_locator()
             if self.history is not None and self.history.status == "valid"
             else None
@@ -1958,15 +2000,9 @@ class _Inspection:
             schema_id="brz2obsidian.review-preflight",
             schema_version=1,
             operation_status=self.operation,
-            state_status="supported"
-            if self.history is not None and self.history.status == "valid"
-            else "unknown",
-            state_schema="brz2obsidian.checkpoint-manifest"
-            if self.history is not None and self.history.status == "valid"
-            else None,
-            state_version=1
-            if self.history is not None and self.history.status == "valid"
-            else None,
+            state_status=state_status,
+            state_schema=state_schema,
+            state_version=state_version,
             state_fingerprint=authority,
             consents=tuple(self.consents),
         )

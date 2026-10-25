@@ -8,6 +8,7 @@ from brz2obsidian.contracts import LinkValidationBaseline, ProposalAssumption
 from .identity import _paths_collide, _target_context, _target_safe
 from .link_meanings import _semantic, resolve_occurrence
 from .link_validation import validate_link_document
+from .reference_targets import validate_targets
 
 
 def consumed_context(
@@ -371,6 +372,42 @@ def rename_link_assumptions(facts, subject, subject_id, dependencies):
     )
 
 
+def onboarding_current_context(facts):
+    """Exact current observations, with no assertion about opaque link meanings."""
+    context = facts.link_context
+    if (
+        facts.format_operation.kind != "onboarding"
+        or context is None
+        or current_observation_problem(facts) is not None
+        or not current_lookup_coverage(facts)
+    ):
+        return False
+    try:
+        validate_targets(context.current_targets)
+    except ValueError:
+        return False
+    for entry in facts.identity_inventory:
+        if entry.current.existence != "present":
+            continue
+        targets = tuple(
+            t for t in context.current_targets if t.canonical_path == entry.current.path
+        )
+        if len(targets) != 1:
+            return False
+        if targets[0].kind == "resource":
+            continue
+        documents = tuple(
+            d for d in context.current_documents if d.source_path == entry.current.path
+        )
+        if (
+            len(documents) != 1
+            or documents[0].content != entry.current.content
+            or documents[0].inventory != "complete"
+        ):
+            return False
+    return True
+
+
 def selected_current_links_safe(facts, change):
     context = facts.link_context
     if change.current is None:
@@ -394,6 +431,13 @@ def selected_current_links_safe(facts, change):
     if len(documents) != 1:
         return False
     (document,) = documents
+    if document.status != "supported" and (
+        onboarding_current_context(facts)
+        and change.identity_review.status == "matched"
+        and not change.identity_review.repair_required
+        and change.target_path == subject.current.path
+    ):
+        return True
     meanings = tuple(
         resolve_occurrence(
             o, context.current_targets, context.current_target_facts, context.inventory
@@ -408,9 +452,9 @@ def selected_current_links_safe(facts, change):
         target_facts=context.current_target_facts,
         inventory=context.inventory,
         baseline=current_baseline(context, document),
-        affected_target_ids=tuple(
-            m.target_id for m in meanings if m.target_id is not None
-        ),
+        affected_target_ids=()
+        if facts.format_operation.kind == "onboarding"
+        else tuple(m.target_id for m in meanings if m.target_id is not None),
     ).valid
 
 

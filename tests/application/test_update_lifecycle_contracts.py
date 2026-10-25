@@ -101,8 +101,9 @@ def preparation(facts=None):
     )
 
 
+@pytest.mark.parametrize("preparation_kind", ("source_update", "onboarding"))
 def test_matching_source_refresh_keeps_reader_and_fresh_observed_identity(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, preparation_kind
 ):
     import json
 
@@ -232,10 +233,28 @@ def test_matching_source_refresh_keeps_reader_and_fresh_observed_identity(
     )
     prepared = operations.prepare_update(vault, source)
     assert prepared.preparation is not None, prepared
+    prior = prepared.preparation
+    if preparation_kind == "onboarding":
+        facts = prior.review.facts.model_copy(
+            update={
+                "format_operation": prior.review.facts.format_operation.model_copy(
+                    update={"kind": "onboarding"}
+                ),
+            }
+        )
+        prior = UpdatePreparation.model_validate(
+            prior.model_dump()
+            | {
+                "kind": "onboarding",
+                "review": prepare_review(facts, preflight=prior.review.preflight),
+            }
+        )
+        history.checkpoint.manifest.boundary = "result"
     data["new_source_evidence"] = "literal changed observation"
     source.write_text(json.dumps(data))
-    refreshed = operations.refresh_update(prepared.preparation, source=source)
+    refreshed = operations.refresh_update(prior, source=source)
     assert refreshed.preparation is not None, refreshed
+    assert refreshed.kind == refreshed.preparation.kind == "source_update"
     assert (
         refreshed.preparation.observed_source.source_sha256
         == hashlib.sha256(source.read_bytes()).hexdigest()
@@ -245,7 +264,7 @@ def test_matching_source_refresh_keeps_reader_and_fresh_observed_identity(
         refreshed.preparation.review.facts.incoming_identity.collection_id
         == "refresh-collection"
     )
-    assert len(scopes) == 2 and "Home — Opening.md" in scopes[-1]
+    assert len(scopes) == 2 and "Home \u2014 Opening.md" in scopes[-1]
 
 
 @pytest.mark.parametrize(
@@ -748,7 +767,8 @@ def test_unavailable_recorded_generation_routes_before_payload_access(
             findings=(),
         ),
         checkpoint=SimpleNamespace(
-            manifest=SimpleNamespace(identity=identity, source=()),
+            manifest=SimpleNamespace(identity=identity, source=(), boundary="local"),
+            review=None,
             locator=preparation().locator,
         ),
     )
@@ -790,7 +810,8 @@ def recorded_history(identity=None, locator=None):
             findings=(),
         ),
         checkpoint=SimpleNamespace(
-            manifest=SimpleNamespace(identity=identity, source=()),
+            manifest=SimpleNamespace(identity=identity, source=(), boundary="local"),
+            review=None,
             locator=locator or preparation().locator,
         ),
     )

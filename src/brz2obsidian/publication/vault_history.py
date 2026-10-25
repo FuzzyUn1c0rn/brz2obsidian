@@ -742,6 +742,19 @@ class _CheckpointRole(NamedTuple):
     recovery_direction: str | None
     memo_fingerprint: str | None = None
     review_parent_fingerprint: str | None = None
+    onboarding_absence: bool = False
+
+
+def _onboarding_absence_review(review):
+    plan = review.saved.plan
+    preflight = plan.preflight
+    return (
+        plan.facts.format_operation.kind == "onboarding"
+        and preflight.operation_status == "idle"
+        and preflight.state_status == "absent"
+        and preflight.state_schema is None
+        and preflight.state_version is None
+    )
 
 
 def _review_parent_fingerprint(review):
@@ -751,7 +764,7 @@ def _review_parent_fingerprint(review):
         and preflight.state_status == "supported"
         and preflight.state_schema == "brz2obsidian.checkpoint-manifest"
         and preflight.state_version == 1
-    ):
+    ) or _onboarding_absence_review(review):
         return preflight.state_fingerprint
     return None
 
@@ -1029,6 +1042,7 @@ def _read(
                     _review_parent_fingerprint(review),
                     _review_source_signature(review.saved),
                     review.saved.plan.facts.baseline_identity,
+                    _onboarding_absence_review(review),
                 )
             elif reviewed[manifest.review_object][:2] != (
                 manifest.review_size,
@@ -1152,6 +1166,9 @@ def _read(
                     reviewed[manifest.review_object][4]
                     if memo_roles and manifest.review_object is not None
                     else None,
+                    reviewed[manifest.review_object][7]
+                    if memo_roles and manifest.review_object is not None
+                    else False,
                 )
             )
         if tip_manifest is None:
@@ -1745,7 +1762,13 @@ def capture_checkpoint(
                 saved_result.status != "saved"
                 or (
                     review.facts.baseline_identity
-                    if boundary == "local" and review_source is not None
+                    if boundary == "local"
+                    and (
+                        review_source is not None
+                        or review.facts.format_operation.kind == "onboarding"
+                        and source_binding is not None
+                        and observed_source is not None
+                    )
                     else review.facts.incoming_identity
                 )
                 != identity

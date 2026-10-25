@@ -9,6 +9,7 @@ from brz2obsidian.core.review_links import (
     current_keep_needs_proof,
     current_lookup_coverage,
     known_result_document,
+    onboarding_current_context,
 )
 
 from .reversals import (
@@ -17,6 +18,64 @@ from .reversals import (
     reversal_target,
     selected_reversal_outputs,
 )
+
+
+def _onboarding_current_effects(facts, proposal, actions, approvals):
+    context = facts.link_context
+    if not onboarding_current_context(facts):
+        return False
+    if any(
+        a.domain == "identity" or a.domain == "rename" and a.choice != "keep_path"
+        for a in actions
+    ):
+        return False
+    approved = {a.change_id: a for a in approvals}
+    action_by_id = {a.decision_id: a for a in actions}
+    for change in proposal.changes:
+        subject = next(
+            s
+            for s in facts.subjects
+            if (s.item_id, s.facet) == (change.item_id, change.facet)
+        )
+        approval = approved.get(change.change_id)
+        if approval is None and change.requires_decision:
+            continue
+        if change.target_path != subject.current.path:
+            return False
+        if approval is not None:
+            action = action_by_id.get(approval.decision_id)
+            if (
+                action is None
+                or action.candidate is not None
+                or approval.choice != "current"
+                or approval.source_accepted
+            ):
+                return False
+            candidate = approval.attachment_candidate
+            if candidate is not None and (
+                approval.attachment_selection.link_choices
+                or len(candidate.outputs) != 1
+                or len(candidate.targets) != len(context.current_targets)
+                or {t.target_id: t for t in candidate.targets}
+                != {t.target_id: t for t in context.current_targets}
+                or len(candidate.target_facts) != len(context.current_target_facts)
+                or {s.target_id: s for s in candidate.target_facts}
+                != {s.target_id: s for s in context.current_target_facts}
+                or len(candidate.documents) != len(context.current_documents)
+                or {d.document_id: d for d in candidate.documents}
+                != {d.document_id: d for d in context.current_documents}
+                or any(
+                    o.path != subject.current.path
+                    or o.content != subject.current.content
+                    for o in candidate.outputs
+                )
+            ):
+                return False
+        content = change.result if approval is None else approval.result
+        path = change.target_path if approval is None else approval.target_path
+        if content != subject.current.content or path != subject.current.path:
+            return False
+    return True
 
 
 def selected_effect_blockers(facts, proposal, actions, approvals):
@@ -33,6 +92,14 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
                 )
             )
             else ()
+        )
+    if facts.format_operation.kind == "onboarding" and any(
+        d.status != "supported" for d in context.current_documents
+    ):
+        return (
+            ()
+            if _onboarding_current_effects(facts, proposal, actions, approvals)
+            else ("onboarding_opaque_effects_unsafe",)
         )
     targets = {t.target_id: t for t in context.current_targets}
     states = {s.target_id: s for s in context.current_target_facts}
@@ -363,6 +430,10 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
                 | (
                     {m.target_id for m in resolved if m.target_id is not None}
                     if document.document_id in explicit_documents
+                    and not (
+                        facts.format_operation.kind == "onboarding"
+                        and document == prior
+                    )
                     else set()
                 )
             ),
