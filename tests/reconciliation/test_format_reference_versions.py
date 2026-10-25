@@ -21,7 +21,7 @@ from tests.reconciliation.test_resolution import action, with_review_links
 def test_format_current_reference_allows_only_a_prose_version_change(changed_fragment):
     report = (
         b"Keep [[Second#Section]].\r\n" if changed_fragment else b"Keep [[Second]].\r\n"
-    )
+    ) + b"Existing [[Untouched#Missing]] warning.\r\n"
     facts = request(original=report, current=report, incoming=report)
     old = b"# Section\nOld guide prose.\r\n"
     incoming = (
@@ -47,11 +47,28 @@ def test_format_current_reference_allows_only_a_prose_version_change(changed_fra
             ),
         }
     )
+    untouched = guide.model_copy(
+        update={
+            "item_id": "item:untouched",
+            "title": "Untouched",
+            "path": "Untouched.md",
+            "current": guide.current.model_copy(update={"path": "Untouched.md"}),
+            "incoming": ExactContent(data=old),
+            "source_target": IdentityTargetFacts(
+                normalized_path="untouched.md", containment="contained", status="safe"
+            ),
+        }
+    )
     facts = with_subjects(
         facts,
-        (facts.subjects[0], guide),
+        (facts.subjects[0], guide, untouched),
         facts.identity_inventory
-        + (inventory_item("second", "item:second", "Second.md", old, title="Second"),),
+        + (
+            inventory_item("second", "item:second", "Second.md", old, title="Second"),
+            inventory_item(
+                "untouched", "item:untouched", "Untouched.md", old, title="Untouched"
+            ),
+        ),
     )
     operation = facts.format_operation
     facts = with_review_links(
@@ -105,6 +122,22 @@ def test_format_current_reference_allows_only_a_prose_version_change(changed_fra
         ),
     )
     assert changed.code == "accepted", changed
+    third = next(
+        c
+        for c in changed.preparation.review.proposal.changes
+        if c.item_id == "item:untouched"
+    )
+    changed = operations.resolve_update(
+        changed.preparation,
+        action(
+            changed.preparation.review,
+            third,
+            domain="format",
+            choice="current",
+            decision_id="untouched-reference-target",
+        ),
+    )
+    assert changed.code == "accepted", changed
     selected = select_review_effects(changed.preparation.review)
     if changed_fragment:
         assert not changed.ready and selected.status == "refused"
@@ -115,4 +148,5 @@ def test_format_current_reference_allows_only_a_prose_version_change(changed_fra
         assert [(row.path, row.content.data) for row in selected.files] == [
             ("Notes/Opening.md", report),
             ("Second.md", incoming),
+            ("Untouched.md", old),
         ]

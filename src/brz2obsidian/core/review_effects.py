@@ -376,6 +376,7 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
     final_states = tuple(states.values())
     for document in documents.values():
         prior = original_documents.get(document.document_id)
+        unchanged_current = document == prior
         relevant = (
             document.document_id in explicit_documents
             or document.document_id in proof_documents
@@ -400,7 +401,7 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
             and document.document_id not in proof_documents
         ) or (
             facts.format_operation.kind == "format_transition"
-            and document == prior
+            and unchanged_current
             and document.document_id not in proof_documents
         ):
             # A retained note's unrelated prose version is not a link redirect. Resource choices
@@ -437,7 +438,7 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
                     and not (
                         facts.format_operation.kind
                         in ("onboarding", "format_transition")
-                        and document == prior
+                        and unchanged_current
                     )
                     else set()
                 )
