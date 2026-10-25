@@ -547,6 +547,8 @@ def _subjects(facts, review=None):
             for path in (subject.path, subject.current.path):
                 add(path, subject_id)
     if review is not None:
+        declared = tuple(paths)
+        changed_documents = set()
         approvals = {a.change_id: a for a in review.approvals}
         views = {a.decision_id: a.candidate for a in review.attachment_applicability}
         context = review.producer_facts.link_context
@@ -571,12 +573,32 @@ def _subjects(facts, review=None):
                         document.source_path,
                         document.content,
                     ):
+                        if (
+                            prior is not None
+                            and prior.source_path == document.source_path
+                        ):
+                            changed_documents.add(document.source_path)
                         add(document.source_path, change.subject_id)
             elif (change.result if approval is None else approval.result) is not None:
                 add(
                     change.target_path if approval is None else approval.target_path,
                     change.subject_id,
                 )
+        if facts.format_operation.kind == "attachment_cleanup":
+            selected = select_review_effects(review)
+            if selected.status == "selected":
+                for row in selected.files:
+                    if (
+                        row.path not in changed_documents
+                        or sum(path == row.path for path, _ in declared) > 1
+                    ):
+                        continue
+                    # One physical write has the selected effect's actual owner.
+                    # Its scoped tracking/storage consent must use that same owner.
+                    paths = {
+                        key: value for key, value in paths.items() if key[0] != row.path
+                    }
+                    add(row.path, row.subject_id)
     return tuple(paths[key] for key in sorted(paths))
 
 

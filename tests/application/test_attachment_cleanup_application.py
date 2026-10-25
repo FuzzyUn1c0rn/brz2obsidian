@@ -2,7 +2,7 @@
 
 import hashlib
 import json
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -709,6 +709,59 @@ def cleanup_asset_action(plan, item, choice, *, document_edits=None):
         attachment_selection=selection,
         attachment_candidate=candidate,
     )
+
+
+def test_cleanup_refresh_scopes_reference_writes_to_one_actual_writer(tmp_path):
+    case = literal_cleanup_case(tmp_path, independent_keep=True)
+    captured = {}
+
+    class NativeSubjectBoundary(type(case.operations)):
+        @contextmanager
+        def inspect_update_inputs(self, vault):
+            with super().inspect_update_inputs(vault) as observed:
+                original = observed.inspect
+
+                def inspect(*, subjects):
+                    # Existing native admission accepts one subject per physical path.
+                    if len({row.path for row in subjects}) != len(subjects):
+                        raise OSError(
+                            "Current scoped admission changed or is incomplete"
+                        )
+                    captured.update((row.path, row.subject_id) for row in subjects)
+                    return original(subjects=subjects)
+
+                yield SimpleNamespace(**(vars(observed) | {"inspect": inspect}))
+
+    operations = NativeSubjectBoundary()
+    prepared = operations.prepare_attachment_cleanup(case.vault).preparation
+    kept = operations.resolve_update(
+        prepared, cleanup_asset_action(prepared.review, "keep-asset", "current")
+    )
+    assert kept.code == "accepted", kept.code
+    prepared = kept.preparation
+    removed = operations.resolve_update(
+        prepared,
+        cleanup_asset_action(
+            prepared.review,
+            "remove-asset",
+            "remove",
+            document_edits={
+                NOTE: note("Authored ."),
+                "Manual.md": b"Manual . `[[Assets/remove.bin]]`\r\n",
+            },
+        ),
+    )
+    assert removed.ready, (removed.code, removed.preparation.review.blockers)
+    removal = next(
+        c
+        for c in removed.preparation.review.proposal.changes
+        if c.item_id == "remove-asset"
+    )
+    before = {path: (case.vault / path).read_bytes() for path in case.current}
+    refreshed = operations.refresh_update(removed.preparation)
+    assert refreshed.code == "current" and refreshed.ready, refreshed.code
+    assert captured[NOTE] == captured["Manual.md"] == removal.subject_id
+    assert {path: (case.vault / path).read_bytes() for path in case.current} == before
 
 
 def test_cleanup_resolution_and_refresh_keep_only_unaffected_current_choices(tmp_path):
