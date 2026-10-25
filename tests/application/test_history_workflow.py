@@ -113,15 +113,25 @@ def test_restart_interruption_wins_over_absent_history_and_onboarding(
         assert result.operation.direction == "finish"
 
 
-def intact_local_history():
+def intact_local_history(*, format_kind="source_update"):
     from brz2obsidian.core import load_review, prepare_review, save_review
     from tests.reconciliation.test_proposals import request
     from tests.reconciliation.test_resolution import with_review_links
 
     history = absent_history()
-    record = save_review(
-        prepare_review(with_review_links(request()), preflight=preflight())
-    ).record
+    facts = with_review_links(request())
+    if format_kind != "source_update":
+        facts = facts.model_copy(
+            update={
+                "format_operation": facts.format_operation.model_copy(
+                    update={
+                        "kind": format_kind,
+                        "target_source_version": facts.format_operation.baseline_source_version,
+                    }
+                )
+            }
+        )
+    record = save_review(prepare_review(facts, preflight=preflight())).record
     loaded = load_review(record).loaded
     payload = record.model_dump_json().encode()
     association = VaultAssociation(
@@ -211,6 +221,64 @@ def test_intact_local_routes_from_actual_manifest_despite_absent_parent_prefligh
     assert absent.status == "onboarding_required"
     assert absent.next_actions == ("review_onboarding",) and not absent.history_retained
     assert absent.checkpoint is None
+
+
+@pytest.mark.parametrize(
+    "canonical_kind,undo_offered",
+    (("source_update", True), ("format_transition", False), (None, False)),
+)
+def test_completed_history_offers_undo_only_for_canonical_import_update(
+    canonical_kind, undo_offered
+):
+    from brz2obsidian.application.history_workflow import history_admission
+
+    history = intact_local_history(format_kind=canonical_kind or "source_update")
+    checkpoint = history.checkpoint.model_copy(
+        update={
+            "locator": history.checkpoint.locator.model_copy(
+                update={"commit": "3" * 40, "generation": 2}
+            ),
+            "manifest": history.checkpoint.manifest.model_copy(
+                update={
+                    "generation": 2,
+                    "boundary": "result",
+                    "previous": "1" * 40,
+                    "operation_intent_commit": "2" * 40,
+                }
+            ),
+            "review": history.checkpoint.review if canonical_kind else None,
+        }
+    )
+    history = history.model_copy(update={"checkpoint": checkpoint})
+    native = VaultApplyResult(
+        schema_id="brz2obsidian.vault-apply-result",
+        schema_version=1,
+        status="applied",
+        code="operation_terminal",
+        operation_id="1" * 32,
+        kind="apply",
+        direction="finish",
+        generation=1,
+        phase="terminal",
+        publication="complete",
+        history="terminal",
+        planned_files=1,
+        published_files=1,
+        authored_files_changed=True,
+        checkpoint_commit="1" * 40,
+        intent_commit="2" * 40,
+        result_commit="3" * 40,
+        receipt_commit="4" * 40,
+        recovery_required=False,
+        elapsed_ms=0,
+        message="Completed current physical apply operation.",
+    )
+    projected = history_admission(history, native)
+    assert projected.status == "available" and projected.history_retained
+    assert projected.operation == native and projected.checkpoint == checkpoint.locator
+    assert projected.next_actions == (
+        ("review_update", "review_undo") if undo_offered else ("review_update",)
+    )
 
 
 def test_unavailable_recovery_preparation_keeps_recovery_route():

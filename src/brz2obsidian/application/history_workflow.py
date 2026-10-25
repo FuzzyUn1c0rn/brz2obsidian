@@ -87,6 +87,9 @@ def history_admission(
         )
         if (
             checkpoint.manifest.boundary == "result"
+            and checkpoint.review is not None
+            and checkpoint.review.saved.plan.facts.format_operation.kind
+            in ("source_update", "onboarding")
             and operation.status == "applied"
             and operation.kind == "apply"
             and operation.result_commit == locator.commit
