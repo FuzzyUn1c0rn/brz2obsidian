@@ -730,7 +730,9 @@ class FormatOperation(ReconciliationContract):
 
     schema_id: Literal["brz2obsidian.format-operation"]
     schema_version: Literal[1]
-    kind: Literal["source_update", "onboarding", "format_transition"]
+    kind: Literal[
+        "source_update", "onboarding", "format_transition", "attachment_cleanup"
+    ]
     recorded_generation: Literal["supported", "unavailable", "unknown"]
     baseline_source_version: str | None = Field(min_length=1)
     target_source_version: str | None = Field(min_length=1)
@@ -1186,6 +1188,7 @@ class ChangeProvenance(ReconciliationContract):
         "remembered_decline",
         "preservation_decision",
         "operation_reversal",
+        "attachment_cleanup",
     ]
 
 
@@ -1321,7 +1324,9 @@ class UpdateProposal(ReconciliationContract):
     proposal_id: str = Field(min_length=1)
     generation: int = Field(ge=1)
     changes: tuple[ProposedChange, ...]
-    operation: Literal["source_update", "onboarding", "format_transition"]
+    operation: Literal[
+        "source_update", "onboarding", "format_transition", "attachment_cleanup"
+    ]
     findings: tuple[ReconciliationFinding, ...]
     readiness: Literal["ready", "review_required", "refused"]
     ready: bool
@@ -1647,7 +1652,7 @@ class AttachmentOutput(ReconciliationContract):
 
 
 class AttachmentAlternative(ReconciliationContract):
-    choice: Literal["current", "incoming", "both"]
+    choice: Literal["current", "incoming", "both", "remove"]
     outputs: tuple[AttachmentOutput, ...]
     eligible: bool
     operation_bound: bool = Field(default=False, exclude_if=lambda value: not value)
@@ -1658,6 +1663,7 @@ class AttachmentAlternative(ReconciliationContract):
             "allocation_unavailable",
             "unsafe_target",
             "collision",
+            "ownership_unavailable",
         ],
         ...,
     ]
@@ -1668,7 +1674,8 @@ class AttachmentAlternative(ReconciliationContract):
             complete = (
                 bool(self.outputs) and self.choice in ("current", "incoming")
                 if self.operation_bound
-                else len(self.outputs) == (2 if self.choice == "both" else 1)
+                else len(self.outputs)
+                == (0 if self.choice == "remove" else 2 if self.choice == "both" else 1)
             )
             if self.unavailable_reasons or not complete:
                 raise ValueError(
@@ -1901,7 +1908,7 @@ class AttachmentSelection(ReconciliationContract):
     facet: str = Field(min_length=1)
     reviewed_change_id: str = Field(min_length=1)
     reviewed_assumptions: tuple[ProposalAssumption, ...]
-    choice: Literal["current", "incoming", "both"]
+    choice: Literal["current", "incoming", "both", "remove"]
     link_choices: tuple[LinkOccurrenceChoice, ...]
     provenance: Literal["explicit_user"]
 
@@ -2052,6 +2059,7 @@ type ReviewDomain = Literal[
 
 type ReviewChoice = Literal[
     "reverse",
+    "remove",
     "approve",
     "current",
     "incoming",

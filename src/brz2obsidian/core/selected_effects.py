@@ -75,6 +75,11 @@ def _project_review_effects(plan: ReviewPlan) -> SelectedReviewEffects:
                     add(row.path, content, change.subject_id)
             if approval is not None and approval.attachment_candidate is not None:
                 candidate = approval.attachment_candidate
+                if (
+                    plan.producer_facts.format_operation.kind == "attachment_cleanup"
+                    and approval.choice == "remove"
+                ):
+                    removals.add(change.path)
                 for output in candidate.outputs:
                     add(output.path, output.content, change.subject_id)
                 for document in candidate.documents:

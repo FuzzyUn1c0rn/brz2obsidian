@@ -160,6 +160,15 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
         relevant.update(
             choice.document_id for choice in approval.attachment_selection.link_choices
         )
+        if (
+            facts.format_operation.kind == "attachment_cleanup"
+            and approval.choice == "remove"
+        ):
+            subject = reversal_subject(facts, change)
+            target_id = subject.attachment.current_target_id
+            target = next(t for t in candidate.targets if t.target_id == target_id)
+            state = next(s for s in candidate.target_facts if s.target_id == target_id)
+            write(target, None, change.path, state)
         for output in candidate.outputs:
             target = next(
                 t for t in candidate.targets if t.target_id == output.target_id
@@ -420,6 +429,12 @@ def selected_effect_active(facts, proposal, approvals):
     for change in proposal.changes:
         approval = approved.get(change.change_id)
         if approval is not None and approval.choice == "reverse":
+            return True
+        if (
+            approval is not None
+            and approval.choice == "remove"
+            and facts.format_operation.kind == "attachment_cleanup"
+        ):
             return True
         if approval is not None and approval.attachment_candidate is not None:
             if any(

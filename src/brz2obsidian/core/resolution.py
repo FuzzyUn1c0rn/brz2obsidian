@@ -738,12 +738,7 @@ def _resolve_action(plan, action):
     ):
         if (
             action.domain != _domain(plan.producer_facts, change)
-            or action.choice
-            not in (
-                _choices(plan.producer_facts, change, action.domain)
-                if action.domain == "reversal"
-                else ("current", "incoming", "both")
-            )
+            or action.choice not in _choices(plan.producer_facts, change, action.domain)
             or action.candidate is not None
             or action.selected_entry_id is not None
             or action.disassociate_entry_ids
@@ -816,7 +811,8 @@ def _resolve_action(plan, action):
                 ),
             ),
             provenance="explicit_user",
-            source_accepted=action.choice != "current" and action.domain != "reversal",
+            source_accepted=action.choice not in ("current", "remove")
+            and action.domain != "reversal",
             source_memory=memory,
             attachment_selection=selection,
             attachment_candidate=candidate,

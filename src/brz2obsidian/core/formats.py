@@ -14,6 +14,16 @@ def format_findings(facts):
     """Return typed operation-level problems; unavailable old paths allow onboarding."""
     operation = facts.format_operation
     baseline, target = facts.baseline_identity, facts.incoming_identity
+    if operation.kind == "attachment_cleanup":
+        if (
+            operation.recorded_generation != "supported"
+            or operation.baseline_source_version is None
+            or operation.baseline_source_version != operation.target_source_version
+        ):
+            return ("format_source_changed",)
+        if output_semantics(baseline) != output_semantics(target):
+            return ("profile_transition_required",)
+        return () if baseline.output_format == 7 else ("unsupported_format",)
     if operation.kind != "source_update":
         if not facts.subjects:
             return ("format_outputs_unavailable",)
@@ -86,6 +96,8 @@ def configuration_change(subject):
 def format_proposal(facts, subject):
     """A format operation always needs an explicit current-generation choice."""
     operation = facts.format_operation
+    if operation.kind == "attachment_cleanup":
+        return None
     if operation.kind == "source_update":
         if configuration_change(subject):
             return "unresolved", None, "format_review", True
@@ -102,6 +114,8 @@ def format_proposal(facts, subject):
 
 
 def review_facts(facts, subject):
+    if facts.format_operation.kind == "attachment_cleanup":
+        return None
     if (
         facts.format_operation.kind == "source_update"
         and not needs_onboarding(facts, subject)
