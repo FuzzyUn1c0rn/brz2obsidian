@@ -516,7 +516,11 @@ def _prepared(
             f"{len(review.proposal.changes)} comparisons; "
             f"{len(review.requirements)} choices remain."
         ),
-        next_actions=("apply_update",)
+        next_actions=("save_update",)
+        if review.ready
+        and preparation.kind == "onboarding"
+        and preparation.locator is None
+        else ("apply_update",)
         if review.ready
         else ("resolve_update", "save_update"),
         recovery_gaps=history.admission.recovery_gaps,
@@ -826,7 +830,11 @@ def resolve_update(operations, preparation, action, *, edited=None):
             checkpoint_commit=preparation.locator.commit
             if preparation.locator
             else None,
-            next_actions=("apply_update",)
+            next_actions=("save_update",)
+            if result_plan.ready
+            and prepared.kind == "onboarding"
+            and prepared.locator is None
+            else ("apply_update",)
             if result_plan.ready
             else ("resolve_update", "save_update"),
         )
@@ -1498,6 +1506,7 @@ def _reobserve_inputs(operations, preparation, observed):
 
 
 def apply_update(operations, preparation, *, cancel=None):
+    native_contact = False
     try:
         history, current, _ = _reobserve(operations, preparation)
         if history is None or current.status == "stale_review":
@@ -1613,6 +1622,7 @@ def apply_update(operations, preparation, *, cancel=None):
                 publication="not_published",
                 summary="The source and vault are unchanged; no additional checkpoint was needed.",
             )
+        native_contact = True
         applied = operations.apply_reviewed_update(
             prepared.vault,
             prepared.payload_directory,
@@ -1658,4 +1668,16 @@ def apply_update(operations, preparation, *, cancel=None):
             recovery_gaps=history.admission.recovery_gaps,
         )
     except OSError, ValueError, KeyError, TypeError:
+        if native_contact:
+            return UpdateResult(
+                kind=prepared.kind,
+                status="publication_unknown",
+                code="native_reply_unavailable",
+                vault=prepared.vault,
+                changes=current.changes,
+                next_actions=("inspect_update_status",),
+                history_retained=current.history_retained,
+                publication="unknown",
+                recovery_gaps=history.admission.recovery_gaps,
+            )
         return _refused("current_review_unavailable", preparation=preparation)

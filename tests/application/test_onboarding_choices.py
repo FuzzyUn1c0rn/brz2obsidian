@@ -81,6 +81,7 @@ def test_unknown_source_onboarding_preserves_current_without_authorizing_target(
     assert result.kind == "onboarding"
     if choice == "current":
         assert result.code == "accepted" and result.ready, result
+        assert result.next_actions == ("save_update",)
         assert result.preparation.review.approvals[0].result.data == (
             b"\x00authored" if binary else b"Exact authored bytes.\r\n"
         )

@@ -49,7 +49,7 @@ def _decode(data, model, maximum):
         ):
             raise ProtocolFailure("Exactly one terminal payload is required")
         for nested in (
-            parsed.get("result"),
+            parsed.get("result") if parsed.get("operation") != "update" else None,
             parsed.get("arguments", {}).get("reviewed")
             if isinstance(parsed.get("arguments"), dict)
             else None,
@@ -61,7 +61,15 @@ def _decode(data, model, maximum):
             ):
                 raise ProtocolFailure("Missing result schema")
         result = parsed.get("result")
-        if model is WorkerResponse and result is not None:
+        if (
+            model is WorkerResponse
+            and result is not None
+            and parsed.get("operation") == "update"
+        ):
+            from .update_context_contracts import UpdateContextResult
+
+            _required_fields(result, set(UpdateContextResult.model_fields))
+        elif model is WorkerResponse and result is not None:
             required = {
                 "schema",
                 "schema_version",
@@ -133,6 +141,7 @@ def rejected_request_response(data: bytes) -> WorkerResponse | None:
                 "convert_reviewed",
                 "check_vault",
                 "list_brains",
+                "update",
             )
         ):
             return None
@@ -152,6 +161,7 @@ def decode_response(data: bytes, request: WorkerRequest) -> WorkerResponse:
     if (
         response.request_id != request.request_id
         or response.operation != request.operation
+        or response.sequence != request.sequence
     ):
         raise ProtocolFailure("Response correlation failed")
     return response
@@ -171,6 +181,8 @@ def encode_response(response: WorkerResponse) -> bytes:
         + b"\n"
     )
     if len(data) > RESPONSE_LIMIT and response.result is not None:
+        if response.operation == "update":
+            raise ProtocolFailure("Authoritative result exceeds the wire limit")
         result = response.result
         omitted = len(result.findings) + (
             result.diagnostic_omission.findings_count

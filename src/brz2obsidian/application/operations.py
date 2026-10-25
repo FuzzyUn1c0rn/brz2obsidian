@@ -102,6 +102,21 @@ class Operations:
 
         return resolve_configuration(self, preparation, actions)
 
+    def resolve_update_choice(
+        self, preparation, *, requirement_id, choice, assumptions_digest, references=()
+    ):
+        """Reconstruct an offered action and validate its canonical dependencies."""
+        from .review_choices import resolve_update_choice
+
+        return resolve_update_choice(
+            self,
+            preparation,
+            requirement_id=requirement_id,
+            choice=choice,
+            assumptions_digest=assumptions_digest,
+            references=references,
+        )
+
     def resolve_update(self, preparation, action, *, edited=None):
         """Resolve one offered S1 choice, binding edited text to its actual target."""
         from .update_lifecycle import resolve_update
