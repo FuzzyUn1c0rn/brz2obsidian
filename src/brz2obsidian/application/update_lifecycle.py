@@ -779,9 +779,14 @@ def refresh_update(operations, preparation, *, source=None):
         if source is None:
             return _reobserve(operations, preparation)[1]
         with operations.inspect_update_inputs(preparation.vault) as observed:
-            return _refresh_source_update(
+            result = _refresh_source_update(
                 operations, preparation, observed, source=source
-            ).model_copy(update={"kind": preparation.kind})
+            )
+            return (
+                result.model_copy(update={"kind": preparation.kind})
+                if result.preparation is None
+                else result
+            )
     except OSError, ValueError, TypeError, AttributeError:
         return _refused(
             "current_inputs_unavailable",
