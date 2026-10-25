@@ -174,9 +174,8 @@ def _review_observation(
         # document facets that were dependent outputs of the original apply.
         query_plan = pending.review.saved.plan
         query_effects = select_review_effects(query_plan)
-    admission = _inspect_vault_for_recovery(
-        root, retained, subjects=_review_subjects(query_plan, query_effects)
-    )
+    query_subjects = _review_subjects(query_plan, query_effects)
+    admission = _inspect_vault_for_recovery(root, retained, subjects=query_subjects)
     if (
         not admission.inventory_complete
         or admission.repository.kind != "root"
@@ -206,8 +205,52 @@ def _review_observation(
             # Every present authored note can own an inbound link to a target
             # selected for removal, including notes added after the stop.
             paths.update(
-                row.path for row in admission.inventory if row.path.endswith(".md")
+                row.path
+                for row in admission.inventory
+                if row.path.casefold().endswith(".md")
             )
+    # Canonical grants are independent of a caller's previous review DTO.
+    granted_plans = [original, query_plan]
+    active_prepared = retained.graph.intent.prepared_commit
+    if active_prepared in retained.owned:
+        loaded = retained.owned[active_prepared][1]
+        if loaded is not None:
+            granted_plans.append(loaded.saved.plan)
+    if (
+        retained.unpublished_prepared == pending.locator.commit
+        and pending.review is not None
+    ):
+        granted_plans.append(pending.review.saved.plan)
+    for path in paths:
+        row = inventory.get(path)
+        if row is None or not row.excluded:
+            continue
+        queried_ids = {
+            subject.subject_id for subject in query_subjects if subject.path == path
+        }
+        if (
+            row.exclusion != "git_ignore"
+            or row.tracked
+            or not queried_ids
+            or not any(
+                required.kind == "tracking"
+                and required.requirement == "required"
+                and required.policy == "ordinary"
+                and queried_ids <= set(required.subjects)
+                and any(
+                    required in plan.preflight.consents
+                    and any(
+                        decision.consent_id == required.consent_id
+                        and decision.kind == required.kind
+                        and decision.choice == "accept"
+                        for decision in plan.consents
+                    )
+                    for plan in granted_plans
+                )
+                for required in admission.preflight.consents
+            )
+        ):
+            raise OSError("Excluded recovery bytes lack current scoped consent")
     needed = sum(inventory[path].size for path in paths if path in inventory)
     if available_memory() < 9 * needed + 64 * 1024 * 1024:
         raise OSError("Insufficient memory to review exact current recovery bytes")
@@ -330,7 +373,7 @@ def _review_observation(
             row.path
             for row in admission.inventory
             if (selected_removal or row.path in operation_owned_notes)
-            and row.path.endswith(".md")
+            and row.path.casefold().endswith(".md")
             and row.path not in known_document_paths
         ):
             observed_document = current[path]

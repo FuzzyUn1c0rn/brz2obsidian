@@ -284,6 +284,151 @@ def test_native_cleanup_prepared_capture_keeps_completed_ownership_under_new_lea
     assert user_git(vault) == original_user_git
 
 
+def test_recovery_checks_new_references_without_reading_ungranted_private_bytes(
+    monkeypatch,
+):
+    from brz2obsidian.publication import vault_recovery
+    from tests.application.test_attachment_cleanup_application import (
+        cleanup_asset_action,
+    )
+    from tests.application.test_attachment_cleanup_lifecycle import all_bytes, user_git
+
+    manual = b"Manual [[Assets/remove.bin|old]].\r\n"
+    vault, source, original, operations, _, _ = completed_native_ownership_case(
+        manual=manual
+    )
+    (vault / ".gitignore").write_bytes(b"Private.MD\n")
+    git(vault, "add", ".gitignore")
+    before_git = user_git(vault)
+    offered = operations.prepare_attachment_cleanup(vault)
+    assert offered.preparation is not None, offered.code
+    removed = operations.resolve_update(
+        offered.preparation,
+        cleanup_asset_action(
+            offered.preparation.review,
+            "remove-asset",
+            "remove",
+            document_edits={"Manual.md": b"Manual .\r\n"},
+        ),
+    )
+    assert removed.ready, removed.code
+    stopped = operations.apply_update(
+        removed.preparation, cancel=lambda: not (vault / "Assets/remove.bin").exists()
+    )
+    assert stopped.status == "recovery_required", stopped.code
+    assert stopped.application.published_files == 1
+    raw_reads = []
+    real_observe = vault_recovery.observe_file
+
+    def observe(root, path, **kwargs):
+        if kwargs.get("sink") is not None:
+            raw_reads.append(Path(path).relative_to(vault).as_posix())
+        return real_observe(root, path, **kwargs)
+
+    monkeypatch.setattr(vault_recovery, "observe_file", observe)
+
+    def snapshot():
+        return {
+            path: ((vault / path).stat().st_mode, raw)
+            for path, raw in all_bytes(vault).items()
+        }
+
+    (vault / "Later.MD").write_bytes(b"New [[Assets/remove.bin|active]].\r\n")
+    before = snapshot()
+    related = operations.prepare_history_workflow(
+        vault, kind="recovery", direction="finish"
+    )
+    (vault.parent / "new-uppercase-reference-refusal.json").write_text(
+        related.model_dump_json(), encoding="utf-8"
+    )
+    assert (
+        related.preparation is None and related.code == "recovery_review_unavailable"
+    ), related.code
+    assert "Later.MD" in raw_reads
+    assert snapshot() == before
+    (vault / "Later.MD").unlink()
+    private = b"Private authored content must not enter review.\r\n"
+    (vault / "Private.MD").write_bytes(private)
+    raw_reads.clear()
+    before = snapshot()
+    refused = operations.prepare_history_workflow(
+        vault, kind="recovery", direction="finish"
+    )
+    (vault.parent / "new-private-note-refusal.json").write_text(
+        refused.model_dump_json(), encoding="utf-8"
+    )
+    assert "Private.MD" not in raw_reads, (refused.code, raw_reads)
+    assert (
+        refused.preparation is None and refused.code == "recovery_review_unavailable"
+    ), refused.code
+    assert snapshot() == before
+    assert (vault / "Private.MD").read_bytes() == private
+    assert (vault / "Manual.md").read_bytes() == manual
+    assert user_git(vault) == before_git
+    assert {
+        p.relative_to(source).as_posix(): p.read_bytes()
+        for p in source.rglob("*")
+        if p.is_file()
+    } == original
+
+
+def test_recovery_reuses_exact_canonical_tracking_grant_for_ignored_note(monkeypatch):
+    from brz2obsidian.publication import vault_recovery
+    from tests.application.test_attachment_cleanup_lifecycle import all_bytes
+    from tests.application.test_vault_apply import _apply, _ready_case
+
+    vault, source, operations, reviewed, _ = _ready_case(tracking_ignore=True)
+    calls = 0
+
+    def cancel():
+        nonlocal calls
+        calls += 1
+        return calls == 2
+
+    stopped = _apply(
+        operations,
+        vault,
+        source,
+        review=reviewed,
+        vault_id="vault-one",
+        import_id="import-one",
+        cancel=cancel,
+    )
+    assert stopped.code == "cancelled_after_intent" and stopped.recovery_required
+    assert stopped.published_files == 0
+    raw_reads = []
+    real_observe = vault_recovery.observe_file
+
+    def observe(root, path, **kwargs):
+        if kwargs.get("sink") is not None:
+            raw_reads.append(Path(path).relative_to(vault).as_posix())
+        return real_observe(root, path, **kwargs)
+
+    monkeypatch.setattr(vault_recovery, "observe_file", observe)
+
+    def snapshot():
+        return {
+            path: ((vault / path).stat().st_mode, raw)
+            for path, raw in all_bytes(vault).items()
+        }
+
+    before = snapshot()
+    offered = operations.prepare_recovery(vault, direction="finish")
+    (vault.parent / "canonical-tracking-grant-recovery.json").write_text(
+        offered.model_dump_json(), encoding="utf-8"
+    )
+    assert offered.status == "offered" and offered.review is not None, offered.code
+    assert "Notes/Opening.md" in raw_reads
+    observed = next(
+        s.current
+        for s in offered.review.facts.subjects
+        if s.current.path == "Notes/Opening.md"
+    )
+    assert observed.content.data == b"authored opening\r\n"
+    assert (vault / "Notes/Opening.md").read_bytes() == b"authored opening\r\n"
+    assert snapshot() == before
+
+
 def test_stopped_native_cleanup_finishes_current_generation_reference_edits():
     from tests.application.test_attachment_cleanup_application import (
         cleanup_asset_action,
@@ -336,7 +481,7 @@ def test_stopped_native_cleanup_finishes_current_generation_reference_edits():
     assert (vault / "Manual.md").read_bytes() == manual
     assert user_git(vault) == original_user_git
     (vault / "Manual.md").write_bytes(manual + later)
-    (vault / "Later.md").write_bytes(unrelated_note)
+    (vault / "Later.MD").write_bytes(unrelated_note)
     restarted = remember(
         "small-stop-restarted", Operations().inspect_history_workflow(vault)
     )
@@ -374,11 +519,11 @@ def test_stopped_native_cleanup_finishes_current_generation_reference_edits():
     assert (vault / "Manual.md").read_bytes() == manual + later
     context = refreshed.preparation.native.review.facts.link_context
     assert any(
-        document.source_path == "Later.md" and document.content.data == unrelated_note
+        document.source_path == "Later.MD" and document.content.data == unrelated_note
         for document in context.current_documents
     )
     assert any(
-        entry.current.path == "Later.md"
+        entry.current.path == "Later.MD"
         and entry.current.content.data == unrelated_note
         for entry in refreshed.preparation.native.review.facts.identity_inventory
     )
@@ -424,7 +569,7 @@ def test_stopped_native_cleanup_finishes_current_generation_reference_edits():
     ), completed.code
     assert not (vault / "Assets/remove.bin").exists()
     assert (vault / "Manual.md").read_bytes() == without_reference + later
-    assert (vault / "Later.md").read_bytes() == unrelated_note
+    assert (vault / "Later.MD").read_bytes() == unrelated_note
     assert all(
         (vault / path).read_bytes() == raw
         for path, raw in original.items()
