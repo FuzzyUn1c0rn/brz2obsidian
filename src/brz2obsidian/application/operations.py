@@ -252,11 +252,76 @@ class Operations:
             vault, preparation, cancel=cancel, executor=self.vault_executor
         )
 
-    def read_update_details(self, vault, *, offset=0, limit=100):
+    def read_update_details(self, vault, *, offset=0, limit=100, expected=None):
         """Page safe before/result comparisons from validated owned intent."""
         from brz2obsidian.publication.vault_apply import read_update_details
 
-        return read_update_details(vault, offset=offset, limit=limit)
+        return read_update_details(vault, offset=offset, limit=limit, expected=expected)
+
+    def read_history_details(self, vault, *, expected, offset=0, limit=100):
+        """Read metadata for exactly this expected native operation identity."""
+        from .vault_update_contracts import VaultApplyResult
+
+        if expected is None:
+            raise ValueError("History details require the expected native operation")
+        try:
+            expected = VaultApplyResult.model_validate(
+                expected.model_dump()
+                if isinstance(expected, VaultApplyResult)
+                else expected
+            )
+        except ValueError, TypeError:
+            raise ValueError(
+                "History details require a valid native operation"
+            ) from None
+        if not expected.operation_id or any(
+            getattr(expected, field) is None
+            for field in (
+                "intent_commit",
+                "generation",
+                "kind",
+                "direction",
+                "checkpoint_commit",
+            )
+        ):
+            raise ValueError(
+                "History details require complete expected operation identity"
+            )
+        return self.read_update_details(
+            vault, offset=offset, limit=limit, expected=expected
+        )
+
+    def inspect_history_workflow(self, vault):
+        """Inspect restart routing from fresh native operation and history facts."""
+        from .history_workflow import inspect_history_workflow
+
+        return inspect_history_workflow(self, vault)
+
+    def prepare_history_workflow(self, vault, *, kind, direction=None, copy=None):
+        """Prepare shared recovery, latest Undo or independently matched repair."""
+        from .history_workflow import prepare_history_workflow
+
+        return prepare_history_workflow(
+            self, vault, kind=kind, direction=direction, copy=copy
+        )
+
+    def refresh_history_workflow(self, preparation):
+        """Refresh the existing native review or exact local-copy repair proof."""
+        from .history_workflow import refresh_history_workflow
+
+        return refresh_history_workflow(self, preparation)
+
+    def resolve_history_workflow(self, preparation, action):
+        """Resolve current native recovery/Undo facts without publication."""
+        from .history_workflow import resolve_history_workflow
+
+        return resolve_history_workflow(self, preparation, action)
+
+    def execute_history_workflow(self, preparation, *, cancel=None):
+        """Execute one freshly checked native action and project its exact result."""
+        from .history_workflow import execute_history_workflow
+
+        return execute_history_workflow(self, preparation, cancel=cancel)
 
     def _configured_workflow(self):
         if self.workflow is None:

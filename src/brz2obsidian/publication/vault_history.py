@@ -1843,6 +1843,17 @@ def capture_checkpoint(
                 _operation_history_fingerprint,
             )
 
+            finish_incoming_rows = recovery_target[1]
+            if target_direction == "finish" and original.kind == "undo":
+                undo_target = authority.origin_undo_target
+                if (
+                    original.undo_of_receipt_commit is None
+                    or undo_target is None
+                    or undo_target.receipt_commit != original.undo_of_receipt_commit
+                    or undo_target.intent.association_id != original.association_id
+                ):
+                    return result("refused", "recovery_review_required")
+                finish_incoming_rows = undo_target.intent.before
             origin_subjects = {
                 (subject.item_id, subject.facet): subject
                 for subject in recovery_origin_plan.producer_facts.subjects
@@ -1862,7 +1873,11 @@ def capture_checkpoint(
                     if origin_subject is None or subject.path != origin_subject.path:
                         return result("refused", "recovery_review_required")
                     source_row = next(
-                        (row for row in recovery_target[1] if row.path == subject.path),
+                        (
+                            row
+                            for row in finish_incoming_rows
+                            if row.path == subject.path
+                        ),
                         None,
                     )
                     expected = origin_subject.incoming
