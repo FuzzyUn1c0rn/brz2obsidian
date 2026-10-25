@@ -22,13 +22,20 @@ class PrepareUpdateCommand(ReconciliationContract):
         "source_update", "onboarding", "format_transition", "attachment_cleanup"
     ]
     source: str | None
+    original_source: str | None = None
     _vault = field_validator("vault")(absolute)
     _selection = field_validator("selection_id")(request_identity)
 
-    @field_validator("source")
+    @field_validator("source", "original_source")
     @classmethod
     def source_path(cls, value):
         return absolute(value) if value is not None else None
+
+    @model_validator(mode="after")
+    def original_evidence_role(self):
+        if self.original_source is not None and self.kind != "onboarding":
+            raise ValueError("Original reference evidence belongs to onboarding")
+        return self
 
 
 class PageUpdateCommand(ReconciliationContract):
@@ -48,6 +55,21 @@ class ReferenceUpdateCommand(ReconciliationContract):
     limit: int = Field(default=100, ge=1, le=100)
 
 
+class ChoicePageUpdateCommand(ReconciliationContract):
+    command: Literal["choices"]
+    binding: UpdateContextBinding
+    offset: int = Field(default=0, ge=0)
+    limit: int = Field(default=100, ge=1, le=100)
+
+
+class ChoiceDetailUpdateCommand(ReconciliationContract):
+    command: Literal["choice_details"]
+    binding: UpdateContextBinding
+    requirement_id: str
+    offset: int = Field(default=0, ge=0)
+    limit: int = Field(default=100, ge=1, le=100)
+
+
 class ChooseUpdateCommand(ReconciliationContract):
     command: Literal["choose"]
     binding: UpdateContextBinding
@@ -58,6 +80,8 @@ class ChooseUpdateCommand(ReconciliationContract):
         default=None, max_length=100
     )
     edit_handle: UpdateEditHandle | None = None
+    selected_entry_id: str | None = None
+    disassociate_entry_ids: tuple[str, ...] = Field(default=(), max_length=100)
 
 
 class BeginEditCommand(ReconciliationContract):
@@ -145,6 +169,8 @@ UpdateCommand = Annotated[
     PrepareUpdateCommand
     | PageUpdateCommand
     | ReferenceUpdateCommand
+    | ChoicePageUpdateCommand
+    | ChoiceDetailUpdateCommand
     | ChooseUpdateCommand
     | StageReferencesCommand
     | ConfigurationChoiceCommand

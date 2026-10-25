@@ -6,14 +6,18 @@ from uuid import uuid4
 from brz2obsidian.core import inspect_review_choices
 
 from .contracts import request_identity
-from .review_choices import attachment_references, requirement_digest
+from .review_choices import (
+    attachment_reference_destinations,
+    attachment_reference_page,
+    attachment_references,
+    requirement_digest,
+)
 from .update_context_contracts import (
     UpdateChoiceOffer,
     UpdateContextBinding,
     UpdateContextResult,
     UpdateEditHandle,
     UpdateReferenceChoice,
-    UpdateReferenceOffer,
 )
 from .update_contracts import UpdatePreparation
 from .update_edits import EditFailure, EditLease
@@ -41,8 +45,17 @@ class UpdateContext:
         return self._kind
 
     def prepare(
-        self, vault, *, selection_id, kind="source_update", source=None, cancel=None
+        self,
+        vault,
+        *,
+        selection_id,
+        kind="source_update",
+        source=None,
+        original_source=None,
+        cancel=None,
     ):
+        if original_source is not None and kind != "onboarding":
+            raise ValueError("Original reference evidence belongs to onboarding")
         if self._preparation is not None:
             return self._uncommitted_draft(code="close_decision_required")
         request_identity(selection_id)
@@ -64,7 +77,9 @@ class UpdateContext:
         if kind == "attachment_cleanup":
             result = self._operations.prepare_attachment_cleanup(vault)
         elif kind == "onboarding":
-            result = self._operations.prepare_onboarding(vault, source)
+            result = self._operations.prepare_onboarding(
+                vault, source, original_source=original_source
+            )
         elif kind == "format_transition":
             result = self._operations.prepare_format_transition(vault, source)
         elif kind == "source_update":
@@ -198,38 +213,32 @@ class UpdateContext:
                 status="refused", code="invalid_page", kind=self._kind
             )
         try:
-            refs = attachment_references(self._preparation, requirement_id)
+            offers, total, following = attachment_reference_page(
+                self._preparation, requirement_id, offset=offset, limit=limit
+            )
         except ValueError, StopIteration:
             return UpdateContextResult(
                 status="refused", code="offer_changed", kind=self._kind
             )
-        end = min(len(refs), offset + limit)
         return UpdateContextResult(
             status="available",
             code="available",
             kind=self._kind,
             binding=self._binding,
             references=tuple(
-                UpdateReferenceOffer(
-                    reference_id=token,
-                    document_id=doc.document_id,
-                    occurrence_id=occ.occurrence_id,
-                    document_path=doc.source_path,
-                    snippet=doc.content.data[
-                        max(0, occ.span.start - 120) : max(0, occ.span.start - 120)
-                        + 512
-                    ],
-                    old=occ.meaning,
-                    selected=self._reference_drafts.get(requirement_id, {})
-                    .get(token)
-                    .choice
-                    if token in self._reference_drafts.get(requirement_id, {})
-                    else None,
+                offer.model_copy(
+                    update={
+                        "selected": self._reference_drafts[requirement_id][
+                            offer.reference_id
+                        ].choice
+                    }
                 )
-                for token, doc, occ in refs[offset:end]
+                if offer.reference_id in self._reference_drafts.get(requirement_id, {})
+                else offer
+                for offer in offers
             ),
-            total_references=len(refs),
-            next_reference_offset=end if end < len(refs) else None,
+            total_references=total,
+            next_reference_offset=following,
         )
 
     def choose(
@@ -241,6 +250,8 @@ class UpdateContext:
         assumptions_digest,
         references=None,
         edit_handle=None,
+        selected_entry_id=None,
+        disassociate_entry_ids=(),
     ):
         try:
             expected = UpdateContextBinding.model_validate(binding)
@@ -278,6 +289,8 @@ class UpdateContext:
                 if references is None
                 else references,
                 edited=edited,
+                selected_entry_id=selected_entry_id,
+                disassociate_entry_ids=disassociate_entry_ids,
             )
         except ValueError, StopIteration:
             return UpdateContextResult(
@@ -313,6 +326,62 @@ class UpdateContext:
             history_retained=result.history_retained,
             checkpoint_commit=result.checkpoint_commit,
             publication=result.publication,
+        )
+
+    def choice_page(self, binding, *, offset=0, limit=100):
+        from .review_offers import choice_page
+
+        return self._choice_content(binding, choice_page, offset=offset, limit=limit)
+
+    def choice_details(self, binding, *, requirement_id, offset=0, limit=100):
+        from .review_offers import choice_detail_page
+
+        return self._choice_content(
+            binding,
+            choice_detail_page,
+            requirement_id=requirement_id,
+            offset=offset,
+            limit=limit,
+        )
+
+    def _choice_content(self, binding, reader, **kwargs):
+        try:
+            if (
+                self._preparation is None
+                or UpdateContextBinding.model_validate(binding) != self._binding
+            ):
+                raise ValueError("Context changed")
+        except ValueError, TypeError:
+            return UpdateContextResult(
+                status="refused", code="context_changed", kind=self._kind
+            )
+        try:
+            rows, total, following = reader(self._preparation, **kwargs)
+        except ValueError, TypeError, StopIteration:
+            return UpdateContextResult(
+                status="refused",
+                code="offer_changed",
+                kind=self._kind,
+                binding=self._binding,
+            )
+        return UpdateContextResult(
+            status="available",
+            code="available",
+            kind=self._kind,
+            binding=self._binding,
+            **(
+                {
+                    "choice_details": rows,
+                    "total_choice_details": total,
+                    "next_choice_detail_offset": following,
+                }
+                if "requirement_id" in kwargs
+                else {
+                    "offers": rows,
+                    "total_choices": total,
+                    "next_choice_offset": following,
+                }
+            ),
         )
 
     def apply(self, binding, *, cancel=None):
@@ -545,8 +614,13 @@ class UpdateContext:
         if self._edit is not None:
             return self._uncommitted_draft()
         try:
+            destinations = attachment_reference_destinations(
+                self._preparation, requirement_id
+            )
             offered = {
-                token
+                token: ("drop",)
+                if self._kind == "attachment_cleanup"
+                else tuple(row.choice for row in destinations[token])
                 for token, _, _ in attachment_references(
                     self._preparation, requirement_id
                 )
@@ -557,7 +631,11 @@ class UpdateContext:
             if (
                 not 1 <= len(selected) <= 100
                 or len({row.reference_id for row in selected}) != len(selected)
-                or any(row.reference_id not in offered for row in selected)
+                or any(
+                    row.reference_id not in offered
+                    or row.choice not in offered[row.reference_id]
+                    for row in selected
+                )
             ):
                 raise ValueError("Reference offer changed")
         except ValueError, TypeError, StopIteration:

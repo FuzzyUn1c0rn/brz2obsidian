@@ -169,14 +169,18 @@ def _choice_offer(change, requirement):
 
     alternatives = (
         {a.choice: a for a in change.attachment_review.alternatives}
-        if change.attachment_review is not None and requirement.domain != "reversal"
+        if change is not None
+        and change.attachment_review is not None
+        and requirement.domain != "reversal"
         else {}
     )
     choices = tuple(dict.fromkeys((*requirement.choices, *alternatives)))
     availability = []
     for choice in choices:
         reasons = []
-        if _format_choice_unavailable(change, requirement.domain, choice):
+        if change is not None and _format_choice_unavailable(
+            change, requirement.domain, choice
+        ):
             reasons.append("unsafe_producer_choice")
         if choice in alternatives and not alternatives[choice].eligible:
             reasons.extend(alternatives[choice].unavailable_reasons)
@@ -201,7 +205,7 @@ def inspect_review_choices(plan):
         raise ValueError("Invalid review")
     plan = checked.plan
     approved = {(a.change_id, a.domain) for a in plan.approvals}
-    return tuple(
+    rows = tuple(
         _choice_offer(change, row)
         for change, row in zip(
             plan.proposal.changes,
@@ -213,6 +217,27 @@ def inspect_review_choices(plan):
         or change.rename_review is not None
         and change.rename_review.requires_decision
         or (row.change_id, row.domain) in approved
+    )
+    return (
+        rows
+        + tuple(
+            _choice_offer(None, row)
+            for row in plan.requirements
+            if row.domain in ("tracking", "storage")
+        )
+        + tuple(
+            _choice_offer(
+                None,
+                ReviewRequirement(
+                    requirement_id=group.group_id,
+                    domain="compatible_group",
+                    change_id=group.group_id,
+                    choices=("approve",),
+                    assumptions=group.assumptions,
+                ),
+            )
+            for group in plan.groups
+        )
     )
 
 

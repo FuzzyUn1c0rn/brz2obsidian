@@ -117,6 +117,10 @@ class UpdateWorker:
                 result = self.context.page(**values)
             elif args.command == "references":
                 result = self.context.reference_page(**values)
+            elif args.command == "choices":
+                result = self.context.choice_page(**values)
+            elif args.command == "choice_details":
+                result = self.context.choice_details(**values)
             elif args.command == "choose":
                 result = self.context.choose(**values)
             elif args.command == "choose_configuration":

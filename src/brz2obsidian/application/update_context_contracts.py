@@ -52,6 +52,24 @@ class UpdateChoiceOffer(ReconciliationContract):
     selected: ReviewChoice | None = None
     decision_id: str | None = None
     unavailable_choices: tuple[ReviewChoiceAvailability, ...] = ()
+    disclosure: str = Field(default="", max_length=2048)
+    policy: str | None = None
+    detail_count: int = Field(default=0, ge=0)
+    detail_omitted: bool = False
+
+
+class UpdateChoiceDetail(ReconciliationContract):
+    kind: Literal["identity", "compatible_group", "consent_scope"]
+    entry_id: str | None = None
+    change_id: str | None = None
+    subject_id: str | None = None
+    path: str | None = None
+    identity_state: str | None = None
+    eligible: bool | None = None
+    target_safe: bool | None = None
+    existence: str | None = None
+    size: int | None = Field(default=None, ge=0)
+    sha256: str | None = None
 
 
 class UpdateConfigurationOffer(ReconciliationContract):
@@ -89,7 +107,12 @@ class UpdateEditState(ReconciliationContract):
 
 class UpdateReferenceChoice(ReconciliationContract):
     reference_id: str = Field(pattern=r"^[0-9a-f]{64}$")
-    choice: Literal["drop"]
+    choice: Literal["drop", "keep_current", "use_incoming", "use_secondary"]
+
+
+class UpdateReferenceDestination(ReconciliationContract):
+    choice: Literal["keep_current", "use_incoming", "use_secondary"]
+    meaning: LinkMeaning
 
 
 class UpdateReferenceOffer(ReconciliationContract):
@@ -99,8 +122,13 @@ class UpdateReferenceOffer(ReconciliationContract):
     document_path: str
     snippet: bytes = Field(max_length=512)
     old: LinkMeaning
-    choices: tuple[Literal["drop"], ...] = ("drop",)
-    selected: Literal["drop"] | None = None
+    choices: tuple[
+        Literal["drop", "keep_current", "use_incoming", "use_secondary"], ...
+    ] = ("drop",)
+    destinations: tuple[UpdateReferenceDestination, ...] = ()
+    selected: (
+        Literal["drop", "keep_current", "use_incoming", "use_secondary"] | None
+    ) = None
 
 
 class UpdateContextResult(ReconciliationContract):
@@ -138,6 +166,11 @@ class UpdateContextResult(ReconciliationContract):
     ] = "not_started"
     page: UpdateReviewPage | None = None
     offers: tuple[UpdateChoiceOffer, ...] = ()
+    total_choices: int = Field(default=0, ge=0)
+    next_choice_offset: int | None = Field(default=None, ge=0)
+    choice_details: tuple[UpdateChoiceDetail, ...] = ()
+    total_choice_details: int = Field(default=0, ge=0)
+    next_choice_detail_offset: int | None = Field(default=None, ge=0)
     references: tuple[UpdateReferenceOffer, ...] = ()
     total_references: int = Field(default=0, ge=0)
     next_reference_offset: int | None = Field(default=None, ge=0)

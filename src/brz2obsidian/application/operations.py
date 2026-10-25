@@ -125,6 +125,8 @@ class Operations:
         assumptions_digest,
         references=(),
         edited=None,
+        selected_entry_id=None,
+        disassociate_entry_ids=(),
     ):
         """Reconstruct an offered action and validate its canonical dependencies."""
         from .review_choices import resolve_update_choice
@@ -137,6 +139,8 @@ class Operations:
             assumptions_digest=assumptions_digest,
             references=references,
             edited=edited,
+            selected_entry_id=selected_entry_id,
+            disassociate_entry_ids=disassociate_entry_ids,
         )
 
     def resolve_update(self, preparation, action, *, edited=None):

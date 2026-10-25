@@ -50,6 +50,199 @@ def context_case(tmp_path):
     return UpdateContext(operations=case.operations), case
 
 
+def test_onboarding_worker_preserves_separate_original_evidence_input(
+    tmp_path, monkeypatch
+):
+    import hashlib
+    import zipfile
+
+    import pytest
+
+    from brz2obsidian.application.contracts import WorkerRequest
+    from brz2obsidian.application.update_context import UpdateContext
+    from tests.application.test_onboarding_originals import (
+        CURRENT,
+        ORIGINAL,
+        controlled_history,
+        legacy_brz_case,
+    )
+
+    operations, vault, archive = legacy_brz_case(tmp_path)
+    controlled_history(operations, vault, monkeypatch)
+    monkeypatch.setattr(
+        operations,
+        "read_checkpoint",
+        lambda *args, **kwargs: SimpleNamespace(status="absent", locator=None),
+    )
+    reference = tmp_path / "same-content-reference.brz"
+    with (
+        zipfile.ZipFile(archive) as source,
+        zipfile.ZipFile(reference, "w", compression=zipfile.ZIP_DEFLATED) as target,
+    ):
+        for name in source.namelist():
+            target.writestr(name, source.read(name))
+    assert (
+        hashlib.sha256(archive.read_bytes()).digest()
+        != hashlib.sha256(reference.read_bytes()).digest()
+    )
+    before = {
+        path.relative_to(vault).as_posix(): path.read_bytes()
+        for path in vault.rglob("*")
+        if path.is_file()
+    }
+    arguments = {
+        "command": "prepare",
+        "kind": "onboarding",
+        "vault": str(vault),
+        "source": str(reference),
+        "original_source": str(archive),
+        "selection_id": "11111111-1111-4111-8111-111111111111",
+    }
+    context = UpdateContext(operations=operations)
+    result = worker_context_call(context, arguments)
+    assert (
+        result.kind == "onboarding" and result.binding is not None and not result.ready
+    )
+    page = worker_context_call(context, {"command": "page", "binding": result.binding})
+    assert page.status == "available"
+    note = next(
+        row
+        for row in page.page.items
+        if row.item_id == "22222222-2222-4222-8222-222222222222"
+    )
+    assert note.original == ORIGINAL and note.current == CURRENT
+    for kind in ("source_update", "format_transition", "attachment_cleanup"):
+        with pytest.raises(ValueError):
+            WorkerRequest(
+                request_id="11111111-1111-4111-8111-111111111111",
+                operation="update",
+                sequence=1,
+                arguments=arguments | {"kind": kind},
+            )
+    assert {
+        path.relative_to(vault).as_posix(): path.read_bytes()
+        for path in vault.rglob("*")
+        if path.is_file()
+    } == before
+
+
+def test_worker_pages_bound_consent_and_identity_choices_from_real_preparation(
+    tmp_path, monkeypatch
+):
+    from brz2obsidian.application.update_context import UpdateContext
+    from brz2obsidian.contracts import ReviewConsentRequirement
+    from tests.application.test_onboarding_originals import (
+        NOTE,
+        controlled_history,
+        legacy_brz_case,
+    )
+
+    operations, vault, archive = legacy_brz_case(tmp_path)
+    duplicate = vault / "Duplicate.md"
+    duplicate.write_bytes((vault / NOTE).read_bytes())
+    controlled_history(operations, vault, monkeypatch)
+    history = operations.inspect_history(vault)
+    history.admission.preflight = history.admission.preflight.model_copy(
+        update={
+            "consents": (
+                ReviewConsentRequirement(
+                    schema_id="brz2obsidian.review-consent-requirement",
+                    schema_version=1,
+                    consent_id="tracked-legacy",
+                    kind="tracking",
+                    requirement="required",
+                    policy="ordinary",
+                    fingerprint="native-policy-snapshot",
+                    disclosure="Include the exact reviewed ignored note in owned history.",
+                    subjects=(),
+                ),
+            )
+        }
+    )
+    before = {
+        path.relative_to(vault).as_posix(): path.read_bytes()
+        for path in vault.rglob("*")
+        if path.is_file()
+    }
+    context = UpdateContext(operations=operations)
+    opened = worker_context_call(
+        context,
+        {
+            "command": "prepare",
+            "kind": "onboarding",
+            "vault": str(vault),
+            "source": str(archive),
+            "selection_id": "11111111-1111-4111-8111-111111111111",
+        },
+    )
+    assert opened.binding is not None
+    page = worker_context_call(
+        context,
+        {"command": "choices", "binding": opened.binding, "offset": 0, "limit": 100},
+    )
+    assert page.total_choices == len(page.offers) and page.next_choice_offset is None
+    consent = next(row for row in page.offers if row.domain == "tracking")
+    assert consent.choices == ("accept", "decline")
+    assert (
+        consent.disclosure
+        == "Include the exact reviewed ignored note in owned history."
+    )
+    assert consent.policy == "ordinary" and not consent.detail_omitted
+    accepted = worker_context_call(
+        context,
+        {
+            "command": "choose",
+            "binding": opened.binding,
+            "requirement_id": consent.requirement_id,
+            "choice": "accept",
+            "assumptions_digest": consent.assumptions_digest,
+        },
+    )
+    assert accepted.code == "accepted" and not accepted.ready
+    identity = next(row for row in page.offers if row.domain == "identity")
+    entries = []
+    for index in range(2):
+        detail = worker_context_call(
+            context,
+            {
+                "command": "choice_details",
+                "binding": accepted.binding,
+                "requirement_id": identity.requirement_id,
+                "offset": index,
+                "limit": 1,
+            },
+        )
+        assert detail.total_choice_details == 2 and len(detail.choice_details) == 1
+        entries.extend(detail.choice_details)
+    assert {row.path for row in entries} == {NOTE, "Duplicate.md"}
+    assert all(
+        row.entry_id and row.sha256 and row.eligible and row.target_safe
+        for row in entries
+    )
+    selected = worker_context_call(
+        context,
+        {
+            "command": "choose",
+            "binding": accepted.binding,
+            "requirement_id": identity.requirement_id,
+            "choice": "associate",
+            "assumptions_digest": identity.assumptions_digest,
+            "selected_entry_id": entries[0].entry_id,
+            "disassociate_entry_ids": (entries[1].entry_id,),
+        },
+    )
+    assert (
+        selected.code == "accepted"
+        and not selected.ready
+        and selected.publication == "not_started"
+    )
+    assert {
+        path.relative_to(vault).as_posix(): path.read_bytes()
+        for path in vault.rglob("*")
+        if path.is_file()
+    } == before
+
+
 def test_unsaved_context_retains_proposal_and_refuses_foreign_or_stale_page(tmp_path):
     context, case = context_case(tmp_path)
     selection = "11111111-1111-4111-8111-111111111111"

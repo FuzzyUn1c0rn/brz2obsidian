@@ -29,11 +29,13 @@ def attachment_references(preparation, requirement_id):
     requirement = next(
         row
         for row in inspect_review_choices(plan)
-        if row.requirement_id == requirement_id and row.domain == "attachment"
+        if row.requirement_id == requirement_id
     )
     change = next(
         row for row in plan.proposal.changes if row.change_id == requirement.change_id
     )
+    if change.attachment_review is None:
+        raise ValueError("An attachment reference offer is required")
     offered = {
         (link.document_id, link.occurrence_id)
         for link in change.attachment_review.links
@@ -58,6 +60,85 @@ def attachment_references(preparation, requirement_id):
     )
 
 
+def attachment_reference_destinations(preparation, requirement_id):
+    """Return canonical offered meanings, without deriving new destinations."""
+    from .update_context_contracts import UpdateReferenceDestination
+
+    plan = UpdatePreparation.model_validate(preparation).review
+    requirement = next(
+        row
+        for row in inspect_review_choices(plan)
+        if row.requirement_id == requirement_id
+    )
+    change = next(
+        row for row in plan.proposal.changes if row.change_id == requirement.change_id
+    )
+    if change.attachment_review is None:
+        raise ValueError("An attachment reference offer is required")
+    links = {
+        (row.document_id, row.occurrence_id): row
+        for row in change.attachment_review.links
+    }
+    return {
+        token: tuple(
+            UpdateReferenceDestination(choice=choice, meaning=meaning)
+            for choice, meaning in (
+                ("keep_current", link.old),
+                ("use_incoming", link.incoming),
+                ("use_secondary", link.secondary),
+            )
+            if choice in link.choices and meaning is not None
+        )
+        for token, document, occurrence in attachment_references(
+            preparation, requirement_id
+        )
+        for link in (links[(document.document_id, occurrence.occurrence_id)],)
+    }
+
+
+def attachment_reference_page(preparation, requirement_id, *, offset=0, limit=100):
+    """Page canonical reference offers; no producer context or candidate is accepted."""
+    from .update_context_contracts import UpdateReferenceOffer
+
+    if (
+        type(offset) is not int
+        or offset < 0
+        or type(limit) is not int
+        or not 1 <= limit <= 100
+    ):
+        raise ValueError("Invalid reference page")
+    preparation = UpdatePreparation.model_validate(preparation)
+    refs = attachment_references(preparation, requirement_id)
+    destinations = attachment_reference_destinations(preparation, requirement_id)
+    end = min(len(refs), offset + limit)
+    return (
+        tuple(
+            UpdateReferenceOffer(
+                reference_id=token,
+                document_id=document.document_id,
+                occurrence_id=occurrence.occurrence_id,
+                document_path=document.source_path,
+                snippet=document.content.data[
+                    max(0, occurrence.span.start - 120) : max(
+                        0, occurrence.span.start - 120
+                    )
+                    + 512
+                ],
+                old=occurrence.meaning,
+                choices=("drop",)
+                if preparation.kind == "attachment_cleanup"
+                else tuple(row.choice for row in destinations[token]),
+                destinations=()
+                if preparation.kind == "attachment_cleanup"
+                else destinations[token],
+            )
+            for token, document, occurrence in refs[offset:end]
+        ),
+        len(refs),
+        end if end < len(refs) else None,
+    )
+
+
 def review_choice_action(
     preparation,
     *,
@@ -65,6 +146,8 @@ def review_choice_action(
     choice,
     assumptions_digest,
     references=(),
+    selected_entry_id=None,
+    disassociate_entry_ids=(),
 ):
     preparation = UpdatePreparation.model_validate(preparation)
     plan = preparation.review
@@ -83,12 +166,32 @@ def review_choice_action(
     ):
         raise ValueError("Review offer changed")
     change = next(
-        row for row in plan.proposal.changes if row.change_id == requirement.change_id
+        (
+            row
+            for row in plan.proposal.changes
+            if row.change_id == requirement.change_id
+        ),
+        None,
     )
+    if change is None and requirement.domain not in (
+        "compatible_group",
+        "tracking",
+        "storage",
+    ):
+        raise ValueError("Review offer changed")
     selection = candidate = None
-    if change.attachment_review is not None:
-        if choice not in ("current", "remove"):
-            raise ValueError("Reference choices are required")
+    if requirement.domain == "identity":
+        candidates = {row.entry_id for row in change.identity_review.candidates}
+        requested = (selected_entry_id, *disassociate_entry_ids)
+        if (
+            selected_entry_id is None
+            or len(set(requested)) != len(requested)
+            or not set(requested) <= candidates
+        ):
+            raise ValueError("Identity offer changed")
+    elif selected_entry_id is not None or disassociate_entry_ids:
+        raise ValueError("Identity choice is unavailable")
+    if change is not None and change.attachment_review is not None:
         alternative = next(
             row
             for row in change.attachment_review.alternatives
@@ -107,9 +210,12 @@ def review_choice_action(
                 UpdateReferenceChoice.model_validate(row) for row in references
             )
             offered_refs = attachment_references(preparation, requirement_id)
-            if len({row.reference_id for row in supplied}) != len(supplied) or {
-                row.reference_id for row in supplied
-            } != {row[0] for row in offered_refs}:
+            if (
+                any(row.choice != "drop" for row in supplied)
+                or len({row.reference_id for row in supplied}) != len(supplied)
+                or {row.reference_id for row in supplied}
+                != {row[0] for row in offered_refs}
+            ):
                 raise ValueError("Reference offer changed")
             subject = next(
                 row
@@ -182,6 +288,16 @@ def review_choice_action(
                 else row
                 for row in states
             )
+        elif choice in ("incoming", "both"):
+            from .attachment_choices import selected_attachment_candidate
+
+            links, candidate = selected_attachment_candidate(
+                plan,
+                change,
+                alternative,
+                references,
+                attachment_references(preparation, requirement_id),
+            )
         elif references:
             raise ValueError("Reference choice is unavailable")
         selection = AttachmentSelection(
@@ -197,7 +313,7 @@ def review_choice_action(
             link_choices=links,
             provenance="explicit_user",
         )
-        candidate = AttachmentCandidate(
+        candidate = candidate or AttachmentCandidate(
             schema_id="brz2obsidian.attachment-candidate",
             schema_version=1,
             outputs=alternative.outputs,
@@ -211,15 +327,15 @@ def review_choice_action(
         decision_id=str(uuid4()),
         proposal_id=plan.proposal.proposal_id,
         expected_generation=plan.proposal.generation,
-        change_id=change.change_id,
+        change_id=requirement.change_id,
         reviewed_assumptions=requirement.assumptions,
         domain=requirement.domain,
         choice=choice,
         candidate=None,
         attachment_selection=selection,
         attachment_candidate=candidate,
-        selected_entry_id=None,
-        disassociate_entry_ids=(),
+        selected_entry_id=selected_entry_id,
+        disassociate_entry_ids=disassociate_entry_ids,
     )
     return action
 
@@ -233,6 +349,8 @@ def resolve_update_choice(
     assumptions_digest,
     references=(),
     edited=None,
+    selected_entry_id=None,
+    disassociate_entry_ids=(),
 ):
     preparation = UpdatePreparation.model_validate(preparation)
     action = review_choice_action(
@@ -241,6 +359,8 @@ def resolve_update_choice(
         choice=choice,
         assumptions_digest=assumptions_digest,
         references=references,
+        selected_entry_id=selected_entry_id,
+        disassociate_entry_ids=disassociate_entry_ids,
     )
     if preparation.kind == "format_transition" and action.domain == "configuration":
         return operations.resolve_configuration(preparation, ())
