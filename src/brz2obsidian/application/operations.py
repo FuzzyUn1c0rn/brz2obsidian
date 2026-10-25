@@ -66,6 +66,12 @@ class Operations:
 
         return prepare_update(self, vault, source)
 
+    def prepare_format_transition(self, vault, source=None):
+        """Review presentation maintenance separately from incoming source changes."""
+        from .format_transition import prepare_format_transition
+
+        return prepare_format_transition(self, vault, source)
+
     def prepare_onboarding(self, vault, source=None, *, original_source=None):
         """Review legacy content without promoting authored bytes to originals."""
         from .onboarding import prepare_onboarding

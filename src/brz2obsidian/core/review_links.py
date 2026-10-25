@@ -453,7 +453,7 @@ def selected_current_links_safe(facts, change):
         inventory=context.inventory,
         baseline=current_baseline(context, document),
         affected_target_ids=()
-        if facts.format_operation.kind == "onboarding"
+        if facts.format_operation.kind in ("onboarding", "format_transition")
         else tuple(m.target_id for m in meanings if m.target_id is not None),
     ).valid
 

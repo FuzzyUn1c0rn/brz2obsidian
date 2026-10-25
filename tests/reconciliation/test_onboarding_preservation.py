@@ -126,9 +126,10 @@ def test_binary_current_keeps_the_complete_opaque_manual_context():
 import pytest
 
 
+@pytest.mark.parametrize("operation_kind", ("onboarding", "format_transition"))
 @pytest.mark.parametrize("changed_target", (False, True))
 def test_onboarding_current_retains_existing_fragment_warning_without_harming_target(
-    tmp_path, changed_target
+    tmp_path, changed_target, operation_kind
 ):
     from brz2obsidian.application.operations import Operations
     from brz2obsidian.application.update_contracts import UpdatePreparation
@@ -178,7 +179,7 @@ def test_onboarding_current_retains_existing_fragment_warning_without_harming_ta
             update={
                 "format_operation": operation.model_copy(
                     update={
-                        "kind": "onboarding",
+                        "kind": operation_kind,
                         "baseline_source_version": operation.target_source_version,
                         "established_baseline": operation.established_baseline.model_copy(
                             update={"source_version": operation.target_source_version}
@@ -199,7 +200,7 @@ def test_onboarding_current_retains_existing_fragment_warning_without_harming_ta
     prepared = UpdatePreparation.model_validate(
         old.model_dump()
         | {
-            "kind": "onboarding",
+            "kind": operation_kind,
             "review": prepare_review(facts, preflight=old.review.preflight),
         }
     )

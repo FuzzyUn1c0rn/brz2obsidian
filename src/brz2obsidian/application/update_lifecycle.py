@@ -64,7 +64,7 @@ def _refused(code, history=None, *, action="inspect_history", preparation=None):
     )
 
 
-def _history(operations, vault, observed=None, *, onboarding=False):
+def _history(operations, vault, observed=None, *, onboarding=False, maintenance=False):
     history = (
         operations.inspect_history(vault) if observed is None else observed.history
     )
@@ -91,6 +91,16 @@ def _history(operations, vault, observed=None, *, onboarding=False):
         )
     if history.status != "intact" or history.admission.status != "supported":
         return history, _refused("history_unavailable", history)
+    # Maintenance deliberately replaces an unavailable generation; native history
+    # and current admission above still have to be fully valid.
+    if maintenance:
+        return history, None
+    if (
+        history.checkpoint.review is not None
+        and history.checkpoint.manifest.boundary != "result"
+        and history.checkpoint.review.saved.plan.facts.format_operation.kind == "format_transition"
+    ):
+        return history, _refused("format_transition_review_required", history, action="resume_update")
     onboarding_pending = (
         history.checkpoint.review is not None
         and history.checkpoint.manifest.boundary != "result"
@@ -901,7 +911,7 @@ def save_update(operations, preparation):
 
 
 def load_update(operations, vault):
-    history, stopped = _history(operations, vault, onboarding=True)
+    history, stopped = _history(operations, vault, onboarding=True, maintenance=True)
     if stopped is not None:
         return stopped
     checkpoint = history.checkpoint
@@ -935,7 +945,7 @@ def resume_update(operations, vault):
 
 def _resume_update(operations, vault, observed):
     try:
-        history, stopped = _history(operations, vault, observed, onboarding=True)
+        history, stopped = _history(operations, vault, observed, onboarding=True, maintenance=True)
         if stopped is not None:
             return stopped
         checkpoint = history.checkpoint
@@ -962,14 +972,20 @@ def _resume_update(operations, vault, observed):
             return _refused("saved_payload_mismatch", history)
         directory = _materialize(incoming, {r.path: r.mode for r in binding.files})
         baseline = _read_source(operations, vault, checkpoint, observed)
-        facts = _observed_facts(
-            history,
-            baseline,
-            incoming,
-            proposal_id=plan.proposal.proposal_id,
-            generation=plan.proposal.generation,
-            source_memory=plan.facts.source_version_memory,
-        )
+        if plan.facts.format_operation.kind == "format_transition":
+            from .format_transition import transition_facts
+
+            facts = transition_facts(history, baseline, incoming,
+                proposal_id=plan.proposal.proposal_id, generation=plan.proposal.generation)
+        else:
+            facts = _observed_facts(
+                history,
+                baseline,
+                incoming,
+                proposal_id=plan.proposal.proposal_id,
+                generation=plan.proposal.generation,
+                source_memory=plan.facts.source_version_memory,
+            )
         history = _scope_review(operations, history, facts, plan, observed)
         if facts != plan.facts or history.admission.preflight != plan.preflight:
             facts = facts.model_copy(update={"generation": facts.generation + 1})
@@ -1213,9 +1229,10 @@ def _reobserve(operations, preparation):
 
 
 def _reobserve_inputs(operations, preparation, observed):
-    history, stopped = _history(operations, preparation.vault, observed)
+    history, stopped = _history(operations, preparation.vault, observed,
+        maintenance=preparation.kind == "format_transition")
     if stopped is not None:
-        return (None, stopped, None)
+        return (None, stopped.model_copy(update={"kind": preparation.kind}), None)
     if history.checkpoint.locator.association != preparation.locator.association:
         return (None, _refused("association_mismatch", history), None)
     directory = Path(preparation.payload_directory).absolute()
@@ -1279,16 +1296,23 @@ def _reobserve_inputs(operations, preparation, observed):
             )
     incoming = _read_physical(directory, actual.files)
     try:
-        facts = _observed_facts(
-            history,
-            baseline,
-            incoming,
-            proposal_id=preparation.review.proposal.proposal_id,
-            generation=preparation.review.proposal.generation,
-            source_memory=_producer_memory(
-                history.checkpoint, preparation.review.proposal.proposal_id
-            ),
-        )
+        if preparation.kind == "format_transition":
+            from .format_transition import transition_facts
+
+            facts = transition_facts(history, baseline, incoming,
+                proposal_id=preparation.review.proposal.proposal_id,
+                generation=preparation.review.proposal.generation)
+        else:
+            facts = _observed_facts(
+                history,
+                baseline,
+                incoming,
+                proposal_id=preparation.review.proposal.proposal_id,
+                generation=preparation.review.proposal.generation,
+                source_memory=_producer_memory(
+                    history.checkpoint, preparation.review.proposal.proposal_id
+                ),
+            )
     except _ExcludedDependency:
         return (
             None,

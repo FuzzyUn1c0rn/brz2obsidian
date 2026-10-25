@@ -431,7 +431,7 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
                     {m.target_id for m in resolved if m.target_id is not None}
                     if document.document_id in explicit_documents
                     and not (
-                        facts.format_operation.kind == "onboarding"
+                        facts.format_operation.kind in ("onboarding", "format_transition")
                         and document == prior
                     )
                     else set()
