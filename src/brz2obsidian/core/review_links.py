@@ -376,7 +376,7 @@ def onboarding_current_context(facts):
     """Exact current observations, with no assertion about opaque link meanings."""
     context = facts.link_context
     if (
-        facts.format_operation.kind != "onboarding"
+        facts.format_operation.kind not in ("onboarding", "format_transition")
         or context is None
         or current_observation_problem(facts) is not None
         or not current_lookup_coverage(facts)
@@ -453,7 +453,7 @@ def selected_current_links_safe(facts, change):
         inventory=context.inventory,
         baseline=current_baseline(context, document),
         affected_target_ids=()
-        if facts.format_operation.kind == "onboarding"
+        if facts.format_operation.kind in ("onboarding", "format_transition")
         else tuple(m.target_id for m in meanings if m.target_id is not None),
     ).valid
 

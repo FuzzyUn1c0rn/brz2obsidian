@@ -1,5 +1,7 @@
 """Unknown links permit exact preservation, never other selected changes."""
 
+import pytest
+
 from brz2obsidian.contracts import (
     ContentVersion,
     CurrentContent,
@@ -22,7 +24,8 @@ from tests.reconciliation.test_attachments import (
 from tests.reconciliation.test_resolution import action, preflight
 
 
-def test_binary_current_keeps_the_complete_opaque_manual_context():
+@pytest.mark.parametrize("operation_kind", ("onboarding", "format_transition"))
+def test_binary_current_keeps_the_complete_opaque_manual_context(operation_kind):
     facts = attachment_request()
     current = ExactContent(data=b"\xffUninterpreted [[Assets/data.bin]]\r\n")
     target = ReferenceTarget(
@@ -79,9 +82,11 @@ def test_binary_current_keeps_the_complete_opaque_manual_context():
             "identity_inventory": facts.identity_inventory + (entry,),
             "format_operation": facts.format_operation.model_copy(
                 update={
-                    "kind": "onboarding",
+                    "kind": operation_kind,
                     "recorded_generation": "unknown",
-                    "baseline_source_version": None,
+                    "baseline_source_version": None
+                    if operation_kind == "onboarding"
+                    else facts.format_operation.target_source_version,
                     "established_baseline": None,
                 }
             ),
@@ -123,12 +128,10 @@ def test_binary_current_keeps_the_complete_opaque_manual_context():
     assert effects.remove_paths == ()
 
 
-import pytest
-
-
+@pytest.mark.parametrize("operation_kind", ("onboarding", "format_transition"))
 @pytest.mark.parametrize("changed_target", (False, True))
 def test_onboarding_current_retains_existing_fragment_warning_without_harming_target(
-    tmp_path, changed_target
+    tmp_path, changed_target, operation_kind
 ):
     from brz2obsidian.application.operations import Operations
     from brz2obsidian.application.update_contracts import UpdatePreparation
@@ -178,7 +181,7 @@ def test_onboarding_current_retains_existing_fragment_warning_without_harming_ta
             update={
                 "format_operation": operation.model_copy(
                     update={
-                        "kind": "onboarding",
+                        "kind": operation_kind,
                         "baseline_source_version": operation.target_source_version,
                         "established_baseline": operation.established_baseline.model_copy(
                             update={"source_version": operation.target_source_version}
@@ -199,7 +202,7 @@ def test_onboarding_current_retains_existing_fragment_warning_without_harming_ta
     prepared = UpdatePreparation.model_validate(
         old.model_dump()
         | {
-            "kind": "onboarding",
+            "kind": operation_kind,
             "review": prepare_review(facts, preflight=old.review.preflight),
         }
     )

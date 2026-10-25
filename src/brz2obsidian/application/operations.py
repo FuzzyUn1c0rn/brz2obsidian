@@ -72,6 +72,12 @@ class Operations:
 
         return prepare_attachment_cleanup(self, vault)
 
+    def prepare_format_transition(self, vault, source=None):
+        """Review presentation maintenance separately from incoming source changes."""
+        from .format_transition import prepare_format_transition
+
+        return prepare_format_transition(self, vault, source)
+
     def prepare_onboarding(self, vault, source=None, *, original_source=None):
         """Review legacy content without promoting authored bytes to originals."""
         from .onboarding import prepare_onboarding
@@ -89,6 +95,12 @@ class Operations:
         from .update_lifecycle import apply_update
 
         return apply_update(self, preparation, cancel=cancel)
+
+    def resolve_configuration(self, preparation, actions):
+        """Record one explicit choice for the complete offered configuration group."""
+        from .format_configuration import resolve_configuration
+
+        return resolve_configuration(self, preparation, actions)
 
     def resolve_update(self, preparation, action, *, edited=None):
         """Resolve one offered S1 choice, binding edited text to its actual target."""

@@ -20,7 +20,7 @@ from brz2obsidian.contracts import (
 class UpdatePreparation(ReconciliationContract):
     schema_id: Literal["brz2obsidian.update-preparation"]
     schema_version: Literal[1]
-    kind: Literal["source_update", "onboarding", "attachment_cleanup"] = "source_update"
+    kind: Literal["source_update", "onboarding", "format_transition", "attachment_cleanup"] = "source_update"
     vault: str
     locator: CheckpointLocator | None
     payload_directory: str
@@ -89,7 +89,7 @@ class UpdateResult(ReconciliationContract):
     ]
     code: str
     operation_id: str | None = None
-    kind: Literal["source_update", "onboarding", "attachment_cleanup"] = "source_update"
+    kind: Literal["source_update", "onboarding", "format_transition", "attachment_cleanup"] = "source_update"
     generation: int | None = Field(default=None, ge=1)
     preparation: UpdatePreparation | None = None
     loaded: LoadedReview | None = None

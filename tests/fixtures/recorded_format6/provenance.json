@@ -1,0 +1,117 @@
+{
+  "status": "actual-output-verified-read-only",
+  "verified_utc": "2026-10-25T11:32:36.359144+00:00",
+  "producer_revision": "ca83db2dc3ad7bc6ecb435cba3356a974329453f",
+  "historical_source": "C:\\Users\\stefa\\.codex\\worktrees\\s3-checkpoint-reader\\brz2obsidian\\tmp\\issue-282\\acquisition-20261025T112949Z\\historical-source\\src",
+  "archive_sha256": "ca7874e7133a25134439a1a5af0ef06ebc2161214d557d7e32ae523a96779292",
+  "brz_sha256": "83f41ca26874418fcaef90545dab26e348e4c36cfdce4b72c159e9ed4cb78f13",
+  "generation_attempts": 2,
+  "actual_conversion_outcome": "clean",
+  "actual_elapsed_seconds": 1.4277627000119537,
+  "migration_schema_version": 6,
+  "renderer_version": "6",
+  "profile_id": "thebrain-format5-reviewed",
+  "profile_version": "9",
+  "source_identity": {
+    "source_id": "7b170eec-a7e4-49f6-a0b4-bd553528a201",
+    "module_id": "thebrain-brz",
+    "module_version": "9",
+    "format_version": "5",
+    "source_sha256": "83f41ca26874418fcaef90545dab26e348e4c36cfdce4b72c159e9ed4cb78f13",
+    "snapshot_digest": "180a0b1e3d04d39a3cd324987b7043a33db240c37546feff5961ba4d3ff083ea"
+  },
+  "run_metadata": {
+    "converter_version": "0.3.0",
+    "renderer_version": "6",
+    "run_id": "f0848cc7-fda1-4264-8853-55fe3f41237c",
+    "run_time": "2026-10-25T11:31:15.335646+00:00",
+    "obsidian_version": "1.13.7",
+    "bookmark_time": 1792927875335
+  },
+  "vault": "C:\\Users\\stefa\\.codex\\worktrees\\s3-checkpoint-reader\\brz2obsidian\\tmp\\issue-282\\acquisition-20261025T112949Z\\attempt-002\\vault-format6",
+  "files": {
+    "Categories.md": {
+      "size": 51,
+      "sha256": "caa4d52d6939e1755a273f7b19eb52a499fc0a994b871fcea28741e3fc529c6e"
+    },
+    "Home \u2014 Format six seed.md": {
+      "size": 321,
+      "sha256": "bf4f3be597d1e441afe9b9735a00a3d51145eaa96cba33f4d4ff363c2df2fab3"
+    },
+    "MIGRATION REPORT.md": {
+      "size": 1624,
+      "sha256": "88bbcacfc7fcf50d62501ceee55d56875940fcaf472572ab6aa398819781230c"
+    },
+    "migration-record.json": {
+      "size": 11855,
+      "sha256": "49c034a32a1c5f2b6fe0cb0067624c6cef88ff158577fe5ddc4ca2a66292a243"
+    },
+    "Vault guide.md": {
+      "size": 9407,
+      "sha256": "194e1707c0229f10705a613f142cc5f13c930d0a713f83a6d454ffb5b9f42b79"
+    },
+    ".obsidian/app.json": {
+      "size": 310,
+      "sha256": "2119b855f672fb9599158f8a93bedd293c8918724ebc7a55794dd57f4f6d15b1"
+    },
+    ".obsidian/bookmarks.json": {
+      "size": 152,
+      "sha256": "c36b3b56fb93235f9494ad56609434d297d4bd8ae9b78aee6150d138cb542c50"
+    },
+    ".obsidian/core-plugins.json": {
+      "size": 262,
+      "sha256": "3ae7e697f51d753b32d3f29d14865e0549875653ee63cfb678864b4937d76461"
+    },
+    ".obsidian/templates.json": {
+      "size": 58,
+      "sha256": "6018a04105fe157c7730ec634a70307f378a0c4f88368c3496477338c88de420"
+    },
+    ".obsidian/types.json": {
+      "size": 264,
+      "sha256": "a643f364ae0fb8b8f8e80f95730d839e4ef7e57f8b8a491ac91d04746a490932"
+    },
+    "Templates/Category starter.md": {
+      "size": 270,
+      "sha256": "9b5084783f48c65876fbcbe16ddb36ff2df1ed839e59503538a493ea30c007ab"
+    },
+    "Templates/Member template starter.md": {
+      "size": 340,
+      "sha256": "51d7dac074e7eeb6e6b7058e35b8806dbed967b5588279414ca499e2d442f4b6"
+    },
+    "Templates/New note.md": {
+      "size": 146,
+      "sha256": "b7dfea1f1e7a5ddfa10cb3b869c8d244a51f91d7ac69cec40c3d3366e6c84293"
+    },
+    "Templates/Bases/Categories.base": {
+      "size": 645,
+      "sha256": "1a8e46b90e55893c977c33e15323ebba665b3de80b709a543742716b7a67c0b8"
+    },
+    "Templates/Bases/Gallery.base": {
+      "size": 1831,
+      "sha256": "8919a7effffdc3f2ce29ef13d661cc878a99f24d16d9cc2e15bc5b602a87b8c5"
+    },
+    "Templates/Bases/Members.base": {
+      "size": 1821,
+      "sha256": "58398bb5b4d561c7214eaa26aeb0f1f2346ef82ce49a7f366d7021432f16c08b"
+    },
+    "Templates/Bases/Starter.base": {
+      "size": 1821,
+      "sha256": "58398bb5b4d561c7214eaa26aeb0f1f2346ef82ce49a7f366d7021432f16c08b"
+    },
+    "Attachments/5f71e626/Notes.md.original": {
+      "size": 33,
+      "sha256": "3f2b3616174be55f19467ae102f73b15ff0d0aa1a2fba925a7ae711a0278e925"
+    }
+  },
+  "original_generation_receipt_status": "failed",
+  "verification_correction": "Post-conversion checker wrongly read renderer_version from historical Receipt; actual migration record supplies renderer_version6. Original failed verifier receipt preserved; no third generation. Subsequent read-only analysis uses explicit UTF8 for native JSON.",
+  "limits": [
+    "Preparation only; no282claim/implementation/qualification or promise of current runtime old-renderer support.",
+    "Synthetic independently authored one-note BRZ and actual historical producer, no retained user/frozen vaults.",
+    "First attempt refused invalid Home setting; corrected collection-scoped uuid5 per historical reader.",
+    "No source/test/branch/checkout edit; a569 remains clean.",
+    "Final289under600/allfour/GUI/80 remains required;280one-off accepted overrun is separate."
+  ],
+  "fixture_kind": "Immutable exact generated historical bytes; no production historical renderer support",
+  "generated_archive_sha256": "8dc1b0dead6755edf178ad64e014f0adafa0c188b5e651f5a9e1e78a459bfea3"
+}
