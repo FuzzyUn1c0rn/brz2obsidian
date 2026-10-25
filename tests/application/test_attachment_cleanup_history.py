@@ -135,6 +135,141 @@ def test_native_cleanup_ownership_reads_qualified_ancestor_without_changing_curr
     assert (vault / "Assets/remove.bin").read_bytes() == b"\x00historical source A\xff"
 
 
+def test_native_cleanup_prepared_capture_keeps_completed_ownership_under_new_lease():
+    from brz2obsidian.application.update_facts import assemble_facts
+    from brz2obsidian.contracts import SourceIdentity
+    from tests.application.test_attachment_cleanup_application import (
+        cleanup_asset_action,
+    )
+    from tests.application.test_attachment_cleanup_lifecycle import user_git
+
+    vault, source, original = owned_history_case()
+    operations = Operations()
+    identity = output_identity(json.loads(original["migration-record.json"]))
+    first = operations.capture_checkpoint(
+        vault,
+        source,
+        vault_id="cleanup-vault",
+        import_id="cleanup-import",
+        identity=identity,
+        admission=operations.inspect_history(vault).admission,
+    )
+    assert first.status == "captured", first.code
+    git(vault, "update-ref", "refs/notes/user-proof", "HEAD")
+    original_user_git = user_git(vault)
+    facts = assemble_facts(
+        original, original, original, proposal_id="actual-native-retain", generation=1
+    )
+    review = prepare_review(
+        facts, preflight=operations.inspect_history(vault).admission.preflight
+    )
+    assert review.ready, (review.requirements, review.blockers)
+    terminal = operations.apply_reviewed_update(
+        vault,
+        source,
+        review=review,
+        vault_id="cleanup-vault",
+        import_id="cleanup-import",
+        source_binding=operations.observe_reviewed_source(source, review),
+        observed_source=SourceIdentity.model_validate(
+            json.loads(original["migration-record.json"])["source_identity"]
+        ),
+    )
+    (vault.parent / "small-completed-native-apply.json").write_text(
+        terminal.model_dump_json(), encoding="utf-8"
+    )
+    assert terminal.status == "no_content_change" and terminal.phase == "terminal", (
+        terminal.code
+    )
+    assert terminal.result_commit is not None and terminal.receipt_commit is not None
+    before = operations.read_checkpoint(vault)
+    assert before.status == "valid" and before.manifest.boundary == "result", (
+        before.code
+    )
+    assert before.locator.commit == terminal.result_commit
+    assert git(vault, "rev-parse", first.ref).decode().strip() == terminal.result_commit
+    assert user_git(vault) == original_user_git
+
+    offered = operations.prepare_attachment_cleanup(vault)
+    assert offered.preparation is not None, offered.code
+    asset = next(
+        s
+        for s in offered.preparation.review.producer_facts.subjects
+        if s.item_id == "remove-asset"
+    )
+    proof = asset.attachment.retained_ownership
+    assert proof.checkpoint_commit == first.commit and proof.source_version == "a" * 64
+    assert (
+        proof.payload_sha256
+        == hashlib.sha256(b"\x00historical source A\xff").hexdigest()
+    )
+    removed = operations.resolve_update(
+        offered.preparation,
+        cleanup_asset_action(
+            offered.preparation.review, "remove-asset", "remove", document_edits={}
+        ),
+    )
+    (vault.parent / "small-cleanup-resolution.json").write_text(
+        removed.model_dump_json(), encoding="utf-8"
+    )
+    assert removed.ready, (removed.code, removed.preparation.review.blockers)
+    applied = operations.apply_update(removed.preparation)
+    (vault.parent / "small-cleanup-native-apply.json").write_text(
+        applied.model_dump_json(), encoding="utf-8"
+    )
+    assert applied.status == "applied", applied.code
+    assert (
+        applied.application.kind == "apply" and applied.application.phase == "terminal"
+    )
+    assert applied.application.published_files == 1
+    assert not (vault / "Assets/remove.bin").exists()
+    assert all(
+        (vault / path).read_bytes() == raw
+        for path, raw in original.items()
+        if path != "Assets/remove.bin"
+    )
+    assert {
+        p.relative_to(source).as_posix(): p.read_bytes()
+        for p in source.rglob("*")
+        if p.is_file()
+    } == original
+    assert user_git(vault) == original_user_git
+    checkpoint = operations.read_checkpoint(vault)
+    assert checkpoint.status == "valid" and checkpoint.manifest.boundary == "result", (
+        checkpoint.code
+    )
+    assert checkpoint.locator.commit == applied.application.result_commit
+    assert (
+        git(vault, "rev-parse", first.ref).decode().strip() == checkpoint.locator.commit
+    )
+    retained = operations.read_checkpoint_payload(
+        vault,
+        locator=checkpoint.locator,
+        requests=(
+            CheckpointPayloadRequest(
+                path="Assets/remove.bin",
+                offset=0,
+                limit=len(b"\x00historical source A\xff"),
+            ),
+        ),
+        byte_limit=len(b"\x00historical source A\xff"),
+    )
+    assert (
+        retained.status == "available"
+        and retained.chunks[0].data == b"\x00historical source A\xff"
+    )
+    (vault / "Assets/remove.bin").write_bytes(b"\x00new manual content")
+    with operations.inspect_update_inputs(vault) as observed:
+        assert (
+            observed.read_attachment_ownership(
+                locator=observed.history.checkpoint.locator,
+                paths=("Assets/remove.bin",),
+            )
+            == ()
+        )
+    assert user_git(vault) == original_user_git
+
+
 def test_native_cleanup_capture_rederives_witness_before_any_history_write():
     vault, source, original = owned_history_case()
     operations = Operations()

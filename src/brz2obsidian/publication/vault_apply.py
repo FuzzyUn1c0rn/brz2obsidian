@@ -30,6 +30,7 @@ from brz2obsidian.publication.vault_admission import _safe_relative
 from brz2obsidian.publication.vault_history import (
     _control_objects,
     _Git,
+    _inspect_history,
     _inspect_retained_history,
     _read,
     capture_checkpoint,
@@ -1916,10 +1917,33 @@ def _apply_reviewed_update(
     failure_code = "apply_unavailable"
     cancel_requested = cancel if cancel is not None else lambda: False
     executor = executor if executor is not None else _NativeExecutor()
+    retained_history = (
+        (undo_target.status, undo_target.observation)
+        if undo_target is not None
+        else None
+    )
     try:
         if undo_target is None:
-            reviewed_observation = inspect_history(root)
-            first = inspect_history(root, subjects=subjects)
+            inspections = []
+            reviewed_observation = _inspect_history(
+                root,
+                _capture=lambda inspection, admission: inspections.append(inspection),
+            )
+            inspected = inspections[0] if inspections else None
+            if (
+                inspected is not None
+                and inspected.recovery_status is not None
+                and inspected.recovery_observation is not None
+            ):
+                retained_history = (
+                    inspected.recovery_status,
+                    inspected.recovery_observation,
+                )
+            first = _inspect_history(
+                root,
+                subjects=subjects,
+                recovery_observation=retained_history[1] if retained_history else None,
+            )
         else:
             from brz2obsidian.application.checkpoint_contracts import (
                 VaultHistoryInspection,
@@ -1987,10 +2011,10 @@ def _apply_reviewed_update(
         acquired = True
         observed = (
             inspect_history(root, subjects=subjects, active_operation=operation_id)
-            if undo_target is None
+            if retained_history is None
             else _inspect_retained_history(
                 root,
-                undo_target.observation,
+                retained_history[1],
                 subjects=subjects,
                 active_operation=operation_id,
             )
@@ -2114,11 +2138,7 @@ def _apply_reviewed_update(
                 undo_of_receipt_commit=(
                     undo_target.receipt_commit if undo_target else None
                 ),
-                _observation=(
-                    (undo_target.status, undo_target.observation)
-                    if undo_target
-                    else None
-                ),
+                _observation=retained_history,
             )
             reused_undo_prepared = (
                 undo_target is not None

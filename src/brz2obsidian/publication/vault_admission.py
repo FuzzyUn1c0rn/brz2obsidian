@@ -401,6 +401,7 @@ class _Inspection:
         self.request_subjects = subjects
         self.active_operation = active_operation
         self.recovery_observation = recovery_observation
+        self.recovery_status = None
         self.checkpoint_observation = checkpoint_observation
         self.current_refs = None
         self.ignore_query_paths = ()
@@ -1096,6 +1097,7 @@ class _Inspection:
                     and observation is not None
                 ):
                     self.recovery_observation = observation
+                    self.recovery_status = terminal_status
         if self.checkpoint_observation is not None:
             _accept_idle_checkpoint(self)
         elif self.recovery_observation is not None:
