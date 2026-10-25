@@ -275,7 +275,7 @@ def test_actual_format6_transition_resumes_declines_config_then_applies_distinct
         for s in prepared.review.facts.subjects
         if s.item_id == "5f71e626-527e-47b4-abaa-e53d124619f8"
     )
-    assert source_note != ORIGINAL and source_note != CURRENT
+    assert source_note == ORIGINAL and source_note != CURRENT
     saved = operations.save_update(prepared)
     (root / "transition-saved.json").write_text(
         saved.model_dump_json(), encoding="utf-8"
