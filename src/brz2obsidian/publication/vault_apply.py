@@ -463,6 +463,7 @@ def _prepared_for_intent(
     origin_commit=None,
     origin_plan=None,
     undo_target=None,
+    origin_undo_target=None,
 ):
     """A retained prepared review authorizes exactly its selected transition."""
     if loaded is None:
@@ -506,6 +507,16 @@ def _prepared_for_intent(
             return False
         if origin is None or origin_plan is None:
             return False
+        finish_incoming_rows = manifest.source
+        if direction == "finish" and origin.kind == "undo":
+            if (
+                origin.undo_of_receipt_commit is None
+                or origin_undo_target is None
+                or origin_undo_target.receipt_commit != origin.undo_of_receipt_commit
+                or origin_undo_target.intent.association_id != origin.association_id
+            ):
+                return False
+            finish_incoming_rows = origin_undo_target.intent.before
         source = {
             row.path: row
             for row in (origin.proposed if direction == "finish" else origin.before)
@@ -527,7 +538,11 @@ def _prepared_for_intent(
                 expected = original_subject.incoming
                 if retained_source_incoming and subject.path in origin.affected_paths:
                     source_row = next(
-                        (row for row in manifest.source if row.path == subject.path),
+                        (
+                            row
+                            for row in finish_incoming_rows
+                            if row.path == subject.path
+                        ),
                         None,
                     )
                     if (
@@ -883,7 +898,9 @@ def _recovery_prepared_matches(
     return covered == set(origin.affected_paths)
 
 
-def _unpublished_recovery_matches(graph, checkpoint, owned, origins):
+def _unpublished_recovery_matches(
+    graph, checkpoint, owned, origins, *, origin_undo_target=None
+):
     """An exact retained preparation does not advance operation authority."""
     manifest, loaded = checkpoint.manifest, checkpoint.review
     if (
@@ -927,6 +944,7 @@ def _unpublished_recovery_matches(graph, checkpoint, owned, origins):
         origin=origin,
         origin_commit=graph.origin_intent_commit,
         origin_plan=original_plan,
+        origin_undo_target=origin_undo_target,
     ) and _recovery_prepared_matches(
         transition,
         origin,
@@ -955,6 +973,7 @@ class _OperationObservation(NamedTuple):
     unpublished_prepared: str | None = None
     graphs: tuple = ()
     checkpoint_roles: tuple = ()
+    origin_undo_target: object = None
 
 
 def _inspect_update_observation(vault):
@@ -1061,6 +1080,7 @@ def _inspect_update_status(vault, *, observations, trusted_association=None):
             raise OSError(
                 "Application result has a missing or duplicate operation root"
             )
+        active_undo_target = None
         for graph in graphs:
             origin = graph.authorities[-1][1]
             origin_saved = owned[origin.prepared_commit][1]
@@ -1117,6 +1137,8 @@ def _inspect_update_status(vault, *, observations, trusted_association=None):
                         graph, checkpoint, owned, graphs=tuple(graphs)
                     ),
                 )
+            if graph is graphs[-1]:
+                active_undo_target = undo_target
             for _, authority in reversed(graph.authorities):
                 prepared, saved = owned[authority.prepared_commit]
                 initial_undo = undo_target if authority is origin else None
@@ -1132,6 +1154,7 @@ def _inspect_update_status(vault, *, observations, trusted_association=None):
                     ),
                     origin_plan=initial_undo.plan if initial_undo else origin_plan,
                     undo_target=initial_undo,
+                    origin_undo_target=undo_target,
                 ):
                     raise OSError("Operation intent lacks a selected prepared review")
                 if initial_undo is not None and not _recovery_prepared_matches(
@@ -1190,6 +1213,7 @@ def _inspect_update_status(vault, *, observations, trusted_association=None):
             owned,
             graphs=tuple(graphs),
             checkpoint_roles=tuple(checkpoint_roles),
+            origin_undo_target=active_undo_target,
         )
         observations.append(observation)
         review_generation = (
@@ -1205,7 +1229,11 @@ def _inspect_update_status(vault, *, observations, trusted_association=None):
                 and manifest.boundary == "prepared"
                 and checkpoint.locator.commit != intent.prepared_commit
                 and _unpublished_recovery_matches(
-                    active_graph, checkpoint, owned, origins
+                    active_graph,
+                    checkpoint,
+                    owned,
+                    origins,
+                    origin_undo_target=observation.origin_undo_target,
                 )
             )
             unpublished_undo = False
@@ -1480,7 +1508,7 @@ def _inspect_update_status(vault, *, observations, trusted_association=None):
         )
 
 
-def read_update_details(vault, *, offset=0, limit=100):
+def read_update_details(vault, *, offset=0, limit=100, expected=None):
     """Page only validated owned before/result comparison facts, never bytes."""
     if (
         type(offset) is not int
@@ -1490,7 +1518,7 @@ def read_update_details(vault, *, offset=0, limit=100):
     ):
         raise ValueError("Detail offset or limit is outside the bounded page")
 
-    def page(status, code, operation_id=None, total=0, items=()):
+    def page(status, code, operation_id=None, total=0, items=(), *, binding=None):
         next_offset = offset + len(items) if offset + len(items) < total else None
         return VaultUpdateDetailPage(
             schema_id="brz2obsidian.vault-update-detail-page",
@@ -1498,6 +1526,11 @@ def read_update_details(vault, *, offset=0, limit=100):
             status=status,
             code=code,
             operation_id=operation_id,
+            intent_commit=None if binding is None else binding.intent_commit,
+            generation=None if binding is None else binding.generation,
+            kind=None if binding is None else binding.kind,
+            direction=None if binding is None else binding.direction,
+            review_generation=None if binding is None else binding.review_generation,
             offset=offset,
             limit=limit,
             total=total,
@@ -1508,6 +1541,28 @@ def read_update_details(vault, *, offset=0, limit=100):
     observed, observation = _inspect_update_observation(vault)
     if observed.status in ("unknown", "refused") or observed.intent_commit is None:
         return page("unavailable", "operation_authority_unavailable")
+    if expected is not None:
+        try:
+            expected = VaultApplyResult.model_validate(expected)
+        except ValueError, TypeError:
+            return page("unavailable", "operation_authority_unavailable")
+        fields = (
+            "operation_id",
+            "intent_commit",
+            "generation",
+            "kind",
+            "direction",
+            "review_generation",
+            "checkpoint_commit",
+        )
+        if any(
+            getattr(expected, field) != getattr(observed, field) for field in fields
+        ) or any(
+            getattr(expected, field) is None
+            for field in fields
+            if field != "review_generation"
+        ):
+            return page("unavailable", "operation_authority_changed")
     try:
         if observation is None:
             return page("unavailable", "operation_authority_unavailable")
@@ -1535,7 +1590,14 @@ def read_update_details(vault, *, offset=0, limit=100):
                     after_sha256=new.sha256 if new is not None else None,
                 )
             )
-        return page("available", "validated", intent.operation_id, len(paths), items)
+        return page(
+            "available",
+            "validated",
+            intent.operation_id,
+            len(paths),
+            items,
+            binding=observed,
+        )
     except OSError, ValueError, TypeError, UnicodeError, IndexError:
         return page("unavailable", "operation_authority_unavailable")
 
