@@ -113,12 +113,41 @@ def format_proposal(facts, subject):
     return "unresolved", None, rule, True
 
 
+def _new_source_output(facts, subject):
+    """An absent new output needs byte approval, not an invented old original."""
+    operation = facts.format_operation
+    baseline = operation.established_baseline
+    return (
+        operation.kind == "source_update"
+        and operation.recorded_generation == "supported"
+        and baseline is not None
+        and baseline.identity.output_format == 7
+        and output_semantics(baseline.identity)
+        == output_semantics(facts.baseline_identity)
+        and output_semantics(facts.baseline_identity)
+        == output_semantics(facts.incoming_identity)
+        and baseline.source_version == operation.baseline_source_version
+        and operation.target_source_version is not None
+        and facts.inventory == "complete"
+        and subject.output_role != "configuration"
+        and subject.baseline.status == "unknown"
+        and subject.baseline.content is None
+        and subject.baseline.unavailable_digest is None
+        and subject.current.existence == "absent"
+        and subject.incoming is not None
+        and all(
+            (output.item_id, output.facet) != (subject.item_id, subject.facet)
+            for output in baseline.outputs
+        )
+    )
+
+
 def review_facts(facts, subject):
     if facts.format_operation.kind == "attachment_cleanup":
         return None
     if (
         facts.format_operation.kind == "source_update"
-        and not needs_onboarding(facts, subject)
+        and (not needs_onboarding(facts, subject) or _new_source_output(facts, subject))
         and not configuration_change(subject)
     ):
         return None

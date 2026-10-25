@@ -32,7 +32,16 @@ def interpret_attachment_mapping(content: ExactContent, *, identity: OutputIdent
         or actual != identity
     ):
         raise ValueError("Attachment mapping generation is unqualified")
-    assets = tuple(AssetTarget.model_validate(row) for row in record["asset_targets"])
+    assets = tuple(
+        AssetTarget.model_validate(
+            {
+                "asset_id": row["asset_id"],
+                "relative_path": row["relative_path"],
+                "resource_link": row.get("resource_link"),
+            }
+        )
+        for row in record["asset_targets"]
+    )
     if len({row.asset_id for row in assets}) != len(assets):
         raise ValueError("Attachment mapping identity is ambiguous")
     paths = []

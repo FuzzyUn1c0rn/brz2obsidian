@@ -37,6 +37,96 @@ from tests.application.test_update_lifecycle_admission import (
 from tests.reconciliation.test_resolution import action, preflight
 
 
+@pytest.mark.parametrize(
+    "case", ("new", "existing_current", "unsupported", "configuration")
+)
+def test_new_source_attachment_requires_binary_approval_without_format_adoption(case):
+    from brz2obsidian.application.update_facts import assemble_facts
+    from tests.application.test_attachment_cleanup_lifecycle import incoming_attachment
+    from tests.application.test_update_lifecycle_contracts import preparation
+
+    baseline = payload("a", "Unchanged note.")
+    incoming = payload("b", "Unchanged note.")
+    path = ".obsidian/new.json" if case == "configuration" else "Assets/new.bin"
+    raw = b"{}\n" if case == "configuration" else b"\x00new-source\xff"
+    item = "support:" + path if case == "configuration" else "new-asset"
+    if case != "configuration":
+        record = json.loads(incoming["migration-record.json"])
+        record["asset_targets"] = [{"asset_id": item, "relative_path": path}]
+        incoming["migration-record.json"] = json.dumps(record).encode()
+    incoming[path] = raw
+    current = dict(baseline)
+    if case == "existing_current":
+        current[path] = b"\x00independent-current"
+    facts = assemble_facts(
+        baseline,
+        incoming,
+        current,
+        proposal_id="new-source-attachment",
+        generation=1,
+        originals_known=case != "unsupported",
+    )
+    subject = next(s for s in facts.subjects if s.item_id == item)
+    assert facts.baseline_identity == facts.incoming_identity
+    assert subject.baseline.status == "unknown" and subject.baseline.content is None
+    assert subject.incoming.data == raw
+    prepared = preparation(facts)
+    plan = prepared.review
+    change = next(c for c in plan.proposal.changes if c.item_id == item)
+    requirement = next(r for r in plan.requirements if r.change_id == change.change_id)
+    assert not plan.ready and not any(
+        a.change_id == change.change_id for a in plan.approvals
+    )
+    if case == "configuration":
+        assert (
+            requirement.domain == "configuration" and change.format_review is not None
+        )
+        return
+    selection, candidate = incoming_attachment(plan, change)
+    result = Operations().resolve_update(
+        prepared,
+        action(
+            plan,
+            change,
+            domain=requirement.domain,
+            choice="restore_incoming"
+            if "restore_incoming" in requirement.choices
+            else "incoming",
+            decision_id="explicit-new-source-asset",
+            attachment_selection=selection,
+            attachment_candidate=candidate,
+        ),
+    )
+    if case != "new":
+        assert change.format_review is not None
+        assert (
+            result.status == "refused"
+            and result.code
+            == {
+                "existing_current": "choice_not_admitted",
+                "unsupported": "unsafe_producer_choice",
+            }[case]
+        )
+        assert result.preparation.review.approvals == plan.approvals
+        return
+    assert result.code == "accepted", (
+        result.code,
+        requirement.domain,
+        requirement.choices,
+        change.identity_review.status,
+        change.disposition,
+        change.format_review is not None,
+        tuple((a.choice, a.eligible) for a in change.attachment_review.alternatives),
+    )
+    assert change.format_review is None and requirement.domain == "restoration"
+    approval = next(
+        a
+        for a in result.preparation.review.approvals
+        if a.change_id == change.change_id
+    )
+    assert approval.attachment_candidate.outputs[0].content.data == raw
+
+
 @pytest.mark.parametrize("condition", ("recovery", "incomplete_references"))
 def test_cleanup_preparation_keeps_recovery_and_uncertain_references_out_of_ready_state(
     condition,

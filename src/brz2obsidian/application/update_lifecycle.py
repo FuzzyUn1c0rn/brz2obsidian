@@ -770,9 +770,12 @@ def resolve_update(operations, preparation, action, *, edited=None):
                 for row in plan.proposal.changes
                 if row.change_id == action.change_id
             )
-            action = action.model_copy(
-                update={"candidate": _text_choice(plan, change, action.choice, edited)}
-            )
+            if change.attachment_review is None:
+                action = action.model_copy(
+                    update={
+                        "candidate": _text_choice(plan, change, action.choice, edited)
+                    }
+                )
         transition = resolve_review(plan, action)
         result_plan = transition.plan
         binding = preparation.source_binding.model_copy(

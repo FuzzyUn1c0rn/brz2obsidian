@@ -203,9 +203,15 @@ def test_actual_absence_cleanup_save_restart_interruption_and_finish_preserve_cu
         change = next(
             c for c in plan.proposal.changes if c.change_id == requirement.change_id
         )
-        choice = "approve" if "approve" in requirement.choices else "incoming"
+        choice = (
+            "approve"
+            if "approve" in requirement.choices
+            else "restore_incoming"
+            if "restore_incoming" in requirement.choices
+            else "incoming"
+        )
         selection = candidate = None
-        if requirement.domain == "attachment":
+        if change.attachment_review is not None:
             selection, candidate = incoming_attachment(plan, change)
         ordinary = remember(
             "ordinary-resolution-" + str(len(plan.actions)),
