@@ -248,13 +248,33 @@ def assemble_facts(
     current_inventory=(),
     originals_known=True,
     onboarding=False,
+    retained_ownership=None,
 ):
     old_record, new_record = record(baseline), record(incoming)
     old_identity, identity = output_identity(old_record), output_identity(new_record)
     old, new = _outputs(old_record, baseline), _outputs(new_record, incoming)
+    ownership = {}
+    historical = {}
+    if retained_ownership is not None:
+        paths = set()
+        for proof in retained_ownership:
+            key = proof.identity.item_id, proof.facet
+            if (proof.identity.collection_id, proof.identity.module_id) != (identity.collection_id, identity.module_id) or proof.facet != "asset" or key in ownership or proof.source_path in paths:
+                raise ValueError("Retained asset identity is ambiguous")
+            ownership[key] = proof
+            paths.add(proof.source_path)
+            historical[key] = proof.source_path, "guide", proof.source_path
+        old = {key: value for key, value in old.items() if key[1] != "asset" or key in ownership}
+        new = {key: value for key, value in new.items() if key[1] != "asset" or key in ownership}
+        if any(key in old and old[key][0] != value[0] or key in new and new[key][0] != value[0] for key, value in historical.items()):
+            raise ValueError("Retained asset moved without current identity proof")
     established = {
         path: (item, role, facet) for (item, facet), (path, role, _) in old.items()
     }
+    for (item, facet), (path, role, _) in historical.items():
+        if path in established and established[path] != (item, role, facet):
+            raise ValueError("Retained asset path has a different association")
+        established[path] = item, role, facet
     inventory = []
     for path, raw in sorted(current.items()):
         content = ExactContent(data=raw)
@@ -278,13 +298,13 @@ def assemble_facts(
     )
     subjects, outputs = [], []
     observed_paths = {row.path for row in current_inventory} | set(current)
-    for key in sorted(old.keys() | new.keys()):
+    for key in sorted(old.keys() | new.keys() | historical.keys()):
         item, facet = key
-        path, role, title = new.get(key, old.get(key))
+        path, role, title = new.get(key, old.get(key, historical.get(key)))
         old_path = old.get(key, (path, role, title))[0]
         original = (
             ExactContent(data=baseline[old_path])
-            if originals_known and old_path in baseline
+            if originals_known and key in old and old_path in baseline
             else None
         )
         received = ExactContent(data=incoming[path]) if key in new else None
@@ -360,6 +380,7 @@ def assemble_facts(
                 current_target_id="subject:" + item + ":" + facet,
                 allocation_candidates=slots,
                 affected_documents=(),
+                retained_ownership=ownership.get(key),
             )
         subjects.append(
             ReconciliationSubject(

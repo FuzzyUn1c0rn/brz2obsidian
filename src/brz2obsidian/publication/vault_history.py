@@ -848,6 +848,7 @@ def _read(
     trusted_association=None,
     missing_payloads=None,
     damaged_payloads=None,
+    ownership_demands_out=None,
 ):
     locator_path = root / ".brz2obsidian/locator.json"
     if not locator_path.exists():
@@ -900,6 +901,7 @@ def _read(
     tip_manifest = tip_review = None
     memo_roles = False
     target_records = {}
+    ownership_demands, ownership_roles = [], []
     visited = set()
     while current is not None:
         if current in visited:
@@ -1034,6 +1036,8 @@ def _read(
                 raise OSError("Saved review has no matching graph edge")
             if manifest.review_object not in reviewed:
                 review, references = _load_review_payload(git, manifest, verified)
+                from .attachment_ownership import review_ownership_claims
+
                 reviewed[manifest.review_object] = (
                     manifest.review_size,
                     manifest.review_sha256,
@@ -1043,6 +1047,7 @@ def _read(
                     _review_source_signature(review.saved),
                     review.saved.plan.facts.baseline_identity,
                     _onboarding_absence_review(review),
+                    review_ownership_claims(review.saved.plan, review.historical_effects),
                 )
             elif reviewed[manifest.review_object][:2] != (
                 manifest.review_size,
@@ -1081,6 +1086,17 @@ def _read(
             if manifest.review_object is not None
             else None
         )
+        if manifest.review_object is not None:
+            claims, missing = reviewed[manifest.review_object][8]
+            if claims or missing:
+                ownership_demands.append((current, manifest.recovery_origin_intent_commit, claims, missing))
+        if ownership_demands:
+            ownership_roles.append(_CheckpointRole(
+                current, manifest.previous, manifest.generation, manifest.boundary,
+                manifest.operation_intent_commit, manifest.undo_of_receipt_commit,
+                manifest.recovery_origin_intent_commit, manifest.recovery_previous_operation_commit,
+                manifest.recovery_direction,
+            ))
         if manifest.reviewed_source is not None and (
             manifest.review_object is None
             or reviewed[manifest.review_object][5]
@@ -1265,6 +1281,24 @@ def _read(
             review=None,
             message="Retained checkpoint graph names unavailable exact Git payloads.",
         )
+    if ownership_demands:
+        from .attachment_ownership import validate_history_claims
+
+        if ownership_demands_out is not None:
+            # The native operation inspector consumes this finite projection
+            # after its existing full authority validation and before release.
+            ownership_demands_out.append((association, tuple(ownership_roles), tuple(ownership_demands)))
+        elif any(role.boundary == "result" for role in ownership_roles):
+            from .vault_apply import _inspect_update_status
+
+            completed_observations = []
+            _inspect_update_status(root, observations=completed_observations,
+                                   trusted_association=trusted_association)
+            observation = completed_observations[0] if completed_observations else None
+            if observation is None or observation.checkpoint.locator != locator or observation.checkpoint.manifest != tip_manifest:
+                raise OSError("Cleanup history lacks current native operation proof")
+        else:
+            validate_history_claims(git, association=association, roles=tuple(ownership_roles), demands=ownership_demands)
     result = CheckpointRead(
         schema_id="brz2obsidian.checkpoint-read",
         schema_version=1,
@@ -1479,6 +1513,30 @@ class _UpdateRead:
             _guard=self._check,
         )
 
+    def read_attachment_ownership(self, *, locator, paths):
+        from .attachment_ownership import read_attachment_ownership
+
+        self._check()
+        if (
+            locator != self._bound_history.checkpoint.locator
+            or type(paths) is not tuple
+            or not paths
+            or len(set(paths)) != len(paths)
+            or not set(paths).issubset(row.path for row in self._inspection.inventory)
+        ):
+            raise OSError("Current finite attachment ownership request required")
+        for path in paths:
+            CheckpointRead.relative_vault_path(path)
+        result = read_attachment_ownership(
+            _Git(self._root, self._inspection.executable),
+            association=locator.association,
+            roles=tuple(self._inspection.checkpoint_roles),
+            paths=set(paths),
+            observation=self._inspection.recovery_observation,
+        )
+        self._check()
+        return result
+
     def inspect(self, *, subjects):
         from .vault_admission import _same_current_domain
 
@@ -1597,12 +1655,14 @@ def capture_checkpoint(
             )
         ):
             return result("refused", "invalid_checkpoint_boundary")
+        captured_inspections = []
         observed_history = (
-            inspect_history(
+            _inspect_history(
                 root,
                 subjects=subjects,
                 git_executable=git_executable,
                 active_operation=active_operation,
+                _capture=lambda inspection, admission: captured_inspections.append(inspection),
             )
             if _observation is None
             else _inspect_retained_history(
@@ -1775,6 +1835,20 @@ def capture_checkpoint(
             ):
                 return result("refused", "invalid_current_review")
             saved = saved_result.record
+            from .attachment_ownership import review_ownership_claims, validate_claims
+
+            claims, missing = review_ownership_claims(saved.plan)
+            if claims or missing:
+                try:
+                    roles = tuple(captured_inspections[0].checkpoint_roles) if captured_inspections else _observation[1].checkpoint_roles
+                    origin_claims = review_ownership_claims(recovery_origin_plan)[0] if recovery_origin_plan is not None else ()
+                    observed_operation = authority if recovery_origin_plan is not None else captured_inspections[0].recovery_observation if captured_inspections else _observation[1]
+                    cutoff = authority.owned[original.prepared_commit][0].previous if recovery_origin_plan is not None else None
+                    validate_claims(git, association=association, roles=roles, claims=claims,
+                                    missing=missing, origin_claims=origin_claims,
+                                    cutoff=cutoff, observation=observed_operation)
+                except OSError, ValueError, TypeError, KeyError:
+                    return result("refused", "cleanup_ownership_unbound")
         if observed_source is not None:
             from brz2obsidian.contracts import SourceIdentity
 

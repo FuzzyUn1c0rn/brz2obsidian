@@ -1630,12 +1630,38 @@ class AttachmentDestination(ReconciliationContract):
     target: IdentityTargetFacts
 
 
+class RetainedAttachmentOwnership(ReconciliationContract):
+    """Historical generated association, rederived by native history before writing."""
+
+    schema_id: Literal["brz2obsidian.retained-attachment-ownership"]
+    schema_version: Literal[1]
+    association_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    checkpoint_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+    generation: int = Field(ge=1, le=(1 << 63) - 1)
+    identity: ImportedItemIdentity
+    facet: str = Field(min_length=1)
+    source_path: str = Field(min_length=1)
+    source_version: str = Field(min_length=1)
+    mapping_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    payload_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    payload_size: int = Field(ge=0, le=(1 << 63) - 1)
+    payload_mode: Literal["100644", "100755"]
+
+    @model_validator(mode="after")
+    def safe_historical_path(self):
+        self.relative_vault_path(self.source_path)
+        return self
+
+
 class AttachmentFacts(ReconciliationContract):
     """Canonical resource association plus explicitly attested allocation slots."""
 
     current_target_id: str = Field(min_length=1)
     allocation_candidates: tuple[AttachmentDestination, ...]
     affected_documents: tuple[str, ...]
+    retained_ownership: RetainedAttachmentOwnership | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class AttachmentOutput(ReconciliationContract):

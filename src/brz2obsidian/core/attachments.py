@@ -189,10 +189,29 @@ def _cleanup_attachment_review(facts, subject, subject_id):
     from .formats import established_original
     from .review_effects import current_note_coverage
 
+    historical = subject.attachment.retained_ownership
+    historical_owned = (
+        historical is not None
+        and (
+            historical.identity.collection_id,
+            historical.identity.module_id,
+            historical.identity.item_id,
+            historical.facet,
+            historical.source_path,
+        )
+        == (
+            facts.incoming_identity.collection_id,
+            facts.incoming_identity.module_id,
+            subject.item_id,
+            subject.facet,
+            subject.current.path,
+        )
+        and subject.path == subject.current.path
+    )
     owned = (
         facts.format_operation.recorded_generation == "supported"
-        and subject.facet.startswith("attachment:")
-        and established_original(facts, subject)
+        and (subject.facet == "asset" or subject.facet.startswith("attachment:"))
+        and (established_original(facts, subject) or historical_owned)
         and subject.current.existence == "present"
         and subject.current.content is not None
     )
@@ -236,6 +255,7 @@ def _cleanup_attachment_review(facts, subject, subject_id):
                     owned,
                     complete,
                 )
+                + ((historical.model_dump(mode="json"),) if historical is not None else ())
             ).encode()
         ).hexdigest(),
         depends_on=(

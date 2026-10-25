@@ -66,6 +66,12 @@ class Operations:
 
         return prepare_update(self, vault, source)
 
+    def prepare_attachment_cleanup(self, vault):
+        """Review recorded attachment ownership and current references explicitly."""
+        from .attachment_cleanup import prepare_attachment_cleanup
+
+        return prepare_attachment_cleanup(self, vault)
+
     def prepare_onboarding(self, vault, source=None, *, original_source=None):
         """Review legacy content without promoting authored bytes to originals."""
         from .onboarding import prepare_onboarding

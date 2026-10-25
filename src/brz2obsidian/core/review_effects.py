@@ -292,6 +292,23 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
         if subject.attachment is not None:
             continue
         selected_path = change.target_path if approval is None else approval.target_path
+        if (
+            facts.format_operation.kind == "attachment_cleanup"
+            and approval is None
+            and not change.requires_decision
+            and change.disposition == "preserve_vault"
+            and selected_path == subject.current.path
+            and content == subject.current.content
+            and any(
+                document.document_id in explicit_documents
+                and document.source_path == selected_path
+                and document.content != content
+                and (prior := original_documents.get(document.document_id)) is not None
+                and (prior.content, prior.source_path) == (content, selected_path)
+                for document in proof_documents.values()
+            )
+        ):
+            continue
         action = None if approval is None else action_by_id.get(approval.decision_id)
         candidate = None if action is None else action.candidate
         known = (

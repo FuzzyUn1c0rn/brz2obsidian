@@ -50,6 +50,21 @@ def _project_review_effects(plan: ReviewPlan) -> SelectedReviewEffects:
             for document in plan.producer_facts.link_context.current_documents
         }
     )
+    cleanup_reference_originals = {}
+    if plan.producer_facts.format_operation.kind == "attachment_cleanup":
+        for approval in approvals.values():
+            if approval.attachment_candidate is None:
+                continue
+            explicit = {choice.document_id for choice in approval.attachment_selection.link_choices}
+            for document in approval.attachment_candidate.documents:
+                prior = current_documents.get(document.document_id)
+                if (
+                    document.document_id in explicit
+                    and prior is not None
+                    and prior.source_path == document.source_path
+                    and prior.content != document.content
+                ):
+                    cleanup_reference_originals[document.source_path] = prior.content
     files = {}
     removals = set()
 
@@ -108,6 +123,16 @@ def _project_review_effects(plan: ReviewPlan) -> SelectedReviewEffects:
             if content is None:
                 continue
             path = change.target_path if approval is None else approval.target_path
+            if (
+                approval is None
+                and not change.requires_decision
+                and change.disposition == "preserve_vault"
+                and subject.attachment is None
+                and path == subject.current.path
+                and content == subject.current.content
+                and cleanup_reference_originals.get(path) == content
+            ):
+                continue
             add(path, content, change.subject_id)
             if (
                 change.rename_review is not None

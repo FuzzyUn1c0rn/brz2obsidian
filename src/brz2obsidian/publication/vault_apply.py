@@ -1017,6 +1017,7 @@ def _inspect_update_status(vault, *, observations, trusted_association=None):
                 git,
                 linked_intents=linked_intents,
                 trusted_association=trusted_association,
+                ownership_demands_out=[],
             )
             if linked_intents:
                 return _outcome(
@@ -1065,6 +1066,7 @@ def _inspect_update_status(vault, *, observations, trusted_association=None):
             targets.add(declared.previous)
         linked_intents = []
         checkpoint_roles = []
+        ownership_demands = []
         checkpoint, owned = _read(
             root,
             git,
@@ -1072,6 +1074,7 @@ def _inspect_update_status(vault, *, observations, trusted_association=None):
             linked_intents=linked_intents,
             checkpoint_roles=checkpoint_roles,
             trusted_association=trusted_association,
+            ownership_demands_out=ownership_demands,
         )
         rooted_intents = {commit for graph in graphs for commit, _ in graph.authorities}
         if len(linked_intents) != len(set(linked_intents)) or not set(
@@ -1215,6 +1218,12 @@ def _inspect_update_status(vault, *, observations, trusted_association=None):
             checkpoint_roles=tuple(checkpoint_roles),
             origin_undo_target=active_undo_target,
         )
+        if ownership_demands:
+            from .attachment_ownership import validate_history_claims
+
+            for association, roles, demands in ownership_demands:
+                validate_history_claims(git, association=association, roles=roles,
+                                        demands=demands, observation=observation)
         observations.append(observation)
         review_generation = (
             intent.review_generation

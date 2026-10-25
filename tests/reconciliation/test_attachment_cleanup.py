@@ -1,5 +1,7 @@
 """Explicit attachment cleanup through the public whole-review seam."""
 
+import hashlib
+
 import pytest
 
 from brz2obsidian.contracts import (
@@ -90,6 +92,44 @@ def cleanup_request():
     return facts.model_copy(
         update={"format_operation": operation, "link_context": binary_context(facts)}
     )
+
+
+def test_historical_ownership_keeps_absent_original_and_current_source_distinct():
+    from brz2obsidian.contracts import ImportedItemIdentity, RetainedAttachmentOwnership
+
+    facts = cleanup_request()
+    subject = facts.subjects[0]
+    assert "retained_ownership" not in subject.attachment.model_dump()
+    proof = RetainedAttachmentOwnership(
+        schema_id="brz2obsidian.retained-attachment-ownership", schema_version=1,
+        association_id="a" * 64, checkpoint_commit="1" * 40, generation=1,
+        identity=ImportedItemIdentity(collection_id=facts.incoming_identity.collection_id,
+                                     module_id=facts.incoming_identity.module_id,
+                                     item_id=subject.item_id),
+        facet=subject.facet, source_path="Assets/data.bin", source_version="source:A",
+        mapping_sha256=hashlib.sha256(b"independent historical mapping").hexdigest(),
+        payload_sha256=hashlib.sha256(b"\x00original").hexdigest(),
+        payload_size=len(b"\x00original"), payload_mode="100644",
+    )
+    absent = subject.model_copy(update={
+        "baseline": subject.baseline.model_copy(update={"status": "unknown", "content": None}),
+        "incoming": None,
+        "attachment": subject.attachment.model_copy(update={"retained_ownership": proof}),
+    })
+    facts = with_subjects(facts, (absent, *facts.subjects[1:]), facts.identity_inventory)
+    facts = facts.model_copy(update={"format_operation": facts.format_operation.model_copy(update={
+        "baseline_source_version": "source:B", "target_source_version": "source:B",
+        "established_baseline": facts.format_operation.established_baseline.model_copy(update={"source_version": "source:B"}),
+    })})
+    plan = prepare_review(facts, preflight=preflight())
+    current = plan.producer_facts.subjects[0]
+    assert current.baseline.status == "unknown" and current.baseline.content is None
+    assert current.incoming is None and current.current.content.data == b"\x00authored"
+    assert current.attachment.retained_ownership.source_version == "source:A"
+    assert plan.facts.format_operation.target_source_version == "source:B"
+    change = next(c for c in plan.proposal.changes if c.facet == subject.facet)
+    remove = next(a for a in change.attachment_review.alternatives if a.choice == "remove")
+    assert remove.eligible and remove.outputs == ()
 
 
 def attachment_action(plan, facet, choice):

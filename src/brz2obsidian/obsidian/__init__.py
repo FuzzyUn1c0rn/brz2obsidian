@@ -7,8 +7,10 @@ __all__ = [
     "ObsidianRenderer",
     "align_structure",
     "inspect_text_candidate",
+    "interpret_attachment_mapping",
     "interpret_link_target",
     "interpret_links",
     "interpret_structure",
     "render",
 ]
+from .attachment_mapping import interpret_attachment_mapping

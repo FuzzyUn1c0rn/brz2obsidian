@@ -185,9 +185,17 @@ class _ExcludedDependency(ValueError):
     """Excluded authored bytes require current tracking review before storage."""
 
 
-def _observed_facts(history, baseline, incoming, **identity):
+def _observed_facts(history, baseline, incoming, *, retained_ownership=None, **identity):
     inventory = history.admission.inventory
     managed = set(baseline) | set(incoming)
+    if retained_ownership is not None:
+        owned = {proof.source_path for proof in retained_ownership}
+        assets = {row["relative_path"] for value in (baseline, incoming)
+                  for row in record(value)["asset_targets"] if row["relative_path"] is not None}
+        managed.difference_update(assets - owned)
+        managed.update(owned)
+        if any(row.excluded and row.path in owned for row in inventory):
+            raise _ExcludedDependency
     current = _read_physical(
         history.admission.vault,
         tuple(
@@ -199,7 +207,8 @@ def _observed_facts(history, baseline, incoming, **identity):
 
     def assembled():
         return assemble_facts(
-            baseline, incoming, current, current_inventory=inventory, **identity
+            baseline, incoming, current, current_inventory=inventory,
+            retained_ownership=retained_ownership, **identity
         )
 
     facts = assembled()
@@ -1232,7 +1241,17 @@ def _reobserve_inputs(operations, preparation, observed):
         return (None, _refused("source_payload_changed", history), None)
     retained = _read_source(operations, preparation.vault, history.checkpoint, observed)
     baseline = _baseline(history.checkpoint, retained)
-    if preparation.source_ref is not None:
+    if preparation.kind == "attachment_cleanup":
+        expected = tuple((row.path, row.mode, row.size, row.sha256) for row in history.checkpoint.manifest.source)
+        if (
+            preparation.source_ref is not None
+            or actual.incoming_identity != history.checkpoint.manifest.identity
+            or actual.target_source_version != record(retained)["source_identity"]["snapshot_digest"]
+            or tuple((row.path, row.mode, row.size, row.sha256) for row in actual.files) != expected
+            or preparation.observed_source != SourceIdentity.model_validate(record(retained)["source_identity"])
+        ):
+            return (None, _refused("retained_source_authority_required", history, preparation=preparation), None)
+    elif preparation.source_ref is not None:
         incoming_record = json.loads(
             next(
                 s.incoming.data
@@ -1279,16 +1298,21 @@ def _reobserve_inputs(operations, preparation, observed):
             )
     incoming = _read_physical(directory, actual.files)
     try:
-        facts = _observed_facts(
-            history,
-            baseline,
-            incoming,
-            proposal_id=preparation.review.proposal.proposal_id,
-            generation=preparation.review.proposal.generation,
-            source_memory=_producer_memory(
-                history.checkpoint, preparation.review.proposal.proposal_id
-            ),
-        )
+        memory = _producer_memory(history.checkpoint, preparation.review.proposal.proposal_id)
+        if preparation.kind == "attachment_cleanup":
+            from .attachment_cleanup import cleanup_facts
+
+            facts = cleanup_facts(history, retained, observed=observed,
+                                  proposal_id=preparation.review.proposal.proposal_id,
+                                  generation=preparation.review.proposal.generation,
+                                  source_memory=memory)
+        else:
+            facts = _observed_facts(
+                history, baseline, incoming,
+                proposal_id=preparation.review.proposal.proposal_id,
+                generation=preparation.review.proposal.generation,
+                source_memory=memory,
+            )
     except _ExcludedDependency:
         return (
             None,
