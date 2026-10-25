@@ -307,6 +307,9 @@ SAFE_LINK_STATUSES = (
 
 def validate_current_link_context(facts, subject):
     """Bind current observations before any remembered or explicit preservation."""
+    from .reversals import cleanup_removal_continuation
+
+    continuation = cleanup_removal_continuation(facts, subject)
     if subject.attachment is None:
         return None
     context = facts.link_context
@@ -447,7 +450,15 @@ def validate_current_link_context(facts, subject):
             if occurrence.meaning != meaning:
                 return "link_context_invalid"
             if (
-                meaning.target_id == association or association in meaning.candidates
-            ) and meaning.status not in SAFE_LINK_STATUSES:
+                (meaning.target_id == association or association in meaning.candidates)
+                and meaning.status not in SAFE_LINK_STATUSES
+                and not (
+                    continuation is not None
+                    and meaning.status == "missing"
+                    and meaning.target_id == association
+                    and meaning.path == continuation.path
+                    and not meaning.candidates
+                )
+            ):
                 return "link_current_unsafe"
     return None

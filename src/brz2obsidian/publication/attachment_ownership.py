@@ -6,6 +6,7 @@ from typing import NamedTuple
 
 from brz2obsidian.application.checkpoint_contracts import CheckpointManifest
 from brz2obsidian.contracts import (
+    AttachmentRemovalContinuation,
     ExactContent,
     ImportedItemIdentity,
     RetainedAttachmentOwnership,
@@ -22,6 +23,174 @@ class _Claim(NamedTuple):
     path: str
     current_path: str
     proof: RetainedAttachmentOwnership
+    continuation: AttachmentRemovalContinuation | None
+    current_existence: str
+    current_content_available: bool
+    operation_reversal_present: bool
+    source_target: object
+    incoming_signature: tuple | None
+
+
+def compile_removal_continuations(original, intent, origin_commit, *, effects):
+    """Describe actual canonical original removals from one native observation."""
+    from .vault_apply import _operation_history_fingerprint
+
+    if (
+        original.facts.format_operation.kind != "attachment_cleanup"
+        or intent.kind != "apply"
+    ):
+        return {}
+    if effects is None or effects.status != "selected":
+        raise OSError("Cleanup origin has no canonical selected effects")
+    before = {row.path: row for row in intent.before}
+    proposed = {row.path for row in intent.proposed}
+    subjects = {(s.item_id, s.facet): s for s in original.producer_facts.subjects}
+    changes = {c.change_id: c for c in original.proposal.changes}
+    result = {}
+    for approval in original.approvals:
+        selection, candidate = (
+            approval.attachment_selection,
+            approval.attachment_candidate,
+        )
+        if approval.choice != "remove" or selection is None or candidate is None:
+            continue
+        change = changes.get(approval.change_id)
+        if change is None:
+            raise OSError("Cleanup origin decision has no canonical change")
+        subject = subjects[(change.item_id, change.facet)]
+        path = subject.current.path
+        row = before.get(path)
+        if (
+            approval.domain != "attachment"
+            or approval.provenance != "explicit_user"
+            or selection.choice != "remove"
+            or candidate.outputs
+            or subject.attachment is None
+            or subject.attachment.retained_ownership is None
+            or path != subject.path
+            or path not in effects.remove_paths
+            or path not in intent.affected_paths
+            or row is None
+            or path in proposed
+            or subject.current.content is None
+            or row.size != len(subject.current.content.data)
+            or row.sha256 != hashlib.sha256(subject.current.content.data).hexdigest()
+        ):
+            raise OSError("Cleanup origin removal is unbound")
+        target_id = subject.attachment.current_target_id
+        targets = tuple(
+            t
+            for t in candidate.targets
+            if t.target_id == target_id and t.canonical_path == path
+        )
+        if (
+            len(targets) != 1
+            or targets[0].kind != "resource"
+            or targets[0].identity is not None
+        ):
+            raise OSError("Cleanup origin has no unique retained removal target")
+        key = change.item_id, change.facet
+        if key in result:
+            raise OSError("Cleanup origin has duplicate removal ownership")
+        result[key] = AttachmentRemovalContinuation(
+            schema_id="brz2obsidian.attachment-removal-continuation",
+            schema_version=1,
+            operation_id=intent.operation_id,
+            operation_kind="apply",
+            direction="finish",
+            operation_generation=intent.generation,
+            origin_intent_commit=origin_commit,
+            prepared_commit=intent.prepared_commit,
+            history_fingerprint=_operation_history_fingerprint(origin_commit, intent),
+            origin_change_id=approval.change_id,
+            origin_decision_id=approval.decision_id,
+            target_id=target_id,
+            path=path,
+            before_mode=row.mode,
+            before_size=row.size,
+            before_sha256=row.sha256,
+        )
+    return result
+
+
+def validate_removal_continuations(
+    claims,
+    *,
+    origin=None,
+    original=None,
+    origin_commit=None,
+    before=(),
+    direction=None,
+    effects=None,
+    expected=None,
+):
+    """Rebind descriptions to the actual original intent and one before snapshot."""
+    demanded = tuple(claim for claim in claims if claim.continuation is not None)
+    if not demanded:
+        return set()
+    if (
+        origin is None
+        or original is None
+        or origin_commit is None
+        or direction != "finish"
+    ):
+        raise OSError("Cleanup removal continuation lacks its native finish origin")
+    if expected is None:
+        if effects is None:
+            from brz2obsidian.core import select_review_effects
+
+            effects = select_review_effects(original)
+        expected = removal_continuation_bindings(
+            original, origin, origin_commit, effects=effects
+        )
+    present = {row.path for row in before}
+    paths = set()
+    for claim in demanded:
+        fact = claim.continuation
+        if (
+            claim.kind != "attachment_cleanup"
+            or expected.get((claim.item_id, claim.facet))
+            != (
+                fact,
+                claim.source_target,
+                claim.incoming_signature,
+            )
+            or claim.path != claim.current_path
+            or claim.path != fact.path
+            or claim.current_existence != "absent"
+            or claim.current_content_available
+            or claim.operation_reversal_present
+            or fact.path in present
+        ):
+            raise OSError(
+                "Cleanup removal continuation differs from its retained before snapshot"
+            )
+        paths.add(fact.path)
+    return paths
+
+
+def removal_continuation_bindings(original, intent, origin_commit, *, effects):
+    """Normalize source meaning once alongside the native original-removal facts."""
+    compiled = compile_removal_continuations(
+        original, intent, origin_commit, effects=effects
+    )
+    return {
+        key: (
+            compiled[key],
+            subject.source_target,
+            _incoming_signature(subject.incoming),
+        )
+        for subject in original.producer_facts.subjects
+        if (key := (subject.item_id, subject.facet)) in compiled
+    }
+
+
+def _incoming_signature(content):
+    return (
+        None
+        if content is None
+        else (len(content.data), hashlib.sha256(content.data).hexdigest())
+    )
 
 
 def interpret_attachment_disposition(owners, *, original, final, receipt, plan):
@@ -98,6 +267,12 @@ def review_ownership_claims(plan, effects=None):
                 subject.path,
                 subject.current.path,
                 subject.attachment.retained_ownership,
+                subject.attachment.removal_continuation,
+                subject.current.existence,
+                subject.current.content is not None,
+                subject.operation_reversal is not None,
+                subject.source_target,
+                _incoming_signature(subject.incoming),
             )
             for facts in (plan.facts, plan.producer_facts)
             for subject in facts.subjects
@@ -105,13 +280,19 @@ def review_ownership_claims(plan, effects=None):
             and subject.attachment.retained_ownership is not None
         )
     )
-    missing = False
+    missing = any(
+        subject.attachment is not None
+        and subject.attachment.removal_continuation is not None
+        and subject.attachment.retained_ownership is None
+        for facts in (plan.facts, plan.producer_facts)
+        for subject in facts.subjects
+    )
     if plan.facts.format_operation.kind == "attachment_cleanup" and plan.ready:
         if effects is None:
             from brz2obsidian.core import select_review_effects
 
             effects = select_review_effects(plan)
-        missing = effects.status != "selected" or any(
+        missing |= effects.status != "selected" or any(
             path not in {claim.current_path for claim in claims}
             for path in effects.remove_paths
         )
@@ -187,7 +368,20 @@ def validate_claims(
     cutoff=None,
     origin_claims=(),
     observation=None,
+    continuation_origin=None,
+    continuation_plan=None,
+    continuation_origin_commit=None,
+    continuation_before=(),
+    continuation_direction=None,
 ):
+    validate_removal_continuations(
+        claims,
+        origin=continuation_origin,
+        original=continuation_plan,
+        origin_commit=continuation_origin_commit,
+        before=continuation_before,
+        direction=continuation_direction,
+    )
     if not roles:
         if claims or missing:
             raise OSError("Cleanup witness has no retained ancestor context")
@@ -211,15 +405,144 @@ def validate_claims(
 
 
 def validate_history_claims(git, *, association, roles, demands, observation=None):
-    from brz2obsidian.application.vault_update_contracts import VaultOperationIntent
+    from brz2obsidian.application.vault_update_contracts import (
+        VaultOperationIntent,
+        VaultRecoveryIntent,
+    )
 
     from .vault_apply import _read_record
 
     by_commit = {role.commit: role for role in roles}
     claims_by_commit = {commit: claims for commit, _, claims, _ in demands}
     origins, bound = {}, []
+    continuation_origins = {}
+    continuation_snapshots = {}
     for commit, origin_commit, claims, missing in demands:
         role = by_commit[commit]
+        if any(claim.continuation is not None for claim in claims):
+            if observation is None:
+                raise OSError(
+                    "Cleanup continuation has no native retained finish graph"
+                )
+            result_prepared_commit = None
+            if role.boundary == "result":
+                result_authorities = tuple(
+                    (graph, intent)
+                    for graph in observation.graphs
+                    for intent_commit, intent in graph.authorities
+                    if intent_commit == role.operation_intent_commit
+                    and isinstance(intent, VaultRecoveryIntent)
+                    and intent.direction == "finish"
+                    and intent.association_id == association.association_id
+                )
+                if len(result_authorities) != 1:
+                    raise OSError(
+                        "Cleanup continuation RESULT has no unique finish intent"
+                    )
+                result_graph, result_intent = result_authorities[0]
+                if (
+                    role.previous != result_intent.prepared_commit
+                    or origin_commit not in (None, result_graph.origin_intent_commit)
+                    or role.recovery_direction not in (None, "finish")
+                ):
+                    raise OSError(
+                        "Cleanup continuation RESULT has changed native lineage"
+                    )
+                origin_commit = result_graph.origin_intent_commit
+                result_prepared_commit = result_intent.prepared_commit
+            elif role.boundary != "prepared" or role.recovery_direction != "finish":
+                raise OSError("Cleanup continuation is not a native finish preparation")
+            if origin_commit is None:
+                raise OSError(
+                    "Cleanup continuation has no native retained finish origin"
+                )
+            if origin_commit not in continuation_origins:
+                graphs = tuple(
+                    graph
+                    for graph in observation.graphs
+                    if graph.origin_intent_commit == origin_commit
+                )
+                if len(graphs) != 1:
+                    raise OSError("Cleanup continuation origin is not unique")
+                graph = graphs[0]
+                origin = graph.authorities[-1][1]
+                original_loaded = observation.owned[origin.prepared_commit][1]
+                if original_loaded is None:
+                    raise OSError(
+                        "Cleanup continuation origin lacks its canonical review"
+                    )
+                expected = removal_continuation_bindings(
+                    original_loaded.saved.plan,
+                    origin,
+                    origin_commit,
+                    effects=original_loaded.historical_effects,
+                )
+                continuation_origins[origin_commit] = (
+                    graph,
+                    origin,
+                    original_loaded,
+                    expected,
+                )
+            graph, origin, original_loaded, expected = continuation_origins[
+                origin_commit
+            ]
+            snapshot_commit = result_prepared_commit or commit
+            snapshot_key = origin_commit, snapshot_commit
+            if snapshot_key not in continuation_snapshots:
+                retained_snapshot = observation.owned.get(snapshot_commit)
+                if (
+                    retained_snapshot is None
+                    and snapshot_commit
+                    == observation.unpublished_prepared
+                    == observation.checkpoint.locator.commit
+                ):
+                    retained_snapshot = (
+                        observation.checkpoint.manifest,
+                        observation.checkpoint.review,
+                    )
+                if retained_snapshot is None:
+                    raise OSError(
+                        "Cleanup continuation has no native retained snapshot"
+                    )
+                snapshot, snapshot_loaded = retained_snapshot
+                if (
+                    snapshot_loaded is None
+                    or snapshot.boundary != "prepared"
+                    or snapshot.recovery_origin_intent_commit != origin_commit
+                    or snapshot.recovery_direction != "finish"
+                    or snapshot.vault != snapshot.preimage
+                ):
+                    raise OSError(
+                        "Cleanup continuation has no retained before snapshot"
+                    )
+                matched = any(
+                    isinstance(intent, VaultRecoveryIntent)
+                    and intent.prepared_commit == snapshot_commit
+                    and intent.before == snapshot.preimage
+                    and intent.direction == "finish"
+                    for _, intent in graph.authorities
+                )
+                pending = (
+                    snapshot_commit
+                    == observation.unpublished_prepared
+                    == observation.checkpoint.locator.commit
+                    and graph is observation.graph
+                    and graph.receipt is None
+                    and snapshot.recovery_previous_operation_commit == graph.commit
+                )
+                if not matched and not pending:
+                    raise OSError("Cleanup continuation preparation is orphaned")
+                continuation_snapshots[snapshot_key] = snapshot.preimage
+            validate_removal_continuations(
+                claims,
+                origin=origin,
+                original=original_loaded.saved.plan,
+                origin_commit=origin_commit,
+                before=continuation_snapshots[snapshot_key],
+                direction="finish",
+                effects=original_loaded.historical_effects,
+                expected=expected,
+            )
         cutoff, origin_claims = role.previous, ()
         if origin_commit is not None:
             if origin_commit not in origins:

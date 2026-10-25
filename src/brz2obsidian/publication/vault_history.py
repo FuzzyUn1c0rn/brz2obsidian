@@ -1304,7 +1304,11 @@ def _read(
             ownership_demands_out.append(
                 (association, tuple(ownership_roles), tuple(ownership_demands))
             )
-        elif any(role.boundary == "result" for role in ownership_roles):
+        elif any(role.boundary == "result" for role in ownership_roles) or any(
+            claim.continuation is not None
+            for _, _, claims, _ in ownership_demands
+            for claim in claims
+        ):
             from .vault_apply import _inspect_update_status
 
             completed_observations = []
@@ -1901,6 +1905,21 @@ def capture_checkpoint(
                         origin_claims=origin_claims,
                         cutoff=cutoff,
                         observation=observed_operation,
+                        continuation_origin=original
+                        if recovery_origin_plan is not None
+                        else None,
+                        continuation_plan=recovery_origin_plan,
+                        continuation_origin_commit=(
+                            target_origin_commit
+                            if recovery_origin_plan is not None
+                            else None
+                        ),
+                        continuation_before=(
+                            prior.manifest.preimage
+                            if boundary == "result"
+                            else current.inventory
+                        ),
+                        continuation_direction=target_direction,
                     )
                 except OSError, ValueError, TypeError, KeyError:
                     return result("refused", "cleanup_ownership_unbound")

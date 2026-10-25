@@ -187,8 +187,10 @@ def attachment_review(facts, subject, subject_id):
 def _cleanup_attachment_review(facts, subject, subject_id):
     """Offer removal only for a recorded owned facet with complete current proof."""
     from .formats import established_original
+    from .reversals import cleanup_removal_continuation
     from .review_effects import current_note_coverage
 
+    continuation = cleanup_removal_continuation(facts, subject)
     historical = subject.attachment.retained_ownership
     historical_owned = (
         historical is not None
@@ -212,8 +214,11 @@ def _cleanup_attachment_review(facts, subject, subject_id):
         facts.format_operation.recorded_generation == "supported"
         and (subject.facet == "asset" or subject.facet.startswith("attachment:"))
         and (established_original(facts, subject) or historical_owned)
-        and subject.current.existence == "present"
-        and subject.current.content is not None
+        and (
+            subject.current.existence == "present"
+            and subject.current.content is not None
+            or continuation is not None
+        )
     )
     complete = facts.inventory == "complete" and current_note_coverage(facts)
     alternatives = (
@@ -258,6 +263,11 @@ def _cleanup_attachment_review(facts, subject, subject_id):
                 + (
                     (historical.model_dump(mode="json"),)
                     if historical is not None
+                    else ()
+                )
+                + (
+                    (continuation.model_dump(mode="json"),)
+                    if continuation is not None
                     else ()
                 )
             ).encode()

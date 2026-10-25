@@ -194,7 +194,7 @@ def _review_observation(
         row.path
         for row in (intent.proposed if direction == "finish" else intent.before)
     }
-    selected_removal = any(
+    selected_removal = bool(selected.remove_paths) or any(
         path in inventory and path not in target_paths for path in intent.affected_paths
     )
     if original.facts.link_context is not None:
@@ -685,12 +685,45 @@ def _current_review_matches(review, admission):
 
 
 def _finish_review(root, observed, *, previous=None, authority=None):
-    original, _, _, _, facts, preflight, _, _ = _review_observation(
-        root,
-        observed,
-        direction="finish",
-        authority=authority,
-        next_generation=(previous.proposal.generation + 1 if previous else None),
+    original, intent, origin_commit, _, facts, preflight, _, retained = (
+        _review_observation(
+            root,
+            observed,
+            direction="finish",
+            authority=authority,
+            next_generation=(previous.proposal.generation + 1 if previous else None),
+        )
+    )
+    from .attachment_ownership import compile_removal_continuations
+
+    loaded = retained.owned[intent.prepared_commit][1]
+    continuations = compile_removal_continuations(
+        original,
+        intent,
+        origin_commit,
+        effects=loaded.historical_effects,
+    )
+    facts = facts.model_copy(
+        update={
+            "subjects": tuple(
+                subject.model_copy(
+                    update={
+                        "attachment": subject.attachment.model_copy(
+                            update={
+                                "removal_continuation": continuations.get(
+                                    (subject.item_id, subject.facet)
+                                )
+                            }
+                        )
+                    }
+                )
+                if subject.attachment is not None
+                and subject.current.existence == "absent"
+                and subject.current.content is None
+                else subject
+                for subject in facts.subjects
+            )
+        }
     )
     refreshed = refresh_review(previous or original, facts, preflight=preflight)
     if refreshed.status != "accepted":
@@ -1575,6 +1608,23 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
         }
         selected_files = {row.path: row.content.data for row in selected.files}
         removals = set(selected.remove_paths)
+        from .attachment_ownership import (
+            review_ownership_claims,
+            validate_removal_continuations,
+        )
+
+        satisfied = validate_removal_continuations(
+            review_ownership_claims(saved.review, selected)[0],
+            origin=origin,
+            original=current_authority.owned[origin.prepared_commit][1].saved.plan,
+            origin_commit=origin_commit,
+            before=tuple(before.values()),
+            direction=saved.direction,
+            effects=current_authority.owned[origin.prepared_commit][
+                1
+            ].historical_effects,
+        )
+        removals -= satisfied
         if any(not _safe_relative(path) for path in (*selected_files, *removals)):
             return _refuse_known_recovery(
                 current_status, "unsafe_recovery_path", start=start
@@ -1701,9 +1751,14 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
                 tip = inspect_history(
                     root, subjects=subjects, active_operation=operation_id
                 )
-                manifest = tip.checkpoint.manifest
-                if tip.status != "intact" or manifest.boundary != "prepared":
+                if (
+                    tip.status != "intact"
+                    or tip.checkpoint is None
+                    or tip.checkpoint.manifest is None
+                    or tip.checkpoint.manifest.boundary != "prepared"
+                ):
                     raise OSError("Recovery preparation could not be rediscovered")
+                manifest = tip.checkpoint.manifest
                 generation = manifest.generation
                 intent = VaultRecoveryIntent(
                     schema_id="brz2obsidian.vault-recovery-intent",

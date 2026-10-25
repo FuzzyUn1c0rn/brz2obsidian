@@ -388,7 +388,9 @@ def test_actual_absence_cleanup_save_restart_interruption_and_finish_preserve_cu
         change = next(
             c for c in plan.proposal.changes if c.change_id == requirement.change_id
         )
-        assert requirement.domain == "attachment" and "remove" in requirement.choices, (
+        assert change.item_id in (OLD_ASSET, NEW_ASSET), change.item_id
+        choice = "remove" if change.item_id == OLD_ASSET else "current"
+        assert requirement.domain == "attachment" and choice in requirement.choices, (
             requirement.domain,
             requirement.choices,
         )
@@ -399,11 +401,15 @@ def test_actual_absence_cleanup_save_restart_interruption_and_finish_preserve_cu
                 cleanup_asset_action(
                     plan,
                     change.item_id,
-                    "remove",
+                    choice,
                     document_edits={
                         NOTE_PATH: expected_note,
                         "Manual.md": expected_manual + later,
                     },
+                ).model_copy(
+                    update={
+                        "decision_id": f"cleanup-finish:{plan.proposal.generation}:{change.item_id}:{resolutions}"
+                    }
                 ),
             ),
         )
@@ -439,6 +445,7 @@ def test_actual_absence_cleanup_save_restart_interruption_and_finish_preserve_cu
     assert undo.status == "none" and undo.code == "latest_operation_is_maintenance"
     assert undo.target_receipt_commit is None
     (vault / OLD_PATH).write_bytes(b"New manual file at the old name\x00")
+    assert operations.read_checkpoint(vault).status == "valid"
     with operations.inspect_update_inputs(vault) as observed:
         assert (
             observed.read_attachment_ownership(

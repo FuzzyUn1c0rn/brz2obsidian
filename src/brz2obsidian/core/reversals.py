@@ -3,6 +3,42 @@
 from .identity import _paths_collide, _target_safe
 
 
+def cleanup_removal_continuation(facts, subject):
+    """Recognize a known-absent retained target, never authorize a new deletion."""
+    attachment = subject.attachment
+    if attachment is None:
+        return None
+    fact = attachment.removal_continuation
+    owner = attachment.retained_ownership
+    if (
+        fact is None
+        or owner is None
+        or subject.operation_reversal is not None
+        or facts.format_operation.kind != "attachment_cleanup"
+        or facts.inventory != "complete"
+        or subject.current.existence != "absent"
+        or subject.current.content is not None
+        or subject.path != subject.current.path
+        or fact.path != subject.current.path
+        or fact.target_id != attachment.current_target_id
+        or owner.source_path != fact.path
+        or (
+            owner.identity.module_id,
+            owner.identity.collection_id,
+            owner.identity.item_id,
+            owner.facet,
+        )
+        != (
+            facts.incoming_identity.module_id,
+            facts.incoming_identity.collection_id,
+            subject.item_id,
+            subject.facet,
+        )
+    ):
+        return None
+    return fact
+
+
 def content_bytes(content):
     return None if content is None else content.data
 

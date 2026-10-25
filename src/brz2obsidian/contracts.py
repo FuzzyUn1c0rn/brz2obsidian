@@ -1653,6 +1653,32 @@ class RetainedAttachmentOwnership(ReconciliationContract):
         return self
 
 
+class AttachmentRemovalContinuation(ReconciliationContract):
+    """A native approved removal already absent in this finish observation."""
+
+    schema_id: Literal["brz2obsidian.attachment-removal-continuation"]
+    schema_version: Literal[1]
+    operation_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    operation_kind: Literal["apply"]
+    direction: Literal["finish"]
+    operation_generation: int = Field(ge=1, le=(1 << 63) - 1)
+    origin_intent_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+    prepared_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+    history_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    origin_change_id: str = Field(min_length=1)
+    origin_decision_id: str = Field(min_length=1)
+    target_id: str = Field(min_length=1)
+    path: str = Field(min_length=1)
+    before_mode: Literal["100644", "100755"]
+    before_size: int = Field(ge=0, le=(1 << 63) - 1)
+    before_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def safe_removed_path(self):
+        self.relative_vault_path(self.path)
+        return self
+
+
 class AttachmentFacts(ReconciliationContract):
     """Canonical resource association plus explicitly attested allocation slots."""
 
@@ -1660,6 +1686,9 @@ class AttachmentFacts(ReconciliationContract):
     allocation_candidates: tuple[AttachmentDestination, ...]
     affected_documents: tuple[str, ...]
     retained_ownership: RetainedAttachmentOwnership | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    removal_continuation: AttachmentRemovalContinuation | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
 

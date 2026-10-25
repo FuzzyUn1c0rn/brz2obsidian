@@ -586,9 +586,32 @@ def _prepared_for_intent(
 
     if not _review_fact_paths_match(plan.producer_facts, saved_current, saved_incoming):
         return False
+    from .attachment_ownership import (
+        review_ownership_claims,
+        validate_removal_continuations,
+    )
+
+    try:
+        continued_removals = validate_removal_continuations(
+            review_ownership_claims(plan, selected)[0],
+            origin=origin,
+            original=origin_plan,
+            origin_commit=origin_commit,
+            before=intent.before,
+            direction=(
+                intent.direction
+                if isinstance(intent, (VaultRecoveryIntent, _UnpublishedRecovery))
+                else None
+            ),
+        )
+    except OSError, ValueError, KeyError:
+        return False
     selected_files = {row.path: row.content for row in selected.files}
     removals = set(selected.remove_paths)
-    if any(path not in before or path in proposed for path in removals):
+    if any(
+        path not in before and path not in continued_removals or path in proposed
+        for path in removals
+    ):
         return False
     for path, content in selected_files.items():
         row = proposed.get(path)
@@ -646,6 +669,23 @@ def _recovery_prepared_matches(
     origin_effects = select_review_effects(origin_plan)
     origin_files = {row.path: row.content for row in origin_effects.files}
     origin_removals = set(origin_effects.remove_paths)
+    from .attachment_ownership import (
+        review_ownership_claims,
+        validate_removal_continuations,
+    )
+
+    try:
+        continued_removals = validate_removal_continuations(
+            review_ownership_claims(loaded.saved.plan, loaded.historical_effects)[0],
+            origin=origin,
+            original=origin_plan,
+            origin_commit=origin_commit,
+            before=intent.before,
+            direction=direction,
+            effects=origin_effects,
+        )
+    except OSError, ValueError, KeyError:
+        return False
     origin_documents = {
         row.source_path
         for row in (
@@ -666,6 +706,17 @@ def _recovery_prepared_matches(
         )
 
     for subject in loaded.saved.plan.producer_facts.subjects:
+        if (
+            subject.attachment is not None
+            and subject.attachment.removal_continuation is not None
+        ):
+            if (
+                subject.current.path not in continued_removals
+                or subject.current.path in covered
+            ):
+                return False
+            covered.add(subject.current.path)
+            continue
         proof = subject.operation_reversal
         if proof is None:
             if (subject.item_id, subject.facet) in origin_subjects:
@@ -886,8 +937,67 @@ def _recovery_prepared_matches(
                     )
                 )
                 document = observed_documents.get(path)
+                manual_reference = False
+                continuation = (
+                    subject.attachment.removal_continuation
+                    if subject.attachment is not None
+                    else None
+                )
                 if (
-                    len(owners) == 1
+                    continuation is not None
+                    and continuation.path in continued_removals
+                    and continuation.origin_change_id == approval.change_id
+                    and continuation.origin_decision_id == approval.decision_id
+                    and approval.choice == "remove"
+                    and approval.provenance == "explicit_user"
+                    and approval.attachment_selection is not None
+                    and approval.attachment_candidate is not None
+                ):
+                    context = origin_plan.producer_facts.link_context
+                    original_documents = tuple(
+                        d for d in context.current_documents if d.source_path == path
+                    )
+                    declared = tuple(
+                        e
+                        for e in origin_plan.producer_facts.identity_inventory
+                        if e.current.path == path
+                    )
+                    records = tuple(
+                        t for t in context.current_targets if t.canonical_path == path
+                    )
+                    produced_documents = tuple(
+                        d
+                        for d in approval.attachment_candidate.documents
+                        if d.source_path == path
+                    )
+                    manual_reference = (
+                        len(original_documents)
+                        == len(declared)
+                        == len(records)
+                        == len(produced_documents)
+                        == 1
+                        and declared[0].identity_state == "missing"
+                        and declared[0].identity is None
+                        and declared[0].raw_identity is None
+                        and declared[0].facet == "content"
+                        and records[0].kind == "note"
+                        and records[0].identity is None
+                        and records[0].target_id
+                        == original_documents[0].document_id
+                        == produced_documents[0].document_id
+                        and produced_documents[0].content == original_file.content
+                        and document is not None
+                        and document.document_id == original_documents[0].document_id
+                        and matches(produced.get(path), original_documents[0].content)
+                        and any(
+                            choice.document_id == original_documents[0].document_id
+                            and choice.old.target_id == continuation.target_id
+                            and choice.provenance == "explicit_user"
+                            for choice in approval.attachment_selection.link_choices
+                        )
+                    )
+                if (
+                    (len(owners) == 1 or manual_reference)
                     and path in origin_documents
                     and document is not None
                     and document.status == "supported"
@@ -1237,6 +1347,23 @@ def _inspect_update_status(vault, *, observations, trusted_association=None):
             checkpoint_roles=tuple(checkpoint_roles),
             origin_undo_target=active_undo_target,
         )
+        unpublished_prepared = (
+            receipt is None
+            and checkpoint.status == "valid"
+            and checkpoint.manifest.boundary == "prepared"
+            and checkpoint.locator.commit != intent.prepared_commit
+            and _unpublished_recovery_matches(
+                active_graph,
+                checkpoint,
+                owned,
+                origins,
+                origin_undo_target=observation.origin_undo_target,
+            )
+        )
+        if unpublished_prepared:
+            observation = observation._replace(
+                unpublished_prepared=checkpoint.locator.commit
+            )
         if ownership_demands:
             from .attachment_ownership import validate_history_claims
 
@@ -1256,19 +1383,6 @@ def _inspect_update_status(vault, *, observations, trusted_association=None):
         )
         try:
             manifest = checkpoint.manifest
-            unpublished_prepared = (
-                receipt is None
-                and checkpoint.status == "valid"
-                and manifest.boundary == "prepared"
-                and checkpoint.locator.commit != intent.prepared_commit
-                and _unpublished_recovery_matches(
-                    active_graph,
-                    checkpoint,
-                    owned,
-                    origins,
-                    origin_undo_target=observation.origin_undo_target,
-                )
-            )
             unpublished_undo = False
             if (
                 receipt is not None
