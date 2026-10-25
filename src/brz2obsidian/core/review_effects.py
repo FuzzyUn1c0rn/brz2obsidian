@@ -398,6 +398,10 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
         if (
             document.document_id not in explicit_documents
             and document.document_id not in proof_documents
+        ) or (
+            facts.format_operation.kind == "format_transition"
+            and document == prior
+            and document.document_id not in proof_documents
         ):
             # A retained note's unrelated prose version is not a link redirect. Resource choices
             # and path/identity/fragment changes still require their explicit selected proof.

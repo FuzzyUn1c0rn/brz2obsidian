@@ -47,6 +47,7 @@ def finish_transition(operations, prepared, root):
         if prepared.review.ready:
             return prepared
         plan = prepared.review
+        assert plan.requirements, plan.blockers
         required = plan.requirements[0]
         change = next(
             c for c in plan.proposal.changes if c.change_id == required.change_id
@@ -196,6 +197,7 @@ def finish_interrupted_transition(operations, vault, prepared, root):
         if refreshed.review.ready:
             break
         plan = refreshed.review
+        assert plan.requirements, plan.blockers
         required = plan.requirements[0]
         change = next(
             c for c in plan.proposal.changes if c.change_id == required.change_id
