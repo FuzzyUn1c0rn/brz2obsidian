@@ -235,6 +235,14 @@ def _review_observation(
     context = original_facts.link_context
     identity_inventory = list(original_facts.identity_inventory)
     if context is not None:
+        from brz2obsidian.core.identity import _paths_collide
+        from brz2obsidian.core.reference_targets import validate_targets
+        from brz2obsidian.core.review_links import (
+            consumed_context,
+            current_lookup_coverage,
+            current_observation_problem,
+        )
+
         target_by_id = {target.target_id: target for target in context.current_targets}
         state_by_id = {state.target_id: state for state in context.current_target_facts}
         file_target_ids = {
@@ -242,15 +250,46 @@ def _review_observation(
             for target in context.current_targets
             if target.kind != "tag"
         }
+        unobserved = file_target_ids - set(state_by_id)
         if (
             len(target_by_id) != len(context.current_targets)
             or len(state_by_id) != len(context.current_target_facts)
-            or file_target_ids != set(state_by_id)
+            or set(state_by_id) - file_target_ids
+            or unobserved
+            and (
+                current_observation_problem(original_facts) is not None
+                or not current_lookup_coverage(original_facts)
+            )
         ):
             raise OSError("Current recovery target lookup is incomplete")
+        for target_id in unobserved:
+            target = target_by_id[target_id]
+            path = target.canonical_path
+            if (
+                target.kind != "resource"
+                or target.identity is not None
+                or path is None
+                or not _safe_relative(path)
+                or target.representations != (path,)
+                or path.casefold().endswith(".md")
+                or path not in inventory
+                or any(entry.current.path == path for entry in identity_inventory)
+                or any(
+                    d.source_path == path
+                    for d in context.current_documents + context.incoming_documents
+                )
+                or any(
+                    other.path != path and _paths_collide(path, other.path)
+                    for other in admission.inventory
+                )
+            ):
+                raise OSError(
+                    "Unobserved recovery resource is not bounded physical metadata"
+                )
+            validate_targets((target,))
         target_facts = []
         for target in context.current_targets:
-            if target.kind == "tag":
+            if target.kind == "tag" or target.target_id in unobserved:
                 continue
             old = state_by_id[target.target_id]
             observed_target = current.get(target.canonical_path)
@@ -632,6 +671,30 @@ def _review_observation(
             "link_context": context,
         }
     )
+    if context is not None and unobserved:
+        if current_observation_problem(
+            facts
+        ) is not None or not current_lookup_coverage(facts):
+            raise OSError("Fresh recovery link lookup is unbound")
+        for documents, targets, states in (
+            (
+                context.current_documents,
+                context.current_targets,
+                context.current_target_facts,
+            ),
+            (
+                context.incoming_documents,
+                context.incoming_targets,
+                context.incoming_target_facts,
+            ),
+        ):
+            _, _, used, _ = consumed_context(
+                documents, targets, states, context.inventory
+            )
+            if unobserved.intersection(target.target_id for target in used):
+                raise OSError(
+                    "Current recovery consumes unobserved physical resource metadata"
+                )
     # The checkpoint locator advances during the already-authorized operation.
     # Only that validated movement is neutralized: changed policy, consents,
     # current bytes, or a broken graph still reach the ordinary refresh rules.
