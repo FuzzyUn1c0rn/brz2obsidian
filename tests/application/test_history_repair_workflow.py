@@ -25,6 +25,8 @@ def test_terminal_matching_copy_repairs_history_without_restoring_files_and_bind
     operations = Operations()
     plan = ReviewPlan.model_validate_json(review_path.read_bytes())
     source_bytes = authored(source)
+    retained_payload = b"test-owned retained payload\x00\xfe"
+    (vault / "Protected-history-only.bin").write_bytes(retained_payload)
     initial_checkpoint = operations.read_checkpoint(vault)
     assert initial_checkpoint.status == "valid", initial_checkpoint.code
     older = vault.parent / "older-complete-copy"
@@ -61,7 +63,7 @@ def test_terminal_matching_copy_repairs_history_without_restoring_files_and_bind
     assert page.kind == "apply" and page.direction == "finish"
     assert page.review_generation == expected.review_generation
     assert page.content_omitted is True
-    assert page.offset == 0 and page.total == 3 and page.next_offset == 1
+    assert page.offset == 0 and page.total == 4 and page.next_offset == 1
     detail = page.items[0]
     assert detail.path == "Notes/Closing.md"
     assert detail.before_size == len(b"closing authored\r\n")
@@ -86,6 +88,20 @@ def test_terminal_matching_copy_repairs_history_without_restoring_files_and_bind
     )
     assert git(vault, "cat-file", "blob", source_blob) == b"closing incoming\n"
     assert source_blob.encode() not in git(vault, "ls-files", "--stage")
+    payload_row = next(
+        row
+        for row in checkpoint.manifest.vault
+        if row.path == "Protected-history-only.bin"
+    )
+    payload_blob = hashlib.sha1(
+        f"blob {len(retained_payload)}\0".encode() + retained_payload
+    ).hexdigest()
+    assert payload_row.object_id == payload_blob
+    assert payload_row.size == len(retained_payload)
+    assert payload_row.sha256 == hashlib.sha256(retained_payload).hexdigest()
+    assert payload_blob.encode() not in git(vault, "ls-files", "--stage")
+    assert payload_blob.encode() not in git(vault, "ls-tree", "-r", "HEAD")
+    assert git(vault, "cat-file", "blob", payload_blob) == retained_payload
     before_old = all_bytes(vault)
     old = operations.prepare_history_workflow(vault, kind="repair", copy=older)
     assert old.status == "refused" and old.code == "copy_invalid", old.code
@@ -110,7 +126,7 @@ def test_terminal_matching_copy_repairs_history_without_restoring_files_and_bind
     assert all_bytes(unanchored) == no_anchor_bytes
     assert all_bytes(matching) == copy_bytes
 
-    object_path = vault / ".git/objects" / source_blob[:2] / source_blob[2:]
+    object_path = vault / ".git/objects" / payload_blob[:2] / payload_blob[2:]
     assert object_path.resolve().is_relative_to(vault.resolve())
     assert object_path.is_file()
     object_path.chmod(stat.S_IWRITE)
@@ -131,7 +147,7 @@ def test_terminal_matching_copy_repairs_history_without_restoring_files_and_bind
     assert prepared.status == "ready", prepared.code
     assert prepared.copy_validation.status == "matching"
     assert tuple(row.object_id for row in prepared.copy_validation.missing_objects) == (
-        source_blob,
+        payload_blob,
     )
     assert all_bytes(vault) == damaged_bytes and all_bytes(matching) == copy_bytes
     assert user_state(vault) == damaged_user
@@ -165,10 +181,12 @@ def test_terminal_matching_copy_repairs_history_without_restoring_files_and_bind
     )
     assert operations.read_checkpoint(vault).locator == checkpoint.locator
     assert git(vault, "cat-file", "blob", source_blob) == b"closing incoming\n"
+    assert git(vault, "cat-file", "blob", payload_blob) == retained_payload
     assert authored(vault) == {
         "Notes/Closing.md": b"closing incoming\n",
         "Notes/Opening.md": b"opening incoming\nlater working bytes after complete copy\nanother stopped edit\n",
         "Unrelated.bin": b"protected\x00\xff",
+        "Protected-history-only.bin": retained_payload,
     }
     assert user_state(vault) == stopped_user
     assert all_bytes(matching) == copy_bytes and all_bytes(older) == older_bytes
