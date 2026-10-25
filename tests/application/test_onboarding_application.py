@@ -93,3 +93,45 @@ def test_current_only_onboarding_requires_first_history_and_real_completion(
         assert result.code == "first_checkpoint_required", result
         assert not result.ready and result.next_actions == ("save_update",)
         assert not result.history_retained and result.checkpoint is None
+
+
+@pytest.mark.parametrize("operation", ("resolve", "refresh", "save", "apply"))
+def test_onboarding_failure_keeps_role(monkeypatch, operation):
+    from brz2obsidian.application.operations import Operations
+    from brz2obsidian.application.update_contracts import UpdatePreparation
+    from brz2obsidian.core import prepare_review
+    from tests.application.test_update_lifecycle_contracts import preparation
+
+    old = preparation()
+    facts = old.review.facts.model_copy(
+        update={
+            "format_operation": old.review.facts.format_operation.model_copy(
+                update={"kind": "onboarding"}
+            ),
+        }
+    )
+    prepared = UpdatePreparation.model_validate(
+        old.model_dump()
+        | {
+            "kind": "onboarding",
+            "review": prepare_review(facts, preflight=old.review.preflight),
+        }
+    )
+    operations = Operations()
+
+    def unavailable(*args, **kwargs):
+        raise OSError("Current inspection is unavailable")
+
+    monkeypatch.setattr(operations, "inspect_history", unavailable)
+    monkeypatch.setattr(operations, "inspect_update_inputs", unavailable)
+    if operation == "resolve":
+        result = operations.resolve_update(prepared, None)
+    elif operation == "refresh":
+        result = operations.refresh_update(prepared, source="unopened.brz")
+    elif operation == "save":
+        result = operations.save_update(prepared)
+    else:
+        result = operations.apply_update(prepared)
+    assert result.kind == "onboarding", result
+    assert result.status == "refused" and not result.ready
+    assert result.preparation is None and result.publication == "not_started"

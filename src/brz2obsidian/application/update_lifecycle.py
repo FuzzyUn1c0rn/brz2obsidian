@@ -45,11 +45,14 @@ def _new_payload_directory():
     return Path(tempfile.mkdtemp(prefix="brz2obsidian-update-")) / "incoming"
 
 
-def _refused(code, history=None, *, action="inspect_history"):
+def _refused(code, history=None, *, action="inspect_history", preparation=None):
     findings = history.admission.findings if history is not None else ()
     if any(row.policy == "git" for row in findings):
         action = "setup_git"
     return UpdateResult(
+        kind=preparation.kind
+        if isinstance(preparation, UpdatePreparation)
+        else "source_update",
         status="refused",
         code=code,
         summary=findings[0].message
@@ -767,7 +770,7 @@ def resolve_update(operations, preparation, action, *, edited=None):
         )
         return _configuration_route(result)
     except OSError, ValueError, KeyError, TypeError, StopIteration, AttributeError:
-        return _refused("invalid_review_action")
+        return _refused("invalid_review_action", preparation=preparation)
 
 
 def refresh_update(operations, preparation, *, source=None):
@@ -778,9 +781,13 @@ def refresh_update(operations, preparation, *, source=None):
         with operations.inspect_update_inputs(preparation.vault) as observed:
             return _refresh_source_update(
                 operations, preparation, observed, source=source
-            )
+            ).model_copy(update={"kind": preparation.kind})
     except OSError, ValueError, TypeError, AttributeError:
-        return _refused("current_inputs_unavailable", action="refresh_update")
+        return _refused(
+            "current_inputs_unavailable",
+            action="refresh_update",
+            preparation=preparation,
+        )
 
 
 def _refresh_source_update(operations, preparation, observed, *, source):
@@ -885,7 +892,7 @@ def save_update(operations, preparation):
             }
         )
     except OSError, ValueError, KeyError, TypeError, AttributeError:
-        return _refused("save_unavailable")
+        return _refused("save_unavailable", preparation=preparation)
 
 
 def load_update(operations, vault):
@@ -1191,7 +1198,11 @@ def _reobserve(operations, preparation):
     except OSError, ValueError, TypeError, AttributeError:
         return (
             None,
-            _refused("current_inputs_unavailable", action="refresh_update"),
+            _refused(
+                "current_inputs_unavailable",
+                action="refresh_update",
+                preparation=preparation,
+            ),
             None,
         )
 
@@ -1458,4 +1469,4 @@ def apply_update(operations, preparation, *, cancel=None):
             recovery_gaps=history.admission.recovery_gaps,
         )
     except OSError, ValueError, KeyError, TypeError:
-        return _refused("current_review_unavailable")
+        return _refused("current_review_unavailable", preparation=preparation)
