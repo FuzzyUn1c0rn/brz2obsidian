@@ -25,9 +25,21 @@ def test_terminal_matching_copy_repairs_history_without_restoring_files_and_bind
     operations = Operations()
     plan = ReviewPlan.model_validate_json(review_path.read_bytes())
     source_bytes = authored(source)
+    initial_checkpoint = operations.read_checkpoint(vault)
+    assert initial_checkpoint.status == "valid", initial_checkpoint.code
     older = vault.parent / "older-complete-copy"
     shutil.copytree(vault, older)
     older_bytes = all_bytes(older)
+    initial_bytes = all_bytes(vault)
+    initial_copy = operations.validate_history_copy(vault, older)
+    (evidence / "older-copy-validation.json").write_text(
+        initial_copy.model_dump_json(), encoding="utf-8"
+    )
+    assert initial_copy.status == "matching", initial_copy.code
+    assert initial_copy.target_commit == initial_checkpoint.locator.commit
+    assert initial_copy.copy_commit == initial_checkpoint.locator.commit
+    assert initial_copy.target_generation == initial_copy.copy_generation
+    assert all_bytes(vault) == initial_bytes and all_bytes(older) == older_bytes
     applied = operations.apply_reviewed_update(
         vault,
         source,
@@ -76,8 +88,11 @@ def test_terminal_matching_copy_repairs_history_without_restoring_files_and_bind
     assert source_blob.encode() not in git(vault, "ls-files", "--stage")
     before_old = all_bytes(vault)
     old = operations.prepare_history_workflow(vault, kind="repair", copy=older)
-    assert old.status == "refused" and old.code == "newer_intact_history", old.code
-    assert old.copy_validation.target_generation > old.copy_validation.copy_generation
+    assert old.status == "refused" and old.code == "copy_invalid", old.code
+    assert old.copy_validation.message == (
+        "Supplied operation authority differs from the target."
+    )
+    assert old.copy_validation.target_generation > initial_copy.copy_generation
     assert all_bytes(vault) == before_old and all_bytes(older) == older_bytes
     matching = vault.parent / "matching-complete-copy"
     shutil.copytree(vault, matching)
