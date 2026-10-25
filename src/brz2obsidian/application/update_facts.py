@@ -259,14 +259,34 @@ def assemble_facts(
         paths = set()
         for proof in retained_ownership:
             key = proof.identity.item_id, proof.facet
-            if (proof.identity.collection_id, proof.identity.module_id) != (identity.collection_id, identity.module_id) or proof.facet != "asset" or key in ownership or proof.source_path in paths:
+            if (
+                (proof.identity.collection_id, proof.identity.module_id)
+                != (identity.collection_id, identity.module_id)
+                or proof.facet != "asset"
+                or key in ownership
+                or proof.source_path in paths
+            ):
                 raise ValueError("Retained asset identity is ambiguous")
             ownership[key] = proof
             paths.add(proof.source_path)
             historical[key] = proof.source_path, "guide", proof.source_path
-        old = {key: value for key, value in old.items() if key[1] != "asset" or key in ownership}
-        new = {key: value for key, value in new.items() if key[1] != "asset" or key in ownership}
-        if any(key in old and old[key][0] != value[0] or key in new and new[key][0] != value[0] for key, value in historical.items()):
+        old = {
+            key: value
+            for key, value in old.items()
+            if key[1] != "asset" or key in ownership
+        }
+        new = {
+            key: value
+            for key, value in new.items()
+            if key[1] != "asset" or key in ownership
+        }
+        if any(
+            key in old
+            and old[key][0] != value[0]
+            or key in new
+            and new[key][0] != value[0]
+            for key, value in historical.items()
+        ):
             raise ValueError("Retained asset moved without current identity proof")
     established = {
         path: (item, role, facet) for (item, facet), (path, role, _) in old.items()
@@ -304,7 +324,9 @@ def assemble_facts(
         old_path = old.get(key, (path, role, title))[0]
         original = (
             ExactContent(data=baseline[old_path])
-            if originals_known and key in old and old_path in baseline
+            if originals_known
+            and (retained_ownership is None or key in old)
+            and old_path in baseline
             else None
         )
         received = ExactContent(data=incoming[path]) if key in new else None

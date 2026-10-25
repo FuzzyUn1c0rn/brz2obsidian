@@ -168,6 +168,12 @@ class VaultApplyResult(ReconciliationContract):
     code: str
     operation_id: str | None
     kind: Literal["apply", "undo"]
+    origin_role: (
+        Literal[
+            "source_update", "onboarding", "format_transition", "attachment_cleanup"
+        ]
+        | None
+    ) = Field(default=None, exclude_if=lambda value: value is None)
     direction: Literal["finish", "restore"] | None = None
     review_generation: int | None = Field(default=None, ge=1)
     generation: int | None = Field(ge=1)

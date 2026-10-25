@@ -980,7 +980,25 @@ def _inspect_update_observation(vault):
     """Return fresh status and validated graph facts for this one public call."""
     observations = []
     status = _inspect_update_status(vault, observations=observations)
-    return status, observations[0] if observations else None
+    observation = observations[0] if observations else None
+    if observation is not None and (
+        status.operation_id,
+        status.kind,
+        status.generation,
+        status.intent_commit,
+    ) == (
+        observation.graph.intent.operation_id,
+        observation.graph.intent.kind,
+        observation.graph.intent.generation,
+        observation.graph.intent_commit,
+    ):
+        original = observation.graph.authorities[-1][1]
+        loaded = observation.owned[original.prepared_commit][1]
+        if loaded is not None:
+            status = status.model_copy(
+                update={"origin_role": loaded.saved.plan.facts.format_operation.kind}
+            )
+    return status, observation
 
 
 def inspect_update_status(vault):
@@ -1222,8 +1240,13 @@ def _inspect_update_status(vault, *, observations, trusted_association=None):
             from .attachment_ownership import validate_history_claims
 
             for association, roles, demands in ownership_demands:
-                validate_history_claims(git, association=association, roles=roles,
-                                        demands=demands, observation=observation)
+                validate_history_claims(
+                    git,
+                    association=association,
+                    roles=roles,
+                    demands=demands,
+                    observation=observation,
+                )
         observations.append(observation)
         review_generation = (
             intent.review_generation

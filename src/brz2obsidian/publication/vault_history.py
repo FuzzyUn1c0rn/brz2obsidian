@@ -1047,7 +1047,9 @@ def _read(
                     _review_source_signature(review.saved),
                     review.saved.plan.facts.baseline_identity,
                     _onboarding_absence_review(review),
-                    review_ownership_claims(review.saved.plan, review.historical_effects),
+                    review_ownership_claims(
+                        review.saved.plan, review.historical_effects
+                    ),
                 )
             elif reviewed[manifest.review_object][:2] != (
                 manifest.review_size,
@@ -1089,14 +1091,26 @@ def _read(
         if manifest.review_object is not None:
             claims, missing = reviewed[manifest.review_object][8]
             if claims or missing:
-                ownership_demands.append((current, manifest.recovery_origin_intent_commit, claims, missing))
+                ownership_demands.append(
+                    (current, manifest.recovery_origin_intent_commit, claims, missing)
+                )
         if ownership_demands:
-            ownership_roles.append(_CheckpointRole(
-                current, manifest.previous, manifest.generation, manifest.boundary,
-                manifest.operation_intent_commit, manifest.undo_of_receipt_commit,
-                manifest.recovery_origin_intent_commit, manifest.recovery_previous_operation_commit,
-                manifest.recovery_direction,
-            ))
+            ownership_roles.append(
+                _CheckpointRole(
+                    current,
+                    manifest.previous,
+                    manifest.generation,
+                    manifest.boundary,
+                    manifest.operation_intent_commit,
+                    manifest.undo_of_receipt_commit,
+                    manifest.recovery_origin_intent_commit,
+                    manifest.recovery_previous_operation_commit,
+                    manifest.recovery_direction,
+                    onboarding_absence=reviewed[manifest.review_object][7]
+                    if manifest.review_object is not None
+                    else False,
+                )
+            )
         if manifest.reviewed_source is not None and (
             manifest.review_object is None
             or reviewed[manifest.review_object][5]
@@ -1183,7 +1197,7 @@ def _read(
                     if memo_roles and manifest.review_object is not None
                     else None,
                     reviewed[manifest.review_object][7]
-                    if memo_roles and manifest.review_object is not None
+                    if manifest.review_object is not None
                     else False,
                 )
             )
@@ -1287,18 +1301,32 @@ def _read(
         if ownership_demands_out is not None:
             # The native operation inspector consumes this finite projection
             # after its existing full authority validation and before release.
-            ownership_demands_out.append((association, tuple(ownership_roles), tuple(ownership_demands)))
+            ownership_demands_out.append(
+                (association, tuple(ownership_roles), tuple(ownership_demands))
+            )
         elif any(role.boundary == "result" for role in ownership_roles):
             from .vault_apply import _inspect_update_status
 
             completed_observations = []
-            _inspect_update_status(root, observations=completed_observations,
-                                   trusted_association=trusted_association)
+            _inspect_update_status(
+                root,
+                observations=completed_observations,
+                trusted_association=trusted_association,
+            )
             observation = completed_observations[0] if completed_observations else None
-            if observation is None or observation.checkpoint.locator != locator or observation.checkpoint.manifest != tip_manifest:
+            if (
+                observation is None
+                or observation.checkpoint.locator != locator
+                or observation.checkpoint.manifest != tip_manifest
+            ):
                 raise OSError("Cleanup history lacks current native operation proof")
         else:
-            validate_history_claims(git, association=association, roles=tuple(ownership_roles), demands=ownership_demands)
+            validate_history_claims(
+                git,
+                association=association,
+                roles=tuple(ownership_roles),
+                demands=ownership_demands,
+            )
     result = CheckpointRead(
         schema_id="brz2obsidian.checkpoint-read",
         schema_version=1,
@@ -1662,7 +1690,9 @@ def capture_checkpoint(
                 subjects=subjects,
                 git_executable=git_executable,
                 active_operation=active_operation,
-                _capture=lambda inspection, admission: captured_inspections.append(inspection),
+                _capture=lambda inspection, admission: captured_inspections.append(
+                    inspection
+                ),
             )
             if _observation is None
             else _inspect_retained_history(
@@ -1840,13 +1870,38 @@ def capture_checkpoint(
             claims, missing = review_ownership_claims(saved.plan)
             if claims or missing:
                 try:
-                    roles = tuple(captured_inspections[0].checkpoint_roles) if captured_inspections else _observation[1].checkpoint_roles
-                    origin_claims = review_ownership_claims(recovery_origin_plan)[0] if recovery_origin_plan is not None else ()
-                    observed_operation = authority if recovery_origin_plan is not None else captured_inspections[0].recovery_observation if captured_inspections else _observation[1]
-                    cutoff = authority.owned[original.prepared_commit][0].previous if recovery_origin_plan is not None else None
-                    validate_claims(git, association=association, roles=roles, claims=claims,
-                                    missing=missing, origin_claims=origin_claims,
-                                    cutoff=cutoff, observation=observed_operation)
+                    roles = (
+                        tuple(captured_inspections[0].checkpoint_roles)
+                        if captured_inspections
+                        else _observation[1].checkpoint_roles
+                    )
+                    origin_claims = (
+                        review_ownership_claims(recovery_origin_plan)[0]
+                        if recovery_origin_plan is not None
+                        else ()
+                    )
+                    observed_operation = (
+                        authority
+                        if recovery_origin_plan is not None
+                        else captured_inspections[0].recovery_observation
+                        if captured_inspections
+                        else _observation[1]
+                    )
+                    cutoff = (
+                        authority.owned[original.prepared_commit][0].previous
+                        if recovery_origin_plan is not None
+                        else None
+                    )
+                    validate_claims(
+                        git,
+                        association=association,
+                        roles=roles,
+                        claims=claims,
+                        missing=missing,
+                        origin_claims=origin_claims,
+                        cutoff=cutoff,
+                        observation=observed_operation,
+                    )
                 except OSError, ValueError, TypeError, KeyError:
                     return result("refused", "cleanup_ownership_unbound")
         if observed_source is not None:

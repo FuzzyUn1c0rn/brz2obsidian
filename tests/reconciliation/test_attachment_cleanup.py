@@ -101,26 +101,51 @@ def test_historical_ownership_keeps_absent_original_and_current_source_distinct(
     subject = facts.subjects[0]
     assert "retained_ownership" not in subject.attachment.model_dump()
     proof = RetainedAttachmentOwnership(
-        schema_id="brz2obsidian.retained-attachment-ownership", schema_version=1,
-        association_id="a" * 64, checkpoint_commit="1" * 40, generation=1,
-        identity=ImportedItemIdentity(collection_id=facts.incoming_identity.collection_id,
-                                     module_id=facts.incoming_identity.module_id,
-                                     item_id=subject.item_id),
-        facet=subject.facet, source_path="Assets/data.bin", source_version="source:A",
+        schema_id="brz2obsidian.retained-attachment-ownership",
+        schema_version=1,
+        association_id="a" * 64,
+        checkpoint_commit="1" * 40,
+        generation=1,
+        identity=ImportedItemIdentity(
+            collection_id=facts.incoming_identity.collection_id,
+            module_id=facts.incoming_identity.module_id,
+            item_id=subject.item_id,
+        ),
+        facet=subject.facet,
+        source_path="Assets/data.bin",
+        source_version="source:A",
         mapping_sha256=hashlib.sha256(b"independent historical mapping").hexdigest(),
         payload_sha256=hashlib.sha256(b"\x00original").hexdigest(),
-        payload_size=len(b"\x00original"), payload_mode="100644",
+        payload_size=len(b"\x00original"),
+        payload_mode="100644",
     )
-    absent = subject.model_copy(update={
-        "baseline": subject.baseline.model_copy(update={"status": "unknown", "content": None}),
-        "incoming": None,
-        "attachment": subject.attachment.model_copy(update={"retained_ownership": proof}),
-    })
-    facts = with_subjects(facts, (absent, *facts.subjects[1:]), facts.identity_inventory)
-    facts = facts.model_copy(update={"format_operation": facts.format_operation.model_copy(update={
-        "baseline_source_version": "source:B", "target_source_version": "source:B",
-        "established_baseline": facts.format_operation.established_baseline.model_copy(update={"source_version": "source:B"}),
-    })})
+    absent = subject.model_copy(
+        update={
+            "baseline": subject.baseline.model_copy(
+                update={"status": "unknown", "content": None}
+            ),
+            "incoming": None,
+            "attachment": subject.attachment.model_copy(
+                update={"retained_ownership": proof}
+            ),
+        }
+    )
+    facts = with_subjects(
+        facts, (absent, *facts.subjects[1:]), facts.identity_inventory
+    )
+    facts = facts.model_copy(
+        update={
+            "format_operation": facts.format_operation.model_copy(
+                update={
+                    "baseline_source_version": "source:B",
+                    "target_source_version": "source:B",
+                    "established_baseline": facts.format_operation.established_baseline.model_copy(
+                        update={"source_version": "source:B"}
+                    ),
+                }
+            )
+        }
+    )
     plan = prepare_review(facts, preflight=preflight())
     current = plan.producer_facts.subjects[0]
     assert current.baseline.status == "unknown" and current.baseline.content is None
@@ -128,8 +153,84 @@ def test_historical_ownership_keeps_absent_original_and_current_source_distinct(
     assert current.attachment.retained_ownership.source_version == "source:A"
     assert plan.facts.format_operation.target_source_version == "source:B"
     change = next(c for c in plan.proposal.changes if c.facet == subject.facet)
-    remove = next(a for a in change.attachment_review.alternatives if a.choice == "remove")
+    remove = next(
+        a for a in change.attachment_review.alternatives if a.choice == "remove"
+    )
     assert remove.eligible and remove.outputs == ()
+
+
+@pytest.mark.parametrize("choice", ("current", "incoming"))
+def test_first_onboarding_asset_choice_keeps_reference_source_distinct(choice):
+    from brz2obsidian.contracts import ContentVersion
+    from brz2obsidian.core import review_owned_targets
+    from tests.reconciliation.test_attachments import attachment_candidate
+
+    facts = attachment_request()
+    subject = facts.subjects[0]
+    facts = facts.model_copy(
+        update={
+            "subjects": (
+                subject.model_copy(
+                    update={
+                        "baseline": ContentVersion(
+                            status="unknown", content=None, unavailable_digest=None
+                        )
+                    }
+                ),
+            ),
+            "format_operation": facts.format_operation.model_copy(
+                update={
+                    "kind": "onboarding",
+                    "recorded_generation": "unknown",
+                    "baseline_source_version": None,
+                    "established_baseline": None,
+                }
+            ),
+        }
+    )
+    facts = facts.model_copy(update={"link_context": binary_context(facts)})
+    offered = prepare_review(facts, preflight=preflight())
+    change = offered.proposal.changes[0]
+    with pytest.raises(ValueError):
+        review_owned_targets(offered, change.change_id, "no-user-association")
+    selection, candidate = attachment_candidate(facts, choice)
+    chosen = resolve_review(
+        offered,
+        action(
+            offered,
+            change,
+            domain="format",
+            choice=choice,
+            attachment_selection=selection,
+            attachment_candidate=candidate,
+            decision_id="explicit-first-association",
+        ),
+    )
+    if choice == "incoming":
+        assert chosen.status == "refused" and chosen.code == "unsafe_producer_choice"
+        assert chosen.plan.approvals == ()
+        with pytest.raises(ValueError):
+            review_owned_targets(
+                chosen.plan, change.change_id, "explicit-first-association"
+            )
+        return
+    assert chosen.status == "accepted" and chosen.plan.ready, chosen.code
+    bound = chosen.plan.producer_facts.subjects[0]
+    assert bound.baseline.status == "unknown" and bound.baseline.content is None
+    assert bound.current.content.data == b"\x00authored"
+    assert bound.incoming.data == b"abc"
+    assert bound.attachment.retained_ownership is None
+    owned = review_owned_targets(
+        chosen.plan, change.change_id, "explicit-first-association"
+    )
+    assert tuple(reference.canonical_path for reference in owned) == (
+        "Assets/data.bin",
+    )
+    selected = select_review_effects(chosen.plan)
+    assert [(row.path, row.content.data) for row in selected.files] == [
+        ("Assets/data.bin", b"\x00authored")
+    ]
+    assert selected.remove_paths == ()
 
 
 def attachment_action(plan, facet, choice):

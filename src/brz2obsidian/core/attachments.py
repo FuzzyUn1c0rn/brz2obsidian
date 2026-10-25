@@ -255,7 +255,11 @@ def _cleanup_attachment_review(facts, subject, subject_id):
                     owned,
                     complete,
                 )
-                + ((historical.model_dump(mode="json"),) if historical is not None else ())
+                + (
+                    (historical.model_dump(mode="json"),)
+                    if historical is not None
+                    else ()
+                )
             ).encode()
         ).hexdigest(),
         depends_on=(

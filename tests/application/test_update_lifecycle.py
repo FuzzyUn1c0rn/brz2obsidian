@@ -76,7 +76,7 @@ def test_converter_vault_without_source_history_routes_to_preservation_onboardin
     assert (vault / "Home — Entry thought.md").read_bytes() == before
 
 
-def _seed(case_path, *, two_notes=False):
+def _seed(case_path, *, two_notes=False, capture_history=True):
     from brz2obsidian.application.wiring import default_workflow
 
     archive = make_archive(case_path / "initial.brz")
@@ -152,6 +152,8 @@ def _seed(case_path, *, two_notes=False):
                 "# My writing\n\nKeep [[Home — Entry thought.md|My reference]] and [[Second thought|Other]].\n\n![[Attachments/manual.bin]]\n"
             ).encode()
         )
+    if not capture_history:
+        return vault, archive
     identity = OutputIdentity(
         collection_id="11111111-1111-4111-8111-111111111111",
         module_id="thebrain-brz",

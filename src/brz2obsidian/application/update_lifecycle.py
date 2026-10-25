@@ -198,13 +198,19 @@ class _ExcludedDependency(ValueError):
     """Excluded authored bytes require current tracking review before storage."""
 
 
-def _observed_facts(history, baseline, incoming, *, retained_ownership=None, **identity):
+def _observed_facts(
+    history, baseline, incoming, *, retained_ownership=None, **identity
+):
     inventory = history.admission.inventory
     managed = set(baseline) | set(incoming)
     if retained_ownership is not None:
         owned = {proof.source_path for proof in retained_ownership}
-        assets = {row["relative_path"] for value in (baseline, incoming)
-                  for row in record(value)["asset_targets"] if row["relative_path"] is not None}
+        assets = {
+            row["relative_path"]
+            for value in (baseline, incoming)
+            for row in record(value)["asset_targets"]
+            if row["relative_path"] is not None
+        }
         managed.difference_update(assets - owned)
         managed.update(owned)
         if any(row.excluded and row.path in owned for row in inventory):
@@ -220,8 +226,12 @@ def _observed_facts(history, baseline, incoming, *, retained_ownership=None, **i
 
     def assembled():
         return assemble_facts(
-            baseline, incoming, current, current_inventory=inventory,
-            retained_ownership=retained_ownership, **identity
+            baseline,
+            incoming,
+            current,
+            current_inventory=inventory,
+            retained_ownership=retained_ownership,
+            **identity,
         )
 
     facts = assembled()
@@ -997,11 +1007,15 @@ def _resume_update(operations, vault, observed):
             from .onboarding import resume_onboarding
 
             return resume_onboarding(operations, history, observed)
-        incoming = {
-            s.path: s.incoming.data
-            for s in plan.facts.subjects
-            if s.incoming is not None
-        }
+        incoming = (
+            _read_source(operations, vault, checkpoint, observed)
+            if plan.facts.format_operation.kind == "attachment_cleanup"
+            else {
+                s.path: s.incoming.data
+                for s in plan.facts.subjects
+                if s.incoming is not None
+            }
+        )
         if tuple(
             sorted(
                 (path, len(raw), hashlib.sha256(raw).hexdigest())
@@ -1010,8 +1024,23 @@ def _resume_update(operations, vault, observed):
         ) != tuple((r.path, r.size, r.sha256) for r in binding.files):
             return _refused("saved_payload_mismatch", history)
         directory = _materialize(incoming, {r.path: r.mode for r in binding.files})
-        baseline = _read_source(operations, vault, checkpoint, observed)
-        if plan.facts.format_operation.kind == "format_transition":
+        baseline = (
+            incoming
+            if plan.facts.format_operation.kind == "attachment_cleanup"
+            else _read_source(operations, vault, checkpoint, observed)
+        )
+        if plan.facts.format_operation.kind == "attachment_cleanup":
+            from .attachment_cleanup import cleanup_facts
+
+            facts = cleanup_facts(
+                history,
+                baseline,
+                observed=observed,
+                proposal_id=plan.proposal.proposal_id,
+                generation=plan.proposal.generation,
+                source_memory=plan.facts.source_version_memory,
+            )
+        elif plan.facts.format_operation.kind == "format_transition":
             from .format_transition import transition_facts
 
             facts = transition_facts(
@@ -1049,7 +1078,8 @@ def _resume_update(operations, vault, observed):
             fresh_binding,
             resumed.plan,
             observed,
-            observed.source_sha256
+            plan.facts.format_operation.kind == "attachment_cleanup"
+            or observed.source_sha256
             != record(incoming)["source_identity"]["source_sha256"],
             code=resumed.code,
         )
@@ -1303,15 +1333,29 @@ def _reobserve_inputs(operations, preparation, observed):
     retained = _read_source(operations, preparation.vault, history.checkpoint, observed)
     baseline = _baseline(history.checkpoint, retained)
     if preparation.kind == "attachment_cleanup":
-        expected = tuple((row.path, row.mode, row.size, row.sha256) for row in history.checkpoint.manifest.source)
+        expected = tuple(
+            (row.path, row.mode, row.size, row.sha256)
+            for row in history.checkpoint.manifest.source
+        )
         if (
             preparation.source_ref is not None
             or actual.incoming_identity != history.checkpoint.manifest.identity
-            or actual.target_source_version != record(retained)["source_identity"]["snapshot_digest"]
-            or tuple((row.path, row.mode, row.size, row.sha256) for row in actual.files) != expected
-            or preparation.observed_source != SourceIdentity.model_validate(record(retained)["source_identity"])
+            or actual.target_source_version
+            != record(retained)["source_identity"]["snapshot_digest"]
+            or tuple((row.path, row.mode, row.size, row.sha256) for row in actual.files)
+            != expected
+            or preparation.observed_source
+            != SourceIdentity.model_validate(record(retained)["source_identity"])
         ):
-            return (None, _refused("retained_source_authority_required", history, preparation=preparation), None)
+            return (
+                None,
+                _refused(
+                    "retained_source_authority_required",
+                    history,
+                    preparation=preparation,
+                ),
+                None,
+            )
     elif preparation.source_ref is not None:
         incoming_record = json.loads(
             next(
@@ -1359,14 +1403,20 @@ def _reobserve_inputs(operations, preparation, observed):
             )
     incoming = _read_physical(directory, actual.files)
     try:
-        memory = _producer_memory(history.checkpoint, preparation.review.proposal.proposal_id)
+        memory = _producer_memory(
+            history.checkpoint, preparation.review.proposal.proposal_id
+        )
         if preparation.kind == "attachment_cleanup":
             from .attachment_cleanup import cleanup_facts
 
-            facts = cleanup_facts(history, retained, observed=observed,
-                                  proposal_id=preparation.review.proposal.proposal_id,
-                                  generation=preparation.review.proposal.generation,
-                                  source_memory=memory)
+            facts = cleanup_facts(
+                history,
+                retained,
+                observed=observed,
+                proposal_id=preparation.review.proposal.proposal_id,
+                generation=preparation.review.proposal.generation,
+                source_memory=memory,
+            )
         elif preparation.kind == "format_transition":
             from .format_transition import transition_facts
 
@@ -1548,12 +1598,22 @@ def apply_update(operations, preparation, *, cancel=None):
             import_id=association.import_id,
             cancel=cancel,
         )
-        status = {
-            "cancelled": "cancelled_before_publication",
-            "incomplete": "recovery_required",
-            "content_complete": "recovery_required",
-            "unknown": "publication_unknown",
-        }.get(applied.status, applied.status)
+        stopped_intent = applied.status == "cancelled" and (
+            applied.recovery_required
+            or applied.intent_commit is not None
+            or applied.history in ("intent", "result", "terminal", "unknown")
+            or applied.publication in ("partial", "complete", "unknown")
+        )
+        status = (
+            "recovery_required"
+            if stopped_intent
+            else {
+                "cancelled": "cancelled_before_publication",
+                "incomplete": "recovery_required",
+                "content_complete": "recovery_required",
+                "unknown": "publication_unknown",
+            }.get(applied.status, applied.status)
+        )
         return UpdateResult(
             kind=prepared.kind,
             status=status,
@@ -1563,7 +1623,9 @@ def apply_update(operations, preparation, *, cancel=None):
             changes=current.changes,
             vault=prepared.vault,
             summary=applied.message,
-            next_actions=("review_recovery",) if applied.recovery_required else (),
+            next_actions=("review_recovery",)
+            if applied.recovery_required or stopped_intent
+            else (),
             history_retained=current.history_retained or applied.history != "none",
             checkpoint_commit=applied.result_commit or applied.checkpoint_commit,
             publication=applied.publication,

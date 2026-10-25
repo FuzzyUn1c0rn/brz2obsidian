@@ -55,7 +55,10 @@ def _project_review_effects(plan: ReviewPlan) -> SelectedReviewEffects:
         for approval in approvals.values():
             if approval.attachment_candidate is None:
                 continue
-            explicit = {choice.document_id for choice in approval.attachment_selection.link_choices}
+            explicit = {
+                choice.document_id
+                for choice in approval.attachment_selection.link_choices
+            }
             for document in approval.attachment_candidate.documents:
                 prior = current_documents.get(document.document_id)
                 if (

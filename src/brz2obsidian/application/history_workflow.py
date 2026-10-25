@@ -243,8 +243,8 @@ def _current_recovery(operations, preparation):
         or observed.review_generation is not None
         and observed.direction != native.direction
     ):
-        return _refused("history_authority_changed", operation=observed)
-    return None
+        return observed, _refused("history_authority_changed", operation=observed)
+    return observed, None
 
 
 def refresh_history_workflow(operations, preparation):
@@ -253,7 +253,7 @@ def refresh_history_workflow(operations, preparation):
     except ValueError, TypeError:
         return _refused("invalid_history_preparation")
     if saved.kind == "recovery":
-        blocked = _current_recovery(operations, saved)
+        _, blocked = _current_recovery(operations, saved)
         if blocked is not None:
             return blocked
         native = operations.refresh_recovery(saved.vault, saved.native)
@@ -272,7 +272,7 @@ def resolve_history_workflow(operations, preparation, action):
     except ValueError, TypeError:
         return _refused("invalid_history_preparation")
     if saved.kind == "recovery":
-        blocked = _current_recovery(operations, saved)
+        _, blocked = _current_recovery(operations, saved)
         if blocked is not None:
             return blocked
         native = operations.resolve_recovery(saved.vault, saved.native, action)
@@ -336,10 +336,14 @@ def execute_history_workflow(operations, preparation, *, cancel=None):
     if not saved.ready:
         return _refused("history_review_required")
     if saved.kind == "recovery":
-        blocked = _current_recovery(operations, saved)
+        observed, blocked = _current_recovery(operations, saved)
         if blocked is not None:
             return blocked
         native = operations.execute_recovery(saved.vault, saved.native, cancel=cancel)
+        if (native.operation_id, native.kind) == (observed.operation_id, observed.kind):
+            # The role comes from this wrapper's actual fresh native
+            # observation, never from caller-supplied preparation metadata.
+            native = native.model_copy(update={"origin_role": observed.origin_role})
     elif saved.kind == "undo":
         native = operations.execute_undo(saved.vault, saved.native, cancel=cancel)
     else:
