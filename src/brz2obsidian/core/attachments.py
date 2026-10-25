@@ -35,6 +35,8 @@ def attachment_review(facts, subject, subject_id):
         return None, ()
     if subject.operation_reversal is not None:
         return _operation_attachment_review(facts, subject, subject_id)
+    if facts.format_operation.kind == "attachment_cleanup":
+        return _cleanup_attachment_review(facts, subject, subject_id)
     association = subject.attachment.current_target_id
     prospective = []
     for other in facts.subjects:
@@ -174,6 +176,79 @@ def attachment_review(facts, subject, subject_id):
     return AttachmentReview(
         incoming_source_path=subject.path,
         alternatives=tuple(alternatives),
+        assumptions=assumptions,
+        links=links,
+        link_inventory="unknown"
+        if facts.link_context is None
+        else facts.link_context.inventory,
+    ), assumptions
+
+
+def _cleanup_attachment_review(facts, subject, subject_id):
+    """Offer removal only for a recorded owned facet with complete current proof."""
+    from .formats import established_original
+    from .review_effects import current_note_coverage
+
+    owned = (
+        facts.format_operation.recorded_generation == "supported"
+        and subject.facet.startswith("attachment:")
+        and established_original(facts, subject)
+        and subject.current.existence == "present"
+        and subject.current.content is not None
+    )
+    complete = facts.inventory == "complete" and current_note_coverage(facts)
+    alternatives = (
+        AttachmentAlternative(
+            choice="current",
+            outputs=()
+            if subject.current.content is None
+            else (
+                AttachmentOutput(
+                    target_id=subject.attachment.current_target_id,
+                    path=subject.current.path,
+                    content=subject.current.content,
+                    content_version=_hash(subject.current.content),
+                ),
+            ),
+            eligible=subject.current.content is not None,
+            unavailable_reasons=()
+            if subject.current.content is not None
+            else ("content_unavailable",),
+        ),
+        AttachmentAlternative(
+            choice="remove",
+            outputs=(),
+            eligible=owned and complete,
+            unavailable_reasons=()
+            if owned and complete
+            else ("ownership_unavailable" if not owned else "inventory_uncertain",),
+        ),
+    )
+    assumption = ProposalAssumption(
+        key=f"attachment:{subject_id}",
+        kind="attachment",
+        fingerprint=sha256(
+            json.dumps(
+                (
+                    subject.attachment.current_target_id,
+                    subject.current.path,
+                    _hash(subject.current.content),
+                    owned,
+                    complete,
+                )
+            ).encode()
+        ).hexdigest(),
+        depends_on=(
+            f"{subject_id}:current",
+            f"{subject_id}:inventory",
+            f"identity-review:{subject_id}",
+        ),
+    )
+    links, link_assumptions = associated_link_reviews(facts, subject, subject_id, ())
+    assumptions = (assumption,) + link_assumptions
+    return AttachmentReview(
+        incoming_source_path=subject.path,
+        alternatives=alternatives,
         assumptions=assumptions,
         links=links,
         link_inventory="unknown"

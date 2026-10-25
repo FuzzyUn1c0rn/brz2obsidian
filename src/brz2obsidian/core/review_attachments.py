@@ -7,6 +7,21 @@ from brz2obsidian.contracts import ProposalAssumption
 from brz2obsidian.core.attachment_validation import validate_attachment_candidate
 
 
+def _selected_target_ids(facts, selection, candidate):
+    target_ids = {o.target_id for o in candidate.outputs}
+    if (
+        facts.format_operation.kind == "attachment_cleanup"
+        and selection.choice == "remove"
+    ):
+        subject = next(
+            s
+            for s in facts.subjects
+            if (s.item_id, s.facet) == (selection.item_id, selection.facet)
+        )
+        target_ids.add(subject.attachment.current_target_id)
+    return target_ids
+
+
 def attachment_candidate_assumption(facts, change, selection, candidate, decision_id):
     current = {d.document_id: d for d in facts.link_context.current_documents}
     relevant = {r.document_id for r in change.attachment_review.links} | {
@@ -19,7 +34,7 @@ def attachment_candidate_assumption(facts, change, selection, candidate, decisio
         or d.document_id not in current
         or d.content.data != current[d.document_id].content.data
     )
-    target_ids = {o.target_id for o in candidate.outputs}
+    target_ids = _selected_target_ids(facts, selection, candidate)
     target_ids.update(
         t
         for d in documents
@@ -111,7 +126,7 @@ def retained_attachment_view(facts, selection, candidate, original_facts):
     }
     if not set(writes) <= {d.document_id for d in context.current_documents}:
         return None
-    outputs = {o.target_id for o in candidate.outputs}
+    outputs = _selected_target_ids(facts, selection, candidate)
     document_paths = {d.source_path for d in writes.values()}
     selected_ids = outputs | {
         t.target_id for t in candidate.targets if t.canonical_path in document_paths

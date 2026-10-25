@@ -213,7 +213,8 @@ def _reconcile(facts: ReconciliationInput, *, _applicability=()) -> UpdatePropos
         )
         link_problem = validate_current_link_context(facts, subject)
         policy_allowed = (
-            link_problem is None
+            facts.format_operation.kind != "attachment_cleanup"
+            and link_problem is None
             and (
                 (format_review is None and format_choice is None)
                 or configuration_memory_allowed(facts, subject)
@@ -272,6 +273,17 @@ def _reconcile(facts: ReconciliationInput, *, _applicability=()) -> UpdatePropos
             or format_choice
             or _proposal(subject)
         )
+        if facts.format_operation.kind == "attachment_cleanup":
+            disposition, result, rule, requires_decision = (
+                ("unresolved", None, "attachment_cleanup", True)
+                if subject.attachment is not None
+                else (
+                    "preserve_vault",
+                    subject.current.content,
+                    "source_unchanged",
+                    False,
+                )
+            )
         if subject.operation_reversal is not None:
             proof = subject.operation_reversal
             already_target = all(

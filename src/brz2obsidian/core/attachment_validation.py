@@ -125,9 +125,13 @@ def validate_attachment_candidate(
         add("attachment_payload_mismatch")
         return result()
     context = facts.link_context
+    removing = (
+        facts.format_operation.kind == "attachment_cleanup"
+        and selection.choice == "remove"
+    )
     association = (
         subject.attachment.current_target_id
-        if subject.operation_reversal is not None
+        if subject.operation_reversal is not None or removing
         else alternative.outputs[0].target_id
     )
     expected_ids = {t.target_id for t in context.current_targets} | {
@@ -274,9 +278,14 @@ def validate_attachment_candidate(
                 (s for s in context.current_target_facts if s.target_id == target_id),
                 None,
             )
-            absent = subject.operation_reversal is not None and any(
-                r.target_id == target_id and r.target is None
-                for r in subject.operation_reversal.outputs
+            absent = (
+                removing
+                and target_id == association
+                or subject.operation_reversal is not None
+                and any(
+                    r.target_id == target_id and r.target is None
+                    for r in subject.operation_reversal.outputs
+                )
             )
             if (
                 absent
@@ -394,7 +403,7 @@ def validate_attachment_candidate(
                 target_facts=context.current_target_facts,
                 inventory=context.inventory,
             ),
-            affected_target_ids=tuple(outputs),
+            affected_target_ids=tuple(outputs) + ((association,) if removing else ()),
         )
         link_findings.extend(validation.findings)
         if not validation.valid:
