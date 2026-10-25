@@ -297,3 +297,36 @@ def test_worker_stream_keeps_unsaved_producer_between_commands(tmp_path):
     assert answer.result.page.proposal_id == result.binding.proposal_id
     assert len(answer.result.page.items) == 1
     assert not (case.vault / ".brz2obsidian").exists()
+
+
+def test_reference_draft_commands_page_choices_without_a_total_reference_cap(tmp_path):
+    from uuid import uuid4
+
+    from pydantic import ValidationError
+
+    from tests.application.test_update_context import context_case
+
+    context, case = context_case(tmp_path)
+    opened = context.prepare(
+        case.vault, selection_id=str(uuid4()), kind="attachment_cleanup"
+    )
+    args = {
+        "command": "stage_references",
+        "binding": opened.binding,
+        "requirement_id": "canonical-offer",
+        "choices": tuple(
+            {"reference_id": f"{n:064x}", "choice": "drop"} for n in range(100)
+        ),
+    }
+    request = WorkerRequest(
+        request_id=str(uuid4()), operation="update", sequence=1, arguments=args
+    )
+    assert len(encode_request(request)) < 256 * 1024
+    assert len(decode_request(encode_request(request)).arguments.choices) == 100
+    with pytest.raises(ValidationError):
+        WorkerRequest(
+            request_id=request.request_id,
+            operation="update",
+            sequence=1,
+            arguments=args | {"choices": args["choices"] + (args["choices"][0],)},
+        )

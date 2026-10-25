@@ -1191,10 +1191,19 @@ def inspect_update_review(
             return refused("invalid_page")
         items = []
         remaining = byte_limit
+        approvals = {approval.change_id: approval for approval in plan.approvals}
         for change in plan.proposal.changes[offset : offset + limit]:
             UpdatePreparation.relative_vault_path(change.path)
             UpdatePreparation.relative_vault_path(change.target_path)
-            versions = change.original, change.current, change.incoming, change.result
+            approval = approvals.get(change.change_id)
+            reviewed_result = (
+                approval.result
+                if approval is not None
+                and approval.attachment_candidate is None
+                and approval.result is not None
+                else change.result
+            )
+            versions = change.original, change.current, change.incoming, reviewed_result
             unread = sum(
                 content is not None and len(content.data) > byte_offset
                 for content in versions

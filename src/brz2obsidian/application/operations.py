@@ -102,8 +102,29 @@ class Operations:
 
         return resolve_configuration(self, preparation, actions)
 
+    def configuration_choice_offer(self, preparation):
+        """Describe one canonical complete configuration group."""
+        from .format_configuration import configuration_choice_offer
+
+        return configuration_choice_offer(preparation)
+
+    def resolve_configuration_choice(self, preparation, *, group_id, choice):
+        """Reconstruct all group actions before the shared explicit group gate."""
+        from .format_configuration import resolve_configuration_choice
+
+        return resolve_configuration_choice(
+            self, preparation, group_id=group_id, choice=choice
+        )
+
     def resolve_update_choice(
-        self, preparation, *, requirement_id, choice, assumptions_digest, references=()
+        self,
+        preparation,
+        *,
+        requirement_id,
+        choice,
+        assumptions_digest,
+        references=(),
+        edited=None,
     ):
         """Reconstruct an offered action and validate its canonical dependencies."""
         from .review_choices import resolve_update_choice
@@ -115,6 +136,7 @@ class Operations:
             choice=choice,
             assumptions_digest=assumptions_digest,
             references=references,
+            edited=edited,
         )
 
     def resolve_update(self, preparation, action, *, edited=None):

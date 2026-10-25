@@ -9,21 +9,26 @@ from brz2obsidian.contracts import (
     ExactContent,
     LinkOccurrenceChoice,
     ReviewAction,
+    ReviewRequirement,
 )
+from brz2obsidian.core import inspect_review_choices
 from brz2obsidian.obsidian import interpret_link_target, interpret_links
 
 from .update_contracts import UpdatePreparation
 
 
 def requirement_digest(requirement):
-    return sha256(requirement.model_dump_json().encode("utf-8")).hexdigest()
+    canonical = ReviewRequirement.model_validate(
+        requirement.model_dump(include=set(ReviewRequirement.model_fields))
+    )
+    return sha256(canonical.model_dump_json().encode("utf-8")).hexdigest()
 
 
 def attachment_references(preparation, requirement_id):
     plan = UpdatePreparation.model_validate(preparation).review
     requirement = next(
         row
-        for row in plan.requirements
+        for row in inspect_review_choices(plan)
         if row.requirement_id == requirement_id and row.domain == "attachment"
     )
     change = next(
@@ -53,8 +58,7 @@ def attachment_references(preparation, requirement_id):
     )
 
 
-def resolve_update_choice(
-    operations,
+def review_choice_action(
     preparation,
     *,
     requirement_id,
@@ -65,19 +69,24 @@ def resolve_update_choice(
     preparation = UpdatePreparation.model_validate(preparation)
     plan = preparation.review
     requirement = next(
-        (row for row in plan.requirements if row.requirement_id == requirement_id), None
+        (
+            row
+            for row in inspect_review_choices(plan)
+            if row.requirement_id == requirement_id
+        ),
+        None,
     )
     if (
         requirement is None
         or requirement_digest(requirement) != assumptions_digest
-        or choice not in requirement.choices
+        or choice not in requirement.enabled_choices
     ):
         raise ValueError("Review offer changed")
     change = next(
         row for row in plan.proposal.changes if row.change_id == requirement.change_id
     )
     selection = candidate = None
-    if requirement.domain == "attachment":
+    if change.attachment_review is not None:
         if choice not in ("current", "remove"):
             raise ValueError("Reference choices are required")
         alternative = next(
@@ -212,4 +221,27 @@ def resolve_update_choice(
         selected_entry_id=None,
         disassociate_entry_ids=(),
     )
-    return operations.resolve_update(preparation, action)
+    return action
+
+
+def resolve_update_choice(
+    operations,
+    preparation,
+    *,
+    requirement_id,
+    choice,
+    assumptions_digest,
+    references=(),
+    edited=None,
+):
+    preparation = UpdatePreparation.model_validate(preparation)
+    action = review_choice_action(
+        preparation,
+        requirement_id=requirement_id,
+        choice=choice,
+        assumptions_digest=assumptions_digest,
+        references=references,
+    )
+    if preparation.kind == "format_transition" and action.domain == "configuration":
+        return operations.resolve_configuration(preparation, ())
+    return operations.resolve_update(preparation, action, edited=edited)

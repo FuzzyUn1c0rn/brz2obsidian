@@ -118,18 +118,18 @@ def test_complete_vault_configuration_choice_survives_later_format_approval(choi
         if c.format_review.configuration_choice
     ]
     assert len(configs) == 2 and all(c.format_review.target_eligible for c in configs)
-    actions = tuple(
-        action(
-            prepared.review,
-            c,
-            domain="configuration",
-            choice=choice,
-            decision_id="explicit-config-" + str(i),
-        )
-        for i, c in enumerate(configs)
-    )
     operations = Operations()
-    chosen = operations.resolve_configuration(prepared, actions)
+    offered = operations.configuration_choice_offer(prepared)
+    assert offered.member_count == 2 and offered.choices == ("current", "incoming")
+    assert len(offered.group_id) == 64
+    stale = operations.resolve_configuration_choice(
+        prepared, group_id="0" * 64, choice=choice
+    )
+    assert stale.code == "configuration_group_mismatch"
+    assert stale.preparation.review == prepared.review
+    chosen = operations.resolve_configuration_choice(
+        prepared, group_id=offered.group_id, choice=choice
+    )
     assert chosen.code == "accepted", chosen
     assert len(chosen.preparation.review.approvals) == 2
     # A note/format approval is a separate request and cannot replace config decisions.
@@ -156,10 +156,11 @@ def test_complete_vault_configuration_choice_survives_later_format_approval(choi
         for path, values in CONFIGURATION.items()
     }
     assert {row.path: row.content.data for row in selected.files} == expected
-    assert all(
-        a.domain == "configuration" and a.choice == choice
-        for a in approved.preparation.review.approvals
-        if a.decision_id.startswith("explicit-config-")
+    config_approvals = tuple(
+        a for a in approved.preparation.review.approvals if a.domain == "configuration"
+    )
+    assert len(config_approvals) == 2 and all(
+        a.choice == choice for a in config_approvals
     )
 
 

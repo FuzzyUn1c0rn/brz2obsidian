@@ -1,8 +1,78 @@
 """One scoped configuration choice expressed by existing canonical S1 actions."""
 
-from brz2obsidian.contracts import ReviewAction
+import json
+from hashlib import sha256
 
+from brz2obsidian.contracts import ReviewAction
+from brz2obsidian.core import inspect_review_choices
+
+from .review_choices import requirement_digest, review_choice_action
+from .update_context_contracts import UpdateConfigurationOffer
 from .update_contracts import UpdatePreparation, UpdateResult
+
+
+def configuration_choice_offer(preparation):
+    preparation = UpdatePreparation.model_validate(preparation)
+    plan = preparation.review
+    requirements = {row.change_id: row for row in inspect_review_choices(plan)}
+    changes = configuration_changes(plan)
+    if preparation.kind != "format_transition" or not changes:
+        return None
+    material = (
+        plan.proposal.proposal_id,
+        plan.proposal.generation,
+        tuple(
+            (key, tuple((a.key, a.fingerprint) for a in value.assumptions))
+            for key, value in sorted(changes.items())
+        ),
+    )
+    selected = {a.choice for a in plan.approvals if a.change_id in changes}
+    return UpdateConfigurationOffer(
+        group_id=sha256(json.dumps(material).encode("utf-8")).hexdigest(),
+        member_count=len(changes),
+        choices=tuple(
+            choice
+            for choice in ("current", "incoming")
+            if all(
+                key in requirements and choice in requirements[key].enabled_choices
+                for key in changes
+            )
+        ),
+        selected=next(iter(selected))
+        if len(selected) == 1
+        and selected <= {"current", "incoming"}
+        and len(tuple(a for a in plan.approvals if a.change_id in changes))
+        == len(changes)
+        else None,
+    )
+
+
+def resolve_configuration_choice(operations, preparation, *, group_id, choice):
+    try:
+        preparation = UpdatePreparation.model_validate(preparation)
+        offered = configuration_choice_offer(preparation)
+        if (
+            offered is None
+            or group_id != offered.group_id
+            or choice not in offered.choices
+        ):
+            return operations.resolve_configuration(preparation, ())
+        changes = configuration_changes(preparation.review)
+        requirements = {
+            row.change_id: row for row in inspect_review_choices(preparation.review)
+        }
+        actions = tuple(
+            review_choice_action(
+                preparation,
+                requirement_id=requirements[key].requirement_id,
+                choice=choice,
+                assumptions_digest=requirement_digest(requirements[key]),
+            )
+            for key in sorted(changes)
+        )
+        return operations.resolve_configuration(preparation, actions)
+    except ValueError, TypeError, KeyError:
+        return operations.resolve_configuration(preparation, ())
 
 
 def configuration_changes(plan):

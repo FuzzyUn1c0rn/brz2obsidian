@@ -2172,6 +2172,28 @@ class ReviewRequirement(ReconciliationContract):
     assumptions: tuple[ProposalAssumption, ...]
 
 
+class ReviewChoiceAvailability(ReconciliationContract):
+    choice: ReviewChoice
+    enabled: bool
+    reasons: tuple[str, ...]
+
+    @model_validator(mode="after")
+    def truthful_availability(self):
+        if self.enabled != (not self.reasons):
+            raise ValueError("Unavailable choices require their shared reason")
+        return self
+
+
+class ReviewChoiceOffer(ReviewRequirement):
+    """Read-only action prerequisites; candidates still require full validation."""
+
+    availability: tuple[ReviewChoiceAvailability, ...]
+
+    @property
+    def enabled_choices(self):
+        return tuple(row.choice for row in self.availability if row.enabled)
+
+
 class CompatibleReviewGroup(ReconciliationContract):
     group_id: str
     member_change_ids: tuple[str, ...]

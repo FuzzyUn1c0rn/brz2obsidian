@@ -4,7 +4,13 @@ from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 
-from brz2obsidian.contracts import ReconciliationContract, ReviewChoice, ReviewDomain
+from brz2obsidian.contracts import (
+    LinkMeaning,
+    ReconciliationContract,
+    ReviewChoice,
+    ReviewChoiceAvailability,
+    ReviewDomain,
+)
 
 from .contract_values import absolute, request_identity
 from .update_contracts import UpdateReviewPage
@@ -43,6 +49,42 @@ class UpdateChoiceOffer(ReconciliationContract):
     domain: ReviewDomain
     choices: tuple[ReviewChoice, ...]
     assumptions_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    selected: ReviewChoice | None = None
+    decision_id: str | None = None
+    unavailable_choices: tuple[ReviewChoiceAvailability, ...] = ()
+
+
+class UpdateConfigurationOffer(ReconciliationContract):
+    group_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    member_count: int = Field(ge=1)
+    choices: tuple[Literal["current", "incoming"], ...]
+    selected: Literal["current", "incoming"] | None
+
+
+class UpdateEditHandle(ReconciliationContract):
+    edit_id: str
+    binding: UpdateContextBinding
+    requirement_id: str
+    assumptions_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    size: int = Field(ge=0)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    _identity = field_validator("edit_id")(request_identity)
+
+
+class UpdateEditState(ReconciliationContract):
+    handle: UpdateEditHandle
+    received_bytes: int = Field(ge=0)
+    sealed: bool
+
+    @model_validator(mode="after")
+    def complete(self):
+        if (
+            self.received_bytes > self.handle.size
+            or self.sealed
+            and self.received_bytes != self.handle.size
+        ):
+            raise ValueError("Edit state must agree with its declared byte count")
+        return self
 
 
 class UpdateReferenceChoice(ReconciliationContract):
@@ -54,7 +96,11 @@ class UpdateReferenceOffer(ReconciliationContract):
     reference_id: str = Field(pattern=r"^[0-9a-f]{64}$")
     document_id: str
     occurrence_id: str
+    document_path: str
+    snippet: bytes = Field(max_length=512)
+    old: LinkMeaning
     choices: tuple[Literal["drop"], ...] = ("drop",)
+    selected: Literal["drop"] | None = None
 
 
 class UpdateContextResult(ReconciliationContract):
@@ -95,6 +141,8 @@ class UpdateContextResult(ReconciliationContract):
     references: tuple[UpdateReferenceOffer, ...] = ()
     total_references: int = Field(default=0, ge=0)
     next_reference_offset: int | None = Field(default=None, ge=0)
+    edit: UpdateEditState | None = None
+    configuration: UpdateConfigurationOffer | None = None
 
     @model_validator(mode="after")
     def truthful_context(self):

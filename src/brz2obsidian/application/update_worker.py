@@ -119,6 +119,16 @@ class UpdateWorker:
                 result = self.context.reference_page(**values)
             elif args.command == "choose":
                 result = self.context.choose(**values)
+            elif args.command == "choose_configuration":
+                result = self.context.choose_configuration(**values)
+            elif args.command == "stage_references":
+                result = self.context.stage_references(**values)
+            elif args.command == "begin_edit":
+                result = self.context.begin_edit(**values)
+            elif args.command == "write_edit":
+                result = self.context.write_edit(**values)
+            elif args.command == "seal_edit":
+                result = self.context.seal_edit(**values)
             elif args.command == "apply":
                 result = self.context.apply(**values, cancel=cancel.is_set)
             elif args.command == "save":
@@ -128,12 +138,8 @@ class UpdateWorker:
             elif args.command == "resume":
                 result = self.context.resume(**values)
             elif args.command == "close":
-                self.closed = True
-                result = UpdateContextResult(
-                    status="no_content_change",
-                    code="context_closed",
-                    kind=self.context.kind,
-                )
+                result = self.context.close(**values)
+                self.closed = result.code == "context_closed"
             self._reply(request, result=result)
         except Exception:  # noqa: BLE001 -- process boundary never exposes exception/source data.
             self.closed = True

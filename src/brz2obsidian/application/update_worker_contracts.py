@@ -7,7 +7,11 @@ from pydantic import Field, field_validator, model_validator
 from brz2obsidian.contracts import ReconciliationContract, ReviewChoice
 
 from .contract_values import absolute, request_identity
-from .update_context_contracts import UpdateContextBinding, UpdateReferenceChoice
+from .update_context_contracts import (
+    UpdateContextBinding,
+    UpdateEditHandle,
+    UpdateReferenceChoice,
+)
 
 
 class PrepareUpdateCommand(ReconciliationContract):
@@ -50,12 +54,50 @@ class ChooseUpdateCommand(ReconciliationContract):
     requirement_id: str
     choice: ReviewChoice
     assumptions_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    references: tuple[UpdateReferenceChoice, ...] = ()
+    references: tuple[UpdateReferenceChoice, ...] | None = Field(
+        default=None, max_length=100
+    )
+    edit_handle: UpdateEditHandle | None = None
+
+
+class BeginEditCommand(ReconciliationContract):
+    command: Literal["begin_edit"]
+    binding: UpdateContextBinding
+    requirement_id: str
+    size: int = Field(ge=0)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class WriteEditCommand(ReconciliationContract):
+    command: Literal["write_edit"]
+    handle: UpdateEditHandle
+    offset: int = Field(ge=0)
+    data: bytes = Field(min_length=1, max_length=32768)
+
+
+class SealEditCommand(ReconciliationContract):
+    command: Literal["seal_edit"]
+    handle: UpdateEditHandle
+
+
+class StageReferencesCommand(ReconciliationContract):
+    command: Literal["stage_references"]
+    binding: UpdateContextBinding
+    requirement_id: str
+    choices: tuple[UpdateReferenceChoice, ...] = Field(min_length=1, max_length=100)
+
+
+class ConfigurationChoiceCommand(ReconciliationContract):
+    command: Literal["choose_configuration"]
+    binding: UpdateContextBinding
+    group_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    choice: Literal["current", "incoming"]
 
 
 class CloseUpdateCommand(ReconciliationContract):
     command: Literal["close"]
-    choice: Literal["discard"]
+    choice: Literal["continue", "save", "discard"]
+    binding: UpdateContextBinding | None = None
 
 
 class ApplyUpdateCommand(ReconciliationContract):
@@ -104,6 +146,11 @@ UpdateCommand = Annotated[
     | PageUpdateCommand
     | ReferenceUpdateCommand
     | ChooseUpdateCommand
+    | StageReferencesCommand
+    | ConfigurationChoiceCommand
+    | BeginEditCommand
+    | WriteEditCommand
+    | SealEditCommand
     | CloseUpdateCommand
     | ApplyUpdateCommand
     | SaveUpdateCommand

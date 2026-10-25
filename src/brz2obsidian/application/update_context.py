@@ -3,15 +3,20 @@
 from pathlib import Path
 from uuid import uuid4
 
+from brz2obsidian.core import inspect_review_choices
+
 from .contracts import request_identity
 from .review_choices import attachment_references, requirement_digest
 from .update_context_contracts import (
     UpdateChoiceOffer,
     UpdateContextBinding,
     UpdateContextResult,
+    UpdateEditHandle,
+    UpdateReferenceChoice,
     UpdateReferenceOffer,
 )
 from .update_contracts import UpdatePreparation
+from .update_edits import EditFailure, EditLease
 
 
 class UpdateContext:
@@ -27,6 +32,9 @@ class UpdateContext:
         self._binding = None
         self._revision = 0
         self._kind = "source_update"
+        self._reference_drafts = {}
+        self._edit = None
+        self._reset_history()
 
     @property
     def kind(self):
@@ -35,18 +43,24 @@ class UpdateContext:
     def prepare(
         self, vault, *, selection_id, kind="source_update", source=None, cancel=None
     ):
+        if self._preparation is not None:
+            return self._uncommitted_draft(code="close_decision_required")
         request_identity(selection_id)
+        self._reset_history()
         # Selecting new work retires the prior handle even if preparation refuses.
         self._binding = self._preparation = None
+        self._reference_drafts.clear()
         self._revision += 1
         self._kind = kind
         if cancel is not None and cancel():
-            return UpdateContextResult(
+            cancelled = UpdateContextResult(
                 status="cancelled_before_publication",
                 code="cancelled_before_preparation",
                 kind=kind,
                 publication="not_published",
             )
+            self._remember(cancelled)
+            return cancelled
         if kind == "attachment_cleanup":
             result = self._operations.prepare_attachment_cleanup(vault)
         elif kind == "onboarding":
@@ -73,6 +87,7 @@ class UpdateContext:
                 revision=self._revision,
             )
         cancelled = cancel is not None and cancel()
+        self._remember(result)
         return UpdateContextResult(
             status="cancelled_before_publication" if cancelled else result.status,
             code=result.code,
@@ -122,15 +137,41 @@ class UpdateContext:
             kind=self._kind,
             binding=self._binding,
             page=page,
+            configuration=self._operations.configuration_choice_offer(self._preparation)
+            if page.status == "available" and self._kind == "format_transition"
+            else None,
             offers=tuple(
                 UpdateChoiceOffer(
                     requirement_id=row.requirement_id,
                     change_id=row.change_id,
                     domain=row.domain,
-                    choices=row.choices,
+                    choices=row.enabled_choices,
+                    unavailable_choices=tuple(
+                        choice for choice in row.availability if not choice.enabled
+                    ),
                     assumptions_digest=requirement_digest(row),
+                    selected=next(
+                        (
+                            a.choice
+                            for a in self._preparation.review.approvals
+                            if a.change_id == row.change_id and a.domain == row.domain
+                        ),
+                        None,
+                    ),
+                    decision_id=next(
+                        (
+                            a.decision_id
+                            for a in self._preparation.review.approvals
+                            if a.change_id == row.change_id and a.domain == row.domain
+                        ),
+                        None,
+                    ),
                 )
-                for row in self._preparation.review.requirements
+                for row in (
+                    inspect_review_choices(self._preparation.review)
+                    if page.status == "available"
+                    else ()
+                )
                 if page.status == "available"
                 and row.change_id in {item.change_id for item in page.items}
             ),
@@ -173,6 +214,17 @@ class UpdateContext:
                     reference_id=token,
                     document_id=doc.document_id,
                     occurrence_id=occ.occurrence_id,
+                    document_path=doc.source_path,
+                    snippet=doc.content.data[
+                        max(0, occ.span.start - 120) : max(0, occ.span.start - 120)
+                        + 512
+                    ],
+                    old=occ.meaning,
+                    selected=self._reference_drafts.get(requirement_id, {})
+                    .get(token)
+                    .choice
+                    if token in self._reference_drafts.get(requirement_id, {})
+                    else None,
                 )
                 for token, doc, occ in refs[offset:end]
             ),
@@ -181,7 +233,14 @@ class UpdateContext:
         )
 
     def choose(
-        self, binding, *, requirement_id, choice, assumptions_digest, references=()
+        self,
+        binding,
+        *,
+        requirement_id,
+        choice,
+        assumptions_digest,
+        references=None,
+        edit_handle=None,
     ):
         try:
             expected = UpdateContextBinding.model_validate(binding)
@@ -191,13 +250,34 @@ class UpdateContext:
             return UpdateContextResult(
                 status="refused", code="context_changed", kind=self._kind
             )
+        edited = None
+        if self._edit is not None:
+            if choice != "edited":
+                return self._uncommitted_draft()
+            try:
+                handle = self._checked_edit(edit_handle)
+                if (
+                    handle.requirement_id != requirement_id
+                    or handle.assumptions_digest != assumptions_digest
+                ):
+                    raise EditFailure("edit_changed")
+                edited = self._edit.content()
+            except EditFailure as error:
+                return self._edit_refusal(str(error))
+        elif choice == "edited":
+            return self._edit_refusal("edit_changed")
         try:
             result = self._operations.resolve_update_choice(
                 self._preparation,
                 requirement_id=requirement_id,
                 choice=choice,
                 assumptions_digest=assumptions_digest,
-                references=references,
+                references=tuple(
+                    self._reference_drafts.get(requirement_id, {}).values()
+                )
+                if references is None
+                else references,
+                edited=edited,
             )
         except ValueError, StopIteration:
             return UpdateContextResult(
@@ -206,7 +286,12 @@ class UpdateContext:
                 kind=self._kind,
                 binding=self._binding,
             )
+        self._remember(result)
         if result.code == "accepted" and result.preparation is not None:
+            if self._edit is not None:
+                self._edit.close()
+                self._edit = None
+            self._reference_drafts.pop(requirement_id, None)
             self._preparation = UpdatePreparation.model_validate(result.preparation)
             self._revision += 1
             self._binding = self._binding.model_copy(
@@ -239,7 +324,10 @@ class UpdateContext:
             return UpdateContextResult(
                 status="refused", code="context_changed", kind=self._kind
             )
+        if self._reference_drafts or self._edit is not None:
+            return self._uncommitted_draft()
         result = self._operations.apply_update(self._preparation, cancel=cancel)
+        self._remember(result)
         if (
             result.application is None
             and result.preparation is not None
@@ -266,6 +354,7 @@ class UpdateContext:
         )
 
     def _project(self, result):
+        self._remember(result)
         return UpdateContextResult(
             status=result.status,
             code=result.code,
@@ -311,20 +400,275 @@ class UpdateContext:
             return UpdateContextResult(
                 status="refused", code="context_changed", kind=self._kind
             )
+        if self._reference_drafts or self._edit is not None:
+            return self._uncommitted_draft()
         result = self._operations.save_update(self._preparation)
         return self._retain(result, selection_id=expected.selection_id)
 
+    def choose_configuration(self, binding, *, group_id, choice):
+        try:
+            expected = UpdateContextBinding.model_validate(binding)
+            if self._preparation is None or expected != self._binding:
+                raise ValueError("Context changed")
+        except ValueError, TypeError:
+            return self._edit_refusal("context_changed")
+        if self._edit is not None or self._reference_drafts:
+            return self._uncommitted_draft()
+        result = self._operations.resolve_configuration_choice(
+            self._preparation, group_id=group_id, choice=choice
+        )
+        return self._retain(result, selection_id=expected.selection_id)
+
     def load(self, vault, *, selection_id):
+        if self._preparation is not None:
+            return self._uncommitted_draft(code="close_decision_required")
         request_identity(selection_id)
+        self._reset_history()
         self._preparation = self._binding = None
+        self._reference_drafts.clear()
         self._revision += 1
         result = self._operations.load_update(vault)
         self._kind = result.kind
         return self._project(result)
 
     def resume(self, vault, *, selection_id):
+        if self._preparation is not None:
+            return self._uncommitted_draft(code="close_decision_required")
         request_identity(selection_id)
+        self._reset_history()
         self._preparation = self._binding = None
+        self._reference_drafts.clear()
         self._revision += 1
         result = self._operations.resume_update(vault)
         return self._retain(result, selection_id=selection_id)
+
+    def _uncommitted_draft(self, *, code="uncommitted_draft"):
+        return UpdateContextResult(
+            status="unresolved",
+            code=code,
+            kind=self._kind,
+            binding=self._binding,
+            unresolved=len(self._preparation.review.requirements),
+            next_actions=("resolve_update", "discard_draft"),
+            history_retained=self._last_history,
+            checkpoint_commit=self._last_checkpoint,
+        )
+
+    def _remember(self, result):
+        self._last_history = result.history_retained
+        self._last_checkpoint = result.checkpoint_commit
+        self._last_publication = result.publication
+        self._last_status = result.status
+        self._last_actions = result.next_actions
+
+    def _reset_history(self):
+        self._last_history = False
+        self._last_checkpoint = None
+        self._last_publication = "not_started"
+        self._last_status = "unresolved"
+        self._last_actions = ()
+
+    def close(self, binding=None, *, choice):
+        try:
+            expected = (
+                UpdateContextBinding.model_validate(binding)
+                if binding is not None
+                else None
+            )
+            if expected != self._binding:
+                raise ValueError("Context changed")
+        except ValueError, TypeError:
+            return self._edit_refusal("context_changed")
+        if choice == "continue":
+            if self._edit is not None or self._reference_drafts:
+                return self._uncommitted_draft(code="continue_review")
+            return UpdateContextResult(
+                status="prepared_review"
+                if self._preparation is not None
+                else "unresolved",
+                code="continue_review",
+                kind=self._kind,
+                binding=self._binding,
+                ready=self._preparation.review.ready
+                if self._preparation is not None
+                else False,
+                unresolved=len(self._preparation.review.requirements)
+                if self._preparation is not None
+                else 0,
+                history_retained=self._last_history,
+                checkpoint_commit=self._last_checkpoint,
+                next_actions=self._last_actions,
+            )
+        if choice == "save":
+            saved = self.save(binding)
+            if saved.code != "saved":
+                return saved
+        elif choice != "discard":
+            return self._edit_refusal("invalid_close_choice")
+        if self._edit is not None:
+            self._edit.close()
+            self._edit = None
+        self._reference_drafts.clear()
+        self._preparation = self._binding = None
+        return UpdateContextResult(
+            status=self._last_status
+            if self._last_status
+            in (
+                "applied",
+                "recovery_required",
+                "publication_unknown",
+                "failed",
+                "cancelled_before_publication",
+            )
+            else "no_content_change",
+            code="context_closed",
+            kind=self._kind,
+            history_retained=self._last_history,
+            checkpoint_commit=self._last_checkpoint,
+            publication=self._last_publication,
+            next_actions=self._last_actions
+            if self._last_status in ("recovery_required", "publication_unknown")
+            else (),
+        )
+
+    def stage_references(self, binding, *, requirement_id, choices):
+        try:
+            if (
+                UpdateContextBinding.model_validate(binding) != self._binding
+                or self._preparation is None
+            ):
+                raise ValueError("Context changed")
+        except ValueError, TypeError:
+            return UpdateContextResult(
+                status="refused", code="context_changed", kind=self._kind
+            )
+        if self._edit is not None:
+            return self._uncommitted_draft()
+        try:
+            offered = {
+                token
+                for token, _, _ in attachment_references(
+                    self._preparation, requirement_id
+                )
+            }
+            selected = tuple(
+                UpdateReferenceChoice.model_validate(row) for row in choices
+            )
+            if (
+                not 1 <= len(selected) <= 100
+                or len({row.reference_id for row in selected}) != len(selected)
+                or any(row.reference_id not in offered for row in selected)
+            ):
+                raise ValueError("Reference offer changed")
+        except ValueError, TypeError, StopIteration:
+            return UpdateContextResult(
+                status="refused",
+                code="offer_changed",
+                kind=self._kind,
+                binding=self._binding,
+            )
+        self._reference_drafts.setdefault(requirement_id, {}).update(
+            (row.reference_id, row) for row in selected
+        )
+        self._revision += 1
+        self._binding = self._binding.model_copy(update={"revision": self._revision})
+        return UpdateContextResult(
+            status="available",
+            code="reference_choices_staged",
+            kind=self._kind,
+            binding=self._binding,
+            changes=len(self._preparation.review.proposal.changes),
+            unresolved=len(self._preparation.review.requirements),
+        )
+
+    def _edit_refusal(self, code):
+        return UpdateContextResult(
+            status="refused", code=code, kind=self._kind, binding=self._binding
+        )
+
+    def _checked_edit(self, value):
+        try:
+            handle = UpdateEditHandle.model_validate(value)
+            if (
+                self._edit is None
+                or self._edit.handle != handle
+                or handle.binding != self._binding
+            ):
+                raise ValueError("Edit changed")
+            return handle
+        except ValueError, TypeError:
+            raise EditFailure("edit_changed") from None
+
+    def begin_edit(self, binding, *, requirement_id, size, sha256):
+        try:
+            if (
+                self._preparation is None
+                or UpdateContextBinding.model_validate(binding) != self._binding
+            ):
+                raise EditFailure("context_changed")
+            if self._edit is not None or self._reference_drafts:
+                return self._uncommitted_draft()
+            requirement = next(
+                row
+                for row in inspect_review_choices(self._preparation.review)
+                if row.requirement_id == requirement_id
+            )
+            if "edited" not in requirement.enabled_choices:
+                raise EditFailure("offer_changed")
+            next_binding = self._binding.model_copy(
+                update={"revision": self._revision + 1}
+            )
+            handle = UpdateEditHandle(
+                edit_id=str(uuid4()),
+                binding=next_binding,
+                requirement_id=requirement_id,
+                assumptions_digest=requirement_digest(requirement),
+                size=size,
+                sha256=sha256,
+            )
+            self._edit = EditLease(handle)
+            self._revision += 1
+            self._binding = next_binding
+            return UpdateContextResult(
+                status="available",
+                code="edit_started",
+                kind=self._kind,
+                binding=self._binding,
+                edit=self._edit.state,
+            )
+        except EditFailure as error:
+            return self._edit_refusal(str(error))
+        except ValueError, TypeError, StopIteration, OSError:
+            return self._edit_refusal("edit_unavailable")
+
+    def write_edit(self, handle, *, offset, data):
+        try:
+            self._checked_edit(handle)
+            self._edit.write(offset=offset, data=data)
+            return UpdateContextResult(
+                status="available",
+                code="edit_chunk_accepted",
+                kind=self._kind,
+                binding=self._binding,
+                edit=self._edit.state,
+            )
+        except EditFailure as error:
+            return self._edit_refusal(str(error))
+        except OSError:
+            return self._edit_refusal("edit_unavailable")
+
+    def seal_edit(self, handle):
+        try:
+            self._checked_edit(handle)
+            self._edit.seal()
+            return UpdateContextResult(
+                status="available",
+                code="edit_sealed",
+                kind=self._kind,
+                binding=self._binding,
+                edit=self._edit.state,
+            )
+        except EditFailure as error:
+            return self._edit_refusal(str(error))
+        except OSError:
+            return self._edit_refusal("edit_unavailable")

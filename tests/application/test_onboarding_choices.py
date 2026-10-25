@@ -54,6 +54,19 @@ def test_unknown_source_onboarding_preserves_current_without_authorizing_target(
         else with_review_links(facts)
     )
     plan = prepare_review(facts, preflight=preflight())
+    from brz2obsidian.core import inspect_review_choices
+
+    displayed = next(
+        row for row in inspect_review_choices(plan) if row.domain == "format"
+    )
+    assert (
+        "current" in displayed.enabled_choices
+        and "incoming" not in displayed.enabled_choices
+    )
+    unavailable = next(
+        row for row in displayed.availability if row.choice == "incoming"
+    )
+    assert not unavailable.enabled and "unsafe_producer_choice" in unavailable.reasons
     original = preparation()
     prepared = UpdatePreparation(
         **(
@@ -75,9 +88,20 @@ def test_unknown_source_onboarding_preserves_current_without_authorizing_target(
     if binary:
         selection, candidate = attachment_candidate(facts, choice)
         options = {"attachment_selection": selection, "attachment_candidate": candidate}
-    result = Operations().resolve_update(
-        prepared, action(plan, domain="format", choice=choice, **options)
-    )
+    if choice == "current":
+        from brz2obsidian.application.review_choices import requirement_digest
+
+        requirement = next(row for row in plan.requirements if row.domain == "format")
+        result = Operations().resolve_update_choice(
+            prepared,
+            requirement_id=requirement.requirement_id,
+            choice=choice,
+            assumptions_digest=requirement_digest(requirement),
+        )
+    else:
+        result = Operations().resolve_update(
+            prepared, action(plan, domain="format", choice=choice, **options)
+        )
     assert result.kind == "onboarding"
     if choice == "current":
         assert result.code == "accepted" and result.ready, result

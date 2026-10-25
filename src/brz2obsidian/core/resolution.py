@@ -143,6 +143,79 @@ def _choices(facts, change, domain):
     )
 
 
+def _choice_requirements(facts, proposal):
+    return tuple(
+        ReviewRequirement(
+            requirement_id=c.change_id,
+            domain=_domain(facts, c),
+            change_id=c.change_id,
+            choices=_choices(facts, c, _domain(facts, c)),
+            assumptions=c.assumptions,
+        )
+        for c in proposal.changes
+    )
+
+
+def _format_choice_unavailable(change, domain, choice):
+    return domain in ("configuration", "format") and (
+        change.format_review is None
+        or choice != "current"
+        and not change.format_review.target_eligible
+    )
+
+
+def _choice_offer(change, requirement):
+    from brz2obsidian.contracts import ReviewChoiceAvailability, ReviewChoiceOffer
+
+    alternatives = (
+        {a.choice: a for a in change.attachment_review.alternatives}
+        if change.attachment_review is not None and requirement.domain != "reversal"
+        else {}
+    )
+    choices = tuple(dict.fromkeys((*requirement.choices, *alternatives)))
+    availability = []
+    for choice in choices:
+        reasons = []
+        if _format_choice_unavailable(change, requirement.domain, choice):
+            reasons.append("unsafe_producer_choice")
+        if choice in alternatives and not alternatives[choice].eligible:
+            reasons.extend(alternatives[choice].unavailable_reasons)
+        if choice not in requirement.choices and not reasons:
+            reasons.append("choice_not_admitted")
+        availability.append(
+            ReviewChoiceAvailability(
+                choice=choice,
+                enabled=not reasons,
+                reasons=tuple(dict.fromkeys(reasons)),
+            )
+        )
+    return ReviewChoiceOffer(
+        **requirement.model_dump(), availability=tuple(availability)
+    )
+
+
+def inspect_review_choices(plan):
+    """Canonical offered decisions, including replacements of existing choices."""
+    checked = validate_review(plan)
+    if checked.status != "accepted":
+        raise ValueError("Invalid review")
+    plan = checked.plan
+    approved = {(a.change_id, a.domain) for a in plan.approvals}
+    return tuple(
+        _choice_offer(change, row)
+        for change, row in zip(
+            plan.proposal.changes,
+            _choice_requirements(plan.producer_facts, plan.proposal),
+            strict=True,
+        )
+        if change.requires_decision
+        or change.identity_review.repair_required
+        or change.rename_review is not None
+        and change.rename_review.requires_decision
+        or (row.change_id, row.domain) in approved
+    )
+
+
 def _plan(
     facts,
     preflight,
@@ -165,20 +238,16 @@ def _plan(
     effective_approvals = applicable_approvals(approvals, attachment_applicability)
     approved = {(a.change_id, a.domain) for a in approvals}
     requirements = tuple(
-        ReviewRequirement(
-            requirement_id=c.change_id,
-            domain=_domain(facts, c),
-            change_id=c.change_id,
-            choices=_choices(facts, c, _domain(facts, c)),
-            assumptions=c.assumptions,
+        row
+        for c, row in zip(
+            proposal.changes, _choice_requirements(facts, proposal), strict=True
         )
-        for c in proposal.changes
         if (
             c.requires_decision
             or c.identity_review.repair_required
             or (c.rename_review is not None and c.rename_review.requires_decision)
         )
-        and (c.change_id, _domain(facts, c)) not in approved
+        and (row.change_id, row.domain) not in approved
     )
     members = tuple(
         c
@@ -768,11 +837,7 @@ def _resolve_action(plan, action):
             )
         ):
             return _transition(plan, "refused", "attachment_invalid")
-        if action.domain in ("configuration", "format") and (
-            change.format_review is None
-            or action.choice != "current"
-            and not change.format_review.target_eligible
-        ):
+        if _format_choice_unavailable(change, action.domain, action.choice):
             return _transition(plan, "refused", "unsafe_producer_choice")
         if not validate_attachment_candidate(
             plan.producer_facts, selection, candidate
@@ -859,11 +924,7 @@ def _resolve_action(plan, action):
         return _transition(plan, "refused", "choice_not_admitted")
     if action.selected_entry_id is not None or action.disassociate_entry_ids:
         return _transition(plan, "refused", "choice_not_admitted")
-    if action.domain in ("configuration", "format") and (
-        change.format_review is None
-        or action.choice != "current"
-        and not change.format_review.target_eligible
-    ):
+    if _format_choice_unavailable(change, action.domain, action.choice):
         return _transition(plan, "refused", "unsafe_producer_choice")
     reversal_present = (
         action.domain == "reversal"
