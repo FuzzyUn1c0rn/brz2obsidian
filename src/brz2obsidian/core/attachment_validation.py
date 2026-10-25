@@ -79,7 +79,7 @@ def validate_attachment_candidate(
         or change.identity_review.status != "matched"
         or change.format_review is not None
         and not (
-            facts.format_operation.kind == "onboarding"
+            facts.format_operation.kind in ("onboarding", "format_transition")
             and selection.choice == "current"
         )
         or change.target_path != change.path

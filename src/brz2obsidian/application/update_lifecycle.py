@@ -98,9 +98,12 @@ def _history(operations, vault, observed=None, *, onboarding=False, maintenance=
     if (
         history.checkpoint.review is not None
         and history.checkpoint.manifest.boundary != "result"
-        and history.checkpoint.review.saved.plan.facts.format_operation.kind == "format_transition"
+        and history.checkpoint.review.saved.plan.facts.format_operation.kind
+        == "format_transition"
     ):
-        return history, _refused("format_transition_review_required", history, action="resume_update")
+        return history, _refused(
+            "format_transition_review_required", history, action="resume_update"
+        )
     onboarding_pending = (
         history.checkpoint.review is not None
         and history.checkpoint.manifest.boundary != "result"
@@ -655,6 +658,11 @@ def _configuration_route(result):
         )
     if not changed:
         return result
+    if prepared.kind == "format_transition":
+        from .format_configuration import configuration_effects_authorized
+
+        if configuration_effects_authorized(prepared, selected):
+            return result
     return result.model_copy(
         update={
             "status": "unresolved",
@@ -807,7 +815,10 @@ def refresh_update(operations, preparation, *, source=None):
 
 def _refresh_source_update(operations, preparation, observed, *, source):
     try:
-        history, stopped = _history(operations, preparation.vault, observed)
+        maintenance = preparation.kind == "format_transition"
+        history, stopped = _history(
+            operations, preparation.vault, observed, maintenance=maintenance
+        )
         if stopped is not None:
             return stopped
         if history.checkpoint.locator.association != preparation.locator.association:
@@ -819,16 +830,27 @@ def _refresh_source_update(operations, preparation, observed, *, source):
         directory, incoming, observed_source, reused = _render(
             operations, source, baseline
         )
-        facts = _observed_facts(
-            history,
-            baseline,
-            incoming,
-            proposal_id=preparation.review.proposal.proposal_id,
-            generation=preparation.review.proposal.generation + 1,
-            source_memory=_producer_memory(
-                history.checkpoint, preparation.review.proposal.proposal_id
-            ),
-        )
+        if maintenance:
+            from .format_transition import transition_facts
+
+            facts = transition_facts(
+                history,
+                baseline,
+                incoming,
+                proposal_id=preparation.review.proposal.proposal_id,
+                generation=preparation.review.proposal.generation + 1,
+            )
+        else:
+            facts = _observed_facts(
+                history,
+                baseline,
+                incoming,
+                proposal_id=preparation.review.proposal.proposal_id,
+                generation=preparation.review.proposal.generation + 1,
+                source_memory=_producer_memory(
+                    history.checkpoint, preparation.review.proposal.proposal_id
+                ),
+            )
         history = _scope_review(
             operations, history, facts, preparation.review, observed
         )
@@ -851,7 +873,13 @@ def _refresh_source_update(operations, preparation, observed, *, source):
         return _refused(
             "excluded_dependency_requires_tracking", action="review_tracking"
         )
-    except OSError, ValueError, KeyError, TypeError, AttributeError:
+    except ValueError as error:
+        if preparation.kind == "format_transition" and error.args == (
+            "format_source_changed",
+        ):
+            return _refused("format_source_changed", action="choose_source_reference")
+        return _refused("refresh_unavailable")
+    except OSError, KeyError, TypeError, AttributeError:
         return _refused("refresh_unavailable")
 
 
@@ -888,7 +916,7 @@ def save_update(operations, preparation):
                 observed_source=prepared.observed_source,
             )
         if captured.status not in ("captured", "unchanged"):
-            return _refused(captured.code, history).model_copy(
+            return _refused(captured.code, history, preparation=prepared).model_copy(
                 update={
                     "history_retained": captured.history_retained
                     or current.history_retained,
@@ -896,7 +924,7 @@ def save_update(operations, preparation):
                 }
             )
         if captured.locator is None:
-            return _refused("saved_history_unavailable", history)
+            return _refused("saved_history_unavailable", history, preparation=prepared)
         locator = captured.locator
         return current.model_copy(
             update={
@@ -945,7 +973,9 @@ def resume_update(operations, vault):
 
 def _resume_update(operations, vault, observed):
     try:
-        history, stopped = _history(operations, vault, observed, onboarding=True, maintenance=True)
+        history, stopped = _history(
+            operations, vault, observed, onboarding=True, maintenance=True
+        )
         if stopped is not None:
             return stopped
         checkpoint = history.checkpoint
@@ -975,8 +1005,13 @@ def _resume_update(operations, vault, observed):
         if plan.facts.format_operation.kind == "format_transition":
             from .format_transition import transition_facts
 
-            facts = transition_facts(history, baseline, incoming,
-                proposal_id=plan.proposal.proposal_id, generation=plan.proposal.generation)
+            facts = transition_facts(
+                history,
+                baseline,
+                incoming,
+                proposal_id=plan.proposal.proposal_id,
+                generation=plan.proposal.generation,
+            )
         else:
             facts = _observed_facts(
                 history,
@@ -1215,7 +1250,12 @@ def _reobserve(operations, preparation):
 
             return reobserve_onboarding(operations, preparation)
         with operations.inspect_update_inputs(preparation.vault) as observed:
-            return _reobserve_inputs(operations, preparation, observed)
+            history, result, baseline = _reobserve_inputs(
+                operations, preparation, observed
+            )
+            if result.status == "refused" and result.preparation is None:
+                result = result.model_copy(update={"kind": preparation.kind})
+            return history, result, baseline
     except OSError, ValueError, TypeError, AttributeError:
         return (
             None,
@@ -1229,8 +1269,12 @@ def _reobserve(operations, preparation):
 
 
 def _reobserve_inputs(operations, preparation, observed):
-    history, stopped = _history(operations, preparation.vault, observed,
-        maintenance=preparation.kind == "format_transition")
+    history, stopped = _history(
+        operations,
+        preparation.vault,
+        observed,
+        maintenance=preparation.kind == "format_transition",
+    )
     if stopped is not None:
         return (None, stopped.model_copy(update={"kind": preparation.kind}), None)
     if history.checkpoint.locator.association != preparation.locator.association:
@@ -1299,9 +1343,13 @@ def _reobserve_inputs(operations, preparation, observed):
         if preparation.kind == "format_transition":
             from .format_transition import transition_facts
 
-            facts = transition_facts(history, baseline, incoming,
+            facts = transition_facts(
+                history,
+                baseline,
+                incoming,
                 proposal_id=preparation.review.proposal.proposal_id,
-                generation=preparation.review.proposal.generation)
+                generation=preparation.review.proposal.generation,
+            )
         else:
             facts = _observed_facts(
                 history,

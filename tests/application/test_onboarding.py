@@ -196,8 +196,9 @@ def test_legacy_without_repository_offers_explicit_initialization():
 @pytest.mark.parametrize(
     "mode", ("preserve", "changed_target", "missing_document", "missing_state")
 )
+@pytest.mark.parametrize("operation_kind", ("onboarding", "format_transition"))
 def test_opaque_legacy_output_offers_exact_current_preservation(
-    tmp_path, monkeypatch, mode
+    tmp_path, monkeypatch, mode, operation_kind
 ):
     from brz2obsidian.core import prepare_review, select_review_effects
     from tests.reconciliation.test_resolution import action
@@ -207,6 +208,17 @@ def test_opaque_legacy_output_offers_exact_current_preservation(
     assert offered.preparation is not None, offered
     plan = offered.preparation.review
     facts = plan.producer_facts
+    if operation_kind == "format_transition":
+        facts = facts.model_copy(
+            update={
+                "format_operation": facts.format_operation.model_copy(
+                    update={
+                        "kind": operation_kind,
+                        "baseline_source_version": facts.format_operation.target_source_version,
+                    }
+                )
+            }
+        )
     if mode == "changed_target":
         facts = facts.model_copy(
             update={
@@ -241,7 +253,23 @@ def test_opaque_legacy_output_offers_exact_current_preservation(
         )
         facts = facts.model_copy(update={"link_context": context})
     plan = prepare_review(facts, preflight=plan.preflight)
-    prepared = offered.preparation.model_copy(update={"review": plan})
+    updates = {"kind": operation_kind, "review": plan}
+    if operation_kind == "format_transition":
+        from tests.application.test_update_lifecycle_contracts import preparation
+
+        locator = preparation().locator
+        identity = plan.facts.incoming_identity
+        updates["locator"] = locator.model_copy(
+            update={
+                "association": locator.association.model_copy(
+                    update={
+                        "collection_id": identity.collection_id,
+                        "module_id": identity.module_id,
+                    }
+                )
+            }
+        )
+    prepared = offered.preparation.model_copy(update=updates)
     report = next(
         c for c in plan.proposal.changes if c.item_id == "support:MIGRATION REPORT.md"
     )

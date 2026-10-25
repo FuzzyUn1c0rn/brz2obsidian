@@ -1,5 +1,7 @@
 """Unknown links permit exact preservation, never other selected changes."""
 
+import pytest
+
 from brz2obsidian.contracts import (
     ContentVersion,
     CurrentContent,
@@ -22,7 +24,8 @@ from tests.reconciliation.test_attachments import (
 from tests.reconciliation.test_resolution import action, preflight
 
 
-def test_binary_current_keeps_the_complete_opaque_manual_context():
+@pytest.mark.parametrize("operation_kind", ("onboarding", "format_transition"))
+def test_binary_current_keeps_the_complete_opaque_manual_context(operation_kind):
     facts = attachment_request()
     current = ExactContent(data=b"\xffUninterpreted [[Assets/data.bin]]\r\n")
     target = ReferenceTarget(
@@ -79,9 +82,11 @@ def test_binary_current_keeps_the_complete_opaque_manual_context():
             "identity_inventory": facts.identity_inventory + (entry,),
             "format_operation": facts.format_operation.model_copy(
                 update={
-                    "kind": "onboarding",
+                    "kind": operation_kind,
                     "recorded_generation": "unknown",
-                    "baseline_source_version": None,
+                    "baseline_source_version": None
+                    if operation_kind == "onboarding"
+                    else facts.format_operation.target_source_version,
                     "established_baseline": None,
                 }
             ),
@@ -121,9 +126,6 @@ def test_binary_current_keeps_the_complete_opaque_manual_context():
         ("Assets/data.bin", b"\x00authored")
     ]
     assert effects.remove_paths == ()
-
-
-import pytest
 
 
 @pytest.mark.parametrize("operation_kind", ("onboarding", "format_transition"))

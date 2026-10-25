@@ -90,6 +90,12 @@ class Operations:
 
         return apply_update(self, preparation, cancel=cancel)
 
+    def resolve_configuration(self, preparation, actions):
+        """Record one explicit choice for the complete offered configuration group."""
+        from .format_configuration import resolve_configuration
+
+        return resolve_configuration(self, preparation, actions)
+
     def resolve_update(self, preparation, action, *, edited=None):
         """Resolve one offered S1 choice, binding edited text to its actual target."""
         from .update_lifecycle import resolve_update

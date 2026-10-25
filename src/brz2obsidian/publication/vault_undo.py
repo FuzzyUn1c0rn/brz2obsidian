@@ -252,10 +252,13 @@ def _eligible_target(observed, observation, *, active_operation=None):
         return "none", "latest_update_not_applied", None
     if not _target_history_known(graph, observation):
         return "unsupported", "maintenance_eligibility_unavailable", None
+    target = _target_from_graph(graph, observation)
+    if target.plan.facts.format_operation.kind not in ("source_update", "onboarding"):
+        return "none", "latest_operation_is_maintenance", None
     return (
         "offered",
         "latest_undo_review_required",
-        _target_from_graph(graph, observation),
+        target,
     )
 
 

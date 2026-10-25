@@ -376,7 +376,7 @@ def onboarding_current_context(facts):
     """Exact current observations, with no assertion about opaque link meanings."""
     context = facts.link_context
     if (
-        facts.format_operation.kind != "onboarding"
+        facts.format_operation.kind not in ("onboarding", "format_transition")
         or context is None
         or current_observation_problem(facts) is not None
         or not current_lookup_coverage(facts)
