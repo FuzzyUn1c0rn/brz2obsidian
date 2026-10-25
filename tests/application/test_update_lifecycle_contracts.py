@@ -810,7 +810,8 @@ def recorded_history(identity=None, locator=None):
             findings=(),
         ),
         checkpoint=SimpleNamespace(
-            manifest=SimpleNamespace(identity=identity, source=()),
+            manifest=SimpleNamespace(identity=identity, source=(), boundary="local"),
+            review=None,
             locator=locator or preparation().locator,
         ),
     )

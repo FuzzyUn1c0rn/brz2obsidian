@@ -121,3 +121,121 @@ def test_binary_current_keeps_the_complete_opaque_manual_context():
         ("Assets/data.bin", b"\x00authored")
     ]
     assert effects.remove_paths == ()
+
+
+import pytest
+
+
+@pytest.mark.parametrize("changed_target", (False, True))
+def test_onboarding_current_retains_existing_fragment_warning_without_harming_target(
+    tmp_path, changed_target
+):
+    from brz2obsidian.application.operations import Operations
+    from brz2obsidian.application.update_contracts import UpdatePreparation
+    from brz2obsidian.contracts import CurrentContent
+    from tests.application.test_update_lifecycle_contracts import preparation
+    from tests.reconciliation.test_identity import inventory_item, with_subjects
+    from tests.reconciliation.test_proposals import request
+    from tests.reconciliation.test_resolution import with_review_links
+
+    warning = b"Exact existing [[Second#Missing]] link.\r\n"
+    facts = request(original=warning, current=warning, incoming=warning)
+    first = facts.subjects[0]
+    other = first.model_copy(
+        update={
+            "item_id": "item:second",
+            "title": "Second",
+            "path": "Second.md",
+            "baseline": ContentVersion(
+                status="known",
+                content=ExactContent(data=b"# Second\r\n"),
+                unavailable_digest=None,
+            ),
+            "current": CurrentContent(
+                existence="present",
+                path="Second.md",
+                content=ExactContent(data=b"# Second\r\n"),
+            ),
+            "incoming": ExactContent(data=b"# Second changed\r\n"),
+            "source_target": IdentityTargetFacts(
+                normalized_path="second.md", containment="contained", status="safe"
+            ),
+        }
+    )
+    facts = with_subjects(
+        facts,
+        (first, other),
+        facts.identity_inventory
+        + (
+            inventory_item(
+                "second", "item:second", "Second.md", b"# Second\r\n", title="Second"
+            ),
+        ),
+    )
+    operation = facts.format_operation
+    facts = with_review_links(
+        facts.model_copy(
+            update={
+                "format_operation": operation.model_copy(
+                    update={
+                        "kind": "onboarding",
+                        "baseline_source_version": operation.target_source_version,
+                        "established_baseline": operation.established_baseline.model_copy(
+                            update={"source_version": operation.target_source_version}
+                        ),
+                    }
+                ),
+            }
+        )
+    )
+    document = next(
+        d
+        for d in facts.link_context.current_documents
+        if d.source_path == "Notes/Opening.md"
+    )
+    assert document.status == "supported"
+    assert document.occurrences[0].meaning.status == "fragment_missing"
+    old = preparation()
+    prepared = UpdatePreparation.model_validate(
+        old.model_dump()
+        | {
+            "kind": "onboarding",
+            "review": prepare_review(facts, preflight=old.review.preflight),
+        }
+    )
+    operations = Operations()
+    kept = operations.resolve_update(
+        prepared, action(prepared.review, domain="format", choice="current")
+    )
+    assert kept.code == "accepted", kept
+    second = next(
+        c
+        for c in kept.preparation.review.proposal.changes
+        if c.item_id == "item:second"
+    )
+    assert second.format_review.target_eligible
+    chosen = operations.resolve_update(
+        kept.preparation,
+        action(
+            kept.preparation.review,
+            second,
+            domain="format",
+            choice="incoming" if changed_target else "current",
+            decision_id="second-choice",
+        ),
+    )
+    assert chosen.code == "accepted", chosen
+    (tmp_path / "warning-current-result.json").write_text(
+        chosen.model_dump_json(), encoding="utf-8"
+    )
+    selected = select_review_effects(chosen.preparation.review)
+    if changed_target:
+        assert not chosen.ready and selected.status == "refused", selected
+    else:
+        assert chosen.ready and selected.status == "selected", (
+            chosen.preparation.review.blockers
+        )
+        assert [(r.path, r.content.data) for r in selected.files] == [
+            ("Notes/Opening.md", warning),
+            ("Second.md", b"# Second\r\n"),
+        ]
