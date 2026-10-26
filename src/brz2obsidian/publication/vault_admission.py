@@ -1864,9 +1864,15 @@ class _Inspection:
             if (
                 parent is not None
                 and role.previous == parent.commit
-                and role.boundary == parent.boundary == "local"
+                and role.generation == parent.generation + 1
+                and role.boundary == "local"
                 and role.memo_fingerprint is not None
-                and role.memo_fingerprint == parent.memo_fingerprint
+                and (
+                    parent.boundary == "local"
+                    and role.memo_fingerprint == parent.memo_fingerprint
+                    or parent.boundary == "result"
+                    and parent.memo_fingerprint is None
+                )
                 and role.operation_intent_commit is None
                 and role.undo_of_receipt_commit is None
                 and role.recovery_origin_intent_commit is None
@@ -1876,7 +1882,12 @@ class _Inspection:
                 physical_parent = locator.model_copy(
                     update={"commit": parent.commit, "generation": parent.generation}
                 )
-                if role.review_parent_fingerprint == self._review_state(context)[0]:
+                if parent.boundary == "result":
+                    if role.review_parent_fingerprint == self._state_fingerprint(
+                        physical_parent
+                    ):
+                        selected = physical_parent
+                elif role.review_parent_fingerprint == self._review_state(context)[0]:
                     selected = context
                 elif role.review_parent_fingerprint == self._state_fingerprint(
                     physical_parent
