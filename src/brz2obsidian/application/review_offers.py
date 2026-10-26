@@ -21,6 +21,18 @@ def _slice(rows, offset, limit):
     return rows[offset:end], len(rows), end if end < len(rows) else None
 
 
+def _attachment_outputs(plan, requirement):
+    change = next(
+        row for row in plan.proposal.changes if row.change_id == requirement.change_id
+    )
+    return tuple(
+        (alternative.choice, output)
+        for alternative in change.attachment_review.alternatives
+        if alternative.eligible and alternative.choice in requirement.enabled_choices
+        for output in alternative.outputs
+    )
+
+
 def choice_offers(preparation):
     plan = UpdatePreparation.model_validate(preparation).review
     return review_plan_choice_offers(plan)
@@ -63,6 +75,8 @@ def review_plan_choice_offers(plan):
                     if c.change_id == row.change_id
                 )
             )
+        elif row.domain == "attachment":
+            count = len(_attachment_outputs(plan, row))
         result.append(
             UpdateChoiceOffer(
                 requirement_id=row.requirement_id,
@@ -104,7 +118,19 @@ def review_plan_choice_detail_page(plan, *, requirement_id, offset=0, limit=100)
         if row.requirement_id == requirement_id
     )
     rows = []
-    if requirement.domain == "identity":
+    if requirement.domain == "attachment":
+        rows = [
+            UpdateChoiceDetail(
+                kind="attachment_output",
+                choice=choice,
+                target_id=output.target_id,
+                path=output.path,
+                size=len(output.content.data),
+                sha256=sha256(output.content.data).hexdigest(),
+            )
+            for choice, output in _attachment_outputs(plan, requirement)
+        ]
+    elif requirement.domain == "identity":
         change = next(
             c for c in plan.proposal.changes if c.change_id == requirement.change_id
         )

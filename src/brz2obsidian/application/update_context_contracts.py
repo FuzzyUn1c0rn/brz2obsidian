@@ -66,7 +66,9 @@ class UpdateChoiceOffer(ReconciliationContract):
 
 
 class UpdateChoiceDetail(ReconciliationContract):
-    kind: Literal["identity", "compatible_group", "consent_scope"]
+    kind: Literal["identity", "compatible_group", "consent_scope", "attachment_output"]
+    choice: ReviewChoice | None = None
+    target_id: str | None = None
     entry_id: str | None = None
     change_id: str | None = None
     subject_id: str | None = None
