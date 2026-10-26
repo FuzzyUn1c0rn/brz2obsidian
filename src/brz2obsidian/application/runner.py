@@ -167,6 +167,7 @@ class HostRunner:
                 ),
             )
 
+        opening_child = False
         try:
             if cancel.is_set():
                 terminal = not_dispatched()
@@ -184,9 +185,11 @@ class HostRunner:
                     epoch = str(uuid4())
                     self._update_epoch = epoch
                     self.session.bind_update_worker(epoch)
+                    opening_child = True
                     self._update_channel = self.supervisor.open_update(
                         on_uncertain=lambda: self._queue_update_uncertainty(epoch)
                     )
+                    opening_child = False
                 terminal = (
                     not_dispatched()
                     if cancel.is_set()
@@ -203,7 +206,10 @@ class HostRunner:
                 ):
                     self._update_channel.close()
         except Exception:  # noqa: BLE001 -- a lost worker reply never grants publication authority.
-            terminal = Terminal(phase="may_have_executed", code="worker_failure")
+            terminal = Terminal(
+                phase="not_started" if opening_child else "may_have_executed",
+                code="launch_failure" if opening_child else "worker_failure",
+            )
         if self._stopped.is_set():
             self.session.complete_update(request.request_id, terminal)
         else:
@@ -250,10 +256,15 @@ class HostRunner:
             self._update_controls.submit(self._send_update_control, request)
 
     def _send_update_control(self, request):
+        from .update_worker_contracts import update_control_scope
+
         if self._update_channel is None:
             return
+        scope = update_control_scope(request.arguments)
+        if scope is None:
+            return
         terminal = self._update_channel.cancel(
-            getattr(request.arguments, "binding", None),
+            scope["binding"],
             target_request_id=request.request_id,
         )
         if not self._stopped.is_set():

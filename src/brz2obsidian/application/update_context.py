@@ -32,6 +32,9 @@ class UpdateContext:
 
             operations = Operations()
         self._operations = operations
+        from .update_history_context import HistoryContext
+
+        self._history = HistoryContext(operations)
         self._preparation = None
         self._binding = None
         self._revision = 0
@@ -60,8 +63,9 @@ class UpdateContext:
     ):
         if original_source is not None and kind != "onboarding":
             raise ValueError("Original reference evidence belongs to onboarding")
-        if self._preparation is not None:
+        if self._preparation is not None or self._history.preparation is not None:
             return self._uncommitted_draft(code="close_decision_required")
+        self._history.binding = self._history.admission = None
         request_identity(selection_id)
         self._reset_history()
         # Selecting new work retires the prior handle even if preparation refuses.
@@ -121,6 +125,39 @@ class UpdateContext:
             checkpoint_commit=result.checkpoint_commit,
             publication="not_published" if cancelled else result.publication,
         )
+
+    def history(self, vault, *, selection_id, cancel=None):
+        if self._history.preparation is not None:
+            return self._history.blocked()
+        if self._preparation is not None or self.draft_pending:
+            return self._uncommitted_draft(code="close_decision_required")
+        self._reset_history()
+        self._kind = "history"
+        result = self._history.inspect(vault, selection_id=selection_id, cancel=cancel)
+        self._remember(result)
+        return result
+
+    def initialize_vault(self, binding, *, choice):
+        if self._preparation is not None or self.draft_pending:
+            return self._uncommitted_draft(code="close_decision_required")
+        result = self._history.initialize(binding, choice=choice)
+        self._remember(result)
+        return result
+
+    def prepare_history(self, binding, **values):
+        result = self._history.prepare(binding, **values)
+        self._remember(result)
+        return result
+
+    def refresh_history(self, binding):
+        result = self._history.refresh(binding)
+        self._remember(result)
+        return result
+
+    def execute_history(self, binding, *, cancel=None):
+        result = self._history.execute(binding, cancel=cancel)
+        self._remember(result)
+        return result
 
     def page(self, binding, *, offset=0, limit=100, byte_offset=0, byte_limit=65536):
         def refused(code):
@@ -492,30 +529,68 @@ class UpdateContext:
         )
         return self._retain(result, selection_id=expected.selection_id)
 
-    def load(self, vault, *, selection_id):
-        if self._preparation is not None:
+    def load(self, vault, *, selection_id, cancel=None):
+        if self._preparation is not None or self._history.preparation is not None:
             return self._uncommitted_draft(code="close_decision_required")
         request_identity(selection_id)
         self._reset_history()
         self._preparation = self._binding = None
         self._reference_drafts.clear()
         self._revision += 1
+        if cancel is not None and cancel():
+            return self._cancelled_inspection()
         result = self._operations.load_update(vault)
         self._kind = result.kind
+        if (
+            cancel is not None
+            and cancel()
+            and result.status
+            not in ("publication_unknown", "recovery_required", "failed")
+            and result.publication not in ("partial", "unknown")
+        ):
+            return self._cancelled_inspection(result)
         return self._project(result)
 
-    def resume(self, vault, *, selection_id):
-        if self._preparation is not None:
+    def resume(self, vault, *, selection_id, cancel=None):
+        if self._preparation is not None or self._history.preparation is not None:
             return self._uncommitted_draft(code="close_decision_required")
         request_identity(selection_id)
         self._reset_history()
         self._preparation = self._binding = None
         self._reference_drafts.clear()
         self._revision += 1
+        if cancel is not None and cancel():
+            return self._cancelled_inspection()
         result = self._operations.resume_update(vault)
+        self._kind = result.kind
+        if (
+            cancel is not None
+            and cancel()
+            and result.status
+            not in ("publication_unknown", "recovery_required", "failed")
+            and result.publication not in ("partial", "unknown")
+        ):
+            return self._cancelled_inspection(result)
         return self._retain(result, selection_id=selection_id)
 
+    def _cancelled_inspection(self, result=None):
+        observed = UpdateContextResult(
+            status="cancelled_before_publication",
+            code="cancelled_after_inspection"
+            if result is not None
+            else "cancelled_before_inspection",
+            kind=result.kind if result is not None else self._kind,
+            history_retained=result.history_retained if result is not None else None,
+            checkpoint_commit=result.checkpoint_commit if result is not None else None,
+            publication="not_published",
+            next_actions=("inspect_history",),
+        )
+        self._remember(observed)
+        return observed
+
     def _uncommitted_draft(self, *, code="uncommitted_draft"):
+        if self._history.preparation is not None:
+            return self._history.blocked(code)
         return UpdateContextResult(
             status="unresolved",
             code=code,
@@ -542,6 +617,10 @@ class UpdateContext:
         self._last_actions = ()
 
     def close(self, binding=None, *, choice):
+        if self._kind == "history":
+            result = self._history.close(binding, choice=choice)
+            self._remember(result)
+            return result
         try:
             expected = (
                 UpdateContextBinding.model_validate(binding)

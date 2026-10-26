@@ -6,6 +6,7 @@ from uuid import uuid4
 from .contract_values import absolute, request_identity
 from .contracts import WorkerRequest
 from .update_context_contracts import UpdateContextBinding, UpdateContextResult
+from .update_history_contracts import HistoryContextBinding
 
 _CONTENT = frozenset(
     (
@@ -26,16 +27,18 @@ class UpdateSessionSnapshot:
     revision: int = 0
     vault: str | None = None
     selection_id: str | None = None
-    binding: UpdateContextBinding | None = None
+    binding: UpdateContextBinding | HistoryContextBinding | None = None
     review_ready: bool = False
     draft_pending: bool = False
     needs_inspection: bool = False
     changes: int = 0
     unresolved: int = 0
     stale: int = 0
-    history_retained: bool = False
+    history_retained: bool | None = False
     checkpoint_commit: str | None = None
     publication: str = "not_started"
+    transport_phase: str | None = None
+    transport_code: str | None = None
     next_actions: tuple[str, ...] = ()
     active_request_id: str | None = None
     active_command: str | None = None
@@ -140,7 +143,7 @@ class UpdateSession:
                 and binding == prior.binding
             ):
                 return None
-        if args.command in ("prepare", "load", "resume") and (
+        if args.command in ("prepare", "load", "resume", "history") and (
             args.vault != state.vault
             or args.selection_id != state.selection_id
             or state.binding is not None
@@ -153,6 +156,8 @@ class UpdateSession:
             active_request_id=request.request_id,
             active_command=args.command,
             control_code=None,
+            transport_phase=None,
+            transport_code=None,
         )
         return request
 
@@ -168,6 +173,8 @@ class UpdateSession:
             active_request_id=None,
             active_command=None,
             control_code=None,
+            transport_phase=terminal.phase,
+            transport_code=terminal.code,
         )
         response = terminal.response
         if (
@@ -242,7 +249,19 @@ class UpdateSession:
             review_ready=result.ready,
             draft_pending=result.draft_pending,
             needs_inspection=result.status
-            in ("publication_unknown", "recovery_required"),
+            in (
+                "publication_unknown",
+                "recovery_required",
+                "unknown",
+                "incomplete",
+                "content_complete",
+            )
+            or result.publication in ("partial", "unknown")
+            or bool(
+                result.history_action
+                and result.history_action.operation
+                and result.history_action.operation.recovery_required
+            ),
             changes=result.changes,
             unresolved=result.unresolved,
             stale=result.stale,

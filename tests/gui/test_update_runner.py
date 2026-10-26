@@ -20,6 +20,73 @@ from brz2obsidian.application.transport import Supervisor
 
 pytestmark = pytest.mark.gui
 
+
+def test_host_reports_external_launch_failure_as_not_started(tmp_path, monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    vault = tmp_path / "unmodified-vault"
+    vault.mkdir()
+    (vault / "Personal.md").write_bytes(b"Personal exact\r\n")
+    views, launches = [], []
+
+    def unavailable(*args, **kwargs):
+        launches.append(True)
+        raise OSError("private external launch detail")
+
+    monkeypatch.setattr(subprocess, "Popen", unavailable)
+
+    class Bridge(QObject):
+        changed = Signal(object)
+
+        @Slot(object)
+        def receive(self, state):
+            assert QThread.currentThread() == app.thread()
+            views.append(state)
+
+    bridge = Bridge()
+    bridge.changed.connect(bridge.receive)
+    runner = HostRunner(
+        Supervisor(Path(sys.executable), Path(__file__).resolve().parents[2] / "src"),
+        on_update=lambda value: None,
+        on_page=lambda value: None,
+        on_update_review=bridge.changed.emit,
+    )
+    try:
+        selection = "11111111-1111-4111-8111-111111111111"
+        runner.select_update(str(vault), selection_id=selection)
+        runner.submit_update(
+            {
+                "command": "prepare",
+                "vault": str(vault),
+                "selection_id": selection,
+                "kind": "onboarding",
+                "source": None,
+            }
+        )
+        deadline = time.monotonic() + 5
+        while not (
+            launches
+            and any(view.active_request_id is not None for view in views)
+            and views[-1].active_request_id is None
+        ):
+            assert time.monotonic() < deadline, (
+                "Owned launch-failure diagnostic exhausted"
+            )
+            app.processEvents()
+            time.sleep(0.005)
+        state = views[-1]
+        assert state.publication == "not_started" and not state.needs_inspection
+        assert (
+            state.transport_phase == "not_started"
+            and state.transport_code == "launch_failure"
+        )
+        assert state.binding is None and not state.ready and not state.history_retained
+        assert "private external launch detail" not in repr(state)
+        assert (vault / "Personal.md").read_bytes() == b"Personal exact\r\n"
+        assert sorted(path.name for path in vault.iterdir()) == ["Personal.md"]
+    finally:
+        runner.shutdown()
+
+
 _NATIVE_READER = """import sys, time
 from pathlib import Path
 from brz2obsidian.application.operations import Operations

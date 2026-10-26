@@ -123,6 +123,9 @@ def history_admission(
         findings=tuple(f.code for f in admission.findings),
         summary=summary,
         guidance=_GUIDANCE,
+        initialization_fingerprint=admission.observation_fingerprint
+        if status == "initialization_required"
+        else None,
     )
 
 

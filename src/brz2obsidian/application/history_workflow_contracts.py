@@ -60,6 +60,11 @@ class HistoryAdmission(ReconciliationContract):
     findings: tuple[str, ...]
     summary: str
     guidance: tuple[str, ...]
+    initialization_fingerprint: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+        exclude_if=lambda value: value is None,
+    )
 
     @model_validator(mode="after")
     def truthful_routes(self):

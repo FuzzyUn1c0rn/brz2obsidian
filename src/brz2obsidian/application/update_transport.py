@@ -17,6 +17,7 @@ from .protocol import (
 )
 from .transport import Terminal
 from .update_stream import WorkerStreamDecoder
+from .update_worker_contracts import update_control_scope
 
 
 class UpdateChannel:
@@ -171,24 +172,18 @@ class UpdateChannel:
                 if pending is None:
                     return Terminal(phase="not_started", code="protocol_failure")
                 active = pending[0].request
-                extra = (
-                    {
-                        "vault": active.arguments.vault,
-                        "selection_id": active.arguments.selection_id,
-                    }
-                    if binding is None and active.arguments.command == "prepare"
-                    else {}
-                )
+                scope = update_control_scope(active.arguments)
+                if scope is None or binding is not None and binding != scope["binding"]:
+                    return Terminal(phase="not_started", code="protocol_failure")
             request = WorkerRequest(
                 request_id=str(uuid4()),
                 sequence=1,
                 operation="update",
                 arguments={
                     "command": "cancel",
-                    "binding": binding,
                     "target_request_id": target_request_id,
                     "target_sequence": active.sequence,
-                    **extra,
+                    **scope,
                 },
             )
             return self._exchange(request)

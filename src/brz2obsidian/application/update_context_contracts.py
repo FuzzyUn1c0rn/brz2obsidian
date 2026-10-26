@@ -14,6 +14,11 @@ from brz2obsidian.contracts import (
 
 from .contract_values import absolute, request_identity
 from .update_contracts import UpdateReviewPage
+from .update_history_contracts import (
+    HistoryContextBinding,
+    UpdateHistoryActionState,
+    UpdateHistoryState,
+)
 
 
 class UpdateContextBinding(ReconciliationContract):
@@ -148,19 +153,37 @@ class UpdateContextResult(ReconciliationContract):
         "applied",
         "failed",
         "available",
+        "initialization_required",
+        "initialized_review_required",
+        "declined",
+        "onboarding_required",
+        "unavailable",
+        "setup_required",
+        "direction_required",
+        "undone",
+        "restored",
+        "repaired",
+        "cancelled",
+        "incomplete",
+        "content_complete",
+        "unknown",
     ]
     code: str
     kind: Literal[
-        "source_update", "onboarding", "format_transition", "attachment_cleanup"
+        "source_update",
+        "onboarding",
+        "format_transition",
+        "attachment_cleanup",
+        "history",
     ]
-    binding: UpdateContextBinding | None = None
+    binding: UpdateContextBinding | HistoryContextBinding | None = None
     ready: bool = False
     draft_pending: bool = False
     changes: int = Field(default=0, ge=0)
     unresolved: int = Field(default=0, ge=0)
     stale: int = Field(default=0, ge=0)
     next_actions: tuple[str, ...] = ()
-    history_retained: bool = False
+    history_retained: bool | None = False
     checkpoint_commit: str | None = None
     publication: Literal[
         "not_started", "not_published", "partial", "complete", "unknown"
@@ -177,6 +200,9 @@ class UpdateContextResult(ReconciliationContract):
     next_reference_offset: int | None = Field(default=None, ge=0)
     edit: UpdateEditState | None = None
     configuration: UpdateConfigurationOffer | None = None
+    history: UpdateHistoryState | None = None
+    history_action: UpdateHistoryActionState | None = None
+    repository_created: bool | None = None
 
     @model_validator(mode="after")
     def truthful_context(self):

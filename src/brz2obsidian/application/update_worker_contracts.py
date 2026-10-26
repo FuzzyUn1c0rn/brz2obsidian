@@ -12,6 +12,7 @@ from .update_context_contracts import (
     UpdateEditHandle,
     UpdateReferenceChoice,
 )
+from .update_history_contracts import HistoryContextBinding
 
 
 class PrepareUpdateCommand(ReconciliationContract):
@@ -36,6 +37,36 @@ class PrepareUpdateCommand(ReconciliationContract):
         if self.original_source is not None and self.kind != "onboarding":
             raise ValueError("Original reference evidence belongs to onboarding")
         return self
+
+
+class HistoryInspectionCommand(ReconciliationContract):
+    command: Literal["history"]
+    vault: str
+    selection_id: str
+    _vault = field_validator("vault")(absolute)
+    _selection = field_validator("selection_id")(request_identity)
+
+
+class InitializeVaultCommand(ReconciliationContract):
+    command: Literal["initialize_vault"]
+    binding: HistoryContextBinding
+    choice: Literal["initialize", "decline"]
+
+
+class PrepareHistoryCommand(ReconciliationContract):
+    command: Literal["prepare_history"]
+    binding: HistoryContextBinding
+    kind: Literal["recovery", "undo", "repair"]
+    direction: Literal["finish", "restore"] | None = None
+    copy_path: str | None = None
+    _copy = field_validator("copy_path")(
+        lambda value: absolute(value) if value is not None else None
+    )
+
+
+class ContinueHistoryCommand(ReconciliationContract):
+    command: Literal["refresh_history", "execute_history"]
+    binding: HistoryContextBinding
 
 
 class PageUpdateCommand(ReconciliationContract):
@@ -121,7 +152,7 @@ class ConfigurationChoiceCommand(ReconciliationContract):
 class CloseUpdateCommand(ReconciliationContract):
     command: Literal["close"]
     choice: Literal["continue", "save", "discard"]
-    binding: UpdateContextBinding | None = None
+    binding: UpdateContextBinding | HistoryContextBinding | None = None
 
 
 class DiscardDraftCommand(ReconciliationContract):
@@ -149,7 +180,7 @@ class OpenSavedUpdateCommand(ReconciliationContract):
 
 class CancelUpdateCommand(ReconciliationContract):
     command: Literal["cancel"]
-    binding: UpdateContextBinding | None
+    binding: UpdateContextBinding | HistoryContextBinding | None
     target_request_id: str
     target_sequence: int = Field(ge=1)
     vault: str | None = None
@@ -170,8 +201,28 @@ class CancelUpdateCommand(ReconciliationContract):
         return self
 
 
+def update_control_scope(arguments):
+    """Extract only the exact scope of an already validated admitted command."""
+    binding = getattr(arguments, "binding", None) or getattr(
+        getattr(arguments, "handle", None), "binding", None
+    )
+    if binding is not None:
+        return {"binding": binding}
+    if arguments.command in ("prepare", "load", "resume", "history"):
+        return {
+            "binding": None,
+            "vault": arguments.vault,
+            "selection_id": arguments.selection_id,
+        }
+    return None
+
+
 UpdateCommand = Annotated[
     PrepareUpdateCommand
+    | HistoryInspectionCommand
+    | InitializeVaultCommand
+    | PrepareHistoryCommand
+    | ContinueHistoryCommand
     | PageUpdateCommand
     | ReferenceUpdateCommand
     | ChoicePageUpdateCommand

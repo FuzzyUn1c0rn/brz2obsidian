@@ -8,6 +8,7 @@ from .protocol import REQUEST_LIMIT, ProtocolFailure, decode_request, encode_res
 from .update_context import UpdateContext
 from .update_context_contracts import UpdateContextResult
 from .update_stream import encode_end
+from .update_worker_contracts import update_control_scope
 
 
 class UpdateWorker:
@@ -78,22 +79,20 @@ class UpdateWorker:
         args = request.arguments
         with self._activity:
             current = self._active
+            scope = (
+                {"binding": args.binding}
+                if args.binding is not None
+                else {
+                    "binding": None,
+                    "vault": args.vault,
+                    "selection_id": args.selection_id,
+                }
+            )
             matched = (
                 current is not None
                 and current.request_id == args.target_request_id
                 and current.sequence == args.target_sequence
-                and (
-                    (
-                        args.binding is not None
-                        and getattr(current.arguments, "binding", None) == args.binding
-                    )
-                    or (
-                        args.binding is None
-                        and current.arguments.command == "prepare"
-                        and current.arguments.vault == args.vault
-                        and current.arguments.selection_id == args.selection_id
-                    )
-                )
+                and update_control_scope(current.arguments) == scope
             )
             kind = (
                 current.arguments.kind
@@ -126,6 +125,16 @@ class UpdateWorker:
             values = args.model_dump(exclude={"command"})
             if args.command == "prepare":
                 result = self.context.prepare(**values, cancel=cancel.is_set)
+            elif args.command == "history":
+                result = self.context.history(**values, cancel=cancel.is_set)
+            elif args.command == "initialize_vault":
+                result = self.context.initialize_vault(**values)
+            elif args.command == "prepare_history":
+                result = self.context.prepare_history(**values)
+            elif args.command == "refresh_history":
+                result = self.context.refresh_history(**values)
+            elif args.command == "execute_history":
+                result = self.context.execute_history(**values, cancel=cancel.is_set)
             elif args.command == "page":
                 result = self.context.page(**values)
             elif args.command == "references":
@@ -151,9 +160,9 @@ class UpdateWorker:
             elif args.command == "save":
                 result = self.context.save(**values)
             elif args.command == "load":
-                result = self.context.load(**values)
+                result = self.context.load(**values, cancel=cancel.is_set)
             elif args.command == "resume":
-                result = self.context.resume(**values)
+                result = self.context.resume(**values, cancel=cancel.is_set)
             elif args.command == "close":
                 result = self.context.close(**values)
                 self.closed = result.code == "context_closed"
