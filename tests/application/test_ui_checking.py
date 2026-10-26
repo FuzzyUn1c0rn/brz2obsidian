@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 
-from brz2obsidian.application.operations import check_vault
+from brz2obsidian.application.operations import Operations, check_vault
 
 
 def inventory(vault):
@@ -84,7 +84,10 @@ def test_explicit_checker_composition_executes_supplied_backend_and_projects_saf
     assert result.counts.base_files is None
     assert result.findings[0].code == "missing_image"
     assert result.findings[0].path == "Manual.md"
-    assert "Review the image link" in result.findings[0].message
+    assert (
+        result.findings[0].message
+        == "Couldn’t verify the image. Check its link and file."
+    )
     assert "CANARY" not in result.model_dump_json()
     assert str(vault) in result.diagnostic_text
     assert not vault.exists()
@@ -209,7 +212,11 @@ def test_check_failure_preserves_input_and_reports_vault_field_error(tmp_path, k
     assert result.outcome == "failed"
     assert result.field_errors[0].field == "vault"
     assert result.field_errors[0].code == "read_failure"
-    assert "Check the path" in result.field_errors[0].message
+    assert result.field_errors[0].message == (
+        "Couldn’t read this file. Check access and text encoding."
+        if kind == "unreadable_note"
+        else "Couldn’t read the vault. Check folder access."
+    )
     if kind != "unreadable_note":
         assert result.counts.inventory_files is None
         assert result.counts.markdown_files is None
@@ -240,6 +247,113 @@ def test_check_findings_keep_artifact_context_and_exclude_authored_references(tm
     assert "REFERENCE_FRAGMENT_CANARY" not in result.model_dump_json()
     assert "NOTE_BODY_CANARY" not in result.model_dump_json()
     assert inventory(tmp_path) == before
+
+
+@pytest.mark.parametrize(
+    "code,message",
+    [
+        ("invalid_frontmatter", "Invalid note properties. Check their format."),
+        ("invalid_property", "Invalid property value. Check its type and format."),
+        (
+            "invalid_category",
+            "Link to a category note in Categories with the categories tag.",
+        ),
+        ("invalid_provider", "Choose one of this note’s categories, or leave blank."),
+        (
+            "missing_base",
+            "Couldn’t verify the Base file. Check its link and contents.",
+        ),
+        (
+            "missing_image",
+            "Couldn’t verify the image. Check its link and file.",
+        ),
+        (
+            "ambiguous_reference",
+            "Several files match this link. Use its full vault path.",
+        ),
+        (
+            "duplicate_source_identity",
+            "Multiple notes identify the same imported item. Review the copies.",
+        ),
+        ("unsafe_reference", "Use a regular file or folder inside the vault."),
+        ("invalid_base", "Invalid Base file. Check its format."),
+    ],
+)
+def test_checker_findings_use_approved_concise_copy_and_keep_detailed_guidance(
+    tmp_path, code, message
+):
+    from brz2obsidian.vault_check.contracts import (
+        VaultCheckCounts,
+        VaultCheckIdentity,
+        VaultCheckIssue,
+        VaultCheckResult,
+    )
+
+    issue = VaultCheckIssue(
+        code=code,
+        artifact="Broken.md",
+        message="raw private content",
+        guidance="untrusted injected guidance",
+    )
+    raw = VaultCheckResult(
+        outcome="issues",
+        vault=VaultCheckIdentity(location=str(tmp_path), name=tmp_path.name),
+        counts=VaultCheckCounts(inventory_files=1),
+        issues=(issue,),
+    )
+    result = Operations(checker=lambda _path: raw).check_vault(tmp_path)
+
+    assert result.findings[0].message == message
+    assert result.findings[0].path == "Broken.md"
+    assert f"{code} (Broken.md): {message}" in result.diagnostic_text
+    assert "  Details: " in result.diagnostic_text
+    assert "untrusted injected guidance" not in result.diagnostic_text
+    assert "raw private content" not in result.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    "artifact,message,expected_path",
+    [
+        (None, "Couldn’t read the vault. Check folder access.", None),
+        (".", "Couldn’t read the vault. Check folder access.", None),
+        (
+            "Broken.md",
+            "Couldn’t read this file. Check access and text encoding.",
+            "Broken.md",
+        ),
+    ],
+)
+def test_checker_distinguishes_root_and_file_read_failures(
+    tmp_path, artifact, message, expected_path
+):
+    from brz2obsidian.vault_check.contracts import (
+        VaultCheckCounts,
+        VaultCheckIdentity,
+        VaultCheckIssue,
+        VaultCheckResult,
+    )
+
+    raw = VaultCheckResult(
+        outcome="failed",
+        vault=VaultCheckIdentity(location=str(tmp_path), name=tmp_path.name),
+        counts=VaultCheckCounts(),
+        issues=(
+            VaultCheckIssue(
+                code="read_failure",
+                artifact=artifact,
+                message="private read failure",
+                guidance="untrusted injected guidance",
+            ),
+        ),
+    )
+    result = Operations(checker=lambda _path: raw).check_vault(tmp_path)
+
+    assert result.findings[0].message == message
+    assert result.findings[0].path == expected_path
+    assert (
+        "Check the path, permissions and text encoding, then check again."
+        in result.diagnostic_text
+    )
 
 
 def test_failed_check_retains_each_finding_with_one_concise_vault_field_error(tmp_path):

@@ -320,6 +320,18 @@ def diagnosed_issue(issue):
 
 def explain_issue(issue, operation):
     """Return an operation, supported cause and action, without exception text."""
+    reason = (
+        (issue.rule_id or "").removeprefix("diagnostic.")
+        if (issue.rule_id or "").startswith("diagnostic.")
+        else None
+    )
+    if (
+        operation == "inspect"
+        and issue.code == "write_failure"
+        and reason == "archive_missing"
+        and (issue.code, reason) in REASONS
+    ):
+        return "Archive not found. Choose an existing BRZ file."
     prefix = {
         "inspect": "Inspection stopped",
         "convert": "Conversion stopped",
@@ -331,11 +343,6 @@ def explain_issue(issue, operation):
             "convert": "Conversion reported a warning",
             "list_brains": "Brain listing reported a warning",
         }[operation]
-    reason = (
-        (issue.rule_id or "").removeprefix("diagnostic.")
-        if (issue.rule_id or "").startswith("diagnostic.")
-        else None
-    )
     admitted_reason = reason if (issue.code, reason) in REASONS else None
     explanation = REASONS.get((issue.code, admitted_reason)) or CODE_EXPLANATIONS.get(
         issue.code

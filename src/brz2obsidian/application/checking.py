@@ -10,7 +10,7 @@ from brz2obsidian.vault_check.contracts import VaultCheckResult
 
 # Raw messages, references and candidate lists can contain authored content.
 # Only known codes, static guidance and the affected artifact path are admitted.
-SAFE_FINDINGS = {
+DETAILED_FINDINGS = {
     "invalid_frontmatter": "Vault check found invalid frontmatter, the properties at the start of a note. These properties must use YAML (a text data format) with one value per key and no executable tags. Correct the properties in the affected note, then check again.",
     "invalid_property": "Vault check found a note property with an invalid value. Review that property's type and supported format in the affected note, then check again.",
     "invalid_category": "Vault check found an invalid category membership. Link it to a note in Categories with the categories tag, then check again.",
@@ -23,15 +23,32 @@ SAFE_FINDINGS = {
     "read_failure": "Vault check could not read the vault folder or one of its files completely. Check the path, permissions and text encoding, then check again.",
     "invalid_base": "Vault check found invalid Base data. A Base must use YAML (a text data format), with one value per key and no executable tags. Correct the affected Base file, then check again.",
 }
+SAFE_FINDINGS = {
+    "invalid_frontmatter": "Invalid note properties. Check their format.",
+    "invalid_property": "Invalid property value. Check its type and format.",
+    "invalid_category": "Link to a category note in Categories with the categories tag.",
+    "invalid_provider": "Choose one of this note’s categories, or leave blank.",
+    "missing_base": "Couldn’t verify the Base file. Check its link and contents.",
+    "missing_image": "Couldn’t verify the image. Check its link and file.",
+    "ambiguous_reference": "Several files match this link. Use its full vault path.",
+    "duplicate_source_identity": "Multiple notes identify the same imported item. Review the copies.",
+    "unsafe_reference": "Use a regular file or folder inside the vault.",
+    "read_failure": "Couldn’t read this file. Check access and text encoding.",
+    "invalid_base": "Invalid Base file. Check its format.",
+}
 
 
 def finding_for_check(issue, outcome):
+    path = None if issue.artifact == "." else issue.artifact
+    message = SAFE_FINDINGS[issue.code]
+    if issue.code == "read_failure" and path is None:
+        message = "Couldn’t read the vault. Check folder access."
     return Finding(
         code=issue.code,
         severity="error" if outcome == "failed" else "warning",
-        message=SAFE_FINDINGS[issue.code],
+        message=message,
         field="vault",
-        path=issue.artifact,
+        path=path,
     )
 
 
@@ -62,8 +79,12 @@ def check_vault(
                     for name, value in raw.counts.model_dump().items()
                 ),
                 *(
-                    f"{finding.code} ({finding.path or 'vault'}): {finding.message}"
-                    for finding in findings
+                    line
+                    for issue, finding in zip(raw.issues, findings, strict=True)
+                    for line in (
+                        f"{finding.code} ({finding.path or 'vault'}): {finding.message}",
+                        f"  Details: {DETAILED_FINDINGS[issue.code]}",
+                    )
                 ),
             )
         ),

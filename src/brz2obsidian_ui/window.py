@@ -46,9 +46,11 @@ from brz2obsidian.application.contracts import (
     SetSourceKind,
     SimpleCommand,
 )
+from brz2obsidian.application.operations import validate_vault_name
 from brz2obsidian.application.runner import HostRunner
 from brz2obsidian.application.transport import Supervisor
 from brz2obsidian_ui.platform_actions import CompletionActions, DiagnosticActions
+from brz2obsidian_ui.validation import api_configuration
 
 EXPLANATIONS = (
     "Convert a BRZ archive into a new Obsidian vault.",
@@ -253,6 +255,7 @@ class MainWindow(QMainWindow):
         self.resize(780, 820)
         self.setMinimumSize(440, 470)
         self.snapshot = SessionSnapshot()
+        self._name_edited = False
         self.diagnostics_expanded = False
         self._may_close = False
         self._started = None
@@ -362,6 +365,16 @@ class MainWindow(QMainWindow):
         self.api_address.setAccessibleName("Local API address")
         self.api_address.textChanged.connect(self._api_settings_edited)
         api_layout.addWidget(self.api_address)
+        self.api_field_errors = {}
+        address_error = label("", "fieldError")
+        address_error.setAccessibleName("Local API address error")
+        address_error.hide()
+        api_layout.addWidget(address_error)
+        self.api_field_errors["api_url"] = address_error
+        self.api_address.setToolTip(
+            "Use the local HTTP(S) address from TheBrain settings, ending in /api, "
+            "without credentials, a query or a fragment."
+        )
         self.api_help = label(
             "Enable Local API in TheBrain settings and use its current address. Set THE_BRAIN_LOCAL_API_KEY in the launch environment; keys are supplied externally.",
             "muted",
@@ -404,13 +417,24 @@ class MainWindow(QMainWindow):
             field.textChanged.connect(self._api_settings_edited)
             self.api_search_fields[key] = field
             advanced_layout.addWidget(field)
+            error = label("", "fieldError")
+            error.setAccessibleName(title + " error")
+            error.hide()
+            advanced_layout.addWidget(error)
+            self.api_field_errors[key] = error
+            field.setToolTip(
+                "Enter 0.001–86,400 seconds, with up to three decimal places."
+                if key == "search_timeout"
+                else "Enter 1–9,223,372,036,854,775,807 bytes."
+                if key == "search_max_response_bytes"
+                else "Enter 1–2,147,483,647, or leave blank to disable the ceiling."
+                if key == "search_max_results"
+                else "Enter 1–2,147,483,647."
+            )
         self.api_advanced_toggle.toggled.connect(self._api_advanced_changed)
         self.api_advanced.hide()
         api_layout.addWidget(self.api_advanced_toggle)
         api_layout.addWidget(self.api_advanced)
-        self.api_error = label("", "fieldError")
-        self.api_error.setAccessibleName("API configuration error")
-        api_layout.addWidget(self.api_error)
         self.api_consistency = label(
             "API acquisition reads several requests over time and is not an atomic snapshot. Inspection acquires and releases a captured copy. Conversion acquires again, repeats the cost and requires another review if content or compatibility changed. Capture verification checks the captured copy, not an unchanged live Brain.",
             "muted",
@@ -544,6 +568,29 @@ class MainWindow(QMainWindow):
         self.validation_status = label("Choose an output parent folder.", "muted")
         self.validation_status.setAccessibleName("Destination validation status")
         destination.addWidget(self.validation_status)
+        self.destination_details_toggle = QPushButton(
+            "▸ Destination details", objectName="diagnosticDisclosure"
+        )
+        self.destination_details_toggle.setAccessibleName("Destination details")
+        self.destination_details_toggle.setCheckable(True)
+        destination.addWidget(self.destination_details_toggle)
+        self.destination_details = label(
+            "Use one nonblank Windows folder name without reserved device names, "
+            "invalid characters, or a trailing dot or space. Choose an existing, "
+            "readable parent folder using its full path.\n"
+            "The destination must be new or empty. Existing contents are never removed. "
+            "Folder redirects include symbolic links and Windows reparse points.\n"
+            "This is a preliminary check; no folder is reserved. Generated paths, "
+            "collisions, manifest and final 240 UTF-16-unit paths remain pending; "
+            "write success is checked during publication.",
+            "muted",
+        )
+        self.destination_details.setAccessibleName("Destination validation details")
+        self.destination_details.hide()
+        self.destination_details_toggle.toggled.connect(
+            self._destination_details_changed
+        )
+        destination.addWidget(self.destination_details)
         body.addWidget(self.destination_form)
         self.published_panel = QWidget()
         published = QVBoxLayout(self.published_panel)
@@ -655,34 +702,39 @@ class MainWindow(QMainWindow):
             self.submit(SetSourceKind(kind="local-api" if index == 1 else "brz"))
 
     def _api_advanced_changed(self, expanded):
+        if not expanded and any(
+            widget.text()
+            for key, widget in self.api_field_errors.items()
+            if key != "api_url"
+        ):
+            self.api_advanced_toggle.setChecked(True)
+            return
         self.api_advanced.setVisible(expanded)
         self.api_advanced_toggle.setText(
             ("▾" if expanded else "▸") + " Advanced search limits"
         )
 
+    def _destination_details_changed(self, expanded):
+        self.destination_details.setVisible(expanded)
+        self.destination_details_toggle.setText(
+            ("▾" if expanded else "▸") + " Destination details"
+        )
+
     def _api_settings_edited(self, *_):
         if self._updating_api or self.source_kind.currentIndex() != 1:
             return
-        try:
-            values = (self.snapshot.api_config or ApiAcquisitionConfig()).model_dump()
-            values["api_url"] = self.api_address.text()
-            for key, field in self.api_search_fields.items():
-                raw = field.text()
-                values[key] = (
-                    None
-                    if key == "search_max_results" and raw == ""
-                    else float(raw)
-                    if key == "search_timeout"
-                    else int(raw)
-                )
-            config = ApiAcquisitionConfig(**values)
-        except ValueError, TypeError:
-            config = None
-        self.api_error.setText(
-            "Use a local HTTP(S) API address without credentials and positive bounded search limits. The optional maximum must be a positive API integer."
-            if config is None
-            else ""
+        config, errors = api_configuration(
+            self.snapshot.api_config or ApiAcquisitionConfig(),
+            {
+                "api_url": self.api_address.text(),
+                **{key: field.text() for key, field in self.api_search_fields.items()},
+            },
         )
+        for key, widget in self.api_field_errors.items():
+            widget.setText(errors.get(key, ""))
+            widget.setVisible(key in errors)
+        if any(key != "api_url" for key in errors):
+            self.api_advanced_toggle.setChecked(True)
         self.submit(ConfigureApi(config=config))
 
     def _api_brain_chosen(self, index):
@@ -962,6 +1014,7 @@ class MainWindow(QMainWindow):
         self.choose_parent_button.setFocus()
 
     def _destination_name_edited(self, text):
+        self._name_edited = True
         parent = self._pending_form[0] if self._pending_form else self.snapshot.parent
         self._destination_edited(parent, text)
 
@@ -1076,6 +1129,8 @@ class MainWindow(QMainWindow):
     def _present(self, prepared):
         previous = self.snapshot
         self.snapshot = prepared.update.snapshot
+        if self.snapshot.source != previous.source:
+            self._name_edited = False
         if self._diagnostic_generation != prepared.diagnostic_generation:
             self._diagnostic_generation = prepared.diagnostic_generation
             self._diagnostic_busy = False
@@ -1180,6 +1235,7 @@ class MainWindow(QMainWindow):
             self.snapshot.can_check_selected_vault
             if mode == 2
             else primary_action in self.snapshot.allowed_actions
+            and not (mode == 0 and self._pending_form is not None)
         )
         self.primary.setText(
             {
@@ -1280,8 +1336,18 @@ class MainWindow(QMainWindow):
             (self.name_error, "vault_name"),
             (self.destination_error, "destination"),
         ):
+            name_error = (
+                validate_vault_name(self.vault_name.text())
+                if field == "vault_name"
+                and (self._name_edited or self.snapshot.parent is not None)
+                else None
+            )
             widget.setText(
-                "\n".join(error.message for error in errors if error.field == field)
+                (name_error.message if name_error else "")
+                if field == "vault_name"
+                else "\n".join(
+                    error.message for error in errors if error.field == field
+                )
             )
             widget.setVisible(bool(widget.text()))
         validating = self._pending_form is not None or self.snapshot.validation_pending
@@ -1296,20 +1362,25 @@ class MainWindow(QMainWindow):
         self.validation_status.setText(
             "Checking destination…"
             if validating
-            else "Preliminary check passed. No folder is reserved. Generated paths, collisions, manifest and final 240 UTF-16-unit paths remain pending; write success is checked during publication."
+            else "Destination looks valid. Final checks run during conversion."
             if validation and validation.outcome == "valid"
-            else "Destination check could not complete. Correct the fields or choose again when ready."
+            else ""
             if validation and validation.outcome == "failed"
-            else "Correct the destination fields before conversion."
+            else ""
             if validation
             else "Review the destination and validate a corrected choice before another conversion."
             if publication is not None
+            else ""
+            if errors
             else "Choose an output parent folder."
         )
+        self.validation_status.setVisible(bool(self.validation_status.text()))
         result = self.snapshot.result
         self.vault_error.setText(
             "\n".join(
-                error.message for error in result.field_errors if error.field == "vault"
+                error.message
+                for error in result.field_errors
+                if error.field == "vault" and error not in result.findings
             )
             if mode == 2 and result is not None and result.operation == "check_vault"
             else ""
