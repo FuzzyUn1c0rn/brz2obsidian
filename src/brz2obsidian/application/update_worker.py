@@ -7,6 +7,7 @@ from .contracts import ProtocolError, WorkerResponse
 from .protocol import REQUEST_LIMIT, ProtocolFailure, decode_request, encode_response
 from .update_context import UpdateContext
 from .update_context_contracts import UpdateContextResult
+from .update_output import UpdateOutput
 from .update_stream import encode_end
 from .update_worker_contracts import update_control_scope
 
@@ -17,7 +18,9 @@ class UpdateWorker:
         self.output = output
         self.closed = False
         self._next_sequence = 1
-        self._sequence_lock, self._activity, self._writer = Lock(), Lock(), Lock()
+        self._sequence_lock, self._activity = Lock(), Lock()
+        self._delivery = None
+        self._output_lost = False
         self._active = None
         self._cancel = Event()
 
@@ -63,17 +66,34 @@ class UpdateWorker:
             protocol_error=error,
         )
         terminal, end = encode_response(response), encode_end(response)
-        with self._writer:
-            self.output.write(terminal)
-            with self._activity:
-                if (
-                    self._active is not None
-                    and self._active.request_id == request.request_id
-                    and self._active.sequence == request.sequence
-                ):
-                    self._active = None
-            self.output.write(end)
-            self.output.flush()
+        try:
+            self._output().reply(request, terminal, end)
+        except OSError:
+            # A lost output channel cannot report even the actual native result.
+            # Keep its stream unsealed and request the existing safe stop.
+            self._output_failed()
+
+    def _output(self):
+        # Started before reader/producer concurrency in serve, or by handle.
+        if self._delivery is None:
+            self._delivery = UpdateOutput(
+                self.output, failed=self._output_failed, retired=self._retire
+            )
+        return self._delivery
+
+    def _output_failed(self):
+        self._output_lost = True
+        self.closed = True
+        self._cancel.set()
+
+    def _retire(self, request):
+        with self._activity:
+            if (
+                self._active is not None
+                and self._active.request_id == request.request_id
+                and self._active.sequence == request.sequence
+            ):
+                self._active = None
 
     def _control(self, request):
         args = request.arguments
@@ -111,11 +131,16 @@ class UpdateWorker:
         )
 
     def handle(self, request):
-        self._accept(request)
-        if request.arguments.command == "cancel":
-            self._control(request)
-        else:
-            self._perform(request)
+        self._output()
+        try:
+            self._accept(request)
+            if request.arguments.command == "cancel":
+                self._control(request)
+            else:
+                self._perform(request)
+        finally:
+            self._delivery.close()
+            self._delivery = None
 
     def _perform(self, request):
         args = request.arguments
@@ -160,7 +185,11 @@ class UpdateWorker:
             elif args.command == "seal_edit":
                 result = self.context.seal_edit(**values)
             elif args.command == "apply":
-                result = self.context.apply(**values, cancel=cancel.is_set)
+                result = self.context.apply(
+                    **values,
+                    cancel=cancel.is_set,
+                    progress=self._output().observer(request),
+                )
             elif args.command == "save":
                 result = self.context.save(**values)
             elif args.command == "load":
@@ -192,6 +221,7 @@ class UpdateWorker:
                     self._active = None
 
     def serve(self, incoming, *, first=None):
+        self._output()
         pending = Queue(maxsize=1)
         bad_input = Event()
 
@@ -227,7 +257,8 @@ class UpdateWorker:
         # The sealed close reply lets the parent release stdin. Join before
         # interpreter shutdown so no thread still owns buffered standard I/O.
         reader.join()
-        return 1 if bad_input.is_set() or not self.closed else 0
+        self._delivery.close()
+        return 1 if bad_input.is_set() or self._output_lost or not self.closed else 0
 
 
 def serve_updates(first, incoming, outgoing):

@@ -1982,11 +1982,15 @@ def _apply_reviewed_update(
     source_binding=None,
     observed_source=None,
     cancel=None,
+    progress=None,
     executor=None,
     undo_target=None,
 ):
     """Retain intent before exact selected publication and verify terminal history."""
     start = time.monotonic()
+    from brz2obsidian.application.vault_progress_contracts import report_progress
+
+    report_progress(progress, "review_validation")
     kind = "undo" if undo_target is not None else "apply"
     outcome = partial(_outcome, kind=kind, direction="finish" if undo_target else None)
     selected = select_review_effects(review)
@@ -2253,6 +2257,7 @@ def _apply_reviewed_update(
                     undo_target.receipt_commit if undo_target else None
                 ),
                 _observation=retained_history,
+                progress=progress,
             )
             reused_undo_prepared = (
                 undo_target is not None
@@ -2352,6 +2357,16 @@ def _apply_reviewed_update(
                 git, "intent.json", intent, parents=(prepared_commit,), ref=op_ref
             )
             phase = "publication"
+            report_progress(
+                progress,
+                "publication",
+                operation_id=operation_id,
+                operation_generation=operation_generation,
+                intent_commit=intent_commit,
+                completed_units=published,
+                total_units=len(changed),
+                unit="files",
+            )
             proposed = {row.path: row for row in manifest.proposed}
             prior = {row.path: row for row in manifest.preimage}
             for path in sorted(changed):
@@ -2425,12 +2440,36 @@ def _apply_reviewed_update(
                     ):
                         raise OSError("Published bytes did not match prepared result")
                 published += 1
+                report_progress(
+                    progress,
+                    "publication",
+                    operation_id=operation_id,
+                    operation_generation=operation_generation,
+                    intent_commit=intent_commit,
+                    completed_units=published,
+                    total_units=len(changed),
+                    unit="files",
+                )
+            report_progress(
+                progress,
+                "final_verification",
+                operation_id=operation_id,
+                operation_generation=operation_generation,
+                intent_commit=intent_commit,
+            )
             for path, row in proposed.items():
                 if not _same_file(root, row):
                     raise OSError("Complete proposed inventory disagrees")
             if any(os.path.lexists(root / path) for path in set(prior) - set(proposed)):
                 raise OSError("Removed path remains visible")
             phase = "result"
+            report_progress(
+                progress,
+                "final_reporting",
+                operation_id=operation_id,
+                operation_generation=operation_generation,
+                intent_commit=intent_commit,
+            )
             result_observation = _inspect_update_observation(root)
             authority = result_observation[1]
             if (
@@ -2459,6 +2498,7 @@ def _apply_reviewed_update(
                 operation_intent_commit=intent_commit,
                 subjects=subjects,
                 _observation=result_observation,
+                progress=progress,
             )
             if result_checkpoint.status != "captured":
                 failure_code = "result_" + result_checkpoint.code
@@ -2663,6 +2703,7 @@ def apply_reviewed_update(
     source_binding=None,
     observed_source=None,
     cancel=None,
+    progress=None,
     executor=None,
 ):
     """Retain intent before exact selected publication and verify terminal history."""
@@ -2676,6 +2717,7 @@ def apply_reviewed_update(
             source_binding=source_binding,
             observed_source=observed_source,
             cancel=cancel,
+            progress=progress,
             executor=executor,
         )
     except _OwnedCleanupFailure as failure:

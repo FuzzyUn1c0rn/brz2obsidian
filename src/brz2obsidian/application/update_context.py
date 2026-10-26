@@ -433,7 +433,7 @@ class UpdateContext:
             ),
         )
 
-    def apply(self, binding, *, cancel=None):
+    def apply(self, binding, *, cancel=None, progress=None):
         try:
             expected = UpdateContextBinding.model_validate(binding)
             if self._preparation is None or expected != self._binding:
@@ -444,7 +444,11 @@ class UpdateContext:
             )
         if self._reference_drafts or self._edit is not None:
             return self._uncommitted_draft()
-        result = self._operations.apply_update(self._preparation, cancel=cancel)
+        result = self._operations.apply_update(
+            self._preparation,
+            cancel=cancel,
+            **({"progress": progress} if progress is not None else {}),
+        )
         self._remember(result)
         if (
             result.application is None

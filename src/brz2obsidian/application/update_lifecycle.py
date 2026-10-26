@@ -1514,7 +1514,7 @@ def _reobserve_inputs(operations, preparation, observed):
     return (history, result, retained)
 
 
-def apply_update(operations, preparation, *, cancel=None):
+def apply_update(operations, preparation, *, cancel=None, progress=None):
     native_contact = False
     try:
         history, current, _ = _reobserve(operations, preparation)
@@ -1641,6 +1641,7 @@ def apply_update(operations, preparation, *, cancel=None):
             vault_id=association.vault_id,
             import_id=association.import_id,
             cancel=cancel,
+            **({"progress": progress} if progress is not None else {}),
         )
         stopped_intent = applied.status == "cancelled" and (
             applied.recovery_required

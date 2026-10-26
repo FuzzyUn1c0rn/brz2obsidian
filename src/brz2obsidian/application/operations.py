@@ -90,11 +90,11 @@ class Operations:
 
         return read_checkpoint_payload(vault, **kwargs)
 
-    def apply_update(self, preparation, *, cancel=None):
+    def apply_update(self, preparation, *, cancel=None, progress=None):
         """Reobserve and apply exactly one complete current source review."""
         from .update_lifecycle import apply_update
 
-        return apply_update(self, preparation, cancel=cancel)
+        return apply_update(self, preparation, cancel=cancel, progress=progress)
 
     def resolve_configuration(self, preparation, actions):
         """Record one explicit choice for the complete offered configuration group."""

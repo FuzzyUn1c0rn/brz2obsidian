@@ -385,7 +385,7 @@ def resolve_undo(vault, preparation, action):
         return _preparation("unavailable", "undo_resolution_unavailable")
 
 
-def execute_undo(vault, preparation, *, cancel=None, executor=None):
+def execute_undo(vault, preparation, *, cancel=None, progress=None, executor=None):
     """Start one new Undo operation through the existing staged apply executor."""
     start = time.monotonic()
     result = None
@@ -411,6 +411,7 @@ def execute_undo(vault, preparation, *, cancel=None, executor=None):
                     vault_id=association.vault_id,
                     import_id=association.import_id,
                     cancel=cancel,
+                    progress=progress,
                     executor=executor,
                     undo_target=target,
                 )

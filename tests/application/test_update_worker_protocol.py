@@ -4,6 +4,104 @@ import json
 
 import pytest
 
+
+def test_progress_is_a_bounded_observation_until_one_matching_terminal_seal(tmp_path):
+    from brz2obsidian.application.update_context_contracts import (
+        UpdateContextBinding,
+        UpdateContextResult,
+    )
+    from brz2obsidian.application.update_stream import (
+        WorkerProgress,
+        WorkerStreamDecoder,
+        encode_end,
+        encode_progress,
+    )
+    from brz2obsidian.application.vault_progress_contracts import VaultProgress
+
+    identity = "11111111-1111-4111-8111-111111111111"
+    binding = UpdateContextBinding(
+        context_id=identity,
+        selection_id=identity,
+        vault=str(tmp_path),
+        association_id="a" * 64,
+        checkpoint_commit="4" * 40,
+        checkpoint_generation=4,
+        proposal_id="closed-proposal",
+        generation=2,
+        revision=1,
+    )
+    request = WorkerRequest(
+        operation="update",
+        request_id=identity,
+        sequence=7,
+        arguments={"command": "apply", "binding": binding},
+    )
+    observed = VaultProgress(
+        phase="publication",
+        operation_id="1" * 32,
+        operation_generation=5,
+        intent_commit="6" * 40,
+        completed_units=1,
+        total_units=2,
+        unit="files",
+    )
+    progress = WorkerProgress(
+        request_id=identity, sequence=7, ordinal=1, value=observed
+    )
+    wire = encode_progress(progress)
+    assert len(wire) < 2048 and json.loads(wire)["schema_version"] == 4
+    decoder = WorkerStreamDecoder(request)
+    assert decoder.feed(wire) is None and not decoder.sealed
+    assert decoder.progress == progress
+    for ordinal in range(2, 1002):
+        latest = progress.model_copy(update={"ordinal": ordinal})
+        assert decoder.feed(encode_progress(latest)) is None
+    assert decoder.progress.ordinal == 1001 and decoder.progress.value == observed
+    result = WorkerResponse(
+        operation="update",
+        request_id=identity,
+        sequence=7,
+        result=UpdateContextResult(
+            status="recovery_required",
+            kind="attachment_cleanup",
+            code="cancelled_after_intent",
+            publication="partial",
+            history_retained=True,
+            checkpoint_commit="5" * 40,
+            next_actions=("inspect_history",),
+        ),
+    )
+    terminal = encode_response(result)
+    assert decoder.feed(terminal) is None and decoder.progress is None
+    assert decoder.feed(encode_end(result)) == result and decoder.sealed
+    with pytest.raises(ProtocolFailure):
+        decoder.feed(wire)
+    assert decoder.poisoned and not decoder.sealed and decoder.progress is None
+    for corrupt in (
+        progress.model_copy(
+            update={"request_id": "22222222-2222-4222-8222-222222222222"}
+        ),
+        progress.model_copy(update={"sequence": 8}),
+        progress.model_copy(update={"ordinal": 0}),
+    ):
+        with pytest.raises(ProtocolFailure):
+            WorkerStreamDecoder(request).feed(encode_progress(corrupt))
+    repeated = WorkerStreamDecoder(request)
+    repeated.feed(wire)
+    with pytest.raises(ProtocolFailure):
+        repeated.feed(wire)
+    assert repeated.progress is None
+    missing = json.loads(wire)
+    del missing["value"]["completed_units"]
+    with pytest.raises(ProtocolFailure):
+        WorkerStreamDecoder(request).feed(json.dumps(missing).encode() + b"\n")
+    abandoned = WorkerStreamDecoder(request)
+    abandoned.feed(wire)
+    with pytest.raises(ProtocolFailure):
+        abandoned.eof()
+    assert abandoned.progress is None
+
+
 from brz2obsidian.application.contracts import (
     ConvertArguments,
     InspectArguments,

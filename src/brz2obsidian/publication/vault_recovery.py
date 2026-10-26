@@ -1592,8 +1592,11 @@ def _cleanup_verified_terminal(root, saved, *, start):
         )
 
 
-def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
+def _execute_recovery(vault, preparation, *, cancel=None, progress=None, executor=None):
     """Retain selected direction before ordinary per-file publication."""
+    from brz2obsidian.application.vault_progress_contracts import report_progress
+
+    report_progress(progress, "review_validation")
     start = time.monotonic()
     try:
         saved = VaultRecoveryPreparation.model_validate(preparation)
@@ -1826,6 +1829,7 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
                     active_operation=operation_id,
                     recovery_direction=saved.direction,
                     _observation=(current_status, current_authority),
+                    progress=progress,
                 )
                 reused_preparation = (
                     prepared.status == "unchanged"
@@ -1928,6 +1932,16 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
                     ref=op_ref,
                 )
                 phase = "publication"
+                report_progress(
+                    progress,
+                    "publication",
+                    operation_id=operation_id,
+                    operation_generation=generation,
+                    intent_commit=recovery_commit,
+                    completed_units=published,
+                    total_units=planned,
+                    unit="files",
+                )
                 proposed = {row.path: row for row in manifest.proposed}
                 prior = {row.path: row for row in manifest.preimage}
                 expected_metadata = {row.path: row for row in intent.result_metadata}
@@ -1999,6 +2013,23 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
                         ):
                             raise OSError("Published recovery result changed")
                     published += 1
+                    report_progress(
+                        progress,
+                        "publication",
+                        operation_id=operation_id,
+                        operation_generation=generation,
+                        intent_commit=recovery_commit,
+                        completed_units=published,
+                        total_units=planned,
+                        unit="files",
+                    )
+                report_progress(
+                    progress,
+                    "final_verification",
+                    operation_id=operation_id,
+                    operation_generation=generation,
+                    intent_commit=recovery_commit,
+                )
                 if any(not _same_file(root, row) for row in manifest.proposed):
                     raise OSError("Complete recovery inventory changed")
                 if any(
@@ -2006,6 +2037,13 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
                 ):
                     raise OSError("Removed recovery path remains visible")
                 phase = "result"
+                report_progress(
+                    progress,
+                    "final_reporting",
+                    operation_id=operation_id,
+                    operation_generation=generation,
+                    intent_commit=recovery_commit,
+                )
                 result_observation = _inspect_update_observation(root)
                 current = _inspect_retained_history(
                     root,
@@ -2026,6 +2064,7 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
                     active_operation=operation_id,
                     operation_intent_commit=recovery_commit,
                     _observation=result_observation,
+                    progress=progress,
                 )
                 if result_checkpoint.status != "captured":
                     failure_code = "result_" + result_checkpoint.code
@@ -2196,9 +2235,11 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
                     )
 
 
-def execute_recovery(vault, preparation, *, cancel=None, executor=None):
+def execute_recovery(vault, preparation, *, cancel=None, progress=None, executor=None):
     """Apply a selected recovery direction through the shared Operations seam."""
     try:
-        return _execute_recovery(vault, preparation, cancel=cancel, executor=executor)
+        return _execute_recovery(
+            vault, preparation, cancel=cancel, progress=progress, executor=executor
+        )
     except _OwnedRecoveryCleanupFailure as failure:
         return failure.result

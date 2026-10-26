@@ -1636,6 +1636,7 @@ def capture_checkpoint(
     operation_intent_commit=None,
     recovery_direction=None,
     undo_of_receipt_commit=None,
+    progress=None,
     _observation=None,
 ):
     root, source = Path(vault).absolute(), Path(source).absolute()
@@ -1646,6 +1647,14 @@ def capture_checkpoint(
     retained = False
     commit = ref = None
     try:
+        from brz2obsidian.application.vault_progress_contracts import report_progress
+
+        report_progress(
+            progress,
+            "final_reporting" if boundary == "result" else "snapshot_preparation",
+            operation_id=active_operation,
+            intent_commit=operation_intent_commit,
+        )
         if _observation is not None:
             from brz2obsidian.application.vault_update_contracts import VaultApplyResult
             from brz2obsidian.publication.vault_apply import _OperationObservation
