@@ -1843,6 +1843,16 @@ class _Inspection:
             )
         )
 
+    @staticmethod
+    def _same_review_context(role, parent):
+        fingerprint = getattr(role, "review_context_fingerprint", None)
+        return (
+            isinstance(fingerprint, str)
+            and len(fingerprint) == 64
+            and all(character in "0123456789abcdef" for character in fingerprint)
+            and fingerprint == getattr(parent, "review_context_fingerprint", None)
+        )
+
     def _review_locator(self):
         """Keep memo dependencies on their proved parent, after full validation."""
         locator = self.history.locator
@@ -1871,7 +1881,7 @@ class _Inspection:
                     parent.boundary == "local"
                     and role.memo_fingerprint == parent.memo_fingerprint
                     or parent.boundary == "result"
-                    and parent.memo_fingerprint is None
+                    and self._same_review_context(role, parent)
                 )
                 and role.operation_intent_commit is None
                 and role.undo_of_receipt_commit is None

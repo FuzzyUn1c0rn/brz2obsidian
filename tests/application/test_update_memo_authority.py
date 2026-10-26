@@ -1,7 +1,9 @@
 """A proved first local memo keeps its actual parent's review authority."""
 
+import hashlib
 import json
 import tempfile
+from collections import namedtuple
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -44,6 +46,50 @@ def test_first_local_memo_keeps_proved_result_parent_and_original_remove_decisio
             "commit": "b" * 40,
         }
     )
+    # With a LOCAL review tip the validated reader computes memo fingerprints
+    # for all ancestors, including this RESULT; None is not its actual shape.
+    # The controlled native reader declares a common context over already
+    # validated metadata. Runtime graph/manifest validation remains native-owned.
+    fields = tuple(
+        dict.fromkeys(
+            vault_history._CheckpointRole._fields + ("review_context_fingerprint",)
+        )
+    )
+    ContextRole = namedtuple("ContextRole", fields)
+    source_inventory = tuple(
+        {
+            "path": path,
+            "mode": "100644",
+            "size": len(raw),
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "object_id": hashlib.sha1(
+                b"blob " + str(len(raw)).encode() + b"\x00" + raw
+            ).hexdigest(),
+        }
+        for path, raw in sorted(case.retained.items())
+    )
+    context = {
+        "association": association.model_dump(mode="json"),
+        "identity": case.history.checkpoint.manifest.identity.model_dump(mode="json"),
+        "source": source_inventory,
+        "recovery_gaps": (),
+        "policy_fingerprint": "1" * 64,
+        "policy_continuity_fingerprint": "2" * 64,
+    }
+
+    def projected(role, *, proposed=(), **changes):
+        declared = context | changes
+        proof = hashlib.sha256(
+            json.dumps(declared, sort_keys=True).encode()
+        ).hexdigest()
+        if (
+            role.boundary not in ("result", "local")
+            or role.boundary == "local"
+            and proposed
+        ):
+            proof = None
+        return ContextRole(**(role._asdict() | {"review_context_fingerprint": proof}))
+
     role = vault_history._CheckpointRole(
         parent.commit,
         None,
@@ -54,7 +100,9 @@ def test_first_local_memo_keeps_proved_result_parent_and_original_remove_decisio
         None,
         None,
         None,
+        "e" * 64,
     )
+    role = projected(role)
     active = {"locator": parent, "roles": (role,)}
     metadata = vault / ".brz2obsidian"
     metadata.mkdir()
@@ -109,6 +157,7 @@ def test_first_local_memo_keeps_proved_result_parent_and_original_remove_decisio
         "f" * 64,
         before.preflight.state_fingerprint,
     )
+    memo = projected(memo)
     active.update(locator=local, roles=(memo, role))
     locator_file.write_text(local.model_dump_json())
     after = Operations().inspect_vault(vault)
@@ -135,6 +184,11 @@ def test_first_local_memo_keeps_proved_result_parent_and_original_remove_decisio
         memo._replace(review_parent_fingerprint="foreign-history"),
         memo._replace(operation_intent_commit="d" * 40),
         memo._replace(generation=5),
+        projected(memo, policy_fingerprint="3" * 64),
+        projected(memo, policy_continuity_fingerprint="4" * 64),
+        projected(memo, source=()),
+        projected(memo, proposed=("new-output",)),
+        memo._replace(review_context_fingerprint="invalid"),
     ):
         active["roles"] = (invalid, role)
         refused = Operations().inspect_vault(vault)

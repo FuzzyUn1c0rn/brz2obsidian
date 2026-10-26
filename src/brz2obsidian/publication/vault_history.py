@@ -743,6 +743,25 @@ class _CheckpointRole(NamedTuple):
     memo_fingerprint: str | None = None
     review_parent_fingerprint: str | None = None
     onboarding_absence: bool = False
+    review_context_fingerprint: str | None = None
+
+
+def _review_context_fingerprint(association, manifest):
+    """Project common context; callers consume roles only after graph validation."""
+    if manifest.boundary not in ("result", "local") or (
+        manifest.boundary == "local" and manifest.proposed
+    ):
+        return None
+    return digest(
+        {
+            "association": association.model_dump(mode="json"),
+            "identity": manifest.identity.model_dump(mode="json"),
+            "source": [row.model_dump(mode="json") for row in manifest.source],
+            "recovery_gaps": manifest.recovery_gaps,
+            "policy_fingerprint": manifest.policy_fingerprint,
+            "policy_continuity_fingerprint": manifest.policy_continuity_fingerprint,
+        }
+    )
 
 
 def _onboarding_absence_review(review):
@@ -1109,6 +1128,9 @@ def _read(
                     onboarding_absence=reviewed[manifest.review_object][7]
                     if manifest.review_object is not None
                     else False,
+                    review_context_fingerprint=_review_context_fingerprint(
+                        association, manifest
+                    ),
                 )
             )
         if manifest.reviewed_source is not None and (
@@ -1199,6 +1221,9 @@ def _read(
                     reviewed[manifest.review_object][7]
                     if manifest.review_object is not None
                     else False,
+                    review_context_fingerprint=_review_context_fingerprint(
+                        association, manifest
+                    ),
                 )
             )
         if tip_manifest is None:
