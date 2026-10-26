@@ -70,6 +70,16 @@ def main(argv=None):
     status = actions.add_parser("status")
     status.add_argument("vault")
     status.add_argument("--json", action="store_true", dest="json_output")
+    inspection = actions.add_parser("inspect")
+    inspection.add_argument("vault")
+    inspection.add_argument("--proposal-id")
+    inspection.add_argument("--generation", type=int)
+    inspection.add_argument("--checkpoint")
+    inspection.add_argument("--offset", type=int, default=0)
+    inspection.add_argument("--limit", type=int, default=100)
+    inspection.add_argument("--byte-offset", type=int, default=0)
+    inspection.add_argument("--byte-limit", type=int, default=65536)
+    inspection.add_argument("--json", action="store_true", dest="json_output")
     try:
         args = parser.parse_args(argv)
     except SystemExit as error:

@@ -13,6 +13,7 @@ from tests.application.test_update_lifecycle import (
     case_path,
     git,
 )
+from tests.reconciliation.test_resolution import action
 
 __all__ = ["case_path"]
 
@@ -42,7 +43,26 @@ def test_fresh_cli_inspects_saved_brz_choices_without_changing_vault(
     )
     offered = Operations().prepare_update(vault, incoming)
     assert offered.status == "prepared_review" and not offered.ready, offered
-    prepared = _finish_incoming(offered.preparation)
+    (case_path / "offered-preparation.json").write_text(
+        offered.preparation.model_dump_json(), encoding="utf-8"
+    )
+    note = next(
+        change
+        for change in offered.preparation.review.proposal.changes
+        if change.item_id == "22222222-2222-4222-8222-222222222222"
+    )
+    kept = Operations().resolve_update(
+        offered.preparation,
+        action(
+            offered.preparation.review,
+            note,
+            choice="current",
+            decision_id="cli-keep-note",
+        ),
+    )
+    assert kept.code == "accepted", kept
+    assert kept.preparation.review.approvals[0].result.data == note.current.data
+    prepared = _finish_incoming(kept.preparation)
     assert prepared.review.ready
     expected_decisions = {
         approval.decision_id for approval in prepared.review.approvals
