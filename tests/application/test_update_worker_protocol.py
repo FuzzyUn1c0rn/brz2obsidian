@@ -519,8 +519,12 @@ def test_worker_stream_keeps_unsaved_producer_between_commands(tmp_path):
     worker.handle(prepare)
     frames = output.getvalue().splitlines(keepends=True)
     first = WorkerStreamDecoder(prepare)
-    assert first.feed(frames[0]) is None
-    result = first.feed(frames[1]).result
+    prepared = None
+    for frame in frames:
+        prepared = first.feed(frame)
+    first.eof()
+    assert first.sealed and not first.poisoned and prepared is not None
+    result = prepared.result
     assert result.binding is not None and result.unresolved == 2
     output.seek(0)
     output.truncate()
