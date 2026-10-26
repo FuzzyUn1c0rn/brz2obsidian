@@ -1,6 +1,7 @@
 """Live controls reach blocked native I/O without changing publication truth."""
 
 import io
+import json
 import os
 from threading import Event, Thread
 from uuid import uuid4
@@ -8,8 +9,12 @@ from uuid import uuid4
 import pytest
 
 from brz2obsidian.application.contracts import WorkerRequest
-from brz2obsidian.application.protocol import ProtocolFailure, encode_request
-from brz2obsidian.application.update_stream import WorkerStreamDecoder
+from brz2obsidian.application.protocol import (
+    ProtocolFailure,
+    encode_request,
+    encode_response,
+)
+from brz2obsidian.application.update_stream import WorkerStreamDecoder, encode_end
 from brz2obsidian.application.update_worker import UpdateWorker
 from brz2obsidian.application.vault_update_contracts import VaultApplyResult
 from tests.application.test_history_workflow import operation_state
@@ -61,7 +66,10 @@ def test_live_cancel_reaches_blocked_native_io_and_retains_after_intent_truth(
             "published_files": 1,
             "authored_files_changed": True,
             "intent_commit": "2" * 40,
-            "review_generation": None,
+            "generation": 3,
+            "review_generation": binding.generation,
+            "direction": None,
+            "origin_role": "attachment_cleanup",
             "recovery_required": True,
         }
     )
@@ -136,6 +144,56 @@ def test_live_cancel_reaches_blocked_native_io_and_retains_after_intent_truth(
         assert (
             terminal.result.publication == "partial"
             and terminal.result.history_retained
+        )
+        assert terminal.result.operation == native
+        assert (
+            terminal.result.operation.generation == 3
+            and binding.checkpoint_generation == 2
+        )
+        assert terminal.result.operation.review_generation == binding.generation == 1
+        assert terminal.result.operation.origin_role == "attachment_cleanup"
+        assert terminal.result.operation.intent_commit == "2" * 40
+        assert terminal.result.binding is None
+        baseline = WorkerStreamDecoder(apply)
+        assert baseline.feed(encode_response(terminal)) is None
+        assert baseline.feed(encode_end(terminal)) == terminal
+        for contradiction in (
+            {"publication": "not_published"},
+            {"history_retained": False},
+            {"status": "cancelled_before_publication"},
+        ):
+            raw = json.loads(encode_response(terminal))
+            raw["result"].update(contradiction)
+            rejected = WorkerStreamDecoder(apply)
+            with pytest.raises(ProtocolFailure):
+                rejected.feed(json.dumps(raw).encode("utf-8") + b"\n")
+            assert rejected.poisoned and not rejected.sealed
+        continued = context.close(None, choice="continue")
+        assert (
+            continued.operation == native
+            and continued.publication == "partial"
+            and continued.history_retained
+        )
+        assert continued.status == "recovery_required" and not continued.ready
+        closed = context.close(None, choice="discard")
+        assert (
+            closed.operation == native
+            and closed.publication == "partial"
+            and closed.history_retained
+        )
+        other = context.prepare(
+            str(tmp_path / "other-vault"),
+            selection_id=str(uuid4()),
+            kind="onboarding",
+            cancel=lambda: True,
+        )
+        assert (
+            other.status == "cancelled_before_publication" and other.operation is None
+        )
+        assert (
+            other.history_retained is False
+            and other.checkpoint_commit is None
+            and other.binding is None
         )
         assert observed_cancel == [True]
     finally:

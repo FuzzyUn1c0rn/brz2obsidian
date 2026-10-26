@@ -3,7 +3,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from threading import Event
+from threading import Event, Lock
 from uuid import uuid4
 
 from brz2obsidian.application.contracts import (
@@ -83,6 +83,9 @@ class HostRunner:
         self._update_epoch = str(uuid4())
         self._update_request = None
         self._update_cancel = Event()
+        self._progress_lock = Lock()
+        self._pending_progress = None
+        self._progress_scheduled = False
         self._update_controls = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="update-control"
         )
@@ -190,6 +193,7 @@ class HostRunner:
                         on_uncertain=lambda: self._queue_update_uncertainty(epoch)
                     )
                     opening_child = False
+                epoch = self._update_epoch
                 terminal = (
                     not_dispatched()
                     if cancel.is_set()
@@ -197,6 +201,9 @@ class HostRunner:
                         request,
                         on_dispatched=lambda actual: self._resubmit_update_cancel(
                             actual, cancel
+                        ),
+                        on_progress=lambda actual, progress: (
+                            self._queue_update_progress(epoch, actual, progress)
                         ),
                     )
                 )
@@ -219,6 +226,39 @@ class HostRunner:
                 )
             except RuntimeError:
                 self.session.complete_update(request.request_id, terminal)
+
+    def _queue_update_progress(self, epoch, request, progress):
+        if self._stopped.is_set():
+            return
+        with self._progress_lock:
+            self._pending_progress = (epoch, request, progress)
+            if self._progress_scheduled:
+                return
+            self._progress_scheduled = True
+        try:
+            self._commands.submit(self._drain_update_progress)
+        except RuntimeError:
+            with self._progress_lock:
+                self._pending_progress = None
+                self._progress_scheduled = False
+
+    def _drain_update_progress(self):
+        with self._progress_lock:
+            observation, self._pending_progress = self._pending_progress, None
+        if observation is not None:
+            self._present_update(self.session.observe_update_progress(*observation))
+        with self._progress_lock:
+            if self._pending_progress is None:
+                self._progress_scheduled = False
+                return
+        # Requeue behind ordinary commands rather than starving control/terminal
+        # reduction when the presentation consumer is slow.
+        try:
+            self._commands.submit(self._drain_update_progress)
+        except RuntimeError:
+            with self._progress_lock:
+                self._pending_progress = None
+                self._progress_scheduled = False
 
     def _complete_update(self, request_id, terminal):
         self._present_update(self.session.complete_update(request_id, terminal))

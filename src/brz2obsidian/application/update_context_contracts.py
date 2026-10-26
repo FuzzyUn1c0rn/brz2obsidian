@@ -12,13 +12,15 @@ from brz2obsidian.contracts import (
     ReviewDomain,
 )
 
+from .checkpoint_contracts import CheckpointResult
 from .contract_values import absolute, request_identity
-from .update_contracts import UpdateReviewPage
+from .update_contracts import UpdateReviewPage, update_application_status
 from .update_history_contracts import (
     HistoryContextBinding,
     UpdateHistoryActionState,
     UpdateHistoryState,
 )
+from .vault_update_contracts import VaultApplyResult
 
 
 class UpdateContextBinding(ReconciliationContract):
@@ -203,10 +205,69 @@ class UpdateContextResult(ReconciliationContract):
     history: UpdateHistoryState | None = None
     history_action: UpdateHistoryActionState | None = None
     repository_created: bool | None = None
+    operation: VaultApplyResult | None = None
+    capture: CheckpointResult | None = None
 
     @model_validator(mode="after")
     def truthful_context(self):
+        capture = self.capture
+        if capture is not None:
+            if (
+                len(capture.message) > 2048
+                or capture.history_retained
+                and self.history_retained is not True
+            ):
+                raise ValueError(
+                    "Snapshot must preserve bounded diagnostics/retained history"
+                )
+            if (
+                capture.history_retained
+                and capture.status in ("captured", "unchanged")
+                and capture.locator is not None
+                and capture.commit != capture.locator.commit
+            ):
+                raise ValueError("Snapshot commit differs from its actual locator")
+            if self.code == "saved":
+                locator = capture.locator
+                if (
+                    capture.status not in ("captured", "unchanged")
+                    or locator is None
+                    or capture.commit != self.checkpoint_commit
+                    or not isinstance(self.binding, UpdateContextBinding)
+                    or (
+                        self.binding.checkpoint_commit,
+                        self.binding.checkpoint_generation,
+                        self.binding.association_id,
+                    )
+                    != (
+                        locator.commit,
+                        locator.generation,
+                        locator.association.association_id,
+                    )
+                ):
+                    raise ValueError(
+                        "Saved snapshot must agree with its actual locator"
+                    )
         action = self.history_action
+        native = self.operation
+        if native is not None:
+            if len(native.message) > 2048 or self.publication != native.publication:
+                raise ValueError(
+                    "Native observation must retain bounded diagnostics/publication"
+                )
+            if (
+                native.history not in ("none", "unknown")
+                and self.history_retained is not True
+            ):
+                raise ValueError("Retained native history cannot be discarded")
+            if self.kind != "history" and self.status != update_application_status(
+                native
+            ):
+                raise ValueError(
+                    "Update outcome differs from its actual native operation"
+                )
+            if action is not None and action.operation != native:
+                raise ValueError("Native operation facts disagree")
         if self.kind == "history" and self.ready and action is None:
             raise ValueError("Ready history requires its native action facts")
         if self.status == "repaired" and (

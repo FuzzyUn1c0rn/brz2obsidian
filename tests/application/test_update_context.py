@@ -612,6 +612,7 @@ def test_lost_native_reply_retires_context_and_requires_history_inspection(
     assert contacted == [True]
     assert unknown.status == "publication_unknown" and unknown.publication == "unknown"
     assert unknown.binding is None and not unknown.ready
+    assert unknown.operation is None
     assert unknown.next_actions == ("inspect_update_status",)
     assert context.page(binding).code == "context_changed"
     assert {

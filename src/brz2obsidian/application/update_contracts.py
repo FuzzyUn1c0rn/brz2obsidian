@@ -4,7 +4,10 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from brz2obsidian.application.checkpoint_contracts import CheckpointLocator
+from brz2obsidian.application.checkpoint_contracts import (
+    CheckpointLocator,
+    CheckpointResult,
+)
 from brz2obsidian.application.source_payload_contracts import ReviewedSourceBinding
 from brz2obsidian.application.vault_contracts import VaultFile
 from brz2obsidian.application.vault_update_contracts import VaultApplyResult
@@ -15,6 +18,26 @@ from brz2obsidian.contracts import (
     SourceGapDiagnostic,
     SourceIdentity,
 )
+
+
+def update_application_status(applied):
+    """Project the actual native outcome without relabelling a durable stop."""
+    stopped = applied.status == "cancelled" and (
+        applied.recovery_required
+        or applied.intent_commit is not None
+        or applied.history in ("intent", "result", "terminal", "unknown")
+        or applied.publication in ("partial", "complete", "unknown")
+    )
+    return (
+        "recovery_required"
+        if stopped
+        else {
+            "cancelled": "cancelled_before_publication",
+            "incomplete": "recovery_required",
+            "content_complete": "recovery_required",
+            "unknown": "publication_unknown",
+        }.get(applied.status, applied.status)
+    )
 
 
 class UpdatePreparation(ReconciliationContract):
@@ -114,6 +137,7 @@ class UpdateResult(ReconciliationContract):
         "not_started", "not_published", "partial", "complete", "unknown"
     ] = "not_started"
     application: VaultApplyResult | None = None
+    capture: CheckpointResult | None = None
     guidance: str = (
         "Keep the target vault idle while an operation runs. Saved converter "
         "history is retained; disk use grows with further versions."

@@ -62,7 +62,7 @@ class UpdateChannel:
             if self.poisoned:
                 return
             self.poisoned = True
-            for _, answers in self._pending.values():
+            for _, answers, _ in self._pending.values():
                 if answers.empty():
                     answers.put_nowait(None)
         self._on_uncertain()
@@ -86,12 +86,15 @@ class UpdateChannel:
                     identity = (
                         value.get("request_id") if isinstance(value, dict) else None
                     )
+                    observation = None
                     with self._state:
                         pending = self._pending.get(identity)
                         if pending is None:
                             raise ProtocolFailure("Unexpected worker frame")
-                        decoder, answers = pending
+                        decoder, answers, observer = pending
                         response = decoder.feed(frame)
+                        if decoder.progress is not None and observer is not None:
+                            observation = (observer, decoder.request, decoder.progress)
                         if response is not None:
                             del self._pending[identity]
                             if (
@@ -100,6 +103,13 @@ class UpdateChannel:
                             ):
                                 self._expected_eof = True
                             answers.put_nowait(response)
+                    if observation is not None:
+                        callback, actual, progress = observation
+                        # User presentation must never run under transport locks.
+                        try:
+                            callback(actual, progress)
+                        except Exception:  # noqa: BLE001 -- loss of observation delivery cannot confer authority.
+                            raise ProtocolFailure("Progress delivery failed") from None
                 except ValueError, TypeError, KeyError, RecursionError:
                     self._poison()
             if not self._expected_eof:
@@ -117,7 +127,7 @@ class UpdateChannel:
         finally:
             retained.clear()
 
-    def _exchange(self, request, *, on_dispatched=None):
+    def _exchange(self, request, *, on_dispatched=None, on_progress=None):
         try:
             if request.operation != "update":
                 raise ProtocolFailure("Wrong producer operation")
@@ -145,6 +155,7 @@ class UpdateChannel:
                     self._pending[request.request_id] = (
                         WorkerStreamDecoder(request),
                         answers,
+                        on_progress,
                     )
                 self._process.stdin.write(wire)
                 self._process.stdin.flush()
@@ -161,9 +172,11 @@ class UpdateChannel:
             self._poison()
             return Terminal(phase="may_have_executed", code="protocol_failure")
 
-    def run(self, request, *, on_dispatched=None):
+    def run(self, request, *, on_dispatched=None, on_progress=None):
         with self._serial:
-            return self._exchange(request, on_dispatched=on_dispatched)
+            return self._exchange(
+                request, on_dispatched=on_dispatched, on_progress=on_progress
+            )
 
     def cancel(self, binding, *, target_request_id):
         with self._controls:

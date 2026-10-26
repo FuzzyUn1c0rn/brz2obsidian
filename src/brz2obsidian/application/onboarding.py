@@ -387,7 +387,7 @@ def reobserve_onboarding(operations, preparation):
         return None, refused("current_onboarding_unavailable", history), None
 
 
-def save_onboarding(operations, history, current):
+def save_onboarding(operations, history, current, *, progress=None):
     prepared = current.preparation
     association = prepared.locator.association if prepared.locator else None
     captured = operations.capture_checkpoint(
@@ -407,10 +407,12 @@ def save_onboarding(operations, history, current):
         review=prepared.review,
         source_binding=prepared.source_binding,
         observed_source=prepared.observed_source,
+        **({"progress": progress} if progress is not None else {}),
     )
     if captured.status not in ("captured", "unchanged") or captured.locator is None:
         return refused(captured.code, history).model_copy(
             update={
+                "capture": captured,
                 "history_retained": captured.history_retained,
                 "checkpoint_commit": captured.commit,
             }
@@ -418,6 +420,7 @@ def save_onboarding(operations, history, current):
     return current.model_copy(
         update={
             "code": "saved",
+            "capture": captured,
             "history_retained": True,
             "checkpoint_commit": captured.commit,
             "checkpoint": captured.locator,

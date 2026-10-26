@@ -60,6 +60,7 @@ class UpdateContext:
         source=None,
         original_source=None,
         cancel=None,
+        progress=None,
     ):
         if original_source is not None and kind != "onboarding":
             raise ValueError("Original reference evidence belongs to onboarding")
@@ -82,6 +83,9 @@ class UpdateContext:
             )
             self._remember(cancelled)
             return cancelled
+        from .vault_progress_contracts import report_progress
+
+        report_progress(progress, "current_inspection")
         if kind == "attachment_cleanup":
             result = self._operations.prepare_attachment_cleanup(vault)
         elif kind == "onboarding":
@@ -154,8 +158,8 @@ class UpdateContext:
         self._remember(result)
         return result
 
-    def execute_history(self, binding, *, cancel=None):
-        result = self._history.execute(binding, cancel=cancel)
+    def execute_history(self, binding, *, cancel=None, progress=None):
+        result = self._history.execute(binding, cancel=cancel, progress=progress)
         self._remember(result)
         return result
 
@@ -473,6 +477,8 @@ class UpdateContext:
             history_retained=result.history_retained,
             checkpoint_commit=result.checkpoint_commit,
             publication=result.publication,
+            operation=self._last_operation,
+            capture=self._last_capture,
         )
 
     def _project(self, result):
@@ -490,6 +496,8 @@ class UpdateContext:
             history_retained=result.history_retained,
             checkpoint_commit=result.checkpoint_commit,
             publication=result.publication,
+            operation=self._last_operation,
+            capture=self._last_capture,
         )
 
     def _retain(self, result, *, selection_id):
@@ -513,7 +521,7 @@ class UpdateContext:
             )
         return self._project(result)
 
-    def save(self, binding):
+    def save(self, binding, *, cancel=None, progress=None):
         try:
             expected = UpdateContextBinding.model_validate(binding)
             if self._preparation is None or expected != self._binding:
@@ -524,7 +532,24 @@ class UpdateContext:
             )
         if self._reference_drafts or self._edit is not None:
             return self._uncommitted_draft()
-        result = self._operations.save_update(self._preparation)
+        if cancel is not None and cancel():
+            return UpdateContextResult(
+                status="cancelled_before_publication",
+                code="cancelled_before_snapshot",
+                kind=self._kind,
+                binding=self._binding,
+                ready=False,
+                history_retained=self._last_history,
+                checkpoint_commit=self._last_checkpoint,
+                publication="not_published",
+                capture=self._last_capture,
+                next_actions=("continue_review", "save_update"),
+            )
+        result = self._operations.save_update(
+            self._preparation,
+            **({"progress": progress} if progress is not None else {}),
+            **({"cancel": cancel} if cancel is not None else {}),
+        )
         return self._retain(result, selection_id=expected.selection_id)
 
     def choose_configuration(self, binding, *, group_id, choice):
@@ -615,6 +640,30 @@ class UpdateContext:
         )
 
     def _remember(self, result):
+        capture = getattr(result, "capture", None)
+        self._last_capture = (
+            capture.model_copy(
+                update={
+                    "message": capture.message[:2036] + " [truncated]"
+                    if len(capture.message) > 2048
+                    else capture.message
+                }
+            )
+            if capture is not None
+            else None
+        )
+        native = getattr(result, "application", None)
+        self._last_operation = (
+            native.model_copy(
+                update={
+                    "message": native.message[:2036] + " [truncated]"
+                    if len(native.message) > 2048
+                    else native.message
+                }
+            )
+            if native is not None
+            else None
+        )
         self._last_history = result.history_retained
         self._last_checkpoint = result.checkpoint_commit
         self._last_publication = result.publication
@@ -622,6 +671,8 @@ class UpdateContext:
         self._last_actions = result.next_actions
 
     def _reset_history(self):
+        self._last_capture = None
+        self._last_operation = None
         self._last_history = False
         self._last_checkpoint = None
         self._last_publication = "not_started"
@@ -649,7 +700,7 @@ class UpdateContext:
             return UpdateContextResult(
                 status="prepared_review"
                 if self._preparation is not None
-                else "unresolved",
+                else self._last_status,
                 code="continue_review",
                 kind=self._kind,
                 binding=self._binding,
@@ -661,6 +712,9 @@ class UpdateContext:
                 else 0,
                 history_retained=self._last_history,
                 checkpoint_commit=self._last_checkpoint,
+                publication=self._last_publication,
+                operation=self._last_operation if self._preparation is None else None,
+                capture=self._last_capture,
                 next_actions=self._last_actions,
             )
         if choice == "save":
@@ -690,6 +744,8 @@ class UpdateContext:
             history_retained=self._last_history,
             checkpoint_commit=self._last_checkpoint,
             publication=self._last_publication,
+            operation=self._last_operation,
+            capture=self._last_capture,
             next_actions=self._last_actions
             if self._last_status in ("recovery_required", "publication_unknown")
             else (),

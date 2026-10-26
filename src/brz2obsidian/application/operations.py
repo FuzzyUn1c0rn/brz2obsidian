@@ -155,11 +155,11 @@ class Operations:
 
         return refresh_update(self, preparation, source=source)
 
-    def save_update(self, preparation):
+    def save_update(self, preparation, *, cancel=None, progress=None):
         """Retain a current unresolved or complete review in owned Git history."""
         from .update_lifecycle import save_update
 
-        return save_update(self, preparation)
+        return save_update(self, preparation, cancel=cancel, progress=progress)
 
     def load_update(self, vault):
         """Load a saved review as explicitly unready historical evidence."""
@@ -239,11 +239,16 @@ class Operations:
 
         return prepare_history_repair(vault, copy, validation)
 
-    def execute_history_repair(self, vault, copy, preparation):
+    def execute_history_repair(self, vault, copy, preparation, *, progress=None):
         """Repair exact missing or damaged converter-owned Git payloads."""
         from brz2obsidian.publication.vault_repair import execute_history_repair
 
-        return execute_history_repair(vault, copy, preparation)
+        return execute_history_repair(
+            vault,
+            copy,
+            preparation,
+            **({"progress": progress} if progress is not None else {}),
+        )
 
     def apply_reviewed_update(self, vault, source, **kwargs):
         """Apply one whole current S1 review through owned existing-vault history."""
@@ -277,12 +282,16 @@ class Operations:
 
         return resolve_recovery(vault, preparation, action)
 
-    def execute_recovery(self, vault, preparation, *, cancel=None):
+    def execute_recovery(self, vault, preparation, *, cancel=None, progress=None):
         """Publish one retained reviewed recovery direction and its exact result."""
         from brz2obsidian.publication.vault_recovery import execute_recovery
 
         return execute_recovery(
-            vault, preparation, cancel=cancel, executor=self.vault_executor
+            vault,
+            preparation,
+            cancel=cancel,
+            executor=self.vault_executor,
+            **({"progress": progress} if progress is not None else {}),
         )
 
     def prepare_undo(self, vault, *, previous=None):
@@ -297,12 +306,16 @@ class Operations:
 
         return resolve_undo(vault, preparation, action)
 
-    def execute_undo(self, vault, preparation, *, cancel=None):
+    def execute_undo(self, vault, preparation, *, cancel=None, progress=None):
         """Publish an eligible reviewed Undo through the existing operation executor."""
         from brz2obsidian.publication.vault_undo import execute_undo
 
         return execute_undo(
-            vault, preparation, cancel=cancel, executor=self.vault_executor
+            vault,
+            preparation,
+            cancel=cancel,
+            executor=self.vault_executor,
+            **({"progress": progress} if progress is not None else {}),
         )
 
     def read_update_details(self, vault, *, offset=0, limit=100, expected=None):
@@ -370,11 +383,13 @@ class Operations:
 
         return resolve_history_workflow(self, preparation, action)
 
-    def execute_history_workflow(self, preparation, *, cancel=None):
+    def execute_history_workflow(self, preparation, *, cancel=None, progress=None):
         """Execute one freshly checked native action and project its exact result."""
         from .history_workflow import execute_history_workflow
 
-        return execute_history_workflow(self, preparation, cancel=cancel)
+        return execute_history_workflow(
+            self, preparation, cancel=cancel, progress=progress
+        )
 
     def _configured_workflow(self):
         if self.workflow is None:
@@ -637,6 +652,10 @@ class ApplicationSession:
     def update_contact_uncertain(self, worker_id):
         with self._lock:
             return self._updates.uncertain(worker_id)
+
+    def observe_update_progress(self, worker_id, request, progress):
+        with self._lock:
+            return self._updates.observe(worker_id, request, progress)
 
     def complete_update_control(self, request_id, terminal):
         with self._lock:

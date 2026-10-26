@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 
 from brz2obsidian.application.update_context import UpdateContext
+from brz2obsidian.application.vault_progress_contracts import VaultProgress
 from tests.application.test_update_context import worker_context_call
 
 
@@ -108,7 +109,19 @@ def test_worker_repair_keeps_matching_target_and_native_object_storage_truth(
             calls.append("prepare")
             return native
 
-        def execute_history_repair(self, path, candidate, preparation):
+        def execute_history_repair(
+            self, path, candidate, preparation, *, progress=None
+        ):
+            assert progress is not None, (
+                "Native repair observer must survive the shared workflow"
+            )
+            progress(
+                VaultProgress(
+                    phase="final_reporting",
+                    completed_units=1 if outcome == "repaired" else None,
+                    unit="history_objects" if outcome == "repaired" else None,
+                )
+            )
             assert preparation == native and Path(candidate) == copy
             calls.append("execute")
             return result
@@ -263,7 +276,7 @@ def test_worker_resolves_canonical_history_current_offer_without_exporting_plan(
                 update={"review": transition.plan, "code": "recovery_choice_recorded"}
             )
 
-        def execute_recovery(self, vault, preparation, *, cancel=None):
+        def execute_recovery(self, vault, preparation, *, cancel=None, progress=None):
             effects = select_review_effects(preparation.review)
             assert effects.status == "selected" and effects.remove_paths == ()
             assert [(row.path, row.content.data) for row in effects.files] == [
@@ -430,7 +443,18 @@ def test_undo_context_distinguishes_current_checkpoint_target_receipt_and_prior_
         def prepare_undo(self, path, *, previous=None):
             return native
 
-        def execute_undo(self, path, preparation, *, cancel=None):
+        def execute_undo(self, path, preparation, *, cancel=None, progress=None):
+            assert progress is not None, (
+                "Native Undo must receive the same observer as its apply engine"
+            )
+            progress(
+                VaultProgress(
+                    phase="final_reporting",
+                    operation_id=undone.operation_id,
+                    operation_generation=undone.generation,
+                    intent_commit=undone.intent_commit,
+                )
+            )
             assert preparation == native
             entered.append(True)
             return undone
@@ -633,7 +657,18 @@ def test_worker_history_recovery_keeps_native_direction_and_distinct_terminal(
             assert Path(path) == vault and previous == prepared
             return prepared
 
-        def execute_recovery(self, path, previous, *, cancel=None):
+        def execute_recovery(self, path, previous, *, cancel=None, progress=None):
+            assert progress is not None, (
+                "Native recovery must receive the workflow observer"
+            )
+            progress(
+                VaultProgress(
+                    phase="final_reporting",
+                    operation_id=result.operation_id,
+                    operation_generation=result.generation,
+                    intent_commit=result.intent_commit,
+                )
+            )
             assert Path(path) == vault and previous == prepared
             writes.append(previous)
             return result

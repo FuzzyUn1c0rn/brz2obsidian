@@ -299,11 +299,13 @@ class HistoryContext:
             return self._result(status="refused", code="context_changed")
         return self._project(self.operations.refresh_history_workflow(self.preparation))
 
-    def execute(self, binding, *, cancel=None):
+    def execute(self, binding, *, cancel=None, progress=None):
         if not self._matches(binding) or self.preparation is None:
             return self._result(status="refused", code="context_changed")
         return self._project(
-            self.operations.execute_history_workflow(self.preparation, cancel=cancel)
+            self.operations.execute_history_workflow(
+                self.preparation, cancel=cancel, progress=progress
+            )
         )
 
     def choice_page(self, binding, *, offset=0, limit=100):

@@ -152,3 +152,74 @@ def test_session_keeps_saved_summary_across_content_reply_and_rejects_stale_sele
     assert not state.history_retained and state.active_request_id is None
     assert state.last_operation_vault == vault and state.last_operation == draft
     assert session.snapshot.reviewed is None
+
+
+def test_progress_is_observational_and_scoped_to_actual_request_selection_and_child(
+    tmp_path,
+):
+    from brz2obsidian.application.update_stream import WorkerProgress
+    from brz2obsidian.application.vault_progress_contracts import VaultProgress
+
+    session = ApplicationSession()
+    vault = str(tmp_path / "vault")
+    selection = "11111111-1111-4111-8111-111111111111"
+    session.select_update(vault, selection_id=selection)
+    session.bind_update_worker("actual-child")
+    requested = session.start_update(
+        {
+            "command": "prepare",
+            "vault": vault,
+            "selection_id": selection,
+            "kind": "onboarding",
+            "source": None,
+        }
+    )
+    # The actual transport allocates sequence7; the host-created placeholder
+    # sequence1 is not the stream's admission authority.
+    actual = requested.model_copy(update={"sequence": 7})
+    frame = WorkerProgress(
+        request_id=actual.request_id,
+        sequence=7,
+        ordinal=1,
+        elapsed_ms=123,
+        value=VaultProgress(
+            phase="publication",
+            operation_id="a" * 32,
+            operation_generation=9,
+            intent_commit="b" * 40,
+            completed_units=1,
+            total_units=2,
+            unit="files",
+        ),
+    )
+    state = session.observe_update_progress("actual-child", actual, frame)
+    assert state.progress == frame and state.progress.value.operation_generation == 9
+    assert not state.ready and state.binding is None and not state.history_retained
+    assert state.publication == "not_started" and state.next_actions == ()
+    for epoch, request, observation in (
+        ("old-child", actual, frame.model_copy(update={"ordinal": 2})),
+        ("actual-child", actual, frame.model_copy(update={"sequence": 8})),
+        ("actual-child", actual, frame.model_copy(update={"request_id": selection})),
+    ):
+        assert (
+            session.observe_update_progress(epoch, request, observation).progress
+            == frame
+        )
+    session.select_update(
+        str(tmp_path / "other"), selection_id="22222222-2222-4222-8222-222222222222"
+    )
+    assert (
+        session.observe_update_progress("actual-child", actual, frame).progress is None
+    )
+    session.complete_update(
+        actual.request_id,
+        terminal(
+            actual,
+            UpdateContextResult(
+                kind="onboarding", status="refused", code="onboarding_evidence_required"
+            ),
+        ),
+    )
+    assert (
+        session.update_snapshot.progress is None and not session.update_snapshot.ready
+    )

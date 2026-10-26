@@ -35,6 +35,7 @@ from .update_contracts import (
     UpdatePreparation,
     UpdateResult,
     UpdateReviewPage,
+    update_application_status,
 )
 from .update_facts import assemble_facts, link_state, output_identity, record, target
 from .vault_contracts import VaultSubject
@@ -935,16 +936,29 @@ def _refresh_source_update(operations, preparation, observed, *, source):
         return _refused("refresh_unavailable")
 
 
-def save_update(operations, preparation):
+def save_update(operations, preparation, *, cancel=None, progress=None):
     try:
+        from .vault_progress_contracts import report_progress
+
+        report_progress(progress, "current_inspection")
         history, current, baseline = _reobserve(operations, preparation)
         if history is None or current.status == "stale_review":
             return current
         prepared = current.preparation
+        if prepared is not None and cancel is not None and cancel():
+            return current.model_copy(
+                update={
+                    "status": "cancelled_before_publication",
+                    "code": "cancelled_before_snapshot",
+                    "ready": False,
+                    "publication": "not_published",
+                    "next_actions": ("continue_review", "save_update"),
+                }
+            )
         if prepared.kind == "onboarding":
             from .onboarding import save_onboarding
 
-            return save_onboarding(operations, history, current)
+            return save_onboarding(operations, history, current, progress=progress)
         association = prepared.locator.association
         with tempfile.TemporaryDirectory(prefix="brz2obsidian-baseline-") as owned:
             source = _materialize(
@@ -966,21 +980,26 @@ def save_update(operations, preparation):
                 source_binding=prepared.source_binding,
                 review_source=prepared.payload_directory,
                 observed_source=prepared.observed_source,
+                **({"progress": progress} if progress is not None else {}),
             )
         if captured.status not in ("captured", "unchanged"):
             return _refused(captured.code, history, preparation=prepared).model_copy(
                 update={
+                    "capture": captured,
                     "history_retained": captured.history_retained
                     or current.history_retained,
                     "checkpoint_commit": captured.commit,
                 }
             )
         if captured.locator is None:
-            return _refused("saved_history_unavailable", history, preparation=prepared)
+            return _refused(
+                "saved_history_unavailable", history, preparation=prepared
+            ).model_copy(update={"capture": captured})
         locator = captured.locator
         return current.model_copy(
             update={
                 "code": "saved",
+                "capture": captured,
                 "preparation": prepared.model_copy(update={"locator": locator}),
                 "checkpoint_commit": captured.commit,
                 "checkpoint": locator,
@@ -1643,22 +1662,8 @@ def apply_update(operations, preparation, *, cancel=None, progress=None):
             cancel=cancel,
             **({"progress": progress} if progress is not None else {}),
         )
-        stopped_intent = applied.status == "cancelled" and (
-            applied.recovery_required
-            or applied.intent_commit is not None
-            or applied.history in ("intent", "result", "terminal", "unknown")
-            or applied.publication in ("partial", "complete", "unknown")
-        )
-        status = (
-            "recovery_required"
-            if stopped_intent
-            else {
-                "cancelled": "cancelled_before_publication",
-                "incomplete": "recovery_required",
-                "content_complete": "recovery_required",
-                "unknown": "publication_unknown",
-            }.get(applied.status, applied.status)
-        )
+        status = update_application_status(applied)
+        stopped_intent = applied.status == "cancelled" and status == "recovery_required"
         return UpdateResult(
             kind=prepared.kind,
             status=status,

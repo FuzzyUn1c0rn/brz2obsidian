@@ -331,7 +331,7 @@ def _executed(native, kind):
     )
 
 
-def execute_history_workflow(operations, preparation, *, cancel=None):
+def execute_history_workflow(operations, preparation, *, cancel=None, progress=None):
     try:
         saved = HistoryWorkflowPreparation.model_validate(preparation)
     except ValueError, TypeError:
@@ -342,13 +342,23 @@ def execute_history_workflow(operations, preparation, *, cancel=None):
         observed, blocked = _current_recovery(operations, saved)
         if blocked is not None:
             return blocked
-        native = operations.execute_recovery(saved.vault, saved.native, cancel=cancel)
+        native = operations.execute_recovery(
+            saved.vault,
+            saved.native,
+            cancel=cancel,
+            **({"progress": progress} if progress is not None else {}),
+        )
         if (native.operation_id, native.kind) == (observed.operation_id, observed.kind):
             # The role comes from this wrapper's actual fresh native
             # observation, never from caller-supplied preparation metadata.
             native = native.model_copy(update={"origin_role": observed.origin_role})
     elif saved.kind == "undo":
-        native = operations.execute_undo(saved.vault, saved.native, cancel=cancel)
+        native = operations.execute_undo(
+            saved.vault,
+            saved.native,
+            cancel=cancel,
+            **({"progress": progress} if progress is not None else {}),
+        )
     else:
         if cancel is not None and not callable(cancel):
             return _refused("invalid_history_cancellation")
@@ -363,6 +373,9 @@ def execute_history_workflow(operations, preparation, *, cancel=None):
                 guidance=_GUIDANCE,
             )
         native = operations.execute_history_repair(
-            saved.vault, saved.copy_path, saved.native
+            saved.vault,
+            saved.copy_path,
+            saved.native,
+            **({"progress": progress} if progress is not None else {}),
         )
     return _executed(native, saved.kind)

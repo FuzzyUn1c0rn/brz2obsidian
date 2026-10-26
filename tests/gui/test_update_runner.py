@@ -209,6 +209,24 @@ def test_qt_host_uses_live_control_while_real_persistent_worker_waits_for_native
         state = views[-1]
         assert state.reply.status == "cancelled_before_publication"
         assert state.reply.publication == "not_published" and not state.ready
+        progress_states = [
+            view for view in views if getattr(view, "progress", None) is not None
+        ]
+        assert progress_states, (
+            "The actual shared/native inspection phase must reach the Qt host"
+        )
+        assert all(
+            view.progress.value.phase == "current_inspection"
+            and view.progress.elapsed_ms >= 0
+            for view in progress_states
+        )
+        assert all(
+            view.active_request_id == view.progress.request_id and not view.ready
+            for view in progress_states
+        )
+        assert state.progress is None, (
+            "A sealed terminal retires observational progress"
+        )
         assert ticks and clicks and release.exists()
         assert len(children) == 1 and children[0].poll() is None
         runner.submit_update(

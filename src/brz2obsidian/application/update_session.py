@@ -7,6 +7,7 @@ from .contract_values import absolute, request_identity
 from .contracts import WorkerRequest
 from .update_context_contracts import UpdateContextBinding, UpdateContextResult
 from .update_history_contracts import HistoryContextBinding
+from .update_stream import WorkerProgress
 
 _CONTENT = frozenset(
     (
@@ -45,6 +46,7 @@ class UpdateSessionSnapshot:
     active_command: str | None = None
     control_code: str | None = None
     worker_epoch: str | None = None
+    progress: WorkerProgress | None = None
     reply: UpdateContextResult | None = None
     last_operation: UpdateContextResult | None = None
     last_operation_vault: str | None = None
@@ -71,7 +73,32 @@ class UpdateSession:
     def bind_worker(self, worker_id):
         if self._worker_id != worker_id:
             self._worker_id, self._poisoned = worker_id, False
-            self.snapshot = replace(self.snapshot, worker_epoch=worker_id)
+            self.snapshot = replace(
+                self.snapshot, worker_epoch=worker_id, progress=None
+            )
+
+    def observe(self, worker_id, actual, progress):
+        progress = WorkerProgress.model_validate(progress)
+        if self._active is None or self._poisoned:
+            return self.snapshot
+        request, selection_revision = self._active
+        previous = self.snapshot.progress
+        if (
+            worker_id != self._worker_id
+            or selection_revision != self._selection_revision
+            or actual.request_id != request.request_id
+            or actual.arguments != request.arguments
+            or progress.request_id != actual.request_id
+            or progress.sequence != actual.sequence
+            or previous is not None
+            and (
+                progress.ordinal <= previous.ordinal
+                or progress.elapsed_ms < previous.elapsed_ms
+            )
+        ):
+            return self.snapshot
+        self.snapshot = replace(self.snapshot, progress=progress)
+        return self.snapshot
 
     def queue_cancel(self, request_id):
         if self._active is not None and self._active[0].request_id == request_id:
@@ -86,6 +113,7 @@ class UpdateSession:
                 binding=None,
                 review_ready=False,
                 needs_inspection=True,
+                progress=None,
                 publication="unknown",
                 next_actions=("inspect_update_status",),
                 reply=None,
@@ -157,6 +185,7 @@ class UpdateSession:
             active_request_id=request.request_id,
             active_command=args.command,
             control_code=None,
+            progress=None,
             transport_phase=None,
             transport_code=None,
         )
@@ -173,6 +202,7 @@ class UpdateSession:
             revision=state.revision + 1,
             active_request_id=None,
             active_command=None,
+            progress=None,
             control_code=None,
             transport_phase=terminal.phase,
             transport_code=terminal.code,

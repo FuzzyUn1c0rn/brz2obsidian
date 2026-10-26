@@ -149,7 +149,11 @@ class UpdateWorker:
         try:
             values = args.model_dump(exclude={"command"})
             if args.command == "prepare":
-                result = self.context.prepare(**values, cancel=cancel.is_set)
+                result = self.context.prepare(
+                    **values,
+                    cancel=cancel.is_set,
+                    progress=self._output().observer(request),
+                )
             elif args.command == "history":
                 result = self.context.history(**values, cancel=cancel.is_set)
             elif args.command == "initialize_vault":
@@ -159,7 +163,11 @@ class UpdateWorker:
             elif args.command == "refresh_history":
                 result = self.context.refresh_history(**values)
             elif args.command == "execute_history":
-                result = self.context.execute_history(**values, cancel=cancel.is_set)
+                result = self.context.execute_history(
+                    **values,
+                    cancel=cancel.is_set,
+                    progress=self._output().observer(request),
+                )
             elif args.command == "history_choices":
                 result = self.context.history_choices(**values)
             elif args.command == "choose_history":
@@ -191,7 +199,11 @@ class UpdateWorker:
                     progress=self._output().observer(request),
                 )
             elif args.command == "save":
-                result = self.context.save(**values)
+                result = self.context.save(
+                    **values,
+                    cancel=cancel.is_set,
+                    progress=self._output().observer(request),
+                )
             elif args.command == "load":
                 result = self.context.load(**values, cancel=cancel.is_set)
             elif args.command == "resume":
