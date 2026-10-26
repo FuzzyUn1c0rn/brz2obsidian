@@ -2248,6 +2248,12 @@ def capture_checkpoint(
             )
             if required.requirement != "required" or not same_consent:
                 return result("refused", "scoped_review_required")
+            if any(
+                pending.domain == required.kind
+                and pending.change_id == "consent:" + required.consent_id
+                for pending in saved.plan.requirements
+            ):
+                return result("refused", "scoped_review_required")
             if (
                 saved.plan.preflight.state_fingerprint
                 != current.preflight.state_fingerprint
