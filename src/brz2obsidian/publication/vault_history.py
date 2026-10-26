@@ -728,6 +728,102 @@ def _load_review_payload(git, manifest, verified):
     return restored, references
 
 
+class _ReviewQueries(NamedTuple):
+    local: tuple
+    selected: tuple | None
+    requirements: tuple
+    grants: tuple
+
+
+class _RolePolicy(NamedTuple):
+    subjects: tuple
+    fingerprints: tuple
+    requirements: tuple
+    grants: tuple
+    context_basis: str
+    memo_basis: str
+    prepared_commit: str | None
+
+
+def _review_queries(review):
+    """Retain finite queries and grants, never the parsed review's byte bodies."""
+    from brz2obsidian.application.update_subjects import review_subjects
+
+    from .vault_apply import _review_subjects
+
+    plan = review.saved.plan
+    effects = review.historical_effects
+    return _ReviewQueries(
+        review_subjects(plan.producer_facts, plan, effects=effects)
+        if plan.preflight.consents
+        else (),
+        _review_subjects(plan, effects)
+        if effects is not None and effects.status == "selected"
+        else None,
+        tuple(plan.preflight.consents),
+        tuple(
+            grant
+            for grant in plan.consents
+            if not any(
+                requirement.change_id == "consent:" + grant.consent_id
+                for requirement in plan.requirements
+            )
+        ),
+    )
+
+
+def _role_policy(association, manifest, queries):
+    if manifest.boundary not in ("local", "result") or (
+        manifest.boundary == "local" and manifest.proposed
+    ):
+        return None
+    if manifest.boundary == "result" and (queries is None or queries.selected is None):
+        return None
+    # These bases never replace the ordinary policy-bearing fingerprints.
+    # They are usable only with separate fresh proof of BOTH stored policies.
+    return _RolePolicy(
+        (
+            ()
+            if queries is None
+            else queries.local
+            if manifest.boundary == "local"
+            else queries.selected
+        ),
+        (manifest.policy_fingerprint, manifest.policy_continuity_fingerprint),
+        () if queries is None else queries.requirements,
+        () if queries is None else queries.grants,
+        digest(
+            {
+                "association": association.model_dump(mode="json"),
+                "identity": manifest.identity.model_dump(mode="json"),
+                "source": [row.model_dump(mode="json") for row in manifest.source],
+                "recovery_gaps": manifest.recovery_gaps,
+            }
+        ),
+        digest(
+            manifest.model_dump(
+                mode="json",
+                exclude={
+                    "generation",
+                    "previous",
+                    "semantic_fingerprint",
+                    "review_content",
+                    "review_object",
+                    "review_size",
+                    "review_sha256",
+                    "observed_source",
+                    "reviewed_source",
+                    "vault",
+                    "preimage",
+                    "policy_fingerprint",
+                    "policy_continuity_fingerprint",
+                },
+            )
+        ),
+        manifest.previous if manifest.boundary == "result" else None,
+    )
+
+
 class _CheckpointRole(NamedTuple):
     """Validated scalar lineage; raw control bodies remain per-generation."""
 
@@ -744,6 +840,7 @@ class _CheckpointRole(NamedTuple):
     review_parent_fingerprint: str | None = None
     onboarding_absence: bool = False
     review_context_fingerprint: str | None = None
+    policy_context: _RolePolicy | None = None
 
 
 def _review_context_fingerprint(association, manifest):
@@ -1069,6 +1166,7 @@ def _read(
                     review_ownership_claims(
                         review.saved.plan, review.historical_effects
                     ),
+                    _review_queries(review),
                 )
             elif reviewed[manifest.review_object][:2] != (
                 manifest.review_size,
@@ -1130,6 +1228,13 @@ def _read(
                     else False,
                     review_context_fingerprint=_review_context_fingerprint(
                         association, manifest
+                    ),
+                    policy_context=_role_policy(
+                        association,
+                        manifest,
+                        reviewed[manifest.review_object][9]
+                        if manifest.review_object is not None
+                        else None,
                     ),
                 )
             )
@@ -1223,6 +1328,13 @@ def _read(
                     else False,
                     review_context_fingerprint=_review_context_fingerprint(
                         association, manifest
+                    ),
+                    policy_context=_role_policy(
+                        association,
+                        manifest,
+                        reviewed[manifest.review_object][9]
+                        if manifest.review_object is not None
+                        else None,
                     ),
                 )
             )
@@ -2172,6 +2284,15 @@ def capture_checkpoint(
                 )
                 if subject_id in scopes:
                     scopes[subject_id].add(item.current.path)
+            if boundary == "local" and review_source is not None:
+                from brz2obsidian.application.update_subjects import (
+                    approved_attachment_subjects,
+                )
+
+                for subject in approved_attachment_subjects(saved.plan):
+                    if subject.subject_id not in scopes:
+                        return result("refused", "review_scope_changed")
+                    scopes[subject.subject_id].add(subject.path)
             if boundary != "local":
                 if (
                     retaining_prepared

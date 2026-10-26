@@ -395,6 +395,7 @@ class _Inspection:
         active_operation=None,
         recovery_observation=None,
         checkpoint_observation=None,
+        policy_probe=False,
     ):
         self.root = Path(vault).absolute()
         self.subjects = ()
@@ -403,6 +404,7 @@ class _Inspection:
         self.recovery_observation = recovery_observation
         self.recovery_status = None
         self.checkpoint_observation = checkpoint_observation
+        self.policy_probe = policy_probe
         self.current_refs = None
         self.ignore_query_paths = ()
         self.attribute_query_paths = ()
@@ -1853,7 +1855,139 @@ class _Inspection:
             and fingerprint == getattr(parent, "review_context_fingerprint", None)
         )
 
-    def _review_locator(self):
+    def _policy_query(self, subjects, admission):
+        idle = None
+        if self.recovery_observation is None and self.active_operation is None:
+            idle = _IdleCheckpointObservation(self, admission)
+        captured = []
+        # Preserve the caller's Git qualification mode and check its resolved
+        # executable below; implicit Windows launchers also bind binary evidence.
+        observed, history = _observe_vault(
+            self.root,
+            subjects=subjects,
+            git_executable=self.executable if self.explicit_executable else None,
+            active_operation=self.active_operation,
+            recovery_observation=self.recovery_observation,
+            checkpoint_observation=idle,
+            _policy_probe=True,
+            _capture=lambda inspection, value: captured.append(inspection),
+        )
+        if (
+            observed.status != "supported"
+            or not observed.inventory_complete
+            or history is None
+            or history.locator != self.history.locator
+            or not captured
+            or captured[0].executable != self.executable
+            or captured[0].current_refs != self.current_refs
+        ):
+            return None
+        return observed, captured[0]
+
+    def _policy_observation(self, subjects, admission, observations):
+        key = tuple((row.path, row.subject_id) for row in subjects)
+        if key in observations:
+            return observations[key][0]
+        fresh = self._policy_query(subjects, admission)
+        if fresh is None:
+            return None
+        observed, inspection = fresh
+        if not (
+            _same_current_domain(self, inspection)
+            or _same_current_domain(inspection, self)
+        ):
+            current_key = tuple((row.path, row.subject_id) for row in self.subjects)
+            current_paths = {path for path, _ in current_key}
+            paths = {path for path, _ in key}
+            if current_paths <= paths or paths <= current_paths:
+                return None
+            union_key = tuple(sorted(set(current_key) | set(key)))
+            union = observations.get(union_key)
+            if union is None:
+                union = self._policy_query(
+                    tuple(
+                        VaultSubject(path=path, subject_id=owner)
+                        for path, owner in union_key
+                    ),
+                    admission,
+                )
+            if union is None or not (
+                _same_current_domain(self, union[1])
+                and _same_current_domain(inspection, union[1])
+            ):
+                return None
+            # The union proves common current metadata only. The caller still
+            # receives this role's own policies and consent requirements.
+            observations[union_key] = union
+        observations[key] = fresh
+        return observed
+
+    @staticmethod
+    def _accepted_policy_grants(policy):
+        return all(
+            required.requirement == "not_required"
+            or required.requirement == "required"
+            and any(
+                grant.consent_id == required.consent_id
+                and grant.kind == required.kind
+                and grant.choice == "accept"
+                for grant in policy.grants
+            )
+            for required in policy.requirements
+        )
+
+    def _qualified_policy_context(self, role, parent, admission, observations):
+        if self.policy_probe or admission is None or admission.status != "supported":
+            return False
+        current = getattr(role, "policy_context", None)
+        previous = getattr(parent, "policy_context", None)
+        tip = getattr(self.checkpoint_roles[0], "policy_context", None)
+        if (
+            current is None
+            or previous is None
+            or tip is None
+            or current.fingerprints == previous.fingerprints
+            or current.context_basis != previous.context_basis
+            or current.context_basis != tip.context_basis
+            or current.memo_basis != tip.memo_basis
+            or parent.boundary == "local"
+            and current.memo_basis != previous.memo_basis
+            or not self._accepted_policy_grants(current)
+            or not self._accepted_policy_grants(previous)
+        ):
+            return False
+        if parent.boundary == "result":
+            terminal = self.recovery_observation
+            if (
+                terminal is None
+                or terminal.graph.receipt is None
+                or terminal.graph.receipt.result_commit != parent.commit
+                or parent.commit not in terminal.owned
+                or terminal.owned[parent.commit][0].previous != previous.prepared_commit
+                or terminal.graph.intent.prepared_commit != previous.prepared_commit
+            ):
+                return False
+        try:
+            fresh = self._policy_observation(current.subjects, admission, observations)
+            old = self._policy_observation(previous.subjects, admission, observations)
+        except OSError, ValueError, TypeError:
+            return False
+        if fresh is None or old is None:
+            return False
+        # A terminal RESULT's qualified graph and continuity check prove its
+        # accepted PREPARED grants across publication. Its full policy may
+        # legitimately differ after that publication's topology changes.
+        return not (
+            (fresh.policy_fingerprint, fresh.policy_continuity_fingerprint)
+            != current.fingerprints
+            or (old.policy_fingerprint, old.policy_continuity_fingerprint)
+            != previous.fingerprints
+            or fresh.preflight.consents != current.requirements
+            or parent.boundary == "local"
+            and old.preflight.consents != previous.requirements
+        )
+
+    def _review_locator(self, admission=None, observations=None):
         """Keep memo dependencies on their proved parent, after full validation."""
         locator = self.history.locator
         roles = self.checkpoint_roles
@@ -1882,6 +2016,10 @@ class _Inspection:
                     and role.memo_fingerprint == parent.memo_fingerprint
                     or parent.boundary == "result"
                     and self._same_review_context(role, parent)
+                    or parent.boundary in ("local", "result")
+                    and self._qualified_policy_context(
+                        role, parent, admission, observations
+                    )
                 )
                 and role.operation_intent_commit is None
                 and role.undo_of_receipt_commit is None
@@ -2029,7 +2167,7 @@ class _Inspection:
             state_fingerprint=authority,
             consents=tuple(self.consents),
         )
-        return VaultAdmission(
+        result = VaultAdmission(
             schema_id="brz2obsidian.vault-admission",
             schema_version=1,
             vault=str(self.root),
@@ -2054,6 +2192,34 @@ class _Inspection:
             admitted_actions=actions,
             preflight=preflight,
         )
+        if (
+            not self.policy_probe
+            and result.status == "supported"
+            and self.history is not None
+            and self.history.status == "valid"
+        ):
+            observations = {
+                tuple((row.path, row.subject_id) for row in self.subjects): (
+                    result,
+                    self,
+                )
+            }
+            authority, state_status, state_schema, state_version = self._review_state(
+                self._review_locator(result, observations)
+            )
+            result = result.model_copy(
+                update={
+                    "preflight": preflight.model_copy(
+                        update={
+                            "state_fingerprint": authority,
+                            "state_status": state_status,
+                            "state_schema": state_schema,
+                            "state_version": state_version,
+                        }
+                    )
+                }
+            )
+        return result
 
 
 def _observe_vault(
@@ -2065,6 +2231,7 @@ def _observe_vault(
     recovery_observation=None,
     checkpoint_observation=None,
     _capture=None,
+    _policy_probe=False,
 ):
     """Observe current storage; caller assertions cannot grant trusted proof."""
     inspection = _Inspection(
@@ -2074,6 +2241,7 @@ def _observe_vault(
         active_operation,
         recovery_observation,
         checkpoint_observation,
+        _policy_probe,
     )
     try:
         with inspection.resources:
