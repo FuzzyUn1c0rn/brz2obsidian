@@ -52,7 +52,11 @@ class UpdateWorker:
                     "draft_pending": pending,
                     "ready": result.ready and not pending,
                     **(
-                        {"next_actions": ("continue_review", "discard_draft")}
+                        {
+                            "next_actions": ("continue_review", "discard_draft")
+                            if result.binding is not None
+                            else ("continue_review", "discard")
+                        }
                         if pending
                         else {}
                     ),

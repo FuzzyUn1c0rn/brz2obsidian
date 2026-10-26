@@ -64,7 +64,11 @@ class UpdateContext:
     ):
         if original_source is not None and kind != "onboarding":
             raise ValueError("Original reference evidence belongs to onboarding")
-        if self._preparation is not None or self._history.preparation is not None:
+        if (
+            self._preparation is not None
+            or self._history.preparation is not None
+            or self.draft_pending
+        ):
             return self._uncommitted_draft(code="close_decision_required")
         self._history.binding = self._history.admission = None
         request_identity(selection_id)
@@ -248,6 +252,7 @@ class UpdateContext:
         )
         if page.status == "refused" and page.code == "association_or_history_changed":
             self._preparation = self._binding = None
+            self._requires_source_refresh = False
             result = UpdateContextResult(
                 status="publication_unknown",
                 code=page.code,
@@ -258,6 +263,8 @@ class UpdateContext:
             )
             self._remember(result)
             return result
+        if page.code == "source_payload_changed":
+            self._requires_source_refresh = True
         return self._content_result(
             status=page.status,
             code=page.code,
@@ -420,19 +427,21 @@ class UpdateContext:
                     "revision": self._revision,
                 }
             )
-        return UpdateContextResult(
-            status=result.status,
-            code=result.code,
-            kind=result.kind,
-            binding=self._binding,
-            ready=result.ready and not self.draft_pending,
-            changes=result.changes,
-            unresolved=result.unresolved,
-            stale=result.stale,
-            next_actions=result.next_actions,
-            history_retained=result.history_retained,
-            checkpoint_commit=result.checkpoint_commit,
-            publication=result.publication,
+        return self._source_projection(
+            UpdateContextResult(
+                status=result.status,
+                code=result.code,
+                kind=result.kind,
+                binding=self._binding,
+                ready=result.ready and not self.draft_pending,
+                changes=result.changes,
+                unresolved=result.unresolved,
+                stale=result.stale,
+                next_actions=result.next_actions,
+                history_retained=result.history_retained,
+                checkpoint_commit=result.checkpoint_commit,
+                publication=result.publication,
+            )
         )
 
     def choice_page(self, binding, *, offset=0, limit=100):
@@ -492,6 +501,12 @@ class UpdateContext:
             )
         if self._reference_drafts or self._edit is not None:
             return self._uncommitted_draft()
+        if self._requires_source_refresh:
+            return self._content_result(
+                status="stale_review",
+                code="source_payload_changed",
+                binding=self._binding,
+            )
         result = self._operations.apply_update(
             self._preparation,
             cancel=cancel,
@@ -527,21 +542,23 @@ class UpdateContext:
 
     def _project(self, result):
         self._remember(result)
-        return UpdateContextResult(
-            status=result.status,
-            code=result.code,
-            kind=result.kind,
-            binding=self._binding,
-            ready=result.ready,
-            changes=result.changes,
-            unresolved=result.unresolved,
-            stale=result.stale,
-            next_actions=result.next_actions,
-            history_retained=result.history_retained,
-            checkpoint_commit=result.checkpoint_commit,
-            publication=result.publication,
-            operation=self._last_operation,
-            capture=self._last_capture,
+        return self._source_projection(
+            UpdateContextResult(
+                status=result.status,
+                code=result.code,
+                kind=result.kind,
+                binding=self._binding,
+                ready=result.ready,
+                changes=result.changes,
+                unresolved=result.unresolved,
+                stale=result.stale,
+                next_actions=result.next_actions,
+                history_retained=result.history_retained,
+                checkpoint_commit=result.checkpoint_commit,
+                publication=result.publication,
+                operation=self._last_operation,
+                capture=self._last_capture,
+            )
         )
 
     def _retain(self, result, *, selection_id):
@@ -576,6 +593,12 @@ class UpdateContext:
             )
         if self._reference_drafts or self._edit is not None:
             return self._uncommitted_draft()
+        if self._requires_source_refresh:
+            return self._content_result(
+                status="stale_review",
+                code="source_payload_changed",
+                binding=self._binding,
+            )
         if cancel is not None and cancel():
             return UpdateContextResult(
                 status="cancelled_before_publication",
@@ -621,6 +644,12 @@ class UpdateContext:
 
         report_progress(progress, "current_inspection")
         result = self._operations.refresh_update(self._preparation, source=source)
+        if result.preparation is not None and result.status in (
+            "prepared_review",
+            "unresolved",
+            "stale_review",
+        ):
+            self._requires_source_refresh = False
         if (
             cancel is not None
             and cancel()
@@ -653,7 +682,11 @@ class UpdateContext:
         return self._retain(result, selection_id=expected.selection_id)
 
     def load(self, vault, *, selection_id, cancel=None):
-        if self._preparation is not None or self._history.preparation is not None:
+        if (
+            self._preparation is not None
+            or self._history.preparation is not None
+            or self.draft_pending
+        ):
             return self._uncommitted_draft(code="close_decision_required")
         request_identity(selection_id)
         self._reset_history()
@@ -675,7 +708,11 @@ class UpdateContext:
         return self._project(result)
 
     def resume(self, vault, *, selection_id, cancel=None):
-        if self._preparation is not None or self._history.preparation is not None:
+        if (
+            self._preparation is not None
+            or self._history.preparation is not None
+            or self.draft_pending
+        ):
             return self._uncommitted_draft(code="close_decision_required")
         request_identity(selection_id)
         self._reset_history()
@@ -714,15 +751,16 @@ class UpdateContext:
     def _uncommitted_draft(self, *, code="uncommitted_draft"):
         if self._history.preparation is not None:
             return self._history.blocked(code)
-        return UpdateContextResult(
-            status="unresolved",
+        return self._content_result(
+            status="unresolved" if self._preparation is not None else self._last_status,
             code=code,
-            kind=self._kind,
             binding=self._binding,
-            unresolved=len(self._preparation.review.requirements),
-            next_actions=("resolve_update", "discard_draft"),
-            history_retained=self._last_history,
-            checkpoint_commit=self._last_checkpoint,
+            unresolved=len(self._preparation.review.requirements)
+            if self._preparation is not None
+            else 0,
+            next_actions=("resolve_update", "discard_draft")
+            if self._binding is not None
+            else ("continue_review", "discard"),
         )
 
     def _remember(self, result):
@@ -757,6 +795,7 @@ class UpdateContext:
         self._last_actions = result.next_actions
 
     def _reset_history(self):
+        self._requires_source_refresh = False
         self._last_capture = None
         self._last_operation = None
         self._last_history = False
@@ -790,25 +829,29 @@ class UpdateContext:
         if choice == "continue":
             if self._edit is not None or self._reference_drafts:
                 return self._uncommitted_draft(code="continue_review")
-            return UpdateContextResult(
-                status="prepared_review"
-                if self._preparation is not None
-                else self._last_status,
-                code="continue_review",
-                kind=self._kind,
-                binding=self._binding,
-                ready=self._preparation.review.ready
-                if self._preparation is not None
-                else False,
-                unresolved=len(self._preparation.review.requirements)
-                if self._preparation is not None
-                else 0,
-                history_retained=self._last_history,
-                checkpoint_commit=self._last_checkpoint,
-                publication=self._last_publication,
-                operation=self._last_operation if self._preparation is None else None,
-                capture=self._last_capture,
-                next_actions=self._last_actions,
+            return self._source_projection(
+                UpdateContextResult(
+                    status="prepared_review"
+                    if self._preparation is not None
+                    else self._last_status,
+                    code="continue_review",
+                    kind=self._kind,
+                    binding=self._binding,
+                    ready=self._preparation.review.ready
+                    if self._preparation is not None
+                    else False,
+                    unresolved=len(self._preparation.review.requirements)
+                    if self._preparation is not None
+                    else 0,
+                    history_retained=self._last_history,
+                    checkpoint_commit=self._last_checkpoint,
+                    publication=self._last_publication,
+                    operation=self._last_operation
+                    if self._preparation is None
+                    else None,
+                    capture=self._last_capture,
+                    next_actions=self._last_actions,
+                )
             )
         if choice == "save":
             saved = self.save(binding)
@@ -821,6 +864,7 @@ class UpdateContext:
             self._edit = None
         self._reference_drafts.clear()
         self._preparation = self._binding = None
+        self._requires_source_refresh = False
         return UpdateContextResult(
             status=self._last_status
             if self._last_status
@@ -921,18 +965,20 @@ class UpdateContext:
             )
             self._history._last_result = result
             return result
-        return UpdateContextResult(
-            status="prepared_review" if plan.ready else "unresolved",
-            code="draft_discarded",
-            kind=self._kind,
-            binding=self._binding,
-            ready=plan.ready,
-            changes=len(plan.proposal.changes),
-            unresolved=len(plan.requirements),
-            history_retained=self._last_history,
-            checkpoint_commit=self._last_checkpoint,
-            publication=self._last_publication,
-            next_actions=self._last_actions,
+        return self._source_projection(
+            UpdateContextResult(
+                status="prepared_review" if plan.ready else "unresolved",
+                code="draft_discarded",
+                kind=self._kind,
+                binding=self._binding,
+                ready=plan.ready,
+                changes=len(plan.proposal.changes),
+                unresolved=len(plan.requirements),
+                history_retained=self._last_history,
+                checkpoint_commit=self._last_checkpoint,
+                publication=self._last_publication,
+                next_actions=self._last_actions,
+            )
         )
 
     def _review_binding(self):
@@ -978,20 +1024,41 @@ class UpdateContext:
         }
         return self._content_result(**values)
 
+    def _source_projection(self, result):
+        # Native debt has its own inspection/recovery route and supersedes refresh.
+        if result.publication in ("partial", "unknown") or result.status in (
+            "publication_unknown",
+            "recovery_required",
+        ):
+            self._requires_source_refresh = False
+        if not self._requires_source_refresh:
+            return result
+        return result.model_copy(
+            update={
+                "ready": False,
+                "next_actions": ("refresh_update",),
+                "status": "stale_review"
+                if result.status in ("prepared_review", "unresolved")
+                else result.status,
+            }
+        )
+
     def _content_result(self, **values):
         if self._kind == "history":
             return self._history._last_result.model_copy(
                 update={"ready": False, **values}
             )
-        return UpdateContextResult(
-            kind=self._kind,
-            **{
-                "history_retained": self._last_history,
-                "checkpoint_commit": self._last_checkpoint,
-                "publication": self._last_publication,
-                "capture": self._last_capture,
-                **values,
-            },
+        return self._source_projection(
+            UpdateContextResult(
+                kind=self._kind,
+                **{
+                    "history_retained": self._last_history,
+                    "checkpoint_commit": self._last_checkpoint,
+                    "publication": self._last_publication,
+                    "capture": self._last_capture,
+                    **values,
+                },
+            )
         )
 
     def _checked_edit(self, value):

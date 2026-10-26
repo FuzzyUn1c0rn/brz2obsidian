@@ -66,6 +66,8 @@ class UpdateSessionSnapshot:
     def close_options(self):
         if self.active_request_id is not None:
             return ("continue", "background", "wait", "safe_stop")
+        if self.draft_pending:
+            return ("continue", "discard")
         if self.binding is not None:
             return (
                 ("continue", "save", "discard")
