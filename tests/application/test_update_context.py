@@ -834,10 +834,28 @@ def test_explicit_close_preserves_pending_edit_or_discards_only_its_owned_file(
         == "close_decision_required"
     )
     assert not created[0].closed
+    local = worker_context_call(
+        context, {"command": "discard_draft", "binding": draft.binding}
+    )
+    assert local.code == "draft_discarded" and local.binding is not None
+    assert local.binding.proposal_id == draft.binding.proposal_id
+    assert local.binding.generation == draft.binding.generation
+    assert created[0].closed
+    assert (
+        context.write_edit(draft.edit.handle, offset=0, data=b"x").code
+        == "edit_changed"
+    )
+    draft = context.begin_edit(
+        local.binding,
+        requirement_id=offer.requirement_id,
+        size=1,
+        sha256=hashlib.sha256(b"x").hexdigest(),
+    )
+    assert len(created) == 2 and not created[1].closed
     discarded = context.close(draft.binding, choice="discard")
     assert discarded.code == "context_closed" and discarded.binding is None
     assert discarded.history_retained and discarded.checkpoint_commit == "b" * 40
-    assert created[0].closed
+    assert all(file.closed for file in created)
     assert context.page(draft.binding).code == "context_changed"
     cancelled = context.prepare(
         vault / "another-vault",
@@ -854,6 +872,63 @@ def test_explicit_close_preserves_pending_edit_or_discards_only_its_owned_file(
         for p in vault.rglob("*")
         if p.is_file()
     } == before
+
+
+def test_discarding_reference_draft_keeps_review_and_independent_approval(tmp_path):
+    context, case = context_case(tmp_path)
+    opened = context.prepare(
+        case.vault,
+        selection_id="11111111-1111-4111-8111-111111111111",
+        kind="attachment_cleanup",
+    )
+    page = context.page(opened.binding, byte_limit=0)
+    keep = next(row for row in page.page.items if row.item_id == "keep-asset")
+    offered = next(row for row in page.offers if row.change_id == keep.change_id)
+    accepted = context.choose(
+        opened.binding,
+        requirement_id=offered.requirement_id,
+        choice="current",
+        assumptions_digest=offered.assumptions_digest,
+    )
+    stable = context.page(accepted.binding, byte_limit=0)
+    independent = next(row for row in stable.offers if row.change_id == keep.change_id)
+    remove = next(row for row in stable.page.items if row.item_id == "remove-asset")
+    requirement = next(
+        row for row in stable.offers if row.change_id == remove.change_id
+    )
+    reference = context.reference_page(
+        accepted.binding, requirement_id=requirement.requirement_id, limit=1
+    ).references[0]
+    staged = worker_context_call(
+        context,
+        {
+            "command": "stage_references",
+            "binding": accepted.binding,
+            "requirement_id": requirement.requirement_id,
+            "choices": ({"reference_id": reference.reference_id, "choice": "drop"},),
+        },
+    )
+    assert staged.draft_pending and not staged.ready
+    discarded = worker_context_call(
+        context, {"command": "discard_draft", "binding": staged.binding}
+    )
+    assert discarded.code == "draft_discarded" and not discarded.draft_pending
+    assert discarded.binding.proposal_id == accepted.binding.proposal_id
+    assert discarded.binding.generation == accepted.binding.generation
+    again = context.page(discarded.binding, byte_limit=0)
+    assert (
+        next(row for row in again.offers if row.change_id == keep.change_id)
+        == independent
+    )
+    assert all(
+        row.selected is None
+        for row in context.reference_page(
+            discarded.binding, requirement_id=requirement.requirement_id
+        ).references
+    )
+    assert {
+        path: (case.vault / path).read_bytes() for path in case.current
+    } == case.current
 
 
 def test_rechoosing_an_approved_row_keeps_the_other_decision_and_blocks_old_ready_apply(

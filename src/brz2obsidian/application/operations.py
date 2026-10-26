@@ -599,6 +599,9 @@ class ApplicationSession:
     """
 
     def __init__(self):
+        from .update_session import UpdateSession
+
+        self._updates = UpdateSession()
         self._snapshot = SessionSnapshot()
         self._active_revision = None
         self._validation_revision = None
@@ -610,6 +613,38 @@ class ApplicationSession:
     @property
     def snapshot(self) -> SessionSnapshot:
         return self._snapshot
+
+    @property
+    def update_snapshot(self):
+        return self._updates.snapshot
+
+    def select_update(self, vault, *, selection_id):
+        with self._lock:
+            return self._updates.select(vault, selection_id=selection_id)
+
+    def start_update(self, arguments):
+        with self._lock:
+            return self._updates.start(arguments)
+
+    def complete_update(self, request_id, terminal):
+        with self._lock:
+            return self._updates.complete(request_id, terminal)
+
+    def bind_update_worker(self, worker_id):
+        with self._lock:
+            self._updates.bind_worker(worker_id)
+
+    def update_contact_uncertain(self, worker_id):
+        with self._lock:
+            return self._updates.uncertain(worker_id)
+
+    def complete_update_control(self, request_id, terminal):
+        with self._lock:
+            return self._updates.control(request_id, terminal)
+
+    def queue_update_cancel(self, request_id):
+        with self._lock:
+            return self._updates.queue_cancel(request_id)
 
     def dispatch(self, command: SessionCommand) -> SessionUpdate:
         with self._lock:

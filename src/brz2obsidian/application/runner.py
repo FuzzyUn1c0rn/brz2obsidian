@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
+from uuid import uuid4
 
 from brz2obsidian.application.contracts import (
     ApplyResult,
@@ -70,12 +71,21 @@ class HostRunner:
         preferences=None,
         on_feedback=None,
         on_completion_feedback=None,
+        on_update_review=None,
     ):
         self.session = session if session is not None else ApplicationSession()
         self.supervisor, self.on_update, self.on_page = supervisor, on_update, on_page
         self.preferences = preferences
         self.on_feedback = on_feedback or (lambda feedback: None)
         self._stopped = Event()
+        self.on_update_review = on_update_review or (lambda state: None)
+        self._update_channel = None
+        self._update_epoch = str(uuid4())
+        self._update_request = None
+        self._update_cancel = Event()
+        self._update_controls = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="update-control"
+        )
         self.on_diagnostic_feedback = on_diagnostic_feedback or (lambda feedback: None)
         self.on_completion_feedback = on_completion_feedback or (lambda feedback: None)
         self._commands = ThreadPoolExecutor(
@@ -99,6 +109,160 @@ class HostRunner:
 
     def submit(self, command):
         self._commands.submit(self._dispatch, command)
+
+    def select_update(self, vault, *, selection_id):
+        self._commands.submit(self._select_update, vault, selection_id)
+
+    def _select_update(self, vault, selection_id):
+        self._present_update(
+            self.session.select_update(vault, selection_id=selection_id)
+        )
+
+    def submit_update(self, arguments):
+        self._commands.submit(self._dispatch_update, arguments)
+
+    def _present_update(self, state):
+        if not self._stopped.is_set():
+            self.on_update_review(state)
+
+    def _dispatch_update(self, arguments):
+        self.session.bind_update_worker(self._update_epoch)
+        prior = self.session.update_snapshot
+        request = self.session.start_update(arguments)
+        self._present_update(self.session.update_snapshot)
+        if request is not None:
+            self._update_request = request
+            self._update_cancel = Event()
+            self._operations.submit(
+                self._run_update, request, self._update_cancel, prior
+            )
+
+    def _run_update(self, request, cancel, prior):
+        from .contracts import WorkerResponse
+        from .transport import Terminal
+        from .update_context_contracts import UpdateContextResult
+
+        def not_dispatched():
+            result = UpdateContextResult(
+                status="cancelled_before_publication",
+                code="cancelled_before_dispatch",
+                kind=request.arguments.kind
+                if request.arguments.command == "prepare"
+                else prior.reply.kind
+                if prior.reply
+                else "source_update",
+                binding=getattr(request.arguments, "binding", None),
+                history_retained=prior.history_retained,
+                checkpoint_commit=prior.checkpoint_commit,
+                publication="not_published",
+                next_actions=("continue_review",),
+            )
+            return Terminal(
+                phase="completed",
+                response=WorkerResponse(
+                    operation="update",
+                    request_id=request.request_id,
+                    sequence=request.sequence,
+                    result=result,
+                ),
+            )
+
+        try:
+            if cancel.is_set():
+                terminal = not_dispatched()
+            else:
+                if (
+                    self._update_channel is None
+                    or self._update_channel.closed
+                    or self._update_channel.poisoned
+                ):
+                    if (
+                        self._update_channel is not None
+                        and not self._update_channel.closed
+                    ):
+                        self._update_channel.close()
+                    epoch = str(uuid4())
+                    self._update_epoch = epoch
+                    self.session.bind_update_worker(epoch)
+                    self._update_channel = self.supervisor.open_update(
+                        on_uncertain=lambda: self._queue_update_uncertainty(epoch)
+                    )
+                terminal = (
+                    not_dispatched()
+                    if cancel.is_set()
+                    else self._update_channel.run(
+                        request,
+                        on_dispatched=lambda actual: self._resubmit_update_cancel(
+                            actual, cancel
+                        ),
+                    )
+                )
+                if (
+                    terminal.phase == "completed"
+                    and terminal.response.result.code == "context_closed"
+                ):
+                    self._update_channel.close()
+        except Exception:  # noqa: BLE001 -- a lost worker reply never grants publication authority.
+            terminal = Terminal(phase="may_have_executed", code="worker_failure")
+        if self._stopped.is_set():
+            self.session.complete_update(request.request_id, terminal)
+        else:
+            try:
+                self._commands.submit(
+                    self._complete_update, request.request_id, terminal
+                )
+            except RuntimeError:
+                self.session.complete_update(request.request_id, terminal)
+
+    def _complete_update(self, request_id, terminal):
+        self._present_update(self.session.complete_update(request_id, terminal))
+        if (
+            self._update_request is not None
+            and self._update_request.request_id == request_id
+        ):
+            self._update_request = None
+
+    def _uncertain_update(self, epoch):
+        self._present_update(self.session.update_contact_uncertain(epoch))
+
+    def _queue_update_uncertainty(self, epoch):
+        if self._stopped.is_set():
+            self.session.update_contact_uncertain(epoch)
+        else:
+            try:
+                self._commands.submit(self._uncertain_update, epoch)
+            except RuntimeError:
+                self.session.update_contact_uncertain(epoch)
+
+    def cancel_update(self):
+        self._commands.submit(self._cancel_update)
+
+    def _cancel_update(self):
+        request = self._update_request
+        if request is None:
+            return
+        self._update_cancel.set()
+        self._present_update(self.session.queue_update_cancel(request.request_id))
+        self._update_controls.submit(self._send_update_control, request)
+
+    def _resubmit_update_cancel(self, request, cancel):
+        if cancel.is_set() and not self._stopped.is_set():
+            self._update_controls.submit(self._send_update_control, request)
+
+    def _send_update_control(self, request):
+        if self._update_channel is None:
+            return
+        terminal = self._update_channel.cancel(
+            getattr(request.arguments, "binding", None),
+            target_request_id=request.request_id,
+        )
+        if not self._stopped.is_set():
+            self._commands.submit(
+                self._complete_update_control, request.request_id, terminal
+            )
+
+    def _complete_update_control(self, request_id, terminal):
+        self._present_update(self.session.complete_update_control(request_id, terminal))
 
     def submit_if_current(self, command, expected_revision, on_complete=None):
         self._commands.submit(self._dispatch, command, expected_revision, on_complete)
@@ -304,6 +468,7 @@ class HostRunner:
         # A normal close is admitted only after the primary terminal result.
         # No GUI-thread join, timeout policy or child termination is introduced.
         self._stopped.set()
+        self._update_controls.shutdown(wait=False)
         self._operations.shutdown(wait=False)
         self._validation.shutdown(wait=False)
         self._preferences.shutdown(wait=False)

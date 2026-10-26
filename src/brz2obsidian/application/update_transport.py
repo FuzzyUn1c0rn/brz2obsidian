@@ -116,7 +116,7 @@ class UpdateChannel:
         finally:
             retained.clear()
 
-    def _exchange(self, request):
+    def _exchange(self, request, *, on_dispatched=None):
         try:
             if request.operation != "update":
                 raise ProtocolFailure("Wrong producer operation")
@@ -147,6 +147,8 @@ class UpdateChannel:
                     )
                 self._process.stdin.write(wire)
                 self._process.stdin.flush()
+            if on_dispatched is not None:
+                on_dispatched(request)
             response = answers.get()
             if response is None or self.poisoned:
                 return Terminal(phase="may_have_executed", code="protocol_failure")
@@ -158,9 +160,9 @@ class UpdateChannel:
             self._poison()
             return Terminal(phase="may_have_executed", code="protocol_failure")
 
-    def run(self, request):
+    def run(self, request, *, on_dispatched=None):
         with self._serial:
-            return self._exchange(request)
+            return self._exchange(request, on_dispatched=on_dispatched)
 
     def cancel(self, binding, *, target_request_id):
         with self._controls:

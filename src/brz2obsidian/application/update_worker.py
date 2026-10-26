@@ -41,6 +41,19 @@ class UpdateWorker:
             self._next_sequence += 1
 
     def _reply(self, request, *, result=None, error=None):
+        if result is not None:
+            pending = self.context.draft_pending
+            result = result.model_copy(
+                update={
+                    "draft_pending": pending,
+                    "ready": result.ready and not pending,
+                    **(
+                        {"next_actions": ("continue_review", "discard_draft")}
+                        if pending
+                        else {}
+                    ),
+                }
+            )
         response = WorkerResponse(
             request_id=request.request_id,
             sequence=request.sequence,
@@ -144,6 +157,8 @@ class UpdateWorker:
             elif args.command == "close":
                 result = self.context.close(**values)
                 self.closed = result.code == "context_closed"
+            elif args.command == "discard_draft":
+                result = self.context.discard_draft(**values)
             self._reply(request, result=result)
         except Exception:  # noqa: BLE001 -- process boundary never exposes exception/source data.
             self.closed = True

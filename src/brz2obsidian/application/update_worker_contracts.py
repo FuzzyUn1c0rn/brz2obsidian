@@ -124,6 +124,11 @@ class CloseUpdateCommand(ReconciliationContract):
     binding: UpdateContextBinding | None = None
 
 
+class DiscardDraftCommand(ReconciliationContract):
+    command: Literal["discard_draft"]
+    binding: UpdateContextBinding
+
+
 class ApplyUpdateCommand(ReconciliationContract):
     command: Literal["apply"]
     binding: UpdateContextBinding
@@ -178,6 +183,7 @@ UpdateCommand = Annotated[
     | WriteEditCommand
     | SealEditCommand
     | CloseUpdateCommand
+    | DiscardDraftCommand
     | ApplyUpdateCommand
     | SaveUpdateCommand
     | OpenSavedUpdateCommand

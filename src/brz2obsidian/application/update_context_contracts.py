@@ -155,6 +155,7 @@ class UpdateContextResult(ReconciliationContract):
     ]
     binding: UpdateContextBinding | None = None
     ready: bool = False
+    draft_pending: bool = False
     changes: int = Field(default=0, ge=0)
     unresolved: int = Field(default=0, ge=0)
     stale: int = Field(default=0, ge=0)
@@ -181,6 +182,7 @@ class UpdateContextResult(ReconciliationContract):
     def truthful_context(self):
         if self.ready and (
             self.binding is None
+            or self.draft_pending
             or self.unresolved
             or self.stale
             or self.status not in ("prepared_review", "unresolved")

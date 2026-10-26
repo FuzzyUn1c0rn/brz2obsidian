@@ -44,6 +44,10 @@ class UpdateContext:
     def kind(self):
         return self._kind
 
+    @property
+    def draft_pending(self):
+        return self._edit is not None or bool(self._reference_drafts)
+
     def prepare(
         self,
         vault,
@@ -318,7 +322,7 @@ class UpdateContext:
             code=result.code,
             kind=result.kind,
             binding=self._binding,
-            ready=result.ready,
+            ready=result.ready and not self.draft_pending,
             changes=result.changes,
             unresolved=result.unresolved,
             stale=result.stale,
@@ -662,6 +666,36 @@ class UpdateContext:
     def _edit_refusal(self, code):
         return UpdateContextResult(
             status="refused", code=code, kind=self._kind, binding=self._binding
+        )
+
+    def discard_draft(self, binding):
+        try:
+            if (
+                self._preparation is None
+                or UpdateContextBinding.model_validate(binding) != self._binding
+            ):
+                raise ValueError("Context changed")
+        except ValueError, TypeError:
+            return self._edit_refusal("context_changed")
+        if self._edit is not None:
+            self._edit.close()
+            self._edit = None
+        self._reference_drafts.clear()
+        self._revision += 1
+        self._binding = self._binding.model_copy(update={"revision": self._revision})
+        plan = self._preparation.review
+        return UpdateContextResult(
+            status="prepared_review" if plan.ready else "unresolved",
+            code="draft_discarded",
+            kind=self._kind,
+            binding=self._binding,
+            ready=plan.ready,
+            changes=len(plan.proposal.changes),
+            unresolved=len(plan.requirements),
+            history_retained=self._last_history,
+            checkpoint_commit=self._last_checkpoint,
+            publication=self._last_publication,
+            next_actions=self._last_actions,
         )
 
     def _checked_edit(self, value):
