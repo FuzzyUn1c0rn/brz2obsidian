@@ -292,7 +292,16 @@ class HistoryContext:
         )
         return self._last_result
 
-    def prepare(self, binding, *, kind, direction=None, copy_path=None, cancel=None, progress=None):
+    def prepare(
+        self,
+        binding,
+        *,
+        kind,
+        direction=None,
+        copy_path=None,
+        cancel=None,
+        progress=None,
+    ):
         if (
             not self._matches(binding)
             or self.admission is None
@@ -322,7 +331,9 @@ class HistoryContext:
         from .vault_progress_contracts import report_progress
 
         report_progress(progress, "current_inspection")
-        result = self._project(self.operations.refresh_history_workflow(self.preparation))
+        result = self._project(
+            self.operations.refresh_history_workflow(self.preparation)
+        )
         if cancel is not None and cancel() and self.preparation is not None:
             return self._cancelled_preparation("cancelled_after_history_preparation")
         return result
@@ -349,10 +360,18 @@ class HistoryContext:
             self.preparation.native.review,
             proposal_id=self.binding.proposal_id,
             generation=self.binding.review_generation,
-            offset=offset, limit=limit, byte_offset=byte_offset, byte_limit=byte_limit,
+            offset=offset,
+            limit=limit,
+            byte_offset=byte_offset,
+            byte_limit=byte_limit,
         )
         return self._last_result.model_copy(
-            update={"status": page.status, "code": page.code, "page": page, "ready": False}
+            update={
+                "status": page.status,
+                "code": page.code,
+                "page": page,
+                "ready": False,
+            }
         )
 
     def choice_page(self, binding, *, offset=0, limit=100):
@@ -381,7 +400,14 @@ class HistoryContext:
         )
 
     def choose(
-        self, binding, *, requirement_id, choice, assumptions_digest, references=(), edited=None
+        self,
+        binding,
+        *,
+        requirement_id,
+        choice,
+        assumptions_digest,
+        references=(),
+        edited=None,
     ):
         from .review_choices import review_plan_choice_action
         from .update_lifecycle import text_choice_action
@@ -400,7 +426,9 @@ class HistoryContext:
                 assumptions_digest=assumptions_digest,
                 references=references,
             )
-            action = text_choice_action(self.preparation.native.review, action, edited=edited)
+            action = text_choice_action(
+                self.preparation.native.review, action, edited=edited
+            )
         except ValueError, TypeError, StopIteration:
             return self.blocked("offer_changed")
         return self._project(

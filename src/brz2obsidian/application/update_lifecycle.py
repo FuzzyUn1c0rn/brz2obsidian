@@ -798,9 +798,14 @@ def text_choice_action(plan, action, *, edited=None):
 
                 change = reversal_text_comparison(plan.producer_facts, change)
             action = action.model_copy(
-                update={"candidate": _text_choice(
-                    plan, change, "incoming" if action.choice == "reverse" else action.choice, edited
-                )}
+                update={
+                    "candidate": _text_choice(
+                        plan,
+                        change,
+                        "incoming" if action.choice == "reverse" else action.choice,
+                        edited,
+                    )
+                }
             )
     return action
 
@@ -1206,8 +1211,13 @@ def inspect_update_review(
         elif checkpoint.status != "valid" or checkpoint.locator != preparation.locator:
             return refused("association_or_history_changed")
         return review_plan_page(
-            plan, proposal_id=proposal_id, generation=generation,
-            offset=offset, limit=limit, byte_offset=byte_offset, byte_limit=byte_limit,
+            plan,
+            proposal_id=proposal_id,
+            generation=generation,
+            offset=offset,
+            limit=limit,
+            byte_offset=byte_offset,
+            byte_limit=byte_limit,
         )
     except OSError, ValueError, TypeError, AttributeError:
         return refused("invalid_review")

@@ -352,7 +352,8 @@ class UpdateContextResult(ReconciliationContract):
             self.binding is None
             or self.page.status != self.status
             or self.page.proposal_id != self.binding.proposal_id
-            or self.page.generation != (
+            or self.page.generation
+            != (
                 self.binding.review_generation
                 if isinstance(self.binding, HistoryContextBinding)
                 else self.binding.generation

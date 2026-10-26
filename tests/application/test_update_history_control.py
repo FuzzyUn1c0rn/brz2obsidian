@@ -14,7 +14,11 @@ from brz2obsidian.application.protocol import encode_request
 from brz2obsidian.application.update_context import UpdateContext
 from brz2obsidian.application.update_stream import WorkerStreamDecoder
 from brz2obsidian.application.update_worker import UpdateWorker
-from tests.application.test_history_workflow import absent_history, operation_state, ready_native_recovery
+from tests.application.test_history_workflow import (
+    absent_history,
+    operation_state,
+    ready_native_recovery,
+)
 
 
 @pytest.mark.parametrize("command", ("prepare_history", "refresh_history"))
@@ -53,32 +57,59 @@ def test_worker_history_read_control_retains_native_debt_and_review(tmp_path, co
     context = UpdateContext(operations=NativePorts())
     opened = context.history(str(vault), selection_id=str(uuid4()))
     if command == "refresh_history":
-        opened = context.prepare_history(opened.binding, kind="recovery", direction="finish")
+        opened = context.prepare_history(
+            opened.binding, kind="recovery", direction="finish"
+        )
     binding = opened.binding
     before_reads = len(native_reads)
     prestart = (
-        context.prepare_history(binding, kind="recovery", direction="finish", cancel=lambda: True)
+        context.prepare_history(
+            binding, kind="recovery", direction="finish", cancel=lambda: True
+        )
         if command == "prepare_history"
         else context.refresh_history(binding, cancel=lambda: True)
     )
-    assert prestart.code == "cancelled_before_history_preparation" and not prestart.ready
+    assert (
+        prestart.code == "cancelled_before_history_preparation" and not prestart.ready
+    )
     assert prestart.binding == binding and prestart.publication == "partial"
-    assert prestart.status == "recovery_required" and prestart.history_retained == opened.history_retained
+    assert (
+        prestart.status == "recovery_required"
+        and prestart.history_retained == opened.history_retained
+    )
     assert len(native_reads) == before_reads
     args = {"command": command, "binding": binding}
     if command == "prepare_history":
         args.update(kind="recovery", direction="finish")
-    request = WorkerRequest(operation="update", request_id=str(uuid4()), sequence=1, arguments=args)
-    cancel = WorkerRequest(operation="update", request_id=str(uuid4()), sequence=2, arguments={
-        "command": "cancel", "binding": binding,
-        "target_request_id": request.request_id, "target_sequence": 1,
-    })
+    request = WorkerRequest(
+        operation="update", request_id=str(uuid4()), sequence=1, arguments=args
+    )
+    cancel = WorkerRequest(
+        operation="update",
+        request_id=str(uuid4()),
+        sequence=2,
+        arguments={
+            "command": "cancel",
+            "binding": binding,
+            "target_request_id": request.request_id,
+            "target_sequence": 1,
+        },
+    )
     input_read, input_write = os.pipe()
     output_read, output_write = os.pipe()
-    incoming, commands = os.fdopen(input_read, "rb"), os.fdopen(input_write, "wb", buffering=0)
-    replies, outgoing = os.fdopen(output_read, "rb"), os.fdopen(output_write, "wb", buffering=0)
+    incoming, commands = (
+        os.fdopen(input_read, "rb"),
+        os.fdopen(input_write, "wb", buffering=0),
+    )
+    replies, outgoing = (
+        os.fdopen(output_read, "rb"),
+        os.fdopen(output_write, "wb", buffering=0),
+    )
     frames = Queue()
-    reader = Thread(target=lambda: [frames.put(frame) for frame in iter(replies.readline, b"")], daemon=True)
+    reader = Thread(
+        target=lambda: [frames.put(frame) for frame in iter(replies.readline, b"")],
+        daemon=True,
+    )
     worker = UpdateWorker(context=context, output=outgoing)
     server = Thread(target=worker.serve, args=(incoming,), daemon=True)
     decoders = {row.request_id: WorkerStreamDecoder(row) for row in (request, cancel)}
@@ -103,7 +134,10 @@ def test_worker_history_read_control_retains_native_debt_and_review(tmp_path, co
         commands.write(encode_request(cancel))
         while cancel.request_id not in results:
             read_one()
-        assert results[cancel.request_id].code == "cancellation_requested" and not release.is_set()
+        assert (
+            results[cancel.request_id].code == "cancellation_requested"
+            and not release.is_set()
+        )
         while "current_inspection" not in phases:
             read_one()
         release.set()
@@ -114,7 +148,10 @@ def test_worker_history_read_control_retains_native_debt_and_review(tmp_path, co
         assert result.status == "recovery_required" and result.publication == "partial"
         assert result.history_retained == opened.history_retained
         assert result.binding.operation_id == observed.operation_id
-        assert result.binding.operation_generation == 7 and result.binding.review_generation == 3
+        assert (
+            result.binding.operation_generation == 7
+            and result.binding.review_generation == 3
+        )
         assert result.binding != binding
         continued = context.close(result.binding, choice="continue")
         assert not continued.ready and continued.publication == "partial"

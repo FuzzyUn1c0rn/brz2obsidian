@@ -180,8 +180,10 @@ class UpdateContext:
                 return self._uncommitted_draft()
             try:
                 handle = self._checked_edit(edit_handle)
-                if (handle.requirement_id != values["requirement_id"]
-                    or handle.assumptions_digest != values["assumptions_digest"]):
+                if (
+                    handle.requirement_id != values["requirement_id"]
+                    or handle.assumptions_digest != values["assumptions_digest"]
+                ):
                     raise EditFailure("edit_changed")
                 edited = self._edit.content()
             except EditFailure as error:
@@ -189,19 +191,26 @@ class UpdateContext:
         elif values["choice"] == "edited":
             return self._edit_refusal("edit_changed")
         result = self._history.choose(binding, **values, edited=edited)
-        if result.status == "prepared_review" and result.binding != binding:
-            if self._edit is not None:
-                self._edit.close()
-                self._edit = None
+        if (
+            result.status == "prepared_review"
+            and result.binding != binding
+            and self._edit is not None
+        ):
+            self._edit.close()
+            self._edit = None
         self._remember(result)
         return result
 
     def page(self, binding, *, offset=0, limit=100, byte_offset=0, byte_limit=65536):
         if self._kind == "history":
             return self._history.page(
-                binding, offset=offset, limit=limit,
-                byte_offset=byte_offset, byte_limit=byte_limit,
+                binding,
+                offset=offset,
+                limit=limit,
+                byte_offset=byte_offset,
+                byte_limit=byte_limit,
             )
+
         def refused(code):
             return UpdateContextResult(status="refused", code=code, kind=self._kind)
 
@@ -593,19 +602,35 @@ class UpdateContext:
             return self._uncommitted_draft()
         if cancel is not None and cancel():
             return UpdateContextResult(
-                status="cancelled_before_publication", code="cancelled_before_refresh",
-                kind=self._kind, binding=self._binding, ready=False,
-                history_retained=self._last_history, checkpoint_commit=self._last_checkpoint,
-                publication="not_published", next_actions=("continue_review", "refresh_update"),
+                status="cancelled_before_publication",
+                code="cancelled_before_refresh",
+                kind=self._kind,
+                binding=self._binding,
+                ready=False,
+                history_retained=self._last_history,
+                checkpoint_commit=self._last_checkpoint,
+                publication="not_published",
+                next_actions=("continue_review", "refresh_update"),
             )
         from .vault_progress_contracts import report_progress
 
         report_progress(progress, "current_inspection")
         result = self._operations.refresh_update(self._preparation, source=source)
-        if (cancel is not None and cancel() and result.preparation is not None
-            and result.status not in ("recovery_required", "publication_unknown", "failed")
-            and result.publication not in ("partial", "complete", "unknown")):
-            result = result.model_copy(update={"status": "cancelled_before_publication", "code": "cancelled_after_refresh", "ready": False})
+        if (
+            cancel is not None
+            and cancel()
+            and result.preparation is not None
+            and result.status
+            not in ("recovery_required", "publication_unknown", "failed")
+            and result.publication not in ("partial", "complete", "unknown")
+        ):
+            result = result.model_copy(
+                update={
+                    "status": "cancelled_before_publication",
+                    "code": "cancelled_after_refresh",
+                    "ready": False,
+                }
+            )
         return self._retain(result, selection_id=expected.selection_id)
 
     def choose_configuration(self, binding, *, group_id, choice):
@@ -890,12 +915,17 @@ class UpdateContext:
             self._edit = None
         self._reference_drafts.clear()
         current = self._review_binding()
-        self._retain_review_binding(current.model_copy(update={"revision": current.revision + 1}))
+        self._retain_review_binding(
+            current.model_copy(update={"revision": current.revision + 1})
+        )
         if self._kind == "history":
-            result = self._history._last_result.model_copy(update={
-                "status": "prepared_review", "code": "draft_discarded",
-                "ready": self._history.preparation.ready,
-            })
+            result = self._history._last_result.model_copy(
+                update={
+                    "status": "prepared_review",
+                    "code": "draft_discarded",
+                    "ready": self._history.preparation.ready,
+                }
+            )
             self._history._last_result = result
             return result
         return UpdateContextResult(
@@ -917,13 +947,18 @@ class UpdateContext:
 
     def _live_review(self, binding):
         if self._kind == "history":
-            if (not self._history._matches(binding) or self._history.preparation is None
-                or getattr(self._history.preparation.native, "review", None) is None):
+            if (
+                not self._history._matches(binding)
+                or self._history.preparation is None
+                or getattr(self._history.preparation.native, "review", None) is None
+            ):
                 raise EditFailure("context_changed")
             return self._history.preparation.native.review
         try:
-            if (self._preparation is None
-                or UpdateContextBinding.model_validate(binding) != self._binding):
+            if (
+                self._preparation is None
+                or UpdateContextBinding.model_validate(binding) != self._binding
+            ):
                 raise ValueError("Context changed")
             return self._preparation.review
         except ValueError, TypeError:
@@ -933,14 +968,21 @@ class UpdateContext:
         if self._kind == "history":
             self._history.binding = binding
             self._history.revision = binding.revision
-            self._history._last_result = self._history._last_result.model_copy(update={"binding": binding})
+            self._history._last_result = self._history._last_result.model_copy(
+                update={"binding": binding}
+            )
         else:
             self._binding = binding
             self._revision = binding.revision
 
     def _edit_result(self, code):
-        values = {"status": "available", "code": code, "ready": False,
-            "binding": self._review_binding(), "edit": self._edit.state}
+        values = {
+            "status": "available",
+            "code": code,
+            "ready": False,
+            "binding": self._review_binding(),
+            "edit": self._edit.state,
+        }
         if self._kind == "history":
             return self._history._last_result.model_copy(update=values)
         return UpdateContextResult(kind=self._kind, **values)
@@ -971,9 +1013,7 @@ class UpdateContext:
             if "edited" not in requirement.enabled_choices:
                 raise EditFailure("offer_changed")
             current = self._review_binding()
-            next_binding = current.model_copy(
-                update={"revision": current.revision + 1}
-            )
+            next_binding = current.model_copy(update={"revision": current.revision + 1})
             handle = UpdateEditHandle(
                 edit_id=str(uuid4()),
                 binding=next_binding,

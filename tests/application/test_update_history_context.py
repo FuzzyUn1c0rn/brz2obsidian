@@ -314,14 +314,22 @@ def test_worker_resolves_canonical_history_current_offer_without_exporting_plan(
     assert comparison.page.generation == 3
     row = comparison.page.items[0]
     assert (row.original, row.current, row.incoming, row.result) == (
-        b"created\r\n", b"created\r\nLater writing\r\n", None, None,
+        b"created\r\n",
+        b"created\r\nLater writing\r\n",
+        None,
+        None,
     )
     bounded = worker_context_call(
         context,
         {"command": "page", "binding": prepared.binding, "limit": 1, "byte_limit": 4},
     )
     row = bounded.page.items[0]
-    assert (row.original, row.current, row.incoming, row.result) == (b"cr", b"cr", None, None)
+    assert (row.original, row.current, row.incoming, row.result) == (
+        b"cr",
+        b"cr",
+        None,
+        None,
+    )
     assert row.next_byte_offset == 2 and row.omitted and bounded.page.omitted
     assert comparison.binding == bounded.binding == prepared.binding
     choices = worker_context_call(
@@ -355,7 +363,8 @@ def test_worker_resolves_canonical_history_current_offer_without_exporting_plan(
     )
     assert chosen.ready and chosen.binding.review_generation == 3 and len(calls) == 1
     stale_page = worker_context_call(
-        context, {"command": "page", "binding": prepared.binding},
+        context,
+        {"command": "page", "binding": prepared.binding},
     )
     assert stale_page.status == "refused" and stale_page.code == "context_changed"
     stale = worker_context_call(
@@ -497,14 +506,38 @@ def test_undo_context_distinguishes_current_checkpoint_target_receipt_and_prior_
     )
     if target == "matching":
         old_header = offered.binding
-        closed_header = worker_context_call(context, {"command": "close", "binding": old_header, "choice": "discard"})
-        assert closed_header.code == "context_closed" and closed_header.status == "no_content_change"
+        closed_header = worker_context_call(
+            context, {"command": "close", "binding": old_header, "choice": "discard"}
+        )
+        assert (
+            closed_header.code == "context_closed"
+            and closed_header.status == "no_content_change"
+        )
         assert closed_header.binding is None and not closed_header.ready and not entered
-        assert closed_header.history.operation == observed and closed_header.publication == "complete"
-        assert closed_header.history_retained and closed_header.next_actions == ("inspect_history",)
-        stale_header = worker_context_call(context, {"command": "prepare_history", "binding": old_header, "kind": "undo"})
-        assert stale_header.status == "refused" and stale_header.code == "context_changed" and not entered
-        offered = worker_context_call(context, {"command": "history", "vault": str(vault), "selection_id": old_header.selection_id})
+        assert (
+            closed_header.history.operation == observed
+            and closed_header.publication == "complete"
+        )
+        assert closed_header.history_retained and closed_header.next_actions == (
+            "inspect_history",
+        )
+        stale_header = worker_context_call(
+            context,
+            {"command": "prepare_history", "binding": old_header, "kind": "undo"},
+        )
+        assert (
+            stale_header.status == "refused"
+            and stale_header.code == "context_changed"
+            and not entered
+        )
+        offered = worker_context_call(
+            context,
+            {
+                "command": "history",
+                "vault": str(vault),
+                "selection_id": old_header.selection_id,
+            },
+        )
         assert offered.status == "available" and offered.binding != old_header
         assert offered.history.operation == observed and not entered
     prepared = worker_context_call(

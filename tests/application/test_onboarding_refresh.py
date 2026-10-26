@@ -44,7 +44,9 @@ def two_note_legacy_inputs(tmp_path, monkeypatch):
 def test_changed_current_note_keeps_the_independent_onboarding_choice(
     tmp_path, monkeypatch
 ):
-    operations, vault, source, authored, second = two_note_legacy_inputs(tmp_path, monkeypatch)
+    operations, vault, source, authored, second = two_note_legacy_inputs(
+        tmp_path, monkeypatch
+    )
     result = operations.prepare_onboarding(vault, source)
     assert result.preparation is not None, result
     for item_id, decision_id in (

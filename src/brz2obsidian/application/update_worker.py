@@ -160,11 +160,15 @@ class UpdateWorker:
                 result = self.context.initialize_vault(**values)
             elif args.command == "prepare_history":
                 result = self.context.prepare_history(
-                    **values, cancel=cancel.is_set, progress=self._output().observer(request)
+                    **values,
+                    cancel=cancel.is_set,
+                    progress=self._output().observer(request),
                 )
             elif args.command == "refresh_history":
                 result = self.context.refresh_history(
-                    **values, cancel=cancel.is_set, progress=self._output().observer(request)
+                    **values,
+                    cancel=cancel.is_set,
+                    progress=self._output().observer(request),
                 )
             elif args.command == "execute_history":
                 result = self.context.execute_history(
@@ -203,7 +207,11 @@ class UpdateWorker:
                     progress=self._output().observer(request),
                 )
             elif args.command == "refresh":
-                result = self.context.refresh(**values, cancel=cancel.is_set, progress=self._output().observer(request))
+                result = self.context.refresh(
+                    **values,
+                    cancel=cancel.is_set,
+                    progress=self._output().observer(request),
+                )
             elif args.command == "save":
                 result = self.context.save(
                     **values,
