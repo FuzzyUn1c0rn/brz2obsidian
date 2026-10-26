@@ -13,14 +13,11 @@ from tests.application.test_update_lifecycle import (
     case_path,
     git,
 )
-from tests.reconciliation.test_resolution import action
 
 __all__ = ["case_path"]
 
 
-def test_fresh_cli_inspects_saved_brz_choices_without_changing_vault(
-    case_path, tmp_path
-):
+def test_fresh_cli_inspects_and_applies_saved_incoming_brz_choices(case_path, tmp_path):
     evidence = {
         "owner": json.loads((case_path / ".fixture-owner.json").read_text()),
         "phase": "seed",
@@ -46,23 +43,7 @@ def test_fresh_cli_inspects_saved_brz_choices_without_changing_vault(
     (case_path / "offered-preparation.json").write_text(
         offered.preparation.model_dump_json(), encoding="utf-8"
     )
-    note = next(
-        change
-        for change in offered.preparation.review.proposal.changes
-        if change.item_id == "22222222-2222-4222-8222-222222222222"
-    )
-    kept = Operations().resolve_update(
-        offered.preparation,
-        action(
-            offered.preparation.review,
-            note,
-            choice="current",
-            decision_id="cli-keep-note",
-        ),
-    )
-    assert kept.code == "accepted", kept
-    assert kept.preparation.review.approvals[0].result.data == note.current.data
-    prepared = _finish_incoming(kept.preparation)
+    prepared = _finish_incoming(offered.preparation)
     assert prepared.review.ready
     expected_decisions = {
         approval.decision_id for approval in prepared.review.approvals
@@ -79,7 +60,7 @@ def test_fresh_cli_inspects_saved_brz_choices_without_changing_vault(
         decisions=sorted(expected_decisions),
     )
     before = {
-        str(path.relative_to(vault)): path.read_bytes()
+        path.relative_to(vault).as_posix(): path.read_bytes()
         for path in vault.rglob("*")
         if path.is_file() and ".git" not in path.relative_to(vault).parts
     }
@@ -93,6 +74,9 @@ def test_fresh_cli_inspects_saved_brz_choices_without_changing_vault(
             path: hashlib.sha256(raw).hexdigest() for path, raw in before.items()
         },
         refs_sha256=hashlib.sha256(refs).hexdigest(),
+        refs_hex=refs.hex(),
+        head_hex=head.hex(),
+        index_hex=index_before.hex() if index_before is not None else None,
     )
     process = subprocess.run(
         [
@@ -159,11 +143,84 @@ def test_fresh_cli_inspects_saved_brz_choices_without_changing_vault(
     assert str(prepared.payload_directory) not in process.stdout
     assert "attachment_alternative_outputs" in result["omissions"]
     assert {
-        str(path.relative_to(vault)): path.read_bytes()
+        path.relative_to(vault).as_posix(): path.read_bytes()
         for path in vault.rglob("*")
         if path.is_file() and ".git" not in path.relative_to(vault).parts
     } == before
     assert git(vault, "for-each-ref", "--format=%(refname) %(objectname)") == refs
     assert (vault / ".git/HEAD").read_bytes() == head
     assert (index.read_bytes() if index.exists() else None) == index_before
+    note_path = "Home — Entry thought.md"
+    attachment_path = "Attachments/22222222/Notes.md.original"
+    assert b"Authored body." in before[note_path]
+    expected_note = before[note_path].replace(b"Authored body.", b"Incoming body.")
+    assert expected_note != before[note_path]
+    record("apply")
+    applied = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "brz2obsidian",
+            "review",
+            "apply",
+            str(vault),
+            "--proposal-id",
+            proposal.proposal_id,
+            "--generation",
+            str(proposal.generation),
+            "--checkpoint",
+            saved.checkpoint.commit,
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=180,
+    )
+    record(
+        "apply_returned",
+        apply_exit=applied.returncode,
+        apply_stdout=applied.stdout,
+        apply_stderr=applied.stderr,
+    )
+    assert applied.returncode == 0, (applied.stdout, applied.stderr)
+    assert applied.stderr == ""
+    outcome = json.loads(applied.stdout)
+    assert outcome["schema"] == "brz2obsidian.cli-review-result"
+    assert outcome["schema_version"] == 1 and outcome["command"] == "apply"
+    assert outcome["status"] == "applied" and outcome["publication"] == "complete"
+    assert outcome["proposal_id"] == proposal.proposal_id
+    assert outcome["generation"] == proposal.generation
+    assert outcome["history_retained"] is True
+    operation = outcome["operation"]
+    assert operation["status"] == "applied" and operation["kind"] == "apply"
+    assert operation["phase"] == "terminal" and operation["history"] == "terminal"
+    assert operation["publication"] == "complete"
+    assert operation["operation_id"] and operation["receipt_commit"]
+    assert (vault / note_path).read_bytes() == expected_note
+    assert (vault / attachment_path).read_bytes() == b"Incoming body.\r\n"
+    for path, raw in before.items():
+        if path not in (
+            note_path,
+            attachment_path,
+            "migration-record.json",
+        ) and not path.startswith(".brz2obsidian"):
+            assert (vault / path).read_bytes() == raw, path
+    assert (vault / ".git/HEAD").read_bytes() == head
+    assert (index.read_bytes() if index.exists() else None) == index_before
+    current_refs = git(vault, "for-each-ref", "--format=%(refname) %(objectname)")
+    assert [
+        row
+        for row in current_refs.splitlines()
+        if not row.startswith(b"refs/brz2obsidian/")
+    ] == [row for row in refs.splitlines() if not row.startswith(b"refs/brz2obsidian/")]
+    operation_ref = (
+        saved.checkpoint.association.ref.removesuffix("/checkpoints")
+        + "/operations/"
+        + operation["operation_id"]
+    )
+    assert (
+        git(vault, "rev-parse", operation_ref).decode().strip()
+        == operation["receipt_commit"]
+    )
     record("complete")

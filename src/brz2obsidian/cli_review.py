@@ -18,7 +18,7 @@ class CliReviewResult(ReconciliationContract):
         default="brz2obsidian.cli-review-result", alias="schema"
     )
     schema_version: Literal[1] = 1
-    command: Literal["status", "inspect"]
+    command: Literal["status", "inspect", "apply"]
     status: Literal[
         "available",
         "initialization_required",
@@ -33,6 +33,9 @@ class CliReviewResult(ReconciliationContract):
         "refused",
         "failed",
         "publication_unknown",
+        "applied",
+        "no_content_change",
+        "cancelled_before_publication",
     ]
     code: str
     ready: bool = False
@@ -53,6 +56,7 @@ class CliReviewResult(ReconciliationContract):
     omissions: tuple[str, ...] = ()
     history_retained: bool | None = None
     checkpoint: CheckpointLocator | None = None
+    checkpoint_commit: str | None = None
     operation: VaultApplyResult | None = None
     recovery_gaps: tuple[str, ...] = ()
     findings: tuple[str, ...] = ()
@@ -66,6 +70,10 @@ def report(result, *, json_output):
         0
         if result.status == "available"
         or (result.command == "inspect" and result.status == "prepared_review")
+        or (
+            result.command == "apply"
+            and result.status in ("applied", "no_content_change")
+        )
         else 2
     )
     if result.status in ("unknown", "failed", "publication_unknown") or (
@@ -105,6 +113,8 @@ def report(result, *, json_output):
             f"Checkpoint: {result.checkpoint.commit}; "
             f"generation: {result.checkpoint.generation}"
         )
+    elif result.checkpoint_commit is not None:
+        print(f"Checkpoint commit: {result.checkpoint_commit}")
     if result.operation is not None:
         print(f"Outcome: {result.operation.status}")
         print(
@@ -120,6 +130,8 @@ def report(result, *, json_output):
 
 
 def run(args):
+    if args.review_command == "apply":
+        return report(_apply(args), json_output=args.json_output)
     if args.review_command == "inspect":
         return report(_inspect(args), json_output=args.json_output)
     observed = Operations().inspect_history_workflow(args.vault)
@@ -160,6 +172,7 @@ def _update_result(observed, **changes):
         "checkpoint": preparation.locator
         if preparation is not None
         else observed.checkpoint,
+        "checkpoint_commit": observed.checkpoint_commit,
         "operation": observed.application,
         "recovery_gaps": observed.recovery_gaps,
         "findings": observed.findings,
@@ -254,12 +267,76 @@ def _inspect(args):
     )
 
 
+def _apply(args):
+    if args.generation < 1:
+        return CliReviewResult(
+            command="apply",
+            status="refused",
+            code="invalid_review_arguments",
+            summary="Review generation must be positive.",
+            guidance=("Inspect the saved proposal before applying it.",),
+        )
+    operations = Operations()
+    loaded = operations.load_update(args.vault)
+    if loaded.loaded is None:
+        return _update_result(loaded, command="apply")
+    if (
+        args.proposal_id != loaded.operation_id
+        or args.generation != loaded.generation
+        or loaded.checkpoint is None
+        or args.checkpoint != loaded.checkpoint.commit
+    ):
+        return _update_result(
+            loaded,
+            command="apply",
+            status="stale_review",
+            code="review_identity_changed",
+            ready=False,
+            next_actions=("inspect_saved_review",),
+        )
+    current = operations.resume_update(args.vault)
+    if current.preparation is None:
+        return _update_result(current, command="apply")
+    if (current.operation_id, current.generation, current.preparation.locator) != (
+        loaded.operation_id,
+        loaded.generation,
+        loaded.checkpoint,
+    ):
+        return _update_result(
+            current,
+            command="apply",
+            status="stale_review",
+            code="review_identity_changed",
+            ready=False,
+            next_actions=("review_update",),
+        )
+    if not current.ready:
+        return _update_result(
+            current,
+            command="apply",
+            status="unresolved",
+            code="review_not_ready",
+            ready=False,
+            next_actions=("resolve_update", "save_update"),
+        )
+    applied = operations.apply_update(current.preparation)
+    return _update_result(
+        applied,
+        command="apply",
+        proposal_id=current.operation_id,
+        generation=current.generation,
+        source=current.preparation.observed_source,
+        output_identity=current.preparation.review.facts.incoming_identity,
+    )
+
+
 def report_failure(args):
     result = CliReviewResult(
         command=args.review_command,
         status="unknown",
         code="operation_failure",
-        summary="Review status could not be established. The cause is not known.",
+        publication="unknown" if args.review_command == "apply" else None,
+        summary="The review operation could not complete. The cause is not known.",
         guidance=("Inspect the vault again before starting a change.",),
         next_actions=("inspect_history",),
     )

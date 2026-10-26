@@ -80,6 +80,12 @@ def main(argv=None):
     inspection.add_argument("--byte-offset", type=int, default=0)
     inspection.add_argument("--byte-limit", type=int, default=65536)
     inspection.add_argument("--json", action="store_true", dest="json_output")
+    application = actions.add_parser("apply")
+    application.add_argument("vault")
+    application.add_argument("--proposal-id", required=True)
+    application.add_argument("--generation", type=int, required=True)
+    application.add_argument("--checkpoint", required=True)
+    application.add_argument("--json", action="store_true", dest="json_output")
     try:
         args = parser.parse_args(argv)
     except SystemExit as error:
