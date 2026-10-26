@@ -363,7 +363,9 @@ class UpdateSession:
             if pending_inspection
             else result.checkpoint_commit,
             publication=state.publication if pending_inspection else result.publication,
-            next_actions=("inspect_history",)
+            next_actions=("continue_review", "discard")
+            if pending_inspection and result.draft_pending and result.binding is None
+            else ("inspect_history",)
             if pending_inspection
             else result.next_actions,
             reply=result,

@@ -79,6 +79,83 @@ def test_waiting_to_close_keeps_prepared_review_and_unknown_contact_truth(tmp_pa
         "discard", expected_revision=waiting.revision
     )
     assert session.update_snapshot.binding == binding
+    edit_request = session.start_update(
+        {
+            "command": "begin_edit",
+            "binding": binding,
+            "requirement_id": "actual-offer",
+            "size": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        }
+    )
+    draft_binding = binding.model_copy(update={"revision": 2})
+    draft = prepared.model_copy(
+        update={
+            "status": "available",
+            "code": "edit_started",
+            "binding": draft_binding,
+            "draft_pending": True,
+        }
+    )
+    session.complete_update(edit_request.request_id, terminal(edit_request, draft))
+    page_request = session.start_update({"command": "page", "binding": draft_binding})
+    retired = UpdateContextResult(
+        kind="onboarding",
+        status="publication_unknown",
+        code="association_or_history_changed",
+        binding=None,
+        draft_pending=True,
+        history_retained=None,
+        publication="unknown",
+        next_actions=("continue_review", "discard"),
+    )
+    state = session.complete_update(
+        page_request.request_id, terminal(page_request, retired)
+    )
+    assert state.needs_inspection and state.draft_pending and state.binding is None
+    assert not state.ready and state.publication == "unknown"
+    assert state.close_options == ("continue", "discard")
+    for arguments, code in (
+        (
+            {"command": "close", "binding": None, "choice": "continue"},
+            "continue_review",
+        ),
+        (
+            {
+                "command": "prepare",
+                "vault": vault,
+                "selection_id": selection,
+                "kind": "onboarding",
+                "source": None,
+            },
+            "close_decision_required",
+        ),
+    ):
+        pending = session.start_update(arguments)
+        state = session.complete_update(
+            pending.request_id,
+            terminal(pending, retired.model_copy(update={"code": code})),
+        )
+        assert state.needs_inspection and state.draft_pending and state.binding is None
+        assert not state.ready and state.publication == "unknown"
+        assert state.next_actions == ("continue_review", "discard")
+        assert state.close_options == ("continue", "discard")
+    discard_request = session.start_update(
+        {"command": "close", "binding": None, "choice": "discard"}
+    )
+    discarded = retired.model_copy(
+        update={
+            "code": "context_closed",
+            "draft_pending": False,
+            "next_actions": ("inspect_history",),
+        }
+    )
+    state = session.complete_update(
+        discard_request.request_id, terminal(discard_request, discarded)
+    )
+    assert state.needs_inspection and not state.draft_pending and state.binding is None
+    assert state.publication == "unknown" and state.next_actions == ("inspect_history",)
+    assert state.close_options == ("close",)
     session.bind_update_worker("actual-child")
     unknown = session.update_contact_uncertain("actual-child")
     assert unknown.needs_inspection and unknown.publication == "unknown"
