@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from .application.checkpoint_contracts import CheckpointLocator
+from .application.checkpoint_contracts import CheckpointLocator, CheckpointResult
 from .application.operations import Operations
 from .application.review_offers import choice_page
 from .application.update_context_contracts import UpdateChoiceOffer
@@ -18,7 +18,13 @@ class CliReviewResult(ReconciliationContract):
         default="brz2obsidian.cli-review-result", alias="schema"
     )
     schema_version: Literal[1] = 1
-    command: Literal["status", "inspect", "apply"]
+    command: Literal["review", "status", "prepare", "inspect", "apply"]
+    kind: (
+        Literal[
+            "source_update", "onboarding", "format_transition", "attachment_cleanup"
+        ]
+        | None
+    ) = None
     status: Literal[
         "available",
         "initialization_required",
@@ -57,6 +63,10 @@ class CliReviewResult(ReconciliationContract):
     history_retained: bool | None = None
     checkpoint: CheckpointLocator | None = None
     checkpoint_commit: str | None = None
+    capture: CheckpointResult | None = None
+    retained_source_provenance: bool | None = None
+    source_gap_count: int | None = Field(default=None, ge=0)
+    diagnostic_omission: bool | None = None
     operation: VaultApplyResult | None = None
     recovery_gaps: tuple[str, ...] = ()
     findings: tuple[str, ...] = ()
@@ -71,26 +81,54 @@ def report(result, *, json_output):
         if result.status == "available"
         or (result.command == "inspect" and result.status == "prepared_review")
         or (
+            result.command == "prepare"
+            and result.status == "prepared_review"
+            and result.code == "saved"
+            and result.capture is not None
+            and result.capture.status in ("captured", "unchanged")
+        )
+        or (
             result.command == "apply"
             and result.status in ("applied", "no_content_change")
         )
         else 2
     )
-    if result.status in ("unknown", "failed", "publication_unknown") or (
-        result.status == "recovery_required"
-        and result.operation is not None
-        and result.operation.status in ("unknown", "failed")
+    if (
+        (result.capture is not None and result.capture.status == "failed")
+        or result.status in ("unknown", "failed", "publication_unknown")
+        or (
+            result.status == "recovery_required"
+            and result.operation is not None
+            and result.operation.status in ("unknown", "failed")
+        )
     ):
         exit_code = 1
     if json_output:
         print(result.model_dump_json(by_alias=True))
         return exit_code
-    print(f"review {result.command}: {result.status}")
+    label = "review" if result.command == "review" else f"review {result.command}"
+    print(f"{label}: {result.status}")
     print(result.summary)
     if result.source is not None:
         print(
             f"Source: {result.source.source_id}; module: {result.source.module_id} {result.source.module_version}; format: {result.source.format_version}"
         )
+    if result.output_identity is not None:
+        print(
+            f"Output profile: {result.output_identity.profile_id} {result.output_identity.profile_version}; "
+            f"output format: {result.output_identity.output_format}"
+        )
+    if result.retained_source_provenance is not None:
+        print(
+            "Baseline payload bytes reused: "
+            + ("yes" if result.retained_source_provenance else "no")
+        )
+    if result.source_gap_count is not None:
+        print(f"Source gaps: {result.source_gap_count}")
+    if result.diagnostic_omission:
+        print("Diagnostic detail omitted; this result is a bounded summary.")
+    if result.recovery_gaps:
+        print("Recovery gaps: " + ", ".join(result.recovery_gaps))
     if result.proposal_id is not None:
         print(
             f"Proposal: {result.proposal_id}; generation: {result.generation}; ready: {result.ready}"
@@ -115,6 +153,12 @@ def report(result, *, json_output):
         )
     elif result.checkpoint_commit is not None:
         print(f"Checkpoint commit: {result.checkpoint_commit}")
+    if result.capture is not None:
+        print(
+            f"Capture: {result.capture.status}; object storage: {result.capture.object_storage}; "
+            f"objects written: {result.capture.objects_written}; retained history: {result.capture.history_retained}; "
+            f"authored files changed: {result.capture.authored_files_changed}"
+        )
     if result.operation is not None:
         print(f"Outcome: {result.operation.status}")
         print(
@@ -130,6 +174,8 @@ def report(result, *, json_output):
 
 
 def run(args):
+    if args.review_command == "prepare":
+        return report(_prepare(args), json_output=args.json_output)
     if args.review_command == "apply":
         return report(_apply(args), json_output=args.json_output)
     if args.review_command == "inspect":
@@ -155,6 +201,7 @@ def _update_result(observed, **changes):
     preparation = observed.preparation
     values = {
         "command": "inspect",
+        "kind": observed.kind,
         "status": observed.status,
         "code": observed.code,
         "ready": observed.ready,
@@ -173,6 +220,15 @@ def _update_result(observed, **changes):
         if preparation is not None
         else observed.checkpoint,
         "checkpoint_commit": observed.checkpoint_commit,
+        "capture": observed.capture,
+        "retained_source_provenance": preparation.retained_source_provenance
+        if preparation
+        else None,
+        "source_gap_count": len(preparation.source_gaps) if preparation else None,
+        "diagnostic_omission": observed.diagnostic_omission,
+        "omissions": ("source_gap_details",)
+        if preparation and preparation.source_gaps
+        else (),
         "operation": observed.application,
         "recovery_gaps": observed.recovery_gaps,
         "findings": observed.findings,
@@ -182,6 +238,39 @@ def _update_result(observed, **changes):
     }
     values.update(changes)
     return CliReviewResult(**values)
+
+
+def _prepare(args):
+    if (
+        (args.kind == "source-update" and not args.source)
+        or (args.kind != "onboarding" and args.original_source is not None)
+        or (args.kind == "attachment-cleanup" and args.source is not None)
+    ):
+        return CliReviewResult(
+            command="prepare",
+            status="refused",
+            code="invalid_review_arguments",
+            publication="not_started",
+            summary="The preparation route and source options do not match.",
+            guidance=(
+                "Use brz2obsidian review prepare --help for route-specific source options.",
+            ),
+        )
+    operations = Operations()
+    if args.kind == "source-update":
+        prepared = operations.prepare_update(args.vault, args.source)
+    elif args.kind == "onboarding":
+        prepared = operations.prepare_onboarding(
+            args.vault, args.source, original_source=args.original_source
+        )
+    elif args.kind == "format-transition":
+        prepared = operations.prepare_format_transition(args.vault, args.source)
+    else:
+        prepared = operations.prepare_attachment_cleanup(args.vault)
+    if prepared.preparation is None:
+        return _update_result(prepared, command="prepare")
+    saved = operations.save_update(prepared.preparation)
+    return _update_result(saved, command="prepare")
 
 
 def _inspect(args):
@@ -263,7 +352,8 @@ def _inspect(args):
         choices=choices,
         choices_total=total,
         choices_next_offset=following,
-        omissions=("attachment_alternative_outputs",),
+        omissions=("attachment_alternative_outputs",)
+        + (("source_gap_details",) if current.preparation.source_gaps else ()),
     )
 
 
@@ -328,6 +418,20 @@ def _apply(args):
         source=current.preparation.observed_source,
         output_identity=current.preparation.review.facts.incoming_identity,
     )
+
+
+def report_argument_failure(command, *, json_output):
+    result = CliReviewResult(
+        command=command
+        if command in ("status", "prepare", "inspect", "apply")
+        else "review",
+        status="refused",
+        code="invalid_review_arguments",
+        publication="not_started",
+        summary="The review command arguments are invalid.",
+        guidance=("Use brz2obsidian review --help for accepted commands and options.",),
+    )
+    return report(result, json_output=json_output)
 
 
 def report_failure(args):

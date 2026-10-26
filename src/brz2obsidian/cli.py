@@ -21,6 +21,7 @@ class SafeArgumentParser(argparse.ArgumentParser):
 
 
 def main(argv=None):
+    argv = sys.argv[1:] if argv is None else list(argv)
     parser = SafeArgumentParser(prog="brz2obsidian")
     commands = parser.add_subparsers(dest="operation", required=True)
     for name in ("inspect", "convert"):
@@ -65,8 +66,44 @@ def main(argv=None):
     checker = commands.add_parser("check-vault")
     checker.add_argument("vault")
     checker.add_argument("--json", action="store_true", dest="json_output")
-    review = commands.add_parser("review")
+    review = commands.add_parser(
+        "review",
+        description="Prepare and inspect saved reviews, apply resolved choices, or inspect history status.",
+        epilog=(
+            "Use the Windows editor for interactive choices; this CLI has no interactive editor. "
+            "Keep the vault idle while operations run. Shared admission checks supported Git and "
+            "current storage policy. Deleted or missing history cannot prove earlier versions. "
+            "Retained history grows disk use. Later stage-two category/tag remapping is unavailable."
+        ),
+    )
     actions = review.add_subparsers(dest="review_command", required=True)
+    preparation = actions.add_parser(
+        "prepare",
+        description="Prepare and save a review using existing shared lifecycle rules. Incoming sources are BRZ archives.",
+        epilog=(
+            "Source-update requires --source. Onboarding may use --source and --original-source; "
+            "format-transition may use --source; attachment-cleanup takes neither. "
+            "Required configuration, consent and review choices remain explicit in the Windows editor. "
+            "Saving retains converter history without applying authored files. Attachment cleanup "
+            "does not perform history pruning; history pruning is deferred."
+        ),
+    )
+    preparation.add_argument("vault")
+    preparation.add_argument(
+        "--kind",
+        choices=(
+            "source-update",
+            "onboarding",
+            "format-transition",
+            "attachment-cleanup",
+        ),
+        default="source-update",
+    )
+    preparation.add_argument("--source", help="Incoming BRZ archive")
+    preparation.add_argument(
+        "--original-source", help="Original BRZ archive for onboarding"
+    )
+    preparation.add_argument("--json", action="store_true", dest="json_output")
     status = actions.add_parser("status")
     status.add_argument("vault")
     status.add_argument("--json", action="store_true", dest="json_output")
@@ -89,7 +126,15 @@ def main(argv=None):
     try:
         args = parser.parse_args(argv)
     except SystemExit as error:
-        return 0 if error.code == 0 else 1
+        if error.code == 0:
+            return 0
+        if argv[:1] == ["review"]:
+            from .cli_review import report_argument_failure
+
+            return report_argument_failure(
+                argv[1] if len(argv) > 1 else None, json_output="--json" in argv
+            )
+        return 1
     try:
         return _execute(args)
     except Exception:  # noqa: BLE001 -- final CLI boundary; never expose raw errors.

@@ -7,6 +7,44 @@ import tempfile
 from pathlib import Path
 from uuid import uuid4
 
+import pytest
+
+
+@pytest.mark.parametrize(
+    ("command", "options"),
+    (
+        ("apply", ()),
+        (
+            "apply",
+            (
+                "--proposal-id",
+                "review:one",
+                "--generation",
+                "invalid",
+                "--checkpoint",
+                "a" * 40,
+            ),
+        ),
+        ("status", ("--not-a-review-option",)),
+    ),
+)
+def test_review_argument_errors_report_actionable_refusal_without_touching_vault(
+    tmp_path, capsys, command, options
+):
+    from brz2obsidian.cli import main
+
+    vault = tmp_path / "untouched-vault"
+    code = main(["review", command, str(vault), *options, "--json"])
+    captured = capsys.readouterr()
+    assert code == 2
+    value = json.loads(captured.out)
+    assert value["schema"] == "brz2obsidian.cli-review-result"
+    assert value["schema_version"] == 1 and value["command"] == command
+    assert value["status"] == "refused"
+    assert value["code"] == "invalid_review_arguments" and value["ready"] is False
+    assert "use --help" in captured.err
+    assert not vault.exists()
+
 
 def test_review_status_reports_initialization_without_creating_history(tmp_path):
     root = Path(tempfile.mkdtemp(prefix="brz2obsidian-286-status-"))

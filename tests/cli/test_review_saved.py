@@ -31,6 +31,87 @@ def test_fresh_cli_inspects_and_applies_saved_incoming_brz_choices(case_path, tm
 
     record("seed")
     vault, initial = _seed(case_path)
+
+    def visible_files():
+        return {
+            path.relative_to(vault).as_posix(): path.read_bytes()
+            for path in vault.rglob("*")
+            if path.is_file() and ".git" not in path.relative_to(vault).parts
+        }
+
+    def refuse_apply(label, snapshot, *, status, proposal_id=None, generation=None):
+        locator = (
+            snapshot.preparation.locator
+            if snapshot.preparation is not None
+            else snapshot.checkpoint
+        )
+        before_files = visible_files()
+        before_refs = git(vault, "for-each-ref", "--format=%(refname) %(objectname)")
+        before_head = (vault / ".git/HEAD").read_bytes()
+        index_path = vault / ".git/index"
+        before_index = index_path.read_bytes() if index_path.exists() else None
+        evidence.setdefault("refusals", {})[label] = {
+            "proposal_id": snapshot.operation_id,
+            "generation": snapshot.generation,
+            "checkpoint": locator.model_dump(mode="json"),
+            "before_sha256": {
+                path: hashlib.sha256(raw).hexdigest()
+                for path, raw in before_files.items()
+            },
+            "refs_hex": before_refs.hex(),
+            "head_hex": before_head.hex(),
+            "index_hex": before_index.hex() if before_index is not None else None,
+        }
+        record(label)
+        rejected = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "brz2obsidian",
+                "review",
+                "apply",
+                str(vault),
+                "--proposal-id",
+                proposal_id or snapshot.operation_id,
+                "--generation",
+                str(generation or snapshot.generation),
+                "--checkpoint",
+                locator.commit,
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=90,
+        )
+        evidence["refusals"][label].update(
+            {
+                "exit": rejected.returncode,
+                "stdout": rejected.stdout,
+                "stderr": rejected.stderr,
+            }
+        )
+        record(label + "_returned")
+        assert rejected.returncode == 2, (rejected.stdout, rejected.stderr)
+        assert rejected.stderr == ""
+        value = json.loads(rejected.stdout)
+        assert value["command"] == "apply" and value["status"] == status
+        assert value["ready"] is False
+        assert value["code"] == (
+            "review_not_ready" if status == "unresolved" else "review_identity_changed"
+        )
+        assert value["publication"] == "not_started"
+        assert value["next_actions"]
+        assert visible_files() == before_files
+        assert (
+            git(vault, "for-each-ref", "--format=%(refname) %(objectname)")
+            == before_refs
+        )
+        assert (vault / ".git/HEAD").read_bytes() == before_head
+        assert (
+            index_path.read_bytes() if index_path.exists() else None
+        ) == before_index
+
     incoming = _changed_archive(initial, case_path / "incoming.brz")
     record(
         "prepare",
@@ -38,11 +119,66 @@ def test_fresh_cli_inspects_and_applies_saved_incoming_brz_choices(case_path, tm
         source=str(incoming),
         source_sha256=hashlib.sha256(incoming.read_bytes()).hexdigest(),
     )
-    offered = Operations().prepare_update(vault, incoming)
+    before_prepare = visible_files()
+    prepared_process = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "brz2obsidian",
+            "review",
+            "prepare",
+            str(vault),
+            "--source",
+            str(incoming),
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    record(
+        "prepare_returned",
+        prepare_exit=prepared_process.returncode,
+        prepare_stdout=prepared_process.stdout,
+        prepare_stderr=prepared_process.stderr,
+    )
+    assert prepared_process.returncode == 0, (
+        prepared_process.stdout,
+        prepared_process.stderr,
+    )
+    assert prepared_process.stderr == ""
+    prepared_value = json.loads(prepared_process.stdout)
+    assert prepared_value["command"] == "prepare" and prepared_value["code"] == "saved"
+    assert (
+        prepared_value["status"] == "prepared_review"
+        and prepared_value["kind"] == "source_update"
+    )
+    assert prepared_value["ready"] is False and prepared_value["unresolved"] > 0
+    assert prepared_value["history_retained"] is True
+    assert prepared_value["capture"]["status"] in ("captured", "unchanged")
+    assert prepared_value["capture"]["authored_files_changed"] is False
+    assert prepared_value["capture"]["commit"] == prepared_value["checkpoint"]["commit"]
+    assert prepared_value["source"]["module_id"] == "thebrain-brz"
+    assert prepared_value["source"]["source_sha256"] == evidence["source_sha256"]
+    assert prepared_value["diagnostic_omission"] is True
+    assert "preparation" not in prepared_value and "loaded" not in prepared_value
+    assert "brz2obsidian-update-" not in prepared_process.stdout
+    assert {
+        p: raw
+        for p, raw in visible_files().items()
+        if not p.startswith(".brz2obsidian")
+    } == {
+        p: raw for p, raw in before_prepare.items() if not p.startswith(".brz2obsidian")
+    }
+    offered = Operations().resume_update(vault)
     assert offered.status == "prepared_review" and not offered.ready, offered
+    assert offered.operation_id == prepared_value["proposal_id"]
+    assert offered.generation == prepared_value["generation"]
     (case_path / "offered-preparation.json").write_text(
         offered.preparation.model_dump_json(), encoding="utf-8"
     )
+    refuse_apply("unresolved", offered, status="unresolved")
     prepared = _finish_incoming(offered.preparation)
     assert prepared.review.ready
     expected_decisions = {
@@ -51,6 +187,15 @@ def test_fresh_cli_inspects_and_applies_saved_incoming_brz_choices(case_path, tm
     assert expected_decisions
     saved = Operations().save_update(prepared)
     assert saved.code == "saved" and saved.checkpoint is not None, saved
+    refuse_apply(
+        "foreign_proposal", saved, status="stale_review", proposal_id="review:foreign"
+    )
+    refuse_apply(
+        "wrong_generation",
+        saved,
+        status="stale_review",
+        generation=saved.generation + 1,
+    )
     proposal = prepared.review.proposal
     record(
         "inspect",
@@ -155,6 +300,13 @@ def test_fresh_cli_inspects_and_applies_saved_incoming_brz_choices(case_path, tm
     assert b"Authored body." in before[note_path]
     expected_note = before[note_path].replace(b"Authored body.", b"Incoming body.")
     assert expected_note != before[note_path]
+    changed_current = before[note_path].replace(
+        b"Authored body.", b"Later authored writing."
+    )
+    (vault / note_path).write_bytes(changed_current)
+    refuse_apply("changed_current", saved, status="stale_review")
+    assert (vault / note_path).read_bytes() == changed_current
+    (vault / note_path).write_bytes(before[note_path])
     record("apply")
     applied = subprocess.run(
         [
