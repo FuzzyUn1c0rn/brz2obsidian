@@ -322,7 +322,8 @@ The raw entry point rejects duplicate keys at every nesting level before model
 decoding can overwrite them. Missing, unknown or ill-typed interpretation fields,
 invalid UTF8/Base64, malformed or excessively nested JSON and unsupported schema
 IDs/versions return typed refusal without echoing the payload. Record version 1
-is separate from output format 7 and worker protocol 3. Loading does not migrate a
+is separate from output format 7 and worker envelope 4. Existing migration results
+and source-inspection reviews retain version 3. Loading does not migrate a
 record, change an output format, invent historical bytes or assert publication,
 rollback or recovery.
 

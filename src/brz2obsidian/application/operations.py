@@ -681,6 +681,12 @@ class ApplicationSession:
         with self._lock:
             return self._updates.queue_cancel(request_id)
 
+    def request_update_close(self, choice, *, expected_revision):
+        with self._lock:
+            return self._updates.request_close(
+                choice, expected_revision=expected_revision
+            )
+
     def dispatch(self, command: SessionCommand) -> SessionUpdate:
         with self._lock:
             return self._dispatch(command)

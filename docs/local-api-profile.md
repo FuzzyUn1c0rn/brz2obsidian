@@ -255,7 +255,8 @@ library workflow, CLI and Windows factory pair a module configured for profile 3
 with `LOCAL_API_POLICY_V3`.
 Direct source-module/session constructors retain profile1 defaults; explicit
 profiles1/2 and their controls remain available. Capture format1, module1,
-contract7 and worker/review schema3 are unchanged. Every new source-family
+contract7 and nested migration/source-inspection review schema3 are unchanged. The current worker
+envelope is version4. Every new source-family
 predicate requires matching live and frozen implementation under its assigned
 slice; raw capture or profile selection never expands the finite qualification.
 

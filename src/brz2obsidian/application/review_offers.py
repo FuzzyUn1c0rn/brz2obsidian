@@ -92,6 +92,12 @@ def review_plan_choice_page(plan, *, offset=0, limit=100):
 
 def choice_detail_page(preparation, *, requirement_id, offset=0, limit=100):
     plan = UpdatePreparation.model_validate(preparation).review
+    return review_plan_choice_detail_page(
+        plan, requirement_id=requirement_id, offset=offset, limit=limit
+    )
+
+
+def review_plan_choice_detail_page(plan, *, requirement_id, offset=0, limit=100):
     requirement = next(
         row
         for row in inspect_review_choices(plan)

@@ -131,6 +131,7 @@ def test_qt_host_uses_live_control_while_real_persistent_worker_waits_for_native
 
     monkeypatch.setattr(subprocess, "Popen", real_hidden_child)
     views, ticks, clicks = [], [], []
+    close_views = []
 
     class Bridge(QObject):
         changed = Signal(object)
@@ -139,8 +140,33 @@ def test_qt_host_uses_live_control_while_real_persistent_worker_waits_for_native
         def receive(self, state):
             assert QThread.currentThread() == app.thread()
             views.append(state)
+            if (
+                state.active_request_id is not None
+                and state.close_disposition is not None
+                and state.close_disposition not in close_views
+            ):
+                assert state.close_options == (
+                    "continue",
+                    "background",
+                    "wait",
+                    "safe_stop",
+                )
+                close_views.append(state.close_disposition)
+                assert children[0].poll() is None and not release.exists()
+                if state.close_disposition == "background":
+                    runner.request_update_close(
+                        "wait", expected_revision=state.revision
+                    )
+                elif state.close_disposition == "wait":
+                    assert state.control_code is None
+                    runner.request_update_close(
+                        "continue", expected_revision=state.revision
+                    )
+                elif state.close_disposition == "continue":
+                    QTimer.singleShot(0, button.click)
             if state.control_code == "cancellation_requested" and not release.exists():
                 assert entered.exists() and state.active_request_id is not None
+                assert state.close_disposition == "safe_stop"
                 release.write_text(
                     "control delivered before native I/O returned", encoding="utf-8"
                 )
@@ -154,7 +180,15 @@ def test_qt_host_uses_live_control_while_real_persistent_worker_waits_for_native
         on_update_review=bridge.changed.emit,
     )
     button = QPushButton("Stop safely")
-    button.clicked.connect(lambda: (clicks.append(True), runner.cancel_update()))
+    button.clicked.connect(
+        lambda: (
+            clicks.append(True),
+            runner.request_update_close(
+                "safe_stop",
+                expected_revision=views[-1].revision,
+            ),
+        )
+    )
     scheduled = []
     timer = QTimer()
 
@@ -163,7 +197,10 @@ def test_qt_host_uses_live_control_while_real_persistent_worker_waits_for_native
             ticks.append(True)
             if not scheduled:
                 scheduled.append(True)
-                QTimer.singleShot(0, button.click)
+                runner.request_update_close("safe_stop", expected_revision=0)
+                runner.request_update_close(
+                    "background", expected_revision=views[-1].revision
+                )
 
     timer.timeout.connect(heartbeat)
     timer.start(5)
@@ -176,6 +213,7 @@ def test_qt_host_uses_live_control_while_real_persistent_worker_waits_for_native
             time.sleep(0.005)
 
     try:
+        assert callable(getattr(runner, "request_update_close", None))
         selection = "11111111-1111-4111-8111-111111111111"
         runner.select_update(str(vault), selection_id=selection)
         runner.submit_update(
@@ -228,10 +266,13 @@ def test_qt_host_uses_live_control_while_real_persistent_worker_waits_for_native
             "A sealed terminal retires observational progress"
         )
         assert ticks and clicks and release.exists()
-        assert len(children) == 1 and children[0].poll() is None
-        runner.submit_update(
-            {"command": "close", "binding": state.binding, "choice": "discard"}
+        assert all(
+            choice in close_views
+            for choice in ("continue", "background", "wait", "safe_stop")
         )
+        assert state.close_disposition is None and state.close_options == ("close",)
+        assert len(children) == 1 and children[0].poll() is None
+        runner.request_update_close("close", expected_revision=state.revision)
         pump_until(
             lambda: bool(views[-1].reply and views[-1].reply.code == "context_closed")
         )

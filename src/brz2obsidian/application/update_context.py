@@ -7,10 +7,10 @@ from brz2obsidian.core import inspect_review_choices
 
 from .contracts import request_identity
 from .review_choices import (
-    attachment_reference_destinations,
-    attachment_reference_page,
-    attachment_references,
     requirement_digest,
+    review_plan_attachment_reference_destinations,
+    review_plan_attachment_reference_page,
+    review_plan_attachment_references,
 )
 from .update_context_contracts import (
     UpdateChoiceOffer,
@@ -190,6 +190,12 @@ class UpdateContext:
                 return self._edit_refusal(str(error))
         elif values["choice"] == "edited":
             return self._edit_refusal("edit_changed")
+        requirement_id = values["requirement_id"]
+        values["references"] = (
+            tuple(self._reference_drafts.get(requirement_id, {}).values())
+            if values.get("references") is None
+            else values["references"]
+        )
         result = self._history.choose(binding, **values, edited=edited)
         if (
             result.status == "prepared_review"
@@ -198,6 +204,8 @@ class UpdateContext:
         ):
             self._edit.close()
             self._edit = None
+        if result.status == "prepared_review" and result.binding != binding:
+            self._reference_drafts.pop(requirement_id, None)
         self._remember(result)
         return result
 
@@ -286,37 +294,30 @@ class UpdateContext:
 
     def reference_page(self, binding, *, requirement_id, offset=0, limit=100):
         try:
-            if (
-                UpdateContextBinding.model_validate(binding) != self._binding
-                or self._preparation is None
-            ):
-                raise ValueError("Context changed")
-        except ValueError, TypeError:
-            return UpdateContextResult(
-                status="refused", code="context_changed", kind=self._kind
-            )
+            plan = self._live_review(binding)
+        except EditFailure:
+            return self._edit_refusal("context_changed")
         if (
             type(offset) is not int
             or offset < 0
             or type(limit) is not int
             or not 1 <= limit <= 100
         ):
-            return UpdateContextResult(
-                status="refused", code="invalid_page", kind=self._kind
-            )
+            return self._edit_refusal("invalid_page")
         try:
-            offers, total, following = attachment_reference_page(
-                self._preparation, requirement_id, offset=offset, limit=limit
+            offers, total, following = review_plan_attachment_reference_page(
+                plan,
+                requirement_id,
+                offset=offset,
+                limit=limit,
+                drop_only=self._kind == "attachment_cleanup",
             )
         except ValueError, StopIteration:
-            return UpdateContextResult(
-                status="refused", code="offer_changed", kind=self._kind
-            )
-        return UpdateContextResult(
+            return self._edit_refusal("offer_changed")
+        return self._content_result(
             status="available",
             code="available",
-            kind=self._kind,
-            binding=self._binding,
+            binding=self._review_binding(),
             references=tuple(
                 offer.model_copy(
                     update={
@@ -421,16 +422,18 @@ class UpdateContext:
         )
 
     def choice_page(self, binding, *, offset=0, limit=100):
-        from .review_offers import choice_page
+        from .review_offers import review_plan_choice_page
 
-        return self._choice_content(binding, choice_page, offset=offset, limit=limit)
+        return self._choice_content(
+            binding, review_plan_choice_page, offset=offset, limit=limit
+        )
 
     def choice_details(self, binding, *, requirement_id, offset=0, limit=100):
-        from .review_offers import choice_detail_page
+        from .review_offers import review_plan_choice_detail_page
 
         return self._choice_content(
             binding,
-            choice_detail_page,
+            review_plan_choice_detail_page,
             requirement_id=requirement_id,
             offset=offset,
             limit=limit,
@@ -438,29 +441,17 @@ class UpdateContext:
 
     def _choice_content(self, binding, reader, **kwargs):
         try:
-            if (
-                self._preparation is None
-                or UpdateContextBinding.model_validate(binding) != self._binding
-            ):
-                raise ValueError("Context changed")
-        except ValueError, TypeError:
-            return UpdateContextResult(
-                status="refused", code="context_changed", kind=self._kind
-            )
+            plan = self._live_review(binding)
+        except EditFailure:
+            return self._edit_refusal("context_changed")
         try:
-            rows, total, following = reader(self._preparation, **kwargs)
+            rows, total, following = reader(plan, **kwargs)
         except ValueError, TypeError, StopIteration:
-            return UpdateContextResult(
-                status="refused",
-                code="offer_changed",
-                kind=self._kind,
-                binding=self._binding,
-            )
-        return UpdateContextResult(
+            return self._edit_refusal("offer_changed")
+        return self._content_result(
             status="available",
             code="available",
-            kind=self._kind,
-            binding=self._binding,
+            binding=self._review_binding(),
             **(
                 {
                     "choice_details": rows,
@@ -841,27 +832,21 @@ class UpdateContext:
 
     def stage_references(self, binding, *, requirement_id, choices):
         try:
-            if (
-                UpdateContextBinding.model_validate(binding) != self._binding
-                or self._preparation is None
-            ):
-                raise ValueError("Context changed")
-        except ValueError, TypeError:
-            return UpdateContextResult(
-                status="refused", code="context_changed", kind=self._kind
-            )
+            plan = self._live_review(binding)
+        except EditFailure:
+            return self._edit_refusal("context_changed")
         if self._edit is not None:
             return self._uncommitted_draft()
         try:
-            destinations = attachment_reference_destinations(
-                self._preparation, requirement_id
+            destinations = review_plan_attachment_reference_destinations(
+                plan, requirement_id
             )
             offered = {
                 token: ("drop",)
                 if self._kind == "attachment_cleanup"
                 else tuple(row.choice for row in destinations[token])
-                for token, _, _ in attachment_references(
-                    self._preparation, requirement_id
+                for token, _, _ in review_plan_attachment_references(
+                    plan, requirement_id
                 )
             }
             selected = tuple(
@@ -878,24 +863,20 @@ class UpdateContext:
             ):
                 raise ValueError("Reference offer changed")
         except ValueError, TypeError, StopIteration:
-            return UpdateContextResult(
-                status="refused",
-                code="offer_changed",
-                kind=self._kind,
-                binding=self._binding,
-            )
+            return self._edit_refusal("offer_changed")
         self._reference_drafts.setdefault(requirement_id, {}).update(
             (row.reference_id, row) for row in selected
         )
-        self._revision += 1
-        self._binding = self._binding.model_copy(update={"revision": self._revision})
-        return UpdateContextResult(
+        current = self._review_binding()
+        self._retain_review_binding(
+            current.model_copy(update={"revision": current.revision + 1})
+        )
+        return self._content_result(
             status="available",
             code="reference_choices_staged",
-            kind=self._kind,
-            binding=self._binding,
-            changes=len(self._preparation.review.proposal.changes),
-            unresolved=len(self._preparation.review.requirements),
+            binding=self._review_binding(),
+            changes=len(plan.proposal.changes),
+            unresolved=len(plan.requirements),
         )
 
     def _edit_refusal(self, code):
@@ -983,8 +964,13 @@ class UpdateContext:
             "binding": self._review_binding(),
             "edit": self._edit.state,
         }
+        return self._content_result(**values)
+
+    def _content_result(self, **values):
         if self._kind == "history":
-            return self._history._last_result.model_copy(update=values)
+            return self._history._last_result.model_copy(
+                update={"ready": False, **values}
+            )
         return UpdateContextResult(kind=self._kind, **values)
 
     def _checked_edit(self, value):

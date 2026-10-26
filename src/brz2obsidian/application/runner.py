@@ -283,6 +283,31 @@ class HostRunner:
     def cancel_update(self):
         self._commands.submit(self._cancel_update)
 
+    def request_update_close(self, choice, *, expected_revision):
+        self._commands.submit(self._request_update_close, choice, expected_revision)
+
+    def _request_update_close(self, choice, expected_revision):
+        accepted = self.session.request_update_close(
+            choice, expected_revision=expected_revision
+        )
+        state = self.session.update_snapshot
+        self._present_update(state)
+        if not accepted:
+            return
+        if state.active_request_id is not None:
+            # Background and Wait retain the existing app and subscriptions.
+            # Only explicit Safe stop requests the existing cooperative control.
+            if choice == "safe_stop":
+                self._cancel_update()
+        elif choice in ("save", "discard", "close"):
+            self._dispatch_update(
+                {
+                    "command": "close",
+                    "binding": state.binding,
+                    "choice": "discard" if choice == "close" else choice,
+                }
+            )
+
     def _cancel_update(self):
         request = self._update_request
         if request is None:

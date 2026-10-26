@@ -72,7 +72,8 @@ Acquisition is not atomic: capture verification checks the retained copy and
 cannot prove that the live Brain remained unchanged. Listing and acquisition run
 in workers so the task sheet remains responsive.
 
-The closed GUI worker and review contracts use version 3. API selections carry
+The closed GUI worker envelope uses version 4; nested migration results and
+source-inspection reviews retain version 3. API selections carry
 every effective credential-free acquisition setting; older or incomplete wire
 shapes refuse explicitly. API credentials and arbitrary remote errors are never
 forwarded in worker results or diagnostics. Existing destination checks, explicit
@@ -210,7 +211,8 @@ explicit older profiles retain their earlier result codes. The finite additional
 source meanings are qualified in [the profile-3 table](local-api-profile3-qualification.md)
 and are implemented in their assigned source-family slices. Qualification alone
 never makes unsupported source content importable. Profile changes require a
-fresh compatible inspection; the worker/review schema remains version 3.
+fresh compatible inspection. Nested migration and source-inspection review schemas remain version 3
+inside the version-4 worker envelope.
 
 
 Profile 3 discovers relationships from the qualified zero-Brain search envelope

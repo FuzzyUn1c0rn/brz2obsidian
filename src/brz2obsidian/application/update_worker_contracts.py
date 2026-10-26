@@ -82,7 +82,9 @@ class ChooseHistoryCommand(ReconciliationContract):
     requirement_id: str
     choice: ReviewChoice
     assumptions_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    references: tuple[UpdateReferenceChoice, ...] = Field(default=(), max_length=100)
+    references: tuple[UpdateReferenceChoice, ...] | None = Field(
+        default=None, max_length=100
+    )
     edit_handle: UpdateEditHandle | None = None
 
 
@@ -97,7 +99,7 @@ class PageUpdateCommand(ReconciliationContract):
 
 class ReferenceUpdateCommand(ReconciliationContract):
     command: Literal["references"]
-    binding: UpdateContextBinding
+    binding: UpdateContextBinding | HistoryContextBinding
     requirement_id: str
     offset: int = Field(default=0, ge=0)
     limit: int = Field(default=100, ge=1, le=100)
@@ -112,7 +114,7 @@ class ChoicePageUpdateCommand(ReconciliationContract):
 
 class ChoiceDetailUpdateCommand(ReconciliationContract):
     command: Literal["choice_details"]
-    binding: UpdateContextBinding
+    binding: UpdateContextBinding | HistoryContextBinding
     requirement_id: str
     offset: int = Field(default=0, ge=0)
     limit: int = Field(default=100, ge=1, le=100)
@@ -154,7 +156,7 @@ class SealEditCommand(ReconciliationContract):
 
 class StageReferencesCommand(ReconciliationContract):
     command: Literal["stage_references"]
-    binding: UpdateContextBinding
+    binding: UpdateContextBinding | HistoryContextBinding
     requirement_id: str
     choices: tuple[UpdateReferenceChoice, ...] = Field(min_length=1, max_length=100)
 

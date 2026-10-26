@@ -20,6 +20,76 @@ def terminal(request, result):
     )
 
 
+def test_waiting_to_close_keeps_prepared_review_and_unknown_contact_truth(tmp_path):
+    from uuid import uuid4
+
+    session = ApplicationSession()
+    selection = str(uuid4())
+    vault = str(tmp_path / "vault")
+    session.select_update(vault, selection_id=selection)
+    request = session.start_update(
+        {
+            "command": "prepare",
+            "vault": vault,
+            "selection_id": selection,
+            "kind": "onboarding",
+            "source": None,
+        }
+    )
+    active = session.update_snapshot
+    assert active.close_options == ("continue", "background", "wait", "safe_stop")
+    assert not session.request_update_close(
+        "safe_stop", expected_revision=active.revision - 1
+    )
+    assert session.update_snapshot.close_disposition is None
+    assert session.request_update_close("wait", expected_revision=active.revision)
+    waiting = session.update_snapshot
+    assert (
+        waiting.active_request_id == request.request_id
+        and waiting.close_disposition == "wait"
+    )
+    binding = UpdateContextBinding(
+        context_id=str(uuid4()),
+        selection_id=selection,
+        vault=vault,
+        association_id=None,
+        proposal_id="review:unsaved",
+        generation=1,
+        revision=1,
+    )
+    prepared = UpdateContextResult(
+        status="prepared_review",
+        code="prepared",
+        kind="onboarding",
+        binding=binding,
+        ready=False,
+        unresolved=1,
+        history_retained=False,
+        publication="not_published",
+    )
+    state = session.complete_update(request.request_id, terminal(request, prepared))
+    assert state.binding == binding and state.reply == prepared
+    assert state.close_disposition is None and state.close_options == (
+        "continue",
+        "save",
+        "discard",
+    )
+    assert not state.ready and not state.history_retained
+    assert not session.request_update_close(
+        "discard", expected_revision=waiting.revision
+    )
+    assert session.update_snapshot.binding == binding
+    session.bind_update_worker("actual-child")
+    unknown = session.update_contact_uncertain("actual-child")
+    assert unknown.needs_inspection and unknown.publication == "unknown"
+    assert unknown.binding is None and unknown.close_options == ("close",)
+    assert session.request_update_close("close", expected_revision=unknown.revision)
+    assert (
+        session.update_snapshot.needs_inspection
+        and session.update_snapshot.publication == "unknown"
+    )
+
+
 @pytest.mark.parametrize("reply", ("launch_failure", "unqualified_refusal"))
 def test_session_keeps_prior_uncertainty_when_a_new_worker_cannot_launch(
     tmp_path, reply

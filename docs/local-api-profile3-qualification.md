@@ -22,7 +22,7 @@ The only capture-identifier alternative is `profile_version="3"` with `profile_i
 
 The standard workflow factory, CLI and Windows app explicitly compose module 3 and policy 3 and report that profile. Direct source-module/session constructor defaults remain profile 1. Explicit profiles 1 and 2 retain their exact existing search/resource rules, vectors, findings and warning dispositions. Module/session/capture identifiers must agree; unknown profiles refuse without fallback. Generic custom module/policy composition remains caller-owned. No CLI, GUI or acquisition-configuration profile selector is added.
 
-Live acquisition, session creation/seal, reopened validation and consistency checks must use the same profile-specific meanings. A rehashed profile-1/2 capture containing new profile-3-only facts refuses semantically. Existing review/worker schema version 3 carries profile strings without wire-shape change. Profile 3 changes the source digest and requires a fresh compatible review; an old GUI review cannot authorize conversion.
+Live acquisition, session creation/seal, reopened validation and consistency checks must use the same profile-specific meanings. A rehashed profile-1/2 capture containing new profile-3-only facts refuses semantically. Nested migration and source-inspection review schema version 3 carries profile strings without a profile-driven wire-shape change; the current worker envelope is version 4. Profile 3 changes the source digest and requires a fresh compatible review; an old GUI review cannot authorize conversion.
 
 ## Finite predicates and controls
 

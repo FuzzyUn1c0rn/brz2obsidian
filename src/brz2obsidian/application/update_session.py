@@ -44,6 +44,7 @@ class UpdateSessionSnapshot:
     next_actions: tuple[str, ...] = ()
     active_request_id: str | None = None
     active_command: str | None = None
+    close_disposition: str | None = None
     control_code: str | None = None
     worker_epoch: str | None = None
     progress: WorkerProgress | None = None
@@ -60,6 +61,21 @@ class UpdateSessionSnapshot:
                 self.active_request_id or self.draft_pending or self.needs_inspection
             )
         )
+
+    @property
+    def close_options(self):
+        if self.active_request_id is not None:
+            return ("continue", "background", "wait", "safe_stop")
+        if self.binding is not None:
+            return (
+                ("continue", "save", "discard")
+                if (
+                    isinstance(self.binding, UpdateContextBinding)
+                    and not self.draft_pending
+                )
+                else ("continue", "discard")
+            )
+        return ("close",)
 
 
 class UpdateSession:
@@ -104,6 +120,19 @@ class UpdateSession:
         if self._active is not None and self._active[0].request_id == request_id:
             self.snapshot = replace(self.snapshot, control_code="cancellation_queued")
         return self.snapshot
+
+    def request_close(self, choice, *, expected_revision):
+        state = self.snapshot
+        if (
+            type(expected_revision) is not int
+            or expected_revision != state.revision
+            or choice not in state.close_options
+        ):
+            return False
+        self.snapshot = replace(
+            state, revision=state.revision + 1, close_disposition=choice
+        )
+        return True
 
     def uncertain(self, worker_id):
         if worker_id == self._worker_id:
@@ -184,6 +213,7 @@ class UpdateSession:
             revision=state.revision + 1,
             active_request_id=request.request_id,
             active_command=args.command,
+            close_disposition=None,
             control_code=None,
             progress=None,
             transport_phase=None,
@@ -202,6 +232,7 @@ class UpdateSession:
             revision=state.revision + 1,
             active_request_id=None,
             active_command=None,
+            close_disposition=None,
             progress=None,
             control_code=None,
             transport_phase=terminal.phase,

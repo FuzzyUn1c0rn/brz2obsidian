@@ -66,9 +66,13 @@ def review_plan_attachment_references(plan, requirement_id):
 
 def attachment_reference_destinations(preparation, requirement_id):
     """Return canonical offered meanings, without deriving new destinations."""
+    plan = UpdatePreparation.model_validate(preparation).review
+    return review_plan_attachment_reference_destinations(plan, requirement_id)
+
+
+def review_plan_attachment_reference_destinations(plan, requirement_id):
     from .update_context_contracts import UpdateReferenceDestination
 
-    plan = UpdatePreparation.model_validate(preparation).review
     requirement = next(
         row
         for row in inspect_review_choices(plan)
@@ -93,8 +97,8 @@ def attachment_reference_destinations(preparation, requirement_id):
             )
             if choice in link.choices and meaning is not None
         )
-        for token, document, occurrence in attachment_references(
-            preparation, requirement_id
+        for token, document, occurrence in review_plan_attachment_references(
+            plan, requirement_id
         )
         for link in (links[(document.document_id, occurrence.occurrence_id)],)
     }
@@ -102,6 +106,19 @@ def attachment_reference_destinations(preparation, requirement_id):
 
 def attachment_reference_page(preparation, requirement_id, *, offset=0, limit=100):
     """Page canonical reference offers; no producer context or candidate is accepted."""
+    preparation = UpdatePreparation.model_validate(preparation)
+    return review_plan_attachment_reference_page(
+        preparation.review,
+        requirement_id,
+        offset=offset,
+        limit=limit,
+        drop_only=preparation.kind == "attachment_cleanup",
+    )
+
+
+def review_plan_attachment_reference_page(
+    plan, requirement_id, *, offset=0, limit=100, drop_only=False
+):
     from .update_context_contracts import UpdateReferenceOffer
 
     if (
@@ -111,9 +128,8 @@ def attachment_reference_page(preparation, requirement_id, *, offset=0, limit=10
         or not 1 <= limit <= 100
     ):
         raise ValueError("Invalid reference page")
-    preparation = UpdatePreparation.model_validate(preparation)
-    refs = attachment_references(preparation, requirement_id)
-    destinations = attachment_reference_destinations(preparation, requirement_id)
+    refs = review_plan_attachment_references(plan, requirement_id)
+    destinations = review_plan_attachment_reference_destinations(plan, requirement_id)
     end = min(len(refs), offset + limit)
     return (
         tuple(
@@ -130,11 +146,9 @@ def attachment_reference_page(preparation, requirement_id, *, offset=0, limit=10
                 ],
                 old=occurrence.meaning,
                 choices=("drop",)
-                if preparation.kind == "attachment_cleanup"
+                if drop_only
                 else tuple(row.choice for row in destinations[token]),
-                destinations=()
-                if preparation.kind == "attachment_cleanup"
-                else destinations[token],
+                destinations=() if drop_only else destinations[token],
             )
             for token, document, occurrence in refs[offset:end]
         ),
@@ -215,11 +229,20 @@ def review_plan_choice_action(
             raise ValueError("Identity offer changed")
     elif selected_entry_id is not None or disassociate_entry_ids:
         raise ValueError("Identity choice is unavailable")
-    if change is not None and change.attachment_review is not None:
+    if (
+        change is not None
+        and change.attachment_review is not None
+        and not (requirement.domain == "reversal" and choice == "current")
+    ):
+        attachment_choice = (
+            "incoming"
+            if requirement.domain == "reversal" and choice == "reverse"
+            else choice
+        )
         alternative = next(
             row
             for row in change.attachment_review.alternatives
-            if row.choice == choice and row.eligible
+            if row.choice == attachment_choice and row.eligible
         )
         context = plan.facts.link_context
         documents, states, links = (
@@ -312,7 +335,7 @@ def review_plan_choice_action(
                 else row
                 for row in states
             )
-        elif choice in ("incoming", "both"):
+        elif attachment_choice in ("incoming", "both"):
             from .attachment_choices import selected_attachment_candidate
 
             links, candidate = selected_attachment_candidate(
@@ -333,7 +356,7 @@ def review_plan_choice_action(
             facet=change.facet,
             reviewed_change_id=change.change_id,
             reviewed_assumptions=requirement.assumptions,
-            choice=choice,
+            choice=attachment_choice,
             link_choices=links,
             provenance="explicit_user",
         )

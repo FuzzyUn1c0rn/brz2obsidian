@@ -10,7 +10,8 @@ The lazy outer implementation lives in `publication/vault_admission.py`.
 with a version-1 `brz2obsidian.vault-admission` envelope. It reuses S1's
 `ReviewPreflight` and `ReviewConsentRequirement`. Core reconciliation and the
 fresh-destination `FilesystemPublisher` retain their established roles.
-The existing worker operation literals and protocol version 3 are unchanged.
+The version-4 worker envelope retains existing migration results and
+source-inspection reviews at version 3, and adds the persistent update operation.
 
 ## Unchanged-vault operation prerequisite
 
