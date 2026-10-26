@@ -733,7 +733,7 @@ def _text_choice(plan, change, choice, edited):
     document_id = next(
         (
             row.document_id
-            for row in context.current_documents
+            for row in (*context.current_documents, *context.incoming_documents)
             if row.source_path == change.target_path
         ),
         "subject:" + change.item_id + ":" + change.facet,
@@ -782,27 +782,34 @@ def _text_choice(plan, change, choice, edited):
     )
 
 
+def text_choice_action(plan, action, *, edited=None):
+    if (
+        action.candidate is None
+        and action.domain
+        in ("text", "configuration", "format", "mapping", "restoration", "reversal")
+        and action.choice in ("incoming", "edited", "restore_incoming", "reverse")
+    ):
+        change = next(
+            row for row in plan.proposal.changes if row.change_id == action.change_id
+        )
+        if change.attachment_review is None:
+            if action.domain == "reversal":
+                from brz2obsidian.core.reversals import reversal_text_comparison
+
+                change = reversal_text_comparison(plan.producer_facts, change)
+            action = action.model_copy(
+                update={"candidate": _text_choice(
+                    plan, change, "incoming" if action.choice == "reverse" else action.choice, edited
+                )}
+            )
+    return action
+
+
 def resolve_update(operations, preparation, action, *, edited=None):
     try:
         preparation = UpdatePreparation.model_validate(preparation)
         plan = preparation.review
-        if (
-            action.candidate is None
-            and action.domain
-            in ("text", "configuration", "format", "mapping", "restoration")
-            and action.choice in ("incoming", "edited", "restore_incoming")
-        ):
-            change = next(
-                row
-                for row in plan.proposal.changes
-                if row.change_id == action.change_id
-            )
-            if change.attachment_review is None:
-                action = action.model_copy(
-                    update={
-                        "candidate": _text_choice(plan, change, action.choice, edited)
-                    }
-                )
+        action = text_choice_action(plan, action, edited=edited)
         transition = resolve_review(plan, action)
         result_plan = transition.plan
         binding = preparation.source_binding.model_copy(
@@ -1198,6 +1205,43 @@ def inspect_update_review(
                 return refused("source_payload_changed")
         elif checkpoint.status != "valid" or checkpoint.locator != preparation.locator:
             return refused("association_or_history_changed")
+        return review_plan_page(
+            plan, proposal_id=proposal_id, generation=generation,
+            offset=offset, limit=limit, byte_offset=byte_offset, byte_limit=byte_limit,
+        )
+    except OSError, ValueError, TypeError, AttributeError:
+        return refused("invalid_review")
+
+
+def review_plan_page(
+    plan,
+    *,
+    proposal_id,
+    generation,
+    offset=0,
+    limit=100,
+    byte_offset=0,
+    byte_limit=65536,
+):
+    def refused(code):
+        return UpdateReviewPage(
+            status="refused",
+            code=code,
+            proposal_id=proposal_id if type(proposal_id) is str else "",
+            generation=generation if type(generation) is int and generation > 0 else 1,
+            total=0,
+            offset=max(offset, 0) if type(offset) is int else 0,
+            next_offset=None,
+            items=(),
+            omitted=True,
+        )
+
+    try:
+        if (
+            proposal_id != plan.proposal.proposal_id
+            or generation != plan.proposal.generation
+        ):
+            return refused("review_identity_changed")
         if (
             any(
                 type(v) is not int or v < 0

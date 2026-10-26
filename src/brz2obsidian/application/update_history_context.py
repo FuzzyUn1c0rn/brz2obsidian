@@ -280,7 +280,19 @@ class HistoryContext:
         )
         return self._last_result
 
-    def prepare(self, binding, *, kind, direction=None, copy_path=None):
+    def _cancelled_preparation(self, code):
+        self._last_result = self._last_result.model_copy(
+            update={
+                "status": "recovery_required"
+                if self.admission.operation.recovery_required
+                else "cancelled_before_publication",
+                "code": code,
+                "ready": False,
+            }
+        )
+        return self._last_result
+
+    def prepare(self, binding, *, kind, direction=None, copy_path=None, cancel=None, progress=None):
         if (
             not self._matches(binding)
             or self.admission is None
@@ -288,16 +300,32 @@ class HistoryContext:
             not in self.admission.next_actions
         ):
             return self._result(status="refused", code="context_changed")
-        return self._project(
+        if cancel is not None and cancel():
+            return self._cancelled_preparation("cancelled_before_history_preparation")
+        from .vault_progress_contracts import report_progress
+
+        report_progress(progress, "current_inspection")
+        result = self._project(
             self.operations.prepare_history_workflow(
                 self.binding.vault, kind=kind, direction=direction, copy=copy_path
             )
         )
+        if cancel is not None and cancel() and self.preparation is not None:
+            return self._cancelled_preparation("cancelled_after_history_preparation")
+        return result
 
-    def refresh(self, binding):
+    def refresh(self, binding, *, cancel=None, progress=None):
         if not self._matches(binding) or self.preparation is None:
             return self._result(status="refused", code="context_changed")
-        return self._project(self.operations.refresh_history_workflow(self.preparation))
+        if cancel is not None and cancel():
+            return self._cancelled_preparation("cancelled_before_history_preparation")
+        from .vault_progress_contracts import report_progress
+
+        report_progress(progress, "current_inspection")
+        result = self._project(self.operations.refresh_history_workflow(self.preparation))
+        if cancel is not None and cancel() and self.preparation is not None:
+            return self._cancelled_preparation("cancelled_after_history_preparation")
+        return result
 
     def execute(self, binding, *, cancel=None, progress=None):
         if not self._matches(binding) or self.preparation is None:
@@ -306,6 +334,25 @@ class HistoryContext:
             self.operations.execute_history_workflow(
                 self.preparation, cancel=cancel, progress=progress
             )
+        )
+
+    def page(self, binding, *, offset=0, limit=100, byte_offset=0, byte_limit=65536):
+        from .update_lifecycle import review_plan_page
+
+        if (
+            not self._matches(binding)
+            or self.preparation is None
+            or getattr(self.preparation.native, "review", None) is None
+        ):
+            return self.blocked("context_changed")
+        page = review_plan_page(
+            self.preparation.native.review,
+            proposal_id=self.binding.proposal_id,
+            generation=self.binding.review_generation,
+            offset=offset, limit=limit, byte_offset=byte_offset, byte_limit=byte_limit,
+        )
+        return self._last_result.model_copy(
+            update={"status": page.status, "code": page.code, "page": page, "ready": False}
         )
 
     def choice_page(self, binding, *, offset=0, limit=100):
@@ -334,9 +381,10 @@ class HistoryContext:
         )
 
     def choose(
-        self, binding, *, requirement_id, choice, assumptions_digest, references=()
+        self, binding, *, requirement_id, choice, assumptions_digest, references=(), edited=None
     ):
         from .review_choices import review_plan_choice_action
+        from .update_lifecycle import text_choice_action
 
         if (
             not self._matches(binding)
@@ -352,6 +400,7 @@ class HistoryContext:
                 assumptions_digest=assumptions_digest,
                 references=references,
             )
+            action = text_choice_action(self.preparation.native.review, action, edited=edited)
         except ValueError, TypeError, StopIteration:
             return self.blocked("offer_changed")
         return self._project(
@@ -379,6 +428,10 @@ class HistoryContext:
                 next_actions=("continue_review", "discard"),
             )
         values = {"code": "context_closed", "binding": None, "ready": False}
+        if self._last_result.status == "available":
+            # Closing an inspected header retires its capability; it does not
+            # execute or erase the observed native history operation.
+            values.update(status="no_content_change", next_actions=("inspect_history",))
         if self.preparation is not None:
             values.update(
                 status="recovery_required"

@@ -83,11 +83,12 @@ class ChooseHistoryCommand(ReconciliationContract):
     choice: ReviewChoice
     assumptions_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     references: tuple[UpdateReferenceChoice, ...] = Field(default=(), max_length=100)
+    edit_handle: UpdateEditHandle | None = None
 
 
 class PageUpdateCommand(ReconciliationContract):
     command: Literal["page"]
-    binding: UpdateContextBinding
+    binding: UpdateContextBinding | HistoryContextBinding
     offset: int = Field(default=0, ge=0)
     limit: int = Field(default=100, ge=1, le=100)
     byte_offset: int = Field(default=0, ge=0)
@@ -133,7 +134,7 @@ class ChooseUpdateCommand(ReconciliationContract):
 
 class BeginEditCommand(ReconciliationContract):
     command: Literal["begin_edit"]
-    binding: UpdateContextBinding
+    binding: UpdateContextBinding | HistoryContextBinding
     requirement_id: str
     size: int = Field(ge=0)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -173,12 +174,21 @@ class CloseUpdateCommand(ReconciliationContract):
 
 class DiscardDraftCommand(ReconciliationContract):
     command: Literal["discard_draft"]
-    binding: UpdateContextBinding
+    binding: UpdateContextBinding | HistoryContextBinding
 
 
 class ApplyUpdateCommand(ReconciliationContract):
     command: Literal["apply"]
     binding: UpdateContextBinding
+
+
+class RefreshUpdateCommand(ReconciliationContract):
+    command: Literal["refresh"]
+    binding: UpdateContextBinding
+    source: str | None = None
+    _source = field_validator("source")(
+        lambda value: absolute(value) if value is not None else None
+    )
 
 
 class SaveUpdateCommand(ReconciliationContract):
@@ -255,6 +265,7 @@ UpdateCommand = Annotated[
     | DiscardDraftCommand
     | ApplyUpdateCommand
     | SaveUpdateCommand
+    | RefreshUpdateCommand
     | OpenSavedUpdateCommand
     | CancelUpdateCommand,
     Field(discriminator="command"),

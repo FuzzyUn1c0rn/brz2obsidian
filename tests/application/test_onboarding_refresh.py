@@ -6,9 +6,7 @@ from tests.application.test_onboarding import legacy_inputs
 from tests.reconciliation.test_resolution import action
 
 
-def test_changed_current_note_keeps_the_independent_onboarding_choice(
-    tmp_path, monkeypatch
-):
+def two_note_legacy_inputs(tmp_path, monkeypatch):
     operations, vault, source, authored = legacy_inputs(tmp_path, monkeypatch)
     data = json.loads(source.read_text())
     data["entries"].append(
@@ -40,6 +38,13 @@ def test_changed_current_note_keeps_the_independent_onboarding_choice(
     source.write_text(json.dumps(data))
     second = b'---\nsource_collection_id: legacy-collection\nsource_item_id: "entry:second"\n---\nIndependent writing.\n'
     (vault / "Second.md").write_bytes(second)
+    return operations, vault, source, authored, second
+
+
+def test_changed_current_note_keeps_the_independent_onboarding_choice(
+    tmp_path, monkeypatch
+):
+    operations, vault, source, authored, second = two_note_legacy_inputs(tmp_path, monkeypatch)
     result = operations.prepare_onboarding(vault, source)
     assert result.preparation is not None, result
     for item_id, decision_id in (

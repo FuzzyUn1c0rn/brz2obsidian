@@ -286,7 +286,7 @@ class UpdateSession:
             or result.history is not None
             or bool(result.history_action and result.history_action.operation)
             or (
-                request.arguments.command in ("prepare", "resume")
+                request.arguments.command in ("prepare", "resume", "refresh")
                 and isinstance(result.binding, UpdateContextBinding)
                 and result.status in ("prepared_review", "unresolved", "stale_review")
             )

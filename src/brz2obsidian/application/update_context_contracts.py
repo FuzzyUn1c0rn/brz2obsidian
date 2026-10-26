@@ -88,7 +88,7 @@ class UpdateConfigurationOffer(ReconciliationContract):
 
 class UpdateEditHandle(ReconciliationContract):
     edit_id: str
-    binding: UpdateContextBinding
+    binding: UpdateContextBinding | HistoryContextBinding
     requirement_id: str
     assumptions_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     size: int = Field(ge=0)
@@ -352,7 +352,11 @@ class UpdateContextResult(ReconciliationContract):
             self.binding is None
             or self.page.status != self.status
             or self.page.proposal_id != self.binding.proposal_id
-            or self.page.generation != self.binding.generation
+            or self.page.generation != (
+                self.binding.review_generation
+                if isinstance(self.binding, HistoryContextBinding)
+                else self.binding.generation
+            )
         ):
             raise ValueError("Review page must agree with its live context")
         return self
