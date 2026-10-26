@@ -220,7 +220,7 @@ class UpdateContext:
             )
 
         def refused(code):
-            return UpdateContextResult(status="refused", code=code, kind=self._kind)
+            return self._edit_refusal(code)
 
         try:
             expected = UpdateContextBinding.model_validate(binding)
@@ -246,12 +246,26 @@ class UpdateContext:
             byte_offset=byte_offset,
             byte_limit=byte_limit,
         )
-        return UpdateContextResult(
+        if page.status == "refused" and page.code == "association_or_history_changed":
+            self._preparation = self._binding = None
+            result = UpdateContextResult(
+                status="publication_unknown",
+                code=page.code,
+                kind=self._kind,
+                history_retained=None,
+                publication="unknown",
+                next_actions=("inspect_history",),
+            )
+            self._remember(result)
+            return result
+        return self._content_result(
             status=page.status,
             code=page.code,
-            kind=self._kind,
             binding=self._binding,
             page=page,
+            next_actions=("refresh_update",)
+            if page.code == "source_payload_changed"
+            else (),
             configuration=self._operations.configuration_choice_offer(self._preparation)
             if page.status == "available" and self._kind == "format_transition"
             else None,
@@ -882,9 +896,7 @@ class UpdateContext:
     def _edit_refusal(self, code):
         if self._kind == "history":
             return self._history.blocked(code)
-        return UpdateContextResult(
-            status="refused", code=code, kind=self._kind, binding=self._binding
-        )
+        return self._content_result(status="refused", code=code, binding=self._binding)
 
     def discard_draft(self, binding):
         try:
@@ -971,7 +983,16 @@ class UpdateContext:
             return self._history._last_result.model_copy(
                 update={"ready": False, **values}
             )
-        return UpdateContextResult(kind=self._kind, **values)
+        return UpdateContextResult(
+            kind=self._kind,
+            **{
+                "history_retained": self._last_history,
+                "checkpoint_commit": self._last_checkpoint,
+                "publication": self._last_publication,
+                "capture": self._last_capture,
+                **values,
+            },
+        )
 
     def _checked_edit(self, value):
         try:

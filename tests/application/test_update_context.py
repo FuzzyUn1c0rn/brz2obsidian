@@ -438,25 +438,31 @@ def test_explicit_save_load_unready_and_resume_rebind_the_native_checkpoint(
     tmp_path, monkeypatch
 ):
     from brz2obsidian.application.checkpoint_contracts import CheckpointResult
+    from brz2obsidian.application.operations import ApplicationSession
     from brz2obsidian.application.update_context import UpdateContext
     from brz2obsidian.core import load_review, save_review
 
     context, case = context_case(tmp_path)
     captured = []
+    sessions = {}
 
     def wire(producer, arguments):
         import io
-        from uuid import uuid4
 
-        from brz2obsidian.application.contracts import WorkerRequest
         from brz2obsidian.application.protocol import decode_request, encode_request
+        from brz2obsidian.application.transport import Terminal
         from brz2obsidian.application.update_stream import WorkerStreamDecoder
         from brz2obsidian.application.update_worker import UpdateWorker
 
         output = io.BytesIO()
-        request = WorkerRequest(
-            request_id=str(uuid4()), operation="update", sequence=1, arguments=arguments
-        )
+        if producer not in sessions:
+            sessions[producer] = ApplicationSession()
+            sessions[producer].select_update(
+                arguments["vault"], selection_id=arguments["selection_id"]
+            )
+        session = sessions[producer]
+        request = session.start_update(arguments)
+        assert request is not None
         UpdateWorker(context=producer, output=output).handle(
             decode_request(encode_request(request))
         )
@@ -465,6 +471,9 @@ def test_explicit_save_load_unready_and_resume_rebind_the_native_checkpoint(
         for frame in output.getvalue().splitlines(keepends=True):
             terminal = decoder.feed(frame)
         assert terminal is not None and terminal.protocol_error is None
+        session.complete_update(
+            request.request_id, Terminal(phase="completed", response=terminal)
+        )
         return terminal.result
 
     def persist(
@@ -499,20 +508,31 @@ def test_explicit_save_load_unready_and_resume_rebind_the_native_checkpoint(
         )
 
     monkeypatch.setattr(type(case.operations), "capture_checkpoint", persist)
-    opened = context.prepare(
-        case.vault,
-        selection_id="11111111-1111-4111-8111-111111111111",
-        kind="attachment_cleanup",
+    opened = wire(
+        context,
+        {
+            "command": "prepare",
+            "vault": str(case.vault),
+            "source": None,
+            "selection_id": "11111111-1111-4111-8111-111111111111",
+            "kind": "attachment_cleanup",
+        },
     )
     assert opened.binding.checkpoint_generation == 2
-    page = context.page(opened.binding, byte_limit=0)
+    page = wire(
+        context, {"command": "page", "binding": opened.binding, "byte_limit": 0}
+    )
     change = next(row for row in page.page.items if row.item_id == "keep-asset")
     offer = next(row for row in page.offers if row.change_id == change.change_id)
-    accepted = context.choose(
-        opened.binding,
-        requirement_id=offer.requirement_id,
-        choice="current",
-        assumptions_digest=offer.assumptions_digest,
+    accepted = wire(
+        context,
+        {
+            "command": "choose",
+            "binding": opened.binding,
+            "requirement_id": offer.requirement_id,
+            "choice": "current",
+            "assumptions_digest": offer.assumptions_digest,
+        },
     )
     saved = wire(context, {"command": "save", "binding": accepted.binding})
     assert captured == [True] and saved.code == "saved"
@@ -521,6 +541,28 @@ def test_explicit_save_load_unready_and_resume_rebind_the_native_checkpoint(
         saved.binding.checkpoint_generation == 3
         and saved.binding.revision > accepted.binding.revision
     )
+    for command in ("references", "choice_details"):
+        refused = wire(
+            context,
+            {
+                "command": command,
+                "binding": saved.binding,
+                "requirement_id": "unoffered-requirement",
+            },
+        )
+        assert refused.code == "offer_changed" and not refused.ready
+        assert refused.binding == saved.binding and refused.history_retained
+        assert (
+            refused.checkpoint_commit == saved.checkpoint_commit
+            and refused.capture == saved.capture
+        )
+        assert refused.publication == saved.publication
+        snapshot = sessions[context].update_snapshot
+        assert snapshot.binding == saved.binding and snapshot.history_retained
+        assert (
+            snapshot.checkpoint_commit == saved.checkpoint_commit
+            and not snapshot.needs_inspection
+        )
     assert context.page(accepted.binding).code == "context_changed"
     fresh = UpdateContext(operations=type(case.operations)())
     loaded = wire(
@@ -547,6 +589,56 @@ def test_explicit_save_load_unready_and_resume_rebind_the_native_checkpoint(
     assert {
         path: (case.vault / path).read_bytes() for path in case.current
     } == case.current
+    page = wire(context, {"command": "page", "binding": saved.binding, "byte_limit": 0})
+    change = next(row for row in page.page.items if row.item_id == "remove-asset")
+    offer = next(row for row in page.offers if row.change_id == change.change_id)
+    references = wire(
+        context,
+        {
+            "command": "references",
+            "binding": saved.binding,
+            "requirement_id": offer.requirement_id,
+        },
+    ).references
+    ready = wire(
+        context,
+        {
+            "command": "choose",
+            "binding": saved.binding,
+            "requirement_id": offer.requirement_id,
+            "choice": "remove",
+            "assumptions_digest": offer.assumptions_digest,
+            "references": tuple(
+                {"reference_id": row.reference_id, "choice": "drop"}
+                for row in references
+            ),
+        },
+    )
+    assert ready.ready and sessions[context].update_snapshot.ready
+    case.history.checkpoint.locator = case.history.checkpoint.locator.model_copy(
+        update={"commit": "d" * 40, "generation": 4}
+    )
+    refused = wire(context, {"command": "page", "binding": ready.binding})
+    assert refused.code == "association_or_history_changed" and not refused.ready
+    assert refused.binding is None and refused.page is None
+    assert refused.next_actions == ("inspect_history",)
+    snapshot = sessions[context].update_snapshot
+    assert snapshot.needs_inspection and snapshot.binding is None and not snapshot.ready
+    assert (
+        worker_context_call(
+            context, {"command": "apply", "binding": ready.binding}
+        ).code
+        == "context_changed"
+    )
+    continued = wire(
+        context, {"command": "close", "binding": None, "choice": "continue"}
+    )
+    assert (
+        not continued.ready
+        and continued.binding is None
+        and continued.next_actions == ("inspect_history",)
+    )
+    assert captured == [True]
 
 
 def test_refused_unresolved_apply_retains_unsaved_review_for_explicit_save(tmp_path):

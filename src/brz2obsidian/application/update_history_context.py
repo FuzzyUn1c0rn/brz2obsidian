@@ -308,7 +308,7 @@ class HistoryContext:
             or "review_" + ("history_repair" if kind == "repair" else kind)
             not in self.admission.next_actions
         ):
-            return self._result(status="refused", code="context_changed")
+            return self.blocked("context_changed")
         if cancel is not None and cancel():
             return self._cancelled_preparation("cancelled_before_history_preparation")
         from .vault_progress_contracts import report_progress
@@ -325,7 +325,7 @@ class HistoryContext:
 
     def refresh(self, binding, *, cancel=None, progress=None):
         if not self._matches(binding) or self.preparation is None:
-            return self._result(status="refused", code="context_changed")
+            return self.blocked("context_changed")
         if cancel is not None and cancel():
             return self._cancelled_preparation("cancelled_before_history_preparation")
         from .vault_progress_contracts import report_progress
@@ -340,7 +340,7 @@ class HistoryContext:
 
     def execute(self, binding, *, cancel=None, progress=None):
         if not self._matches(binding) or self.preparation is None:
-            return self._result(status="refused", code="context_changed")
+            return self.blocked("context_changed")
         return self._project(
             self.operations.execute_history_workflow(
                 self.preparation, cancel=cancel, progress=progress
@@ -445,15 +445,12 @@ class HistoryContext:
             if expected != self.binding or self._last_result is None:
                 raise ValueError("Context changed")
         except ValueError, TypeError:
-            return self._result(status="refused", code="context_changed")
+            return self.blocked("context_changed")
         if choice == "continue":
             return self._last_result.model_copy(update={"code": "continue_review"})
         if choice != "discard":
-            return self._result(
-                status="refused",
-                code="history_save_unavailable",
-                binding=self.binding,
-                next_actions=("continue_review", "discard"),
+            return self.blocked("history_save_unavailable").model_copy(
+                update={"next_actions": ("continue_review", "discard")}
             )
         values = {"code": "context_closed", "binding": None, "ready": False}
         if self._last_result.status == "available":
@@ -485,7 +482,7 @@ class HistoryContext:
             ):
                 raise ValueError("History offer changed")
         except ValueError, TypeError:
-            return self._result(status="refused", code="context_changed")
+            return self.blocked("context_changed")
         result = self.operations.initialize_vault(
             expected.vault,
             decision=VaultInitializationDecision(

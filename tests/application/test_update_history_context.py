@@ -506,6 +506,40 @@ def test_undo_context_distinguishes_current_checkpoint_target_receipt_and_prior_
     )
     if target == "matching":
         old_header = offered.binding
+        unsupported_save = worker_context_call(
+            context, {"command": "close", "binding": old_header, "choice": "save"}
+        )
+        assert (
+            unsupported_save.code == "history_save_unavailable"
+            and not unsupported_save.ready
+        )
+        assert (
+            unsupported_save.publication == "complete"
+            and unsupported_save.history_retained
+        )
+        assert (
+            unsupported_save.history.operation == observed
+            and unsupported_save.binding == old_header
+        )
+        foreign_close = worker_context_call(
+            context,
+            {
+                "command": "close",
+                "binding": old_header.model_copy(
+                    update={"revision": old_header.revision + 1}
+                ),
+                "choice": "discard",
+            },
+        )
+        assert (
+            foreign_close.code == "context_changed"
+            and foreign_close.publication == "complete"
+        )
+        assert (
+            foreign_close.history.operation == observed
+            and foreign_close.history_retained
+            and not entered
+        )
         closed_header = worker_context_call(
             context, {"command": "close", "binding": old_header, "choice": "discard"}
         )
@@ -529,6 +563,10 @@ def test_undo_context_distinguishes_current_checkpoint_target_receipt_and_prior_
             stale_header.status == "refused"
             and stale_header.code == "context_changed"
             and not entered
+        )
+        assert stale_header.publication == "complete" and stale_header.history_retained
+        assert (
+            stale_header.history.operation == observed and stale_header.binding is None
         )
         offered = worker_context_call(
             context,
