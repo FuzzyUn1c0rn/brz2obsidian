@@ -65,6 +65,11 @@ def main(argv=None):
     checker = commands.add_parser("check-vault")
     checker.add_argument("vault")
     checker.add_argument("--json", action="store_true", dest="json_output")
+    review = commands.add_parser("review")
+    actions = review.add_subparsers(dest="review_command", required=True)
+    status = actions.add_parser("status")
+    status.add_argument("vault")
+    status.add_argument("--json", action="store_true", dest="json_output")
     try:
         args = parser.parse_args(argv)
     except SystemExit as error:
@@ -79,6 +84,10 @@ def main(argv=None):
 
 
 def _unexpected_failure(args):
+    if args.operation == "review":
+        from .cli_review import report_failure
+
+        return report_failure(args)
     label = {
         "inspect": "Inspection",
         "convert": "Conversion",
@@ -119,6 +128,10 @@ def _unexpected_failure(args):
 
 
 def _execute(args):
+    if args.operation == "review":
+        from .cli_review import run
+
+        return run(args)
     if args.operation == "check-vault":
         from brz2obsidian.vault_check import check_vault
 
