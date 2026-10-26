@@ -2,12 +2,25 @@
 
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from brz2obsidian.contracts import ReconciliationContract
 
 from .contract_values import absolute, request_identity
+from .vault_repair_contracts import HistoryRepairResult
 from .vault_update_contracts import VaultApplyResult
+
+
+class UpdateHistoryCopyState(ReconciliationContract):
+    status: Literal["matching", "refused", "unavailable"]
+    code: str
+    association_id: str | None
+    target_commit: str | None
+    target_generation: int | None
+    copy_commit: str | None
+    copy_generation: int | None
+    missing_objects: int = Field(ge=0)
+    damaged_objects: int = Field(ge=0)
 
 
 class UpdateHistoryActionState(ReconciliationContract):
@@ -34,6 +47,28 @@ class UpdateHistoryActionState(ReconciliationContract):
     available_directions: tuple[Literal["finish", "restore"], ...]
     operation: VaultApplyResult | None
     summary: str = Field(max_length=2048)
+    copy_validation: UpdateHistoryCopyState | None = None
+    repair: HistoryRepairResult | None = None
+
+    @model_validator(mode="after")
+    def declared_readiness(self):
+        if self.ready != (self.status == "ready"):
+            raise ValueError("History action readiness must match its status")
+        if self.status == "direction_required" and (
+            self.kind != "recovery" or not self.available_directions
+        ):
+            raise ValueError("Only an offered recovery direction requires selection")
+        if self.repair is not None and (
+            self.kind != "repair"
+            or self.status != self.repair.status
+            or self.operation is not None
+        ):
+            raise ValueError(
+                "Repair outcomes must keep their actual native role/result"
+            )
+        if self.status == "repaired" and self.repair is None:
+            raise ValueError("Repaired requires verified native object storage")
+        return self
 
 
 class HistoryContextBinding(ReconciliationContract):
@@ -52,6 +87,7 @@ class HistoryContextBinding(ReconciliationContract):
     association_id: str | None = None
     checkpoint_commit: str | None = None
     checkpoint_generation: int | None = Field(default=None, ge=1)
+    target_receipt_commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
     _ids = field_validator("context_id", "selection_id")(request_identity)
     _vault = field_validator("vault")(absolute)
 

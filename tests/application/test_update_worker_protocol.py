@@ -121,6 +121,154 @@ def test_update_commands_roundtrip_without_canonical_preparation(tmp_path):
         )
 
 
+def test_sealed_history_reply_requires_consistent_readiness_and_native_outcome(
+    tmp_path,
+):
+    from brz2obsidian.application.update_context_contracts import UpdateContextResult
+    from brz2obsidian.application.update_history_contracts import (
+        HistoryContextBinding,
+        UpdateHistoryActionState,
+    )
+    from brz2obsidian.application.update_stream import WorkerStreamDecoder, encode_end
+    from brz2obsidian.application.vault_update_contracts import VaultApplyResult
+    from tests.application.test_history_workflow import operation_state
+
+    identity = "11111111-1111-4111-8111-111111111111"
+    request = WorkerRequest(
+        operation="update",
+        request_id=identity,
+        sequence=1,
+        arguments={
+            "command": "history",
+            "vault": str(tmp_path),
+            "selection_id": identity,
+        },
+    )
+    binding = HistoryContextBinding(
+        context_id=identity,
+        selection_id=identity,
+        vault=str(tmp_path),
+        revision=1,
+        fingerprint="a" * 64,
+        operation_id="1" * 32,
+        operation_generation=7,
+        intent_commit="2" * 40,
+    )
+    directions = UpdateContextResult(
+        status="direction_required",
+        kind="history",
+        code="direction_required",
+        binding=binding,
+        history_action=UpdateHistoryActionState(
+            kind="recovery",
+            status="direction_required",
+            ready=False,
+            available_directions=("finish", "restore"),
+            operation=None,
+            summary="Choose a direction.",
+        ),
+    )
+    response = WorkerResponse(
+        operation="update", request_id=identity, sequence=1, result=directions
+    )
+
+    def sealed(result):
+        value = WorkerResponse(
+            operation="update", request_id=identity, sequence=1, result=result
+        )
+        decoder = WorkerStreamDecoder(request)
+        assert decoder.feed(encode_response(value)) is None
+        return decoder.feed(encode_end(value)).result
+
+    assert not sealed(directions).ready
+    for kind in ("recovery", "repair"):
+        # Cleanup-only recovery and repair legitimately have no S1 direction/review.
+        ready = directions.model_copy(
+            update={
+                "status": "prepared_review",
+                "ready": True,
+                "history_action": UpdateHistoryActionState(
+                    kind=kind,
+                    status="ready",
+                    ready=True,
+                    available_directions=(),
+                    operation=None,
+                    summary="Ready native preparation.",
+                ),
+            }
+        )
+        assert sealed(ready).ready
+    native = VaultApplyResult.model_validate(
+        operation_state("incomplete").model_dump()
+        | {
+            "status": "restored",
+            "direction": "restore",
+            "phase": "terminal",
+            "publication": "complete",
+            "history": "terminal",
+            "checkpoint_commit": "3" * 40,
+            "result_commit": "4" * 40,
+            "receipt_commit": "5" * 40,
+            "published_files": 2,
+            "recovery_required": False,
+        }
+    )
+    restored = directions.model_copy(
+        update={
+            "status": "restored",
+            "binding": None,
+            "publication": "complete",
+            "history_retained": True,
+            "checkpoint_commit": "3" * 40,
+            "history_action": UpdateHistoryActionState(
+                kind="recovery",
+                status="restored",
+                ready=False,
+                available_directions=(),
+                operation=native,
+                summary="Restored.",
+            ),
+        }
+    )
+    assert sealed(restored).status == "restored"
+    contradictions = [
+        {"status": "prepared_review", "ready": True},
+        {"status": "prepared_review", "ready": True, "history_action": None},
+        {
+            "status": "prepared_review",
+            "ready": True,
+            "history_action": directions.history_action.model_dump()
+            | {"status": "ready", "ready": True},
+        },
+    ]
+    for status in ("restored", "undone"):
+        contradictions.append(
+            {
+                "status": status,
+                "binding": None,
+                "history_action": directions.history_action.model_dump()
+                | {"status": status, "available_directions": []},
+            }
+        )
+    for contradiction in contradictions:
+        unsafe = json.loads(encode_response(response))
+        unsafe["result"].update(contradiction)
+        with pytest.raises(ProtocolFailure):
+            WorkerStreamDecoder(request).feed(json.dumps(unsafe).encode() + b"\n")
+    mismatched = json.loads(
+        encode_response(
+            WorkerResponse(
+                operation="update", request_id=identity, sequence=1, result=restored
+            )
+        )
+    )
+    mismatched["result"]["status"] = mismatched["result"]["history_action"][
+        "status"
+    ] = "undone"
+    with pytest.raises(ProtocolFailure):
+        WorkerStreamDecoder(request).feed(json.dumps(mismatched).encode() + b"\n")
+
+
 def test_stream_terminal_is_provisional_until_matching_end_and_poisoned_by_late_fault():
     import pytest
 

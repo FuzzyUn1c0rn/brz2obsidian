@@ -1,5 +1,7 @@
 """Session reduction keeps content replies and review/publication truth distinct."""
 
+import pytest
+
 from brz2obsidian.application.contracts import WorkerResponse
 from brz2obsidian.application.operations import ApplicationSession
 from brz2obsidian.application.transport import Terminal
@@ -16,6 +18,39 @@ def terminal(request, result):
             operation="update", request_id=request.request_id, sequence=1, result=result
         ),
     )
+
+
+@pytest.mark.parametrize("reply", ("launch_failure", "unqualified_refusal"))
+def test_session_keeps_prior_uncertainty_when_a_new_worker_cannot_launch(
+    tmp_path, reply
+):
+    session = ApplicationSession()
+    selection = "11111111-1111-4111-8111-111111111111"
+    vault = str(tmp_path / "vault")
+    session.select_update(vault, selection_id=selection)
+    session.bind_update_worker("previous-child")
+    uncertain = session.update_contact_uncertain("previous-child")
+    assert uncertain.needs_inspection and uncertain.publication == "unknown"
+    session.bind_update_worker("new-child")
+    request = session.start_update(
+        {"command": "history", "vault": vault, "selection_id": selection}
+    )
+    outcome = (
+        Terminal(phase="not_started", code="launch_failure")
+        if reply == "launch_failure"
+        else terminal(
+            request,
+            UpdateContextResult(
+                kind="history", status="refused", code="context_changed"
+            ),
+        )
+    )
+    state = session.complete_update(request.request_id, outcome)
+    assert state.needs_inspection and state.publication == "unknown"
+    assert (
+        state.transport_phase == outcome.phase and state.transport_code == outcome.code
+    )
+    assert not state.ready and state.binding is None
 
 
 def test_session_keeps_saved_summary_across_content_reply_and_rejects_stale_selection(

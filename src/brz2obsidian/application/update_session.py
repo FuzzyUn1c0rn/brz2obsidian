@@ -18,6 +18,7 @@ _CONTENT = frozenset(
         "write_edit",
         "seal_edit",
         "stage_references",
+        "history_choices",
     )
 )
 
@@ -189,7 +190,8 @@ class UpdateSession:
                 self.snapshot,
                 binding=None,
                 review_ready=False,
-                needs_inspection=terminal.phase != "not_started",
+                needs_inspection=state.needs_inspection
+                or terminal.phase != "not_started",
                 publication="unknown"
                 if terminal.phase != "not_started"
                 else state.publication,
@@ -243,12 +245,38 @@ class UpdateSession:
                 draft_pending=result.draft_pending,
             )
             return self.snapshot
+        reviewed_history = (
+            isinstance(result.binding, HistoryContextBinding)
+            and result.history_action is not None
+            and result.history_action.status
+            in ("direction_required", "review_required", "ready")
+        )
+        qualified = (
+            reviewed_history
+            or result.history is not None
+            or bool(result.history_action and result.history_action.operation)
+            or (
+                request.arguments.command in ("prepare", "resume")
+                and isinstance(result.binding, UpdateContextBinding)
+                and result.status in ("prepared_review", "unresolved", "stale_review")
+            )
+            or (
+                request.arguments.command == "load"
+                and result.code == "revalidation_required"
+                and result.history_retained is True
+                and result.checkpoint_commit is not None
+            )
+        )
+        pending_inspection = state.needs_inspection and not qualified
         self.snapshot = replace(
             self.snapshot,
-            binding=result.binding,
-            review_ready=result.ready,
+            binding=None if pending_inspection else result.binding,
+            review_ready=result.ready and not pending_inspection,
             draft_pending=result.draft_pending,
-            needs_inspection=result.status
+            needs_inspection=False
+            if reviewed_history
+            else pending_inspection
+            or result.status
             in (
                 "publication_unknown",
                 "recovery_required",
@@ -265,10 +293,16 @@ class UpdateSession:
             changes=result.changes,
             unresolved=result.unresolved,
             stale=result.stale,
-            history_retained=result.history_retained,
-            checkpoint_commit=result.checkpoint_commit,
-            publication=result.publication,
-            next_actions=result.next_actions,
+            history_retained=state.history_retained
+            if pending_inspection
+            else result.history_retained,
+            checkpoint_commit=state.checkpoint_commit
+            if pending_inspection
+            else result.checkpoint_commit,
+            publication=state.publication if pending_inspection else result.publication,
+            next_actions=("inspect_history",)
+            if pending_inspection
+            else result.next_actions,
             reply=result,
         )
         return self.snapshot

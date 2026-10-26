@@ -26,6 +26,10 @@ def requirement_digest(requirement):
 
 def attachment_references(preparation, requirement_id):
     plan = UpdatePreparation.model_validate(preparation).review
+    return review_plan_attachment_references(plan, requirement_id)
+
+
+def review_plan_attachment_references(plan, requirement_id):
     requirement = next(
         row
         for row in inspect_review_choices(plan)
@@ -150,7 +154,27 @@ def review_choice_action(
     disassociate_entry_ids=(),
 ):
     preparation = UpdatePreparation.model_validate(preparation)
-    plan = preparation.review
+    return review_plan_choice_action(
+        preparation.review,
+        requirement_id=requirement_id,
+        choice=choice,
+        assumptions_digest=assumptions_digest,
+        references=references,
+        selected_entry_id=selected_entry_id,
+        disassociate_entry_ids=disassociate_entry_ids,
+    )
+
+
+def review_plan_choice_action(
+    plan,
+    *,
+    requirement_id,
+    choice,
+    assumptions_digest,
+    references=(),
+    selected_entry_id=None,
+    disassociate_entry_ids=(),
+):
     requirement = next(
         (
             row
@@ -209,7 +233,7 @@ def review_choice_action(
             supplied = tuple(
                 UpdateReferenceChoice.model_validate(row) for row in references
             )
-            offered_refs = attachment_references(preparation, requirement_id)
+            offered_refs = review_plan_attachment_references(plan, requirement_id)
             if (
                 any(row.choice != "drop" for row in supplied)
                 or len({row.reference_id for row in supplied}) != len(supplied)
@@ -296,7 +320,7 @@ def review_choice_action(
                 change,
                 alternative,
                 references,
-                attachment_references(preparation, requirement_id),
+                review_plan_attachment_references(plan, requirement_id),
             )
         elif references:
             raise ValueError("Reference choice is unavailable")

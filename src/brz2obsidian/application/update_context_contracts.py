@@ -206,6 +206,71 @@ class UpdateContextResult(ReconciliationContract):
 
     @model_validator(mode="after")
     def truthful_context(self):
+        action = self.history_action
+        if self.kind == "history" and self.ready and action is None:
+            raise ValueError("Ready history requires its native action facts")
+        if self.status == "repaired" and (
+            self.kind != "history"
+            or action is None
+            or action.repair is None
+            or action.repair.status != "repaired"
+        ):
+            raise ValueError(
+                "Repaired requires its actual verified native repair result"
+            )
+        if action is not None:
+            if self.kind != "history":
+                raise ValueError("History action facts require their actual role")
+            if self.ready and (not action.ready or action.status != "ready"):
+                raise ValueError("Ready history requires a ready native preparation")
+            if (
+                action.ready
+                and action.available_directions
+                and (
+                    not isinstance(self.binding, HistoryContextBinding)
+                    or self.binding.direction not in action.available_directions
+                )
+            ):
+                raise ValueError(
+                    "A ready recovery review requires its chosen direction"
+                )
+            if action.operation is not None:
+                native = action.operation
+                if (
+                    action.status not in ("refused", "recovery_required")
+                    and action.status != native.status
+                ):
+                    raise ValueError(
+                        "History outcome differs from its native operation"
+                    )
+                if (
+                    self.publication != native.publication
+                    or self.history_retained
+                    is not (
+                        None
+                        if native.history == "unknown"
+                        else native.history != "none"
+                    )
+                ):
+                    raise ValueError(
+                        "Native history/publication facts must be retained"
+                    )
+            if (
+                action.repair is not None
+                and self.history_retained is not action.repair.history_retained
+            ):
+                raise ValueError("Repair must preserve actual history retention")
+        if (
+            self.kind == "history"
+            and self.status
+            in ("applied", "undone", "restored", "incomplete", "content_complete")
+            and (
+                action is None
+                or action.operation is None
+                or action.operation.status != self.status
+            )
+        ):
+            raise ValueError("History file outcomes require their exact native result")
         if self.ready and (
             self.binding is None
             or self.draft_pending

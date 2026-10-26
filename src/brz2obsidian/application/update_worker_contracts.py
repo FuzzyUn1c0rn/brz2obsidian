@@ -69,6 +69,22 @@ class ContinueHistoryCommand(ReconciliationContract):
     binding: HistoryContextBinding
 
 
+class HistoryChoicesCommand(ReconciliationContract):
+    command: Literal["history_choices"]
+    binding: HistoryContextBinding
+    offset: int = Field(default=0, ge=0)
+    limit: int = Field(default=100, ge=1, le=100)
+
+
+class ChooseHistoryCommand(ReconciliationContract):
+    command: Literal["choose_history"]
+    binding: HistoryContextBinding
+    requirement_id: str
+    choice: ReviewChoice
+    assumptions_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    references: tuple[UpdateReferenceChoice, ...] = Field(default=(), max_length=100)
+
+
 class PageUpdateCommand(ReconciliationContract):
     command: Literal["page"]
     binding: UpdateContextBinding
@@ -223,6 +239,8 @@ UpdateCommand = Annotated[
     | InitializeVaultCommand
     | PrepareHistoryCommand
     | ContinueHistoryCommand
+    | HistoryChoicesCommand
+    | ChooseHistoryCommand
     | PageUpdateCommand
     | ReferenceUpdateCommand
     | ChoicePageUpdateCommand

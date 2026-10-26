@@ -135,6 +135,10 @@ class UpdateWorker:
                 result = self.context.refresh_history(**values)
             elif args.command == "execute_history":
                 result = self.context.execute_history(**values, cancel=cancel.is_set)
+            elif args.command == "history_choices":
+                result = self.context.history_choices(**values)
+            elif args.command == "choose_history":
+                result = self.context.choose_history(**values)
             elif args.command == "page":
                 result = self.context.page(**values)
             elif args.command == "references":

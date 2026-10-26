@@ -9,6 +9,7 @@ from .contract_values import request_identity
 from .update_history_contracts import (
     HistoryContextBinding,
     UpdateHistoryActionState,
+    UpdateHistoryCopyState,
     UpdateHistoryState,
 )
 
@@ -27,6 +28,15 @@ class HistoryContext:
         return UpdateContextResult(kind="history", **values)
 
     def blocked(self, code="close_decision_required"):
+        if self._last_result is not None:
+            return self._last_result.model_copy(
+                update={
+                    "status": "refused",
+                    "code": code,
+                    "ready": False,
+                    "binding": self.binding,
+                }
+            )
         return self._result(status="refused", code=code, binding=self.binding)
 
     @staticmethod
@@ -117,9 +127,10 @@ class HistoryContext:
 
     def _project(self, result):
         preparation = result.preparation
+        changed_target = False
         if preparation is not None and preparation.kind == "recovery":
             native = preparation.native
-            if (
+            changed_target = (
                 native.operation_id,
                 native.generation,
                 native.intent_commit,
@@ -129,33 +140,75 @@ class HistoryContext:
                 self.binding.operation_generation,
                 self.binding.intent_commit,
                 self.admission.operation.kind,
-            ):
-                self.preparation = self.binding = None
-                self._last_result = self._result(
-                    status="refused",
-                    code="history_target_changed",
-                    history_retained=self.admission.history_retained,
-                    publication=self.admission.operation.publication,
-                    history=self._state(self.admission),
-                    next_actions=("inspect_history",),
+            )
+        elif preparation is not None and preparation.kind == "undo":
+            native = preparation.native
+            changed_target = (
+                native.checkpoint_commit,
+                native.generation,
+                native.target_receipt_commit,
+            ) != (
+                self.binding.checkpoint_commit,
+                self.binding.checkpoint_generation,
+                self.binding.target_receipt_commit
+                or self.admission.operation.receipt_commit,
+            )
+        elif preparation is not None and preparation.kind == "repair":
+            validation = preparation.native.validation
+            changed_target = any(
+                expected is not None and actual != expected
+                for expected, actual in (
+                    (self.binding.association_id, validation.association_id),
+                    (self.binding.checkpoint_commit, validation.target_commit),
+                    (self.binding.checkpoint_generation, validation.target_generation),
                 )
-                return self._last_result
+            )
+        if changed_target:
+            self.preparation = self.binding = None
+            self._last_result = self._result(
+                status="refused",
+                code="history_target_changed",
+                history_retained=self.admission.history_retained,
+                publication=self.admission.operation.publication,
+                history=self._state(self.admission),
+                next_actions=("inspect_history",),
+            )
+            return self._last_result
         self.preparation = preparation
         if preparation is not None:
             prior = self.binding
             self.revision += 1
             native = preparation.native
             review = getattr(native, "review", None)
+            authority = {}
+            if preparation.kind == "recovery":
+                authority = {
+                    "operation_id": native.operation_id,
+                    "operation_generation": native.generation,
+                    "intent_commit": native.intent_commit,
+                    "direction": native.direction,
+                }
+            elif preparation.kind == "undo":
+                # Undo preparation names a current checkpoint/receipt target,
+                # not a newly allocated operation identity or generation.
+                authority = {
+                    "checkpoint_commit": native.checkpoint_commit,
+                    "checkpoint_generation": native.generation,
+                    "target_receipt_commit": native.target_receipt_commit,
+                }
+            else:
+                authority = {
+                    "association_id": native.validation.association_id,
+                    "checkpoint_commit": native.validation.target_commit,
+                    "checkpoint_generation": native.validation.target_generation,
+                }
             self.binding = prior.model_copy(
                 update={
                     "revision": self.revision,
                     "fingerprint": sha256(
                         preparation.model_dump_json().encode()
                     ).hexdigest(),
-                    "operation_id": getattr(native, "operation_id", None),
-                    "operation_generation": getattr(native, "generation", None),
-                    "intent_commit": getattr(native, "intent_commit", None),
-                    "direction": getattr(native, "direction", None),
+                    **authority,
                     "proposal_id": review.proposal.proposal_id if review else None,
                     "review_generation": review.proposal.generation if review else None,
                 }
@@ -167,6 +220,22 @@ class HistoryContext:
             getattr(preparation.native, "available_directions", ())
             if preparation
             else ()
+        )
+        validation = result.copy_validation
+        copy_state = (
+            UpdateHistoryCopyState(
+                status=validation.status,
+                code=validation.code,
+                association_id=validation.association_id,
+                target_commit=validation.target_commit,
+                target_generation=validation.target_generation,
+                copy_commit=validation.copy_commit,
+                copy_generation=validation.copy_generation,
+                missing_objects=len(validation.missing_objects),
+                damaged_objects=len(validation.damaged_objects),
+            )
+            if validation is not None
+            else None
         )
         self._last_result = self._result(
             status="prepared_review"
@@ -201,6 +270,12 @@ class HistoryContext:
                 if operation
                 else None,
                 summary=result.summary[:2048],
+                copy_validation=copy_state,
+                repair=result.repair.model_copy(
+                    update={"message": result.repair.message[:2048]}
+                )
+                if result.repair
+                else None,
             ),
         )
         return self._last_result
@@ -229,6 +304,56 @@ class HistoryContext:
             return self._result(status="refused", code="context_changed")
         return self._project(
             self.operations.execute_history_workflow(self.preparation, cancel=cancel)
+        )
+
+    def choice_page(self, binding, *, offset=0, limit=100):
+        from .review_offers import review_plan_choice_page
+
+        if (
+            not self._matches(binding)
+            or self.preparation is None
+            or getattr(self.preparation.native, "review", None) is None
+        ):
+            return self.blocked("context_changed")
+        try:
+            rows, total, following = review_plan_choice_page(
+                self.preparation.native.review, offset=offset, limit=limit
+            )
+        except ValueError, TypeError:
+            return self.blocked("offer_changed")
+        return self._last_result.model_copy(
+            update={
+                "status": "available",
+                "ready": False,
+                "offers": rows,
+                "total_choices": total,
+                "next_choice_offset": following,
+            }
+        )
+
+    def choose(
+        self, binding, *, requirement_id, choice, assumptions_digest, references=()
+    ):
+        from .review_choices import review_plan_choice_action
+
+        if (
+            not self._matches(binding)
+            or self.preparation is None
+            or getattr(self.preparation.native, "review", None) is None
+        ):
+            return self.blocked("context_changed")
+        try:
+            action = review_plan_choice_action(
+                self.preparation.native.review,
+                requirement_id=requirement_id,
+                choice=choice,
+                assumptions_digest=assumptions_digest,
+                references=references,
+            )
+        except ValueError, TypeError, StopIteration:
+            return self.blocked("offer_changed")
+        return self._project(
+            self.operations.resolve_history_workflow(self.preparation, action)
         )
 
     def close(self, binding, *, choice):

@@ -11,6 +11,479 @@ from brz2obsidian.application.update_context import UpdateContext
 from tests.application.test_update_context import worker_context_call
 
 
+@pytest.mark.parametrize("outcome", ("repaired", "unknown"))
+def test_worker_repair_keeps_matching_target_and_native_object_storage_truth(
+    tmp_path, outcome
+):
+    from brz2obsidian.application.operations import Operations
+    from brz2obsidian.application.vault_repair_contracts import (
+        HistoryCopyValidation,
+        HistoryRepairPreparation,
+        HistoryRepairResult,
+        MissingHistoryObject,
+    )
+    from tests.application.test_history_workflow import absent_history, operation_state
+
+    vault, copy = tmp_path / "vault", tmp_path / "local-copy"
+    vault.mkdir()
+    copy.mkdir()
+    (vault / "Personal.md").write_bytes(b"Author stays exact\r\n")
+    history = absent_history()
+    repository = history.admission.repository.model_copy(
+        update={
+            "kind": "root",
+            "root": str(vault),
+            "git_directory": str(vault / ".git"),
+            "common_directory": str(vault / ".git"),
+            "object_directory": str(vault / ".git/objects"),
+            "object_format": "sha1",
+            "ref_format": "files",
+        }
+    )
+    history = history.model_copy(
+        update={
+            "status": "unavailable",
+            "admission": history.admission.model_copy(
+                update={"repository": repository}
+            ),
+        }
+    )
+    observed = operation_state("unknown")
+    validation = HistoryCopyValidation(
+        schema_id="brz2obsidian.history-copy-validation",
+        schema_version=1,
+        status="matching",
+        code="exact_missing_dependency",
+        association_id="a" * 64,
+        target_commit="3" * 40,
+        copy_commit="3" * 40,
+        target_generation=4,
+        copy_generation=4,
+        missing_objects=(
+            MissingHistoryObject(object_id="e" * 40, size=7, sha256="b" * 64),
+        ),
+        message="One qualified retained object is missing.",
+    )
+    native = HistoryRepairPreparation(
+        schema_id="brz2obsidian.history-repair-preparation",
+        schema_version=1,
+        status="prepared",
+        code="repair_prepared",
+        validation=validation,
+        target_anchor="qualified-target",
+        target_git_anchor="qualified-target-git",
+        copy_anchor="qualified-copy",
+        copy_git_anchor="qualified-copy-git",
+        target_snapshot="c" * 64,
+        copy_snapshot="d" * 64,
+        message="Matching native object repair prepared.",
+    )
+    result = HistoryRepairResult(
+        schema_id="brz2obsidian.history-repair-result",
+        schema_version=1,
+        status=outcome,
+        code="native_" + outcome,
+        history_retained=outcome == "repaired",
+        object_storage="verified" if outcome == "repaired" else "possible",
+        objects_written=1,
+        authored_files_changed=False,
+        message="Actual native object-storage outcome.",
+    )
+    calls = []
+
+    class NativePorts(Operations):
+        def inspect_history(self, path, **kwargs):
+            return history
+
+        def inspect_update_status(self, path):
+            return observed
+
+        def validate_history_copy(self, path, candidate):
+            assert Path(path) == vault and Path(candidate) == copy
+            calls.append("validate")
+            return validation
+
+        def prepare_history_repair(self, path, candidate, checked):
+            assert checked == validation and Path(candidate) == copy
+            calls.append("prepare")
+            return native
+
+        def execute_history_repair(self, path, candidate, preparation):
+            assert preparation == native and Path(candidate) == copy
+            calls.append("execute")
+            return result
+
+    context = UpdateContext(operations=NativePorts())
+    offered = worker_context_call(
+        context,
+        {
+            "command": "history",
+            "vault": str(vault),
+            "selection_id": "11111111-1111-4111-8111-111111111111",
+        },
+    )
+    assert (
+        "review_history_repair" in offered.next_actions
+        and offered.binding.operation_id is None
+    )
+    prepared = worker_context_call(
+        context,
+        {
+            "command": "prepare_history",
+            "binding": offered.binding,
+            "kind": "repair",
+            "copy_path": str(copy),
+        },
+    )
+    assert (
+        prepared.ready
+        and prepared.binding.proposal_id is None
+        and prepared.binding.review_generation is None
+    )
+    assert prepared.binding.operation_generation is None
+    assert (
+        prepared.binding.association_id == "a" * 64
+        and prepared.binding.checkpoint_commit == "3" * 40
+        and prepared.binding.checkpoint_generation == 4
+    )
+    assert (
+        prepared.history_action.copy_validation.status == "matching"
+        and prepared.history_action.copy_validation.missing_objects == 1
+    )
+    assert calls == ["validate", "prepare"]
+    completed = worker_context_call(
+        context, {"command": "execute_history", "binding": prepared.binding}
+    )
+    assert completed.status == outcome and completed.status not in (
+        "applied",
+        "restored",
+    )
+    assert (
+        completed.history_action.repair == result
+        and completed.history_action.operation is None
+    )
+    assert (
+        completed.history_retained is result.history_retained
+        and completed.binding is None
+        and not completed.ready
+    )
+    assert (
+        completed.history_action.repair.object_storage == result.object_storage
+        and not completed.history_action.repair.authored_files_changed
+    )
+    assert calls == ["validate", "prepare", "execute"]
+    assert (vault / "Personal.md").read_bytes() == b"Author stays exact\r\n" and list(
+        copy.iterdir()
+    ) == []
+
+
+def test_worker_resolves_canonical_history_current_offer_without_exporting_plan(
+    tmp_path,
+):
+    from brz2obsidian.application.operations import Operations
+    from brz2obsidian.application.vault_recovery_contracts import (
+        VaultRecoveryPreparation,
+    )
+    from brz2obsidian.application.vault_update_contracts import VaultApplyResult
+    from brz2obsidian.core import prepare_review, resolve_review, select_review_effects
+    from tests.application.test_history_workflow import absent_history, operation_state
+    from tests.reconciliation.test_resolution import preflight
+    from tests.reconciliation.test_reversal_absence import reversal_facts
+
+    facts = reversal_facts(current=b"created\r\nLater writing\r\n")
+    subject = facts.subjects[0]
+    proof = subject.operation_reversal.model_copy(
+        update={"operation_id": "1" * 32, "operation_generation": 7}
+    )
+    facts = facts.model_copy(
+        update={
+            "generation": 3,
+            "subjects": (subject.model_copy(update={"operation_reversal": proof}),),
+        }
+    )
+    plan = prepare_review(facts, preflight=preflight())
+    assert not plan.ready and len(plan.requirements) == 1
+    assert (
+        plan.requirements[0].domain == "reversal"
+        and "current" in plan.requirements[0].choices
+    )
+    native = VaultRecoveryPreparation(
+        schema_id="brz2obsidian.vault-recovery-preparation",
+        schema_version=1,
+        status="offered",
+        code="recovery_offered",
+        operation_id="1" * 32,
+        kind="apply",
+        generation=7,
+        intent_commit="2" * 40,
+        available_directions=("restore",),
+        direction="restore",
+        review=plan,
+    )
+    observed = operation_state("incomplete").model_copy(
+        update={"direction": "restore", "origin_role": "source_update"}
+    )
+    completed = VaultApplyResult.model_validate(
+        observed.model_dump()
+        | {
+            "status": "restored",
+            "code": "recovery_restored",
+            "generation": 8,
+            "review_generation": 3,
+            "phase": "terminal",
+            "publication": "complete",
+            "history": "terminal",
+            "planned_files": 0,
+            "published_files": 0,
+            "authored_files_changed": False,
+            "checkpoint_commit": "3" * 40,
+            "result_commit": "4" * 40,
+            "receipt_commit": "5" * 40,
+            "recovery_required": False,
+        }
+    )
+    calls = []
+
+    class NativePorts(Operations):
+        def inspect_history(self, vault, **kwargs):
+            return absent_history()
+
+        def inspect_update_status(self, vault):
+            return observed
+
+        def prepare_recovery(self, vault, *, direction=None):
+            assert direction == "restore"
+            return native
+
+        def resolve_recovery(self, vault, preparation, action):
+            calls.append(action)
+            transition = resolve_review(preparation.review, action)
+            assert transition.status == "accepted", transition.code
+            return preparation.model_copy(
+                update={"review": transition.plan, "code": "recovery_choice_recorded"}
+            )
+
+        def execute_recovery(self, vault, preparation, *, cancel=None):
+            effects = select_review_effects(preparation.review)
+            assert effects.status == "selected" and effects.remove_paths == ()
+            assert [(row.path, row.content.data) for row in effects.files] == [
+                ("Notes/Opening.md", b"created\r\nLater writing\r\n")
+            ]
+            return completed
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "Personal.md").write_bytes(b"Exact personal bytes\r\n")
+    context = UpdateContext(operations=NativePorts())
+    offered = worker_context_call(
+        context,
+        {
+            "command": "history",
+            "vault": str(vault),
+            "selection_id": "11111111-1111-4111-8111-111111111111",
+        },
+    )
+    prepared = worker_context_call(
+        context,
+        {
+            "command": "prepare_history",
+            "binding": offered.binding,
+            "kind": "recovery",
+            "direction": "restore",
+        },
+    )
+    assert not prepared.ready and prepared.unresolved == 1
+    choices = worker_context_call(
+        context, {"command": "history_choices", "binding": prepared.binding, "limit": 1}
+    )
+    assert choices.total_choices == 1 and choices.next_choice_offset is None
+    offer = choices.offers[0]
+    assert offer.domain == "reversal" and "current" in offer.choices
+    wire = choices.model_dump_json()
+    assert "producer_facts" not in wire and "link_context" not in wire
+    wrong = worker_context_call(
+        context,
+        {
+            "command": "choose_history",
+            "binding": prepared.binding,
+            "requirement_id": offer.requirement_id,
+            "choice": "current",
+            "assumptions_digest": "0" * 64,
+        },
+    )
+    assert wrong.status == "refused" and wrong.code == "offer_changed" and not calls
+    chosen = worker_context_call(
+        context,
+        {
+            "command": "choose_history",
+            "binding": prepared.binding,
+            "requirement_id": offer.requirement_id,
+            "choice": "current",
+            "assumptions_digest": offer.assumptions_digest,
+        },
+    )
+    assert chosen.ready and chosen.binding.review_generation == 3 and len(calls) == 1
+    stale = worker_context_call(
+        context,
+        {
+            "command": "choose_history",
+            "binding": prepared.binding,
+            "requirement_id": offer.requirement_id,
+            "choice": "current",
+            "assumptions_digest": offer.assumptions_digest,
+        },
+    )
+    assert stale.status == "refused" and len(calls) == 1
+    result = worker_context_call(
+        context, {"command": "execute_history", "binding": chosen.binding}
+    )
+    assert result.status == "restored" and result.history_action.operation == completed
+    assert (vault / "Personal.md").read_bytes() == b"Exact personal bytes\r\n"
+
+
+@pytest.mark.parametrize("target", ("matching", "new_checkpoint", "other_receipt"))
+def test_undo_context_distinguishes_current_checkpoint_target_receipt_and_prior_operation(
+    tmp_path, target
+):
+    from brz2obsidian.application.operations import Operations
+    from brz2obsidian.application.vault_undo_contracts import VaultUndoPreparation
+    from brz2obsidian.application.vault_update_contracts import VaultApplyResult
+    from tests.application.test_history_workflow import (
+        intact_local_history,
+        operation_state,
+        ready_native_recovery,
+    )
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "Personal.md").write_bytes(b"Keep authored bytes\r\n")
+    history = intact_local_history()
+    checkpoint = history.checkpoint.model_copy(
+        update={
+            "locator": history.checkpoint.locator.model_copy(
+                update={"commit": "3" * 40, "generation": 2}
+            ),
+            "manifest": history.checkpoint.manifest.model_copy(
+                update={
+                    "generation": 2,
+                    "boundary": "result",
+                    "previous": "1" * 40,
+                    "operation_intent_commit": "2" * 40,
+                }
+            ),
+        }
+    )
+    history = history.model_copy(update={"checkpoint": checkpoint})
+    observed = VaultApplyResult.model_validate(
+        operation_state("incomplete").model_dump()
+        | {
+            "status": "applied",
+            "code": "operation_terminal",
+            "generation": 1,
+            "phase": "terminal",
+            "publication": "complete",
+            "history": "terminal",
+            "published_files": 2,
+            "checkpoint_commit": "1" * 40,
+            "result_commit": "3" * 40,
+            "receipt_commit": "4" * 40,
+            "recovery_required": False,
+            "origin_role": "source_update",
+        }
+    )
+    review = ready_native_recovery().native.review
+    native = VaultUndoPreparation(
+        schema_id="brz2obsidian.vault-undo-preparation",
+        schema_version=1,
+        status="offered",
+        code="undo_offered",
+        checkpoint_commit="e" * 40 if target == "new_checkpoint" else "3" * 40,
+        generation=3 if target == "new_checkpoint" else 2,
+        target_receipt_commit="f" * 40 if target == "other_receipt" else "4" * 40,
+        review=review,
+    )
+    undone = VaultApplyResult.model_validate(
+        observed.model_dump()
+        | {
+            "status": "undone",
+            "code": "operation_undone",
+            "kind": "undo",
+            "operation_id": "9" * 32,
+            "generation": 3,
+            "review_generation": 3,
+            "checkpoint_commit": "5" * 40,
+            "intent_commit": "6" * 40,
+            "result_commit": "7" * 40,
+            "receipt_commit": "8" * 40,
+        }
+    )
+    entered = []
+
+    class NativePorts(Operations):
+        def inspect_history(self, path, **kwargs):
+            assert Path(path) == vault
+            return history
+
+        def inspect_update_status(self, path):
+            return observed
+
+        def prepare_undo(self, path, *, previous=None):
+            return native
+
+        def execute_undo(self, path, preparation, *, cancel=None):
+            assert preparation == native
+            entered.append(True)
+            return undone
+
+    context = UpdateContext(operations=NativePorts())
+    offered = worker_context_call(
+        context,
+        {
+            "command": "history",
+            "vault": str(vault),
+            "selection_id": "11111111-1111-4111-8111-111111111111",
+        },
+    )
+    assert "review_undo" in offered.next_actions
+    assert (
+        offered.binding.operation_generation == 1
+        and offered.binding.checkpoint_generation == 2
+    )
+    prepared = worker_context_call(
+        context,
+        {"command": "prepare_history", "binding": offered.binding, "kind": "undo"},
+    )
+    if target != "matching":
+        assert (
+            prepared.status == "refused" and prepared.code == "history_target_changed"
+        )
+        assert prepared.binding is None and not prepared.ready and not entered
+    else:
+        assert prepared.ready and prepared.binding.operation_generation == 1
+        assert (
+            prepared.binding.operation_id == observed.operation_id
+            and prepared.binding.intent_commit == observed.intent_commit
+        )
+        assert (
+            prepared.binding.checkpoint_commit == "3" * 40
+            and prepared.binding.checkpoint_generation == 2
+        )
+        assert (
+            prepared.binding.target_receipt_commit == "4" * 40
+            and prepared.binding.review_generation == 3
+        )
+        actual = worker_context_call(
+            context, {"command": "execute_history", "binding": prepared.binding}
+        )
+        assert actual.status == "undone" and actual.history_action.operation == undone
+        assert (
+            actual.history_action.operation.operation_id == "9" * 32
+            and actual.history_action.operation.kind == "undo"
+        )
+        assert actual.binding is None and entered == [True]
+    assert (vault / "Personal.md").read_bytes() == b"Keep authored bytes\r\n"
+
+
 @pytest.mark.parametrize(
     "changed", ("operation_id", "generation", "intent_commit", "kind")
 )

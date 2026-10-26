@@ -23,6 +23,10 @@ def _slice(rows, offset, limit):
 
 def choice_offers(preparation):
     plan = UpdatePreparation.model_validate(preparation).review
+    return review_plan_choice_offers(plan)
+
+
+def review_plan_choice_offers(plan):
     result = []
     for row in inspect_review_choices(plan):
         selected = next(
@@ -80,6 +84,10 @@ def choice_offers(preparation):
 
 def choice_page(preparation, *, offset=0, limit=100):
     return _slice(choice_offers(preparation), offset, limit)
+
+
+def review_plan_choice_page(plan, *, offset=0, limit=100):
+    return _slice(review_plan_choice_offers(plan), offset, limit)
 
 
 def choice_detail_page(preparation, *, requirement_id, offset=0, limit=100):

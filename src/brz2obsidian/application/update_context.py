@@ -159,6 +159,14 @@ class UpdateContext:
         self._remember(result)
         return result
 
+    def history_choices(self, binding, **values):
+        return self._history.choice_page(binding, **values)
+
+    def choose_history(self, binding, **values):
+        result = self._history.choose(binding, **values)
+        self._remember(result)
+        return result
+
     def page(self, binding, *, offset=0, limit=100, byte_offset=0, byte_limit=65536):
         def refused(code):
             return UpdateContextResult(status="refused", code=code, kind=self._kind)
