@@ -311,6 +311,22 @@ See [readable diagnostics and compatibility](docs/diagnostics.md).
 
 ### Review an existing vault
 
+In Windows, select **Update vault**, choose the incoming BRZ and existing vault,
+then select **Prepare update review**. The left queue opens compatible comparisons,
+conflicts and other required choices beside the decision workspace. Accept or
+discard edited text and reference drafts explicitly. **Apply update** requires the
+whole review to be resolved. Inputs stay locked to the reviewed target while that
+review is open.
+
+Use **Save review** to retain decisions. **Reopen saved review** loads them without
+granting apply readiness; **Resume saved review** rechecks current inputs.
+**Refresh review** reviews changes made between operations and retains unaffected
+decisions. **Review operation** also offers onboarding, separate format transitions
+and attachment-file cleanup. **Inspect history and recovery** opens current setup,
+recovery, latest Undo and matching-history repair actions. Closing an active
+operation offers background/wait/safe-stop choices; a stop request is not a
+completed rollback.
+
 Review preparation currently accepts **BRZ sources**. Start with status, then
 prepare and persist the incoming review:
 
@@ -320,7 +336,7 @@ prepare and persist the incoming review:
 ```
 
 Resolve the review in the Windows editor or a shared lifecycle client, then
-choose **Save**. The CLI has no interactive editor and does not approve pending
+choose **Save review**. The CLI has no interactive editor and does not approve pending
 choices or consent. Inspect the saved review to obtain its current identities:
 
 ```powershell

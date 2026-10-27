@@ -21,6 +21,7 @@ class ProjectedReviewTransport:
         self.sequence = count(1)
 
     def open_update(self, **kwargs):
+        self.closed = False
         return self
 
     def run(self, request, **callbacks):

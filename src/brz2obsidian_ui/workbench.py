@@ -49,6 +49,8 @@ class UpdateWorkbench(QWidget):
         self._pick_source, self._pick_vault = pick_source, pick_vault
         self.source, self.vault, self.original_source = None, None, None
         self._input_revision = 0
+        self._source_selection_id = None
+        self._saved_selection_id = None
         self._preparing = False
         self._state = None
         self._binding_key = None
@@ -73,6 +75,10 @@ class UpdateWorkbench(QWidget):
         self.history_copy = None
         self._history = self._history_action = None
         self._after_close = None
+        self._internal_close = None
+        self._transition = None
+        self._details_expanded = False
+        self._history_scope = None
         self._closing = False
         self._active_id = self._active_started = None
         self._requested = set()
@@ -91,7 +97,7 @@ class UpdateWorkbench(QWidget):
         layout.setSpacing(16)
         self.queue = QListWidget(objectName="reviewQueue")
         self.queue.setAccessibleName("Review queue")
-        self.queue.addItems(("Archive & vault", "Overview", "Conflicts", "Other choices", "History & recovery"))
+        self.queue.addItems(("Archive & vault", "Overview", "Conflicts", "Other choices", "History & recovery", "Compatible changes"))
         self.queue.setFixedWidth(160)
         self.queue.setWordWrap(True)
         self.queue.setCurrentRow(0)
@@ -129,6 +135,12 @@ class UpdateWorkbench(QWidget):
             self._configuration = None
             self._identity_selection.clear()
         self._state = state
+        scope = (state.selection_id, state.vault)
+        if (scope != self._history_scope
+                or state.reply is not None and state.reply.kind != "history"
+                or state.reply is None and state.publication == "unknown"):
+            self._history = self._history_action = None
+        self._history_scope = scope
         if state.active_request_id != self._active_id:
             self._active_id = state.active_request_id
             self._active_started = monotonic() if self._active_id else None
@@ -137,9 +149,16 @@ class UpdateWorkbench(QWidget):
                 self._history = state.reply.history
             if state.reply.history_action is not None:
                 self._history_action = state.reply.history_action
-            if state.reply.code == "context_closed" and self._after_close is not None and not state.active_request_id:
+            pending = self._internal_close
+            if pending is not None and not state.active_request_id and state.revision > pending[0] and state.reply is not pending[1]:
+                self._internal_close = None
                 action, self._after_close = self._after_close, None
-                action()
+                if state.reply.code == "context_closed" and action is not None:
+                    self._transition = None
+                    self._closing = False
+                    action()
+                elif self._transition is not None:
+                    self._closing = True
         if (
             self._pending_read is not None
             and state.revision > self._pending_read
@@ -155,8 +174,8 @@ class UpdateWorkbench(QWidget):
             self._pending_choice = None
         if (
             self._preparing
-            and state.transport_phase == "completed"
-            and state.reply is not None
+            and not state.active_request_id
+            and state.transport_phase is not None
         ):
             self._preparing = False
         self._refresh_inputs()
@@ -244,6 +263,8 @@ class UpdateWorkbench(QWidget):
             return text
         if state.needs_inspection or state.publication in ("partial", "unknown"):
             return "Publication is unknown; inspect history before continuing." if state.publication == "unknown" else "Recovery is required; inspect current history before continuing."
+        if state.transport_phase == "not_started":
+            return "The review worker could not start. Check the Python environment and try again."
         reply = state.reply
         if reply is not None and reply.operation is not None:
             return reply.operation.message
@@ -256,6 +277,7 @@ class UpdateWorkbench(QWidget):
         return "Review the whole proposal before applying. Keep the target vault idle while an operation runs."
 
     def open_close_choices(self):
+        self._transition = None
         self._closing = True
         self._rendered = None
         self._render()
@@ -451,11 +473,15 @@ class UpdateWorkbench(QWidget):
             self._body.addWidget(_label("Saved decisions are loaded. Recheck the source and vault before continuing.", "muted"))
             self._action_button("Resume saved review", "resume", vault=state.vault, selection_id=state.selection_id)
         if isinstance(state.binding, UpdateContextBinding):
+            self._body.addWidget(_label("Reviewed vault: " + state.binding.vault, "muted"))
+            incoming = self.source if state.selection_id == self._source_selection_id else None
+            origin = "saved review" if state.selection_id == self._saved_selection_id else "current review"
+            self._body.addWidget(_label("Incoming source: " + incoming if incoming else "Incoming source: retained from the " + origin + "; no new archive selected.", "muted"))
             if "save_update" in state.next_actions:
                 self._action_button("Save review", "save", binding=state.binding)
             if "refresh_update" in state.next_actions or state.stale:
-                self._action_button("Refresh review", "refresh", binding=state.binding, source=self.source)
-        if state.needs_inspection or "inspect_history" in state.next_actions or "inspect_update_status" in state.next_actions:
+                self._action_button("Refresh review", "refresh", binding=state.binding, source=incoming)
+        if self.queue.currentRow() != 0 and (state.needs_inspection or "inspect_history" in state.next_actions or "inspect_update_status" in state.next_actions):
             self._action_button_callback("Inspect history and recovery", self._inspect_history)
 
     def _action_button_callback(self, title, callback):
@@ -479,8 +505,14 @@ class UpdateWorkbench(QWidget):
         if self.busy or self._state and self._state.draft_pending:
             return
         if self._state and self._state.binding is not None:
-            self._after_close = self._start_history
-            self._action("close", binding=self._state.binding, choice="discard")
+            if isinstance(self._state.binding, UpdateContextBinding) or self._state.binding.proposal_id is not None:
+                self._transition = ("inspect history", self._start_history)
+                self._closing = True
+                self._rendered = None
+                self._render()
+                self.scroll.ensureWidgetVisible(self._close_panel)
+            else:
+                self._close_internal(self._start_history, "discard")
         elif self.vault or self._state and self._state.vault:
             self._start_history()
 
@@ -491,13 +523,84 @@ class UpdateWorkbench(QWidget):
             self._refresh_inputs()
             if command:
                 selection = str(uuid4())
+                self._saved_selection_id = selection
                 self._select(self.vault or self._state.vault, selection_id=selection)
                 self._submit({"command": command, "vault": self.vault or self._state.vault, "selection_id": selection})
         if self._state.binding:
-            self._after_close = selected_role
-            self._action("close", binding=self._state.binding, choice="discard")
+            self._close_internal(selected_role, "discard")
         else:
             selected_role()
+
+    def _close_internal(self, callback, choice):
+        self._after_close = callback
+        self._internal_close = (self._state.revision, self._state.reply)
+        self._action("close", binding=self._state.binding, choice=choice)
+
+    def _transition_choice(self, choice, revision):
+        if self._state.revision != revision or self._transition is None:
+            self._rendered = None
+            self._render()
+            return
+        if choice == "continue":
+            self._transition = None
+            self.finish_close_choice()
+        elif choice in ("save", "discard") and not (choice == "save" and self.local_draft):
+            self._close_internal(self._transition[1], choice)
+
+    def _render_feedback(self):
+        state = self._state
+        if state is None or state.active_request_id:
+            return
+        reply = state.reply
+        not_started = state.transport_phase == "not_started"
+        uncertain = state.publication == "unknown" or state.transport_phase == "may_have_executed"
+        failed = reply is not None and reply.status in ("refused", "failed", "stale_review", "recovery_required", "publication_unknown", "unknown", "incomplete", "content_complete")
+        if not (not_started or uncertain or failed or reply and (reply.findings or reply.guidance or reply.recovery_gap_count)):
+            return
+        if not_started:
+            self._body.addWidget(_label("Review could not start", "sectionTitle"))
+            self._body.addWidget(_label("Check the application's Python environment and worker setup, then try again. This request was not dispatched.", "fieldError"))
+        elif uncertain:
+            self._body.addWidget(_label("Connection lost", "sectionTitle"))
+            self._body.addWidget(_label("Publication is unknown. Inspect current history before continuing.", "fieldError"))
+        elif failed:
+            self._body.addWidget(_label("Review could not continue", "sectionTitle"))
+            known = {"context_changed": "The review changed. Reopen or refresh the current review before choosing.",
+                     "offer_changed": "This choice changed. Refresh the current review before choosing again.",
+                     "uncommitted_draft": "Accept or explicitly discard your draft before continuing.",
+                     "source_payload_changed": "The source changed. Refresh and review the affected choices before applying."}
+            summary = known.get(reply.code, reply.summary or "Check the selected source and vault, then inspect current history before another attempt.")
+            self._body.addWidget(_label(summary[:240] + (" See review details." if len(summary) > 240 else ""), "fieldError"))
+        if not_started or uncertain or failed:
+            self._body.addWidget(_label("File publication: " + state.publication.replace("_", " "), "muted"))
+            retained = "unknown" if uncertain or state.history_retained is None else "retained" if state.history_retained else "not established"
+            self._body.addWidget(_label("Saved converter history: " + retained, "muted"))
+        toggle = QPushButton("Hide review details" if self._details_expanded else "Show review details")
+        toggle.setAccessibleName(toggle.text())
+        def expand():
+            self._details_expanded = not self._details_expanded
+            self._rendered = None
+            self._render()
+        toggle.clicked.connect(expand)
+        self._body.addWidget(toggle)
+        if self._details_expanded:
+            if not_started:
+                self._body.addWidget(_label("Worker launch detail: " + (state.transport_code or "not started"), "muted"))
+            elif reply is not None:
+                summary = _label(reply.summary)
+                summary.setAccessibleName("Review diagnostic summary")
+                self._body.addWidget(summary)
+                self._body.addWidget(_label("Status: " + reply.status + "; detail: " + reply.code, "muted"))
+                for finding in reply.findings:
+                    self._body.addWidget(_label(finding, "muted"))
+                if reply.recovery_gap_count:
+                    self._body.addWidget(_label(f"Recovery gaps: {reply.recovery_gap_count}", "muted"))
+                if reply.diagnostic_omission:
+                    self._body.addWidget(_label("Some review diagnostics were omitted from this bounded view.", "muted"))
+                if reply.guidance:
+                    self._body.addWidget(_label(reply.guidance, "muted"))
+            elif state.transport_code:
+                self._body.addWidget(_label("Worker contact detail: " + state.transport_code, "muted"))
 
     def _pick_history_copy(self):
         binding = self._state.binding
@@ -584,6 +687,8 @@ class UpdateWorkbench(QWidget):
         names = {"continue": "Continue operation" if state and state.active_request_id else "Continue review",
                  "background": "Keep running in background", "wait": "Wait for operation", "safe_stop": "Request safe stop",
                  "save": "Save review and close", "discard": "Discard review and close", "close": "Close window"}
+        if self._transition is not None:
+            names.update(save="Save review and " + self._transition[0], discard="Discard review and " + self._transition[0])
         if self.local_draft and not (state and state.active_request_id):
             options = ("continue", "discard")
         for option in options:
@@ -591,7 +696,10 @@ class UpdateWorkbench(QWidget):
                 continue
             button = QPushButton(names[option])
             button.setAccessibleName(names[option])
-            button.clicked.connect(lambda checked=False, choice=option, revision=state.revision if state else 0: self.close_choice.emit(choice, revision))
+            if self._transition is not None:
+                button.clicked.connect(lambda checked=False, choice=option, revision=state.revision: self._transition_choice(choice, revision))
+            else:
+                button.clicked.connect(lambda checked=False, choice=option, revision=state.revision if state else 0: self.close_choice.emit(choice, revision))
             layout.addWidget(button)
         self._body.addWidget(panel)
 
@@ -659,7 +767,9 @@ class UpdateWorkbench(QWidget):
                self._state.reply.code if self._state and self._state.reply else None,
                self._history, self._history_action, self.history_copy, self._closing,
                self._state.close_options if self._state else None,
-               self._state.revision if self._closing and self._state else None)
+               self._state.revision if self._closing and self._state else None,
+               self._transition[0] if self._transition else None, self._details_expanded,
+               self._state.reply if self._state else None, self._state.transport_phase if self._state else None)
         if key == self._rendered:
             return
         self._rendered = key
@@ -700,12 +810,13 @@ class UpdateWorkbench(QWidget):
         elif self.queue.currentRow() == 4:
             self._render_history()
         else:
-            self._body.addWidget(_label("Conflicts", "sectionTitle"))
+            compatible = self.queue.currentRow() == 5
+            self._body.addWidget(_label("Compatible changes" if compatible else "Conflicts", "sectionTitle"))
             rows = () if self._page is None else self._page.items
             offers = {row.change_id: row for row in (*self._offers, *self._row_offers)}
             positions = {row.change_id: self._page.offset + index for index, row in enumerate(rows)}
             rows = sorted(
-                (row for row in rows if row.disposition == "unresolved"),
+                (row for row in rows if row.disposition == ("compatible" if compatible else "unresolved")),
                 key=lambda row: (
                     offers.get(row.change_id) is not None
                     and offers[row.change_id].selected is not None
@@ -717,6 +828,8 @@ class UpdateWorkbench(QWidget):
                 )
             for row in rows:
                 self._body.addWidget(_label(row.current_path, "sectionTitle"))
+                if row.incoming_path != row.current_path:
+                    self._body.addWidget(_label("Incoming path: " + row.incoming_path, "muted"))
                 offer = offers.get(row.change_id)
                 if offer is not None and offer.selected is not None:
                     self._body.addWidget(_label("Chosen: " + offer.selected, "muted"))
@@ -724,6 +837,7 @@ class UpdateWorkbench(QWidget):
                     ("Original", row.original),
                     ("Current", row.current),
                     ("Incoming", row.incoming),
+                    ("Result", row.result),
                 ):
                     self._body.addWidget(_label(title, "sectionTitle"))
                     if raw is None:
@@ -794,6 +908,7 @@ class UpdateWorkbench(QWidget):
         if self.queue.currentRow() == 1:
             self._render_configuration()
         self._render_lifecycle()
+        self._render_feedback()
         if self._editor.active:
             self._body.addWidget(self._editor)
             self._editor.show()
@@ -983,19 +1098,26 @@ class UpdateWorkbench(QWidget):
 
     def _refresh_inputs(self):
         busy = self._preparing or self.busy
-        self.source_path.setPlainText(self.source or "No incoming archive selected")
-        self.vault_path.setPlainText(self.vault or "No vault selected")
-        self.original_path.setPlainText(self.original_source or "Original output is unknown; current vault content is preserved for review.")
+        bound = self._state.binding if self._state else None
+        locked = bool(bound or self._state and self._state.needs_inspection)
+        own_source = not bound or self._state.selection_id == self._source_selection_id
+        if isinstance(bound, UpdateContextBinding) and self._state.reply is not None:
+            self.operation.blockSignals(True)
+            self.operation.setCurrentIndex(self.operation.findData(self._state.reply.kind))
+            self.operation.blockSignals(False)
+        self.source_path.setPlainText((self.source or "No incoming archive selected") if own_source else "Retained incoming source from the current review; no new archive selected.")
+        self.vault_path.setPlainText(bound.vault if bound else self._state.vault if locked else self.vault or "No vault selected")
+        self.original_path.setPlainText((self.original_source or "Original output is unknown; current vault content is preserved for review.") if own_source else "Original evidence belongs to the saved review; no new evidence selected.")
         kind = self.operation.currentData()
         self.source_path.setVisible(kind != "attachment_cleanup")
         self.source_choice.setVisible(kind != "attachment_cleanup")
         for widget in (self.original_heading, self.original_path, self.original_choice, self.original_clear):
             widget.setVisible(kind == "onboarding")
-        self.operation.setEnabled(not busy and not (self._state and self._state.binding))
-        self.original_choice.setEnabled(not busy)
-        self.original_clear.setEnabled(not busy and self.original_source is not None)
-        self.source_choice.setEnabled(not busy)
-        self.vault_choice.setEnabled(not busy)
+        self.operation.setEnabled(not busy and not locked)
+        self.original_choice.setEnabled(not busy and not locked)
+        self.original_clear.setEnabled(not busy and not locked and self.original_source is not None)
+        self.source_choice.setEnabled(not busy and not locked)
+        self.vault_choice.setEnabled(not busy and not locked)
         self.prepare.setEnabled(
             bool(self.vault and (self.source or kind == "attachment_cleanup"))
             and not busy
@@ -1003,8 +1125,8 @@ class UpdateWorkbench(QWidget):
                 self._state and (self._state.binding or self._state.needs_inspection)
             )
         )
-        self.reopen.setEnabled(bool(self.vault) and not busy and not (self._state and self._state.binding))
-        self.inspect_history.setEnabled(bool(self.vault) and not busy and not (self._state and self._state.binding))
+        self.reopen.setEnabled(bool(self.vault) and not busy and not locked)
+        self.inspect_history.setEnabled(bool(self.vault or self._state and self._state.vault) and not busy)
 
     def _clear_original(self):
         if self.original_clear.isEnabled():
@@ -1018,6 +1140,7 @@ class UpdateWorkbench(QWidget):
         self._input_revision += 1
         self._refresh_inputs()
         selection = str(uuid4())
+        self._saved_selection_id = selection
         self._select(self.vault, selection_id=selection)
         self._submit({"command": "load", "vault": self.vault, "selection_id": selection})
 
@@ -1029,6 +1152,8 @@ class UpdateWorkbench(QWidget):
                 not path
                 or revision != self._input_revision
                 or self._preparing
+                or (self._state is not None and self._state.binding is not None)
+                or (self._state is not None and self._state.needs_inspection)
                 or (self._state is not None and self._state.active_request_id)
             ):
                 return
@@ -1050,6 +1175,7 @@ class UpdateWorkbench(QWidget):
         self._input_revision += 1
         self._refresh_inputs()
         selection = str(uuid4())
+        self._source_selection_id = selection
         self._select(self.vault, selection_id=selection)
         self._submit(
             {

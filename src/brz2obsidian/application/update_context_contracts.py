@@ -1,6 +1,6 @@
 """Small immutable producer handles; canonical review content stays private."""
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, field_validator, model_validator
 
@@ -187,6 +187,11 @@ class UpdateContextResult(ReconciliationContract):
     unresolved: int = Field(default=0, ge=0)
     stale: int = Field(default=0, ge=0)
     next_actions: tuple[str, ...] = ()
+    summary: str = Field(default="", max_length=2048)
+    findings: tuple[Annotated[str, Field(max_length=160)], ...] = Field(default=(), max_length=20)
+    diagnostic_omission: bool = False
+    recovery_gap_count: int = Field(default=0, ge=0)
+    guidance: str = Field(default="", max_length=2048)
     history_retained: bool | None = False
     checkpoint_commit: str | None = None
     publication: Literal[

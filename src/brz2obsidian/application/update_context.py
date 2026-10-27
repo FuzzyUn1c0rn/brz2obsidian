@@ -119,7 +119,7 @@ class UpdateContext:
             )
         cancelled = cancel is not None and cancel()
         self._remember(result)
-        return UpdateContextResult(
+        return self._source_projection(UpdateContextResult(
             status="cancelled_before_publication" if cancelled else result.status,
             code=result.code,
             kind=result.kind,
@@ -132,7 +132,7 @@ class UpdateContext:
             history_retained=result.history_retained,
             checkpoint_commit=result.checkpoint_commit,
             publication="not_published" if cancelled else result.publication,
-        )
+        ))
 
     def history(self, vault, *, selection_id, cancel=None):
         if self._history.preparation is not None:
@@ -524,7 +524,7 @@ class UpdateContext:
         # Any attempted native mutation retires prior readiness; current native
         # inspection/resume supplies the next authority, including cancellation.
         self._preparation = self._binding = None
-        return UpdateContextResult(
+        return self._source_projection(UpdateContextResult(
             status=result.status,
             code=result.code,
             kind=result.kind,
@@ -538,7 +538,7 @@ class UpdateContext:
             publication=result.publication,
             operation=self._last_operation,
             capture=self._last_capture,
-        )
+        ))
 
     def _project(self, result):
         self._remember(result)
@@ -764,6 +764,11 @@ class UpdateContext:
         )
 
     def _remember(self, result):
+        self._last_summary = getattr(result, "summary", "")
+        self._last_findings = getattr(result, "findings", ())
+        self._last_omission = getattr(result, "diagnostic_omission", False)
+        self._last_gaps = len(getattr(result, "recovery_gaps", ()))
+        self._last_guidance = getattr(result, "guidance", "")
         capture = getattr(result, "capture", None)
         self._last_capture = (
             capture.model_copy(
@@ -795,6 +800,10 @@ class UpdateContext:
         self._last_actions = result.next_actions
 
     def _reset_history(self):
+        self._last_summary = self._last_guidance = ""
+        self._last_findings = ()
+        self._last_omission = False
+        self._last_gaps = 0
         self._requires_source_refresh = False
         self._last_capture = None
         self._last_operation = None
@@ -1025,6 +1034,15 @@ class UpdateContext:
         return self._content_result(**values)
 
     def _source_projection(self, result):
+        result = result.model_copy(update={
+            "summary": self._last_summary[:2048],
+            "findings": tuple(row[:160] for row in self._last_findings[:20]),
+            "guidance": self._last_guidance[:2048],
+            "recovery_gap_count": self._last_gaps,
+            "diagnostic_omission": self._last_omission or len(self._last_summary) > 2048
+            or len(self._last_guidance) > 2048 or len(self._last_findings) > 20
+            or any(len(row) > 160 for row in self._last_findings),
+        })
         # Native debt has its own inspection/recovery route and supersedes refresh.
         if result.publication in ("partial", "unknown") or result.status in (
             "publication_unknown",
@@ -1032,6 +1050,11 @@ class UpdateContext:
         ):
             self._requires_source_refresh = False
         if not self._requires_source_refresh:
+            if (self._preparation is not None and result.binding == self._binding and result.binding is not None
+                    and not self.draft_pending and result.status in ("prepared_review", "unresolved", "stale_review", "available", "cancelled_before_publication")):
+                # These are current producer capabilities, not reviewed file authority.
+                # Both methods still validate the exact preparation/current facts.
+                result = result.model_copy(update={"next_actions": tuple(dict.fromkeys((*result.next_actions, "save_update", "refresh_update")))})
             return result
         return result.model_copy(
             update={

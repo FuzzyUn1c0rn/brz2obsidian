@@ -9,7 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QAbstractItemView, QPushButton, QTabBar
+from PySide6.QtWidgets import QApplication, QAbstractItemView, QPlainTextEdit, QPushButton, QTabBar
 
 from brz2obsidian.application.contracts import WorkerResponse
 from brz2obsidian.application.review_choices import attachment_reference_page
@@ -123,15 +123,15 @@ def test_offer_workspace_routes_admitted_choices_and_reaches_bounded_review_page
                 common = dict(kind="source_update", binding=self.binding)
                 if args.command == "page":
                     index = args.offset
-                    assert index in (0, 1)
-                    plan = text.review if index == 0 else binary.review
+                    assert index in (0, 1, 2)
+                    plan = (text.review, binary.review, compatible.review)[index]
                     local = review_plan_page(
                         plan, proposal_id=plan.proposal.proposal_id, generation=1,
                         offset=0, limit=1, byte_offset=args.byte_offset, byte_limit=12,
                     )
                     page = local.model_copy(update={
-                        "proposal_id": self.binding.proposal_id, "total": 2,
-                        "offset": index, "next_offset": 1 if index == 0 else None,
+                        "proposal_id": self.binding.proposal_id, "total": 3,
+                        "offset": index, "next_offset": index + 1 if index < 2 else None,
                         "omitted": local.omitted or index == 0,
                     })
                     result = UpdateContextResult(status="available", code="available", page=page, **common)
@@ -257,6 +257,31 @@ def test_offer_workspace_routes_admitted_choices_and_reaches_bounded_review_page
         assert any(row.command == "choice_details" and row.offset == 2 for row in calls)
         assert any(row.command == "references" and row.offset == 1 for row in calls)
         assert sum(row.command == "choose" for row in calls) == 1
+        select("Compatible changes")
+        click("Next comparison items")
+        version_names = {"Original version","Current version","Incoming version","Result version"}
+        def visible_versions():
+            return {row.accessibleName() for row in window.findChildren(QPlainTextEdit) if row.isVisible()}
+        until(app, lambda: version_names <= visible_versions())
+        versions = {row.accessibleName(): row.toPlainText() for row in window.findChildren(QPlainTextEdit) if row.isVisible()}
+        assert versions["Original version"] == versions["Current version"] == "ori"
+        assert versions["Incoming version"] == versions["Result version"] == "inc"
+        rows = [window.workbench.snapshot.reply.page.items[0]]
+        click("More comparison bytes for Notes/Opening.md")
+        until(app, lambda: window.workbench.snapshot.reply.page is not None and window.workbench.snapshot.reply.page.items[0].offset == 3 and not window.workbench.busy and version_names <= visible_versions())
+        versions = {row.accessibleName(): row.toPlainText() for row in window.findChildren(QPlainTextEdit) if row.isVisible()}
+        assert versions["Original version"] == versions["Current version"] == "gin"
+        assert versions["Incoming version"] == versions["Result version"] == "omi"
+        rows.append(window.workbench.snapshot.reply.page.items[0])
+        for offset in (6,9):
+            click("More comparison bytes for Notes/Opening.md")
+            until(app, lambda: window.workbench.snapshot.reply.page is not None and window.workbench.snapshot.reply.page.items[0].offset == offset and not window.workbench.busy and version_names <= visible_versions())
+            rows.append(window.workbench.snapshot.reply.page.items[0])
+        assert [row.offset for row in rows] == [0,3,6,9] and rows[-1].next_byte_offset is None
+        assert b"".join(row.original for row in rows) == b"".join(row.current for row in rows) == b"original\r\n"
+        assert b"".join(row.incoming for row in rows) == b"".join(row.result for row in rows) == b"incoming\n"
+        assert "Notes/Opening.md" in window_text(window)
+        assert window.runner.session.update_snapshot.binding.revision == 2
         assert not window.runner.session.update_snapshot.ready
         assert list(vault.iterdir()) == []
         assert source.read_bytes() == b"Declared worker source; no Native preparation is claimed"

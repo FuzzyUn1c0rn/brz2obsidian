@@ -21,12 +21,20 @@ class ReviewWorkerTransport:
         self.replies = []
         self.binding = None
         self._output = io.BytesIO()
+        self._operations = operations
         self._worker = UpdateWorker(context=UpdateContext(operations=operations), output=self._output)
         self._sequence = count(1)
         self._lock = RLock()
         self._before_request = before_request
 
     def open_update(self, **kwargs):
+        if self.closed or self._worker.closed:
+            self._output = io.BytesIO()
+            self._worker = UpdateWorker(context=UpdateContext(operations=self._operations), output=self._output)
+            self._sequence = count(1)
+            self.binding = None
+            self.closed = False
+            self.poisoned = False
         return self
 
     def run(self, request, **callbacks):
