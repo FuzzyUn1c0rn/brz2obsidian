@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QHBoxLayout,
     QLabel,
@@ -15,6 +16,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from brz2obsidian.application.update_context_contracts import UpdateContextBinding
 
 from .edited_result import EditedResult
 
@@ -41,7 +44,7 @@ class UpdateWorkbench(QWidget):
         self._submit = submit
         self._select = select
         self._pick_source, self._pick_vault = pick_source, pick_vault
-        self.source, self.vault = None, None
+        self.source, self.vault, self.original_source = None, None, None
         self._input_revision = 0
         self._preparing = False
         self._state = None
@@ -62,6 +65,8 @@ class UpdateWorkbench(QWidget):
         self._draft_buttons = []
         self._chosen_owner = None
         self._draft_message = ""
+        self._configuration = None
+        self._identity_selection = {}
         self._requested = set()
         self._last_reply = None
         self._rendered = None
@@ -113,6 +118,8 @@ class UpdateWorkbench(QWidget):
             self._requested.clear()
             self._last_reply = None
             self._pending_read = None
+            self._configuration = None
+            self._identity_selection.clear()
         self._state = state
         if (
             self._pending_read is not None
@@ -143,6 +150,8 @@ class UpdateWorkbench(QWidget):
                 if reply.page is not None:
                     self._page = reply.page
                     self._row_offers = reply.offers
+                if reply.configuration is not None:
+                    self._configuration = reply.configuration
                 if reply.page is None and (reply.offers or reply.total_choices):
                     self._offers = reply.offers
                     offset = (self._read_request or {}).get("offset", 0)
@@ -339,9 +348,97 @@ class UpdateWorkbench(QWidget):
             }
         )
 
+    def _action(self, command, **arguments):
+        if self._state is None or self.busy or self._state.draft_pending:
+            return
+        self._pending_choice = self._state.revision
+        self._refresh_choices()
+        self._refresh_inputs()
+        self.availability_changed.emit()
+        self._submit({"command": command, **arguments})
+
+    def _action_button(self, title, command, **arguments):
+        button = QPushButton(title)
+        button.setAccessibleName(title)
+        button.clicked.connect(lambda checked=False, c=command, a=arguments: self._action(c, **a))
+        self._choice_buttons.append(button)
+        self._body.addWidget(button)
+
+    def _render_lifecycle(self):
+        state = self._state
+        if state is None:
+            return
+        if state.reply is not None and state.reply.code == "revalidation_required" and state.binding is None:
+            self._body.addWidget(_label("Saved decisions are loaded. Recheck the source and vault before continuing.", "muted"))
+            self._action_button("Resume saved review", "resume", vault=state.vault, selection_id=state.selection_id)
+        if isinstance(state.binding, UpdateContextBinding):
+            if "save_update" in state.next_actions:
+                self._action_button("Save review", "save", binding=state.binding)
+            if "refresh_update" in state.next_actions or state.stale:
+                self._action_button("Refresh review", "refresh", binding=state.binding, source=self.source)
+
+    def _render_configuration(self):
+        offer = self._configuration
+        if offer is None:
+            return
+        self._body.addWidget(_label("Vault configuration", "sectionTitle"))
+        self._body.addWidget(_label(f"Review {offer.member_count} configuration files separately; these settings affect the whole vault."))
+        if offer.selected:
+            self._body.addWidget(_label("Configuration chosen: " + offer.selected, "muted"))
+        for choice, title in (("current", "Keep current configuration"), ("incoming", "Use reviewed incoming configuration")):
+            if choice in offer.choices:
+                self._action_button(title, "choose_configuration", binding=self._state.binding, group_id=offer.group_id, choice=choice)
+
+    def _render_identity(self, offer, title, rows):
+        state = self._identity_selection.setdefault(offer.requirement_id, {"selected": None, "disassociate": set()})
+        combo = QComboBox()
+        combo.setAccessibleName("Selected identity for " + title)
+        combo.addItem("Choose an identity candidate", None)
+        for row in rows:
+            if row.eligible and row.target_safe and row.existence == "present":
+                combo.addItem(row.path, row.entry_id)
+        combo.setCurrentIndex(max(0, combo.findData(state["selected"])))
+        boxes = {}
+        def selection_changed(index):
+            state["selected"] = combo.itemData(index)
+            if state["selected"] in boxes:
+                boxes[state["selected"]].setChecked(False)
+            self._refresh_choices()
+        combo.currentIndexChanged.connect(selection_changed)
+        self._body.addWidget(combo)
+        self._body.addWidget(_label("Choose any other identities to disassociate explicitly. The vault still needs the reviewed identity repair before update.", "muted"))
+        for row in rows:
+            checkbox = QCheckBox("Disassociate identity from " + row.path)
+            checkbox.setAccessibleName("Disassociate identity from " + row.path)
+            checkbox.setChecked(row.entry_id in state["disassociate"])
+            def checked(value, token=row.entry_id):
+                if value:
+                    state["disassociate"].add(token)
+                else:
+                    state["disassociate"].discard(token)
+                self._refresh_choices()
+            checkbox.toggled.connect(checked)
+            boxes[row.entry_id] = checkbox
+            self._body.addWidget(checkbox)
+        button = QPushButton("Associate selected identity")
+        button.setAccessibleName("Associate selected identity for " + title)
+        binding = self._state.binding
+        def associate():
+            if self._state.binding != binding or self.busy or self._state.draft_pending or state["selected"] is None:
+                return
+            self._action("choose", binding=binding, requirement_id=offer.requirement_id, choice="associate",
+                         assumptions_digest=offer.assumptions_digest, selected_entry_id=state["selected"],
+                         disassociate_entry_ids=tuple(sorted(state["disassociate"])))
+        button.clicked.connect(associate)
+        self._body.addWidget(button)
+        self._draft_buttons.append((button, lambda: not self.busy and not self._state.draft_pending
+                                    and state["selected"] is not None and state["selected"] not in state["disassociate"]))
+
     def _render(self, *_):
         key = (self.queue.currentRow(), self._binding_key, self._page, self._offers,
-               self._offer_page, self._details, self._references, self._editor.active, self._reference_owner, self._draft_message)
+               self._offer_page, self._details, self._references, self._editor.active, self._reference_owner, self._draft_message,
+               self._configuration, self._state.next_actions if self._state else None,
+               self._state.reply.code if self._state and self._state.reply else None)
         if key == self._rendered:
             return
         self._rendered = key
@@ -470,6 +567,9 @@ class UpdateWorkbench(QWidget):
                     self._read_button("Next comparison items", "page", offset=self._page.next_offset, limit=100, byte_offset=0)
         if self._draft_message:
             self._body.addWidget(_label(self._draft_message, "muted"))
+        if self.queue.currentRow() == 1:
+            self._render_configuration()
+        self._render_lifecycle()
         if self._editor.active:
             self._body.addWidget(self._editor)
             self._editor.show()
@@ -534,6 +634,8 @@ class UpdateWorkbench(QWidget):
                               None if row.size is None else f"{row.size} bytes", row.sha256,
                               row.identity_state, row.existence]
                     self._body.addWidget(_label("\n".join(str(v) for v in fields if v is not None)))
+                if offer.domain == "identity" and "associate" in offer.choices:
+                    self._render_identity(offer, title, reply.choice_details)
                 self._previous_button("Previous choice details", "choice_details", requirement_id=offer.requirement_id)
                 if reply.next_choice_detail_offset is not None:
                     self._read_button("Next choice details", "choice_details", requirement_id=offer.requirement_id,
@@ -597,6 +699,12 @@ class UpdateWorkbench(QWidget):
         form.setContentsMargins(0, 0, 0, 0)
         form.setSpacing(12)
         form.addWidget(_label("Archive & vault", "sectionTitle"))
+        self.operation = QComboBox()
+        self.operation.setAccessibleName("Review operation")
+        for title, kind in (("Update from a source export", "source_update"), ("Onboard a vault without update history", "onboarding"),
+                            ("Review an output-format transition", "format_transition"), ("Review attachment-file cleanup", "attachment_cleanup")):
+            self.operation.addItem(title, kind)
+        form.addWidget(self.operation)
         form.addWidget(
             _label(
                 "Review an export from the same Brain, including an older or scoped export.",
@@ -611,6 +719,17 @@ class UpdateWorkbench(QWidget):
         self.source_choice.setAccessibleName("Choose incoming BRZ")
         self.source_choice.clicked.connect(lambda: self._pick_input("source"))
         form.addWidget(self.source_choice)
+        self.original_heading = _label("Original generated BRZ evidence (optional)", "sectionTitle")
+        self.original_path = path_widget()
+        self.original_path.setAccessibleName("Selected original BRZ evidence")
+        self.original_choice = QPushButton("Choose original BRZ evidence")
+        self.original_choice.setAccessibleName("Choose original BRZ evidence")
+        self.original_choice.clicked.connect(lambda: self._pick_input("original_source"))
+        self.original_clear = QPushButton("Review without original evidence")
+        self.original_clear.setAccessibleName("Review without original evidence")
+        self.original_clear.clicked.connect(self._clear_original)
+        for widget in (self.original_heading, self.original_path, self.original_choice, self.original_clear):
+            form.addWidget(widget)
         form.addWidget(_label("Vault", "sectionTitle"))
         self.vault_path = path_widget()
         self.vault_path.setAccessibleName("Selected update vault")
@@ -623,6 +742,11 @@ class UpdateWorkbench(QWidget):
         self.prepare.setAccessibleName("Prepare update review")
         self.prepare.clicked.connect(self._prepare)
         form.addWidget(self.prepare)
+        self.reopen = QPushButton("Reopen saved review")
+        self.reopen.setAccessibleName("Reopen saved review")
+        self.reopen.clicked.connect(self._reopen)
+        form.addWidget(self.reopen)
+        self.operation.currentIndexChanged.connect(self._refresh_inputs)
         self._refresh_inputs()
         return panel
 
@@ -630,15 +754,40 @@ class UpdateWorkbench(QWidget):
         busy = self._preparing or self.busy
         self.source_path.setPlainText(self.source or "No incoming archive selected")
         self.vault_path.setPlainText(self.vault or "No vault selected")
+        self.original_path.setPlainText(self.original_source or "Original output is unknown; current vault content is preserved for review.")
+        kind = self.operation.currentData()
+        self.source_path.setVisible(kind != "attachment_cleanup")
+        self.source_choice.setVisible(kind != "attachment_cleanup")
+        for widget in (self.original_heading, self.original_path, self.original_choice, self.original_clear):
+            widget.setVisible(kind == "onboarding")
+        self.operation.setEnabled(not busy and not (self._state and self._state.binding))
+        self.original_choice.setEnabled(not busy)
+        self.original_clear.setEnabled(not busy and self.original_source is not None)
         self.source_choice.setEnabled(not busy)
         self.vault_choice.setEnabled(not busy)
         self.prepare.setEnabled(
-            bool(self.source and self.vault)
+            bool(self.vault and (self.source or kind == "attachment_cleanup"))
             and not busy
             and not (
                 self._state and (self._state.binding or self._state.needs_inspection)
             )
         )
+        self.reopen.setEnabled(bool(self.vault) and not busy and not (self._state and self._state.binding))
+
+    def _clear_original(self):
+        if self.original_clear.isEnabled():
+            self.original_source = None
+            self._refresh_inputs()
+
+    def _reopen(self):
+        if not self.reopen.isEnabled():
+            return
+        self._preparing = True
+        self._input_revision += 1
+        self._refresh_inputs()
+        selection = str(uuid4())
+        self._select(self.vault, selection_id=selection)
+        self._submit({"command": "load", "vault": self.vault, "selection_id": selection})
 
     def _pick_input(self, field):
         revision = self._input_revision
@@ -654,11 +803,13 @@ class UpdateWorkbench(QWidget):
             self._input_revision += 1
             if field == "source":
                 self.source = str(path)
-            else:
+            elif field == "vault":
                 self.vault = str(path)
+            else:
+                self.original_source = str(path)
             self._refresh_inputs()
 
-        (self._pick_source if field == "source" else self._pick_vault)(selected)
+        (self._pick_vault if field == "vault" else lambda callback: self._pick_source(callback, field=field))(selected)
 
     def _prepare(self):
         if not self.prepare.isEnabled():
@@ -671,9 +822,10 @@ class UpdateWorkbench(QWidget):
         self._submit(
             {
                 "command": "prepare",
-                "kind": "source_update",
+                "kind": self.operation.currentData(),
                 "vault": self.vault,
-                "source": self.source,
+                "source": None if self.operation.currentData() == "attachment_cleanup" else self.source,
+                "original_source": self.original_source if self.operation.currentData() == "onboarding" else None,
                 "selection_id": selection,
             }
         )

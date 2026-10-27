@@ -663,7 +663,7 @@ class MainWindow(QMainWindow):
         self.workbench = UpdateWorkbench(
             self.runner.submit_update,
             select=self.runner.select_update,
-            pick_source=lambda callback: self._choose_update_path("source", callback),
+            pick_source=lambda callback, field="source": self._choose_update_path(field, callback),
             pick_vault=lambda callback: self._choose_update_path("vault", callback),
             path_widget=PathText,
         )
@@ -966,18 +966,18 @@ class MainWindow(QMainWindow):
         if self.dialogs is not None:
             (
                 self.dialogs.choose_source
-                if field == "source"
+                if field != "vault"
                 else self.dialogs.choose_vault
             )(callback)
             return
         if self._dialog is not None:
             return
         origin = QApplication.focusWidget()
-        source = field == "source"
+        source = field != "vault"
         dialog = QFileDialog(
-            self, "Choose incoming BRZ" if source else "Choose update vault"
+            self, "Choose original BRZ evidence" if field == "original_source" else "Choose incoming BRZ" if source else "Choose update vault"
         )
-        selected = self.workbench.source if source else self.workbench.vault
+        selected = getattr(self.workbench, field)
         initial = str(Path(selected).parent) if selected and source else selected
         if initial or os.environ.get("USERPROFILE"):
             dialog.setDirectory(initial or os.environ["USERPROFILE"])
