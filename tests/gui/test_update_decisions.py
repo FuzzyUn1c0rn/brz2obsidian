@@ -30,10 +30,11 @@ from brz2obsidian.application.update_context import UpdateContext
 from brz2obsidian.application.update_contracts import UpdateResult
 from brz2obsidian.application.update_stream import WorkerStreamDecoder
 from brz2obsidian.application.update_worker import UpdateWorker
+from brz2obsidian.application.vault_update_contracts import VaultApplyResult
 from brz2obsidian.contracts import ExactContent
 from tests.application.test_minimal_workflow import make_archive
 from tests.application.test_update_lifecycle_contracts import preparation
-from tests.gui.test_conversion_window import until
+from tests.gui.test_conversion_window import until, window_text
 from tests.reconciliation.test_refresh import two_items
 from tests.reconciliation.test_resolution import with_review_links
 
@@ -79,11 +80,13 @@ def test_current_and_incoming_choices_retain_decision_and_gate_whole_review_appl
     assert len(prepared.review.requirements) == 2 and not prepared.review.ready
     calls = []
     observations = []
+    publications = []
 
     class NativeInputs(Operations):
-        # These two outer Native ports supply declared preparation/checkpoint
-        # observations. Real Core resolution, paging, worker codecs and host
-        # reduction remain exercised; this is no Native publication claim.
+        # These outer Native ports supply declared preparation/checkpoint
+        # observations and a typed publication outcome. Real Core resolution,
+        # paging, worker codecs and host reduction remain exercised; the
+        # publication port performs no writes and proves no Native publication.
         def prepare_update(self, path, incoming, **kwargs):
             assert (path, incoming) == (str(vault), str(source))
             return UpdateResult(
@@ -112,7 +115,28 @@ def test_current_and_incoming_choices_retain_decision_and_gate_whole_review_appl
             )
 
         def apply_update(self, preparation, **kwargs):
-            raise AssertionError("Choosing a version must not publish the review")
+            assert preparation.review.ready
+            paths = {row.change_id: row.path for row in preparation.review.proposal.changes}
+            publications.append({
+                paths[row.change_id]: row.result.data
+                for row in preparation.review.approvals if row.domain == "text"
+            })
+            operation = VaultApplyResult(
+                schema_id="brz2obsidian.vault-apply-result", schema_version=1,
+                status="applied", code="applied", operation_id="controlled-publication",
+                kind="apply", origin_role="source_update", generation=2,
+                review_generation=1, phase="terminal", publication="complete",
+                history="terminal", planned_files=1, published_files=1,
+                authored_files_changed=True, checkpoint_commit="d" * 40,
+                intent_commit="c" * 40, result_commit="e" * 40, receipt_commit="d" * 40,
+                recovery_required=False, elapsed_ms=1, message="Update applied.",
+            )
+            return UpdateResult(
+                status="applied", code="applied", kind="source_update",
+                application=operation, history_retained=True,
+                checkpoint_commit="d" * 40, publication="complete", changes=2,
+                next_actions=("inspect_history",),
+            )
 
     class Channel:
         closed = False
@@ -159,7 +183,7 @@ def test_current_and_incoming_choices_retain_decision_and_gate_whole_review_appl
                     )
                 self.output.seek(0)
                 self.output.truncate()
-                if terminal.result is not None and terminal.result.binding is not None:
+                if terminal.result is not None:
                     self.binding = terminal.result.binding
                 return Terminal(phase="completed", response=terminal)
 
@@ -284,6 +308,9 @@ def test_current_and_incoming_choices_retain_decision_and_gate_whole_review_appl
             and "Local second." in visible
             and "incoming" in visible
         )
+        until(app, lambda: button("Keep vault version for Notes/Opening.md") is not None
+              and button("Keep vault version for Notes/Opening.md").isEnabled())
+        current = button("Keep vault version for Notes/Opening.md")
         apply = button("Apply update")
         assert apply is not None and not apply.isEnabled()
         current.click()
@@ -352,12 +379,38 @@ def test_current_and_incoming_choices_retain_decision_and_gate_whole_review_appl
             "Notes/Opening.md": b"Local first.\r\n",
             "Notes/Second.md": b"incoming\n",
         }
+        until(app, lambda: button("Apply update") is not None and button("Apply update").isEnabled())
         assert (
             window.runner.session.update_snapshot.ready
             and button("Apply update").isEnabled()
         )
+        button("Apply update").click()
+        until(app, lambda: bool(publications))
+        assert publications == [{
+            "Notes/Opening.md": b"Local first.\r\n",
+            "Notes/Second.md": b"incoming\n",
+        }]
+        until(app, lambda: window.runner.session.update_snapshot.reply.status == "applied")
+        until(app, lambda: "Update applied" in window_text(window))
+        applied = window.runner.session.update_snapshot
+        assert applied.binding is None and not applied.ready
+        assert applied.publication == "complete" and applied.history_retained is True
+        assert applied.checkpoint_commit == "d" * 40
+        assert applied.reply.operation.status == "applied"
+        assert button("Apply update") is None or not button("Apply update").isEnabled()
+        assert calls.count("apply") == 1
         assert source.read_bytes() == original and list(vault.iterdir()) == []
     finally:
+        final = window.runner.session.update_snapshot
+        (tmp_path / "public-apply-observations.json").write_text(json.dumps({
+            "commands": calls, "publications": publications,
+            "revision": final.revision, "ready": final.ready,
+            "active_command": final.active_command,
+            "binding": None if final.binding is None else final.binding.model_dump(),
+            "reply": None if final.reply is None else final.reply.model_dump(),
+            "buttons": [(row.accessibleName(), row.isEnabled())
+                        for row in window.findChildren(QPushButton) if row.isVisible()],
+        }, default=repr, indent=2), encoding="utf-8")
         window.shutdown()
         channel.close()
         window.hide()

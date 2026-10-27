@@ -668,6 +668,7 @@ class MainWindow(QMainWindow):
             path_widget=PathText,
         )
         self.operation_pages.addWidget(self.workbench)
+        self.workbench.availability_changed.connect(self._render)
         layout.addWidget(self.operation_pages, 1)
         footer = Footer(objectName="footer")
         footer.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Minimum)
@@ -917,6 +918,17 @@ class MainWindow(QMainWindow):
 
     def _primary_action(self):
         if self.tabs.currentIndex() == 3:
+            state = self.workbench.snapshot
+            if (
+                state is not None
+                and state.ready
+                and not self.workbench.busy
+                and "apply_update" in state.next_actions
+            ):
+                self.primary.setEnabled(False)
+                self.runner.submit_update(
+                    {"command": "apply", "binding": state.binding}
+                )
             return
         if (
             self.tabs.currentIndex() == 1
@@ -1255,11 +1267,19 @@ class MainWindow(QMainWindow):
             self.primary.setEnabled(
                 state is not None
                 and state.ready
+                and not self.workbench.busy
                 and "apply_update" in state.next_actions
             )
             self.heading.setText("Review incoming update")
             self.explanation.setText("Review the proposal and your decisions.")
             self.guidance.setText("Select a review group to continue.")
+            if (
+                state is not None
+                and not state.active_request_id
+                and state.reply is not None
+                and state.reply.operation is not None
+            ):
+                self.guidance.setText(state.reply.operation.message)
             self.activity.hide()
             self.tabs.setEnabled(not self.snapshot.active_request_id)
             return
