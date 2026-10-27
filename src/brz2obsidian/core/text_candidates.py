@@ -23,11 +23,14 @@ def _known_memberships(subject, document, choice, *, mapping_choice):
             not document.appearance_present or document.appearance != appearance.value
         ):
             return False
+        # Exact Current/Incoming bytes already preserve empty property groups;
+        # this comparison checks the target meanings they actually bind.
         expected = {
             (m.field_key, m.kind): tuple(
                 (e.representation, _target_meaning(e.target)) for e in m.entries
             )
             for m in selected.memberships
+            if m.entries
         }
         actual = {
             (p.key, p.membership_kind): tuple(
@@ -35,7 +38,7 @@ def _known_memberships(subject, document, choice, *, mapping_choice):
                 for r, t in zip(p.representations, p.targets, strict=True)
             )
             for p in document.properties
-            if p.membership_kind
+            if p.membership_kind and p.targets
         }
         if selected.status == "supported" and actual != expected:
             return False

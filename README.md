@@ -16,9 +16,10 @@ captured copy's integrity; this does not prove that the live Brain stayed
 unchanged or that every captured object existed at the same moment. Inspection
 releases its capture, so conversion acquires again and pays that cost again.
 
-This is a **one-time conversion into a new vault**. It does not merge into an
-existing vault or keep TheBrain and Obsidian synchronized. Your source archive
-is read without being modified.
+The `convert` command creates a **new vault**. Existing vaults use the separate
+[review workflow](#review-an-existing-vault) with explicit saved choices and
+current validation. Neither workflow keeps TheBrain and Obsidian synchronized.
+Your source archive is read without being modified.
 
 ## Optional local Windows app
 
@@ -307,6 +308,54 @@ Errors retain their existing codes and may include a diagnostic reason and safe
 item name. An absent name leaves the old JSON shape unchanged; a populated
 optional `subject` requires older strict readers to accept this extension.
 See [readable diagnostics and compatibility](docs/diagnostics.md).
+
+### Review an existing vault
+
+Review preparation currently accepts **BRZ sources**. Start with status, then
+prepare and persist the incoming review:
+
+```powershell
+.\.venv\Scripts\python.exe -m brz2obsidian review status $vault
+.\.venv\Scripts\python.exe -m brz2obsidian review prepare $vault --source 'C:\exports\Work-updated.brz' --json
+```
+
+Resolve the review in the Windows editor or a shared lifecycle client, then
+choose **Save**. The CLI has no interactive editor and does not approve pending
+choices or consent. Inspect the saved review to obtain its current identities:
+
+```powershell
+$review = .\.venv\Scripts\python.exe -m brz2obsidian review inspect $vault --byte-limit 0 --json | ConvertFrom-Json
+if ($LASTEXITCODE -eq 0 -and $review.ready) {
+    .\.venv\Scripts\python.exe -m brz2obsidian review apply $vault --proposal-id $review.proposal_id --generation $review.generation --checkpoint $review.checkpoint.commit --json
+}
+```
+
+Apply requires all three identity arguments and revalidates the saved choices
+against the current vault and source. Unresolved, changed or stale reviews
+require further review before application. Inspection pages are bounded;
+`--byte-limit 0` requests metadata only. Counts describe review changes, and
+omission fields identify details absent from the output, including attachment
+alternative outputs.
+
+Review JSON uses the separate schema `brz2obsidian.cli-review-result`, version 1.
+It distinguishes proposal identity from Native operation identity, saved history
+from authored-file publication, and source gaps from omitted diagnostics.
+`retained_source_provenance` reports whether exact baseline payload bytes were
+reused; it does not report whether Save retained the incoming source.
+
+| Review exit | Meaning |
+| --- | --- |
+| 0 | Requested preparation, inspection, available status or application completed; preparation and inspection may still report `ready: false` |
+| 2 | Action required: invalid arguments, unresolved/stale/refused review, recovery, or cancellation before publication |
+| 1 | Operational failure or unknown outcome; inspect current history before continuing |
+
+Use `review --help` and `review prepare --help` for the option reference and
+separate onboarding, format-transition and attachment-cleanup routes.
+Required configuration and consent remain explicit. Keep the vault idle during
+operations; supported Git and current storage policy are checked. Missing history
+cannot prove earlier versions. Retained history grows disk use, and attachment
+cleanup does not prune it. History pruning and later stage-two category/tag
+remapping are unavailable.
 
 ## What you will find in the vault
 

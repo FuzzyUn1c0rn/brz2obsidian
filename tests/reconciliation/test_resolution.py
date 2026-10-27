@@ -1340,6 +1340,53 @@ def test_deleted_configuration_has_explicit_restoration_decline_and_scoped_memor
     }
 
 
+def test_incoming_choice_preserves_empty_memberships_with_no_membership_targets():
+    from brz2obsidian.contracts import ExactContent, ImportedItemIdentity
+    from brz2obsidian.core import prepare_review, resolve_review
+    from brz2obsidian.obsidian import inspect_text_candidate
+    from tests.reconciliation.test_memberships import membership_request
+
+    original = (
+        b'---\ncategories: []\ntags: []\nappearance_category: ""\n---\nOriginal.\r\n'
+    )
+    current = original.replace(b"Original.", b"Local.")
+    incoming = (
+        b'---\ncategories: []\ntags: []\nappearance_category: ""\n---\nIncoming.\r\n'
+    )
+    facts = with_review_links(
+        membership_request(original, current, incoming, targets=())
+    )
+    plan = prepare_review(facts, preflight=preflight())
+    assert not plan.ready and "incoming" in plan.requirements[0].choices
+    context = facts.link_context
+    candidate = inspect_text_candidate(
+        ExactContent(data=incoming),
+        identity=ImportedItemIdentity(
+            collection_id="folio:collection",
+            module_id="synthetic-folio",
+            item_id="entry:opening",
+        ),
+        target=facts.subjects[0].source_target,
+        output_format=7,
+        membership_targets=(),
+        source_path="Notes/Opening.md",
+        document_id=context.incoming_documents[0].document_id,
+        path_mode="vault",
+        link_targets=context.incoming_targets,
+        link_target_facts=context.incoming_target_facts,
+        link_inventory="complete",
+    )
+    assert candidate.status == "safe"
+    accepted = resolve_review(
+        plan, action(plan, choice="incoming", candidate=candidate)
+    )
+    assert accepted.status == "accepted" and accepted.plan.ready, accepted
+    assert accepted.plan.approvals[0].choice == "incoming"
+    assert accepted.plan.approvals[0].result.data == (
+        b'---\ncategories: []\ntags: []\nappearance_category: ""\n---\nIncoming.\r\n'
+    )
+
+
 def test_exact_current_choice_cannot_reinterpret_bound_membership_identity():
     from brz2obsidian.contracts import ExactContent, ImportedItemIdentity
     from brz2obsidian.core import prepare_review, resolve_review
