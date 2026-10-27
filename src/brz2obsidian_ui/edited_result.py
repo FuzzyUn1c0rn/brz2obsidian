@@ -5,6 +5,8 @@ from hashlib import sha256
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QLabel, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget
 
+from brz2obsidian.application.update_history_contracts import HistoryContextBinding
+
 
 def _same_review(left, right):
     return left is not None and right is not None and left.model_dump(exclude={"revision"}) == right.model_dump(exclude={"revision"})
@@ -114,10 +116,10 @@ class EditedResult(QWidget):
         elif phase == "write_edit" and reply.code == "edit_chunk_accepted" and reply.edit is not None and reply.edit.handle == self._handle and reply.edit.received_bytes == self._expected_received:
             self._write(reply.edit.received_bytes)
         elif phase == "seal_edit" and reply.code == "edit_sealed" and reply.edit is not None and reply.edit.handle == self._handle and reply.edit.sealed:
-            self._send("choose", binding=self._handle.binding,
+            self._send("choose_history" if isinstance(self._handle.binding, HistoryContextBinding) else "choose", binding=self._handle.binding,
                        requirement_id=self._handle.requirement_id, choice="edited",
                        assumptions_digest=self._handle.assumptions_digest, edit_handle=self._handle)
-        elif phase == "choose" and reply.code == "accepted":
+        elif phase in ("choose", "choose_history") and reply.code in ("accepted", "recovery_choice_recorded", "undo_choice_recorded"):
             self._clear()
         elif phase == "discard_draft" and reply.code == "draft_discarded":
             self._clear()

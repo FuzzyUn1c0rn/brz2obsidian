@@ -266,6 +266,8 @@ class MainWindow(QMainWindow):
         self._name_edited = False
         self.diagnostics_expanded = False
         self._may_close = False
+        self._update_close_requested = None
+        self._update_background_requested = False
         self._started = None
         self._started_at = {}
         self._result_identity = None
@@ -664,11 +666,12 @@ class MainWindow(QMainWindow):
             self.runner.submit_update,
             select=self.runner.select_update,
             pick_source=lambda callback, field="source": self._choose_update_path(field, callback),
-            pick_vault=lambda callback: self._choose_update_path("vault", callback),
+            pick_vault=lambda callback, field="vault": self._choose_update_path(field, callback),
             path_widget=PathText,
         )
         self.operation_pages.addWidget(self.workbench)
         self.workbench.availability_changed.connect(self._render)
+        self.workbench.close_choice.connect(self._review_close_choice)
         layout.addWidget(self.operation_pages, 1)
         footer = Footer(objectName="footer")
         footer.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Minimum)
@@ -966,16 +969,16 @@ class MainWindow(QMainWindow):
         if self.dialogs is not None:
             (
                 self.dialogs.choose_source
-                if field != "vault"
+                if field in ("source", "original_source")
                 else self.dialogs.choose_vault
             )(callback)
             return
         if self._dialog is not None:
             return
         origin = QApplication.focusWidget()
-        source = field != "vault"
+        source = field in ("source", "original_source")
         dialog = QFileDialog(
-            self, "Choose original BRZ evidence" if field == "original_source" else "Choose incoming BRZ" if source else "Choose update vault"
+            self, "Choose original BRZ evidence" if field == "original_source" else "Choose incoming BRZ" if source else "Choose complete history copy" if field == "history_copy" else "Choose update vault"
         )
         selected = getattr(self.workbench, field)
         initial = str(Path(selected).parent) if selected and source else selected
@@ -1272,7 +1275,7 @@ class MainWindow(QMainWindow):
             )
             self.heading.setText("Review incoming update")
             self.explanation.setText("Review the proposal and your decisions.")
-            self.guidance.setText("Select a review group to continue.")
+            self.guidance.setText(self.workbench.status_text)
             if (
                 state is not None
                 and not state.active_request_id
@@ -1280,9 +1283,20 @@ class MainWindow(QMainWindow):
                 and state.reply.operation is not None
             ):
                 self.guidance.setText(state.reply.operation.message)
-            self.activity.hide()
-            self.tabs.setEnabled(not self.snapshot.active_request_id)
+            active = bool(state and state.active_request_id)
+            self.activity.setAccessibleName("Update operation progress")
+            self.activity.setVisible(active)
+            progress = state.progress.value if active and state.progress else None
+            if progress and progress.total_units is not None and progress.completed_units is not None:
+                self.activity.setRange(0, progress.total_units)
+                self.activity.setValue(progress.completed_units)
+            else:
+                self.activity.setRange(0, 0)
+            self.tabs.setEnabled(not (active or self.snapshot.active_request_id))
+            self.workbench.setEnabled(not self.snapshot.active_request_id)
             return
+        self.activity.setAccessibleName("Operation in progress")
+        self.activity.setRange(0, 0)
         self.diagnostic_path.setVisible(bool(self.diagnostic_path.toPlainText()))
         mode = self.tabs.currentIndex()
         self.findings.setAccessibleName(
@@ -1613,10 +1627,26 @@ class MainWindow(QMainWindow):
 
     def _present_review(self, state):
         self.workbench.present(state)
+        if self._update_background_requested and state.close_disposition == "background":
+            self._update_background_requested = False
+            self.showMinimized()
+        if (self._update_close_requested is not None and not state.active_request_id
+                and state.reply is not None and state.reply.code == "context_closed"):
+            self._update_close_requested = None
+            self.workbench.discard_local()
+            if self.snapshot.active_request_id or self.snapshot.validation_request_id:
+                self.submit(SimpleCommand(command="request_close"))
+            else:
+                self._may_close = True
+                self.close()
+            return
         if self.tabs.currentIndex() == 3:
             self._render()
 
     def _elapsed(self):
+        if self.tabs.currentIndex() == 3:
+            self.guidance.setText(self.workbench.status_text)
+            return
         if self.snapshot.active_request_id or self.snapshot.validation_request_id:
             seconds = (
                 int(monotonic() - self._started) if self._started is not None else 0
@@ -1650,7 +1680,30 @@ class MainWindow(QMainWindow):
             event.accept()
         else:
             event.ignore()
-            self.submit(SimpleCommand(command="request_close"))
+            if self.workbench.has_review:
+                self.tabs.setCurrentIndex(3)
+                self.workbench.open_close_choices()
+            else:
+                self.submit(SimpleCommand(command="request_close"))
+
+    def _review_close_choice(self, choice, revision):
+        state = self.workbench.snapshot
+        if state is None or state.revision != revision:
+            self.workbench.open_close_choices()
+            return
+        if choice == "save" and self.workbench.local_draft:
+            return
+        self.workbench.finish_close_choice()
+        if choice == "continue" and not state.active_request_id:
+            return
+        if choice in ("save", "discard", "close"):
+            self._update_close_requested = choice
+            if choice not in state.close_options and choice == "discard" and state.close_options == ("close",):
+                choice = "close"
+        if choice in state.close_options:
+            if choice == "background":
+                self._update_background_requested = True
+            self.runner.request_update_close(choice, expected_revision=revision)
 
     def shutdown(self):
         self._timer.stop()

@@ -1,6 +1,7 @@
 """Persistent review navigation over bounded, backend-owned presentation facts."""
 
 from uuid import uuid4
+from time import monotonic
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from brz2obsidian.application.update_context_contracts import UpdateContextBinding
+from brz2obsidian.application.update_history_contracts import HistoryContextBinding
 
 from .edited_result import EditedResult
 
@@ -38,6 +40,7 @@ class UpdateWorkbench(QWidget):
     """A view cache and navigation; the shared session owns review authority."""
 
     availability_changed = Signal()
+    close_choice = Signal(str, int)
 
     def __init__(self, submit, *, select, pick_source, pick_vault, path_widget):
         super().__init__()
@@ -67,6 +70,11 @@ class UpdateWorkbench(QWidget):
         self._draft_message = ""
         self._configuration = None
         self._identity_selection = {}
+        self.history_copy = None
+        self._history = self._history_action = None
+        self._after_close = None
+        self._closing = False
+        self._active_id = self._active_started = None
         self._requested = set()
         self._last_reply = None
         self._rendered = None
@@ -83,12 +91,12 @@ class UpdateWorkbench(QWidget):
         layout.setSpacing(16)
         self.queue = QListWidget(objectName="reviewQueue")
         self.queue.setAccessibleName("Review queue")
-        self.queue.addItems(("Archive & vault", "Overview", "Conflicts", "Other choices"))
+        self.queue.addItems(("Archive & vault", "Overview", "Conflicts", "Other choices", "History & recovery"))
         self.queue.setFixedWidth(160)
         self.queue.setWordWrap(True)
         self.queue.setCurrentRow(0)
         layout.addWidget(self.queue)
-        scroll = QScrollArea()
+        scroll = self.scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         self.workspace = QWidget()
         self.workspace.setAccessibleName("Decision workspace")
@@ -121,6 +129,17 @@ class UpdateWorkbench(QWidget):
             self._configuration = None
             self._identity_selection.clear()
         self._state = state
+        if state.active_request_id != self._active_id:
+            self._active_id = state.active_request_id
+            self._active_started = monotonic() if self._active_id else None
+        if state.reply is not None:
+            if state.reply.history is not None:
+                self._history = state.reply.history
+            if state.reply.history_action is not None:
+                self._history_action = state.reply.history_action
+            if state.reply.code == "context_closed" and self._after_close is not None and not state.active_request_id:
+                action, self._after_close = self._after_close, None
+                action()
         if (
             self._pending_read is not None
             and state.revision > self._pending_read
@@ -178,6 +197,8 @@ class UpdateWorkbench(QWidget):
         self._refresh_choices()
         if binding is None or self.busy or state.needs_inspection:
             return
+        if isinstance(binding, HistoryContextBinding) and binding.proposal_id is None:
+            return
         reads = [("page", {"offset": 0, "limit": 100}),
                  ("choices", {"offset": self._reference_owner["offer_offset"] if self._reference_owner else 0, "limit": 100})]
         if self._reference_owner is not None:
@@ -194,6 +215,63 @@ class UpdateWorkbench(QWidget):
         return self._state
 
     @property
+    def has_review(self):
+        state = self._state
+        return self.local_draft or bool(state and (state.binding or state.active_request_id or state.draft_pending))
+
+    @property
+    def local_draft(self):
+        return self._editor.active or self._reference_dirty
+
+    @property
+    def status_text(self):
+        state = self._state
+        if state is None:
+            return "Choose a vault to review."
+        if state.active_request_id:
+            progress = state.progress
+            phases = {"current_inspection": "Inspecting current vault", "reference_preparation": "Preparing reference output",
+                      "review_validation": "Validating review", "snapshot_preparation": "Snapshot preparation",
+                      "publication": "Publishing reviewed files", "final_verification": "Verifying published files", "final_reporting": "Recording final result"}
+            text = phases.get(progress.value.phase, progress.value.phase) if progress else "Running " + state.active_command.replace("_", " ")
+            elapsed = progress.elapsed_ms // 1000 if progress else int(monotonic() - self._active_started) if self._active_started is not None else 0
+            text += f" · {elapsed // 60}:{elapsed % 60:02d} elapsed"
+            if progress and progress.value.completed_units is not None:
+                value = progress.value
+                text += f" · {value.completed_units}" + (f" of {value.total_units}" if value.total_units is not None else "") + " " + value.unit.replace("_", " ")
+            if state.control_code in ("cancellation_queued", "cancellation_requested"):
+                text = "Cancellation requested. Waiting for the operation's safe stop. " + text
+            return text
+        if state.needs_inspection or state.publication in ("partial", "unknown"):
+            return "Publication is unknown; inspect history before continuing." if state.publication == "unknown" else "Recovery is required; inspect current history before continuing."
+        reply = state.reply
+        if reply is not None and reply.operation is not None:
+            return reply.operation.message
+        if reply is not None and reply.history_action is not None:
+            return reply.history_action.summary
+        if reply is not None and reply.status == "cancelled_before_publication":
+            return "Stopped before file publication. Retained history and saved review remain available."
+        if reply is not None and reply.code == "saved":
+            return "Review saved. Reopening rechecks current source and vault inputs."
+        return "Review the whole proposal before applying. Keep the target vault idle while an operation runs."
+
+    def open_close_choices(self):
+        self._closing = True
+        self._rendered = None
+        self._render()
+        self.scroll.ensureWidgetVisible(self._close_panel)
+
+    def finish_close_choice(self):
+        self._closing = False
+        self._rendered = None
+        self._render()
+
+    def discard_local(self):
+        self._editor._clear()
+        self._reference_selections.clear()
+        self._reference_dirty = False
+
+    @property
     def busy(self):
         return self._external_busy() or self._editor.active or self._reference_dirty
 
@@ -205,13 +283,12 @@ class UpdateWorkbench(QWidget):
         )
 
     def _refresh_choices(self):
-        available = self._state is not None and not (
-            self.busy or self._state.needs_inspection
-        )
+        available = self._state is not None and not self.busy
         for button in self._choice_buttons:
             owner = self._reference_owner
             pending_allowed = owner is not None and button.property("draftRequirement") == owner["requirement_id"]
-            button.setEnabled(available and (not self._state.draft_pending or pending_allowed))
+            inspected = self._state is not None and (not self._state.needs_inspection or button.property("inspectionAllowed"))
+            button.setEnabled(bool(available and inspected and (not self._state.draft_pending or pending_allowed)))
         for button in self._read_buttons:
             button.setEnabled(self._state is not None and not self.busy and not self._state.needs_inspection)
         for button, allowed in self._draft_buttons:
@@ -243,7 +320,7 @@ class UpdateWorkbench(QWidget):
             self._reference_pending = None
         chosen = self._chosen_owner
         if chosen and not state.active_request_id and state.revision > chosen["revision"] and state.reply is not chosen["reply"]:
-            if state.reply is not None and state.reply.code == "accepted" and self._reference_owner is not None and chosen["requirement_id"] == self._reference_owner["requirement_id"]:
+            if state.reply is not None and state.reply.code in ("accepted", "recovery_choice_recorded", "undo_choice_recorded") and self._reference_owner is not None and chosen["requirement_id"] == self._reference_owner["requirement_id"]:
                 self._reference_owner = None
                 self._reference_selections.clear()
                 self._reference_dirty = False
@@ -301,7 +378,8 @@ class UpdateWorkbench(QWidget):
         self._refresh_choices()
         self._refresh_inputs()
         self.availability_changed.emit()
-        self._submit({"command": command, "binding": state.binding, **arguments})
+        wire_command = "history_choices" if command == "choices" and isinstance(state.binding, HistoryContextBinding) else command
+        self._submit({"command": wire_command, "binding": state.binding, **arguments})
 
     def _read_button(self, title, command, *, name=None, **arguments):
         button = QPushButton(title)
@@ -340,7 +418,7 @@ class UpdateWorkbench(QWidget):
         self.availability_changed.emit()
         self._submit(
             {
-                "command": "choose",
+                "command": "choose_history" if isinstance(binding, HistoryContextBinding) else "choose",
                 "binding": binding,
                 "requirement_id": offer.requirement_id,
                 "choice": choice,
@@ -360,6 +438,7 @@ class UpdateWorkbench(QWidget):
     def _action_button(self, title, command, **arguments):
         button = QPushButton(title)
         button.setAccessibleName(title)
+        button.setProperty("inspectionAllowed", command in ("prepare_history", "initialize_vault", "close", "refresh_history"))
         button.clicked.connect(lambda checked=False, c=command, a=arguments: self._action(c, **a))
         self._choice_buttons.append(button)
         self._body.addWidget(button)
@@ -376,6 +455,145 @@ class UpdateWorkbench(QWidget):
                 self._action_button("Save review", "save", binding=state.binding)
             if "refresh_update" in state.next_actions or state.stale:
                 self._action_button("Refresh review", "refresh", binding=state.binding, source=self.source)
+        if state.needs_inspection or "inspect_history" in state.next_actions or "inspect_update_status" in state.next_actions:
+            self._action_button_callback("Inspect history and recovery", self._inspect_history)
+
+    def _action_button_callback(self, title, callback):
+        button = QPushButton(title)
+        button.setAccessibleName(title)
+        button.setProperty("inspectionAllowed", True)
+        button.clicked.connect(callback)
+        self._choice_buttons.append(button)
+        self._body.addWidget(button)
+
+    def _start_history(self):
+        self._history = self._history_action = None
+        self._preparing = True
+        selection = str(uuid4())
+        self._select(self.vault or self._state.vault, selection_id=selection)
+        self._submit({"command": "history", "vault": self.vault or self._state.vault, "selection_id": selection})
+        self.queue.setCurrentRow(4)
+        self._refresh_inputs()
+
+    def _inspect_history(self):
+        if self.busy or self._state and self._state.draft_pending:
+            return
+        if self._state and self._state.binding is not None:
+            self._after_close = self._start_history
+            self._action("close", binding=self._state.binding, choice="discard")
+        elif self.vault or self._state and self._state.vault:
+            self._start_history()
+
+    def _history_source(self, kind, command=None):
+        def selected_role():
+            self.operation.setCurrentIndex(self.operation.findData(kind))
+            self.queue.setCurrentRow(0)
+            self._refresh_inputs()
+            if command:
+                selection = str(uuid4())
+                self._select(self.vault or self._state.vault, selection_id=selection)
+                self._submit({"command": command, "vault": self.vault or self._state.vault, "selection_id": selection})
+        if self._state.binding:
+            self._after_close = selected_role
+            self._action("close", binding=self._state.binding, choice="discard")
+        else:
+            selected_role()
+
+    def _pick_history_copy(self):
+        binding = self._state.binding
+        def selected(path):
+            if path and self._state.binding == binding and not self.busy:
+                self.history_copy = str(path)
+                self._rendered = None
+                self._render()
+        self._pick_vault(selected, field="history_copy")
+
+    def _render_history(self):
+        state = self._state
+        self._body.addWidget(_label("History & recovery", "sectionTitle"))
+        self._body.addWidget(_label("All saved converter history is retained locally. Disk use grows as further versions are saved.", "muted"))
+        if state is None:
+            self._body.addWidget(_label("Select a vault, then inspect its current history and recovery state.", "muted"))
+            return
+        actions, binding = state.next_actions, state.binding
+        if binding is None and self._history_action is not None:
+            self._body.addWidget(_label(self._history_action.summary))
+            if self._history_action.repair is not None:
+                self._body.addWidget(_label(self._history_action.repair.message))
+            return
+        if self._history is not None:
+            self._body.addWidget(_label(self._history.summary))
+            self._body.addWidget(_label(self._history.operation.message, "muted"))
+            for finding in self._history.findings:
+                self._body.addWidget(_label(finding.replace("_", " "), "muted"))
+            if self._history.recovery_gap_count:
+                self._body.addWidget(_label(f"Recovery gaps: {self._history.recovery_gap_count}. Excluded content is outside retained recovery coverage.", "muted"))
+            if self._history.diagnostic_omission:
+                self._body.addWidget(_label("Some history diagnostics were omitted from this bounded view.", "muted"))
+        if "setup_git" in actions:
+            self._body.addWidget(_label("Install Git with the required local storage commands, make it available to the application, then restart the converter and inspect this vault again. No Git account or command-line experience is required."))
+        if "initialize_vault" in actions and isinstance(binding, HistoryContextBinding):
+            self._body.addWidget(_label("This vault has no local repository. Explicitly initialize converter history before preservation-first onboarding."))
+            self._action_button("Initialize local history", "initialize_vault", binding=binding, choice="initialize")
+            self._action_button("Decline initialization", "initialize_vault", binding=binding, choice="decline")
+        if "review_onboarding" in actions:
+            self._body.addWidget(_label("Earlier recovery and Undo are unavailable without validated matching history. Current notes do not prove pristine original output."))
+            self._action_button_callback("Review preservation-first onboarding", lambda: self._history_source("onboarding"))
+        if "review_update" in actions:
+            self._action_button_callback("Choose incoming source update", lambda: self._history_source("source_update"))
+        if "resume_update" in actions:
+            self._action_button_callback("Resume saved review", lambda: self._history_source("source_update", "resume"))
+        if not isinstance(binding, HistoryContextBinding):
+            return
+        if "review_recovery" in actions and (self._history_action is None or self._history_action.status != "direction_required"):
+            self._action_button("Review interrupted update", "prepare_history", binding=binding, kind="recovery")
+        if "review_undo" in actions:
+            self._body.addWidget(_label("Undo reviews the latest eligible completed import or update. Keeping current content can retain later writing and imported changes while reversing eligible other changes."))
+            self._action_button("Review latest Undo", "prepare_history", binding=binding, kind="undo")
+        if "review_history_repair" in actions:
+            self._body.addWidget(_label("Supply a complete local matching vault copy, including hidden history. Repair restores verified converter history, not authored files; notes-only sync or a normal clone may omit this history."))
+            self._body.addWidget(_label(self.history_copy or "No complete history copy selected", "muted"))
+            self._action_button_callback("Choose complete history copy", self._pick_history_copy)
+            if self.history_copy:
+                self._action_button("Review matching-history repair", "prepare_history", binding=binding, kind="repair", copy_path=self.history_copy)
+        action = self._history_action
+        if action is not None:
+            self._body.addWidget(_label(action.summary))
+            if action.status == "direction_required":
+                for direction in action.available_directions:
+                    self._action_button("Review " + direction + " direction", "prepare_history", binding=binding, kind="recovery", direction=direction)
+            if action.copy_validation is not None:
+                copy = action.copy_validation
+                self._body.addWidget(_label(f"History copy: {copy.status}; missing objects: {copy.missing_objects}; damaged objects: {copy.damaged_objects}.", "muted"))
+            if action.repair is not None:
+                self._body.addWidget(_label(action.repair.message))
+            if "execute_history" in actions and state.ready and action.ready:
+                self._action_button("Execute reviewed " + action.kind, "execute_history", binding=binding)
+            if "refresh_history" in actions:
+                self._action_button("Refresh history review", "refresh_history", binding=binding)
+
+    def _render_close(self):
+        panel = self._close_panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(_label("Close review", "sectionTitle"))
+        state = self._state
+        options = state.close_options if state is not None else ("close",)
+        if self.local_draft:
+            layout.addWidget(_label("Your draft is uncommitted. Continue to accept or discard it; saving the review would not save this draft."))
+        names = {"continue": "Continue operation" if state and state.active_request_id else "Continue review",
+                 "background": "Keep running in background", "wait": "Wait for operation", "safe_stop": "Request safe stop",
+                 "save": "Save review and close", "discard": "Discard review and close", "close": "Close window"}
+        if self.local_draft and not (state and state.active_request_id):
+            options = ("continue", "discard")
+        for option in options:
+            if option == "save" and self.local_draft:
+                continue
+            button = QPushButton(names[option])
+            button.setAccessibleName(names[option])
+            button.clicked.connect(lambda checked=False, choice=option, revision=state.revision if state else 0: self.close_choice.emit(choice, revision))
+            layout.addWidget(button)
+        self._body.addWidget(panel)
 
     def _render_configuration(self):
         offer = self._configuration
@@ -438,7 +656,10 @@ class UpdateWorkbench(QWidget):
         key = (self.queue.currentRow(), self._binding_key, self._page, self._offers,
                self._offer_page, self._details, self._references, self._editor.active, self._reference_owner, self._draft_message,
                self._configuration, self._state.next_actions if self._state else None,
-               self._state.reply.code if self._state and self._state.reply else None)
+               self._state.reply.code if self._state and self._state.reply else None,
+               self._history, self._history_action, self.history_copy, self._closing,
+               self._state.close_options if self._state else None,
+               self._state.revision if self._closing and self._state else None)
         if key == self._rendered:
             return
         self._rendered = key
@@ -476,6 +697,8 @@ class UpdateWorkbench(QWidget):
                 )
         elif self.queue.currentRow() == 3:
             self._render_offers()
+        elif self.queue.currentRow() == 4:
+            self._render_history()
         else:
             self._body.addWidget(_label("Conflicts", "sectionTitle"))
             rows = () if self._page is None else self._page.items
@@ -535,10 +758,11 @@ class UpdateWorkbench(QWidget):
                         name="More comparison bytes for " + row.current_path,
                         offset=positions[row.change_id], limit=1, byte_offset=row.next_byte_offset,
                     )
-                if offer is not None and offer.domain == "text":
+                if offer is not None and offer.domain in ("text", "reversal"):
                     for choice, title in (
                         ("current", "Keep vault version"),
                         ("incoming", "Use incoming version"),
+                        ("reverse", "Reverse reviewed change"),
                     ):
                         if choice not in offer.choices:
                             continue
@@ -573,6 +797,8 @@ class UpdateWorkbench(QWidget):
         if self._editor.active:
             self._body.addWidget(self._editor)
             self._editor.show()
+        if self._closing:
+            self._render_close()
         self._body.addStretch()
         self._refresh_choices()
 
@@ -746,6 +972,11 @@ class UpdateWorkbench(QWidget):
         self.reopen.setAccessibleName("Reopen saved review")
         self.reopen.clicked.connect(self._reopen)
         form.addWidget(self.reopen)
+        self.inspect_history = QPushButton("Inspect history and recovery")
+        self.inspect_history.setAccessibleName("Inspect history and recovery")
+        self.inspect_history.clicked.connect(self._inspect_history)
+        form.addWidget(self.inspect_history)
+        form.addWidget(_label("Keep the target vault idle while any conversion, recovery, Undo, repair or cleanup operation runs. Saved converter history is retained and grows with further versions.", "muted"))
         self.operation.currentIndexChanged.connect(self._refresh_inputs)
         self._refresh_inputs()
         return panel
@@ -773,6 +1004,7 @@ class UpdateWorkbench(QWidget):
             )
         )
         self.reopen.setEnabled(bool(self.vault) and not busy and not (self._state and self._state.binding))
+        self.inspect_history.setEnabled(bool(self.vault) and not busy and not (self._state and self._state.binding))
 
     def _clear_original(self):
         if self.original_clear.isEnabled():
