@@ -22,6 +22,7 @@ _CONTENT = frozenset(
         "history_choices",
     )
 )
+_READS = frozenset(("page", "references", "choices", "choice_details", "history_choices"))
 
 
 @dataclass(frozen=True)
@@ -266,9 +267,10 @@ class UpdateSession:
         vault = getattr(
             request.arguments, "vault", binding.vault if binding else state.vault
         )
-        self.snapshot = replace(
-            self.snapshot, last_operation=result, last_operation_vault=vault
-        )
+        if request.arguments.command not in _READS or result.status != "available":
+            self.snapshot = replace(
+                self.snapshot, last_operation=result, last_operation_vault=vault
+            )
         if selection_revision != self._selection_revision:
             return self.snapshot
         if result.binding is not None and (

@@ -456,6 +456,40 @@ def _equivalent_payload(baseline, incoming):
     return True
 
 
+def _stale_slots(before, after):
+    """Count retired accepted slots that the current Core plan requires again."""
+    def slots(plan):
+        changes = {change.change_id: change for change in plan.proposal.changes}
+
+        def slot(change_id, domain):
+            change = changes.get(change_id)
+            return (domain, change.subject_id) if change else (domain, change_id)
+
+        accepted = {slot(row.change_id, row.domain) for row in plan.approvals}
+        accepted.update((row.kind, "consent:" + row.consent_id) for row in plan.consents)
+        by_item = {(change.item_id, change.facet): change for change in changes.values()}
+        for domain, decisions in (
+            ("identity", plan.producer_facts.association_decisions),
+            ("rename", plan.producer_facts.rename_decisions),
+        ):
+            for decision in decisions:
+                change = by_item.get((decision.item_id, decision.facet))
+                review = None if change is None else getattr(change, domain + "_review")
+                if (
+                    review is not None
+                    and review.decision_id == decision.decision_id
+                    and review.provenance == "explicit_user"
+                    and review.status in ("matched", "association_proposed", "accepted", "declined")
+                ):
+                    accepted.add((domain, change.subject_id))
+        required = {slot(row.change_id, row.domain) for row in plan.requirements}
+        return accepted, required
+
+    prior, _ = slots(before)
+    current, required = slots(after)
+    return len((prior - current) & required)
+
+
 def _prepared(
     history,
     directory,
@@ -468,6 +502,7 @@ def _prepared(
     original_source_ref=None,
     status="prepared_review",
     code="prepared",
+    stale=0,
 ):
     source_record = json.loads(
         next(
@@ -512,6 +547,7 @@ def _prepared(
         ready=review.ready,
         changes=len(review.proposal.changes),
         unresolved=len(review.requirements),
+        stale=stale,
         summary=(
             f"{len(review.proposal.changes)} comparisons; "
             f"{len(review.requirements)} choices remain."
@@ -786,7 +822,12 @@ def refresh_update(operations, preparation, *, source=None):
     try:
         preparation = UpdatePreparation.model_validate(preparation)
         if source is None:
-            return _reobserve(operations, preparation)[1]
+            result = _reobserve(operations, preparation)[1]
+            # Explicit Refresh may expose a newly complete review. Internal
+            # Save/Apply reobservation still stops at its stale_review boundary.
+            if result.status == "stale_review" and result.ready and not result.stale:
+                result = result.model_copy(update={"status": "prepared_review"})
+            return result
         with operations.inspect_update_inputs(preparation.vault) as observed:
             result = _refresh_source_update(
                 operations, preparation, observed, source=source
@@ -859,6 +900,7 @@ def _refresh_source_update(operations, preparation, observed, *, source):
             observed_source,
             reused,
             source_ref=str(Path(source).absolute()),
+            stale=_stale_slots(preparation.review, transition.plan),
         )
     except _ExcludedDependency:
         return _refused(
@@ -1509,6 +1551,7 @@ def _reobserve_inputs(operations, preparation, observed):
         source_ref=preparation.source_ref,
         status="stale_review" if changed else "prepared_review",
         code="current_facts_changed" if changed else "current",
+        stale=_stale_slots(preparation.review, review) if changed else 0,
     )
     return (history, result, retained)
 

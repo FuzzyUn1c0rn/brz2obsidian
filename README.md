@@ -354,6 +354,11 @@ require further review before application. Inspection pages are bounded;
 omission fields identify details absent from the output, including attachment
 alternative outputs.
 
+`stale` counts prior accepted choice slots invalidated by that operation that
+still need review. Each affected bulk member and required consent counts
+separately. It is an operation-local result; ordinary read replies report zero.
+The workbench retains the last operation summary while its pages are read.
+
 Review JSON uses the separate schema `brz2obsidian.cli-review-result`, version 1.
 It distinguishes proposal identity from Native operation identity, saved history
 from authored-file publication, and source gaps from omitted diagnostics.
