@@ -61,7 +61,7 @@ def test_preparation_roles_use_explicit_source_and_original_evidence(tmp_path, r
         )
 
     transport = ProjectedReviewTransport(project)
-    dialogs = ReviewDialogs(source, vault)
+    dialogs = ReviewDialogs(source.as_posix(), vault.as_posix())
     window = MainWindow(supervisor=transport, dialogs=dialogs)
     window.show()
     controls = ReviewControls(window, app)
@@ -83,7 +83,7 @@ def test_preparation_roles_use_explicit_source_and_original_evidence(tmp_path, r
         if kind != "attachment_cleanup":
             controls.click("Choose incoming BRZ")
         if role == "onboarding_known":
-            dialogs.source = str(original)
+            dialogs.source = original.as_posix()
             controls.click("Choose original BRZ evidence")
         controls.click("Prepare update review")
         until(app, lambda: len(transport.commands) == 1)

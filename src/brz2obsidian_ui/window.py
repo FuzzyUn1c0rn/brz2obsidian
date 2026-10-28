@@ -970,12 +970,17 @@ class MainWindow(QMainWindow):
             self.primary.setFocus()
 
     def _choose_update_path(self, field, callback):
+        def selected_path(path):
+            if path and Path(path).is_absolute():
+                path = str(Path(path).absolute())
+            callback(path)
+
         if self.dialogs is not None:
             (
                 self.dialogs.choose_source
                 if field in ("source", "original_source")
                 else self.dialogs.choose_vault
-            )(callback)
+            )(selected_path)
             return
         if self._dialog is not None:
             return
@@ -1003,7 +1008,7 @@ class MainWindow(QMainWindow):
         else:
             dialog.setFileMode(QFileDialog.FileMode.Directory)
             dialog.setOption(QFileDialog.Option.ShowDirsOnly, True)
-        dialog.fileSelected.connect(callback)
+        dialog.fileSelected.connect(selected_path)
 
         def finished(_):
             if self._dialog is dialog:

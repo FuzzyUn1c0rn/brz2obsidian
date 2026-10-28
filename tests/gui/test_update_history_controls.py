@@ -353,8 +353,10 @@ def test_history_controls_use_current_admitted_setup_recovery_undo_and_repair(
             )
         else:
             if role == "repair":
-                dialogs.vault = str(copy)
+                dialogs.vault = copy.as_posix()
                 controls.click("Choose complete history copy")
+                until(app, lambda: copy.name in window_text(window))
+                assert str(copy) in window_text(window)
                 controls.click("Review matching-history repair")
             else:
                 controls.click(
