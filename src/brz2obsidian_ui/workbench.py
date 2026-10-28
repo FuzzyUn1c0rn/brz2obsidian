@@ -97,7 +97,7 @@ class UpdateWorkbench(QWidget):
         layout.setSpacing(16)
         self.queue = QListWidget(objectName="reviewQueue")
         self.queue.setAccessibleName("Review queue")
-        self.queue.addItems(("Archive & vault", "Overview", "Conflicts", "Other choices", "History & recovery", "Compatible changes"))
+        self.queue.addItems(("Archive & vault", "Overview", "Conflicts", "Other choices", "History & recovery", "Compatible changes", "All changes"))
         self.queue.setFixedWidth(160)
         self.queue.setWordWrap(True)
         self.queue.setCurrentRow(0)
@@ -811,12 +811,13 @@ class UpdateWorkbench(QWidget):
             self._render_history()
         else:
             compatible = self.queue.currentRow() == 5
-            self._body.addWidget(_label("Compatible changes" if compatible else "Conflicts", "sectionTitle"))
+            catalogue = self.queue.currentRow() == 6
+            self._body.addWidget(_label("All changes" if catalogue else "Compatible changes" if compatible else "Conflicts", "sectionTitle"))
             rows = () if self._page is None else self._page.items
             offers = {row.change_id: row for row in (*self._offers, *self._row_offers)}
             positions = {row.change_id: self._page.offset + index for index, row in enumerate(rows)}
             rows = sorted(
-                (row for row in rows if row.disposition == ("compatible" if compatible else "unresolved")),
+                (row for row in rows if catalogue or row.disposition == ("compatible" if compatible else "unresolved")),
                 key=lambda row: (
                     offers.get(row.change_id) is not None
                     and offers[row.change_id].selected is not None
@@ -824,10 +825,11 @@ class UpdateWorkbench(QWidget):
             )
             if not rows:
                 self._body.addWidget(
-                    _label("No conflict comparisons in the current page.", "muted")
+                    _label("No matching comparisons in the current page.", "muted")
                 )
             for row in rows:
                 self._body.addWidget(_label(row.current_path, "sectionTitle"))
+                self._body.addWidget(_label(row.disposition.replace("_", " ").capitalize(), "muted"))
                 if row.incoming_path != row.current_path:
                     self._body.addWidget(_label("Incoming path: " + row.incoming_path, "muted"))
                 offer = offers.get(row.change_id)
@@ -940,7 +942,13 @@ class UpdateWorkbench(QWidget):
                 self._body.addWidget(_label("Some disclosure was omitted; review the bounded details.", "muted"))
             if offer.selected is not None:
                 self._body.addWidget(_label("Chosen: " + offer.selected, "muted"))
-            for choice in offer.choices:
+            scoped_configuration = offer.domain == "configuration" and self._configuration is not None
+            if scoped_configuration:
+                button = QPushButton("Review vault configuration")
+                button.setAccessibleName("Review vault configuration")
+                button.clicked.connect(lambda checked=False: self.queue.setCurrentRow(1))
+                self._body.addWidget(button)
+            for choice in (() if scoped_configuration else offer.choices):
                 if choice in ("edited", "associate"):
                     continue
                 text = labels[choice]
@@ -952,7 +960,7 @@ class UpdateWorkbench(QWidget):
                 button.clicked.connect(lambda checked=False, b=binding, o=offer, c=choice: self._choose(b, o, c))
                 self._choice_buttons.append(button)
                 self._body.addWidget(button)
-            for unavailable in offer.unavailable_choices:
+            for unavailable in (() if scoped_configuration else offer.unavailable_choices):
                 self._body.addWidget(_label("Unavailable: " + labels[unavailable.choice] + " — " + ", ".join(r.replace("_", " ") for r in unavailable.reasons), "muted"))
                 button = QPushButton(labels[unavailable.choice])
                 button.setAccessibleName(labels[unavailable.choice] + " for " + title)
@@ -960,7 +968,7 @@ class UpdateWorkbench(QWidget):
                 self._body.addWidget(button)
             self._read_button("Review details", "choice_details", name="Review details for " + title,
                               requirement_id=offer.requirement_id, offset=0, limit=100)
-            if offer.domain == "attachment":
+            if offer.reference_review or offer.domain == "attachment":
                 self._read_button("Review references", "references", name="Review references for " + title,
                                   requirement_id=offer.requirement_id, offset=0, limit=100)
             if self._details is not None and self._details[0] == offer.requirement_id:

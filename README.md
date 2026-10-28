@@ -313,7 +313,8 @@ See [readable diagnostics and compatibility](docs/diagnostics.md).
 
 In Windows, select **Update vault**, choose the incoming BRZ and existing vault,
 then select **Prepare update review**. The left queue opens compatible comparisons,
-conflicts and other required choices beside the decision workspace. Accept or
+conflicts and other required choices beside the decision workspace. **All changes**
+opens the canonical comparisons, including history reversals. Accept or
 discard edited text and reference drafts explicitly. **Apply update** requires the
 whole review to be resolved. Inputs stay locked to the reviewed target while that
 review is open.

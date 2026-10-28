@@ -63,6 +63,7 @@ class UpdateChoiceOffer(ReconciliationContract):
     policy: str | None = None
     detail_count: int = Field(default=0, ge=0)
     detail_omitted: bool = False
+    reference_review: bool = False
 
 
 class UpdateChoiceDetail(ReconciliationContract):
