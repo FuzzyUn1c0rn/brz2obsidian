@@ -22,7 +22,9 @@ class ReviewWorkerTransport:
         self.binding = None
         self._output = io.BytesIO()
         self._operations = operations
-        self._worker = UpdateWorker(context=UpdateContext(operations=operations), output=self._output)
+        self._worker = UpdateWorker(
+            context=UpdateContext(operations=operations), output=self._output
+        )
         self._sequence = count(1)
         self._lock = RLock()
         self._before_request = before_request
@@ -30,7 +32,9 @@ class ReviewWorkerTransport:
     def open_update(self, **kwargs):
         if self.closed or self._worker.closed:
             self._output = io.BytesIO()
-            self._worker = UpdateWorker(context=UpdateContext(operations=self._operations), output=self._output)
+            self._worker = UpdateWorker(
+                context=UpdateContext(operations=self._operations), output=self._output
+            )
             self._sequence = count(1)
             self.binding = None
             self.closed = False
@@ -64,8 +68,16 @@ class ReviewWorkerTransport:
     def close(self):
         with self._lock:
             if not self._worker.closed:
-                self.run(WorkerRequest(
-                    operation="update", request_id=str(uuid4()), sequence=1,
-                    arguments={"command": "close", "binding": self.binding, "choice": "discard"},
-                ))
+                self.run(
+                    WorkerRequest(
+                        operation="update",
+                        request_id=str(uuid4()),
+                        sequence=1,
+                        arguments={
+                            "command": "close",
+                            "binding": self.binding,
+                            "choice": "discard",
+                        },
+                    )
+                )
             self.closed = True

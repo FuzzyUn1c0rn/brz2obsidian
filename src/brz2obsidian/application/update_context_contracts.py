@@ -189,7 +189,9 @@ class UpdateContextResult(ReconciliationContract):
     stale: int = Field(default=0, ge=0)
     next_actions: tuple[str, ...] = ()
     summary: str = Field(default="", max_length=2048)
-    findings: tuple[Annotated[str, Field(max_length=160)], ...] = Field(default=(), max_length=20)
+    findings: tuple[Annotated[str, Field(max_length=160)], ...] = Field(
+        default=(), max_length=20
+    )
     diagnostic_omission: bool = False
     recovery_gap_count: int = Field(default=0, ge=0)
     guidance: str = Field(default="", max_length=2048)

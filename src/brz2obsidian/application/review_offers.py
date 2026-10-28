@@ -40,7 +40,11 @@ def choice_offers(preparation):
 
 def review_plan_choice_offers(plan):
     result = []
-    reference_changes = {row.change_id for row in plan.proposal.changes if row.attachment_review is not None}
+    reference_changes = {
+        row.change_id
+        for row in plan.proposal.changes
+        if row.attachment_review is not None
+    }
     for row in inspect_review_choices(plan):
         selected = next(
             (

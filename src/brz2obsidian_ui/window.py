@@ -665,8 +665,12 @@ class MainWindow(QMainWindow):
         self.workbench = UpdateWorkbench(
             self.runner.submit_update,
             select=self.runner.select_update,
-            pick_source=lambda callback, field="source": self._choose_update_path(field, callback),
-            pick_vault=lambda callback, field="vault": self._choose_update_path(field, callback),
+            pick_source=lambda callback, field="source": self._choose_update_path(
+                field, callback
+            ),
+            pick_vault=lambda callback, field="vault": self._choose_update_path(
+                field, callback
+            ),
             path_widget=PathText,
         )
         self.operation_pages.addWidget(self.workbench)
@@ -978,7 +982,14 @@ class MainWindow(QMainWindow):
         origin = QApplication.focusWidget()
         source = field in ("source", "original_source")
         dialog = QFileDialog(
-            self, "Choose original BRZ evidence" if field == "original_source" else "Choose incoming BRZ" if source else "Choose complete history copy" if field == "history_copy" else "Choose update vault"
+            self,
+            "Choose original BRZ evidence"
+            if field == "original_source"
+            else "Choose incoming BRZ"
+            if source
+            else "Choose complete history copy"
+            if field == "history_copy"
+            else "Choose update vault",
         )
         selected = getattr(self.workbench, field)
         initial = str(Path(selected).parent) if selected and source else selected
@@ -1287,7 +1298,11 @@ class MainWindow(QMainWindow):
             self.activity.setAccessibleName("Update operation progress")
             self.activity.setVisible(active)
             progress = state.progress.value if active and state.progress else None
-            if progress and progress.total_units is not None and progress.completed_units is not None:
+            if (
+                progress
+                and progress.total_units is not None
+                and progress.completed_units is not None
+            ):
                 self.activity.setRange(0, progress.total_units)
                 self.activity.setValue(progress.completed_units)
             else:
@@ -1627,11 +1642,18 @@ class MainWindow(QMainWindow):
 
     def _present_review(self, state):
         self.workbench.present(state)
-        if self._update_background_requested and state.close_disposition == "background":
+        if (
+            self._update_background_requested
+            and state.close_disposition == "background"
+        ):
             self._update_background_requested = False
             self.showMinimized()
-        if (self._update_close_requested is not None and not state.active_request_id
-                and state.reply is not None and state.reply.code == "context_closed"):
+        if (
+            self._update_close_requested is not None
+            and not state.active_request_id
+            and state.reply is not None
+            and state.reply.code == "context_closed"
+        ):
             self._update_close_requested = None
             self.workbench.discard_local()
             if self.snapshot.active_request_id or self.snapshot.validation_request_id:
@@ -1698,7 +1720,11 @@ class MainWindow(QMainWindow):
             return
         if choice in ("save", "discard", "close"):
             self._update_close_requested = choice
-            if choice not in state.close_options and choice == "discard" and state.close_options == ("close",):
+            if (
+                choice not in state.close_options
+                and choice == "discard"
+                and state.close_options == ("close",)
+            ):
                 choice = "close"
         if choice in state.close_options:
             if choice == "background":

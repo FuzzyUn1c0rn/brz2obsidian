@@ -116,25 +116,49 @@ def test_current_and_incoming_choices_retain_decision_and_gate_whole_review_appl
 
         def apply_update(self, preparation, **kwargs):
             assert preparation.review.ready
-            paths = {row.change_id: row.path for row in preparation.review.proposal.changes}
-            publications.append({
-                paths[row.change_id]: row.result.data
-                for row in preparation.review.approvals if row.domain == "text"
-            })
+            paths = {
+                row.change_id: row.path for row in preparation.review.proposal.changes
+            }
+            publications.append(
+                {
+                    paths[row.change_id]: row.result.data
+                    for row in preparation.review.approvals
+                    if row.domain == "text"
+                }
+            )
             operation = VaultApplyResult(
-                schema_id="brz2obsidian.vault-apply-result", schema_version=1,
-                status="applied", code="applied", operation_id="controlled-publication",
-                kind="apply", origin_role="source_update", generation=2,
-                review_generation=1, phase="terminal", publication="complete",
-                history="terminal", planned_files=1, published_files=1,
-                authored_files_changed=True, checkpoint_commit="d" * 40,
-                intent_commit="c" * 40, result_commit="e" * 40, receipt_commit="d" * 40,
-                recovery_required=False, elapsed_ms=1, message="Update applied.",
+                schema_id="brz2obsidian.vault-apply-result",
+                schema_version=1,
+                status="applied",
+                code="applied",
+                operation_id="controlled-publication",
+                kind="apply",
+                origin_role="source_update",
+                generation=2,
+                review_generation=1,
+                phase="terminal",
+                publication="complete",
+                history="terminal",
+                planned_files=1,
+                published_files=1,
+                authored_files_changed=True,
+                checkpoint_commit="d" * 40,
+                intent_commit="c" * 40,
+                result_commit="e" * 40,
+                receipt_commit="d" * 40,
+                recovery_required=False,
+                elapsed_ms=1,
+                message="Update applied.",
             )
             return UpdateResult(
-                status="applied", code="applied", kind="source_update",
-                application=operation, history_retained=True,
-                checkpoint_commit="d" * 40, publication="complete", changes=2,
+                status="applied",
+                code="applied",
+                kind="source_update",
+                application=operation,
+                history_retained=True,
+                checkpoint_commit="d" * 40,
+                publication="complete",
+                changes=2,
                 next_actions=("inspect_history",),
             )
 
@@ -308,8 +332,13 @@ def test_current_and_incoming_choices_retain_decision_and_gate_whole_review_appl
             and "Local second." in visible
             and "incoming" in visible
         )
-        until(app, lambda: button("Keep vault version for Notes/Opening.md") is not None
-              and button("Keep vault version for Notes/Opening.md").isEnabled())
+        until(
+            app,
+            lambda: (
+                button("Keep vault version for Notes/Opening.md") is not None
+                and button("Keep vault version for Notes/Opening.md").isEnabled()
+            ),
+        )
         current = button("Keep vault version for Notes/Opening.md")
         apply = button("Apply update")
         assert apply is not None and not apply.isEnabled()
@@ -379,18 +408,28 @@ def test_current_and_incoming_choices_retain_decision_and_gate_whole_review_appl
             "Notes/Opening.md": b"Local first.\r\n",
             "Notes/Second.md": b"incoming\n",
         }
-        until(app, lambda: button("Apply update") is not None and button("Apply update").isEnabled())
+        until(
+            app,
+            lambda: (
+                button("Apply update") is not None
+                and button("Apply update").isEnabled()
+            ),
+        )
         assert (
             window.runner.session.update_snapshot.ready
             and button("Apply update").isEnabled()
         )
         button("Apply update").click()
         until(app, lambda: bool(publications))
-        assert publications == [{
-            "Notes/Opening.md": b"Local first.\r\n",
-            "Notes/Second.md": b"incoming\n",
-        }]
-        until(app, lambda: window.runner.session.update_snapshot.reply.status == "applied")
+        assert publications == [
+            {
+                "Notes/Opening.md": b"Local first.\r\n",
+                "Notes/Second.md": b"incoming\n",
+            }
+        ]
+        until(
+            app, lambda: window.runner.session.update_snapshot.reply.status == "applied"
+        )
         until(app, lambda: "Update applied" in window_text(window))
         applied = window.runner.session.update_snapshot
         assert applied.binding is None and not applied.ready
@@ -402,15 +441,29 @@ def test_current_and_incoming_choices_retain_decision_and_gate_whole_review_appl
         assert source.read_bytes() == original and list(vault.iterdir()) == []
     finally:
         final = window.runner.session.update_snapshot
-        (tmp_path / "public-apply-observations.json").write_text(json.dumps({
-            "commands": calls, "publications": publications,
-            "revision": final.revision, "ready": final.ready,
-            "active_command": final.active_command,
-            "binding": None if final.binding is None else final.binding.model_dump(),
-            "reply": None if final.reply is None else final.reply.model_dump(),
-            "buttons": [(row.accessibleName(), row.isEnabled())
-                        for row in window.findChildren(QPushButton) if row.isVisible()],
-        }, default=repr, indent=2), encoding="utf-8")
+        (tmp_path / "public-apply-observations.json").write_text(
+            json.dumps(
+                {
+                    "commands": calls,
+                    "publications": publications,
+                    "revision": final.revision,
+                    "ready": final.ready,
+                    "active_command": final.active_command,
+                    "binding": None
+                    if final.binding is None
+                    else final.binding.model_dump(),
+                    "reply": None if final.reply is None else final.reply.model_dump(),
+                    "buttons": [
+                        (row.accessibleName(), row.isEnabled())
+                        for row in window.findChildren(QPushButton)
+                        if row.isVisible()
+                    ],
+                },
+                default=repr,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
         window.shutdown()
         channel.close()
         window.hide()
