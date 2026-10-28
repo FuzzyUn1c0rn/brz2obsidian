@@ -20,6 +20,7 @@ from .update_lifecycle import (
     _render,
     _scope_review,
     _scoped,
+    _stale_slots,
     _subjects,
 )
 
@@ -381,6 +382,7 @@ def reobserve_onboarding(operations, preparation):
             original_source_ref=preparation.original_source_ref,
             status="stale_review" if changed else "prepared_review",
             code="current_facts_changed" if changed else "current",
+            stale=_stale_slots(preparation.review, review) if changed else 0,
         )
         return history, result, incoming
     except OSError, ValueError, KeyError, TypeError, AttributeError:

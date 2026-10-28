@@ -1114,6 +1114,7 @@ def _resume_update(operations, vault, observed):
             or observed.source_sha256
             != record(incoming)["source_identity"]["source_sha256"],
             code=resumed.code,
+            stale=_stale_slots(plan, resumed.plan),
         )
     except _ExcludedDependency:
         return _refused(
