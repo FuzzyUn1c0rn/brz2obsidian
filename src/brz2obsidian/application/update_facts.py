@@ -496,13 +496,16 @@ def _physical_target(path, current_path, inventory):
 
 
 def _link_context(facts, baseline_record, incoming_record, physical_inventory):
-    subjects = {(s.item_id, s.facet): s for s in facts.subjects}
+    subjects = {
+        (_identity(facts.incoming_identity, s.item_id), s.facet): s
+        for s in facts.subjects
+    }
     current_memberships = _membership_targets(
         (baseline_record, incoming_record), facts.identity_inventory
     )
     incoming_memberships = _membership_targets((incoming_record,))
     categories = {
-        record.identity.item_id
+        record.identity
         for record in current_memberships + incoming_memberships
         if record.kind == "category"
     }
@@ -510,7 +513,7 @@ def _link_context(facts, baseline_record, incoming_record, physical_inventory):
     paths = []
     for row in facts.identity_inventory:
         subject = (
-            subjects.get((row.identity.item_id, row.facet))
+            subjects.get((row.identity, row.facet))
             if row.identity is not None
             else None
         )
@@ -524,7 +527,7 @@ def _link_context(facts, baseline_record, incoming_record, physical_inventory):
             schema_version=1,
             target_id=target_id,
             kind="category"
-            if row.identity is not None and row.identity.item_id in categories
+            if row.identity is not None and row.identity in categories
             else "note"
             if row.facet != "asset"
             and (row.identity is not None or row.current.path.lower().endswith(".md"))
@@ -535,7 +538,7 @@ def _link_context(facts, baseline_record, incoming_record, physical_inventory):
             representations=_representations(
                 row.current.path,
                 "category"
-                if row.identity is not None and row.identity.item_id in categories
+                if row.identity is not None and row.identity in categories
                 else "note",
             ),
             validation_fingerprint=digest((target_id, row.current.path)),
