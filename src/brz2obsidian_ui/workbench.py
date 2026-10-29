@@ -3,7 +3,7 @@
 from time import monotonic
 from uuid import uuid4
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -84,6 +84,9 @@ class UpdateWorkbench(QWidget):
         self._requested = set()
         self._last_reply = None
         self._rendered = None
+        self._read_position = None
+        self._reveal_intent = None
+        self._editor_was_active = False
         self._choice_buttons = []
         self._pending_choice = None
         self._pending_read = None
@@ -246,7 +249,7 @@ class UpdateWorkbench(QWidget):
             and self.queue.currentRow() == 0
         ):
             self.queue.setCurrentRow(1)
-        self._render()
+        self._render(preserve_position=True)
         self._refresh_choices()
         if binding is None or self.busy or state.needs_inspection:
             return
@@ -367,7 +370,7 @@ class UpdateWorkbench(QWidget):
         self._closing = True
         self._rendered = None
         self._render()
-        self.scroll.ensureWidgetVisible(self._close_panel)
+        self._reveal_task("close")
 
     def finish_close_choice(self):
         self._closing = False
@@ -418,7 +421,11 @@ class UpdateWorkbench(QWidget):
             button.setEnabled(bool(allowed()))
 
     def _draft_changed(self):
+        opened = self._editor.active and not self._editor_was_active
+        self._editor_was_active = self._editor.active
         self._render()
+        if opened:
+            self._reveal_task("editor")
         self._refresh_choices()
         self._refresh_inputs()
         self.availability_changed.emit()
@@ -727,7 +734,7 @@ class UpdateWorkbench(QWidget):
                 self._closing = True
                 self._rendered = None
                 self._render()
-                self.scroll.ensureWidgetVisible(self._close_panel)
+                self._reveal_task("close")
             else:
                 self._close_internal(self._start_history, "discard")
         elif self.vault or self._state and self._state.vault:
@@ -1232,7 +1239,36 @@ class UpdateWorkbench(QWidget):
             )
         )
 
-    def _render(self, *_):
+    def _reveal_task(self, kind):
+        self._reveal_intent = (kind, self.queue.currentRow(), self._binding_key)
+        self._after_layout()
+
+    def _after_layout(self):
+        rendered = self._rendered
+
+        def position_workspace():
+            if self._rendered is not rendered:
+                return
+            self._body.activate()
+            self.workspace.adjustSize()
+            intent, self._reveal_intent = self._reveal_intent, None
+            position, self._read_position = self._read_position, None
+            scope = (self.queue.currentRow(), self._binding_key)
+            if intent is not None and intent[1:] == scope:
+                kind = intent[0]
+                if kind == "editor" and self._editor.active:
+                    self.scroll.ensureWidgetVisible(self._editor, 0, 16)
+                    self._editor.text.setFocus()
+                    return
+                if kind == "close" and self._closing:
+                    self.scroll.ensureWidgetVisible(self._close_panel, 0, 16)
+                    return
+            if position is not None and position[0] == scope:
+                self.scroll.verticalScrollBar().setValue(position[1])
+
+        QTimer.singleShot(0, position_workspace)
+
+    def _render(self, *_, preserve_position=False):
         key = (
             self.queue.currentRow(),
             self._binding_key,
@@ -1260,6 +1296,12 @@ class UpdateWorkbench(QWidget):
         )
         if key == self._rendered:
             return
+        scope = (self.queue.currentRow(), self._binding_key)
+        if preserve_position and self._rendered is not None and self._rendered[:2] == scope:
+            if self._read_position is None or self._read_position[0] != scope:
+                self._read_position = (scope, self.scroll.verticalScrollBar().value())
+        else:
+            self._read_position = None
         self._rendered = key
         self._choice_buttons = []
         self._read_buttons = []
@@ -1334,14 +1376,15 @@ class UpdateWorkbench(QWidget):
                 )
             for row in rows:
                 self._body.addWidget(_label(row.current_path, "sectionTitle"))
+                offer = offers.get(row.change_id)
                 self._body.addWidget(
-                    _label(row.disposition.replace("_", " ").capitalize(), "muted")
+                    _label("Decision recorded" if offer is not None and offer.selected is not None
+                           else row.disposition.replace("_", " ").capitalize(), "muted")
                 )
                 if row.incoming_path != row.current_path:
                     self._body.addWidget(
                         _label("Incoming path: " + row.incoming_path, "muted")
                     )
-                offer = offers.get(row.change_id)
                 if offer is not None and offer.selected is not None:
                     self._body.addWidget(_label("Chosen: " + offer.selected, "muted"))
                 for title, raw in (
@@ -1442,6 +1485,8 @@ class UpdateWorkbench(QWidget):
             self._render_close()
         self._body.addStretch()
         self._refresh_choices()
+        if self._read_position is not None or self._reveal_intent is not None:
+            self._after_layout()
 
     def _render_offers(self):
         self._body.addWidget(_label("Review choices", "sectionTitle"))

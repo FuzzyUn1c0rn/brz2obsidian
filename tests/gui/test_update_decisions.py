@@ -16,6 +16,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QLabel,
     QPlainTextEdit,
     QPushButton,
     QTabBar,
@@ -350,6 +351,10 @@ def test_current_and_incoming_choices_retain_decision_and_gate_whole_review_appl
         assert window.runner.session.update_snapshot.unresolved == 1
         assert not window.runner.session.update_snapshot.ready
         assert not button("Apply update").isEnabled() and "apply" not in calls
+        until(app, lambda: "Chosen: current" in window_text(window))
+        captions = [row.text() for row in window.findChildren(QLabel) if row.isVisible()]
+        assert captions.count("Unresolved") == 1
+        assert "Chosen: current" in captions
 
         until(
             app,
