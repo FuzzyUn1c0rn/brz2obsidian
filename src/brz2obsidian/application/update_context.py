@@ -409,11 +409,15 @@ class UpdateContext:
                 disassociate_entry_ids=disassociate_entry_ids,
             )
         except ValueError, StopIteration:
-            return UpdateContextResult(
+            # This binding still owns the retained plan; refusal retires no
+            # decisions and grants no readiness. Refresh reobserves its inputs.
+            return self._content_result(
                 status="refused",
                 code="offer_changed",
-                kind=self._kind,
                 binding=self._binding,
+                changes=len(self._preparation.review.proposal.changes),
+                unresolved=len(self._preparation.review.requirements),
+                next_actions=("refresh_update",),
             )
         self._remember(result)
         if result.code == "accepted" and result.preparation is not None:
