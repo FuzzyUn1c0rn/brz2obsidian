@@ -552,7 +552,9 @@ class UpdateContext:
                 code=result.code,
                 kind=result.kind,
                 binding=self._binding,
-                ready=result.ready,
+                # A changed-input Save/Apply stops this operation even when the
+                # retained canonical plan no longer needs another decision.
+                ready=result.ready and result.status != "stale_review",
                 changes=result.changes,
                 unresolved=result.unresolved,
                 stale=result.stale,
