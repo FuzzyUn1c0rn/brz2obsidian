@@ -144,6 +144,7 @@ def selected_attachment_candidate(plan, change, alternative, references, offered
                 target_id=target_id,
                 existence="present",
                 memberships=state.memberships,
+                membership_targets=tuple(targets.values()),
             )
     return tuple(links), AttachmentCandidate(
         schema_id="brz2obsidian.attachment-candidate",
