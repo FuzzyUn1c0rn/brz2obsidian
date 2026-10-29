@@ -458,6 +458,7 @@ def _equivalent_payload(baseline, incoming):
 
 def _stale_slots(before, after):
     """Count retired accepted slots that the current Core plan requires again."""
+
     def slots(plan):
         changes = {change.change_id: change for change in plan.proposal.changes}
 
@@ -466,8 +467,12 @@ def _stale_slots(before, after):
             return (domain, change.subject_id) if change else (domain, change_id)
 
         accepted = {slot(row.change_id, row.domain) for row in plan.approvals}
-        accepted.update((row.kind, "consent:" + row.consent_id) for row in plan.consents)
-        by_item = {(change.item_id, change.facet): change for change in changes.values()}
+        accepted.update(
+            (row.kind, "consent:" + row.consent_id) for row in plan.consents
+        )
+        by_item = {
+            (change.item_id, change.facet): change for change in changes.values()
+        }
         for domain, decisions in (
             ("identity", plan.producer_facts.association_decisions),
             ("rename", plan.producer_facts.rename_decisions),
@@ -479,7 +484,8 @@ def _stale_slots(before, after):
                     review is not None
                     and review.decision_id == decision.decision_id
                     and review.provenance == "explicit_user"
-                    and review.status in ("matched", "association_proposed", "accepted", "declined")
+                    and review.status
+                    in ("matched", "association_proposed", "accepted", "declined")
                 ):
                     accepted.add((domain, change.subject_id))
         required = {slot(row.change_id, row.domain) for row in plan.requirements}

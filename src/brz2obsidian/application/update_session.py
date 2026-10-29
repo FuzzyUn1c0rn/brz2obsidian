@@ -22,7 +22,9 @@ _CONTENT = frozenset(
         "history_choices",
     )
 )
-_READS = frozenset(("page", "references", "choices", "choice_details", "history_choices"))
+_READS = frozenset(
+    ("page", "references", "choices", "choice_details", "history_choices")
+)
 
 
 @dataclass(frozen=True)

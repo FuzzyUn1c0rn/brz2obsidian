@@ -1297,7 +1297,11 @@ class UpdateWorkbench(QWidget):
         if key == self._rendered:
             return
         scope = (self.queue.currentRow(), self._binding_key)
-        if preserve_position and self._rendered is not None and self._rendered[:2] == scope:
+        if (
+            preserve_position
+            and self._rendered is not None
+            and self._rendered[:2] == scope
+        ):
             if self._read_position is None or self._read_position[0] != scope:
                 self._read_position = (scope, self.scroll.verticalScrollBar().value())
         else:
@@ -1378,8 +1382,12 @@ class UpdateWorkbench(QWidget):
                 self._body.addWidget(_label(row.current_path, "sectionTitle"))
                 offer = offers.get(row.change_id)
                 self._body.addWidget(
-                    _label("Decision recorded" if offer is not None and offer.selected is not None
-                           else row.disposition.replace("_", " ").capitalize(), "muted")
+                    _label(
+                        "Decision recorded"
+                        if offer is not None and offer.selected is not None
+                        else row.disposition.replace("_", " ").capitalize(),
+                        "muted",
+                    )
                 )
                 if row.incoming_path != row.current_path:
                     self._body.addWidget(

@@ -187,7 +187,8 @@ class UpdateContextResult(ReconciliationContract):
     changes: int = Field(default=0, ge=0)
     unresolved: int = Field(default=0, ge=0)
     stale: int = Field(
-        default=0, ge=0,
+        default=0,
+        ge=0,
         description="Prior accepted choice slots invalidated by this operation and still requiring review; reads report zero.",
     )
     next_actions: tuple[str, ...] = ()

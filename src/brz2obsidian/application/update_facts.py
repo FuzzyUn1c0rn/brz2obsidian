@@ -527,7 +527,9 @@ def _link_context(facts, baseline_record, incoming_record, physical_inventory):
             schema_version=1,
             target_id=target_id,
             kind="category"
-            if row.facet == "content" and row.identity is not None and row.identity in categories
+            if row.facet == "content"
+            and row.identity is not None
+            and row.identity in categories
             else "note"
             if row.facet != "asset"
             and (row.identity is not None or row.current.path.lower().endswith(".md"))
@@ -538,7 +540,9 @@ def _link_context(facts, baseline_record, incoming_record, physical_inventory):
             representations=_representations(
                 row.current.path,
                 "category"
-                if row.facet == "content" and row.identity is not None and row.identity in categories
+                if row.facet == "content"
+                and row.identity is not None
+                and row.identity in categories
                 else "note",
             ),
             validation_fingerprint=digest((target_id, row.current.path)),

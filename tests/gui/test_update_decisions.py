@@ -352,7 +352,9 @@ def test_current_and_incoming_choices_retain_decision_and_gate_whole_review_appl
         assert not window.runner.session.update_snapshot.ready
         assert not button("Apply update").isEnabled() and "apply" not in calls
         until(app, lambda: "Chosen: current" in window_text(window))
-        captions = [row.text() for row in window.findChildren(QLabel) if row.isVisible()]
+        captions = [
+            row.text() for row in window.findChildren(QLabel) if row.isVisible()
+        ]
         assert captions.count("Unresolved") == 1
         assert "Chosen: current" in captions
 
