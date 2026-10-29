@@ -16,7 +16,7 @@ def owned_note(collection, body):
     ).encode()
 
 
-def owner_facts(role, *, duplicate=False):
+def owner_facts(role, *, duplicate=False, asset=False):
     path = "Categories/Own.md" if role == "category" else "Notes/Own.md"
     source = {
         "schema": "brz2obsidian.migration", "schema_version": 7,
@@ -39,6 +39,11 @@ def owner_facts(role, *, duplicate=False):
     baseline = {"migration-record.json": json.dumps(source).encode(), path: original}
     received = baseline | {path: incoming}
     current = baseline | {"Foreign/Retained.md": foreign}
+    if asset:
+        source["asset_targets"] = [{"asset_id": "entry:opening", "relative_path": "Assets/Own.bin"}]
+        for payload, raw in ((baseline, b"\x00ORIGINAL asset"), (received, b"\x00INCOMING asset"), (current, b"\x00CURRENT asset")):
+            payload["migration-record.json"] = json.dumps(source).encode()
+            payload["Assets/Own.bin"] = raw
     return assemble_facts(baseline, received, current, proposal_id="review:owners", generation=1), path, original, incoming, foreign
 
 
@@ -74,3 +79,27 @@ def test_genuine_same_owner_duplicate_remains_ambiguous():
     assert change.identity_review.selected_entry_id is None
     assert foreign in {row.current.content.data for row in change.identity_review.candidates}
     assert not reconcile(facts).ready
+
+
+def test_category_content_does_not_promote_same_owner_asset_facet_to_category():
+    facts, path, _, incoming, _ = owner_facts("category", asset=True)
+    context = facts.link_context
+    for targets, states, documents, raw in (
+        (context.current_targets, context.current_target_facts, context.current_documents, b"\x00CURRENT asset"),
+        (context.incoming_targets, context.incoming_target_facts, context.incoming_documents, b"\x00INCOMING asset"),
+    ):
+        asset = next(row for row in targets if row.canonical_path == "Assets/Own.bin")
+        assert asset.kind == "resource" and asset.identity is None
+        assert asset.target_id == "subject:entry:opening:asset"
+        assert asset.representations == ("Assets/Own.bin",)
+        state = next(row for row in states if row.target_id == asset.target_id)
+        assert state.content.data == raw and state.memberships == ()
+        assert not any(row.document_id == asset.target_id for row in documents)
+        category = next(row for row in targets if row.canonical_path == path)
+        assert category.kind == "category" and category.identity.item_id == "entry:opening"
+        assert "[[Categories/Own]]" in category.representations
+    own = next(row for row in context.incoming_documents if row.source_path == path)
+    assert own.content.data == incoming
+    occurrence, = own.occurrences
+    assert occurrence.meaning.status == "resolved"
+    assert occurrence.meaning.target_id == "subject:entry:opening:content"
