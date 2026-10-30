@@ -232,6 +232,7 @@ def review_plan_choice_action(
     if (
         change is not None
         and change.attachment_review is not None
+        and requirement.domain != "rename"
         and not (requirement.domain == "reversal" and choice == "current")
     ):
         attachment_choice = (

@@ -21,6 +21,7 @@ from brz2obsidian.contracts import (
     ReviewTransition,
 )
 from brz2obsidian.core.attachment_validation import validate_attachment_candidate
+from brz2obsidian.core.identity import rename_source_path_safe
 from brz2obsidian.core.link_meanings import _semantic
 from brz2obsidian.core.memberships import used_mappings
 from brz2obsidian.core.reconciliation import _reconcile
@@ -164,20 +165,22 @@ def _format_choice_unavailable(change, domain, choice):
     )
 
 
-def _choice_offer(change, requirement):
+def _choice_offer(change, requirement, *, source_path_safe=True):
     from brz2obsidian.contracts import ReviewChoiceAvailability, ReviewChoiceOffer
 
     alternatives = (
         {a.choice: a for a in change.attachment_review.alternatives}
         if change is not None
         and change.attachment_review is not None
-        and requirement.domain != "reversal"
+        and requirement.domain not in ("reversal", "rename")
         else {}
     )
     choices = tuple(dict.fromkeys((*requirement.choices, *alternatives)))
     availability = []
     for choice in choices:
         reasons = []
+        if requirement.domain == "rename" and choice == "source_path" and not source_path_safe:
+            reasons.append("unsafe_producer_choice")
         if change is not None and _format_choice_unavailable(
             change, requirement.domain, choice
         ):
@@ -206,7 +209,11 @@ def inspect_review_choices(plan):
     plan = checked.plan
     approved = {(a.change_id, a.domain) for a in plan.approvals}
     rows = tuple(
-        _choice_offer(change, row)
+        _choice_offer(
+            change, row,
+            source_path_safe=rename_source_path_safe(plan.producer_facts, change)
+            if row.domain == "rename" else True,
+        )
         for change, row in zip(
             plan.proposal.changes,
             _choice_requirements(plan.producer_facts, plan.proposal),
@@ -220,6 +227,22 @@ def inspect_review_choices(plan):
     )
     return (
         rows
+        + tuple(
+            _choice_offer(
+                change,
+                ReviewRequirement(
+                    requirement_id="rename:" + change.change_id,
+                    domain="rename",
+                    change_id=change.change_id,
+                    choices=("keep_path", "source_path"),
+                    assumptions=change.assumptions,
+                ),
+                source_path_safe=rename_source_path_safe(plan.producer_facts, change),
+            )
+            for change in plan.proposal.changes
+            if change.rename_review is not None
+            and _domain(plan.producer_facts, change) != "rename"
+        )
         + tuple(
             _choice_offer(None, row)
             for row in plan.requirements

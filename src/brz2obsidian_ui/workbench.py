@@ -1363,7 +1363,16 @@ class UpdateWorkbench(QWidget):
                 )
             )
             rows = () if self._page is None else self._page.items
-            offers = {row.change_id: row for row in (*self._offers, *self._row_offers)}
+            offers = {
+                row.change_id: row
+                for row in (*self._offers, *self._row_offers)
+                if row.domain != "rename"
+            }
+            renames = {
+                row.change_id: row
+                for row in (*self._offers, *self._row_offers)
+                if row.domain == "rename"
+            }
             positions = {
                 row.change_id: self._page.offset + index
                 for index, row in enumerate(rows)
@@ -1476,6 +1485,8 @@ class UpdateWorkbench(QWidget):
                         )
                         self._choice_buttons.append(button)
                         self._body.addWidget(button)
+                if row.change_id in renames:
+                    self._render_path_choices(renames[row.change_id], row.current_path)
             if self._page is not None:
                 self._previous_button("Previous comparison page", "page")
                 if self._page.next_offset is not None:
@@ -1501,6 +1512,34 @@ class UpdateWorkbench(QWidget):
         self._refresh_choices()
         if self._read_position is not None or self._reveal_intent is not None:
             self._after_layout()
+
+    def _render_path_choices(self, offer, current_path):
+        self._body.addWidget(_label("Source path", "sectionTitle"))
+        self._body.addWidget(_label(offer.disclosure))
+        if offer.detail_omitted:
+            self._body.addWidget(
+                _label("Some disclosure was omitted from this bounded view.", "muted")
+            )
+        labels = {"keep_path": "Keep current path", "source_path": "Use incoming path"}
+        if offer.selected is not None:
+            self._body.addWidget(_label("Chosen path: " + labels[offer.selected], "muted"))
+        for choice, text in labels.items():
+            button = QPushButton(text)
+            button.setAccessibleName(text + " for " + current_path)
+            button.setProperty("draftRequirement", offer.requirement_id)
+            button.setEnabled(choice in offer.choices)
+            if choice in offer.choices:
+                binding = self._state.binding
+                button.clicked.connect(
+                    lambda checked=False, b=binding, o=offer, c=choice: self._choose(b, o, c)
+                )
+                self._choice_buttons.append(button)
+            self._body.addWidget(button)
+        for unavailable in offer.unavailable_choices:
+            self._body.addWidget(_label(
+                "Unavailable: " + labels[unavailable.choice] + " — "
+                + ", ".join(r.replace("_", " ") for r in unavailable.reasons), "muted",
+            ))
 
     def _render_offers(self):
         self._body.addWidget(_label("Review choices", "sectionTitle"))
@@ -1555,7 +1594,8 @@ class UpdateWorkbench(QWidget):
                     )
                 )
             if offer.selected is not None:
-                self._body.addWidget(_label("Chosen: " + offer.selected, "muted"))
+                selected = labels[offer.selected] if offer.domain == "rename" else offer.selected
+                self._body.addWidget(_label("Chosen: " + selected, "muted"))
             scoped_configuration = (
                 offer.domain == "configuration" and self._configuration is not None
             )

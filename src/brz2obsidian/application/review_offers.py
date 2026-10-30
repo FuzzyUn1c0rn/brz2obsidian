@@ -89,10 +89,19 @@ def review_plan_choice_offers(plan):
             if change.path != change.target_path:
                 disclosure += "\nDeleted path: " + change.path
         change = changes.get(row.change_id)
+        selected_choice = selected.choice if selected else None
+        decision_id = selected.decision_id if selected else None
+        if change is not None and row.domain == "rename":
+            selected_choice = {
+                "accepted": "source_path", "declined": "keep_path",
+            }.get(change.rename_review.status)
+            decision_id = (
+                change.rename_review.decision_id if selected_choice is not None else None
+            )
         if (
             change is not None
             and change.rename_review is not None
-            and change.rename_review.status != "accepted"
+            and (change.rename_review.status != "accepted" or row.domain == "rename")
         ):
             rename = change.rename_review
             disclosure = "\n".join(
@@ -112,13 +121,13 @@ def review_plan_choice_offers(plan):
                 choices=row.enabled_choices,
                 unavailable_choices=tuple(a for a in row.availability if not a.enabled),
                 assumptions_digest=requirement_digest(row),
-                selected=selected.choice if selected else None,
-                decision_id=selected.decision_id if selected else None,
+                selected=selected_choice,
+                decision_id=decision_id,
                 disclosure=disclosure[:2048],
                 policy=policy,
                 detail_count=count,
                 detail_omitted=len(disclosure) > 2048,
-                reference_review=row.change_id in reference_changes,
+                reference_review=row.change_id in reference_changes and row.domain != "rename",
             )
         )
     return tuple(result)

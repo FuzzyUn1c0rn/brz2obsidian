@@ -155,7 +155,15 @@ def test_restoration_actions_identify_distinct_destinations_through_closed_worke
             ),
         )
         QTest.qWait(60)
-        offers = next(r.offers for r in reversed(transport.replies) if r.offers)
+        all_offers = next(r.offers for r in reversed(transport.replies) if r.offers)
+        renames = [row for row in all_offers if row.domain == "rename"]
+        assert len(renames) == 1 and renames[0].selected == "source_path"
+        assert renames[0].disclosure == (
+            "Current path: Deleted/Native category.md\n"
+            "Proposed source path: Categories/Native category.md"
+        )
+        assert len({row.requirement_id for row in all_offers}) == len(all_offers)
+        offers = tuple(row for row in all_offers if row.domain == "restoration")
         assert [r.domain for r in offers] == ["restoration", "restoration"]
         assert all(
             r.selected is None
@@ -168,20 +176,17 @@ def test_restoration_actions_identify_distinct_destinations_through_closed_worke
         titles = [
             next(w for w in labels if w.text() == f"Restoration choice {n}")
             for n in (1, 2)
-        ]
+        ] + [next(w for w in labels if w.text() == "Rename choice 3")]
         positions = [w.mapTo(window.workbench.workspace, QPoint()).y() for w in titles]
-        assert positions[1] > positions[0]
+        assert positions[2] > positions[1] > positions[0]
         blocks = [
             "\n".join(
                 w.text()
                 for w in labels
                 if (
                     w.mapTo(window.workbench.workspace, QPoint()).y() >= positions[i]
-                    and (
-                        i == 1
-                        or w.mapTo(window.workbench.workspace, QPoint()).y()
-                        < positions[1]
-                    )
+                    and w.mapTo(window.workbench.workspace, QPoint()).y()
+                    < positions[i + 1]
                 )
             )
             for i in range(2)
@@ -221,7 +226,9 @@ def test_restoration_actions_identify_distinct_destinations_through_closed_worke
                 )
             ),
         )
-        selected = next(r.offers for r in reversed(transport.replies) if r.offers)
+        all_selected = next(r.offers for r in reversed(transport.replies) if r.offers)
+        assert next(row for row in all_selected if row.domain == "rename").selected == "source_path"
+        selected = tuple(row for row in all_selected if row.domain == "restoration")
         assert (
             selected[0].selected is None
             and selected[1].selected == "decline_restoration"

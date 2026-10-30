@@ -12,8 +12,8 @@ from .review_choices import (
     review_plan_attachment_reference_page,
     review_plan_attachment_references,
 )
+from .review_offers import review_plan_choice_offers
 from .update_context_contracts import (
-    UpdateChoiceOffer,
     UpdateContextBinding,
     UpdateContextResult,
     UpdateEditHandle,
@@ -279,34 +279,9 @@ class UpdateContext:
             if page.status == "available" and self._kind == "format_transition"
             else None,
             offers=tuple(
-                UpdateChoiceOffer(
-                    requirement_id=row.requirement_id,
-                    change_id=row.change_id,
-                    domain=row.domain,
-                    choices=row.enabled_choices,
-                    unavailable_choices=tuple(
-                        choice for choice in row.availability if not choice.enabled
-                    ),
-                    assumptions_digest=requirement_digest(row),
-                    selected=next(
-                        (
-                            a.choice
-                            for a in self._preparation.review.approvals
-                            if a.change_id == row.change_id and a.domain == row.domain
-                        ),
-                        None,
-                    ),
-                    decision_id=next(
-                        (
-                            a.decision_id
-                            for a in self._preparation.review.approvals
-                            if a.change_id == row.change_id and a.domain == row.domain
-                        ),
-                        None,
-                    ),
-                )
+                row
                 for row in (
-                    inspect_review_choices(self._preparation.review)
+                    review_plan_choice_offers(self._preparation.review)
                     if page.status == "available"
                     else ()
                 )
