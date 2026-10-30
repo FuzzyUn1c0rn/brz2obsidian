@@ -82,28 +82,44 @@ def test_binary_output_details_page_actual_alternatives_without_references():
 
 @pytest.mark.parametrize("state", ("offered", "declined"))
 def test_bound_rename_alternatives_identify_current_and_source_before_acceptance(
-    tmp_path, state,
+    tmp_path,
+    state,
 ):
-    facts = request(current=b"Authored current body.\n", incoming=b"Changed source body.\n")
-    moved = inventory_item(
-        "moved-opening", "entry:opening", "Authored/Opening.md", b"Authored current body.\n"
+    facts = request(
+        current=b"Authored current body.\n", incoming=b"Changed source body.\n"
     )
-    facts = with_review_links(facts.model_copy(update={
-        "subjects": (facts.subjects[0].model_copy(update={"current": moved.current}),),
-        "identity_inventory": (moved,),
-    }))
+    moved = inventory_item(
+        "moved-opening",
+        "entry:opening",
+        "Authored/Opening.md",
+        b"Authored current body.\n",
+    )
+    facts = with_review_links(
+        facts.model_copy(
+            update={
+                "subjects": (
+                    facts.subjects[0].model_copy(update={"current": moved.current}),
+                ),
+                "identity_inventory": (moved,),
+            }
+        )
+    )
     vault = tmp_path / "vault"
     vault.mkdir()
     prepared = preparation(facts).model_copy(update={"vault": str(vault)})
     if state == "declined":
         kept = Operations().resolve_update(
-            prepared, action(prepared.review, domain="rename", choice="keep_path"),
+            prepared,
+            action(prepared.review, domain="rename", choice="keep_path"),
         )
         assert kept.code == "accepted"
         prepared = kept.preparation
     (change,) = prepared.review.proposal.changes
     assert change.rename_review.status == state
-    assert (change.path, change.target_path) == ("Authored/Opening.md", "Authored/Opening.md")
+    assert (change.path, change.target_path) == (
+        "Authored/Opening.md",
+        "Authored/Opening.md",
+    )
     assert change.rename_review.source_path == "Notes/Opening.md"
     original = prepared.model_dump_json()
 
@@ -112,37 +128,64 @@ def test_bound_rename_alternatives_identify_current_and_source_before_acceptance
         def prepare_update(self, path, source, **kwargs):
             assert path == str(vault)
             return UpdateResult(
-                status="unresolved", code="prepared", preparation=prepared,
-                changes=1, unresolved=1, history_retained=True,
+                status="unresolved",
+                code="prepared",
+                preparation=prepared,
+                changes=1,
+                unresolved=1,
+                history_retained=True,
                 checkpoint_commit=prepared.locator.commit,
                 next_actions=("resolve_update", "save_update"),
             )
 
         def read_checkpoint(self, path, **kwargs):
             return CheckpointRead(
-                schema_id="brz2obsidian.checkpoint-read", schema_version=1,
-                status="valid", code="valid", locator=prepared.locator,
-                manifest=None, review=None, message="Controlled retained checkpoint",
+                schema_id="brz2obsidian.checkpoint-read",
+                schema_version=1,
+                status="valid",
+                code="valid",
+                locator=prepared.locator,
+                manifest=None,
+                review=None,
+                message="Controlled retained checkpoint",
             )
 
     context = UpdateContext(operations=NativeInputs())
-    opened = worker_context_call(context, {
-        "command": "prepare", "kind": "source_update", "vault": str(vault),
-        "source": str(tmp_path / "incoming.brz"),
-        "selection_id": "11111111-1111-4111-8111-111111111111",
-    })
-    result = worker_context_call(context, {
-        "command": "choices", "binding": opened.binding, "offset": 0, "limit": 1,
-    })
+    opened = worker_context_call(
+        context,
+        {
+            "command": "prepare",
+            "kind": "source_update",
+            "vault": str(vault),
+            "source": str(tmp_path / "incoming.brz"),
+            "selection_id": "11111111-1111-4111-8111-111111111111",
+        },
+    )
+    result = worker_context_call(
+        context,
+        {
+            "command": "choices",
+            "binding": opened.binding,
+            "offset": 0,
+            "limit": 1,
+        },
+    )
     assert result.status == "available" and result.binding == opened.binding
     (offer,) = result.offers
     # Optional rename uses the actual primary text action before/after declining;
     # an unaccepted target_path would name the current file twice.
     assert offer.domain == "text" and offer.choices == ("current", "incoming", "edited")
-    assert offer.disclosure == "Current path: Authored/Opening.md\nProposed source path: Notes/Opening.md"
+    assert (
+        offer.disclosure
+        == "Current path: Authored/Opening.md\nProposed source path: Notes/Opening.md"
+    )
     assert not offer.detail_omitted and offer.selected is None
-    assert (choice_offers(prepared)[0].assumptions_digest, choice_offers(prepared)[0].disclosure) == (
-        offer.assumptions_digest, offer.disclosure,
+    assert (
+        choice_offers(prepared)[0].assumptions_digest,
+        choice_offers(prepared)[0].disclosure,
+    ) == (
+        offer.assumptions_digest,
+        offer.disclosure,
     )
     assert prepared.model_dump_json() == original and not prepared.review.ready
     assert list(vault.iterdir()) == []

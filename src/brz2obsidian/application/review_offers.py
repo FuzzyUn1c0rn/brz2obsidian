@@ -96,11 +96,13 @@ def review_plan_choice_offers(plan):
         ):
             rename = change.rename_review
             disclosure = "\n".join(
-                text for text in (
+                text
+                for text in (
                     disclosure,
                     "Current path: " + rename.current_path,
                     "Proposed source path: " + rename.source_path,
-                ) if text
+                )
+                if text
             )
         result.append(
             UpdateChoiceOffer(
