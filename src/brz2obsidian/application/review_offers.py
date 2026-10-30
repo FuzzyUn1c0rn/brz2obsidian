@@ -93,10 +93,13 @@ def review_plan_choice_offers(plan):
         decision_id = selected.decision_id if selected else None
         if change is not None and row.domain == "rename":
             selected_choice = {
-                "accepted": "source_path", "declined": "keep_path",
+                "accepted": "source_path",
+                "declined": "keep_path",
             }.get(change.rename_review.status)
             decision_id = (
-                change.rename_review.decision_id if selected_choice is not None else None
+                change.rename_review.decision_id
+                if selected_choice is not None
+                else None
             )
         if (
             change is not None
@@ -127,7 +130,8 @@ def review_plan_choice_offers(plan):
                 policy=policy,
                 detail_count=count,
                 detail_omitted=len(disclosure) > 2048,
-                reference_review=row.change_id in reference_changes and row.domain != "rename",
+                reference_review=row.change_id in reference_changes
+                and row.domain != "rename",
             )
         )
     return tuple(result)

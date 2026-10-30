@@ -1522,7 +1522,9 @@ class UpdateWorkbench(QWidget):
             )
         labels = {"keep_path": "Keep current path", "source_path": "Use incoming path"}
         if offer.selected is not None:
-            self._body.addWidget(_label("Chosen path: " + labels[offer.selected], "muted"))
+            self._body.addWidget(
+                _label("Chosen path: " + labels[offer.selected], "muted")
+            )
         for choice, text in labels.items():
             button = QPushButton(text)
             button.setAccessibleName(text + " for " + current_path)
@@ -1531,15 +1533,22 @@ class UpdateWorkbench(QWidget):
             if choice in offer.choices:
                 binding = self._state.binding
                 button.clicked.connect(
-                    lambda checked=False, b=binding, o=offer, c=choice: self._choose(b, o, c)
+                    lambda checked=False, b=binding, o=offer, c=choice: self._choose(
+                        b, o, c
+                    )
                 )
                 self._choice_buttons.append(button)
             self._body.addWidget(button)
         for unavailable in offer.unavailable_choices:
-            self._body.addWidget(_label(
-                "Unavailable: " + labels[unavailable.choice] + " — "
-                + ", ".join(r.replace("_", " ") for r in unavailable.reasons), "muted",
-            ))
+            self._body.addWidget(
+                _label(
+                    "Unavailable: "
+                    + labels[unavailable.choice]
+                    + " — "
+                    + ", ".join(r.replace("_", " ") for r in unavailable.reasons),
+                    "muted",
+                )
+            )
 
     def _render_offers(self):
         self._body.addWidget(_label("Review choices", "sectionTitle"))
@@ -1594,7 +1603,11 @@ class UpdateWorkbench(QWidget):
                     )
                 )
             if offer.selected is not None:
-                selected = labels[offer.selected] if offer.domain == "rename" else offer.selected
+                selected = (
+                    labels[offer.selected]
+                    if offer.domain == "rename"
+                    else offer.selected
+                )
                 self._body.addWidget(_label("Chosen: " + selected, "muted"))
             scoped_configuration = (
                 offer.domain == "configuration" and self._configuration is not None

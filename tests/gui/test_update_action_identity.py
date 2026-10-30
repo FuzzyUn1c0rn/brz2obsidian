@@ -227,7 +227,10 @@ def test_restoration_actions_identify_distinct_destinations_through_closed_worke
             ),
         )
         all_selected = next(r.offers for r in reversed(transport.replies) if r.offers)
-        assert next(row for row in all_selected if row.domain == "rename").selected == "source_path"
+        assert (
+            next(row for row in all_selected if row.domain == "rename").selected
+            == "source_path"
+        )
         selected = tuple(row for row in all_selected if row.domain == "restoration")
         assert (
             selected[0].selected is None

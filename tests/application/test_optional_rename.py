@@ -14,16 +14,20 @@ from tests.reconciliation.test_resolution import action, preflight
 
 def moved_attachment_facts():
     facts = attachment_request()
-    current = facts.subjects[0].current.model_copy(
-        update={"path": "Authored/data.bin"}
-    )
-    slot = facts.subjects[0].attachment.allocation_candidates[0].model_copy(
-        update={
-            "path": "Authored/data (incoming-ba7816bf).bin",
-            "target": facts.subjects[0].attachment.allocation_candidates[0].target.model_copy(
-                update={"normalized_path": "authored/data (incoming-ba7816bf).bin"}
-            ),
-        }
+    current = facts.subjects[0].current.model_copy(update={"path": "Authored/data.bin"})
+    slot = (
+        facts.subjects[0]
+        .attachment.allocation_candidates[0]
+        .model_copy(
+            update={
+                "path": "Authored/data (incoming-ba7816bf).bin",
+                "target": facts.subjects[0]
+                .attachment.allocation_candidates[0]
+                .target.model_copy(
+                    update={"normalized_path": "authored/data (incoming-ba7816bf).bin"}
+                ),
+            }
+        )
     )
     subject = facts.subjects[0].model_copy(
         update={
@@ -63,11 +67,15 @@ def test_public_binary_optional_rename_is_not_an_attachment_selection():
     assert not kept.ready and kept.unresolved == 1
     assert kept.preparation.review.approvals == ()
     assert kept.preparation.review.actions[-1].attachment_candidate is None
-    assert kept.preparation.review.proposal.changes[0].target_path == "Authored/data.bin"
+    assert (
+        kept.preparation.review.proposal.changes[0].target_path == "Authored/data.bin"
+    )
     offers = choice_offers(kept.preparation)
     assert next(row for row in offers if row.domain == "rename").selected == "keep_path"
     assert next(row for row in offers if row.domain == "attachment").selected is None
-    assert next(row for row in offers if row.domain == "rename").unavailable_choices == ()
+    assert (
+        next(row for row in offers if row.domain == "rename").unavailable_choices == ()
+    )
     assert not next(row for row in offers if row.domain == "rename").reference_review
     assert next(row for row in offers if row.domain == "attachment").reference_review
 
@@ -78,10 +86,12 @@ def test_colliding_optional_source_path_stays_disabled_after_keep_replacement():
         "other", "entry:other", "Notes/Opening.md", b"Unrelated existing bytes.\n"
     )
     # Interpret the complete actual collision inventory through the public fixture.
-    facts = facts.model_copy(update={
-        "identity_inventory": facts.identity_inventory + (collision,),
-        "link_context": None,
-    })
+    facts = facts.model_copy(
+        update={
+            "identity_inventory": facts.identity_inventory + (collision,),
+            "link_context": None,
+        }
+    )
     from tests.reconciliation.test_resolution import with_review_links
 
     facts = with_review_links(facts)
@@ -116,6 +126,8 @@ def test_colliding_optional_source_path_stays_disabled_after_keep_replacement():
             )
             assert kept.code == "accepted", kept.code
             prepared = kept.preparation
-            assert prepared.review.proposal.changes[0].rename_review.status == "declined"
+            assert (
+                prepared.review.proposal.changes[0].rename_review.status == "declined"
+            )
     assert prepared.review.proposal.changes[0].target_path == "Authored/Opening.md"
     assert len(prepared.review.requirements) == 1 and not prepared.review.ready

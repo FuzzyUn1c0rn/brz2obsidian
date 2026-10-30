@@ -28,7 +28,8 @@ pytestmark = pytest.mark.gui
 
 @pytest.mark.parametrize("scenario", ("conflict", "compatible", "omitted"))
 def test_optional_path_replacements_preserve_primary_controls_and_chosen_caption(
-    tmp_path, scenario,
+    tmp_path,
+    scenario,
 ):
     from brz2obsidian_ui.window import MainWindow
 
@@ -41,25 +42,34 @@ def test_optional_path_replacements_preserve_primary_controls_and_chosen_caption
     facts = moved_facts(conflict=conflict)
     if scenario == "omitted":
         destination = "Notes/" + "segment/" * 280 + "Opening.md"
-        subject = facts.subjects[0].model_copy(update={
-            "path": destination,
-            "source_target": facts.subjects[0].source_target.model_copy(
-                update={"normalized_path": destination.casefold()}
-            ),
-        })
-        facts = with_review_links(facts.model_copy(update={
-            "subjects": (subject,), "link_context": None,
-        }))
-    prepared = preparation(facts).model_copy(
-        update={"vault": str(vault)}
-    )
+        subject = facts.subjects[0].model_copy(
+            update={
+                "path": destination,
+                "source_target": facts.subjects[0].source_target.model_copy(
+                    update={"normalized_path": destination.casefold()}
+                ),
+            }
+        )
+        facts = with_review_links(
+            facts.model_copy(
+                update={
+                    "subjects": (subject,),
+                    "link_context": None,
+                }
+            )
+        )
+    prepared = preparation(facts).model_copy(update={"vault": str(vault)})
 
     class Inputs(Operations):
         def prepare_update(self, path, incoming, **kwargs):
             assert (path, incoming) == (str(vault), str(source))
             return UpdateResult(
-                status="unresolved", code="prepared", preparation=prepared,
-                changes=1, unresolved=1, history_retained=True,
+                status="unresolved",
+                code="prepared",
+                preparation=prepared,
+                changes=1,
+                unresolved=1,
+                history_retained=True,
                 checkpoint_commit=prepared.locator.commit,
                 next_actions=("resolve_update", "save_update"),
             )
@@ -67,9 +77,14 @@ def test_optional_path_replacements_preserve_primary_controls_and_chosen_caption
         def read_checkpoint(self, path, **kwargs):
             assert path == str(vault)
             return CheckpointRead(
-                schema_id="brz2obsidian.checkpoint-read", schema_version=1,
-                status="valid", code="controlled_current", locator=prepared.locator,
-                manifest=None, review=None, message="Controlled current checkpoint",
+                schema_id="brz2obsidian.checkpoint-read",
+                schema_version=1,
+                status="valid",
+                code="controlled_current",
+                locator=prepared.locator,
+                manifest=None,
+                review=None,
+                message="Controlled current checkpoint",
             )
 
         def capture_checkpoint(self, *args, **kwargs):
@@ -97,11 +112,22 @@ def test_optional_path_replacements_preserve_primary_controls_and_chosen_caption
     try:
         selection = str(uuid4())
         window.runner.select_update(str(vault), selection_id=selection)
-        window.runner.submit_update({
-            "command": "prepare", "kind": "source_update", "source": str(source),
-            "vault": str(vault), "selection_id": selection,
-        })
-        until(app, lambda: window.runner.session.update_snapshot.binding is not None and not window.workbench.busy)
+        window.runner.submit_update(
+            {
+                "command": "prepare",
+                "kind": "source_update",
+                "source": str(source),
+                "vault": str(vault),
+                "selection_id": selection,
+            }
+        )
+        until(
+            app,
+            lambda: (
+                window.runner.session.update_snapshot.binding is not None
+                and not window.workbench.busy
+            ),
+        )
         pane = "Conflicts" if conflict else "Compatible changes"
         controls.select(pane)
         until(
@@ -132,13 +158,21 @@ def test_optional_path_replacements_preserve_primary_controls_and_chosen_caption
         # The same change has two canonical offered domains. The optional row
         # must not overwrite its primary comparison actions or chosen caption.
         assert controls.button("Keep vault version for Authored/Opening.md") is not None
-        assert controls.button("Use incoming version for Authored/Opening.md") is not None
+        assert (
+            controls.button("Use incoming version for Authored/Opening.md") is not None
+        )
         assert controls.button("Edit result for Authored/Opening.md") is not None
         if scenario == "omitted":
-            rename = next(row for row in latest_comparison().offers if row.domain == "rename")
+            rename = next(
+                row for row in latest_comparison().offers if row.domain == "rename"
+            )
             assert rename.detail_omitted and len(rename.disclosure) == 2048
-            assert rename.disclosure.startswith("Current path: Authored/Opening.md\nProposed source path: Notes/segment/")
-            assert "Opening.md" not in rename.disclosure.split("Proposed source path: ")[1]
+            assert rename.disclosure.startswith(
+                "Current path: Authored/Opening.md\nProposed source path: Notes/segment/"
+            )
+            assert (
+                "Opening.md" not in rename.disclosure.split("Proposed source path: ")[1]
+            )
             assert rename.disclosure in labels()
             assert "Conflicts" in labels() and "Source path" in labels()
             assert "Review choices" not in labels()
@@ -151,13 +185,36 @@ def test_optional_path_replacements_preserve_primary_controls_and_chosen_caption
         assert "Proposed source path: Notes/Opening.md" in "\n".join(labels())
         assert not window.runner.session.update_snapshot.ready
         for button, selected, caption, target in (
-            ("Keep current path for Authored/Opening.md", "keep_path", "Keep current path", "Authored/Opening.md"),
-            ("Use incoming path for Authored/Opening.md", "source_path", "Use incoming path", "Notes/Opening.md"),
-            ("Keep current path for Notes/Opening.md", "keep_path", "Keep current path", "Authored/Opening.md"),
+            (
+                "Keep current path for Authored/Opening.md",
+                "keep_path",
+                "Keep current path",
+                "Authored/Opening.md",
+            ),
+            (
+                "Use incoming path for Authored/Opening.md",
+                "source_path",
+                "Use incoming path",
+                "Notes/Opening.md",
+            ),
+            (
+                "Keep current path for Notes/Opening.md",
+                "keep_path",
+                "Keep current path",
+                "Authored/Opening.md",
+            ),
         ):
             before = window.runner.session.update_snapshot.binding
             controls.click(button)
-            until(app, lambda: not window.workbench.busy and window.runner.session.update_snapshot.binding.revision > before.revision and "Chosen path: " + caption in labels())
+            until(
+                app,
+                lambda before=before, caption=caption: (
+                    not window.workbench.busy
+                    and window.runner.session.update_snapshot.binding.revision
+                    > before.revision
+                    and "Chosen path: " + caption in labels()
+                ),
+            )
             reply = latest_comparison()
             rename = next(row for row in reply.offers if row.domain == "rename")
             primary = next(row for row in reply.offers if row.domain == "text")
@@ -176,13 +233,30 @@ def test_optional_path_replacements_preserve_primary_controls_and_chosen_caption
             until(app, lambda: not window.workbench.busy)
             controls.click("Approve compatible group")
             expected, primary_choice = INCOMING, "approve"
-        until(app, lambda: window.runner.session.update_snapshot.ready and not window.workbench.busy)
+        until(
+            app,
+            lambda: (
+                window.runner.session.update_snapshot.ready
+                and not window.workbench.busy
+            ),
+        )
         controls.select(pane)
-        until(app, lambda: not window.workbench.busy and "Chosen: " + primary_choice in labels())
+        until(
+            app,
+            lambda: (
+                not window.workbench.busy and "Chosen: " + primary_choice in labels()
+            ),
+        )
         assert "Chosen path: Keep current path" in labels()
         reply = latest_comparison()
-        assert next(row for row in reply.offers if row.domain == "text").selected == primary_choice
-        assert next(row for row in reply.offers if row.domain == "rename").selected == "keep_path"
+        assert (
+            next(row for row in reply.offers if row.domain == "text").selected
+            == primary_choice
+        )
+        assert (
+            next(row for row in reply.offers if row.domain == "rename").selected
+            == "keep_path"
+        )
         (row,) = reply.page.items
         assert row.current_path == "Authored/Opening.md" and row.result == expected
         assert window.runner.session.update_snapshot.unresolved == 0

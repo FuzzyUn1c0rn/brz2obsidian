@@ -179,7 +179,11 @@ def _choice_offer(change, requirement, *, source_path_safe=True):
     availability = []
     for choice in choices:
         reasons = []
-        if requirement.domain == "rename" and choice == "source_path" and not source_path_safe:
+        if (
+            requirement.domain == "rename"
+            and choice == "source_path"
+            and not source_path_safe
+        ):
             reasons.append("unsafe_producer_choice")
         if change is not None and _format_choice_unavailable(
             change, requirement.domain, choice
@@ -210,9 +214,11 @@ def inspect_review_choices(plan):
     approved = {(a.change_id, a.domain) for a in plan.approvals}
     rows = tuple(
         _choice_offer(
-            change, row,
+            change,
+            row,
             source_path_safe=rename_source_path_safe(plan.producer_facts, change)
-            if row.domain == "rename" else True,
+            if row.domain == "rename"
+            else True,
         )
         for change, row in zip(
             plan.proposal.changes,

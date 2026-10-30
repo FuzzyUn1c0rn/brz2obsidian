@@ -164,13 +164,18 @@ def rename_source_path_safe(facts, change):
     """Use the producer's target predicate for canonical rename availability."""
     items = tuple(sorted(facts.identity_inventory, key=lambda item: item.entry_id))
     selected = next(
-        (item for item in items if item.entry_id == change.identity_review.selected_entry_id),
+        (
+            item
+            for item in items
+            if item.entry_id == change.identity_review.selected_entry_id
+        ),
         None,
     )
     if selected is None:
         return False
     subject = next(
-        row for row in facts.subjects
+        row
+        for row in facts.subjects
         if (row.item_id, row.facet) == (change.item_id, change.facet)
     ).model_copy(update={"current": selected.current})
     return _rename_target_context(
