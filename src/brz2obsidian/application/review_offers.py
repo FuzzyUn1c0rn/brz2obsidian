@@ -82,6 +82,13 @@ def review_plan_choice_offers(plan):
             )
         elif row.domain == "attachment":
             count = len(_attachment_outputs(plan, row))
+        elif row.domain == "restoration":
+            change = next(
+                c for c in plan.proposal.changes if c.change_id == row.change_id
+            )
+            disclosure = "Restore to: " + change.target_path
+            if change.path != change.target_path:
+                disclosure += "\nDeleted path: " + change.path
         result.append(
             UpdateChoiceOffer(
                 requirement_id=row.requirement_id,
