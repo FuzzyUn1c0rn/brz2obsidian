@@ -545,6 +545,11 @@ class UpdateWorkbench(QWidget):
             return
         if binding is not None and binding != state.binding:
             return
+        # Busy-state focus changes can move the viewport before present().
+        self._read_position = (
+            (self.queue.currentRow(), self._binding_key),
+            self.scroll.verticalScrollBar().value(),
+        )
         self._pending_read = state.revision
         self._read_request = {"command": command, **arguments}
         if command == "choices":
@@ -558,6 +563,7 @@ class UpdateWorkbench(QWidget):
             else command
         )
         self._submit({"command": wire_command, "binding": state.binding, **arguments})
+        self._after_layout()
 
     def _read_button(self, title, command, *, name=None, **arguments):
         button = QPushButton(title)
