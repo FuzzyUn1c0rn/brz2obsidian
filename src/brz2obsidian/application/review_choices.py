@@ -325,6 +325,7 @@ def review_plan_choice_action(
                     existence="present",
                     memberships=row.memberships,
                     membership_targets=context.current_targets,
+                    source_path=document.source_path,
                 )
                 if (
                     document := next(

@@ -729,6 +729,7 @@ def _text_choice(plan, change, choice, edited):
             target_id=own.target_id,
             existence="present",
             membership_targets=targets,
+            source_path=change.target_path,
         )
         states = tuple(s for s in states if s.target_id != own.target_id) + (observed,)
     return inspect_text_candidate(

@@ -184,7 +184,7 @@ def _membership_targets(records, inventory=()):
     return tuple(result)
 
 
-def link_state(content, *, target_id, existence, membership_targets=()):
+def link_state(content, *, target_id, existence, membership_targets=(), source_path=None):
     document = (
         interpret_structure(
             content, output_format=7, membership_targets=membership_targets
@@ -205,6 +205,7 @@ def link_state(content, *, target_id, existence, membership_targets=()):
         existence=existence,
         memberships=memberships,
         membership_targets=membership_targets,
+        source_path=source_path,
     )
 
 
@@ -576,6 +577,7 @@ def _link_context(facts, baseline_record, incoming_record, physical_inventory):
                 target_id=actual.target_id,
                 existence="present" if row.current.content is not None else "missing",
                 membership_targets=current_memberships,
+                source_path=actual.canonical_path,
             )
         )
         incoming_states.append(
@@ -584,6 +586,7 @@ def _link_context(facts, baseline_record, incoming_record, physical_inventory):
                 target_id=future.target_id,
                 existence="present" if received is not None else "missing",
                 membership_targets=incoming_memberships,
+                source_path=future.canonical_path,
             )
         )
         paths.append((row, subject, actual, received))

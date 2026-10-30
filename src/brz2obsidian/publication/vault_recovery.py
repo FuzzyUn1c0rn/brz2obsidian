@@ -351,6 +351,7 @@ def _review_observation(
                         if observed_target.existence == "absent"
                         else "present",
                         memberships=(),
+                        source_path=target.canonical_path,
                     )
                 )
         new_documents = []
@@ -439,6 +440,7 @@ def _review_observation(
                     target_id=retained_target.target_id,
                     existence="present",
                     memberships=(),
+                    source_path=path,
                 )
                 parsed = interpret_links(
                     observed_document.content,
@@ -525,6 +527,7 @@ def _review_observation(
                 target_id=target_id,
                 existence="present",
                 memberships=(),
+                source_path=path,
             )
             parsed = interpret_links(
                 observed_document.content,
@@ -914,6 +917,7 @@ def _restore_link_context(original, facts, before, affected, git):
                     target_id=target.target_id,
                     existence="missing" if content is None else "present",
                     memberships=(),
+                    source_path=path,
                 )
             )
         else:
@@ -1183,6 +1187,7 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
                     target_id=reference.target_id,
                     existence="missing" if current[path].content is None else "present",
                     memberships=(),
+                    source_path=path,
                 )
             )
         if reference.target_id not in {target.target_id for target in incoming_refs}:
@@ -1194,6 +1199,7 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
                     target_id=reference.target_id,
                     existence="missing" if target is None else "present",
                     memberships=(),
+                    source_path=path,
                 )
             )
         context = context.model_copy(

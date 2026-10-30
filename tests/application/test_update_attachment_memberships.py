@@ -32,7 +32,7 @@ EDIT_PREFIX = b'---\nsource_collection_id: "folio:collection"\nsource_item_id: "
 EDITED = EDIT_PREFIX + b"Independently accepted Edited writing.\r\n"
 
 
-def membership_preparation(choice):
+def membership_preparation(choice, *, include_base=False):
     owner = (
         b"Owner without resource references.\r\n"
         if choice == "incoming"
@@ -71,6 +71,35 @@ def membership_preparation(choice):
             "support-template", "unused", SUPPORT, SUPPORT_BYTES, state="missing"
         ),
     )
+    if include_base:
+        path = "Templates/Bases/Members.base"
+        raw = b"views:\n  - type: table\n    name: Members\n"
+        entry = inventory_item("members-base", "support:members-base", path, raw)
+        base = target_for_links("support:members-base", path).model_copy(
+            update={"identity": entry.identity}
+        )
+        state = interpret_link_target(
+            ExactContent(data=raw),
+            target_id=base.target_id,
+            existence="present",
+            memberships=(),
+            source_path=path,
+        )
+        document = interpret_links(
+            ExactContent(data=raw),
+            document_id=base.target_id,
+            source_path=path,
+            path_mode="vault",
+            targets=(base,),
+            target_facts=(state,),
+            inventory="complete",
+        )
+        targets += (base,)
+        states += (state,)
+        incoming_states += (state,)
+        documents += (document,)
+        incoming_documents += (document,)
+        inventory += (entry,)
     if choice != "remove":
         independent = request(
             original=EDIT_PREFIX + b"Original writing.\n",
@@ -329,3 +358,31 @@ def test_inconsistent_membership_registry_is_rejected_before_attachment_admissio
             memberships=("format:7:categories",),
             membership_targets=(wrong,),
         )
+
+
+def test_public_binary_choice_retains_exact_base_named_view_facts():
+    prepared, _ = membership_preparation("incoming", include_base=True)
+    offer = next(
+        row for row in inspect_review_choices(prepared.review) if row.domain == "attachment"
+    )
+    result = Operations().resolve_update_choice(
+        prepared,
+        requirement_id=offer.requirement_id,
+        choice="incoming",
+        assumptions_digest=requirement_digest(offer),
+    )
+    assert result.code == "accepted" and result.ready, result.code
+    attachment = next(
+        row for row in result.preparation.review.approvals if row.domain == "attachment"
+    )
+    state = next(
+        row
+        for row in attachment.attachment_candidate.target_facts
+        if row.target_id == "support:members-base"
+    )
+    assert state.content.data == b"views:\n  - type: table\n    name: Members\n"
+    assert [(a.fragment.value, a.raw_parts) for a in state.anchors] == [
+        ("Members", (b"Members",)),
+    ]
+    assert state.interpretation == "supported"
+    assert result.publication == "not_started" and result.application is None

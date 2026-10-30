@@ -132,3 +132,84 @@ def test_link_replacement_refuses_a_fragment_absent_from_the_selected_payload():
             targets=targets,
             target_facts=states,
         )
+
+
+def test_base_named_view_fragments_bind_exact_yaml_names():
+    raw = (
+        "# É context\nviews:\n  - type: table\n    name: Members\n"
+        "  - type: cards\n    name: 'Gallery'\n"
+    ).encode()
+    target = target_for_links("base", "Templates/Bases/Native.base")
+    state = interpret_link_target(
+        ExactContent(data=raw),
+        target_id="base",
+        existence="present",
+        memberships=(),
+        source_path="Templates/Bases/Native.base",
+    )
+    assert [(a.fragment.kind, a.fragment.value, a.raw_parts) for a in state.anchors] == [
+        ("heading", "Members", (b"Members",)),
+        ("heading", "Gallery", (b"Gallery",)),
+    ]
+    assert [(a.spans[0].start, a.spans[0].end) for a in state.anchors] == [
+        (46, 53),
+        (81, 88),
+    ]
+    document = interpret_links(
+        ExactContent(
+            data=b"![[Templates/Bases/Native.base#Members]]\n"
+            b"![[Templates/Bases/Native.base#Gallery]]\n"
+        ),
+        document_id="category",
+        source_path="Categories/Native.md",
+        path_mode="vault",
+        targets=(target,),
+        target_facts=(state,),
+        inventory="complete",
+    )
+    assert [
+        (o.meaning.status, o.meaning.path, o.meaning.fragment.value)
+        for o in document.occurrences
+    ] == [
+        ("resolved", "Templates/Bases/Native.base", "Members"),
+        ("resolved", "Templates/Bases/Native.base", "Gallery"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("path", "raw", "expected"),
+    (
+        ("Native.base", b"views:\n  - type: table\n    name: Other\n", "fragment_missing"),
+        (
+            "Native.base",
+            b"views:\n  - name: Members\n  - name: Members\n",
+            "fragment_ambiguous",
+        ),
+        ("Native.base", b"views: [\n", "unknown"),
+        ("Native.base", b"views:\n  - name: 42\n", "unknown"),
+        ("Native.base", b"views:\n  - name: Members\n    name: Other\n", "unknown"),
+        ("Native.base", b'views:\n  - name: "Memb\\u0065rs"\n', "unknown"),
+        ("Native.md", b"views:\n  - name: Members\n", "fragment_missing"),
+    ),
+)
+def test_base_named_view_fragments_refuse_unestablished_destinations(
+    path, raw, expected
+):
+    target = target_for_links("base", path)
+    state = interpret_link_target(
+        ExactContent(data=raw),
+        target_id="base",
+        existence="present",
+        memberships=(),
+        source_path=path,
+    )
+    document = interpret_links(
+        ExactContent(data=("![[" + path + "#Members]]").encode()),
+        document_id="category",
+        source_path="Categories/Native.md",
+        path_mode="vault",
+        targets=(target,),
+        target_facts=(state,),
+        inventory="complete",
+    )
+    assert document.occurrences[0].meaning.status == expected
