@@ -168,3 +168,95 @@ def test_restoration_actions_identify_distinct_destinations_through_closed_worke
         window.hide()
         window.deleteLater()
         app.processEvents()
+
+
+def test_omitted_action_identity_does_not_promise_missing_path_details(tmp_path):
+    from brz2obsidian_ui.window import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    source = tmp_path / "incoming.brz"
+    source.write_bytes(b"Controlled outer preparation input")
+    # A valid canonical path is deliberately longer than the existing disclosure
+    # cap. No physical file or OS path-limit claim is involved.
+    destination = "Categories/" + "segment/" * 280 + "Native category.md"
+    facts = facts_for(existence="absent", incoming=b"Changed source body.\n")
+    current = facts.subjects[0].current.model_copy(update={"path": destination})
+    target = IdentityTargetFacts(
+        normalized_path=destination.casefold(), containment="contained", status="safe"
+    )
+    subject = facts.subjects[0].model_copy(update={
+        "path": destination, "current": current, "source_target": target,
+    })
+    entry = facts.identity_inventory[0].model_copy(update={"current": current, "target": target})
+    prepared = preparation(with_review_links(with_subjects(facts, (subject,), (entry,)))).model_copy(
+        update={"vault": str(vault)}
+    )
+    assert prepared.review.proposal.changes[0].disposition == "restoration"
+
+    class NativeInputs(Operations):
+        def prepare_update(self, path, incoming, **kwargs):
+            assert (path, incoming) == (str(vault), str(source))
+            return UpdateResult(
+                status="unresolved", code="prepared", preparation=prepared,
+                changes=1, unresolved=1, history_retained=True,
+                checkpoint_commit=prepared.locator.commit,
+                next_actions=("resolve_update", "save_update"),
+            )
+
+        def read_checkpoint(self, path, **kwargs):
+            return CheckpointRead(
+                schema_id="brz2obsidian.checkpoint-read", schema_version=1,
+                status="valid", code="valid", locator=prepared.locator,
+                manifest=None, review=None, message="Controlled retained checkpoint",
+            )
+
+    transport = ReviewWorkerTransport(NativeInputs())
+    window = MainWindow(supervisor=transport)
+    window.resize(644, 852)
+    window.show()
+    controls = ReviewControls(window, app)
+    try:
+        selection = str(uuid4())
+        window.runner.select_update(str(vault), selection_id=selection)
+        window.runner.submit_update({
+            "command": "prepare", "kind": "source_update", "source": str(source),
+            "vault": str(vault), "selection_id": selection,
+        })
+        until(app, lambda: (
+            window.runner.session.update_snapshot.binding is not None
+            and not window.workbench.busy
+        ))
+        controls.select("Other choices")
+        until(app, lambda: controls.button("Review details for restoration choice 1") is not None)
+        (offer,) = next(r.offers for r in reversed(transport.replies) if r.offers)
+        assert offer.detail_omitted and len(offer.disclosure) == 2048
+        assert offer.disclosure.startswith("Restore to: Categories/segment/")
+        assert "Native category.md" not in offer.disclosure
+        assert any(w.isVisible() and w.text() == offer.disclosure for w in window.findChildren(QLabel))
+        binding = window.runner.session.update_snapshot.binding
+        previous = window.runner.session.update_snapshot.reply
+        controls.click("Review details for restoration choice 1")
+        until(app, lambda: (
+            not window.workbench.busy
+            and window.runner.session.update_snapshot.reply is not previous
+            and any(w.isVisible() and w.text() == "No additional details for this choice." for w in window.findChildren(QLabel))
+        ))
+        details = window.runner.session.update_snapshot.reply
+        assert details.total_choice_details == 0 and details.choice_details == ()
+        messages = [w.text() for w in window.findChildren(QLabel) if w.isVisible()]
+        assert "No additional details for this choice." in messages
+        assert "Some disclosure was omitted from this bounded view." in messages
+        assert not any("review the bounded details" in text for text in messages)
+        state = window.runner.session.update_snapshot
+        assert state.binding == binding and state.unresolved == 1 and not state.ready
+        assert state.publication == "not_started" and offer.selected is None
+        assert all(c.command in ("prepare", "page", "choices", "choice_details") for c in transport.commands)
+        assert list(vault.iterdir()) == []
+    finally:
+        window.shutdown()
+        transport.close()
+        window.hide()
+        window.deleteLater()
+        app.processEvents()

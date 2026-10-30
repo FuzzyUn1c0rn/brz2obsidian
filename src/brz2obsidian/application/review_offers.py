@@ -40,6 +40,7 @@ def choice_offers(preparation):
 
 def review_plan_choice_offers(plan):
     result = []
+    changes = {row.change_id: row for row in plan.proposal.changes}
     reference_changes = {
         row.change_id
         for row in plan.proposal.changes
@@ -83,12 +84,24 @@ def review_plan_choice_offers(plan):
         elif row.domain == "attachment":
             count = len(_attachment_outputs(plan, row))
         elif row.domain == "restoration":
-            change = next(
-                c for c in plan.proposal.changes if c.change_id == row.change_id
-            )
+            change = changes[row.change_id]
             disclosure = "Restore to: " + change.target_path
             if change.path != change.target_path:
                 disclosure += "\nDeleted path: " + change.path
+        change = changes.get(row.change_id)
+        if (
+            change is not None
+            and change.rename_review is not None
+            and change.rename_review.status != "accepted"
+        ):
+            rename = change.rename_review
+            disclosure = "\n".join(
+                text for text in (
+                    disclosure,
+                    "Current path: " + rename.current_path,
+                    "Proposed source path: " + rename.source_path,
+                ) if text
+            )
         result.append(
             UpdateChoiceOffer(
                 requirement_id=row.requirement_id,

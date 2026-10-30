@@ -1550,7 +1550,7 @@ class UpdateWorkbench(QWidget):
             if offer.detail_omitted:
                 self._body.addWidget(
                     _label(
-                        "Some disclosure was omitted; review the bounded details.",
+                        "Some disclosure was omitted from this bounded view.",
                         "muted",
                     )
                 )
