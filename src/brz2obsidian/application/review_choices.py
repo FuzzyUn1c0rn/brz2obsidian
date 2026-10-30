@@ -234,7 +234,9 @@ def review_plan_choice_action(
         and change.attachment_review is not None
         and requirement.domain != "rename"
         and not (requirement.domain == "reversal" and choice == "current")
-        and not (requirement.domain == "restoration" and choice == "decline_restoration")
+        and not (
+            requirement.domain == "restoration" and choice == "decline_restoration"
+        )
     ):
         attachment_choice = (
             "incoming"

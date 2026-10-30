@@ -92,9 +92,7 @@ def test_public_binary_restoration_uses_offered_verbs(choice):
         assert [
             (row.target_id, row.path, row.content.data)
             for row in action.attachment_candidate.outputs
-        ] == [
-            ("subject:new-asset:asset", "Assets/new.bin", b"\x00new-source\xff")
-        ]
+        ] == [("subject:new-asset:asset", "Assets/new.bin", b"\x00new-source\xff")]
     else:
         assert approval.result is None and not approval.source_accepted
         assert approval.source_memory.choice == "decline_restoration"
@@ -103,7 +101,9 @@ def test_public_binary_restoration_uses_offered_verbs(choice):
         assert "Assets/new.bin" not in files
 
 
-def test_closed_binary_restoration_refuses_wrong_handles_then_replaces_decline(tmp_path):
+def test_closed_binary_restoration_refuses_wrong_handles_then_replaces_decline(
+    tmp_path,
+):
     from uuid import uuid4
 
     from brz2obsidian.application.checkpoint_contracts import CheckpointRead
@@ -121,17 +121,26 @@ def test_closed_binary_restoration_refuses_wrong_handles_then_replaces_decline(t
     class Inputs(Operations):
         def prepare_update(self, *args, **kwargs):
             return UpdateResult(
-                status="unresolved", code="prepared", preparation=prepared,
-                changes=len(prepared.review.proposal.changes), unresolved=1,
-                history_retained=True, checkpoint_commit=prepared.locator.commit,
+                status="unresolved",
+                code="prepared",
+                preparation=prepared,
+                changes=len(prepared.review.proposal.changes),
+                unresolved=1,
+                history_retained=True,
+                checkpoint_commit=prepared.locator.commit,
             )
 
         def read_checkpoint(self, path, **kwargs):
             assert path == str(vault)
             return CheckpointRead(
-                schema_id="brz2obsidian.checkpoint-read", schema_version=1,
-                status="valid", code="controlled_current", locator=prepared.locator,
-                manifest=None, review=None, message="Controlled current checkpoint",
+                schema_id="brz2obsidian.checkpoint-read",
+                schema_version=1,
+                status="valid",
+                code="controlled_current",
+                locator=prepared.locator,
+                manifest=None,
+                review=None,
+                message="Controlled current checkpoint",
             )
 
         def capture_checkpoint(self, *args, **kwargs):
@@ -141,77 +150,147 @@ def test_closed_binary_restoration_refuses_wrong_handles_then_replaces_decline(t
             raise AssertionError("Review must not publish automatically")
 
     producer = UpdateContext(operations=Inputs())
-    opened = worker_context_call(producer, {
-        "command": "prepare", "kind": "source_update", "vault": str(vault),
-        "source": str(tmp_path / "controlled.brz"), "selection_id": str(uuid4()),
-    })
+    opened = worker_context_call(
+        producer,
+        {
+            "command": "prepare",
+            "kind": "source_update",
+            "vault": str(vault),
+            "source": str(tmp_path / "controlled.brz"),
+            "selection_id": str(uuid4()),
+        },
+    )
     assert opened.binding is not None and not opened.ready and opened.unresolved == 1
-    before = worker_context_call(producer, {"command": "page", "binding": opened.binding})
+    before = worker_context_call(
+        producer, {"command": "page", "binding": opened.binding}
+    )
     offer = next(row for row in before.offers if row.domain == "restoration")
-    assert next(row for row in offer.unavailable_choices if row.choice == "incoming").reasons == ("choice_not_admitted",)
+    assert next(
+        row for row in offer.unavailable_choices if row.choice == "incoming"
+    ).reasons == ("choice_not_admitted",)
     arguments = {
-        "command": "choose", "binding": opened.binding,
-        "requirement_id": offer.requirement_id, "choice": "restore_incoming",
+        "command": "choose",
+        "binding": opened.binding,
+        "requirement_id": offer.requirement_id,
+        "choice": "restore_incoming",
         "assumptions_digest": offer.assumptions_digest,
     }
     for changed, expected in (
-        ({"binding": opened.binding.model_copy(update={"selection_id": str(uuid4())})}, "context_changed"),
+        (
+            {
+                "binding": opened.binding.model_copy(
+                    update={"selection_id": str(uuid4())}
+                )
+            },
+            "context_changed",
+        ),
         ({"assumptions_digest": "0" * 64}, "offer_changed"),
         ({"choice": "incoming"}, "offer_changed"),
     ):
         refused = worker_context_call(producer, arguments | changed)
         assert refused.code == expected and not refused.ready
-        unchanged = worker_context_call(producer, {"command": "page", "binding": opened.binding})
+        unchanged = worker_context_call(
+            producer, {"command": "page", "binding": opened.binding}
+        )
         assert unchanged.page == before.page
-    declined = worker_context_call(producer, arguments | {"choice": "decline_restoration"})
+    declined = worker_context_call(
+        producer, arguments | {"choice": "decline_restoration"}
+    )
     assert declined.code == "accepted" and declined.ready and declined.unresolved == 0
     stale = worker_context_call(producer, arguments)
     assert stale.code == "context_changed" and not stale.ready
-    page = worker_context_call(producer, {"command": "page", "binding": declined.binding})
+    page = worker_context_call(
+        producer, {"command": "page", "binding": declined.binding}
+    )
     asset = next(row for row in page.page.items if row.item_id == "new-asset")
-    assert asset.current is asset.result is None and asset.incoming == b"\x00new-source\xff"
+    assert (
+        asset.current is asset.result is None
+        and asset.incoming == b"\x00new-source\xff"
+    )
     offer = next(row for row in page.offers if row.domain == "restoration")
     assert offer.selected == "decline_restoration"
-    restored = worker_context_call(producer, arguments | {
-        "binding": declined.binding, "requirement_id": offer.requirement_id,
-        "assumptions_digest": offer.assumptions_digest,
-    })
+    restored = worker_context_call(
+        producer,
+        arguments
+        | {
+            "binding": declined.binding,
+            "requirement_id": offer.requirement_id,
+            "assumptions_digest": offer.assumptions_digest,
+        },
+    )
     assert restored.code == "accepted" and restored.ready and restored.unresolved == 0
-    page = worker_context_call(producer, {"command": "page", "binding": restored.binding})
+    page = worker_context_call(
+        producer, {"command": "page", "binding": restored.binding}
+    )
     asset = next(row for row in page.page.items if row.item_id == "new-asset")
     assert asset.current is asset.result is None
     assert asset.incoming == b"\x00new-source\xff"
     assert asset.current_path == "Assets/new.bin"
-    assert next(row for row in page.page.items if row.current_path == "migration-record.json").result == metadata
-    assert next(row for row in page.offers if row.domain == "restoration").selected == "restore_incoming"
+    assert (
+        next(
+            row
+            for row in page.page.items
+            if row.current_path == "migration-record.json"
+        ).result
+        == metadata
+    )
+    assert (
+        next(row for row in page.offers if row.domain == "restoration").selected
+        == "restore_incoming"
+    )
     assert restored.publication == "not_started" and list(vault.iterdir()) == []
 
 
 def test_unsafe_observed_binary_destination_has_no_admitted_restore():
     prepared = binary_restoration_preparation()
-    original = next(row for row in choice_offers(prepared) if row.domain == "restoration")
+    original = next(
+        row for row in choice_offers(prepared) if row.domain == "restoration"
+    )
     facts = prepared.review.facts
     asset = next(row for row in facts.subjects if row.item_id == "new-asset")
     outside = asset.source_target.model_copy(
         update={"status": "unsafe", "containment": "outside"}
     )
     context = facts.link_context
-    facts = facts.model_copy(update={
-        "subjects": tuple(row.model_copy(update={"source_target": outside}) if row.item_id == "new-asset" else row for row in facts.subjects),
-        "identity_inventory": tuple(row.model_copy(update={"target": outside}) if row.identity is not None and row.identity.item_id == "new-asset" else row for row in facts.identity_inventory),
-        "link_context": context.model_copy(update={
-            key: tuple(row.model_copy(update={"target": outside, "status": "unsafe"}) if row.target_id == "subject:new-asset:asset" else row for row in getattr(context, key))
-            for key in ("current_targets", "incoming_targets")
-        }),
-    })
+    facts = facts.model_copy(
+        update={
+            "subjects": tuple(
+                row.model_copy(update={"source_target": outside})
+                if row.item_id == "new-asset"
+                else row
+                for row in facts.subjects
+            ),
+            "identity_inventory": tuple(
+                row.model_copy(update={"target": outside})
+                if row.identity is not None and row.identity.item_id == "new-asset"
+                else row
+                for row in facts.identity_inventory
+            ),
+            "link_context": context.model_copy(
+                update={
+                    key: tuple(
+                        row.model_copy(update={"target": outside, "status": "unsafe"})
+                        if row.target_id == "subject:new-asset:asset"
+                        else row
+                        for row in getattr(context, key)
+                    )
+                    for key in ("current_targets", "incoming_targets")
+                }
+            ),
+        }
+    )
     blocked = preparation(facts)
-    assert any(row.code == "unsafe_identity_target" for row in blocked.review.proposal.findings)
+    assert any(
+        row.code == "unsafe_identity_target" for row in blocked.review.proposal.findings
+    )
     assert not blocked.review.ready
     assert all("restore_incoming" not in row.choices for row in choice_offers(blocked))
     before = blocked.review.model_dump_json()
     with pytest.raises(ValueError, match="Review offer changed"):
         Operations().resolve_update_choice(
-            blocked, requirement_id=original.requirement_id, choice="restore_incoming",
+            blocked,
+            requirement_id=original.requirement_id,
+            choice="restore_incoming",
             assumptions_digest=original.assumptions_digest,
         )
     assert blocked.review.model_dump_json() == before
