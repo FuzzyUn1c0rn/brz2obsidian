@@ -7,7 +7,11 @@ from uuid import uuid4
 
 from brz2obsidian.application.operations import Operations
 from brz2obsidian.application.review_choices import requirement_digest
-from brz2obsidian.application.update_facts import assemble_facts, output_identity, record
+from brz2obsidian.application.update_facts import (
+    assemble_facts,
+    output_identity,
+    record,
+)
 from brz2obsidian.contracts import SourceIdentity
 from brz2obsidian.core import (
     inspect_review_choices,
@@ -22,7 +26,7 @@ from tests.application.test_update_lifecycle_contracts import preparation
 CATEGORY_PATH = "Categories/Native category.md"
 TEMPLATE_PATH = "Templates/Native category.md"
 CATEGORY_ID = "77777777-7777-4777-8777-777777777777"
-CATEGORY = b'''---
+CATEGORY = b"""---
 categories: []
 appearance_category:
 icon:
@@ -45,8 +49,8 @@ source_item_id: "77777777-7777-4777-8777-777777777777"
 
 ![[Templates/Bases/Gallery.base#Gallery]]
 
-'''
-TEMPLATE = b'''---
+"""
+TEMPLATE = b"""---
 categories:
   - "[[Categories/Native category.md]]"
 appearance_category: "[[Categories/Native category.md]]"
@@ -58,12 +62,12 @@ aliases: []
 ---
 
 # {{title}}
-'''
-EDIT_PREFIX = b'''---
+"""
+EDIT_PREFIX = b"""---
 source_collection_id: "11111111-1111-4111-8111-111111111111"
 source_item_id: "independent"
 ---
-'''
+"""
 EDITED = EDIT_PREFIX + b"Independently accepted writing.\r\n"
 
 
@@ -419,7 +423,8 @@ def test_saved_old_base_facts_resume_through_closed_worker_without_losing_edited
             producer, {"command": "page", "binding": chosen.binding}
         )
         assert (
-            next(r for r in page.page.items if r.current_path == path).result == expected
+            next(r for r in page.page.items if r.current_path == path).result
+            == expected
         )
         assert (
             next(

@@ -363,7 +363,9 @@ def test_inconsistent_membership_registry_is_rejected_before_attachment_admissio
 def test_public_binary_choice_retains_exact_base_named_view_facts():
     prepared, _ = membership_preparation("incoming", include_base=True)
     offer = next(
-        row for row in inspect_review_choices(prepared.review) if row.domain == "attachment"
+        row
+        for row in inspect_review_choices(prepared.review)
+        if row.domain == "attachment"
     )
     result = Operations().resolve_update_choice(
         prepared,

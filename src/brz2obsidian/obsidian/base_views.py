@@ -21,7 +21,7 @@ def view_anchors(text):
     root = yaml.compose(text, Loader=yaml.SafeLoader)
     views = _fields(root).get("views")
     if not isinstance(views, yaml.SequenceNode):
-        raise ValueError("base_views_unsupported")
+        raise ValueError("base_views_unsupported")  # noqa: TRY004 -- wrong YAML node kind is invalid Base syntax.
     anchors = []
     for view in views.value:
         name = _fields(view).get("name")

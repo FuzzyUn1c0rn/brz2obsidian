@@ -147,7 +147,9 @@ def test_base_named_view_fragments_bind_exact_yaml_names():
         memberships=(),
         source_path="Templates/Bases/Native.base",
     )
-    assert [(a.fragment.kind, a.fragment.value, a.raw_parts) for a in state.anchors] == [
+    assert [
+        (a.fragment.kind, a.fragment.value, a.raw_parts) for a in state.anchors
+    ] == [
         ("heading", "Members", (b"Members",)),
         ("heading", "Gallery", (b"Gallery",)),
     ]
@@ -179,7 +181,11 @@ def test_base_named_view_fragments_bind_exact_yaml_names():
 @pytest.mark.parametrize(
     ("path", "raw", "expected"),
     (
-        ("Native.base", b"views:\n  - type: table\n    name: Other\n", "fragment_missing"),
+        (
+            "Native.base",
+            b"views:\n  - type: table\n    name: Other\n",
+            "fragment_missing",
+        ),
         (
             "Native.base",
             b"views:\n  - name: Members\n  - name: Members\n",

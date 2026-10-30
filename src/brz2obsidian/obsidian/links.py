@@ -113,7 +113,7 @@ def interpret_link_target(
                 try:
                     anchors = list(view_anchors(text))
                     fragments = [anchor.fragment for anchor in anchors]
-                except (ValueError, yaml.YAMLError):
+                except ValueError, yaml.YAMLError:
                     status = "unsupported"
                 return LinkTargetFacts(
                     schema_id="brz2obsidian.link-target-facts",

@@ -184,7 +184,9 @@ def _membership_targets(records, inventory=()):
     return tuple(result)
 
 
-def link_state(content, *, target_id, existence, membership_targets=(), source_path=None):
+def link_state(
+    content, *, target_id, existence, membership_targets=(), source_path=None
+):
     document = (
         interpret_structure(
             content, output_format=7, membership_targets=membership_targets
