@@ -8,12 +8,17 @@ from pathlib import Path
 from brz2obsidian.application.operations import Operations
 from brz2obsidian.application.vault_recovery_contracts import VaultRecoveryPreparation
 from brz2obsidian.application.vault_undo_contracts import VaultUndoPreparation
-from brz2obsidian.contracts import ExactContent, LinkOccurrenceChoice, ReviewPlan
+from brz2obsidian.contracts import (
+    CurrentContent,
+    ExactContent,
+    LinkOccurrenceChoice,
+    ReviewPlan,
+)
 from brz2obsidian.core import prepare_review, resolve_review, select_review_effects
 from brz2obsidian.obsidian import interpret_link_target, interpret_links
 from brz2obsidian.publication.vault_apply import _NativeExecutor
 from tests.application.test_vault_apply import _apply
-from tests.application.test_vault_checkpoints import user_state
+from tests.application.test_vault_checkpoints import git, user_state
 from tests.application.test_vault_recovery_process import (
     _AFTER,
     _BASE,
@@ -28,7 +33,9 @@ from tests.reconciliation.test_attachments import (
     attachment_candidate,
     linked_attachment_request,
 )
-from tests.reconciliation.test_resolution import action
+from tests.reconciliation.test_identity import with_subjects
+from tests.reconciliation.test_proposals import request
+from tests.reconciliation.test_resolution import action, with_review_links
 
 _UNDO_CHILD = """
 import os
@@ -56,6 +63,252 @@ def _with_review(prepared, review):
     return contract.model_validate(
         {**prepared.model_dump(mode="python"), "review": review}
     )
+
+
+def test_latest_undo_retains_created_definition_identities_and_later_home():
+    effort = Path(__file__).resolve().parents[2] / "tmp/issue-304/fixtures"
+    effort.mkdir(parents=True, exist_ok=True)
+    # Public history admission requires a vault outside any parent repository.
+    container = Path(tempfile.mkdtemp(prefix="brz2obsidian-304-definitions-"))
+    vault, source = container / "vault", container / "source"
+    ownership = json.dumps(
+        {
+            "owner": container.name,
+            "root": str(container.resolve()),
+            "base": str(Path(tempfile.gettempdir()).resolve()),
+            "vault": str(vault),
+            "source": str(source),
+        }
+    )
+    (container / ".fixture-owner.json").write_text(ownership, encoding="utf-8")
+    (effort / (container.name + ".json")).write_text(ownership, encoding="utf-8")
+    vault.mkdir()
+    source.mkdir()
+    git(vault, "init", "-q")
+    git(vault, "config", "core.autocrlf", "false")
+    (vault / "Home.md").write_bytes(b"Home before.\n")
+    (vault / "Protected.bin").write_bytes(b"protected\x00\xff")
+    git(vault, "add", ".")
+    git(vault, "commit", "-qm", "independent authored preimage")
+    git(vault, "update-ref", "refs/notes/user-proof", "HEAD")
+    # A mixed user index must survive preparation and Current resolution too.
+    (vault / "Home.md").write_bytes(b"User staged Home.\n")
+    git(vault, "add", "Home.md")
+    (vault / "Home.md").write_bytes(b"Home before.\n")
+    facts = request(
+        original=b"Home before.\n",
+        current=b"Home before.\n",
+        incoming=b"Home incoming.\n",
+    )
+    home = facts.subjects[0]
+    current = home.current.model_copy(update={"path": "Home.md"})
+    target = home.source_target.model_copy(update={"normalized_path": "home.md"})
+    subjects = [
+        home.model_copy(
+            update={"path": "Home.md", "current": current, "source_target": target}
+        )
+    ]
+    entries = [
+        facts.identity_inventory[0].model_copy(
+            update={"current": current, "target": target}
+        )
+    ]
+    definitions = (
+        (
+            "category",
+            "Categories/Experiments.md",
+            "definition:experiments",
+            b"# Old category\n",
+            b"# Experiments\n",
+        ),
+        (
+            "note",
+            "Templates/Experiments.md",
+            "support:template",
+            b"# Old template\n",
+            b'---\ncreated: "{{date:YYYY-MM-DD}}"\n---\n# New member\n',
+        ),
+        (
+            "relationship",
+            "Definitions/Related.md",
+            "definition:related",
+            b"# Old relation\n",
+            b"# Related\n",
+        ),
+    )
+    for _, path, item_id, old, incoming in definitions:
+        observed = CurrentContent(existence="absent", path=path, content=None)
+        target = home.source_target.model_copy(
+            update={"normalized_path": path.casefold()}
+        )
+        subjects.append(
+            home.model_copy(
+                update={
+                    "item_id": item_id,
+                    "path": path,
+                    "current": observed,
+                    "source_target": target,
+                    "baseline": home.baseline.model_copy(
+                        update={"content": ExactContent(data=old)}
+                    ),
+                    "incoming": ExactContent(data=incoming),
+                }
+            )
+        )
+        entries.append(
+            facts.identity_inventory[0].model_copy(
+                update={
+                    "entry_id": item_id,
+                    "identity": facts.identity_inventory[0].identity.model_copy(
+                        update={"item_id": item_id}
+                    ),
+                    "current": observed,
+                    "target": target,
+                }
+            )
+        )
+        (source / path).parent.mkdir(parents=True, exist_ok=True)
+        (source / path).write_bytes(old)
+    facts = with_review_links(with_subjects(facts, tuple(subjects), tuple(entries)))
+    kinds = {"review:" + item_id: kind for kind, _, item_id, _, _ in definitions}
+    context = facts.link_context
+    facts = facts.model_copy(
+        update={
+            "link_context": context.model_copy(
+                update={
+                    name: tuple(
+                        row.model_copy(
+                            update={"kind": kinds.get(row.target_id, row.kind)}
+                        )
+                        for row in getattr(context, name)
+                    )
+                    for name in ("current_targets", "incoming_targets")
+                }
+            )
+        }
+    )
+    (source / "Home.md").write_bytes(b"Home before.\n")
+    operations = Operations()
+    admission = operations.inspect_history(vault).admission
+    assert admission.status == "supported", admission.model_dump_json()
+    captured = operations.capture_checkpoint(
+        vault,
+        source,
+        vault_id="definitions-vault",
+        import_id="definitions-import",
+        identity=facts.incoming_identity,
+        admission=admission,
+    )
+    assert captured.status == "captured", captured.code
+    (source / "Home.md").write_bytes(b"Home incoming.\n")
+    for _, path, _, _, incoming in definitions:
+        (source / path).write_bytes(incoming)
+    reviewed = prepare_review(
+        facts, preflight=operations.inspect_history(vault).admission.preflight
+    )
+    for subject in subjects:
+        change = next(
+            row for row in reviewed.proposal.changes if row.item_id == subject.item_id
+        )
+        selected = resolve_review(
+            reviewed,
+            action(
+                reviewed,
+                change,
+                decision_id="apply:" + subject.item_id,
+                domain="text" if subject.path == "Home.md" else "restoration",
+                choice="incoming" if subject.path == "Home.md" else "restore_incoming",
+                candidate=_incoming_candidate(facts, subject, subject.incoming.data),
+            ),
+        )
+        assert selected.status == "accepted", selected.code
+        reviewed = selected.plan
+    assert reviewed.ready, reviewed.blockers
+    applied = _apply(
+        operations,
+        vault,
+        source,
+        review=reviewed,
+        vault_id="definitions-vault",
+        import_id="definitions-import",
+    )
+    assert applied.status == "applied", applied.code
+    assert {path: (vault / path).read_bytes() for _, path, _, _, _ in definitions} == {
+        path: incoming for _, path, _, _, incoming in definitions
+    }
+    later = b"Home incoming.\nLater independent writing.\n"
+    (vault / "Home.md").write_bytes(later)
+    before = user_state(vault)
+    full_before = {
+        p.relative_to(vault).as_posix(): p.read_bytes()
+        for p in vault.rglob("*")
+        if p.is_file()
+    }
+    prepared = operations.prepare_undo(vault)
+    assert prepared.status == "offered", prepared.code
+    assert prepared.target_receipt_commit == applied.receipt_commit
+    assert prepared.checkpoint_commit == applied.result_commit
+    context = prepared.review.facts.link_context
+    for kind, path, item_id, _, incoming in definitions:
+        (target,) = [
+            row for row in context.current_targets if row.canonical_path == path
+        ]
+        assert (
+            target.target_id,
+            target.kind,
+            target.identity.module_id,
+            target.identity.collection_id,
+            target.identity.item_id,
+        ) == (
+            "review:" + item_id,
+            kind,
+            "synthetic-folio",
+            "folio:collection",
+            item_id,
+        )
+        (state,) = [
+            row
+            for row in context.current_target_facts
+            if row.target_id == target.target_id
+        ]
+        assert state.existence == "present" and state.content.data == incoming
+        (document,) = [
+            row for row in context.current_documents if row.source_path == path
+        ]
+        assert (document.document_id, document.status, document.content.data) == (
+            target.target_id,
+            "supported",
+            incoming,
+        )
+    home_change = next(
+        row for row in prepared.review.proposal.changes if row.path == "Home.md"
+    )
+    assert home_change.current.data == later
+    assert any(
+        row.change_id == home_change.change_id and "current" in row.choices
+        for row in prepared.review.requirements
+    )
+    kept = operations.resolve_undo(
+        vault,
+        prepared,
+        action(
+            prepared.review,
+            home_change,
+            choice="current",
+            decision_id="keep:later-home",
+        ),
+    )
+    assert kept.status == "offered", kept.code
+    approval = next(
+        row for row in kept.review.approvals if row.change_id == home_change.change_id
+    )
+    assert approval.result.data == later
+    assert user_state(vault) == before
+    assert {
+        p.relative_to(vault).as_posix(): p.read_bytes()
+        for p in vault.rglob("*")
+        if p.is_file()
+    } == full_before
 
 
 def _preserve_candidate_inputs(vault, preparation, selected_action):
