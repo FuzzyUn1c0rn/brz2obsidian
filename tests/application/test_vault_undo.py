@@ -1606,12 +1606,66 @@ def test_unassociated_document_partial_undo_recovery(direction):
     assert proof.operation_id == stopped.operation_id
     assert proof.operation_kind == "undo" and proof.direction == direction
     assert proof.operation_generation == stopped.generation
+    original_change = next(
+        row for row in prepared.review.proposal.changes if row.path == "Manual.md"
+    )
+    original_approval = next(
+        row
+        for row in prepared.review.approvals
+        if row.change_id == original_change.change_id
+    )
+    assert (proof.origin_change_id, proof.origin_decision_id) == (
+        original_change.change_id,
+        original_approval.decision_id,
+    )
+    asset = next(
+        row for row in recovery.review.facts.subjects if row.path == "Assets/data.bin"
+    )
+    asset_owner = next(
+        row
+        for row in recovery.review.facts.identity_inventory
+        if row.current.path == "Assets/data.bin"
+    )
+    assert asset_owner.identity_state == "valid"
+    assert (
+        asset_owner.identity.module_id,
+        asset_owner.identity.collection_id,
+        asset_owner.identity.item_id,
+        asset_owner.facet,
+    ) == ("synthetic-folio", "folio:collection", "entry:asset", "attachment:payload")
+    manual_owner = next(
+        row
+        for row in recovery.review.facts.identity_inventory
+        if row.current.path == "Manual.md"
+    )
+    assert manual_owner.identity_state == "missing"
+    assert manual_owner.identity is None and manual_owner.raw_identity is None
+    assert asset.operation_reversal is None
+    assert not any(
+        row.item_id == manual.item_id
+        for row in recovery.review.facts.format_operation.established_baseline.outputs
+    )
     if direction == "finish":
         assert proof.outputs[0].produced.data == produced
         assert proof.outputs[0].target.data == original
         expected_notes = _BEFORE
         expected_terminal = "undone"
         protected_selection = {"Assets/data.bin": b"\x00authored"}
+        assert asset.baseline.content.data == asset.incoming.data == b"abc"
+        operation = recovery.review.facts.format_operation
+        assert (operation.baseline_source_version, operation.target_source_version) == (
+            "source:b",
+            "source:a",
+        )
+        assert operation.established_baseline.source_version == "source:b"
+        assert (
+            next(
+                row.content.data
+                for row in operation.established_baseline.outputs
+                if (row.item_id, row.facet) == (asset.item_id, asset.facet)
+            )
+            == b"abc"
+        )
     else:
         assert proof.outputs[0].produced.data == original
         assert proof.outputs[0].target.data == produced
@@ -1627,11 +1681,6 @@ def test_unassociated_document_partial_undo_recovery(direction):
     )
     assert manual.baseline.status == "unknown" and manual.baseline.content is None
     if direction == "restore":
-        asset = next(
-            row
-            for row in recovery.review.facts.subjects
-            if row.path == "Assets/data.bin"
-        )
         assert asset.operation_reversal is None
         assert asset.baseline.status == "known"
         assert asset.baseline.content.data == b"\x00original"
