@@ -167,8 +167,14 @@ def test_latest_undo_retains_created_definition_identities_and_later_home():
     (effort / (container.name + ".json")).write_text(ownership, encoding="utf-8")
     vault.mkdir()
     source.mkdir()
-    manual_before = b"Authored prose.\n[[Assets/data.bin|Keep first]] and [[Assets/data.bin|Redirect second]]\n"
-    manual_after = b"Authored prose.\n[[Assets/data.bin|Keep first]] and [Second edited alias](Assets/data%20%28incoming-ba7816bf%29.bin)\n"
+    manual_before = (
+        b"Authored prose.\n[[Assets/data.bin|Keep first]] and "
+        b"[[Assets/data.bin|Redirect second]]\n"
+    )
+    manual_after = (
+        b"Authored prose.\n[[Assets/data.bin|Keep first]] and "
+        b"[Second edited alias](Assets/data%20%28incoming-ba7816bf%29.bin)\n"
+    )
     git(vault, "init", "-q")
     git(vault, "config", "core.autocrlf", "false")
     (vault / "Home.md").write_bytes(b"Home before.\n")
@@ -303,7 +309,9 @@ def test_latest_undo_retains_created_definition_identities_and_later_home():
     for _, path, _, _, incoming in definitions:
         (source / path).write_bytes(incoming)
     history = operations.inspect_history(vault)
-    assert not any(row.path == "Manual.md" for row in history.checkpoint.manifest.source)
+    assert not any(
+        row.path == "Manual.md" for row in history.checkpoint.manifest.source
+    )
     reviewed = prepare_review(facts, preflight=history.admission.preflight)
     for subject in subjects:
         change = next(
@@ -322,13 +330,9 @@ def test_latest_undo_retains_created_definition_identities_and_later_home():
         )
         assert selected.status == "accepted", selected.code
         reviewed = selected.plan
-    selection, candidate = _both_with_owner(
-        facts, manual_after, owner_path="Manual.md"
-    )
+    selection, candidate = _both_with_owner(facts, manual_after, owner_path="Manual.md")
     asset_change = next(
-        row
-        for row in reviewed.proposal.changes
-        if row.facet == "attachment:payload"
+        row for row in reviewed.proposal.changes if row.facet == "attachment:payload"
     )
     selected = resolve_review(
         reviewed,
@@ -407,7 +411,9 @@ def test_latest_undo_retains_created_definition_identities_and_later_home():
     # cannot acquire operation-owned binding from a matching file name.
     observed_facts = prepared.review.facts
     manual_entry = next(
-        row for row in observed_facts.identity_inventory if row.current.path == "Manual.md"
+        row
+        for row in observed_facts.identity_inventory
+        if row.current.path == "Manual.md"
     )
     variants = (
         observed_facts.model_copy(
@@ -461,7 +467,9 @@ def test_latest_undo_retains_created_definition_identities_and_later_home():
     )
     for unsafe in variants:
         refused = prepare_review(unsafe, preflight=prepared.review.preflight)
-        change = next(row for row in refused.proposal.changes if row.path == "Manual.md")
+        change = next(
+            row for row in refused.proposal.changes if row.path == "Manual.md"
+        )
         assert change.identity_review.status != "matched"
         assert not refused.ready
         assert select_review_effects(refused).status != "selected"
@@ -551,7 +559,7 @@ def test_latest_undo_retains_created_definition_identities_and_later_home():
             if path == "Manual.md":
                 assert selected_action.candidate is None
             transition = resolve_review(plan, selected_action)
-            assert transition.status == "accepted", transition.code
+            assert transition.status == "accepted", (path, transition.code)
             preparation = _with_review(preparation, transition.plan)
         assert preparation.review.ready, preparation.review.blockers
         return preparation
@@ -583,7 +591,9 @@ def test_latest_undo_retains_created_definition_identities_and_later_home():
                 update={
                     "outputs": (
                         proof.outputs[0].model_copy(
-                            update={"produced": ExactContent(data=b"forged produced bytes")}
+                            update={
+                                "produced": ExactContent(data=b"forged produced bytes")
+                            }
                         ),
                     )
                 }
@@ -652,18 +662,29 @@ def test_latest_undo_retains_created_definition_identities_and_later_home():
         if p.is_file()
     } == later_before
     final_manual = next(
-        row for row in final.review.facts.identity_inventory if row.current.path == "Manual.md"
+        row
+        for row in final.review.facts.identity_inventory
+        if row.current.path == "Manual.md"
     )
     assert final_manual.identity is None and final_manual.raw_identity is None
     assert final_manual.identity_state == "missing"
-    assert next(
-        row for row in final.review.facts.link_context.current_targets
-        if row.canonical_path == "Manual.md"
-    ).identity is None
-    assert not any(row.source_memory for row in final.review.approvals if row.target_path == "Manual.md")
+    assert (
+        next(
+            row
+            for row in final.review.facts.link_context.current_targets
+            if row.canonical_path == "Manual.md"
+        ).identity
+        is None
+    )
+    assert not any(
+        row.source_memory
+        for row in final.review.approvals
+        if row.target_path == "Manual.md"
+    )
     source_before = {
         p.relative_to(source).as_posix(): p.read_bytes()
-        for p in source.rglob("*") if p.is_file()
+        for p in source.rglob("*")
+        if p.is_file()
     }
     undone = operations.execute_undo(vault, final)
     assert undone.status == "undone", undone.code
@@ -678,12 +699,16 @@ def test_latest_undo_retains_created_definition_identities_and_later_home():
         before,
         after,
         allowed_refs=frozenset(
-            (captured.locator.ref.encode(), _operation_ref(captured.locator.ref, undone.operation_id))
+            (
+                captured.locator.ref.encode(),
+                _operation_ref(captured.locator.ref, undone.operation_id),
+            )
         ),
     )
     assert {
         p.relative_to(source).as_posix(): p.read_bytes()
-        for p in source.rglob("*") if p.is_file()
+        for p in source.rglob("*")
+        if p.is_file()
     } == source_before
     assert "Manual.md" not in source_before
 

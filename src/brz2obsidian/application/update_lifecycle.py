@@ -837,9 +837,11 @@ def text_choice_action(plan, action, *, edited=None):
                     reversal_text_comparison,
                 )
 
-                if action.choice == "reverse" and reversal_document_entry(
-                    plan.producer_facts, reversal_subject(plan.producer_facts, change)
-                ) is not None:
+                subject = reversal_subject(plan.producer_facts, change)
+                if action.choice == "reverse" and (
+                    subject.attachment is not None
+                    or reversal_document_entry(plan.producer_facts, subject) is not None
+                ):
                     return action
                 change = reversal_text_comparison(plan.producer_facts, change)
             action = action.model_copy(

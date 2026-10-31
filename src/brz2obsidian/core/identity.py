@@ -504,15 +504,12 @@ def bind_identity(facts, subject, subject_id, *, applicability=()):
         ):
             status, reason = "refused", "current_mismatch"
             finding("current_inventory_mismatch", True)
-    repair_required = (
-        selected is None
-        or (
-            not operation_owned
-            and (
-                selected.identity_state != "valid"
-                or selected.facet != subject.facet
-                or len(matches) != 1
-            )
+    repair_required = selected is None or (
+        not operation_owned
+        and (
+            selected.identity_state != "valid"
+            or selected.facet != subject.facet
+            or len(matches) != 1
         )
     )
     if (

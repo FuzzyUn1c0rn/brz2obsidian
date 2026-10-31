@@ -242,6 +242,7 @@ def reversal_document_entry(facts, subject):
         or entry.current != subject.current
         or entry.current.existence != "present"
         or entry.target != target.target
+        or target.status != "safe"
         or document.document_id != target.target_id
         or document.content != entry.current.content
         or document.status != "supported"
@@ -475,7 +476,9 @@ def review_owned_documents(plan, change_id, decision_id):
     selected = []
     for document in candidate.documents:
         prior = tuple(
-            d for d in context.current_documents if d.document_id == document.document_id
+            d
+            for d in context.current_documents
+            if d.document_id == document.document_id
         )
         if len(prior) != 1 or document.content == prior[0].content:
             continue
@@ -510,7 +513,9 @@ def review_owned_documents(plan, change_id, decision_id):
             or document.status != "supported"
             or document.inventory != prior[0].inventory
             or document.inventory != "complete"
-            or tuple(t for t in context.current_targets if t.target_id == target.target_id)
+            or tuple(
+                t for t in context.current_targets if t.target_id == target.target_id
+            )
             != (target,)
             or len(entries) != 1
             or entries[0].identity_state != "missing"
@@ -524,6 +529,8 @@ def review_owned_documents(plan, change_id, decision_id):
             or files[0].subject_id != change.subject_id
             or files[0].content != document.content
         ):
-            raise ValueError("Changed document lacks unique retained selected authority")
+            raise ValueError(
+                "Changed document lacks unique retained selected authority"
+            )
         selected.append(target)
     return tuple(selected)

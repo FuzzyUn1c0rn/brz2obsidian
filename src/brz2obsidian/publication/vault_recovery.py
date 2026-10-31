@@ -1106,7 +1106,9 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
                 or any(s.path == path for s in subjects)
                 or path in output_references
             ):
-                raise OSError("Dependent recovery document lacks exact operation versions")
+                raise OSError(
+                    "Dependent recovery document lacks exact operation versions"
+                )
             proof = OperationReversalTarget(
                 schema_id="brz2obsidian.operation-reversal-target",
                 schema_version=1,
@@ -1114,7 +1116,9 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
                 operation_kind=intent.kind,
                 direction="restore",
                 operation_generation=intent.generation,
-                history_fingerprint=_operation_history_fingerprint(origin_commit, intent),
+                history_fingerprint=_operation_history_fingerprint(
+                    origin_commit, intent
+                ),
                 origin_change_id=approval.change_id,
                 origin_decision_id=approval.decision_id,
                 owned_targets=(reference,),
