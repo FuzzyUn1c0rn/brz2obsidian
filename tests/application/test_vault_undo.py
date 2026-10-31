@@ -553,7 +553,7 @@ def test_latest_undo_retains_created_definition_identities_and_later_home():
                     change,
                     domain="text" if path == "Home.md" else "reversal",
                     choice=choice,
-                    decision_id="undo:" + path + ":" + choice,
+                    decision_id=f"undo:{plan.proposal.generation}:{path}:{choice}",
                 ),
             )
             if path == "Manual.md":
@@ -577,6 +577,24 @@ def test_latest_undo_retains_created_definition_identities_and_later_home():
         *(path for _, path, _, _, _ in definitions),
         "Assets/data (incoming-ba7816bf).bin",
     }
+    manual_change = next(
+        row
+        for row in reversed_review.review.proposal.changes
+        if row.path == "Manual.md"
+    )
+    unsafe_current = resolve_review(
+        reversed_review.review,
+        action(
+            reversed_review.review,
+            manual_change,
+            domain="reversal",
+            choice="current",
+            decision_id="keep:still-references-secondary",
+        ),
+    )
+    assert unsafe_current.status == "refused" or not unsafe_current.plan.ready
+    if unsafe_current.status != "refused":
+        assert select_review_effects(unsafe_current.plan).status != "selected"
     assert {
         p.relative_to(vault).as_posix(): p.read_bytes()
         for p in vault.rglob("*")

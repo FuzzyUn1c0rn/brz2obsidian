@@ -206,16 +206,19 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
                 )
             write(target, content, target.canonical_path, state)
             if reversal_document_target(subject) is not None:
+                source_documents = (
+                    context.incoming_documents
+                    if approval is not None and approval.choice == "reverse"
+                    else context.current_documents
+                )
                 retained_documents = tuple(
                     d
-                    for d in context.current_documents + context.incoming_documents
+                    for d in source_documents
                     if d.source_path == row.path
                     and d.document_id == target_id
                     and d.content == content
                 )
-                if not retained_documents or any(
-                    d != retained_documents[0] for d in retained_documents
-                ):
+                if len(retained_documents) != 1:
                     add("selected_link_context_conflict")
                     continue
                 documents = {

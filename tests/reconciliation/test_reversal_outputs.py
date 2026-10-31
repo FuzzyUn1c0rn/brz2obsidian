@@ -252,6 +252,55 @@ def test_foreign_physical_path_cannot_be_added_to_retained_owned_outputs():
         )
 
 
+@pytest.mark.parametrize(
+    "mutation", ("noop", "resource_bytes", "unknown_current", "different_current_path")
+)
+def test_core_refuses_unproven_byte_reversal_declarations(mutation):
+    from pydantic import ValidationError
+
+    from brz2obsidian.contracts import ExactContent
+    from brz2obsidian.core import prepare_review
+
+    facts = both_reversal_facts()
+    subject = facts.subjects[0]
+    proof = subject.operation_reversal
+    row = proof.outputs[0]
+    if mutation in ("noop", "resource_bytes"):
+        row = row.model_copy(
+            update={
+                "target_existence": "present",
+                "target": row.produced
+                if mutation == "noop"
+                else ExactContent(data=b"different original binary"),
+            }
+        )
+    else:
+        row = row.model_copy(
+            update={
+                "current": row.current.model_copy(
+                    update={"existence": "unknown", "content": None}
+                    if mutation == "unknown_current"
+                    else {"path": "Assets/foreign.bin"}
+                )
+            }
+        )
+    facts = facts.model_copy(
+        update={
+            "subjects": (
+                subject.model_copy(
+                    update={
+                        "operation_reversal": proof.model_copy(
+                            update={"outputs": (row,)}
+                        )
+                    }
+                ),
+            )
+        }
+    )
+    with pytest.raises(ValidationError, match="exact proven|identityless document"):
+        prepare_review(facts, preflight=preflight())
+
+
 def present_extra_facts():
     from brz2obsidian.obsidian import interpret_link_target
 

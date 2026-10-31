@@ -443,11 +443,12 @@ def review_owned_targets(plan, change_id, decision_id):
     return tuple(selected.values())
 
 
-def review_owned_documents(plan, change_id, decision_id):
-    """Prove documents changed by one canonical attachment decision.
+def review_owned_documents(plan):
+    """Project exact identityless document ownership in one canonical pass.
 
     Unchanged document context conveys no ownership. The exact candidate,
     observed document, selected output and unique approval must all agree.
+    Each returned target is bound to its originating change and decision.
     Resource ownership remains the separate review_owned_targets projection.
     """
     from .resolution import validate_review
@@ -457,80 +458,77 @@ def review_owned_documents(plan, change_id, decision_id):
     if checked.status != "accepted" or not checked.plan.ready:
         raise ValueError("A canonical ready origin review is required")
     plan = checked.plan
-    approval = next(
-        (
-            a
-            for a in plan.approvals
-            if (a.change_id, a.decision_id) == (change_id, decision_id)
-        ),
-        None,
-    )
-    if approval is None:
-        raise ValueError("Origin decision does not own this change")
-    candidate = approval.attachment_candidate
     context = plan.producer_facts.link_context
-    if candidate is None or context is None:
+    if context is None:
         return ()
-    change = next(c for c in plan.proposal.changes if c.change_id == change_id)
     effects = select_review_effects(plan)
     selected = []
-    for document in candidate.documents:
-        prior = tuple(
-            d
-            for d in context.current_documents
-            if d.document_id == document.document_id
-        )
-        if len(prior) != 1 or document.content == prior[0].content:
+    for approval in plan.approvals:
+        candidate = approval.attachment_candidate
+        if candidate is None:
             continue
-        targets = tuple(
-            t for t in candidate.targets if t.canonical_path == document.source_path
+        change = next(
+            c for c in plan.proposal.changes if c.change_id == approval.change_id
         )
-        if len(targets) != 1 or targets[0].identity is not None:
-            continue
-        target = targets[0]
-        entries = tuple(
-            e
-            for e in plan.producer_facts.identity_inventory
-            if e.current.path == document.source_path
-        )
-        owners = tuple(
-            a
-            for a in plan.approvals
-            if a.attachment_candidate is not None
-            and any(
-                d.document_id == document.document_id
-                and d.source_path == document.source_path
-                and d.content != prior[0].content
-                for d in a.attachment_candidate.documents
+        for document in candidate.documents:
+            prior = tuple(
+                d
+                for d in context.current_documents
+                if d.document_id == document.document_id
             )
-        )
-        files = tuple(f for f in effects.files if f.path == document.source_path)
-        if (
-            target.kind != "note"
-            or target.target_id != document.document_id
-            or document.source_path != prior[0].source_path
-            or document.status != prior[0].status
-            or document.status != "supported"
-            or document.inventory != prior[0].inventory
-            or document.inventory != "complete"
-            or tuple(
-                t for t in context.current_targets if t.target_id == target.target_id
+            if len(prior) != 1 or document.content == prior[0].content:
+                continue
+            targets = tuple(
+                t for t in candidate.targets if t.canonical_path == document.source_path
             )
-            != (target,)
-            or len(entries) != 1
-            or entries[0].identity_state != "missing"
-            or entries[0].identity is not None
-            or entries[0].raw_identity is not None
-            or entries[0].facet != "content"
-            or entries[0].current.content != prior[0].content
-            or entries[0].target != target.target
-            or owners != (approval,)
-            or len(files) != 1
-            or files[0].subject_id != change.subject_id
-            or files[0].content != document.content
-        ):
-            raise ValueError(
-                "Changed document lacks unique retained selected authority"
+            if len(targets) != 1 or targets[0].identity is not None:
+                continue
+            target = targets[0]
+            entries = tuple(
+                e
+                for e in plan.producer_facts.identity_inventory
+                if e.current.path == document.source_path
             )
-        selected.append(target)
+            owners = tuple(
+                a
+                for a in plan.approvals
+                if a.attachment_candidate is not None
+                and any(
+                    d.document_id == document.document_id
+                    and d.source_path == document.source_path
+                    and d.content != prior[0].content
+                    for d in a.attachment_candidate.documents
+                )
+            )
+            files = tuple(f for f in effects.files if f.path == document.source_path)
+            if (
+                target.kind != "note"
+                or target.target_id != document.document_id
+                or document.source_path != prior[0].source_path
+                or document.status != prior[0].status
+                or document.status != "supported"
+                or document.inventory != prior[0].inventory
+                or document.inventory != "complete"
+                or tuple(
+                    t
+                    for t in context.current_targets
+                    if t.target_id == target.target_id
+                )
+                != (target,)
+                or len(entries) != 1
+                or entries[0].identity_state != "missing"
+                or entries[0].identity is not None
+                or entries[0].raw_identity is not None
+                or entries[0].facet != "content"
+                or entries[0].current.content != prior[0].content
+                or entries[0].target != target.target
+                or owners != (approval,)
+                or len(files) != 1
+                or files[0].subject_id != change.subject_id
+                or files[0].content != document.content
+            ):
+                raise ValueError(
+                    "Changed document lacks unique retained selected authority"
+                )
+            selected.append((approval.change_id, approval.decision_id, target))
     return tuple(selected)

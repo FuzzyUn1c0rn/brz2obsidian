@@ -1075,85 +1075,79 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
                     item_id=subject.item_id, facet=subject.facet, content=generated
                 )
             )
-    for approval in original.approvals:
-        if approval.attachment_candidate is None:
-            continue
-        for reference in review_owned_documents(
-            original, approval.change_id, approval.decision_id
+    for change_id, decision_id, reference in review_owned_documents(original):
+        approval = approved[change_id]
+        if approval.decision_id != decision_id:
+            raise OSError("Dependent recovery document decision is ambiguous")
+        path = reference.canonical_path
+        old = _owned_content(git, before.get(path))
+        new = _owned_content(git, produced.get(path))
+        documents = tuple(
+            d
+            for d in original.facts.link_context.current_documents
+            if (d.document_id, d.source_path) == (reference.target_id, path)
+        )
+        selected_documents = tuple(
+            d
+            for d in approval.attachment_candidate.documents
+            if (d.document_id, d.source_path) == (reference.target_id, path)
+        )
+        if (
+            path not in intent.affected_paths
+            or old is None
+            or new is None
+            or old == new
+            or len(documents) != 1
+            or documents[0].content != old
+            or len(selected_documents) != 1
+            or selected_documents[0].content != new
+            or any(s.path == path for s in subjects)
+            or path in output_references
         ):
-            path = reference.canonical_path
-            old = _owned_content(git, before.get(path))
-            new = _owned_content(git, produced.get(path))
-            documents = tuple(
-                d
-                for d in original.facts.link_context.current_documents
-                if (d.document_id, d.source_path) == (reference.target_id, path)
-            )
-            selected_documents = tuple(
-                d
-                for d in approval.attachment_candidate.documents
-                if (d.document_id, d.source_path) == (reference.target_id, path)
-            )
-            if (
-                path not in intent.affected_paths
-                or old is None
-                or new is None
-                or old == new
-                or len(documents) != 1
-                or documents[0].content != old
-                or len(selected_documents) != 1
-                or selected_documents[0].content != new
-                or any(s.path == path for s in subjects)
-                or path in output_references
-            ):
-                raise OSError(
-                    "Dependent recovery document lacks exact operation versions"
-                )
-            proof = OperationReversalTarget(
-                schema_id="brz2obsidian.operation-reversal-target",
-                schema_version=1,
-                operation_id=intent.operation_id,
-                operation_kind=intent.kind,
-                direction="restore",
-                operation_generation=intent.generation,
-                history_fingerprint=_operation_history_fingerprint(
-                    origin_commit, intent
-                ),
-                origin_change_id=approval.change_id,
-                origin_decision_id=approval.decision_id,
-                owned_targets=(reference,),
-                outputs=(
-                    OperationReversalOutput(
-                        path=path,
-                        target_id=reference.target_id,
-                        produced_existence="present",
-                        produced=new,
-                        current=current[path],
-                        target_existence="present",
-                        target=old,
-                    ),
-                ),
-            )
-            subjects.append(
-                ReconciliationSubject(
-                    item_id=reference.target_id,
-                    facet="content",
+            raise OSError("Dependent recovery document lacks exact operation versions")
+        proof = OperationReversalTarget(
+            schema_id="brz2obsidian.operation-reversal-target",
+            schema_version=1,
+            operation_id=intent.operation_id,
+            operation_kind=intent.kind,
+            direction="restore",
+            operation_generation=intent.generation,
+            history_fingerprint=_operation_history_fingerprint(origin_commit, intent),
+            origin_change_id=approval.change_id,
+            origin_decision_id=approval.decision_id,
+            owned_targets=(reference,),
+            outputs=(
+                OperationReversalOutput(
                     path=path,
-                    baseline=ContentVersion(
-                        status="unknown", content=None, unavailable_digest=None
-                    ),
+                    target_id=reference.target_id,
+                    produced_existence="present",
+                    produced=new,
                     current=current[path],
-                    incoming=old,
-                    interpretation="supported",
-                    title=Path(path).stem,
-                    source_target=reference.target,
-                    output_role="note",
-                    structure=None,
-                    attachment=None,
-                    operation_reversal=proof,
-                )
+                    target_existence="present",
+                    target=old,
+                ),
+            ),
+        )
+        subjects.append(
+            ReconciliationSubject(
+                item_id=reference.target_id,
+                facet="content",
+                path=path,
+                baseline=ContentVersion(
+                    status="unknown", content=None, unavailable_digest=None
+                ),
+                current=current[path],
+                incoming=old,
+                interpretation="supported",
+                title=Path(path).stem,
+                source_target=reference.target,
+                output_role="note",
+                structure=None,
+                attachment=None,
+                operation_reversal=proof,
             )
-            output_references[path] = reference
+        )
+        output_references[path] = reference
     covered = {
         path
         for subject in subjects

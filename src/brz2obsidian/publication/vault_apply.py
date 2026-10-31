@@ -699,6 +699,7 @@ def _recovery_prepared_matches(
         )
     }
     covered = set()
+    owned_documents = None
 
     def matches(row, content):
         if row is None:
@@ -853,13 +854,15 @@ def _recovery_prepared_matches(
             != _operation_history_fingerprint(origin_commit, origin)
         ):
             return False
+        if document is not None and owned_documents is None:
+            owned_documents = review_owned_documents(origin_plan)
         owned = (
             tuple(
                 t
-                for t in review_owned_documents(
-                    origin_plan, proof.origin_change_id, proof.origin_decision_id
-                )
-                if t == document
+                for change_id, decision_id, t in owned_documents
+                if (change_id, decision_id)
+                == (proof.origin_change_id, proof.origin_decision_id)
+                and t == document
             )
             if document is not None
             else review_owned_targets(
