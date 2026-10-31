@@ -8,6 +8,11 @@ from pathlib import Path
 import pytest
 
 from brz2obsidian.application.operations import Operations
+from brz2obsidian.application.review_choices import (
+    requirement_digest,
+    review_plan_attachment_references,
+    review_plan_choice_action,
+)
 from brz2obsidian.application.update_lifecycle import text_choice_action
 from brz2obsidian.application.vault_recovery_contracts import VaultRecoveryPreparation
 from brz2obsidian.application.vault_undo_contracts import VaultUndoPreparation
@@ -17,7 +22,12 @@ from brz2obsidian.contracts import (
     LinkOccurrenceChoice,
     ReviewPlan,
 )
-from brz2obsidian.core import prepare_review, resolve_review, select_review_effects
+from brz2obsidian.core import (
+    inspect_review_choices,
+    prepare_review,
+    resolve_review,
+    select_review_effects,
+)
 from brz2obsidian.core.reversals import review_owned_documents
 from brz2obsidian.obsidian import interpret_link_target, interpret_links
 from brz2obsidian.publication.vault_apply import _NativeExecutor
@@ -1496,6 +1506,21 @@ def _unassociated_reference_update():
     return operations, vault, source, applied, original, produced, checkpoint_ref
 
 
+def _ordinary_asset_choice(plan, choice="current"):
+    offer = next(row for row in inspect_review_choices(plan) if row.domain == "attachment")
+    assert choice in offer.enabled_choices
+    if choice == "incoming":
+        assert review_plan_attachment_references(plan, offer.requirement_id) == ()
+    selected = review_plan_choice_action(
+        plan,
+        requirement_id=offer.requirement_id,
+        choice=choice,
+        assumptions_digest=requirement_digest(offer),
+    )
+    assert selected.attachment_selection.link_choices == ()
+    return selected
+
+
 @pytest.mark.parametrize("direction", ["finish", "restore"])
 def test_unassociated_document_partial_undo_recovery(direction):
     operations, vault, source, applied, original, produced, checkpoint_ref = (
@@ -1590,7 +1615,7 @@ def test_unassociated_document_partial_undo_recovery(direction):
         assert proof.outputs[0].target.data == produced
         expected_notes = _AFTER
         expected_terminal = "restored"
-        protected_selection = {}
+        protected_selection = {"Assets/data.bin": b"\x00authored"}
     assert proof.outputs[0].current.content.data == original
     assert not any(
         row.path.startswith("Assets/")
@@ -1600,13 +1625,31 @@ def test_unassociated_document_partial_undo_recovery(direction):
     )
     assert manual.baseline.status == "unknown" and manual.baseline.content is None
     if direction == "restore":
+        asset = next(
+            row for row in recovery.review.facts.subjects if row.path == "Assets/data.bin"
+        )
+        assert asset.operation_reversal is None
+        assert asset.baseline.status == "known"
+        assert asset.baseline.content.data == b"\x00original"
+        assert asset.incoming.data == b"abc" and asset.current.content.data == b"\x00authored"
+        operation = recovery.review.facts.format_operation
+        assert (operation.baseline_source_version, operation.target_source_version) == (
+            "source:a", "source:b"
+        )
+        assert next(
+            row.content.data for row in operation.established_baseline.outputs
+            if (row.item_id, row.facet) == (asset.item_id, asset.facet)
+        ) == b"\x00original"
+        protected = resolve_review(recovery.review, _ordinary_asset_choice(recovery.review))
+        assert protected.status == "accepted", protected.code
+        plan = protected.plan
         change = next(
-            row for row in recovery.review.proposal.changes if row.path == "Manual.md"
+            row for row in plan.proposal.changes if row.path == "Manual.md"
         )
         selected_action = text_choice_action(
-            recovery.review,
+            plan,
             action(
-                recovery.review,
+                plan,
                 change,
                 domain="reversal",
                 choice="reverse",
@@ -1614,7 +1657,7 @@ def test_unassociated_document_partial_undo_recovery(direction):
             ),
         )
         assert selected_action.candidate is None
-        preview = resolve_review(recovery.review, selected_action)
+        preview = resolve_review(plan, selected_action)
         assert preview.status == "accepted", preview.code
         assert preview.plan.ready, preview.plan.blockers
         effects = select_review_effects(preview.plan)
@@ -1629,10 +1672,78 @@ def test_unassociated_document_partial_undo_recovery(direction):
             for p in vault.rglob("*")
             if p.is_file()
         } == full_before
-    later = original + b"\nLater ordinary document writing after Undo stopped.\n"
+    later = (
+        original + b"\nLater ordinary document writing after Undo stopped.\n"
+        if direction == "finish"
+        else b"User removed the references.\nLater independent ordinary writing.\n"
+    )
     (vault / "Manual.md").write_bytes(later)
     recovery = operations.prepare_recovery(vault, direction=direction)
     assert recovery.status == "offered", recovery.code
+    if direction == "restore":
+        manual_change = next(
+            row for row in recovery.review.proposal.changes if row.path == "Manual.md"
+        )
+        kept = resolve_review(
+            recovery.review,
+            action(
+                recovery.review,
+                manual_change,
+                domain="reversal",
+                choice="current",
+                decision_id="ordinary:scope-negative:manual",
+            ),
+        )
+        assert kept.status == "accepted", kept.code
+        incoming = resolve_review(
+            kept.plan, _ordinary_asset_choice(kept.plan, "incoming")
+        )
+        assert incoming.status == "accepted" and incoming.plan.ready, (
+            incoming.code, incoming.plan.blockers
+        )
+        unsupported = select_review_effects(incoming.plan)
+        assert unsupported.status == "selected" and unsupported.remove_paths == ()
+        assert {row.path: row.content.data for row in unsupported.files} == {
+            **_AFTER,
+            "Manual.md": later,
+            "Assets/data.bin": b"abc",
+        }
+        refusal_before = {
+            p.relative_to(vault).as_posix(): p.read_bytes()
+            for p in vault.rglob("*")
+            if p.is_file()
+        }
+        marker = json.loads(refusal_before[".git/brz2obsidian/owner.json"])
+        assert marker["operation_id"] == stopped.operation_id
+        assert len(refusal_before[".git/brz2obsidian/held"]) == 1
+        refused = operations.execute_recovery(vault, _with_review(recovery, incoming.plan))
+        assert refused.status == "refused" and refused.code == "recovery_scope_changed"
+        refusal_after = {
+            p.relative_to(vault).as_posix(): p.read_bytes()
+            for p in vault.rglob("*")
+            if p.is_file()
+        }
+        # Normal refusal releases its two coordination files; persistent state
+        # including every Git object/ref/index byte and authored file is exact.
+        released = {".git/brz2obsidian/owner.json", ".git/brz2obsidian/held"}
+        assert set(refusal_before) - set(refusal_after) == released
+        assert refusal_after == {
+            path: raw for path, raw in refusal_before.items() if path not in released
+        }
+        recovery = operations.refresh_recovery(vault, recovery)
+        assert recovery.status == "offered", recovery.code
+        assert recovery.operation_id == stopped.operation_id
+        assert recovery.intent_commit == stopped.intent_commit
+        selected_action = _ordinary_asset_choice(recovery.review)
+        recovery = operations.resolve_recovery(vault, recovery, selected_action)
+        assert recovery.status == "offered", recovery.code
+        approval = next(
+            row for row in recovery.review.approvals if row.domain == "attachment"
+        )
+        assert approval.choice == "current" and not approval.source_accepted
+        assert approval.source_memory.reviewed_incoming.data == b"abc"
+        assert approval.source_memory.source_version == hashlib.sha256(b"abc").hexdigest()
+        assert approval.source_memory.provenance.decision_id == selected_action.decision_id
     change = next(
         row for row in recovery.review.proposal.changes if row.path == "Manual.md"
     )
@@ -1677,6 +1788,10 @@ def test_unassociated_document_partial_undo_recovery(direction):
         assert transition.status == "accepted", transition.code
         recovery = _with_review(recovery, transition.plan)
     assert recovery.review.ready, recovery.review.blockers
+    assert not any(
+        row.source_memory for row in recovery.review.approvals
+        if row.target_path == "Manual.md"
+    )
     selected = select_review_effects(recovery.review)
     assert selected.status == "selected" and selected.remove_paths == ()
     assert {row.path: row.content.data for row in selected.files} == {
@@ -1726,3 +1841,13 @@ def test_unassociated_document_partial_undo_recovery(direction):
     } == source_before
     assert "Manual.md" not in source_before
     assert applied.operation_id != stopped.operation_id
+    checkpoint = operations.read_checkpoint(vault)
+    assert checkpoint.status == "valid", checkpoint.code
+    generated = {
+        **(_BASE if direction == "finish" else _AFTER),
+        "Assets/data.bin": b"\x00original" if direction == "finish" else b"abc",
+    }
+    assert {row.path: (row.size, row.sha256) for row in checkpoint.manifest.source} == {
+        path: (len(raw), hashlib.sha256(raw).hexdigest())
+        for path, raw in generated.items()
+    }
