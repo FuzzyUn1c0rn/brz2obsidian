@@ -27,6 +27,7 @@ from brz2obsidian.core.memberships import used_mappings
 from brz2obsidian.core.reconciliation import _reconcile
 from brz2obsidian.core.reversals import (
     primary_reversal_content,
+    reversal_document_target,
     reversal_subject,
     reversal_text_comparison,
 )
@@ -110,7 +111,9 @@ def _choices(facts, change, domain):
             if (s.item_id, s.facet) == (change.item_id, change.facet)
         )
         return ("current", "reverse") + (
-            ("edited",) if subject.attachment is None else ()
+            ("edited",)
+            if subject.attachment is None and reversal_document_target(subject) is None
+            else ()
         )
     if domain == "identity":
         return ("associate",)
@@ -984,6 +987,8 @@ def _resolve_action(plan, action):
         action.domain == "reversal"
         and action.choice == "reverse"
         and reversal_subject(plan.producer_facts, change).attachment is None
+        and reversal_document_target(reversal_subject(plan.producer_facts, change))
+        is None
         and any(
             r.target is not None
             for r in reversal_subject(

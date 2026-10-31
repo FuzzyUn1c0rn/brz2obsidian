@@ -15,6 +15,7 @@ from brz2obsidian.core.review_links import (
 
 from .reversals import (
     content_bytes,
+    reversal_document_target,
     reversal_subject,
     reversal_target,
     selected_reversal_outputs,
@@ -204,6 +205,26 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
                     interpretation="supported",
                 )
             write(target, content, target.canonical_path, state)
+            if reversal_document_target(subject) is not None:
+                retained_documents = tuple(
+                    d
+                    for d in context.current_documents + context.incoming_documents
+                    if d.source_path == row.path
+                    and d.document_id == target_id
+                    and d.content == content
+                )
+                if not retained_documents or any(
+                    d != retained_documents[0] for d in retained_documents
+                ):
+                    add("selected_link_context_conflict")
+                    continue
+                documents = {
+                    key: doc
+                    for key, doc in documents.items()
+                    if doc.source_path != row.path
+                }
+                documents[target_id] = retained_documents[0]
+                explicit_documents.add(target_id)
             absent = {r.path for r, data in members if data is None}
             documents = {
                 key: doc

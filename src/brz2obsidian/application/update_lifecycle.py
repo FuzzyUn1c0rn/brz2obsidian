@@ -831,8 +831,16 @@ def text_choice_action(plan, action, *, edited=None):
         )
         if change.attachment_review is None:
             if action.domain == "reversal":
-                from brz2obsidian.core.reversals import reversal_text_comparison
+                from brz2obsidian.core.reversals import (
+                    reversal_document_entry,
+                    reversal_subject,
+                    reversal_text_comparison,
+                )
 
+                if action.choice == "reverse" and reversal_document_entry(
+                    plan.producer_facts, reversal_subject(plan.producer_facts, change)
+                ) is not None:
+                    return action
                 change = reversal_text_comparison(plan.producer_facts, change)
             action = action.model_copy(
                 update={

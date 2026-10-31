@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 
 from brz2obsidian.application.operations import Operations
+from brz2obsidian.application.update_lifecycle import text_choice_action
 from brz2obsidian.application.vault_recovery_contracts import VaultRecoveryPreparation
 from brz2obsidian.application.vault_undo_contracts import VaultUndoPreparation
 from brz2obsidian.contracts import (
@@ -378,6 +379,92 @@ def test_latest_undo_retains_created_definition_identities_and_later_home():
     assert prepared.status == "offered", prepared.code
     assert prepared.target_receipt_commit == applied.receipt_commit
     assert prepared.checkpoint_commit == applied.result_commit
+    manual_subject = next(
+        row for row in prepared.review.facts.subjects if row.path == "Manual.md"
+    )
+    assert manual_subject.item_id == "file:Manual.md"
+    assert manual_subject.baseline.status == "unknown"
+    assert manual_subject.baseline.content is None
+    assert manual_subject.operation_reversal.outputs[0].produced.data == manual_after
+    assert manual_subject.operation_reversal.outputs[0].target.data == manual_before
+    manual_change = next(
+        row for row in prepared.review.proposal.changes if row.path == "Manual.md"
+    )
+    assert manual_change.identity_review.provenance == "operation_owned"
+    assert not manual_change.identity_review.repair_required
+    assert next(
+        row.choices
+        for row in prepared.review.requirements
+        if row.change_id == manual_change.change_id
+    ) == ("current", "reverse")
+    rejected_edit = resolve_review(
+        prepared.review,
+        action(prepared.review, manual_change, domain="reversal", choice="edited"),
+    )
+    assert rejected_edit.status == "refused"
+
+    # Generic missing identity, duplicate owners and inconsistent path/hash facts
+    # cannot acquire operation-owned binding from a matching file name.
+    observed_facts = prepared.review.facts
+    manual_entry = next(
+        row for row in observed_facts.identity_inventory if row.current.path == "Manual.md"
+    )
+    variants = (
+        observed_facts.model_copy(
+            update={
+                "subjects": tuple(
+                    row.model_copy(update={"operation_reversal": None})
+                    if row.path == "Manual.md"
+                    else row
+                    for row in observed_facts.subjects
+                )
+            }
+        ),
+        observed_facts.model_copy(
+            update={
+                "identity_inventory": observed_facts.identity_inventory
+                + (manual_entry.model_copy(update={"entry_id": "duplicate:manual"}),)
+            }
+        ),
+        observed_facts.model_copy(
+            update={
+                "subjects": tuple(
+                    row.model_copy(
+                        update={
+                            "source_target": row.source_target.model_copy(
+                                update={"normalized_path": "protected.bin"}
+                            )
+                        }
+                    )
+                    if row.path == "Manual.md"
+                    else row
+                    for row in observed_facts.subjects
+                )
+            }
+        ),
+        observed_facts.model_copy(
+            update={
+                "identity_inventory": tuple(
+                    row.model_copy(
+                        update={
+                            "current": row.current.model_copy(
+                                update={"content": ExactContent(data=b"foreign bytes")}
+                            )
+                        }
+                    )
+                    if row.current.path == "Manual.md"
+                    else row
+                    for row in observed_facts.identity_inventory
+                )
+            }
+        ),
+    )
+    for unsafe in variants:
+        refused = prepare_review(unsafe, preflight=prepared.review.preflight)
+        change = next(row for row in refused.proposal.changes if row.path == "Manual.md")
+        assert change.identity_review.status != "matched"
+        assert not refused.ready
+        assert select_review_effects(refused).status != "selected"
     context = prepared.review.facts.link_context
     for kind, path, item_id, _, incoming in definitions:
         (target,) = [
@@ -439,6 +526,166 @@ def test_latest_undo_retains_created_definition_identities_and_later_home():
         for p in vault.rglob("*")
         if p.is_file()
     } == full_before
+
+    def complete(preparation, manual_choice):
+        for path, choice in (
+            ("Manual.md", manual_choice),
+            ("Home.md", "current"),
+            *((path, "reverse") for _, path, _, _, _ in definitions),
+            ("Assets/data.bin", "reverse"),
+        ):
+            plan = preparation.review
+            change = next(row for row in plan.proposal.changes if row.path == path)
+            if not any(row.change_id == change.change_id for row in plan.requirements):
+                continue
+            selected_action = text_choice_action(
+                plan,
+                action(
+                    plan,
+                    change,
+                    domain="text" if path == "Home.md" else "reversal",
+                    choice=choice,
+                    decision_id="undo:" + path + ":" + choice,
+                ),
+            )
+            if path == "Manual.md":
+                assert selected_action.candidate is None
+            transition = resolve_review(plan, selected_action)
+            assert transition.status == "accepted", transition.code
+            preparation = _with_review(preparation, transition.plan)
+        assert preparation.review.ready, preparation.review.blockers
+        return preparation
+
+    # The unchanged produced document reverses to literal authored preimage.
+    reversed_review = complete(kept, "reverse")
+    selected = select_review_effects(reversed_review.review)
+    assert selected.status == "selected"
+    assert {row.path: row.content.data for row in selected.files} == {
+        "Home.md": later,
+        "Manual.md": manual_before,
+        "Assets/data.bin": b"\x00authored",
+    }
+    assert set(selected.remove_paths) == {
+        *(path for _, path, _, _, _ in definitions),
+        "Assets/data (incoming-ba7816bf).bin",
+    }
+    assert {
+        p.relative_to(vault).as_posix(): p.read_bytes()
+        for p in vault.rglob("*")
+        if p.is_file()
+    } == full_before
+
+    # A self-consistent Core declaration cannot forge retained storage authority.
+    proof = manual_subject.operation_reversal
+    forged_subject = manual_subject.model_copy(
+        update={
+            "operation_reversal": proof.model_copy(
+                update={
+                    "outputs": (
+                        proof.outputs[0].model_copy(
+                            update={"produced": ExactContent(data=b"forged produced bytes")}
+                        ),
+                    )
+                }
+            )
+        }
+    )
+    forged_facts = observed_facts.model_copy(
+        update={
+            "subjects": tuple(
+                forged_subject if row.path == "Manual.md" else row
+                for row in observed_facts.subjects
+            )
+        }
+    )
+    forged_plan = prepare_review(forged_facts, preflight=prepared.review.preflight)
+    forged = complete(_with_review(prepared, forged_plan), "reverse")
+    refused = operations.execute_undo(vault, forged)
+    assert refused.status == "refused" and refused.code == "undo_review_stale"
+    assert {
+        p.relative_to(vault).as_posix(): p.read_bytes()
+        for p in vault.rglob("*")
+        if p.is_file()
+    } == full_before
+
+    # This third version restores original references AND adds later prose.
+    # Current therefore remains coherent when the secondary asset is reversed.
+    manual_later = manual_before + b"\nLater independent Manual writing.\n"
+    (vault / "Manual.md").write_bytes(manual_later)
+    later_before = {
+        p.relative_to(vault).as_posix(): p.read_bytes()
+        for p in vault.rglob("*")
+        if p.is_file()
+    }
+    refreshed = operations.prepare_undo(vault, previous=reversed_review)
+    assert refreshed.status == "offered", refreshed.code
+    manual_change = next(
+        row for row in refreshed.review.proposal.changes if row.path == "Manual.md"
+    )
+    assert manual_change.current.data == manual_later
+    assert not any(
+        row.change_id == manual_change.change_id for row in refreshed.review.approvals
+    )
+    current = operations.resolve_undo(
+        vault,
+        refreshed,
+        action(
+            refreshed.review,
+            manual_change,
+            domain="reversal",
+            choice="current",
+            decision_id="keep:later-manual",
+        ),
+    )
+    assert current.status == "offered", current.code
+    final = complete(current, "current")
+    selected = select_review_effects(final.review)
+    assert selected.status == "selected"
+    assert {row.path: row.content.data for row in selected.files} == {
+        "Home.md": later,
+        "Manual.md": manual_later,
+        "Assets/data.bin": b"\x00authored",
+    }
+    assert {
+        p.relative_to(vault).as_posix(): p.read_bytes()
+        for p in vault.rglob("*")
+        if p.is_file()
+    } == later_before
+    final_manual = next(
+        row for row in final.review.facts.identity_inventory if row.current.path == "Manual.md"
+    )
+    assert final_manual.identity is None and final_manual.raw_identity is None
+    assert final_manual.identity_state == "missing"
+    assert next(
+        row for row in final.review.facts.link_context.current_targets
+        if row.canonical_path == "Manual.md"
+    ).identity is None
+    assert not any(row.source_memory for row in final.review.approvals if row.target_path == "Manual.md")
+    source_before = {
+        p.relative_to(source).as_posix(): p.read_bytes()
+        for p in source.rglob("*") if p.is_file()
+    }
+    undone = operations.execute_undo(vault, final)
+    assert undone.status == "undone", undone.code
+    after = user_state(vault)
+    assert after["authored"] == {
+        "Home.md": later,
+        "Manual.md": manual_later,
+        "Assets/data.bin": b"\x00authored",
+        "Protected.bin": b"protected\x00\xff",
+    }
+    _assert_user_state(
+        before,
+        after,
+        allowed_refs=frozenset(
+            (captured.locator.ref.encode(), _operation_ref(captured.locator.ref, undone.operation_id))
+        ),
+    )
+    assert {
+        p.relative_to(source).as_posix(): p.read_bytes()
+        for p in source.rglob("*") if p.is_file()
+    } == source_before
+    assert "Manual.md" not in source_before
 
 
 def _preserve_candidate_inputs(vault, preparation, selected_action):

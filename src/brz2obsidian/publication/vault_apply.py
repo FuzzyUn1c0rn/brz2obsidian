@@ -25,6 +25,10 @@ from brz2obsidian.application.vault_update_contracts import (
     VaultUpdateDetailPage,
 )
 from brz2obsidian.core import review_owned_targets, select_review_effects
+from brz2obsidian.core.reversals import (
+    reversal_document_target,
+    review_owned_documents,
+)
 from brz2obsidian.publication.git_payload import verify_blobs
 from brz2obsidian.publication.vault_admission import _safe_relative
 from brz2obsidian.publication.vault_history import (
@@ -834,9 +838,13 @@ def _recovery_prepared_matches(
             ),
             None,
         )
+        document = reversal_document_target(subject)
         if (
             change is None
-            or (change.item_id, change.facet) != (subject.item_id, subject.facet)
+            or (
+                document is None
+                and (change.item_id, change.facet) != (subject.item_id, subject.facet)
+            )
             or proof.operation_id != origin.operation_id
             or proof.operation_kind != origin.kind
             or proof.direction != direction
@@ -845,9 +853,20 @@ def _recovery_prepared_matches(
             != _operation_history_fingerprint(origin_commit, origin)
         ):
             return False
-        if proof.owned_targets != review_owned_targets(
-            origin_plan, proof.origin_change_id, proof.origin_decision_id
-        ):
+        owned = (
+            tuple(
+                t
+                for t in review_owned_documents(
+                    origin_plan, proof.origin_change_id, proof.origin_decision_id
+                )
+                if t == document
+            )
+            if document is not None
+            else review_owned_targets(
+                origin_plan, proof.origin_change_id, proof.origin_decision_id
+            )
+        )
+        if proof.owned_targets != owned:
             return False
         for row in proof.outputs:
             if (

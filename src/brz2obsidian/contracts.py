@@ -957,16 +957,16 @@ class OperationReversalOutput(ReconciliationContract):
     target: ExactContent | None
 
     @model_validator(mode="after")
-    def exact_existence_change(self):
+    def exact_version_change(self):
         if (
             (self.produced_existence == "present") != (self.produced is not None)
             or (self.target_existence == "present") != (self.target is not None)
-            or self.produced_existence == self.target_existence
+            or self.produced == self.target
             or self.current.existence == "unknown"
             or self.current.path != self.path
         ):
             raise ValueError(
-                "Operation reversal requires an exact proven existence change"
+                "Operation reversal requires an exact proven version change"
             )
         return self
 
@@ -1015,6 +1015,17 @@ class OperationReversalTarget(ReconciliationContract):
                 raise ValueError(
                     "One logical reversal target cannot occupy multiple present paths"
                 )
+        for row in self.outputs:
+            if row.produced_existence != row.target_existence:
+                continue
+            target = next(t for t in self.owned_targets if t.target_id == row.target_id)
+            if (
+                len(self.outputs) != 1
+                or len(self.owned_targets) != 1
+                or target.kind != "note"
+                or target.identity is not None
+            ):
+                raise ValueError("A byte reversal requires one identityless document")
         return self
 
 

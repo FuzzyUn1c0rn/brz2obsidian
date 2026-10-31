@@ -303,6 +303,11 @@ def bind_identity(facts, subject, subject_id, *, applicability=()):
         else None
     )
     operation_owned = False
+    if selected is None and not matches:
+        from .reversals import reversal_document_entry
+
+        selected = reversal_document_entry(facts, subject)
+        operation_owned = selected is not None
     if len(matches) > 1 and subject.operation_reversal is not None:
         from .reversals import reversal_physical_entry
 
@@ -353,6 +358,7 @@ def bind_identity(facts, subject, subject_id, *, applicability=()):
         same_path = item.current.path == subject.path
         if not (
             same
+            or (operation_owned and item.entry_id == selected.entry_id)
             or (
                 selected is None
                 and (item.identity_state != "valid" or same_title or same_path)
@@ -500,9 +506,14 @@ def bind_identity(facts, subject, subject_id, *, applicability=()):
             finding("current_inventory_mismatch", True)
     repair_required = (
         selected is None
-        or selected.identity_state != "valid"
-        or selected.facet != subject.facet
-        or (len(matches) != 1 and not operation_owned)
+        or (
+            not operation_owned
+            and (
+                selected.identity_state != "valid"
+                or selected.facet != subject.facet
+                or len(matches) != 1
+            )
+        )
     )
     if (
         selected is not None
