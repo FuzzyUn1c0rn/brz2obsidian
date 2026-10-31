@@ -431,6 +431,17 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
 
     final_targets = tuple(targets.values())
     final_states = tuple(states.values())
+    attachment_links = {
+        (choice.document_id, choice.occurrence_id)
+        for approval in approvals
+        if approval.attachment_selection is not None
+        for choice in approval.attachment_selection.link_choices
+    }
+    attachment_documents = (
+        {key[0] for key in attachment_links}
+        if facts.format_operation.kind == "source_update"
+        else set()
+    )
     for document in documents.values():
         prior = original_documents.get(document.document_id)
         unchanged_current = document == prior
@@ -453,14 +464,15 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
         )
         if not relevant:
             continue
-        if (
+        ordinary_renewal = (
             document.document_id not in explicit_documents
             and document.document_id not in proof_documents
         ) or (
             facts.format_operation.kind == "format_transition"
             and unchanged_current
             and document.document_id not in proof_documents
-        ):
+        )
+        if ordinary_renewal or document.document_id in attachment_documents:
             # A retained note's unrelated prose version is not a link redirect. Resource choices
             # and path/identity/fragment changes still require their explicit selected proof.
             occurrences = []
@@ -469,6 +481,23 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
                 if (
                     target is not None
                     and target.kind != "resource"
+                    and (
+                        ordinary_renewal
+                        or prior is not None
+                        and (document.document_id, occurrence.occurrence_id)
+                        not in attachment_links
+                        and any(
+                            (old.raw, old.syntax, old.embedded, old.query, old.meaning)
+                            == (
+                                occurrence.raw,
+                                occurrence.syntax,
+                                occurrence.embedded,
+                                occurrence.query,
+                                occurrence.meaning,
+                            )
+                            for old in prior.occurrences
+                        )
+                    )
                     and occurrence.meaning.model_copy(
                         update={"target_version": actual.target_version}
                     )

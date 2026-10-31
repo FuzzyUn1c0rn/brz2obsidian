@@ -1105,11 +1105,10 @@ def _resolve(plan, action):
     return result
 
 
-def validate_review(plan: ReviewPlan) -> ReviewTransition:
-    """Reconstruct original actions and publication-free refreshes in their epochs."""
+def _reconstruct_review(plan: ReviewPlan) -> ReviewTransition:
+    """Replay every typed historical event; refused replay never counts as complete."""
     from .refresh import _refresh
 
-    plan = ReviewPlan.model_validate(plan)
     canonical = prepare_review(
         plan.history.initial_facts, preflight=plan.history.initial_preflight
     )
@@ -1121,6 +1120,16 @@ def validate_review(plan: ReviewPlan) -> ReviewTransition:
         if replayed.status != "accepted":
             return _transition(canonical, "refused", "invalid_plan")
         canonical = replayed.plan
+    return _transition(canonical, "accepted", "accepted")
+
+
+def validate_review(plan: ReviewPlan) -> ReviewTransition:
+    """Reconstruct original actions and require the entire canonical plan exactly."""
+    plan = ReviewPlan.model_validate(plan)
+    reconstructed = _reconstruct_review(plan)
+    if reconstructed.status != "accepted":
+        return reconstructed
+    canonical = reconstructed.plan
     if canonical != plan:
         return _transition(canonical, "refused", "invalid_plan")
     return _transition(canonical, "accepted", "accepted")

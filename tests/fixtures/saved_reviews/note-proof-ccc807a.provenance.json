@@ -1,0 +1,11 @@
+{
+  "source_commit": "ccc807a431605f1aaa9b2d8a8e8702892343635a",
+  "route": "Existing small source-neutral fixtures -> fresh public choice_offers/Operations.resolve_update_choice for unrelated Current, Home Edited, attachment Both references -> public core.save_review -> exact SavedReview.model_dump_json UTF-8 bytes BEFORE production edits",
+  "owning_red_receipt": "C:\\Users\\stefa\\.codex\\worktrees\\s3-checkpoint-reader\\brz2obsidian\\tmp\\checks\\277a1cfb\\receipt.json",
+  "original_artifact": "C:\\Users\\stefa\\.codex\\worktrees\\s3-checkpoint-reader\\brz2obsidian\\tmp\\checks\\277a1cfb\\pytest\\test_cross_document_edited_hom0\\authentic-saved-review.json",
+  "fixture": "tests/fixtures/saved_reviews/note-proof-ccc807a.json",
+  "sha256": "5b2fc083d56166871c188a104547f2c33396399377467020079cfc40969cee20",
+  "size": 264330,
+  "manual_cache_edits": false,
+  "synthetic_only": true
+}

@@ -636,7 +636,7 @@ def _review_references(raw):
     return envelope["record"], references
 
 
-def _restore_review(record, payloads):
+def _restore_review(record, payloads, manifest):
     def restore(value):
         if type(value) is dict:
             if _REVIEW_BYTES_KEY in value:
@@ -647,13 +647,24 @@ def _restore_review(record, payloads):
         return value
 
     saved = SavedReview.model_validate(restore(record))
-    restored = load_review(saved)
+    if manifest.boundary == "local" and not manifest.proposed:
+        from brz2obsidian.core.resume import _load_local_review
+
+        restored = _load_local_review(saved)
+    else:
+        restored = load_review(saved)
     if restored.status != "loaded":
         raise OSError("Saved S1 review is unavailable or invalid")
     return restored.loaded
 
 
-def _load_review_payload(git, manifest, verified):
+def read_checkpoint_review(git, manifest, verified):
+    """Read exact review payloads after caller graph/association/lineage admission.
+
+    A typed manifest alone is not that admission. This reader verifies its review
+    object/size/digest, envelope, five-role reference closure and every blob.
+    ``verified`` only accumulates checked object IDs; it confers no authority.
+    """
     size = manifest.review_size
     if available_memory() < 4 * size + 64 * 1024 * 1024:
         raise OSError("Insufficient current memory for the saved review envelope")
@@ -721,7 +732,7 @@ def _load_review_payload(git, manifest, verified):
     verified.update(available[sha][0] for sha in references)
     try:
         restored = _restore_review(
-            record, {sha: sink.getvalue() for sha, sink in sinks.items()}
+            record, {sha: sink.getvalue() for sha, sink in sinks.items()}, manifest
         )
     except RecursionError as error:
         raise OSError("Saved review value exceeds its bounded nesting") from error
@@ -1151,7 +1162,7 @@ def _read(
             if entries.get("review.json") != ("100644", "blob", manifest.review_object):
                 raise OSError("Saved review has no matching graph edge")
             if manifest.review_object not in reviewed:
-                review, references = _load_review_payload(git, manifest, verified)
+                review, references = read_checkpoint_review(git, manifest, verified)
                 from .attachment_ownership import review_ownership_claims
 
                 reviewed[manifest.review_object] = (
@@ -1199,7 +1210,7 @@ def _read(
                     ):
                         review = tip_review
                     else:
-                        review, _ = _load_review_payload(git, manifest, verified)
+                        review, _ = read_checkpoint_review(git, manifest, verified)
         meaning = (
             reviewed[manifest.review_object][2]
             if manifest.review_object is not None

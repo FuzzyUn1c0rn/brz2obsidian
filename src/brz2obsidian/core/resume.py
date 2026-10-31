@@ -14,7 +14,7 @@ from brz2obsidian.contracts import (
 )
 
 from .refresh import refresh_review
-from .resolution import validate_review
+from .resolution import _reconstruct_review, validate_review
 from .selected_effects import _project_review_effects
 
 
@@ -105,6 +105,54 @@ def _resume_result(status, code, loaded=None, plan=None):
         loaded=loaded,
         plan=plan,
         ready=plan is not None and plan.ready,
+    )
+
+
+def _load_local_review(saved: SavedReview) -> ReviewLoadResult:
+    """Verified local memo ingress only: reinterpret one historical derived cache.
+
+    The storage caller owns graph/boundary/integrity admission. This is not a
+    raw-load option, and no authority-bearing field may differ after full replay.
+    The returned SavedReview is canonical in memory; recorded bytes stay intact.
+    """
+    old = saved.plan
+    replayed = _reconstruct_review(old)
+    if replayed.status != "accepted":
+        return _load_result("invalid_review")
+    canonical = replayed.plan
+    effects = _project_review_effects(canonical)
+    if canonical == old:
+        return _load_result("loaded", saved, effects)
+    if (
+        old.facts.format_operation.kind != "source_update"
+        or old.requirements
+        or old.blockers != ("selected_link_context_conflict",)
+        or old.readiness != "refused"
+        or old.ready is not False
+    ):
+        return _load_result("invalid_review")
+    if (
+        canonical.requirements
+        or canonical.blockers
+        or canonical.readiness != "ready"
+        or canonical.ready is not True
+        or effects.status != "selected"
+        or old.model_copy(
+            update={
+                "blockers": canonical.blockers,
+                "readiness": canonical.readiness,
+                "ready": canonical.ready,
+            }
+        )
+        != canonical
+    ):
+        return _load_result("invalid_review")
+    return _load_result(
+        "loaded",
+        SavedReview(
+            schema_id="brz2obsidian.saved-review", schema_version=1, plan=canonical
+        ),
+        effects,
     )
 
 
