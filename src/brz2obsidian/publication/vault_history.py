@@ -1506,10 +1506,36 @@ def _read(
         review=tip_review,
         message="Complete owned local checkpoint graph validated.",
     )
+    _retain_review_effects(result.review, tip_review)
     if targets is not None:
         if set(target_records) != set(targets):
             raise OSError("Operation checkpoint is outside the retained owned chain")
         return result, target_records
+    return result
+
+
+def _retain_review_effects(destination, admitted):
+    """Keep this read's derived comparison after strict result construction.
+
+    Only trusted local assemblers call this; generic model validation continues
+    discarding private state. The cache never supplies current write authority.
+    """
+    if admitted is not None:
+        if destination is None or destination.saved != admitted.saved:
+            raise OSError("Admitted saved review changed during result construction")
+        destination._historical_effects = admitted.historical_effects
+
+
+def _history_result(*, status, admission, checkpoint):
+    result = VaultHistoryInspection(
+        schema_id="brz2obsidian.vault-history-inspection",
+        schema_version=1,
+        status=status,
+        admission=admission,
+        checkpoint=checkpoint,
+    )
+    if checkpoint is not None:
+        _retain_review_effects(result.checkpoint.review, checkpoint.review)
     return result
 
 
@@ -1525,9 +1551,7 @@ def _inspect_retained_history(vault, observation, *, subjects=(), active_operati
         active_operation=active_operation,
         recovery_observation=observation,
     )
-    return VaultHistoryInspection(
-        schema_id="brz2obsidian.vault-history-inspection",
-        schema_version=1,
+    return _history_result(
         status="intact" if checkpoint is not None else "unavailable",
         admission=admission,
         checkpoint=checkpoint,
@@ -1580,9 +1604,7 @@ def _inspect_history(
                 admission = admission.model_copy(update={"preflight": preflight})
     except OSError, ValueError, TypeError, UnicodeError:
         history = None
-    return VaultHistoryInspection(
-        schema_id="brz2obsidian.vault-history-inspection",
-        schema_version=1,
+    return _history_result(
         status=status,
         admission=admission,
         checkpoint=history,
@@ -1644,9 +1666,7 @@ class _UpdateRead:
                         "History did not originate in the completed inspection"
                     )
                 self._inspection = inspection
-                self._bound_history = VaultHistoryInspection(
-                    schema_id="brz2obsidian.vault-history-inspection",
-                    schema_version=1,
+                self._bound_history = _history_result(
                     status="intact",
                     admission=admission,
                     checkpoint=inspection.history,

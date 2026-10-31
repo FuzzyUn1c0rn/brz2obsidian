@@ -7,8 +7,10 @@ from dataclasses import dataclass
 
 import pytest
 
+from brz2obsidian.application.checkpoint_payload_contracts import (
+    CheckpointPayloadRequest,
+)
 from brz2obsidian.application.operations import Operations
-from brz2obsidian.application.checkpoint_payload_contracts import CheckpointPayloadRequest
 from brz2obsidian.application.vault_contracts import VaultSubject
 from brz2obsidian.core import prepare_review, resolve_review
 from tests.application.test_vault_checkpoint_integrity import _blob, _call, _git, _state
@@ -251,7 +253,9 @@ def test_public_history_retains_exact_derived_effects_without_current_authority(
         assert loaded.ready is False and loaded.readiness == "revalidation_required"
         assert loaded.saved.plan == case.plan
         effects = loaded.historical_effects
-        assert effects is not None, "The admitted public result must retain derived effects"
+        assert effects is not None, (
+            "The admitted public result must retain derived effects"
+        )
         assert effects.status == "selected" and effects.code == "selected"
         assert effects.proposal_id == case.plan.proposal.proposal_id
         assert effects.generation == case.plan.proposal.generation == 3
@@ -295,7 +299,9 @@ def test_public_history_retains_exact_derived_effects_without_current_authority(
         assert scoped.checkpoint == reopened
     assert _state(case.vault.parent) == before
     assert (case.vault / ".brz2obsidian/locator.json").read_bytes() == case.locator
-    assert _git(case.vault, "show", case.result.commit + ":manifest.json") == case.manifest
+    assert (
+        _git(case.vault, "show", case.result.commit + ":manifest.json") == case.manifest
+    )
     assert _git(case.vault, "show", case.result.commit + ":review.json") == case.review
 
 
