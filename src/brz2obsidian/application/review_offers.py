@@ -88,6 +88,16 @@ def review_plan_choice_offers(plan):
             disclosure = "Restore to: " + change.target_path
             if change.path != change.target_path:
                 disclosure += "\nDeleted path: " + change.path
+        elif row.domain == "text":
+            change = changes[row.change_id]
+            current_path = (
+                change.rename_review.current_path
+                if change.rename_review is not None
+                else change.path
+            )
+            disclosure = "Current file: " + current_path
+            if change.target_path != current_path:
+                disclosure += "\nSelected destination: " + change.target_path
         change = changes.get(row.change_id)
         selected_choice = selected.choice if selected else None
         decision_id = selected.decision_id if selected else None
@@ -103,6 +113,7 @@ def review_plan_choice_offers(plan):
             )
         if (
             change is not None
+            and row.domain != "text"
             and change.rename_review is not None
             and (change.rename_review.status != "accepted" or row.domain == "rename")
         ):

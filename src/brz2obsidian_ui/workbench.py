@@ -1592,6 +1592,14 @@ class UpdateWorkbench(QWidget):
         for index, offer in enumerate(self._offers, offset + 1):
             domain = names[offer.domain]
             title = f"{domain} choice {index}"
+            text_identity_unavailable = offer.domain == "text" and (
+                not offer.disclosure or offer.detail_omitted
+            )
+            action_identity = (
+                offer.disclosure.removeprefix("Current file: ")
+                if offer.domain == "text"
+                else title
+            )
             self._body.addWidget(_label(title.capitalize(), "sectionTitle"))
             if offer.disclosure:
                 self._body.addWidget(_label(offer.disclosure))
@@ -1599,6 +1607,13 @@ class UpdateWorkbench(QWidget):
                 self._body.addWidget(
                     _label(
                         "Some disclosure was omitted from this bounded view.",
+                        "muted",
+                    )
+                )
+            if text_identity_unavailable:
+                self._body.addWidget(
+                    _label(
+                        "Text actions unavailable: complete file identity is not shown.",
                         "muted",
                     )
                 )
@@ -1626,18 +1641,20 @@ class UpdateWorkbench(QWidget):
                 action_name = (
                     text + " " + domain
                     if choice in ("approve", "accept", "decline")
-                    else text + " for " + title
+                    else text + " for " + action_identity
                 )
                 button = QPushButton(text)
                 button.setAccessibleName(action_name)
                 button.setProperty("draftRequirement", offer.requirement_id)
                 binding = self._state.binding
-                button.clicked.connect(
-                    lambda checked=False, b=binding, o=offer, c=choice: self._choose(
-                        b, o, c
+                button.setEnabled(not text_identity_unavailable)
+                if not text_identity_unavailable:
+                    button.clicked.connect(
+                        lambda checked=False, b=binding, o=offer, c=choice: (
+                            self._choose(b, o, c)
+                        )
                     )
-                )
-                self._choice_buttons.append(button)
+                    self._choice_buttons.append(button)
                 self._body.addWidget(button)
             for unavailable in (
                 () if scoped_configuration else offer.unavailable_choices
