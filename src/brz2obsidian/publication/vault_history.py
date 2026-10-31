@@ -658,11 +658,77 @@ def _restore_review(record, payloads, manifest):
     return restored.loaded
 
 
-def read_checkpoint_review(git, manifest, verified):
-    """Read exact review payloads after caller graph/association/lineage admission.
+class CheckpointReviewMemo:
+    """Per-traversal review metadata with at most one retained parsed tip.
 
-    A typed manifest alone is not that admission. This reader verifies its review
-    object/size/digest, envelope, five-role reference closure and every blob.
+    Callers own full checkpoint admission, as for ``read_checkpoint_review``.
+    Requesting the parsed review does not bypass declaration or closure checks.
+    """
+
+    def __init__(self):
+        self._entries = {}
+        self._tip_key = None
+        self._tip_review = None
+
+    def read(self, git, manifest, verified, *, include_review=False):
+        key = (
+            manifest.review_object,
+            manifest.boundary == "local" and not manifest.proposed,
+        )
+        review = None
+        if key not in self._entries:
+            review, references = read_checkpoint_review(git, manifest, verified)
+            from .attachment_ownership import review_ownership_claims
+
+            self._entries[key] = (
+                manifest.review_size,
+                manifest.review_sha256,
+                _review_meaning(review.saved),
+                references,
+                _review_parent_fingerprint(review),
+                _review_source_signature(review.saved),
+                review.saved.plan.facts.baseline_identity,
+                _onboarding_absence_review(review),
+                review_ownership_claims(review.saved.plan, review.historical_effects),
+                _review_queries(review),
+            )
+        else:
+            metadata = self._entries[key]
+            if metadata[:2] != (manifest.review_size, manifest.review_sha256):
+                raise OSError("Shared review payload has inconsistent declarations")
+            role_hashes = {
+                row.sha256
+                for role in (
+                    manifest.source,
+                    manifest.vault,
+                    manifest.preimage,
+                    manifest.proposed,
+                )
+                for row in role
+            }
+            if metadata[3] - role_hashes != {
+                row.sha256 for row in manifest.review_content
+            }:
+                raise OSError(
+                    "Repeated saved review references changed their owned graph"
+                )
+        if include_review:
+            if self._tip_key == key:
+                review = self._tip_review
+            elif review is None:
+                review, _ = read_checkpoint_review(git, manifest, verified)
+            if self._tip_review is None:
+                self._tip_key, self._tip_review = key, review
+        return self._entries[key], review if include_review else None
+
+
+def read_checkpoint_review(git, manifest, verified):
+    """Read exact review payloads within caller-owned checkpoint admission.
+
+    The caller must complete graph, association and lineage admission before
+    exposing a valid checkpoint. A typed manifest or this result alone does not
+    establish it. This reader verifies the review object/size/digest, envelope,
+    five-role reference closure and every blob.
     ``verified`` only accumulates checked object IDs; it confers no authority.
     """
     size = manifest.review_size
@@ -1023,7 +1089,8 @@ def _read(
     expected_ref = "refs/brz2obsidian/imports/" + expected_id + "/checkpoints"
     if association.association_id != expected_id or association.ref != expected_ref:
         raise OSError("Invalid stable checkpoint association")
-    blobs, controls, reviewed, verified = {}, {}, {}, set()
+    blobs, controls, verified = {}, {}, set()
+    review_memo = CheckpointReviewMemo()
     current, generation = locator.commit, locator.generation
     tip_manifest = tip_review = None
     memo_roles = False
@@ -1161,63 +1228,16 @@ def _read(
         else:
             if entries.get("review.json") != ("100644", "blob", manifest.review_object):
                 raise OSError("Saved review has no matching graph edge")
-            if manifest.review_object not in reviewed:
-                review, references = read_checkpoint_review(git, manifest, verified)
-                from .attachment_ownership import review_ownership_claims
-
-                reviewed[manifest.review_object] = (
-                    manifest.review_size,
-                    manifest.review_sha256,
-                    _review_meaning(review.saved),
-                    references,
-                    _review_parent_fingerprint(review),
-                    _review_source_signature(review.saved),
-                    review.saved.plan.facts.baseline_identity,
-                    _onboarding_absence_review(review),
-                    review_ownership_claims(
-                        review.saved.plan, review.historical_effects
-                    ),
-                    _review_queries(review),
-                )
-            elif reviewed[manifest.review_object][:2] != (
-                manifest.review_size,
-                manifest.review_sha256,
-            ):
-                raise OSError("Shared review payload has inconsistent declarations")
-            else:
-                references = reviewed[manifest.review_object][3]
-                role_hashes = {
-                    row.sha256
-                    for role in (
-                        manifest.source,
-                        manifest.vault,
-                        manifest.preimage,
-                        manifest.proposed,
-                    )
-                    for row in role
-                }
-                if references - role_hashes != {
-                    row.sha256 for row in manifest.review_content
-                }:
-                    raise OSError(
-                        "Repeated saved review references changed their owned graph"
-                    )
-                if targets is not None and current in targets:
-                    if (
-                        tip_manifest is not None
-                        and tip_review is not None
-                        and manifest.review_object == tip_manifest.review_object
-                    ):
-                        review = tip_review
-                    else:
-                        review, _ = read_checkpoint_review(git, manifest, verified)
-        meaning = (
-            reviewed[manifest.review_object][2]
-            if manifest.review_object is not None
-            else None
-        )
+            review_metadata, review = review_memo.read(
+                git,
+                manifest,
+                verified,
+                include_review=tip_manifest is None
+                or (targets is not None and current in targets),
+            )
+        meaning = review_metadata[2] if manifest.review_object is not None else None
         if manifest.review_object is not None:
-            claims, missing = reviewed[manifest.review_object][8]
+            claims, missing = review_metadata[8]
             if claims or missing:
                 ownership_demands.append(
                     (current, manifest.recovery_origin_intent_commit, claims, missing)
@@ -1234,7 +1254,7 @@ def _read(
                     manifest.recovery_origin_intent_commit,
                     manifest.recovery_previous_operation_commit,
                     manifest.recovery_direction,
-                    onboarding_absence=reviewed[manifest.review_object][7]
+                    onboarding_absence=review_metadata[7]
                     if manifest.review_object is not None
                     else False,
                     review_context_fingerprint=_review_context_fingerprint(
@@ -1243,7 +1263,7 @@ def _read(
                     policy_context=_role_policy(
                         association,
                         manifest,
-                        reviewed[manifest.review_object][9]
+                        review_metadata[9]
                         if manifest.review_object is not None
                         else None,
                     ),
@@ -1251,10 +1271,9 @@ def _read(
             )
         if manifest.reviewed_source is not None and (
             manifest.review_object is None
-            or reviewed[manifest.review_object][5]
-            != _binding_signature(manifest.reviewed_source)
+            or review_metadata[5] != _binding_signature(manifest.reviewed_source)
             or (
-                reviewed[manifest.review_object][6]
+                review_metadata[6]
                 if manifest.boundary == "local"
                 else manifest.reviewed_source.incoming_identity
             )
@@ -1331,19 +1350,17 @@ def _read(
                     )
                     if memo_roles
                     else None,
-                    reviewed[manifest.review_object][4]
+                    review_metadata[4]
                     if memo_roles and manifest.review_object is not None
                     else None,
-                    reviewed[manifest.review_object][7]
-                    if manifest.review_object is not None
-                    else False,
+                    review_metadata[7] if manifest.review_object is not None else False,
                     review_context_fingerprint=_review_context_fingerprint(
                         association, manifest
                     ),
                     policy_context=_role_policy(
                         association,
                         manifest,
-                        reviewed[manifest.review_object][9]
+                        review_metadata[9]
                         if manifest.review_object is not None
                         else None,
                     ),

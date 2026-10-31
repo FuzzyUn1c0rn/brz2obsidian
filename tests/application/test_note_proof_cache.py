@@ -317,6 +317,103 @@ def saved_payload_port(tmp_path, saved, *, boundary="local", proposed=False):
     return git, manifest, envelope, declaration
 
 
+@pytest.mark.parametrize(
+    "boundary, proposed", (("prepared", False), ("result", False), ("local", True))
+)
+@pytest.mark.parametrize("include_review", (True, False))
+def test_shared_review_memo_rechecks_legacy_admission_for_targeted_manifest(
+    tmp_path, boundary, proposed, include_review
+):
+    from brz2obsidian.contracts import SavedReview
+    from brz2obsidian.publication.vault_history import CheckpointReviewMemo
+
+    old = SavedReview.model_validate_json(OLD_RECORD.read_bytes())
+    git, local, _envelope, declaration = saved_payload_port(tmp_path, old)
+    before = declaration.read_bytes()
+    memo, verified = CheckpointReviewMemo(), set()
+    metadata, loaded = memo.read(git, local, verified, include_review=True)
+    assert not loaded.ready and loaded.saved.plan.ready
+    assert metadata[3] == {row.sha256 for row in local.review_content}
+    forbidden = local.model_copy(update={"boundary": boundary})
+    if proposed:
+        forbidden = forbidden.model_copy(
+            update={
+                "proposed": (
+                    local.review_content[0].model_copy(update={"path": "proposed.bin"}),
+                ),
+                "review_content": local.review_content[1:],
+            }
+        )
+    with pytest.raises(OSError, match="Saved S1 review is unavailable or invalid"):
+        memo.read(git, forbidden, verified, include_review=include_review)
+    assert declaration.read_bytes() == before
+
+
+def test_shared_review_memo_reuses_same_class_and_admits_canonical_cross_class(
+    tmp_path,
+):
+    from brz2obsidian.publication.vault_history import CheckpointReviewMemo
+
+    saved = save_review(cross_document_review()).record
+    git, local, _envelope, declaration = saved_payload_port(tmp_path, saved)
+    before = declaration.read_bytes()
+    memo, verified = CheckpointReviewMemo(), set()
+    metadata, tip = memo.read(git, local, verified, include_review=True)
+    assert tip.saved == saved and not tip.ready
+    # A cached same-class read needs no further external blob request.
+    original_prefix = git.prefix
+    git.prefix = [sys.executable, "-c", "raise SystemExit(7)"]
+    repeated, again = memo.read(git, local, verified, include_review=True)
+    assert again == tip and repeated == metadata
+    git.prefix = original_prefix
+    for boundary, proposed in (("prepared", False), ("result", False), ("local", True)):
+        manifest = local.model_copy(update={"boundary": boundary})
+        if proposed:
+            manifest = manifest.model_copy(
+                update={
+                    "proposed": (
+                        local.review_content[0].model_copy(
+                            update={"path": "proposed.bin"}
+                        ),
+                    ),
+                    "review_content": local.review_content[1:],
+                }
+            )
+        current, loaded = memo.read(git, manifest, verified, include_review=True)
+        assert current == metadata and loaded.saved == saved and not loaded.ready
+        assert loaded.historical_effects == tip.historical_effects
+    assert metadata[3] == {row.sha256 for row in local.review_content}
+    assert verified == {row.object_id for row in local.review_content}
+    assert declaration.read_bytes() == before
+
+
+@pytest.mark.parametrize("changed", ("size", "sha", "closure"))
+def test_shared_review_memo_checks_integrity_before_returning_cached_tip(
+    tmp_path, changed
+):
+    from brz2obsidian.contracts import SavedReview
+    from brz2obsidian.publication.vault_history import CheckpointReviewMemo
+
+    old = SavedReview.model_validate_json(OLD_RECORD.read_bytes())
+    git, local, _envelope, _declaration = saved_payload_port(tmp_path, old)
+    memo, verified = CheckpointReviewMemo(), set()
+    memo.read(git, local, verified, include_review=True)
+    updates = {
+        "size": {"review_size": local.review_size + 1},
+        "sha": {"review_sha256": "0" * 64},
+        "closure": {"review_content": local.review_content[1:]},
+    }
+    with pytest.raises(
+        OSError, match="inconsistent declarations|changed their owned graph"
+    ):
+        memo.read(
+            git,
+            local.model_copy(update=updates[changed]),
+            verified,
+            include_review=True,
+        )
+
+
 def test_verified_old_local_review_reconstructs_then_requires_current_recheck(tmp_path):
     from brz2obsidian.contracts import SavedReview
     from brz2obsidian.core import load_review, resume_review
