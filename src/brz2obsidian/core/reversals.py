@@ -202,7 +202,7 @@ def reversal_document_target(subject):
         or row.target_id != subject.item_id
         or row.produced is None
         or row.target is None
-        or row.produced == row.target
+        or row.produced.data == row.target.data
         or subject.incoming != row.target
         or (target.target_id, target.canonical_path) != (row.target_id, row.path)
         or target.kind != "note"
@@ -473,7 +473,9 @@ def review_owned_documents(plan):
             files = tuple(f for f in effects.files if f.path == subject.path)
             if len(files) != 1 or files[0].subject_id != change.subject_id:
                 raise ValueError("Reversed document lacks its selected owner")
-            if files[0].content == subject.current.content:
+            if content_bytes(files[0].content) == content_bytes(
+                subject.current.content
+            ):
                 continue
             documents = tuple(
                 d
@@ -505,7 +507,7 @@ def review_owned_documents(plan):
                 for d in context.current_documents
                 if d.document_id == document.document_id
             )
-            if len(prior) != 1 or document.content == prior[0].content:
+            if len(prior) != 1 or document.content.data == prior[0].content.data:
                 continue
             targets = tuple(
                 t for t in candidate.targets if t.canonical_path == document.source_path
@@ -525,7 +527,7 @@ def review_owned_documents(plan):
                 and any(
                     d.document_id == document.document_id
                     and d.source_path == document.source_path
-                    and d.content != prior[0].content
+                    and d.content.data != prior[0].content.data
                     for d in a.attachment_candidate.documents
                 )
             )

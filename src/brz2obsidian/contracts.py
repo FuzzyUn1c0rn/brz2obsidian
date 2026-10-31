@@ -961,7 +961,8 @@ class OperationReversalOutput(ReconciliationContract):
         if (
             (self.produced_existence == "present") != (self.produced is not None)
             or (self.target_existence == "present") != (self.target is not None)
-            or self.produced == self.target
+            or (None if self.produced is None else self.produced.data)
+            == (None if self.target is None else self.target.data)
             or self.current.existence == "unknown"
             or self.current.path != self.path
         ):

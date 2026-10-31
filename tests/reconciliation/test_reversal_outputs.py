@@ -319,18 +319,26 @@ def test_document_byte_change_rejects_locator_only_difference(locator_style):
     def content(data, locator):
         return ExactContent(
             data=data,
-            reference=None if locator is None else ImmutableContentReference(
+            reference=None
+            if locator is None
+            else ImmutableContentReference(
                 content_id=locator, sha256=sha256(data).hexdigest(), size=len(data)
             ),
         )
 
     original = content(raw, None if locator_style == "inline_to_locator" else "store:a")
     observed = CurrentContent(existence="present", path="Manual.md", content=original)
-    fields = dict(
-        path="Manual.md", target_id="file:Manual.md", produced_existence="present",
-        produced=original, current=observed, target_existence="present",
+    fields = {
+        "path": "Manual.md",
+        "target_id": "file:Manual.md",
+        "produced_existence": "present",
+        "produced": original,
+        "current": observed,
+        "target_existence": "present",
+    }
+    changed = OperationReversalOutput(
+        **fields, target=content(b"Different bytes.", "store:b")
     )
-    changed = OperationReversalOutput(**fields, target=content(b"Different bytes.", "store:b"))
     assert changed.produced.data != changed.target.data
     with pytest.raises(ValidationError, match="exact proven version change"):
         OperationReversalOutput(**fields, target=content(raw, "store:b"))
@@ -356,49 +364,98 @@ def test_attachment_context_locator_change_does_not_own_document(locator_style):
     def content(locator):
         return ExactContent(
             data=raw,
-            reference=None if locator is None else ImmutableContentReference(
+            reference=None
+            if locator is None
+            else ImmutableContentReference(
                 content_id=locator, sha256=sha256(raw).hexdigest(), size=len(raw)
             ),
         )
 
     before = content(None if locator_style == "inline_to_locator" else "store:a")
     after = content("store:b")
-    owner = owner.model_copy(update={
-        "identity_state": "missing", "identity": None, "raw_identity": None,
-        "current": owner.current.model_copy(update={"content": before}),
-    })
+    owner = owner.model_copy(
+        update={
+            "identity_state": "missing",
+            "identity": None,
+            "raw_identity": None,
+            "current": owner.current.model_copy(update={"content": before}),
+        }
+    )
     context = facts.link_context
     updates = {}
     for stage in ("current", "incoming"):
-        targets = tuple(t.model_copy(update={"identity": None})
-                        if t.target_id == "owner:note" else t
-                        for t in getattr(context, stage + "_targets"))
-        states = tuple(interpret_link_target(before, target_id=s.target_id,
-                        existence="present", memberships=(), source_path=owner.current.path)
-                       if s.target_id == "owner:note" else s
-                       for s in getattr(context, stage + "_target_facts"))
-        document = interpret_links(before, document_id="owner:note",
-                    source_path=owner.current.path, path_mode="vault", targets=targets,
-                    target_facts=states, inventory="complete")
+        targets = tuple(
+            t.model_copy(update={"identity": None})
+            if t.target_id == "owner:note"
+            else t
+            for t in getattr(context, stage + "_targets")
+        )
+        states = tuple(
+            interpret_link_target(
+                before,
+                target_id=s.target_id,
+                existence="present",
+                memberships=(),
+                source_path=owner.current.path,
+            )
+            if s.target_id == "owner:note"
+            else s
+            for s in getattr(context, stage + "_target_facts")
+        )
+        document = interpret_links(
+            before,
+            document_id="owner:note",
+            source_path=owner.current.path,
+            path_mode="vault",
+            targets=targets,
+            target_facts=states,
+            inventory="complete",
+        )
         updates[stage + "_targets"] = targets
         updates[stage + "_target_facts"] = states
         updates[stage + "_documents"] = (document,)
-    facts = facts.model_copy(update={
-        "identity_inventory": (facts.identity_inventory[0], owner),
-        "link_context": context.model_copy(update=updates),
-    })
+    facts = facts.model_copy(
+        update={
+            "identity_inventory": (facts.identity_inventory[0], owner),
+            "link_context": context.model_copy(update=updates),
+        }
+    )
     plan = prepare_review(facts, preflight=preflight())
     selection, candidate = attachment_candidate(facts, "both")
-    states = tuple(interpret_link_target(after, target_id=s.target_id,
-                   existence="present", memberships=(), source_path=owner.current.path)
-                   if s.target_id == "owner:note" else s
-                   for s in candidate.target_facts)
-    document = interpret_links(after, document_id="owner:note", source_path=owner.current.path,
-                    path_mode="vault", targets=candidate.targets, target_facts=states,
-                    inventory="complete")
-    candidate = candidate.model_copy(update={"documents": (document,), "target_facts": states})
-    selected = resolve_review(plan, action(plan, domain="attachment", choice="both",
-                    attachment_selection=selection, attachment_candidate=candidate))
+    states = tuple(
+        interpret_link_target(
+            after,
+            target_id=s.target_id,
+            existence="present",
+            memberships=(),
+            source_path=owner.current.path,
+        )
+        if s.target_id == "owner:note"
+        else s
+        for s in candidate.target_facts
+    )
+    document = interpret_links(
+        after,
+        document_id="owner:note",
+        source_path=owner.current.path,
+        path_mode="vault",
+        targets=candidate.targets,
+        target_facts=states,
+        inventory="complete",
+    )
+    candidate = candidate.model_copy(
+        update={"documents": (document,), "target_facts": states}
+    )
+    selected = resolve_review(
+        plan,
+        action(
+            plan,
+            domain="attachment",
+            choice="both",
+            attachment_selection=selection,
+            attachment_candidate=candidate,
+        ),
+    )
     assert selected.status == "accepted", selected.code
     assert selected.plan.ready, selected.plan.blockers
     assert review_owned_documents(selected.plan) == ()
