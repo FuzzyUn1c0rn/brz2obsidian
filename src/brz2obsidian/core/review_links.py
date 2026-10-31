@@ -408,7 +408,7 @@ def onboarding_current_context(facts):
     return True
 
 
-def selected_current_links_safe(facts, change):
+def selected_current_links_safe(facts, change, *, candidate=None):
     context = facts.link_context
     if change.current is None:
         return True
@@ -423,14 +423,22 @@ def selected_current_links_safe(facts, change):
         return current_lookup_coverage(facts)
     if current_keep_needs_proof(facts, change) and not current_lookup_coverage(facts):
         return False
+    observed_path = (
+        change.rename_review.current_path
+        if change.rename_review is not None
+        else change.target_path
+    )
+    relocated = change.target_path != observed_path
     documents = tuple(
         d
         for d in context.current_documents
-        if d.source_path == change.target_path and d.content == change.current
+        if d.source_path == observed_path and d.content == change.current
     )
     if len(documents) != 1:
         return False
     (document,) = documents
+    if relocated and candidate is None:
+        return False
     if document.status != "supported" and (
         onboarding_current_context(facts)
         and change.identity_review.status == "matched"
@@ -444,10 +452,10 @@ def selected_current_links_safe(facts, change):
         )
         for o in document.occurrences
     )
-    return validate_link_document(
+    valid = validate_link_document(
         document,
         expected_content=change.current,
-        expected_path=change.target_path,
+        expected_path=observed_path,
         targets=context.current_targets,
         target_facts=context.current_target_facts,
         inventory=context.inventory,
@@ -456,6 +464,47 @@ def selected_current_links_safe(facts, change):
         if facts.format_operation.kind in ("onboarding", "format_transition")
         else tuple(m.target_id for m in meanings if m.target_id is not None),
     ).valid
+    if not valid or not relocated:
+        return valid
+    rename = change.rename_review
+    if (
+        rename is None
+        or rename.status != "accepted"
+        or rename.source_path != change.target_path
+        or rename.current_path != observed_path
+        or not current_lookup_coverage(facts)
+        or candidate.content != change.current
+        or candidate.target != subject.source_target
+        or candidate.links.document_id != document.document_id
+        or candidate.links.path_mode != document.path_mode
+        or candidate.links.source_path != change.target_path
+        or candidate.links.inventory != context.inventory
+        or candidate.link_target_facts != context.current_target_facts
+    ):
+        return False
+    owners = tuple(
+        t for t in context.current_targets if t.canonical_path == observed_path
+    )
+    if len(owners) != 1:
+        return False
+    owner = owners[0]
+    prospective = owner.model_copy(
+        update={
+            "canonical_path": change.target_path,
+            "target": subject.source_target,
+            "representations": (change.target_path,),
+        }
+    )
+    if candidate.link_targets != tuple(
+        prospective if row.target_id == owner.target_id else row
+        for row in context.current_targets
+    ):
+        return False
+    return tuple(
+        (o.raw, o.syntax, o.embedded, o.meaning) for o in document.occurrences
+    ) == tuple(
+        (o.raw, o.syntax, o.embedded, o.meaning) for o in candidate.links.occurrences
+    )
 
 
 def current_keep_needs_proof(facts, change):

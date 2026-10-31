@@ -751,7 +751,75 @@ def _text_choice(plan, change, choice, edited):
     )
 
 
+def _current_path_choice(plan, change):
+    """Interpret observed Current bytes at the explicitly selected prospective path."""
+    facts = plan.producer_facts
+    subject = next(
+        row
+        for row in facts.subjects
+        if (row.item_id, row.facet) == (change.item_id, change.facet)
+    )
+    context = facts.link_context
+    documents = tuple(
+        row
+        for row in context.current_documents
+        if row.source_path == change.rename_review.current_path
+        and row.content == change.current
+    )
+    owners = tuple(
+        row
+        for row in context.current_targets
+        if row.canonical_path == change.rename_review.current_path
+    )
+    if len(documents) != 1 or len(owners) != 1:
+        raise ValueError("Current path interpretation is unavailable")
+    document, owner = documents[0], owners[0]
+    prospective = owner.model_copy(
+        update={
+            "canonical_path": change.target_path,
+            "target": subject.source_target,
+            "representations": (change.target_path,),
+        }
+    )
+    targets = tuple(
+        prospective if row.target_id == owner.target_id else row
+        for row in context.current_targets
+    )
+    return inspect_text_candidate(
+        change.current,
+        identity=ImportedItemIdentity(
+            collection_id=facts.incoming_identity.collection_id,
+            module_id=facts.incoming_identity.module_id,
+            item_id=change.item_id,
+        ),
+        target=subject.source_target,
+        output_format=facts.baseline_identity.output_format,
+        source_path=change.target_path,
+        document_id=document.document_id,
+        path_mode=document.path_mode,
+        link_targets=targets,
+        link_target_facts=context.current_target_facts,
+        link_inventory=context.inventory,
+        membership_targets=targets,
+    )
+
+
 def text_choice_action(plan, action, *, edited=None):
+    if (
+        action.domain == "text"
+        and action.choice == "current"
+        and action.candidate is None
+    ):
+        change = next(
+            row for row in plan.proposal.changes if row.change_id == action.change_id
+        )
+        if (
+            change.rename_review is not None
+            and change.rename_review.status == "accepted"
+        ):
+            return action.model_copy(
+                update={"candidate": _current_path_choice(plan, change)}
+            )
     if (
         action.candidate is None
         and action.domain

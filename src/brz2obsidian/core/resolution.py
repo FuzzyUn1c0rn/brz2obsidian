@@ -1015,7 +1015,9 @@ def _resolve_action(plan, action):
         return _transition(plan, "refused", "choice_not_admitted")
     memory = None
     if action.choice == "current":
-        if not selected_current_links_safe(plan.producer_facts, change):
+        if not selected_current_links_safe(
+            plan.producer_facts, change, candidate=action.candidate
+        ):
             return _transition(plan, "refused", "invalid_candidate")
         if change.current is None and not _observed_absence(
             plan.producer_facts, change, action.domain

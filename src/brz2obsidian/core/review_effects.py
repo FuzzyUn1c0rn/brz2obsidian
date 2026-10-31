@@ -355,10 +355,17 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
             document = matching[0] if len(matching) == 1 else None
             source_targets = context.current_targets
             source_states = context.current_target_facts
+        observed_path = (
+            change.rename_review.current_path
+            if candidate is not None
+            and approval is not None
+            and approval.choice == "current"
+            and change.rename_review is not None
+            and change.rename_review.status == "accepted"
+            else subject.current.path
+        )
         own = tuple(
-            t
-            for t in context.current_targets
-            if t.canonical_path == subject.current.path
+            t for t in context.current_targets if t.canonical_path == observed_path
         )
         if len(own) == 1:
             target = own[0]
