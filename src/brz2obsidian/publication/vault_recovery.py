@@ -366,7 +366,7 @@ def _review_observation(
         operation_owned_notes = {
             target.canonical_path
             for target in context.incoming_targets
-            if target.kind == "note"
+            if target.kind in ("note", "category", "relationship")
             and target.canonical_path in intent.affected_paths
             and target.canonical_path in selected_files
         }
@@ -383,7 +383,8 @@ def _review_observation(
             retained_targets = tuple(
                 target
                 for target in context.incoming_targets
-                if target.canonical_path == path and target.kind == "note"
+                if target.canonical_path == path
+                and target.kind in ("note", "category", "relationship")
             )
             if path in operation_owned_notes and retained_targets:
                 # The original selected effect can move one real note identity

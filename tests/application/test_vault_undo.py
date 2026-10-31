@@ -233,18 +233,25 @@ def test_latest_undo_retains_created_definition_identities_and_later_home():
         import_id="definitions-import",
     )
     assert applied.status == "applied", applied.code
-    assert {path: (vault / path).read_bytes() for _, path, _, _, _ in definitions} == {
-        path: incoming for _, path, _, _, incoming in definitions
-    }
     later = b"Home incoming.\nLater independent writing.\n"
     (vault / "Home.md").write_bytes(later)
     before = user_state(vault)
+    assert before["authored"] == {
+        "Home.md": later,
+        "Protected.bin": b"protected\x00\xff",
+        **{path: incoming for _, path, _, _, incoming in definitions},
+    }
     full_before = {
         p.relative_to(vault).as_posix(): p.read_bytes()
         for p in vault.rglob("*")
         if p.is_file()
     }
     prepared = operations.prepare_undo(vault)
+    assert {
+        p.relative_to(vault).as_posix(): p.read_bytes()
+        for p in vault.rglob("*")
+        if p.is_file()
+    } == full_before
     assert prepared.status == "offered", prepared.code
     assert prepared.target_receipt_commit == applied.receipt_commit
     assert prepared.checkpoint_commit == applied.result_commit
