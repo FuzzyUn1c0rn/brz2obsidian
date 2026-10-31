@@ -1496,7 +1496,7 @@ def _unassociated_reference_update():
     return operations, vault, source, applied, original, produced, checkpoint_ref
 
 
-@pytest.mark.parametrize("direction", ["finish"])
+@pytest.mark.parametrize("direction", ["finish", "restore"])
 def test_unassociated_document_partial_undo_recovery(direction):
     operations, vault, source, applied, original, produced, checkpoint_ref = (
         _unassociated_reference_update()
@@ -1579,8 +1579,18 @@ def test_unassociated_document_partial_undo_recovery(direction):
     assert proof.operation_id == stopped.operation_id
     assert proof.operation_kind == "undo" and proof.direction == direction
     assert proof.operation_generation == stopped.generation
-    assert proof.outputs[0].produced.data == produced
-    assert proof.outputs[0].target.data == original
+    if direction == "finish":
+        assert proof.outputs[0].produced.data == produced
+        assert proof.outputs[0].target.data == original
+        expected_notes = _BEFORE
+        expected_terminal = "undone"
+        protected_selection = {"Assets/data.bin": b"\x00authored"}
+    else:
+        assert proof.outputs[0].produced.data == original
+        assert proof.outputs[0].target.data == produced
+        expected_notes = _AFTER
+        expected_terminal = "restored"
+        protected_selection = {}
     assert proof.outputs[0].current.content.data == original
     assert not any(
         row.path.startswith("Assets/")
@@ -1589,6 +1599,36 @@ def test_unassociated_document_partial_undo_recovery(direction):
         for row in subject.operation_reversal.outputs
     )
     assert manual.baseline.status == "unknown" and manual.baseline.content is None
+    if direction == "restore":
+        change = next(
+            row for row in recovery.review.proposal.changes if row.path == "Manual.md"
+        )
+        selected_action = text_choice_action(
+            recovery.review,
+            action(
+                recovery.review,
+                change,
+                domain="reversal",
+                choice="reverse",
+                decision_id="ordinary:restore:preview",
+            ),
+        )
+        assert selected_action.candidate is None
+        preview = resolve_review(recovery.review, selected_action)
+        assert preview.status == "accepted", preview.code
+        assert preview.plan.ready, preview.plan.blockers
+        effects = select_review_effects(preview.plan)
+        assert effects.status == "selected" and effects.remove_paths == ()
+        assert {row.path: row.content.data for row in effects.files} == {
+            **_AFTER,
+            "Manual.md": produced,
+            **protected_selection,
+        }
+        assert {
+            p.relative_to(vault).as_posix(): p.read_bytes()
+            for p in vault.rglob("*")
+            if p.is_file()
+        } == full_before
     later = original + b"\nLater ordinary document writing after Undo stopped.\n"
     (vault / "Manual.md").write_bytes(later)
     recovery = operations.prepare_recovery(vault, direction=direction)
@@ -1630,7 +1670,7 @@ def test_unassociated_document_partial_undo_recovery(direction):
                 choice="incoming",
                 decision_id="ordinary:recovery:" + subject.item_id,
                 candidate=_incoming_candidate(
-                    plan.facts, subject, _BEFORE[subject.path]
+                    plan.facts, subject, expected_notes[subject.path]
                 ),
             ),
         )
@@ -1640,9 +1680,9 @@ def test_unassociated_document_partial_undo_recovery(direction):
     selected = select_review_effects(recovery.review)
     assert selected.status == "selected" and selected.remove_paths == ()
     assert {row.path: row.content.data for row in selected.files} == {
-        **_BEFORE,
+        **expected_notes,
         "Manual.md": later,
-        "Assets/data.bin": b"\x00authored",
+        **protected_selection,
     }
     source_before = {
         p.relative_to(source).as_posix(): p.read_bytes()
@@ -1650,19 +1690,20 @@ def test_unassociated_document_partial_undo_recovery(direction):
         if p.is_file()
     }
     completed = operations.execute_recovery(vault, recovery)
-    assert completed.status == "undone" and completed.direction == direction, (
+    assert completed.status == expected_terminal and completed.direction == direction, (
         completed.code
     )
     assert completed.operation_id == stopped.operation_id
     terminal = _fresh_status(vault)
     assert (
-        terminal.status == "undone"
+        terminal.status == expected_terminal
         and terminal.receipt_commit == completed.receipt_commit
     )
+    assert terminal.kind == "undo" and terminal.direction == direction
     assert terminal.operation_id == stopped.operation_id
     after = user_state(vault)
     assert after["authored"] == {
-        **_BEFORE,
+        **expected_notes,
         "Manual.md": later,
         "Assets/data.bin": b"\x00authored",
         "Assets/data (incoming-ba7816bf).bin": b"abc",
