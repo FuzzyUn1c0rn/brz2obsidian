@@ -118,15 +118,22 @@ def test_elapsed_advances_between_observations_without_changing_operation_truth(
         until(app, lambda: reported.is_set())
         until(app, lambda: window.runner.session.update_snapshot.progress.ordinal == 2)
         QTest.qWait(300)
-        assert elapsed_seconds(window) >= advanced, "Later observations must not rewind elapsed"
-        assert window.runner.session.update_snapshot.active_request_id == state.active_request_id
+        assert elapsed_seconds(window) >= advanced, (
+            "Later observations must not rewind elapsed"
+        )
+        assert (
+            window.runner.session.update_snapshot.active_request_id
+            == state.active_request_id
+        )
         assert window.runner.session.update_snapshot.reply is None
         assert not window.runner.session.update_snapshot.ready
         assert "Snapshot preparation" in window_text(window)
         assert "2 of 5 files" in window_text(window)
 
         release.set()
-        until(app, lambda: window.runner.session.update_snapshot.active_request_id is None)
+        until(
+            app, lambda: window.runner.session.update_snapshot.active_request_id is None
+        )
         until(app, lambda: "Stopped before file publication" in window_text(window))
         assert " elapsed" not in window_text(window)
         assert window.runner.session.update_snapshot.publication == "not_published"
@@ -134,12 +141,19 @@ def test_elapsed_advances_between_observations_without_changing_operation_truth(
         window.runner.submit_update(command)
         until(app, lambda: second_active.is_set())
         until(app, lambda: "Running prepare" in window_text(window))
-        assert elapsed_seconds(window) < initial, "A new request must reset its elapsed clock"
+        assert elapsed_seconds(window) < initial, (
+            "A new request must reset its elapsed clock"
+        )
         assert window.runner.session.update_snapshot.progress is None
-        assert window.runner.session.update_snapshot.active_request_id == requests[1].request_id
+        assert (
+            window.runner.session.update_snapshot.active_request_id
+            == requests[1].request_id
+        )
         assert requests[1].request_id != requests[0].request_id
         second_release.set()
-        until(app, lambda: window.runner.session.update_snapshot.active_request_id is None)
+        until(
+            app, lambda: window.runner.session.update_snapshot.active_request_id is None
+        )
         window.runner.select_update(str(vault), selection_id=str(uuid4()))
         app.processEvents()
         assert " elapsed" not in window_text(window)

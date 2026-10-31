@@ -162,6 +162,12 @@ class UpdateWorkbench(QWidget):
         if state.active_request_id != self._active_id:
             self._active_id = state.active_request_id
             self._active_started = monotonic() if self._active_id else None
+        if state.active_request_id and state.progress is not None:
+            # Advance locally between real observations; a later frame cannot
+            # rewind the presentation clock or change operation authority.
+            self._active_started = min(
+                self._active_started, monotonic() - state.progress.elapsed_ms / 1000
+            )
         if state.reply is not None:
             if state.reply.history is not None:
                 self._history = state.reply.history
@@ -321,9 +327,7 @@ class UpdateWorkbench(QWidget):
                 else "Running " + state.active_command.replace("_", " ")
             )
             elapsed = (
-                progress.elapsed_ms // 1000
-                if progress
-                else int(monotonic() - self._active_started)
+                int(monotonic() - self._active_started)
                 if self._active_started is not None
                 else 0
             )
