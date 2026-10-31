@@ -811,12 +811,34 @@ def _finish_review(root, observed, *, previous=None, authority=None):
         if reversal_document_target(subject) is not None
     }
     if document_keys:
+        before = {row.path: row for row in intent.before}
+        proposed = {row.path: row for row in intent.proposed}
+        affected = set(intent.affected_paths)
+
+        def inactive_proof(subject):
+            proof = subject.operation_reversal
+            if proof is None:
+                return False
+            paths = {subject.path, subject.current.path} | {
+                row.path for row in proof.outputs
+            }
+            return not paths & affected and all(
+                path in before and path in proposed and before[path] == proposed[path]
+                for path in paths
+            )
+
+        inactive_keys = {
+            (subject.item_id, subject.facet)
+            for subject in facts.subjects
+            if inactive_proof(subject)
+        }
         facts = facts.model_copy(
             update={
                 "subjects": tuple(
                     subject
                     for subject in facts.subjects
                     if (subject.item_id, subject.facet) not in document_keys
+                    and (subject.item_id, subject.facet) not in inactive_keys
                 )
                 + _operation_document_subjects(
                     original,
@@ -829,6 +851,37 @@ def _finish_review(root, observed, *, previous=None, authority=None):
                 )
             }
         )
+        if inactive_keys:
+            # The stopped operation never allocated these versions. Preserve
+            # their fresh inventory/context without importing the prior proof.
+            # Reinspect the narrower query rather than neutralizing its policy.
+            keys = {(subject.item_id, subject.facet) for subject in facts.subjects}
+            owners = {
+                change.subject_id
+                for change in original.proposal.changes
+                if (change.item_id, change.facet) in keys
+            }
+            admission = _inspect_vault_for_recovery(
+                root,
+                retained,
+                subjects=tuple(
+                    subject
+                    for subject in _review_subjects(
+                        original, select_review_effects(original)
+                    )
+                    if subject.subject_id in owners
+                ),
+            )
+            if (
+                not admission.inventory_complete
+                or admission.repository.kind != "root"
+                or any(finding.policy != "operation" for finding in admission.findings)
+                or admission.preflight.state_status != "supported"
+            ):
+                raise OSError("Current recovery policy or inventory is unavailable")
+            preflight = _review_preflight(
+                admission, retained.owned[intent.prepared_commit][0], original, retained
+            )
     from .attachment_ownership import compile_removal_continuations
 
     loaded = retained.owned[intent.prepared_commit][1]
