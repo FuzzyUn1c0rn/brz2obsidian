@@ -795,6 +795,94 @@ def _current_review_matches(review, admission):
     )
 
 
+def _inactive_attachment_proof(original, intent, subject):
+    """Qualify a protected canonical Current, never an affected resource effect."""
+    proof = subject.operation_reversal
+    operation = original.producer_facts.format_operation
+    baseline = operation.established_baseline
+    if (
+        intent.kind != "undo"
+        or proof is None
+        or subject.attachment is None
+        or subject.baseline.status != "known"
+        or subject.incoming is None
+        or subject.incoming != subject.baseline.content
+        or baseline is None
+        or baseline.source_version != operation.baseline_source_version
+        or baseline.identity != original.producer_facts.baseline_identity
+    ):
+        return False
+    versions = tuple(
+        row
+        for row in baseline.outputs
+        if (row.item_id, row.facet) == (subject.item_id, subject.facet)
+    )
+    changes = tuple(
+        row
+        for row in original.proposal.changes
+        if (row.item_id, row.facet) == (subject.item_id, subject.facet)
+    )
+    if (
+        len(versions) != 1
+        or versions[0].content != subject.baseline.content
+        or len(changes) != 1
+        or not any(
+            row.change_id == changes[0].change_id
+            and row.domain == "reversal"
+            and row.choice == "current"
+            for row in original.approvals
+        )
+    ):
+        return False
+    before = {row.path: row for row in intent.before}
+    proposed = {row.path: row for row in intent.proposed}
+    paths = {subject.path, subject.current.path} | {row.path for row in proof.outputs}
+    return not paths & set(intent.affected_paths) and all(
+        path in before and path in proposed and before[path] == proposed[path]
+        for path in paths
+    )
+
+
+def _document_preflight(root, retained, original, intent, facts):
+    """Reinspect the exact retained subject query after inactive-proof removal."""
+    keys = {(subject.item_id, subject.facet) for subject in facts.subjects}
+    owners = {
+        change.subject_id
+        for change in original.proposal.changes
+        if (change.item_id, change.facet) in keys
+    }
+    paths = {
+        path
+        for subject in facts.subjects
+        for path in (subject.path, subject.current.path)
+    }
+    paths.update(
+        row.path
+        for subject in facts.subjects
+        if subject.operation_reversal is not None
+        for row in subject.operation_reversal.outputs
+    )
+    admission = _inspect_vault_for_recovery(
+        root,
+        retained,
+        subjects=tuple(
+            subject
+            for subject in _review_subjects(original, select_review_effects(original))
+            if subject.subject_id in owners and subject.path in paths
+        ),
+    )
+    if (
+        not admission.inventory_complete
+        or admission.repository.kind != "root"
+        or any(finding.policy != "operation" for finding in admission.findings)
+        or admission.preflight.state_status != "supported"
+    ):
+        raise OSError("Current recovery policy or inventory is unavailable")
+    return _review_preflight(
+        admission, retained.owned[intent.prepared_commit][0], original, retained
+    )
+
+
 def _finish_review(root, observed, *, previous=None, authority=None):
     original, intent, origin_commit, git, facts, preflight, current, retained = (
         _review_observation(
@@ -811,32 +899,10 @@ def _finish_review(root, observed, *, previous=None, authority=None):
         if reversal_document_target(subject) is not None
     }
     if document_keys:
-        before = {row.path: row for row in intent.before}
-        proposed = {row.path: row for row in intent.proposed}
-        affected = set(intent.affected_paths)
-
-        def inactive_proof(subject):
-            proof = subject.operation_reversal
-            if (
-                proof is None
-                or subject.attachment is None
-                or subject.baseline.status != "known"
-                or subject.incoming is None
-                or subject.incoming != subject.baseline.content
-            ):
-                return False
-            paths = {subject.path, subject.current.path} | {
-                row.path for row in proof.outputs
-            }
-            return not paths & affected and all(
-                path in before and path in proposed and before[path] == proposed[path]
-                for path in paths
-            )
-
         inactive_keys = {
             (subject.item_id, subject.facet)
             for subject in facts.subjects
-            if inactive_proof(subject)
+            if _inactive_attachment_proof(original, intent, subject)
         }
         facts = facts.model_copy(
             update={
@@ -859,47 +925,7 @@ def _finish_review(root, observed, *, previous=None, authority=None):
             }
         )
         if inactive_keys:
-            # The stopped operation never allocated these versions. Preserve
-            # their fresh inventory/context without importing the prior proof.
-            # Reinspect the narrower query rather than neutralizing its policy.
-            keys = {(subject.item_id, subject.facet) for subject in facts.subjects}
-            owners = {
-                change.subject_id
-                for change in original.proposal.changes
-                if (change.item_id, change.facet) in keys
-            }
-            paths = {
-                path
-                for subject in facts.subjects
-                for path in (subject.path, subject.current.path)
-            }
-            paths.update(
-                row.path
-                for subject in facts.subjects
-                if subject.operation_reversal is not None
-                for row in subject.operation_reversal.outputs
-            )
-            admission = _inspect_vault_for_recovery(
-                root,
-                retained,
-                subjects=tuple(
-                    subject
-                    for subject in _review_subjects(
-                        original, select_review_effects(original)
-                    )
-                    if subject.subject_id in owners and subject.path in paths
-                ),
-            )
-            if (
-                not admission.inventory_complete
-                or admission.repository.kind != "root"
-                or any(finding.policy != "operation" for finding in admission.findings)
-                or admission.preflight.state_status != "supported"
-            ):
-                raise OSError("Current recovery policy or inventory is unavailable")
-            preflight = _review_preflight(
-                admission, retained.owned[intent.prepared_commit][0], original, retained
-            )
+            preflight = _document_preflight(root, retained, original, intent, facts)
     from .attachment_ownership import compile_removal_continuations
 
     loaded = retained.owned[intent.prepared_commit][1]
@@ -1164,6 +1190,7 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
     produced_source = {row.path: row for row in source_prepared.source}
     subjects = []
     baseline_outputs = []
+    protected_attachments = set()
     output_references = {}
     approved = {approval.change_id: approval for approval in original.approvals}
     document_keys = {
@@ -1212,8 +1239,13 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
                 )
             )
             output_references[path] = reference
-        if subject.path not in intent.affected_paths and not rows:
+        protected = bool(document_keys) and _inactive_attachment_proof(
+            original, intent, subject
+        )
+        if subject.path not in intent.affected_paths and not rows and not protected:
             continue
+        if protected:
+            protected_attachments.add((subject.item_id, subject.facet))
         old = _owned_content(git, before.get(subject.path))
         if old is None and not rows:
             continue
@@ -1479,6 +1511,8 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
             "preservation_decisions": (),
         }
     )
+    if protected_attachments:
+        preflight = _document_preflight(root, retained, original, intent, reverse_facts)
     if previous is None:
         return prepare_review(reverse_facts, preflight=preflight)
     refreshed = refresh_review(previous, reverse_facts, preflight=preflight)

@@ -1507,7 +1507,9 @@ def _unassociated_reference_update():
 
 
 def _ordinary_asset_choice(plan, choice="current"):
-    offer = next(row for row in inspect_review_choices(plan) if row.domain == "attachment")
+    offer = next(
+        row for row in inspect_review_choices(plan) if row.domain == "attachment"
+    )
     assert choice in offer.enabled_choices
     if choice == "incoming":
         assert review_plan_attachment_references(plan, offer.requirement_id) == ()
@@ -1626,26 +1628,36 @@ def test_unassociated_document_partial_undo_recovery(direction):
     assert manual.baseline.status == "unknown" and manual.baseline.content is None
     if direction == "restore":
         asset = next(
-            row for row in recovery.review.facts.subjects if row.path == "Assets/data.bin"
+            row
+            for row in recovery.review.facts.subjects
+            if row.path == "Assets/data.bin"
         )
         assert asset.operation_reversal is None
         assert asset.baseline.status == "known"
         assert asset.baseline.content.data == b"\x00original"
-        assert asset.incoming.data == b"abc" and asset.current.content.data == b"\x00authored"
+        assert (
+            asset.incoming.data == b"abc"
+            and asset.current.content.data == b"\x00authored"
+        )
         operation = recovery.review.facts.format_operation
         assert (operation.baseline_source_version, operation.target_source_version) == (
-            "source:a", "source:b"
+            "source:a",
+            "source:b",
         )
-        assert next(
-            row.content.data for row in operation.established_baseline.outputs
-            if (row.item_id, row.facet) == (asset.item_id, asset.facet)
-        ) == b"\x00original"
-        protected = resolve_review(recovery.review, _ordinary_asset_choice(recovery.review))
+        assert (
+            next(
+                row.content.data
+                for row in operation.established_baseline.outputs
+                if (row.item_id, row.facet) == (asset.item_id, asset.facet)
+            )
+            == b"\x00original"
+        )
+        protected = resolve_review(
+            recovery.review, _ordinary_asset_choice(recovery.review)
+        )
         assert protected.status == "accepted", protected.code
         plan = protected.plan
-        change = next(
-            row for row in plan.proposal.changes if row.path == "Manual.md"
-        )
+        change = next(row for row in plan.proposal.changes if row.path == "Manual.md")
         selected_action = text_choice_action(
             plan,
             action(
@@ -1699,7 +1711,8 @@ def test_unassociated_document_partial_undo_recovery(direction):
             kept.plan, _ordinary_asset_choice(kept.plan, "incoming")
         )
         assert incoming.status == "accepted" and incoming.plan.ready, (
-            incoming.code, incoming.plan.blockers
+            incoming.code,
+            incoming.plan.blockers,
         )
         unsupported = select_review_effects(incoming.plan)
         assert unsupported.status == "selected" and unsupported.remove_paths == ()
@@ -1716,7 +1729,9 @@ def test_unassociated_document_partial_undo_recovery(direction):
         marker = json.loads(refusal_before[".git/brz2obsidian/owner.json"])
         assert marker["operation_id"] == stopped.operation_id
         assert len(refusal_before[".git/brz2obsidian/held"]) == 1
-        refused = operations.execute_recovery(vault, _with_review(recovery, incoming.plan))
+        refused = operations.execute_recovery(
+            vault, _with_review(recovery, incoming.plan)
+        )
         assert refused.status == "refused" and refused.code == "recovery_scope_changed"
         refusal_after = {
             p.relative_to(vault).as_posix(): p.read_bytes()
@@ -1742,8 +1757,12 @@ def test_unassociated_document_partial_undo_recovery(direction):
         )
         assert approval.choice == "current" and not approval.source_accepted
         assert approval.source_memory.reviewed_incoming.data == b"abc"
-        assert approval.source_memory.source_version == hashlib.sha256(b"abc").hexdigest()
-        assert approval.source_memory.provenance.decision_id == selected_action.decision_id
+        assert (
+            approval.source_memory.source_version == hashlib.sha256(b"abc").hexdigest()
+        )
+        assert (
+            approval.source_memory.provenance.decision_id == selected_action.decision_id
+        )
     change = next(
         row for row in recovery.review.proposal.changes if row.path == "Manual.md"
     )
@@ -1789,7 +1808,8 @@ def test_unassociated_document_partial_undo_recovery(direction):
         recovery = _with_review(recovery, transition.plan)
     assert recovery.review.ready, recovery.review.blockers
     assert not any(
-        row.source_memory for row in recovery.review.approvals
+        row.source_memory
+        for row in recovery.review.approvals
         if row.target_path == "Manual.md"
     )
     selected = select_review_effects(recovery.review)

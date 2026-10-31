@@ -112,6 +112,7 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
     writes = {}
     proof_documents = {}
     explicit_documents = set()
+    operation_documents = set()
     changed_ids = set()
     blockers = []
     composed_documents, composition_conflict = composed_text_documents(
@@ -228,6 +229,7 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
                 }
                 documents[target_id] = retained_documents[0]
                 explicit_documents.add(target_id)
+                operation_documents.add(target_id)
             absent = {r.path for r, data in members if data is None}
             documents = {
                 key: doc
@@ -307,7 +309,10 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
                     state = composed[1]
                 write(target, document.content, document.source_path, state)
                 explicit_documents.add(document.document_id)
-            if changed or document.document_id in relevant:
+            if changed or (
+                document.document_id in relevant
+                and document.document_id not in operation_documents
+            ):
                 proof_documents[document.document_id] = document
     documents.update(proof_documents)
 
