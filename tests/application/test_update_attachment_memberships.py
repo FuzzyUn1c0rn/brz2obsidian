@@ -30,6 +30,9 @@ SUPPORT_BYTES = b"---\ntags:\n  - categories\n---\nUnrelated template stays exac
 EDIT_PATH = "Notes/Independent.md"
 EDIT_PREFIX = b'---\nsource_collection_id: "folio:collection"\nsource_item_id: "entry:independent"\n---\n'
 EDITED = EDIT_PREFIX + b"Independently accepted Edited writing.\r\n"
+OWNER_PREFIX = b'---\nsource_collection_id: "folio:collection"\nsource_item_id: "entry:owner"\n---\n'
+OWNER_EDITED = OWNER_PREFIX + b"Edited approved owner [[Assets/data.bin|Map]].\r\n"
+MANUAL = b"Manual link [[Assets/data.bin|Current]] and embed ![[Assets/data.bin|Incoming]].\r\n"
 
 
 def membership_preparation(choice, *, include_base=False):
@@ -388,3 +391,263 @@ def test_public_binary_choice_retains_exact_base_named_view_facts():
     ]
     assert state.interpretation == "supported"
     assert result.publication == "not_started" and result.application is None
+
+
+def overlapping_preparation():
+    """Real public producers see an edited owner and a separate split-reference note."""
+    prepared, _ = membership_preparation("both")
+    facts = prepared.review.facts
+    context = facts.link_context
+    original = OWNER_PREFIX + b"Original owner [[Assets/data.bin|Map]].\r\n"
+    current = OWNER_PREFIX + b"Current owner [[Assets/data.bin|Map]].\r\n"
+    incoming = OWNER_PREFIX + b"Incoming owner [[Assets/data.bin|Map]].\r\n"
+    entry = inventory_item("owner-note", "entry:owner", "Notes/Owner.md", current)
+    owner = request(original=original, current=current, incoming=incoming).subjects[0]
+    owner = owner.model_copy(
+        update={
+            "item_id": "entry:owner",
+            "path": "Notes/Owner.md",
+            "current": entry.current,
+            "source_target": entry.target,
+            "title": "Owner",
+        }
+    )
+    owner_target = target_for_links("owner:note", "Notes/Owner.md").model_copy(
+        update={"identity": entry.identity}
+    )
+    manual_target = target_for_links("manual:note", "Notes/Manual.md")
+    targets = tuple(t for t in context.current_targets if t.target_id != "owner:note")
+    targets += (owner_target, manual_target)
+
+    def states(rows, raw):
+        return tuple(s for s in rows if s.target_id != "owner:note") + tuple(
+            interpret_link_target(
+                ExactContent(data=content),
+                target_id=target_id,
+                existence="present",
+                memberships=(),
+            )
+            for target_id, content in (("owner:note", raw), ("manual:note", MANUAL))
+        )
+
+    old_states = states(context.current_target_facts, current)
+    new_states = states(context.incoming_target_facts, incoming)
+
+    def documents(rows, raw, target_states):
+        return tuple(d for d in rows if d.document_id != "owner:note") + tuple(
+            interpret_links(
+                ExactContent(data=content),
+                document_id=target_id,
+                source_path=path,
+                path_mode="vault",
+                targets=targets,
+                target_facts=target_states,
+                inventory="complete",
+            )
+            for target_id, content, path in (
+                ("owner:note", raw, "Notes/Owner.md"),
+                ("manual:note", MANUAL, "Notes/Manual.md"),
+            )
+        )
+
+    resource = facts.subjects[0].model_copy(
+        update={
+            "attachment": facts.subjects[0].attachment.model_copy(
+                update={"affected_documents": ("owner:note", "manual:note")}
+            )
+        }
+    )
+    inventory = tuple(i for i in facts.identity_inventory if i.entry_id != "owner-note")
+    inventory += (
+        entry,
+        inventory_item(
+            "manual-note", "unused", "Notes/Manual.md", MANUAL, state="missing"
+        ),
+    )
+    facts = with_subjects(facts, (resource,) + facts.subjects[1:] + (owner,), inventory)
+    facts = facts.model_copy(
+        update={
+            "link_context": LinkContext(
+                schema_id="brz2obsidian.link-context",
+                schema_version=1,
+                inventory="complete",
+                current_targets=targets,
+                incoming_targets=targets,
+                current_target_facts=old_states,
+                incoming_target_facts=new_states,
+                current_documents=documents(
+                    context.current_documents, current, old_states
+                ),
+                incoming_documents=documents(
+                    context.incoming_documents, incoming, new_states
+                ),
+            )
+        }
+    )
+    prepared = preparation(type(facts).model_validate(facts.model_dump()))
+    return choose_text(prepared, "entry:independent", EDITED).preparation
+
+
+def choose_text(prepared, item_id, raw):
+    offer = next(
+        row
+        for row in inspect_review_choices(prepared.review)
+        if next(
+            change
+            for change in prepared.review.proposal.changes
+            if change.change_id == row.change_id
+        ).item_id
+        == item_id
+    )
+    result = Operations().resolve_update_choice(
+        prepared,
+        requirement_id=offer.requirement_id,
+        choice="edited",
+        assumptions_digest=requirement_digest(offer),
+        edited=raw,
+    )
+    assert result.code == "accepted", result.code
+    return result
+
+
+def choose_overlapping_binary(prepared, *, owner_choice="keep_current"):
+    offer = next(
+        row
+        for row in inspect_review_choices(prepared.review)
+        if row.domain == "attachment"
+    )
+    refs, total, following = attachment_reference_page(prepared, offer.requirement_id)
+    assert total == 3 and following is None
+    result = Operations().resolve_update_choice(
+        prepared,
+        requirement_id=offer.requirement_id,
+        choice="both",
+        assumptions_digest=requirement_digest(offer),
+        references=tuple(
+            {
+                "reference_id": row.reference_id,
+                "choice": owner_choice
+                if row.document_path == "Notes/Owner.md"
+                else "use_secondary"
+                if row.old.display_text == "Incoming"
+                else "keep_current",
+            }
+            for row in refs
+        ),
+    )
+    assert result.code == "accepted", result.code
+    return result
+
+
+@pytest.mark.parametrize("owner_choice", ("keep_current", "use_secondary"))
+def test_edited_owner_composes_with_later_explicit_attachment_reference(owner_choice):
+    """#298 A1: the later link decision preserves already approved prose exactly."""
+    prepared = overlapping_preparation()
+    prepared = choose_text(prepared, "entry:owner", OWNER_EDITED).preparation
+    prior_approvals = prepared.review.approvals
+    result = choose_overlapping_binary(prepared, owner_choice=owner_choice)
+    assert result.ready and not result.preparation.review.requirements
+    assert not result.preparation.review.blockers
+    assert all(row in result.preparation.review.approvals for row in prior_approvals)
+    selected = select_review_effects(result.preparation.review)
+    assert selected.status == "selected", selected.code
+    assert {row.path: row.content.data for row in selected.files} == {
+        "Assets/data.bin": b"\x00authored",
+        "Assets/data (incoming-ba7816bf).bin": b"abc",
+        "Notes/Owner.md": OWNER_EDITED
+        if owner_choice == "keep_current"
+        else OWNER_PREFIX
+        + b"Edited approved owner [[Assets/data (incoming-ba7816bf).bin|Map]].\r\n",
+        "Notes/Independent.md": EDITED,
+        "Notes/Manual.md": b"Manual link [[Assets/data.bin|Current]] and embed ![[Assets/data (incoming-ba7816bf).bin|Incoming]].\r\n",
+    }
+    assert selected.remove_paths == ()
+    assert result.publication == "not_started" and result.application is None
+
+
+@pytest.mark.parametrize(
+    "raw",
+    (
+        OWNER_PREFIX + b"Edited owner removes the map.\r\n",
+        OWNER_PREFIX + b"Edited owner [[Assets/data.bin|Changed alias]].\r\n",
+        OWNER_PREFIX
+        + b"Edited owner [[Assets/data.bin|Map]] [[Assets/data.bin|Map]].\r\n",
+        OWNER_PREFIX
+        + b"Edited owner [[Assets/data.bin|Map]] [[Assets/data.bin|New]].\r\n",
+    ),
+    ids=("removed", "changed", "duplicate", "unreviewed-new-reference"),
+)
+def test_attachment_reference_does_not_claim_changed_edited_occurrences(raw):
+    prepared = choose_text(overlapping_preparation(), "entry:owner", raw).preparation
+    result = choose_overlapping_binary(prepared)
+    assert not result.ready
+    assert "selected_link_context_conflict" in result.preparation.review.blockers
+    assert (
+        next(
+            row.result.data
+            for row in result.preparation.review.approvals
+            if row.domain == "text" and row.result.data != EDITED
+        )
+        == raw
+    )
+    assert select_review_effects(result.preparation.review).status == "refused"
+
+
+def test_later_edited_owner_preserves_previously_reviewed_secondary_reference():
+    binary = choose_overlapping_binary(
+        overlapping_preparation(), owner_choice="use_secondary"
+    )
+    raw = (
+        OWNER_PREFIX
+        + b"Edited approved owner [[Assets/data (incoming-ba7816bf).bin|Map]].\r\n"
+    )
+    result = choose_text(binary.preparation, "entry:owner", raw)
+    assert result.ready
+    selected = select_review_effects(result.preparation.review)
+    assert selected.status == "selected", selected.code
+    files = {row.path: row.content.data for row in selected.files}
+    assert files["Notes/Owner.md"] == raw
+    assert files["Assets/data.bin"] == b"\x00authored"
+    assert files["Assets/data (incoming-ba7816bf).bin"] == b"abc"
+    assert files[EDIT_PATH] == EDITED
+    assert selected.remove_paths == ()
+
+
+def test_later_edited_owner_cannot_silently_undo_reviewed_secondary_destination():
+    binary = choose_overlapping_binary(
+        overlapping_preparation(), owner_choice="use_secondary"
+    )
+    result = choose_text(binary.preparation, "entry:owner", OWNER_EDITED)
+    assert not result.ready
+    assert "selected_link_context_conflict" in result.preparation.review.blockers
+    assert select_review_effects(result.preparation.review).status == "refused"
+
+
+def test_owner_reference_rewrite_preserves_other_occurrences_and_anchor_evidence():
+    raw = (
+        OWNER_PREFIX
+        + b"Edited [[Assets/data.bin|Map]] then [Reference](https://example.test).\r\n"
+        + b"# Heading\r\nTail ^stable\r\n"
+    )
+    prepared = choose_text(overlapping_preparation(), "entry:owner", raw).preparation
+    result = choose_overlapping_binary(prepared, owner_choice="use_secondary")
+    assert result.ready
+    selected = select_review_effects(result.preparation.review)
+    assert selected.status == "selected", selected.code
+    files = {row.path: row.content.data for row in selected.files}
+    assert files["Notes/Owner.md"] == (
+        OWNER_PREFIX
+        + b"Edited [[Assets/data (incoming-ba7816bf).bin|Map]] then [Reference](https://example.test).\r\n"
+        + b"# Heading\r\nTail ^stable\r\n"
+    )
+    assert files[EDIT_PATH] == EDITED
+    assert selected.remove_paths == ()
+
+
+def test_reference_rewrite_refuses_unsupported_edited_owner_anchor_interpretation():
+    raw = OWNER_PREFIX + b"# Edited [[Assets/data.bin|Map]]\r\n"
+    prepared = choose_text(overlapping_preparation(), "entry:owner", raw).preparation
+    result = choose_overlapping_binary(prepared, owner_choice="use_secondary")
+    assert not result.ready
+    assert "selected_link_context_conflict" in result.preparation.review.blockers
+    assert select_review_effects(result.preparation.review).status == "refused"

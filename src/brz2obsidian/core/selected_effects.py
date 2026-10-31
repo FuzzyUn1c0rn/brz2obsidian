@@ -4,6 +4,7 @@ from brz2obsidian.contracts import ReviewPlan, SelectedReviewEffects, SelectedRe
 from brz2obsidian.core.resolution import validate_review
 from brz2obsidian.core.reversals import reversal_subject, selected_reversal_outputs
 from brz2obsidian.core.review_attachments import applicable_approvals
+from brz2obsidian.core.review_composition import composed_text_documents
 
 
 def _refused(code):
@@ -42,6 +43,12 @@ def _project_review_effects(plan: ReviewPlan) -> SelectedReviewEffects:
             plan.approvals, plan.attachment_applicability
         )
     }
+    composed_documents, conflict = composed_text_documents(
+        plan.producer_facts, plan.actions, tuple(approvals.values())
+    )
+    if conflict:
+        return _refused("effect_conflict")
+    actions = {action.decision_id: action for action in plan.actions}
     current_documents = (
         {}
         if plan.producer_facts.link_context is None
@@ -101,6 +108,8 @@ def _project_review_effects(plan: ReviewPlan) -> SelectedReviewEffects:
                 for output in candidate.outputs:
                     add(output.path, output.content, change.subject_id)
                 for document in candidate.documents:
+                    if document.document_id in composed_documents:
+                        document = composed_documents[document.document_id][0]
                     prior = current_documents.get(document.document_id)
                     if prior is None or (prior.content, prior.source_path) != (
                         document.content,
@@ -126,6 +135,11 @@ def _project_review_effects(plan: ReviewPlan) -> SelectedReviewEffects:
             if content is None:
                 continue
             path = change.target_path if approval is None else approval.target_path
+            action = None if approval is None else actions.get(approval.decision_id)
+            if action is not None and action.candidate is not None:
+                composed = composed_documents.get(action.candidate.links.document_id)
+                if composed is not None:
+                    content = composed[0].content
             if (
                 approval is None
                 and not change.requires_decision

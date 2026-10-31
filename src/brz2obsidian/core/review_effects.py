@@ -3,6 +3,7 @@
 from brz2obsidian.contracts import LinkTargetFacts
 from brz2obsidian.core.link_meanings import resolve_occurrence
 from brz2obsidian.core.link_validation import validate_link_document
+from brz2obsidian.core.review_composition import composed_text_documents
 from brz2obsidian.core.review_links import (
     bound_resource_record,
     current_baseline,
@@ -112,10 +113,16 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
     explicit_documents = set()
     changed_ids = set()
     blockers = []
+    composed_documents, composition_conflict = composed_text_documents(
+        facts, actions, approvals
+    )
 
     def add(code):
         if code not in blockers:
             blockers.append(code)
+
+    if composition_conflict:
+        add("selected_link_context_conflict")
 
     if any(
         c.provenance.rule == "remembered_keep" and current_keep_needs_proof(facts, c)
@@ -246,6 +253,9 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
             )
             write(target, output.content, output.path, state)
         for document in candidate.documents:
+            composed = composed_documents.get(document.document_id)
+            if composed is not None:
+                document = composed[0]
             prior = original_documents.get(document.document_id)
             changed = prior is None or (prior.content, prior.source_path) != (
                 document.content,
@@ -269,6 +279,8 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
                     ),
                     None,
                 )
+                if composed is not None:
+                    state = composed[1]
                 write(target, document.content, document.source_path, state)
                 explicit_documents.add(document.document_id)
             if changed or document.document_id in relevant:
@@ -317,9 +329,21 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
             else None
         )
         if candidate is not None:
-            document = candidate.links
+            composed = composed_documents.get(candidate.links.document_id)
+            document = candidate.links if composed is None else composed[0]
+            if composed is not None:
+                content = document.content
             source_targets = candidate.link_targets
-            source_states = candidate.link_target_facts
+            source_states = (
+                candidate.link_target_facts
+                if composed is None
+                else tuple(
+                    state
+                    for state in candidate.link_target_facts
+                    if state.target_id != composed[1].target_id
+                )
+                + (composed[1],)
+            )
         elif known is not None:
             document, source_targets, source_states = known
         else:
