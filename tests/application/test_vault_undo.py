@@ -5,6 +5,8 @@ import json
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from brz2obsidian.application.operations import Operations
 from brz2obsidian.application.update_lifecycle import text_choice_action
 from brz2obsidian.application.vault_recovery_contracts import VaultRecoveryPreparation
@@ -1414,3 +1416,271 @@ def test_production_undo_child_stops_partially_and_fresh_review_restores_same_ta
             )
         ),
     )
+
+
+def _unassociated_reference_update():
+    """Reuse the two-note physical setup with one ordinary reference owner."""
+    vault, source, review_path, _, checkpoint_ref = _two_note_case()
+    notes = ReviewPlan.model_validate_json(review_path.read_bytes()).producer_facts
+    original = b"[[Assets/data.bin|Keep first]] and [[Assets/data.bin|Redirect second]]"
+    produced = (
+        b"[[Assets/data.bin|Keep first]] and "
+        b"[Second edited alias](Assets/data%20%28incoming-ba7816bf%29.bin)"
+    )
+    facts = _with_unassociated_manual(notes, original)
+    (vault / "Manual.md").write_bytes(original)
+    (vault / "Assets").mkdir()
+    (source / "Assets").mkdir()
+    (vault / "Assets/data.bin").write_bytes(b"\x00authored")
+    (source / "Assets/data.bin").write_bytes(b"\x00original")
+    for path, raw in _BASE.items():
+        (source / path).write_bytes(raw)
+    operations = Operations()
+    seeded = operations.capture_checkpoint(
+        vault,
+        source,
+        vault_id="vault-one",
+        import_id="import-one",
+        identity=facts.incoming_identity,
+        admission=operations.inspect_history(vault).admission,
+    )
+    assert seeded.status == "captured", seeded.code
+    for path, raw in _AFTER.items():
+        (source / path).write_bytes(raw)
+    (source / "Assets/data.bin").write_bytes(b"abc")
+    history = operations.inspect_history(vault)
+    assert not any(
+        row.path == "Manual.md" for row in history.checkpoint.manifest.source
+    )
+    plan = prepare_review(facts, preflight=history.admission.preflight)
+    for note in notes.subjects:
+        change = next(row for row in plan.proposal.changes if row.path == note.path)
+        selected = resolve_review(
+            plan,
+            action(
+                plan,
+                change,
+                choice="incoming",
+                decision_id="ordinary:apply:" + note.item_id,
+                candidate=_incoming_candidate(facts, note, _AFTER[note.path]),
+            ),
+        )
+        assert selected.status == "accepted", selected.code
+        plan = selected.plan
+    selection, candidate = _both_with_owner(facts, produced, owner_path="Manual.md")
+    change = next(
+        row for row in plan.proposal.changes if row.facet == "attachment:payload"
+    )
+    selected = resolve_review(
+        plan,
+        action(
+            plan,
+            change,
+            domain="attachment",
+            choice="both",
+            decision_id="ordinary:apply:references",
+            attachment_selection=selection,
+            attachment_candidate=candidate,
+        ),
+    )
+    assert selected.status == "accepted" and selected.plan.ready
+    applied = _apply(
+        operations,
+        vault,
+        source,
+        review=selected.plan,
+        vault_id="vault-one",
+        import_id="import-one",
+    )
+    assert applied.status == "applied", applied.code
+    return operations, vault, source, applied, original, produced, checkpoint_ref
+
+
+@pytest.mark.parametrize("direction", ["finish"])
+def test_unassociated_document_partial_undo_recovery(direction):
+    operations, vault, source, applied, original, produced, checkpoint_ref = (
+        _unassociated_reference_update()
+    )
+    prepared = operations.prepare_undo(vault)
+    assert prepared.status == "offered", prepared.code
+    while prepared.review.requirements:
+        requirement = prepared.review.requirements[0]
+        plan = prepared.review
+        change = next(
+            row
+            for row in plan.proposal.changes
+            if row.change_id == requirement.change_id
+        )
+        subject = next(
+            row
+            for row in plan.facts.subjects
+            if (row.item_id, row.facet) == (change.item_id, change.facet)
+        )
+        choice = (
+            "reverse"
+            if subject.path == "Manual.md"
+            else "current"
+            if subject.attachment is not None
+            else "incoming"
+        )
+        selected_action = text_choice_action(
+            plan,
+            action(
+                plan,
+                change,
+                domain="reversal" if subject.operation_reversal is not None else "text",
+                choice=choice,
+                decision_id="ordinary:undo:" + subject.item_id,
+                candidate=_incoming_candidate(
+                    plan.facts, subject, _BEFORE[subject.path]
+                )
+                if choice == "incoming"
+                else None,
+            ),
+        )
+        transition = resolve_review(plan, selected_action)
+        assert transition.status == "accepted", transition.code
+        prepared = _with_review(prepared, transition.plan)
+    assert prepared.review.ready, prepared.review.blockers
+    selected = select_review_effects(prepared.review)
+    assert selected.status == "selected" and selected.remove_paths == ()
+    assert {row.path: row.content.data for row in selected.files} == {
+        **_BEFORE,
+        "Manual.md": original,
+        "Assets/data.bin": b"\x00authored",
+        "Assets/data (incoming-ba7816bf).bin": b"abc",
+    }
+    undo_path = vault.parent / "ordinary-undo-preparation.json"
+    undo_path.write_text(prepared.model_dump_json(), encoding="utf-8")
+    _child(_UNDO_CHILD, vault, undo_path, expected=81)
+    assert (vault / "Manual.md").read_bytes() == original
+    assert {path: (vault / path).read_bytes() for path in _AFTER} == _AFTER
+    stopped = _fresh_status(vault)
+    assert stopped.kind == "undo" and stopped.status == "incomplete", stopped.code
+    assert stopped.publication == "partial" and stopped.published_files == 1
+    before = user_state(vault)
+    full_before = {
+        p.relative_to(vault).as_posix(): p.read_bytes()
+        for p in vault.rglob("*")
+        if p.is_file()
+    }
+    recovery = operations.prepare_recovery(vault, direction=direction)
+    assert recovery.status == "offered", recovery.code
+    assert {
+        p.relative_to(vault).as_posix(): p.read_bytes()
+        for p in vault.rglob("*")
+        if p.is_file()
+    } == full_before
+    manual = next(
+        row for row in recovery.review.facts.subjects if row.path == "Manual.md"
+    )
+    proof = manual.operation_reversal
+    assert proof is not None
+    assert proof.operation_id == stopped.operation_id
+    assert proof.operation_kind == "undo" and proof.direction == direction
+    assert proof.operation_generation == stopped.generation
+    assert proof.outputs[0].produced.data == produced
+    assert proof.outputs[0].target.data == original
+    assert proof.outputs[0].current.content.data == original
+    assert not any(
+        row.path.startswith("Assets/")
+        for subject in recovery.review.facts.subjects
+        if subject.operation_reversal is not None
+        for row in subject.operation_reversal.outputs
+    )
+    assert manual.baseline.status == "unknown" and manual.baseline.content is None
+    later = original + b"\nLater ordinary document writing after Undo stopped.\n"
+    (vault / "Manual.md").write_bytes(later)
+    recovery = operations.prepare_recovery(vault, direction=direction)
+    assert recovery.status == "offered", recovery.code
+    change = next(
+        row for row in recovery.review.proposal.changes if row.path == "Manual.md"
+    )
+    assert change.current.data == later
+    recovery = operations.resolve_recovery(
+        vault,
+        recovery,
+        action(
+            recovery.review,
+            change,
+            domain="reversal",
+            choice="current",
+            decision_id="ordinary:recovery:current",
+        ),
+    )
+    assert recovery.status == "offered", recovery.code
+    while recovery.review.requirements:
+        requirement = recovery.review.requirements[0]
+        plan = recovery.review
+        change = next(
+            row
+            for row in plan.proposal.changes
+            if row.change_id == requirement.change_id
+        )
+        subject = next(
+            row
+            for row in plan.facts.subjects
+            if (row.item_id, row.facet) == (change.item_id, change.facet)
+        )
+        transition = resolve_review(
+            plan,
+            action(
+                plan,
+                change,
+                choice="incoming",
+                decision_id="ordinary:recovery:" + subject.item_id,
+                candidate=_incoming_candidate(
+                    plan.facts, subject, _BEFORE[subject.path]
+                ),
+            ),
+        )
+        assert transition.status == "accepted", transition.code
+        recovery = _with_review(recovery, transition.plan)
+    assert recovery.review.ready, recovery.review.blockers
+    selected = select_review_effects(recovery.review)
+    assert selected.status == "selected" and selected.remove_paths == ()
+    assert {row.path: row.content.data for row in selected.files} == {
+        **_BEFORE,
+        "Manual.md": later,
+    }
+    source_before = {
+        p.relative_to(source).as_posix(): p.read_bytes()
+        for p in source.rglob("*")
+        if p.is_file()
+    }
+    completed = operations.execute_recovery(vault, recovery)
+    assert completed.status == "undone" and completed.direction == direction, (
+        completed.code
+    )
+    assert completed.operation_id == stopped.operation_id
+    terminal = _fresh_status(vault)
+    assert (
+        terminal.status == "undone"
+        and terminal.receipt_commit == completed.receipt_commit
+    )
+    assert terminal.operation_id == stopped.operation_id
+    after = user_state(vault)
+    assert after["authored"] == {
+        **_BEFORE,
+        "Manual.md": later,
+        "Assets/data.bin": b"\x00authored",
+        "Assets/data (incoming-ba7816bf).bin": b"abc",
+        "Unrelated.bin": b"protected\x00\xff",
+    }
+    _assert_user_state(
+        before,
+        after,
+        allowed_refs=frozenset(
+            (
+                checkpoint_ref.encode(),
+                _operation_ref(checkpoint_ref, stopped.operation_id),
+            )
+        ),
+    )
+    assert {
+        p.relative_to(source).as_posix(): p.read_bytes()
+        for p in source.rglob("*")
+        if p.is_file()
+    } == source_before
+    assert "Manual.md" not in source_before
+    assert applied.operation_id != stopped.operation_id
