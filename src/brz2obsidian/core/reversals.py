@@ -464,12 +464,41 @@ def review_owned_documents(plan):
     effects = select_review_effects(plan)
     selected = []
     for approval in plan.approvals:
-        candidate = approval.attachment_candidate
-        if candidate is None:
-            continue
         change = next(
             c for c in plan.proposal.changes if c.change_id == approval.change_id
         )
+        subject = reversal_subject(plan.producer_facts, change)
+        retained = reversal_document_target(subject)
+        if retained is not None:
+            files = tuple(f for f in effects.files if f.path == subject.path)
+            if len(files) != 1 or files[0].subject_id != change.subject_id:
+                raise ValueError("Reversed document lacks its selected owner")
+            if files[0].content == subject.current.content:
+                continue
+            documents = tuple(
+                d
+                for d in context.incoming_documents
+                if (d.document_id, d.source_path)
+                == (retained.target_id, retained.canonical_path)
+                and d.content == files[0].content
+                and d.status == "supported"
+                and d.inventory == "complete"
+            )
+            if (
+                reversal_document_entry(plan.producer_facts, subject) is None
+                or approval.domain != "reversal"
+                or approval.choice != "reverse"
+                or files[0].content != subject.operation_reversal.outputs[0].target
+                or len(documents) != 1
+            ):
+                raise ValueError(
+                    "Reversed document lacks exact retained byte authority"
+                )
+            selected.append((approval.change_id, approval.decision_id, retained))
+            continue
+        candidate = approval.attachment_candidate
+        if candidate is None:
+            continue
         for document in candidate.documents:
             prior = tuple(
                 d

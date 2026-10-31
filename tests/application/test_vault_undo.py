@@ -16,6 +16,7 @@ from brz2obsidian.contracts import (
     ReviewPlan,
 )
 from brz2obsidian.core import prepare_review, resolve_review, select_review_effects
+from brz2obsidian.core.reversals import review_owned_documents
 from brz2obsidian.obsidian import interpret_link_target, interpret_links
 from brz2obsidian.publication.vault_apply import _NativeExecutor
 from tests.application.test_vault_apply import _apply
@@ -566,6 +567,10 @@ def test_latest_undo_retains_created_definition_identities_and_later_home():
 
     # The unchanged produced document reverses to literal authored preimage.
     reversed_review = complete(kept, "reverse")
+    assert [
+        (target.target_id, target.canonical_path, target.identity)
+        for _, _, target in review_owned_documents(reversed_review.review)
+    ] == [("file:Manual.md", "Manual.md", None)]
     selected = select_review_effects(reversed_review.review)
     assert selected.status == "selected"
     assert {row.path: row.content.data for row in selected.files} == {
@@ -667,6 +672,7 @@ def test_latest_undo_retains_created_definition_identities_and_later_home():
     )
     assert current.status == "offered", current.code
     final = complete(current, "current")
+    assert review_owned_documents(final.review) == ()
     selected = select_review_effects(final.review)
     assert selected.status == "selected"
     assert {row.path: row.content.data for row in selected.files} == {
@@ -718,8 +724,8 @@ def test_latest_undo_retains_created_definition_identities_and_later_home():
         after,
         allowed_refs=frozenset(
             (
-                captured.locator.ref.encode(),
-                _operation_ref(captured.locator.ref, undone.operation_id),
+                captured.locator.association.ref.encode(),
+                _operation_ref(captured.locator.association.ref, undone.operation_id),
             )
         ),
     )
