@@ -65,6 +65,88 @@ def _with_review(prepared, review):
     )
 
 
+def _with_unassociated_manual(facts, raw):
+    """Ordinary authored link owner: no imported subject or source membership."""
+    binary = linked_attachment_request(payload_current=b"\x00authored", raw=raw)
+    asset = binary.subjects[0].model_copy(
+        update={
+            "item_id": "entry:asset",
+            "attachment": binary.subjects[0].attachment.model_copy(
+                update={"affected_documents": ("file:Manual.md",)}
+            ),
+        }
+    )
+    asset_entry = binary.identity_inventory[0].model_copy(
+        update={
+            "entry_id": "binary:payload",
+            "identity": binary.identity_inventory[0].identity.model_copy(
+                update={"item_id": "entry:asset"}
+            ),
+        }
+    )
+    manual_entry = binary.identity_inventory[1].model_copy(
+        update={
+            "entry_id": "file:Manual.md",
+            "identity_state": "missing",
+            "identity": None,
+            "raw_identity": None,
+            "current": CurrentContent(
+                existence="present", path="Manual.md", content=ExactContent(data=raw)
+            ),
+            "target": binary.identity_inventory[1].target.model_copy(
+                update={"normalized_path": "manual.md"}
+            ),
+        }
+    )
+    context = {}
+    for stage in ("current", "incoming"):
+        targets = tuple(
+            row.model_copy(
+                update={
+                    "target_id": "file:Manual.md",
+                    "canonical_path": "Manual.md",
+                    "identity": None,
+                    "target": manual_entry.target,
+                    "representations": ("Manual.md",),
+                }
+            )
+            if row.target_id == "owner:note"
+            else row
+            for row in getattr(binary.link_context, stage + "_targets")
+        )
+        states = tuple(
+            row.model_copy(update={"target_id": "file:Manual.md"})
+            if row.target_id == "owner:note"
+            else row
+            for row in getattr(binary.link_context, stage + "_target_facts")
+        )
+        document = interpret_links(
+            ExactContent(data=raw),
+            document_id="file:Manual.md",
+            source_path="Manual.md",
+            path_mode="vault",
+            targets=targets,
+            target_facts=states,
+            inventory="complete",
+        )
+        assert document.status == "supported"
+        for suffix, rows in (
+            ("_targets", targets),
+            ("_target_facts", states),
+            ("_documents", (document,)),
+        ):
+            name = stage + suffix
+            context[name] = getattr(facts.link_context, name) + rows
+    facts = with_subjects(
+        facts,
+        (*facts.subjects, asset),
+        (*facts.identity_inventory, asset_entry, manual_entry),
+    )
+    return facts.model_copy(
+        update={"link_context": facts.link_context.model_copy(update=context)}
+    )
+
+
 def test_latest_undo_retains_created_definition_identities_and_later_home():
     effort = Path(__file__).resolve().parents[2] / "tmp/issue-304/fixtures"
     effort.mkdir(parents=True, exist_ok=True)
@@ -84,10 +166,17 @@ def test_latest_undo_retains_created_definition_identities_and_later_home():
     (effort / (container.name + ".json")).write_text(ownership, encoding="utf-8")
     vault.mkdir()
     source.mkdir()
+    manual_before = b"Authored prose.\n[[Assets/data.bin|Keep first]] and [[Assets/data.bin|Redirect second]]\n"
+    manual_after = b"Authored prose.\n[[Assets/data.bin|Keep first]] and [Second edited alias](Assets/data%20%28incoming-ba7816bf%29.bin)\n"
     git(vault, "init", "-q")
     git(vault, "config", "core.autocrlf", "false")
     (vault / "Home.md").write_bytes(b"Home before.\n")
     (vault / "Protected.bin").write_bytes(b"protected\x00\xff")
+    (vault / "Manual.md").write_bytes(manual_before)
+    (vault / "Assets").mkdir()
+    (source / "Assets").mkdir()
+    (vault / "Assets/data.bin").write_bytes(b"\x00original")
+    (source / "Assets/data.bin").write_bytes(b"\x00original")
     git(vault, "add", ".")
     git(vault, "commit", "-qm", "independent authored preimage")
     git(vault, "update-ref", "refs/notes/user-proof", "HEAD")
@@ -187,6 +276,13 @@ def test_latest_undo_retains_created_definition_identities_and_later_home():
             )
         }
     )
+    facts = _with_unassociated_manual(facts, manual_before)
+    (manual,) = [
+        row for row in facts.identity_inventory if row.current.path == "Manual.md"
+    ]
+    assert manual.identity_state == "missing" and manual.identity is None
+    assert not any(row.path == "Manual.md" for row in facts.subjects)
+    assert not (source / "Manual.md").exists()
     (source / "Home.md").write_bytes(b"Home before.\n")
     operations = Operations()
     admission = operations.inspect_history(vault).admission
@@ -200,12 +296,14 @@ def test_latest_undo_retains_created_definition_identities_and_later_home():
         admission=admission,
     )
     assert captured.status == "captured", captured.code
+    (vault / "Assets/data.bin").write_bytes(b"\x00authored")
+    (source / "Assets/data.bin").write_bytes(b"abc")
     (source / "Home.md").write_bytes(b"Home incoming.\n")
     for _, path, _, _, incoming in definitions:
         (source / path).write_bytes(incoming)
-    reviewed = prepare_review(
-        facts, preflight=operations.inspect_history(vault).admission.preflight
-    )
+    history = operations.inspect_history(vault)
+    assert not any(row.path == "Manual.md" for row in history.checkpoint.manifest.source)
+    reviewed = prepare_review(facts, preflight=history.admission.preflight)
     for subject in subjects:
         change = next(
             row for row in reviewed.proposal.changes if row.item_id == subject.item_id
@@ -223,6 +321,28 @@ def test_latest_undo_retains_created_definition_identities_and_later_home():
         )
         assert selected.status == "accepted", selected.code
         reviewed = selected.plan
+    selection, candidate = _both_with_owner(
+        facts, manual_after, owner_path="Manual.md"
+    )
+    asset_change = next(
+        row
+        for row in reviewed.proposal.changes
+        if row.facet == "attachment:payload"
+    )
+    selected = resolve_review(
+        reviewed,
+        action(
+            reviewed,
+            asset_change,
+            domain="attachment",
+            choice="both",
+            decision_id="apply:authored-references",
+            attachment_selection=selection,
+            attachment_candidate=candidate,
+        ),
+    )
+    assert selected.status == "accepted", selected.code
+    reviewed = selected.plan
     assert reviewed.ready, reviewed.blockers
     applied = _apply(
         operations,
@@ -239,6 +359,9 @@ def test_latest_undo_retains_created_definition_identities_and_later_home():
     assert before["authored"] == {
         "Home.md": later,
         "Protected.bin": b"protected\x00\xff",
+        "Manual.md": manual_after,
+        "Assets/data.bin": b"\x00authored",
+        "Assets/data (incoming-ba7816bf).bin": b"abc",
         **{path: incoming for _, path, _, _, incoming in definitions},
     }
     full_before = {
@@ -478,12 +601,12 @@ def _operation_ref(checkpoint_ref, operation_id):
     ).encode()
 
 
-def _both_with_owner(facts, content):
+def _both_with_owner(facts, content, *, owner_path="Notes/Owner.md"):
     selection, candidate = attachment_candidate(facts, "both")
     old_doc = next(
         row
         for row in facts.link_context.current_documents
-        if row.source_path == "Notes/Owner.md"
+        if row.source_path == owner_path
     )
     document = interpret_links(
         ExactContent(data=content),
@@ -518,11 +641,11 @@ def _both_with_owner(facts, content):
             "target_facts": tuple(
                 interpret_link_target(
                     document.content,
-                    target_id="owner:note",
+                    target_id=old_doc.document_id,
                     existence="present",
                     memberships=(),
                 )
-                if row.target_id == "owner:note"
+                if row.target_id == old_doc.document_id
                 else row
                 for row in candidate.target_facts
             ),
