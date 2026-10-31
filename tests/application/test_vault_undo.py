@@ -1642,6 +1642,7 @@ def test_unassociated_document_partial_undo_recovery(direction):
     assert {row.path: row.content.data for row in selected.files} == {
         **_BEFORE,
         "Manual.md": later,
+        "Assets/data.bin": b"\x00authored",
     }
     source_before = {
         p.relative_to(source).as_posix(): p.read_bytes()

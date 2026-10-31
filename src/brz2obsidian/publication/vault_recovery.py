@@ -817,7 +817,13 @@ def _finish_review(root, observed, *, previous=None, authority=None):
 
         def inactive_proof(subject):
             proof = subject.operation_reversal
-            if proof is None:
+            if (
+                proof is None
+                or subject.attachment is None
+                or subject.baseline.status != "known"
+                or subject.incoming is None
+                or subject.incoming != subject.baseline.content
+            ):
                 return False
             paths = {subject.path, subject.current.path} | {
                 row.path for row in proof.outputs
@@ -835,10 +841,11 @@ def _finish_review(root, observed, *, previous=None, authority=None):
         facts = facts.model_copy(
             update={
                 "subjects": tuple(
-                    subject
+                    subject.model_copy(update={"operation_reversal": None})
+                    if (subject.item_id, subject.facet) in inactive_keys
+                    else subject
                     for subject in facts.subjects
                     if (subject.item_id, subject.facet) not in document_keys
-                    and (subject.item_id, subject.facet) not in inactive_keys
                 )
                 + _operation_document_subjects(
                     original,
@@ -861,6 +868,17 @@ def _finish_review(root, observed, *, previous=None, authority=None):
                 for change in original.proposal.changes
                 if (change.item_id, change.facet) in keys
             }
+            paths = {
+                path
+                for subject in facts.subjects
+                for path in (subject.path, subject.current.path)
+            }
+            paths.update(
+                row.path
+                for subject in facts.subjects
+                if subject.operation_reversal is not None
+                for row in subject.operation_reversal.outputs
+            )
             admission = _inspect_vault_for_recovery(
                 root,
                 retained,
@@ -869,7 +887,7 @@ def _finish_review(root, observed, *, previous=None, authority=None):
                     for subject in _review_subjects(
                         original, select_review_effects(original)
                     )
-                    if subject.subject_id in owners
+                    if subject.subject_id in owners and subject.path in paths
                 ),
             )
             if (
