@@ -139,6 +139,7 @@ def test_worker_repair_keeps_matching_target_and_native_object_storage_truth(
         "review_history_repair" in offered.next_actions
         and offered.binding.operation_id is None
     )
+    assert offered.changes == 0
     prepared = worker_context_call(
         context,
         {
@@ -154,6 +155,7 @@ def test_worker_repair_keeps_matching_target_and_native_object_storage_truth(
         and prepared.binding.review_generation is None
     )
     assert prepared.binding.operation_generation is None
+    assert prepared.changes == 0
     assert (
         prepared.binding.association_id == "a" * 64
         and prepared.binding.checkpoint_commit == "3" * 40
@@ -312,6 +314,7 @@ def test_worker_resolves_canonical_history_current_offer_without_exporting_plan(
         {"command": "page", "binding": prepared.binding, "limit": 1},
     )
     assert comparison.page.total == 1 and comparison.page.next_offset is None
+    assert comparison.changes == 1
     assert comparison.page.generation == 3
     row = comparison.page.items[0]
     assert (row.original, row.current, row.incoming, row.result) == (
@@ -333,10 +336,12 @@ def test_worker_resolves_canonical_history_current_offer_without_exporting_plan(
     )
     assert row.next_byte_offset == 2 and row.omitted and bounded.page.omitted
     assert comparison.binding == bounded.binding == prepared.binding
+    assert bounded.changes == 1
     choices = worker_context_call(
         context, {"command": "history_choices", "binding": prepared.binding, "limit": 1}
     )
     assert choices.total_choices == 1 and choices.next_choice_offset is None
+    assert choices.changes == 1
     offer = choices.offers[0]
     assert offer.domain == "reversal" and "current" in offer.choices
     wire = choices.model_dump_json()
@@ -352,6 +357,7 @@ def test_worker_resolves_canonical_history_current_offer_without_exporting_plan(
         },
     )
     assert wrong.status == "refused" and wrong.code == "offer_changed" and not calls
+    assert wrong.changes == 1, "A refused choice retains the existing review total"
     chosen = worker_context_call(
         context,
         {
@@ -363,11 +369,13 @@ def test_worker_resolves_canonical_history_current_offer_without_exporting_plan(
         },
     )
     assert chosen.ready and chosen.binding.review_generation == 3 and len(calls) == 1
+    assert chosen.changes == 1 and chosen.unresolved == 0
     stale_page = worker_context_call(
         context,
         {"command": "page", "binding": prepared.binding},
     )
     assert stale_page.status == "refused" and stale_page.code == "context_changed"
+    assert stale_page.changes == 1
     stale = worker_context_call(
         context,
         {
@@ -379,11 +387,113 @@ def test_worker_resolves_canonical_history_current_offer_without_exporting_plan(
         },
     )
     assert stale.status == "refused" and len(calls) == 1
+    assert stale.changes == 1
     result = worker_context_call(
         context, {"command": "execute_history", "binding": chosen.binding}
     )
     assert result.status == "restored" and result.history_action.operation == completed
+    assert result.changes == 0 and result.binding is None
+    assert completed.planned_files == completed.published_files == 0
     assert (vault / "Personal.md").read_bytes() == b"Exact personal bytes\r\n"
+
+
+def test_worker_history_refresh_counts_the_new_review_scope(tmp_path):
+    from brz2obsidian.application.operations import Operations
+    from brz2obsidian.core import prepare_review, select_review_effects
+    from tests.application.test_history_workflow import (
+        absent_history,
+        operation_state,
+        ready_native_recovery,
+    )
+    from tests.reconciliation.test_identity import inventory_item, with_subjects
+    from tests.reconciliation.test_resolution import preflight, with_review_links
+
+    original = ready_native_recovery().native
+    facts = original.review.facts
+    second_entry = inventory_item(
+        "second-entry", "entry:second", "Notes/Second.md", b"Second retained\n"
+    )
+    first_subject = facts.subjects[0]
+    second_subject = first_subject.model_copy(
+        update={
+            "item_id": "entry:second",
+            "path": "Notes/Second.md",
+            "title": "Second",
+            "baseline": first_subject.baseline.model_copy(
+                update={"content": second_entry.current.content}
+            ),
+            "current": second_entry.current,
+            "incoming": second_entry.current.content,
+            "source_target": second_entry.target,
+        }
+    )
+    renewed_facts = with_review_links(
+        with_subjects(
+            facts.model_copy(update={"generation": 4, "link_context": None}),
+            (first_subject, second_subject),
+            facts.identity_inventory + (second_entry,),
+        )
+    )
+    renewed = original.model_copy(
+        update={"review": prepare_review(renewed_facts, preflight=preflight())}
+    )
+    assert original.review.ready and renewed.review.ready
+    effects = select_review_effects(renewed.review)
+    assert effects.status == "selected" and effects.remove_paths == ()
+    assert [(row.path, row.content.data) for row in effects.files] == [
+        ("Notes/Opening.md", b"retained"),
+        ("Notes/Second.md", b"Second retained\n"),
+    ]
+
+    class NativePorts(Operations):
+        def inspect_history(self, vault, **kwargs):
+            return absent_history()
+
+        def inspect_update_status(self, vault):
+            return operation_state("incomplete")
+
+        def prepare_recovery(self, vault, *, direction=None):
+            assert direction == "finish"
+            return original
+
+        def refresh_recovery(self, vault, previous):
+            assert previous == original
+            return renewed
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    context = UpdateContext(operations=NativePorts())
+    header = worker_context_call(
+        context,
+        {"command": "history", "vault": str(vault), "selection_id": str(uuid4())},
+    )
+    assert header.changes == 0
+    prepared = worker_context_call(
+        context,
+        {
+            "command": "prepare_history",
+            "binding": header.binding,
+            "kind": "recovery",
+            "direction": "finish",
+        },
+    )
+    assert prepared.ready and prepared.changes == 1
+    refreshed = worker_context_call(
+        context, {"command": "refresh_history", "binding": prepared.binding}
+    )
+    assert refreshed.ready and refreshed.changes == 2 and refreshed.unresolved == 0
+    assert refreshed.binding.review_generation == 4
+    assert refreshed.binding != prepared.binding
+    page = worker_context_call(
+        context, {"command": "page", "binding": refreshed.binding, "limit": 1}
+    )
+    assert page.page.total == page.changes == 2 and len(page.page.items) == 1
+    stale = worker_context_call(
+        context, {"command": "page", "binding": prepared.binding}
+    )
+    assert stale.status == "refused" and stale.code == "context_changed"
+    assert stale.changes == 2, "Refusal retains the renewed two-row review"
+    assert list(vault.iterdir()) == [], "Counting and refreshing publish no files"
 
 
 @pytest.mark.parametrize("target", ("matching", "new_checkpoint", "other_receipt"))
@@ -588,8 +698,10 @@ def test_undo_context_distinguishes_current_checkpoint_target_receipt_and_prior_
             prepared.status == "refused" and prepared.code == "history_target_changed"
         )
         assert prepared.binding is None and not prepared.ready and not entered
+        assert prepared.changes == 0
     else:
         assert prepared.ready and prepared.binding.operation_generation == 1
+        assert prepared.changes == 1, "One retained row counts despite no byte change"
         assert (
             prepared.binding.operation_id == observed.operation_id
             and prepared.binding.intent_commit == observed.intent_commit
@@ -602,6 +714,10 @@ def test_undo_context_distinguishes_current_checkpoint_target_receipt_and_prior_
             prepared.binding.target_receipt_commit == "4" * 40
             and prepared.binding.review_generation == 3
         )
+        comparison = worker_context_call(
+            context, {"command": "page", "binding": prepared.binding}
+        )
+        assert comparison.changes == comparison.page.total == 1
         actual = worker_context_call(
             context, {"command": "execute_history", "binding": prepared.binding}
         )
@@ -814,6 +930,7 @@ def test_worker_history_recovery_keeps_native_direction_and_distinct_terminal(
         {"command": "prepare_history", "binding": offered.binding, "kind": "recovery"}
     )
     assert directions.status == "direction_required" and not directions.ready
+    assert directions.changes == 0
     assert directions.history_action.available_directions == ("finish", "restore")
     selected = wire(
         {
@@ -824,6 +941,8 @@ def test_worker_history_recovery_keeps_native_direction_and_distinct_terminal(
         }
     )
     assert selected.ready and selected.binding.operation_generation == 7
+    assert selected.changes == 1
+    assert session.update_snapshot.reply.changes == 1
     assert (
         selected.binding.review_generation == 3
         and selected.binding.direction == direction
@@ -833,8 +952,11 @@ def test_worker_history_recovery_keeps_native_direction_and_distinct_terminal(
         context, {"command": "execute_history", "binding": directions.binding}
     )
     assert stale.status == "refused" and not writes
+    assert stale.changes == 1
     refreshed = wire({"command": "refresh_history", "binding": selected.binding})
     assert refreshed.ready and refreshed.binding != selected.binding
+    assert refreshed.changes == 1
+    assert session.update_snapshot.reply.changes == 1
     completed = wire({"command": "execute_history", "binding": refreshed.binding})
     assert completed.status == outcome and completed.history_action.status == outcome
     assert completed.history_action.operation == result and len(writes) == 1
@@ -846,6 +968,7 @@ def test_worker_history_recovery_keeps_native_direction_and_distinct_terminal(
     assert not completed.ready and (vault / "Personal.md").read_bytes() == literal
     state = session.update_snapshot
     assert state.publication == result.publication and state.reply.status == outcome
+    assert state.reply.changes == 0
     assert state.needs_inspection is (not terminal)
     assert state.history_retained is (None if outcome == "unknown" else True)
     closed = wire({"command": "close", "binding": None, "choice": "discard"})

@@ -244,6 +244,9 @@ class HistoryContext:
             code=result.code,
             binding=self.binding,
             ready=preparation.ready if preparation else False,
+            changes=len(preparation.native.review.proposal.changes)
+            if preparation and getattr(preparation.native, "review", None)
+            else 0,
             unresolved=len(preparation.native.review.requirements)
             if preparation and getattr(preparation.native, "review", None)
             else 0,

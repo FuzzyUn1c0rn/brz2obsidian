@@ -314,6 +314,7 @@ def test_history_controls_use_current_admitted_setup_recovery_undo_and_repair(
                 binding=self.binding,
                 history_action=self.action,
                 ready=ready if status is None else False,
+                changes=1 if self.binding.proposal_id is not None else 0,
                 unresolved=0 if ready else 1,
                 history_retained=role in ("undo", "recovery"),
                 publication="partial" if role == "recovery" else "not_started",
@@ -338,6 +339,8 @@ def test_history_controls_use_current_admitted_setup_recovery_undo_and_repair(
         )
         controls.click("Inspect history and recovery")
         until(app, lambda: window.runner.session.update_snapshot.reply is not None)
+        controls.select("Overview")
+        until(app, lambda: "Changes: 0" in window_text(window))
         controls.select("History & recovery")
         if role == "setup":
             until(app, lambda: "Install Git" in window_text(window))
@@ -366,8 +369,14 @@ def test_history_controls_use_current_admitted_setup_recovery_undo_and_repair(
                 )
                 if role == "recovery":
                     controls.click("Review restore direction")
+                controls.select("Overview")
+                until(app, lambda: "Changes: 1" in window_text(window))
+                assert "Unresolved choices: 1" in window_text(window)
                 controls.select("Other choices")
                 controls.click("Keep vault version for reversal choice 1")
+                controls.select("Overview")
+                until(app, lambda: "Unresolved choices: 0" in window_text(window))
+                assert "Changes: 1" in window_text(window)
                 controls.select("History & recovery")
             controls.click("Execute reviewed " + role)
             until(
