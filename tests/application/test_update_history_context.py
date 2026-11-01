@@ -306,6 +306,7 @@ def test_worker_resolves_canonical_history_current_offer_without_exporting_plan(
         },
     )
     assert not prepared.ready and prepared.unresolved == 1
+    assert prepared.changes == 1, "The one review row counts before any publication"
     comparison = worker_context_call(
         context,
         {"command": "page", "binding": prepared.binding, "limit": 1},
