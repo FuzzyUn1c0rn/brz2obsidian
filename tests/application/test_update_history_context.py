@@ -647,6 +647,14 @@ def test_worker_history_original_incoming_keeps_home_current_and_manual_reverse(
     })})
     review = prepare_review(undo_facts, preflight=preflight())
     assert not review.ready and not review.blockers and len(review.requirements) == 3
+    protected_asset = next(c for c in review.proposal.changes if c.path == linked.path)
+    assert not protected_asset.requires_decision
+    assert tuple(
+        version.data for version in (
+            protected_asset.original, protected_asset.current,
+            protected_asset.incoming, protected_asset.result,
+        )
+    ) == (b"abc", b"\x00authored", b"abc", b"\x00authored")
     native = VaultUndoPreparation(
         schema_id="brz2obsidian.vault-undo-preparation", schema_version=1,
         status="offered", code="undo_offered", checkpoint_commit="3" * 40,
@@ -783,6 +791,8 @@ def test_worker_history_original_incoming_keeps_home_current_and_manual_reverse(
     assert selected_bytes[home.path] == home_later
     assert selected_bytes["Manual.md"] == manual_before
     assert selected_bytes[original_path] == original_before
+    assert selected_bytes[linked.path] == b"\x00authored"
+    assert before[extra.canonical_path] == b"abc"
     assert physical() == before
 
 
