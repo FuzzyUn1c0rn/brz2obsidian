@@ -632,7 +632,13 @@ def test_worker_history_original_incoming_keeps_home_current_and_manual_reverse(
             "incoming": reverse_bytes[s.path],
         })
         for s in (home, resource)
-    ) + (manual,)
+    ) + (
+        linked.model_copy(update={
+            "baseline": linked.baseline.model_copy(update={"content": linked.incoming}),
+            "current": next(e.current for e in observed if e.current.path == linked.path),
+        }),
+        manual,
+    )
     undo_facts = with_subjects(facts, undo_subjects, observed)
     undo_facts = undo_facts.model_copy(update={"link_context": context.model_copy(update={
         "current_targets": targets, "incoming_targets": targets,
@@ -686,7 +692,7 @@ def test_worker_history_original_incoming_keeps_home_current_and_manual_reverse(
                 )
             except Exception:
                 diagnostic["traceback"] = traceback.format_exc()
-                destination = Path(__file__).resolve().parents[2] / "tmp/issue307/storage-port-diagnostic001.json"
+                destination = Path(__file__).resolve().parents[2] / "tmp/issue307/storage-port-diagnostic002.json"
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 with destination.open("x", encoding="utf-8") as output:
                     json.dump(diagnostic, output, ensure_ascii=True, indent=2)
@@ -718,7 +724,7 @@ def test_worker_history_original_incoming_keeps_home_current_and_manual_reverse(
     prepared = worker_context_call(context, {
         "command": "prepare_history", "binding": opened.binding, "kind": "undo",
     })
-    assert prepared.status == "prepared_review" and prepared.changes == prepared.unresolved == 3
+    assert prepared.status == "prepared_review" and prepared.changes == 4 and prepared.unresolved == 3
 
     def public_offer(binding, path):
         page = worker_context_call(context, {"command": "page", "binding": binding})
@@ -736,7 +742,7 @@ def test_worker_history_original_incoming_keeps_home_current_and_manual_reverse(
             "assumptions_digest": offer.assumptions_digest,
         })
         assert prepared.status == "prepared_review", prepared.code
-    assert prepared.changes == 3 and prepared.unresolved == 1
+    assert prepared.changes == 4 and prepared.unresolved == 1
     retained = tuple(resolved[-1].review.approvals)
     offer = public_offer(prepared.binding, original_path)
     assert offer.domain == "attachment" and "incoming" in offer.choices
@@ -762,7 +768,7 @@ def test_worker_history_original_incoming_keeps_home_current_and_manual_reverse(
         "assumptions_digest": offer.assumptions_digest,
     })
     assert chosen.status == "prepared_review", chosen.code
-    assert chosen.ready and chosen.changes == 3 and chosen.unresolved == 0
+    assert chosen.ready and chosen.changes == 4 and chosen.unresolved == 0
     assert chosen.binding.proposal_id == prepared.binding.proposal_id
     assert chosen.binding.revision > prepared.binding.revision
     assert chosen.binding.review_generation >= prepared.binding.review_generation
