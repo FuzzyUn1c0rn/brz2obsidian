@@ -674,11 +674,23 @@ def test_worker_history_original_incoming_keeps_home_current_and_manual_reverse(
             return native
 
         def resolve_undo(self, vault, preparation, action):
-            transition = resolve_review(preparation.review, action)
-            assert transition.status == "accepted", transition.code
-            result = VaultUndoPreparation.model_validate(
-                preparation.model_dump() | {"review": transition.plan, "code": "undo_choice_recorded"}
-            )
+            import traceback
+
+            diagnostic = {"domain": action.domain, "choice": action.choice}
+            try:
+                transition = resolve_review(preparation.review, action)
+                diagnostic.update(status=transition.status, code=transition.code)
+                assert transition.status == "accepted", transition.code
+                result = VaultUndoPreparation.model_validate(
+                    preparation.model_dump() | {"review": transition.plan, "code": "undo_choice_recorded"}
+                )
+            except Exception:
+                diagnostic["traceback"] = traceback.format_exc()
+                destination = Path(__file__).resolve().parents[2] / "tmp/issue307/storage-port-diagnostic001.json"
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                with destination.open("x", encoding="utf-8") as output:
+                    json.dump(diagnostic, output, ensure_ascii=True, indent=2)
+                raise
             resolved.append(result)
             return result
 
