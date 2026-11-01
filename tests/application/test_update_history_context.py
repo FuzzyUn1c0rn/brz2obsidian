@@ -397,7 +397,9 @@ def test_worker_resolves_canonical_history_current_offer_without_exporting_plan(
     assert (vault / "Personal.md").read_bytes() == b"Exact personal bytes\r\n"
 
 
-def test_worker_history_original_incoming_keeps_home_current_and_manual_reverse(tmp_path):
+def test_worker_history_original_incoming_keeps_home_current_and_manual_reverse(
+    tmp_path,
+):
     """A fresh canonical review crosses the worker; storage is a declared port."""
     from hashlib import sha256
 
@@ -441,8 +443,12 @@ def test_worker_history_original_incoming_keeps_home_current_and_manual_reverse(
     home_before = b"Home before.\n"
     home_produced = b"Home incoming.\n"
     home_later = b"Home incoming.\nIndependent later Home writing.\n"
-    original_before = b"First source writing.\n# Shared heading\nOriginal block. ^original\n"
-    original_produced = b"Second source writing.\n# Shared heading\nChanged block. ^original\n"
+    original_before = (
+        b"First source writing.\n# Shared heading\nOriginal block. ^original\n"
+    )
+    original_produced = (
+        b"Second source writing.\n# Shared heading\nChanged block. ^original\n"
+    )
     original_path = "Attachments/opening/Notes.md.original"
     original_target_id = "subject:entry:original:asset"
     manual_before = (
@@ -458,7 +464,11 @@ def test_worker_history_original_incoming_keeps_home_current_and_manual_reverse(
     facts = _with_unassociated_manual(facts, manual_before)
     home, linked = facts.subjects
     resource_entry = inventory_item(
-        "original-entry", "entry:original", original_path, original_before, facet="asset"
+        "original-entry",
+        "entry:original",
+        original_path,
+        original_before,
+        facet="asset",
     )
     resource = home.model_copy(
         update={
@@ -491,16 +501,22 @@ def test_worker_history_original_incoming_keeps_home_current_and_manual_reverse(
     additions = {}
     for stage, raw in (("current", original_before), ("incoming", original_produced)):
         additions[stage + "_targets"] = (
-            *getattr(context, stage + "_targets"), resource_target
+            *getattr(context, stage + "_targets"),
+            resource_target,
         )
         additions[stage + "_target_facts"] = (
             *getattr(context, stage + "_target_facts"),
             interpret_link_target(
-                ExactContent(data=raw), target_id=original_target_id,
-                existence="present", memberships=(), source_path=original_path,
+                ExactContent(data=raw),
+                target_id=original_target_id,
+                existence="present",
+                memberships=(),
+                source_path=original_path,
             ),
         )
-    facts = facts.model_copy(update={"link_context": context.model_copy(update=additions)})
+    facts = facts.model_copy(
+        update={"link_context": context.model_copy(update=additions)}
+    )
     origin = prepare_review(facts, preflight=preflight())
 
     def origin_choice(plan, path, choice, references=()):
@@ -509,8 +525,11 @@ def test_worker_history_original_incoming_keeps_home_current_and_manual_reverse(
             o for o in inspect_review_choices(plan) if o.change_id == change.change_id
         )
         action = review_plan_choice_action(
-            plan, requirement_id=offered.requirement_id, choice=choice,
-            assumptions_digest=requirement_digest(offered), references=references,
+            plan,
+            requirement_id=offered.requirement_id,
+            choice=choice,
+            assumptions_digest=requirement_digest(offered),
+            references=references,
         )
         result = resolve_review(plan, text_choice_action(plan, action))
         assert result.status == "accepted", result.code
@@ -519,12 +538,16 @@ def test_worker_history_original_incoming_keeps_home_current_and_manual_reverse(
     # The distinct linked binary creates real canonical changed-document ownership.
     binary_change = next(c for c in origin.proposal.changes if c.path == linked.path)
     binary_offer = next(
-        o for o in inspect_review_choices(origin) if o.change_id == binary_change.change_id
+        o
+        for o in inspect_review_choices(origin)
+        if o.change_id == binary_change.change_id
     )
     refs = review_plan_attachment_references(origin, binary_offer.requirement_id)
     assert len(refs) == 2 and all(d.source_path == "Manual.md" for _, d, _ in refs)
     origin = origin_choice(
-        origin, linked.path, "both",
+        origin,
+        linked.path,
+        "both",
         tuple(
             {"reference_id": token, "choice": choice}
             for (token, _, _), choice in zip(
@@ -544,23 +567,33 @@ def test_worker_history_original_incoming_keeps_home_current_and_manual_reverse(
     owned = review_owned_documents(origin)
     assert len(owned) == 1
     origin_change, origin_decision, manual_target = owned[0]
-    assert manual_target.canonical_path == "Manual.md" and manual_target.identity is None
+    assert (
+        manual_target.canonical_path == "Manual.md" and manual_target.identity is None
+    )
     assert (origin_change, origin_decision) == (
         binary_change.change_id,
-        next(a.decision_id for a in origin.approvals if a.change_id == binary_change.change_id),
+        next(
+            a.decision_id
+            for a in origin.approvals
+            if a.change_id == binary_change.change_id
+        ),
     )
 
     # Observe only fresh in-memory fixture bytes. No physical history is manufactured.
     targets = next(
-        a.attachment_candidate.targets for a in origin.approvals
+        a.attachment_candidate.targets
+        for a in origin.approvals
         if a.change_id == binary_change.change_id
     )
     current = {path: raw for path, raw in produced.items()}
     current[home.path] = ExactContent(data=home_later)
     states = tuple(
         interpret_link_target(
-            current[t.canonical_path], target_id=t.target_id,
-            existence="present", memberships=(), source_path=t.canonical_path,
+            current[t.canonical_path],
+            target_id=t.target_id,
+            existence="present",
+            memberships=(),
+            source_path=t.canonical_path,
         )
         for t in targets
     )
@@ -572,108 +605,199 @@ def test_worker_history_original_incoming_keeps_home_current_and_manual_reverse(
     incoming_states = tuple(
         interpret_link_target(
             reverse_bytes.get(t.canonical_path, current[t.canonical_path]),
-            target_id=t.target_id, existence="present", memberships=(),
+            target_id=t.target_id,
+            existence="present",
+            memberships=(),
             source_path=t.canonical_path,
         )
         for t in targets
     )
     document_rows = {}
     for stage, versions, stage_states in (
-        ("current", current, states), ("incoming", reverse_bytes, incoming_states)
+        ("current", current, states),
+        ("incoming", reverse_bytes, incoming_states),
     ):
         document_rows[stage + "_documents"] = tuple(
             interpret_links(
-                versions[t.canonical_path], document_id=t.target_id,
-                source_path=t.canonical_path, path_mode="vault", targets=targets,
-                target_facts=stage_states, inventory="complete",
+                versions[t.canonical_path],
+                document_id=t.target_id,
+                source_path=t.canonical_path,
+                path_mode="vault",
+                targets=targets,
+                target_facts=stage_states,
+                inventory="complete",
             )
-            for t in targets if t.kind == "note"
+            for t in targets
+            if t.kind == "note"
         )
     observed = tuple(
-        entry.model_copy(update={"current": entry.current.model_copy(
-            update={"content": current[entry.current.path]}
-        )})
+        entry.model_copy(
+            update={
+                "current": entry.current.model_copy(
+                    update={"content": current[entry.current.path]}
+                )
+            }
+        )
         for entry in facts.identity_inventory
     )
-    extra = next(t for t in targets if t.canonical_path == "Assets/data (incoming-ba7816bf).bin")
-    observed += (IdentityInventoryItem(
-        entry_id="physical:secondary", facet=None, identity_state="missing",
-        identity=None, raw_identity=None, title="Secondary resource",
-        current=CurrentContent(existence="present", path=extra.canonical_path,
-                               content=current[extra.canonical_path]), target=extra.target,
-    ),)
+    extra = next(
+        t for t in targets if t.canonical_path == "Assets/data (incoming-ba7816bf).bin"
+    )
+    observed += (
+        IdentityInventoryItem(
+            entry_id="physical:secondary",
+            facet=None,
+            identity_state="missing",
+            identity=None,
+            raw_identity=None,
+            title="Secondary resource",
+            current=CurrentContent(
+                existence="present",
+                path=extra.canonical_path,
+                content=current[extra.canonical_path],
+            ),
+            target=extra.target,
+        ),
+    )
     manual_entry = next(e for e in observed if e.current.path == "Manual.md")
     assert manual_entry.identity is None and manual_entry.raw_identity is None
     proof = OperationReversalTarget(
-        schema_id="brz2obsidian.operation-reversal-target", schema_version=1,
-        operation_id="1" * 32, operation_kind="apply", direction="restore",
+        schema_id="brz2obsidian.operation-reversal-target",
+        schema_version=1,
+        operation_id="1" * 32,
+        operation_kind="apply",
+        direction="restore",
         operation_generation=1,
         history_fingerprint=sha256(origin.model_dump_json().encode()).hexdigest(),
-        origin_change_id=origin_change, origin_decision_id=origin_decision,
+        origin_change_id=origin_change,
+        origin_decision_id=origin_decision,
         owned_targets=(manual_target,),
-        outputs=(OperationReversalOutput(
-            path="Manual.md", target_id=manual_target.target_id,
-            produced_existence="present", produced=produced["Manual.md"],
-            current=manual_entry.current, target_existence="present",
-            target=ExactContent(data=manual_before),
-        ),),
+        outputs=(
+            OperationReversalOutput(
+                path="Manual.md",
+                target_id=manual_target.target_id,
+                produced_existence="present",
+                produced=produced["Manual.md"],
+                current=manual_entry.current,
+                target_existence="present",
+                target=ExactContent(data=manual_before),
+            ),
+        ),
     )
     manual = ReconciliationSubject(
-        item_id=manual_target.target_id, facet="content", path="Manual.md",
-        baseline=ContentVersion(status="unknown", content=None, unavailable_digest=None),
-        current=manual_entry.current, incoming=ExactContent(data=manual_before),
-        interpretation="supported", title="Manual", source_target=manual_target.target,
-        output_role="note", structure=None, attachment=None, operation_reversal=proof,
+        item_id=manual_target.target_id,
+        facet="content",
+        path="Manual.md",
+        baseline=ContentVersion(
+            status="unknown", content=None, unavailable_digest=None
+        ),
+        current=manual_entry.current,
+        incoming=ExactContent(data=manual_before),
+        interpretation="supported",
+        title="Manual",
+        source_target=manual_target.target,
+        output_role="note",
+        structure=None,
+        attachment=None,
+        operation_reversal=proof,
     )
     undo_subjects = tuple(
-        s.model_copy(update={
-            "baseline": s.baseline.model_copy(update={"content": produced[s.path]}),
-            "current": next(e.current for e in observed if e.current.path == s.path),
-            "incoming": reverse_bytes[s.path],
-        })
+        s.model_copy(
+            update={
+                "baseline": s.baseline.model_copy(update={"content": produced[s.path]}),
+                "current": next(
+                    e.current for e in observed if e.current.path == s.path
+                ),
+                "incoming": reverse_bytes[s.path],
+            }
+        )
         for s in (home, resource)
     ) + (
-        linked.model_copy(update={
-            "baseline": linked.baseline.model_copy(update={"content": linked.incoming}),
-            "current": next(e.current for e in observed if e.current.path == linked.path),
-        }),
+        linked.model_copy(
+            update={
+                "baseline": linked.baseline.model_copy(
+                    update={"content": linked.incoming}
+                ),
+                "current": next(
+                    e.current for e in observed if e.current.path == linked.path
+                ),
+            }
+        ),
         manual,
     )
     undo_facts = with_subjects(facts, undo_subjects, observed)
-    undo_facts = undo_facts.model_copy(update={"link_context": context.model_copy(update={
-        "current_targets": targets, "incoming_targets": targets,
-        "current_target_facts": states, "incoming_target_facts": incoming_states,
-        **document_rows,
-    })})
+    undo_facts = undo_facts.model_copy(
+        update={
+            "link_context": context.model_copy(
+                update={
+                    "current_targets": targets,
+                    "incoming_targets": targets,
+                    "current_target_facts": states,
+                    "incoming_target_facts": incoming_states,
+                    **document_rows,
+                }
+            )
+        }
+    )
     review = prepare_review(undo_facts, preflight=preflight())
     assert not review.ready and not review.blockers and len(review.requirements) == 3
     protected_asset = next(c for c in review.proposal.changes if c.path == linked.path)
     assert not protected_asset.requires_decision
     assert tuple(
-        version.data for version in (
-            protected_asset.original, protected_asset.current,
-            protected_asset.incoming, protected_asset.result,
+        version.data
+        for version in (
+            protected_asset.original,
+            protected_asset.current,
+            protected_asset.incoming,
+            protected_asset.result,
         )
     ) == (b"abc", b"\x00authored", b"abc", b"\x00authored")
     native = VaultUndoPreparation(
-        schema_id="brz2obsidian.vault-undo-preparation", schema_version=1,
-        status="offered", code="undo_offered", checkpoint_commit="3" * 40,
-        generation=2, target_receipt_commit="4" * 40, review=review,
+        schema_id="brz2obsidian.vault-undo-preparation",
+        schema_version=1,
+        status="offered",
+        code="undo_offered",
+        checkpoint_commit="3" * 40,
+        generation=2,
+        target_receipt_commit="4" * 40,
+        review=review,
     )
     history = intact_local_history()
-    history = history.model_copy(update={"checkpoint": history.checkpoint.model_copy(update={
-        "locator": history.checkpoint.locator.model_copy(update={"commit": "3" * 40, "generation": 2}),
-        "manifest": history.checkpoint.manifest.model_copy(update={
-            "generation": 2, "boundary": "result", "previous": "1" * 40,
-            "operation_intent_commit": "2" * 40,
-        }),
-    })})
-    operation = VaultApplyResult.model_validate(operation_state("incomplete").model_dump() | {
-        "status": "applied", "code": "operation_terminal", "generation": 1,
-        "phase": "terminal", "publication": "complete", "history": "terminal",
-        "checkpoint_commit": "1" * 40, "result_commit": "3" * 40,
-        "receipt_commit": "4" * 40, "recovery_required": False, "origin_role": "source_update",
-    })
+    history = history.model_copy(
+        update={
+            "checkpoint": history.checkpoint.model_copy(
+                update={
+                    "locator": history.checkpoint.locator.model_copy(
+                        update={"commit": "3" * 40, "generation": 2}
+                    ),
+                    "manifest": history.checkpoint.manifest.model_copy(
+                        update={
+                            "generation": 2,
+                            "boundary": "result",
+                            "previous": "1" * 40,
+                            "operation_intent_commit": "2" * 40,
+                        }
+                    ),
+                }
+            )
+        }
+    )
+    operation = VaultApplyResult.model_validate(
+        operation_state("incomplete").model_dump()
+        | {
+            "status": "applied",
+            "code": "operation_terminal",
+            "generation": 1,
+            "phase": "terminal",
+            "publication": "complete",
+            "history": "terminal",
+            "checkpoint_commit": "1" * 40,
+            "result_commit": "3" * 40,
+            "receipt_commit": "4" * 40,
+            "recovery_required": False,
+            "origin_role": "source_update",
+        }
+    )
     resolved = []
 
     class NativePorts(Operations):
@@ -696,11 +820,15 @@ def test_worker_history_original_incoming_keeps_home_current_and_manual_reverse(
                 diagnostic.update(status=transition.status, code=transition.code)
                 assert transition.status == "accepted", transition.code
                 result = VaultUndoPreparation.model_validate(
-                    preparation.model_dump() | {"review": transition.plan, "code": "undo_choice_recorded"}
+                    preparation.model_dump()
+                    | {"review": transition.plan, "code": "undo_choice_recorded"}
                 )
             except Exception:
                 diagnostic["traceback"] = traceback.format_exc()
-                destination = Path(__file__).resolve().parents[2] / "tmp/issue307/storage-port-diagnostic002.json"
+                destination = (
+                    Path(__file__).resolve().parents[2]
+                    / "tmp/issue307/storage-port-diagnostic002.json"
+                )
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 with destination.open("x", encoding="utf-8") as output:
                     json.dump(diagnostic, output, ensure_ascii=True, indent=2)
@@ -720,61 +848,116 @@ def test_worker_history_original_incoming_keeps_home_current_and_manual_reverse(
     (vault / "Personal.bin").write_bytes(b"Protected\x00\xff\r\n")
 
     def physical():
-        return {p.relative_to(vault).as_posix(): p.read_bytes() for p in vault.rglob("*") if p.is_file()}
+        return {
+            p.relative_to(vault).as_posix(): p.read_bytes()
+            for p in vault.rglob("*")
+            if p.is_file()
+        }
 
     before = physical()
     context = UpdateContext(operations=NativePorts())
-    opened = worker_context_call(context, {
-        "command": "history", "vault": str(vault),
-        "selection_id": "11111111-1111-4111-8111-111111111111",
-    })
+    opened = worker_context_call(
+        context,
+        {
+            "command": "history",
+            "vault": str(vault),
+            "selection_id": "11111111-1111-4111-8111-111111111111",
+        },
+    )
     assert "review_undo" in opened.next_actions
-    prepared = worker_context_call(context, {
-        "command": "prepare_history", "binding": opened.binding, "kind": "undo",
-    })
-    assert prepared.status == "prepared_review" and prepared.changes == 4 and prepared.unresolved == 3
+    prepared = worker_context_call(
+        context,
+        {
+            "command": "prepare_history",
+            "binding": opened.binding,
+            "kind": "undo",
+        },
+    )
+    assert (
+        prepared.status == "prepared_review"
+        and prepared.changes == 4
+        and prepared.unresolved == 3
+    )
 
     def public_offer(binding, path):
         page = worker_context_call(context, {"command": "page", "binding": binding})
         row = next(r for r in page.page.items if r.current_path == path)
-        choices = worker_context_call(context, {"command": "history_choices", "binding": binding})
+        choices = worker_context_call(
+            context, {"command": "history_choices", "binding": binding}
+        )
         assert choices.status == "available" and choices.binding == binding
         return next(o for o in choices.offers if o.change_id == row.change_id)
 
-    for path, choice, domain in ((home.path, "current", "text"), ("Manual.md", "reverse", "reversal")):
+    for path, choice, domain in (
+        (home.path, "current", "text"),
+        ("Manual.md", "reverse", "reversal"),
+    ):
         offer = public_offer(prepared.binding, path)
         assert offer.domain == domain and choice in offer.choices
-        prepared = worker_context_call(context, {
-            "command": "choose_history", "binding": prepared.binding,
-            "requirement_id": offer.requirement_id, "choice": choice,
-            "assumptions_digest": offer.assumptions_digest,
-        })
+        prepared = worker_context_call(
+            context,
+            {
+                "command": "choose_history",
+                "binding": prepared.binding,
+                "requirement_id": offer.requirement_id,
+                "choice": choice,
+                "assumptions_digest": offer.assumptions_digest,
+            },
+        )
         assert prepared.status == "prepared_review", prepared.code
     assert prepared.changes == 4 and prepared.unresolved == 1
     retained = tuple(resolved[-1].review.approvals)
     offer = public_offer(prepared.binding, original_path)
     assert offer.domain == "attachment" and "incoming" in offer.choices
-    details = worker_context_call(context, {
-        "command": "choice_details", "binding": prepared.binding,
-        "requirement_id": offer.requirement_id,
-    })
+    details = worker_context_call(
+        context,
+        {
+            "command": "choice_details",
+            "binding": prepared.binding,
+            "requirement_id": offer.requirement_id,
+        },
+    )
     assert details.status == "available" and details.binding == prepared.binding
-    assert {(d.choice, d.path, d.target_id, d.size, d.sha256) for d in details.choice_details} == {
-        ("current", original_path, original_target_id, len(original_produced), sha256(original_produced).hexdigest()),
-        ("incoming", original_path, original_target_id, len(original_before), sha256(original_before).hexdigest()),
+    assert {
+        (d.choice, d.path, d.target_id, d.size, d.sha256)
+        for d in details.choice_details
+    } == {
+        (
+            "current",
+            original_path,
+            original_target_id,
+            len(original_produced),
+            sha256(original_produced).hexdigest(),
+        ),
+        (
+            "incoming",
+            original_path,
+            original_target_id,
+            len(original_before),
+            sha256(original_before).hexdigest(),
+        ),
     }
-    references = worker_context_call(context, {
-        "command": "references", "binding": prepared.binding,
-        "requirement_id": offer.requirement_id,
-    })
+    references = worker_context_call(
+        context,
+        {
+            "command": "references",
+            "binding": prepared.binding,
+            "requirement_id": offer.requirement_id,
+        },
+    )
     assert references.status == "available" and references.binding == prepared.binding
     assert references.references == () and references.total_references == 0
     assert references.next_reference_offset is None
-    chosen = worker_context_call(context, {
-        "command": "choose_history", "binding": prepared.binding,
-        "requirement_id": offer.requirement_id, "choice": "incoming",
-        "assumptions_digest": offer.assumptions_digest,
-    })
+    chosen = worker_context_call(
+        context,
+        {
+            "command": "choose_history",
+            "binding": prepared.binding,
+            "requirement_id": offer.requirement_id,
+            "choice": "incoming",
+            "assumptions_digest": offer.assumptions_digest,
+        },
+    )
     assert chosen.status == "prepared_review", chosen.code
     assert chosen.ready and chosen.changes == 4 and chosen.unresolved == 0
     assert chosen.binding.proposal_id == prepared.binding.proposal_id
@@ -783,7 +966,9 @@ def test_worker_history_original_incoming_keeps_home_current_and_manual_reverse(
     final = resolved[-1].review
     assert all(approval in final.approvals for approval in retained)
     assert {(a.domain, a.choice) for a in final.approvals} == {
-        ("text", "current"), ("reversal", "reverse"), ("attachment", "incoming")
+        ("text", "current"),
+        ("reversal", "reverse"),
+        ("attachment", "incoming"),
     }
     selected = select_review_effects(final)
     assert selected.status == "selected" and selected.remove_paths == ()
@@ -820,7 +1005,9 @@ def _worker_real_undo_original_case(tmp_path, *, with_created_memberships=False)
     assert applied.status == "applied" and applied.publication == "complete"
     original_path = "Attachments/opening/Notes.md.original"
     original_before = b"First source writing.\n# Shared heading\nOld block. ^original\n"
-    original_produced = b"Second source writing.\n# Shared heading\nNew block. ^original\n"
+    original_produced = (
+        b"Second source writing.\n# Shared heading\nNew block. ^original\n"
+    )
     later_home = b"opening incoming\nLater independent Home writing.\n"
     assert (vault / original_path).read_bytes() == original_produced
     (vault / "Notes/Opening.md").write_bytes(later_home)
@@ -837,29 +1024,37 @@ def _worker_real_undo_original_case(tmp_path, *, with_created_memberships=False)
         original_path: original_produced,
     }
     if with_created_memberships:
-        expected_authored.update({
-            "Categories/Review category.md": (
-                b'---\nsource_collection_id: "folio:collection"\n'
-                b'source_item_id: "definition:review-category"\ntags:\n  - categories\n'
-                b'---\n# Review category\n'
-            ),
-            "Templates/Review category.md": (
-                b'---\nsource_collection_id: "folio:collection"\n'
-                b'source_item_id: "support:Templates/Review category.md"\n'
-                b'categories:\n  - "[[Categories/Review category.md]]"\n'
-                b'---\n# New member\n'
-            ),
-        })
+        expected_authored.update(
+            {
+                "Categories/Review category.md": (
+                    b'---\nsource_collection_id: "folio:collection"\n'
+                    b'source_item_id: "definition:review-category"\ntags:\n  - categories\n'
+                    b"---\n# Review category\n"
+                ),
+                "Templates/Review category.md": (
+                    b'---\nsource_collection_id: "folio:collection"\n'
+                    b'source_item_id: "support:Templates/Review category.md"\n'
+                    b'categories:\n  - "[[Categories/Review category.md]]"\n'
+                    b"---\n# New member\n"
+                ),
+            }
+        )
     assert user_state(vault)["authored"] == expected_authored
-    assert manual_before == b"[[Assets/data.bin|Keep first]] and [[Assets/data.bin|Redirect second]]"
+    assert (
+        manual_before
+        == b"[[Assets/data.bin|Keep first]] and [[Assets/data.bin|Redirect second]]"
+    )
     assert (vault / "Manual.md").read_bytes() == manual_produced
 
     def preservation():
         return {
             "user": user_state(vault),
             "locator": (vault / ".brz2obsidian/locator.json").read_bytes(),
-            "source": {p.relative_to(source).as_posix(): p.read_bytes()
-                       for p in source.rglob("*") if p.is_file()},
+            "source": {
+                p.relative_to(source).as_posix(): p.read_bytes()
+                for p in source.rglob("*")
+                if p.is_file()
+            },
         }
 
     before = preservation()
@@ -884,14 +1079,23 @@ def _worker_real_undo_original_case(tmp_path, *, with_created_memberships=False)
             return result
 
     context = UpdateContext(operations=ObservedOperations())
-    opened = worker_context_call(context, {
-        "command": "history", "vault": str(vault),
-        "selection_id": "11111111-1111-4111-8111-111111111111",
-    })
+    opened = worker_context_call(
+        context,
+        {
+            "command": "history",
+            "vault": str(vault),
+            "selection_id": "11111111-1111-4111-8111-111111111111",
+        },
+    )
     assert "review_undo" in opened.next_actions
-    prepared = worker_context_call(context, {
-        "command": "prepare_history", "binding": opened.binding, "kind": "undo",
-    })
+    prepared = worker_context_call(
+        context,
+        {
+            "command": "prepare_history",
+            "binding": opened.binding,
+            "kind": "undo",
+        },
+    )
     assert prepared.status == "prepared_review", prepared.code
     total = 7 if with_created_memberships else 5
     assert prepared.changes == total and prepared.unresolved == total
@@ -911,17 +1115,27 @@ def _worker_real_undo_original_case(tmp_path, *, with_created_memberships=False)
         for target in facts.link_context.current_targets:
             if target.canonical_path not in paths:
                 continue
-            state = next(s for s in facts.link_context.current_target_facts if s.target_id == target.target_id)
-            observed_memberships.append({
-                "path": target.canonical_path, "target_id": target.target_id,
-                "memberships": state.memberships,
-                "structure_memberships": None if state.structure is None else [
-                    (m.field_key, [e.target_id for e in m.entries])
-                    for m in state.structure.memberships
-                ],
-            })
+            state = next(
+                s
+                for s in facts.link_context.current_target_facts
+                if s.target_id == target.target_id
+            )
+            observed_memberships.append(
+                {
+                    "path": target.canonical_path,
+                    "target_id": target.target_id,
+                    "memberships": state.memberships,
+                    "structure_memberships": None
+                    if state.structure is None
+                    else [
+                        (m.field_key, [e.target_id for e in m.entries])
+                        for m in state.structure.memberships
+                    ],
+                }
+            )
         (tmp_path / "actual-undo-memberships.json").write_text(
-            json.dumps(observed_memberships, ensure_ascii=True, indent=2), encoding="utf-8"
+            json.dumps(observed_memberships, ensure_ascii=True, indent=2),
+            encoding="utf-8",
         )
     assert preservation() == before
 
@@ -929,58 +1143,97 @@ def _worker_real_undo_original_case(tmp_path, *, with_created_memberships=False)
         page = worker_context_call(context, {"command": "page", "binding": binding})
         assert page.status == "available" and page.binding == binding
         row = next(r for r in page.page.items if r.current_path == path)
-        choices = worker_context_call(context, {"command": "history_choices", "binding": binding})
+        choices = worker_context_call(
+            context, {"command": "history_choices", "binding": binding}
+        )
         assert choices.status == "available" and choices.binding == binding
         return next(o for o in choices.offers if o.change_id == row.change_id)
 
     for path, choice, domain in (
-        ("Notes/Opening.md", "current", "text"), ("Manual.md", "reverse", "reversal")
+        ("Notes/Opening.md", "current", "text"),
+        ("Manual.md", "reverse", "reversal"),
     ):
         offer = public_offer(prepared.binding, path)
         assert offer.domain == domain and choice in offer.choices
-        prepared = worker_context_call(context, {
-            "command": "choose_history", "binding": prepared.binding,
-            "requirement_id": offer.requirement_id, "choice": choice,
-            "assumptions_digest": offer.assumptions_digest,
-        })
+        prepared = worker_context_call(
+            context,
+            {
+                "command": "choose_history",
+                "binding": prepared.binding,
+                "requirement_id": offer.requirement_id,
+                "choice": choice,
+                "assumptions_digest": offer.assumptions_digest,
+            },
+        )
         assert prepared.status == "prepared_review", prepared.code
         assert preservation() == before
     assert prepared.changes == total and prepared.unresolved == total - 2
     retained = tuple(preparations[-1].review.approvals)
     assert {(a.domain, a.choice) for a in retained} == {
-        ("text", "current"), ("reversal", "reverse")
+        ("text", "current"),
+        ("reversal", "reverse"),
     }
     assert {a.target_path: a.result.data for a in retained} == {
-        "Notes/Opening.md": later_home, "Manual.md": manual_before
+        "Notes/Opening.md": later_home,
+        "Manual.md": manual_before,
     }
     offer = public_offer(prepared.binding, original_path)
     assert offer.domain == "attachment" and "incoming" in offer.choices
-    details = worker_context_call(context, {
-        "command": "choice_details", "binding": prepared.binding,
-        "requirement_id": offer.requirement_id,
-    })
+    details = worker_context_call(
+        context,
+        {
+            "command": "choice_details",
+            "binding": prepared.binding,
+            "requirement_id": offer.requirement_id,
+        },
+    )
     assert details.status == "available" and details.binding == prepared.binding
-    assert {(d.choice, d.path, d.target_id, d.size, d.sha256) for d in details.choice_details} == {
-        ("current", original_path, "subject:entry:original:asset",
-         len(original_produced), sha256(original_produced).hexdigest()),
-        ("incoming", original_path, "subject:entry:original:asset",
-         len(original_before), sha256(original_before).hexdigest()),
+    assert {
+        (d.choice, d.path, d.target_id, d.size, d.sha256)
+        for d in details.choice_details
+    } == {
+        (
+            "current",
+            original_path,
+            "subject:entry:original:asset",
+            len(original_produced),
+            sha256(original_produced).hexdigest(),
+        ),
+        (
+            "incoming",
+            original_path,
+            "subject:entry:original:asset",
+            len(original_before),
+            sha256(original_before).hexdigest(),
+        ),
     }
-    references = worker_context_call(context, {
-        "command": "references", "binding": prepared.binding,
-        "requirement_id": offer.requirement_id,
-    })
+    references = worker_context_call(
+        context,
+        {
+            "command": "references",
+            "binding": prepared.binding,
+            "requirement_id": offer.requirement_id,
+        },
+    )
     assert references.status == "available" and references.binding == prepared.binding
     assert references.references == () and references.total_references == 0
     assert references.next_reference_offset is None
     assert preservation() == before
-    chosen = worker_context_call(context, {
-        "command": "choose_history", "binding": prepared.binding,
-        "requirement_id": offer.requirement_id, "choice": "incoming",
-        "assumptions_digest": offer.assumptions_digest,
-    })
+    chosen = worker_context_call(
+        context,
+        {
+            "command": "choose_history",
+            "binding": prepared.binding,
+            "requirement_id": offer.requirement_id,
+            "choice": "incoming",
+            "assumptions_digest": offer.assumptions_digest,
+        },
+    )
+    assert preservation() == before
     assert chosen.status == "prepared_review", chosen.code
-    assert chosen.changes == total and chosen.unresolved == total - 3 and not chosen.ready
+    assert (
+        chosen.changes == total and chosen.unresolved == total - 3 and not chosen.ready
+    )
     assert chosen.binding.target_receipt_commit == applied.receipt_commit
     assert chosen.binding.checkpoint_commit == prepared.binding.checkpoint_commit
     assert chosen.binding.revision > prepared.binding.revision
@@ -990,9 +1243,36 @@ def _worker_real_undo_original_case(tmp_path, *, with_created_memberships=False)
     selected = next(a for a in final.approvals if a.target_path == original_path)
     assert selected.domain == "attachment" and selected.choice == "incoming"
     assert selected.source_accepted and selected.result.data == original_before
-    assert [(o.path, o.content.data) for o in selected.attachment_candidate.outputs] == [
-        (original_path, original_before)
-    ]
+    assert [
+        (o.path, o.content.data) for o in selected.attachment_candidate.outputs
+    ] == [(original_path, original_before)]
+    if with_created_memberships:
+        facts = final.producer_facts
+        expected_memberships = {
+            "Categories/Review category.md": ("format:7:categories",),
+            "Templates/Review category.md": (
+                "subject:definition:review-category:content",
+            ),
+        }
+        for path, memberships in expected_memberships.items():
+            target = next(
+                t
+                for t in facts.link_context.current_targets
+                if t.canonical_path == path
+            )
+            state = next(
+                s
+                for s in facts.link_context.current_target_facts
+                if s.target_id == target.target_id
+            )
+            assert state.memberships == memberships
+            assert (
+                tuple(
+                    e.target_id for m in state.structure.memberships for e in m.entries
+                )
+                == memberships
+            )
+            assert state.content.data == expected_authored[path]
     assert preservation() == before
 
 

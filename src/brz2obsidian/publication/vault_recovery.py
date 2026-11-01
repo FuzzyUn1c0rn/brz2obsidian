@@ -12,6 +12,7 @@ import unicodedata
 from contextlib import contextmanager
 from pathlib import Path
 
+from brz2obsidian.application.update_facts import link_state
 from brz2obsidian.application.vault_recovery_contracts import VaultRecoveryPreparation
 from brz2obsidian.application.vault_update_contracts import (
     VaultOperationLock,
@@ -345,13 +346,13 @@ def _review_observation(
                 target_facts.append(old)
             else:
                 target_facts.append(
-                    interpret_link_target(
+                    link_state(
                         observed_target.content,
                         target_id=target.target_id,
                         existence="missing"
                         if observed_target.existence == "absent"
                         else "present",
-                        memberships=(),
+                        membership_targets=context.current_targets,
                         source_path=target.canonical_path,
                     )
                 )
@@ -437,11 +438,11 @@ def _review_observation(
                     for i, state in enumerate(target_facts)
                     if state.target_id == retained_target.target_id
                 )
-                target_facts[state_index] = interpret_link_target(
+                target_facts[state_index] = link_state(
                     observed_document.content,
                     target_id=retained_target.target_id,
                     existence="present",
-                    memberships=(),
+                    membership_targets=tuple(current_targets),
                     source_path=path,
                 )
                 parsed = interpret_links(
