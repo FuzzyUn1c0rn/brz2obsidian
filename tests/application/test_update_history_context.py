@@ -800,7 +800,11 @@ def test_worker_real_undo_original_incoming_retains_home_and_manual(tmp_path):
     _worker_real_undo_original_case(tmp_path)
 
 
-def _worker_real_undo_original_case(tmp_path):
+def test_worker_real_undo_created_memberships_allow_original_incoming(tmp_path):
+    _worker_real_undo_original_case(tmp_path, with_created_memberships=True)
+
+
+def _worker_real_undo_original_case(tmp_path, *, with_created_memberships=False):
     """One fresh physical graph supplies every actual Undo producer response."""
     from hashlib import sha256
 
@@ -809,7 +813,9 @@ def _worker_real_undo_original_case(tmp_path):
     from tests.application.test_vault_undo import _unassociated_reference_update
 
     _operations, vault, source, applied, manual_before, manual_produced, _ = (
-        _unassociated_reference_update(with_original=True)
+        _unassociated_reference_update(
+            with_original=True, with_created_memberships=with_created_memberships
+        )
     )
     assert applied.status == "applied" and applied.publication == "complete"
     original_path = "Attachments/opening/Notes.md.original"
@@ -818,7 +824,7 @@ def _worker_real_undo_original_case(tmp_path):
     later_home = b"opening incoming\nLater independent Home writing.\n"
     assert (vault / original_path).read_bytes() == original_produced
     (vault / "Notes/Opening.md").write_bytes(later_home)
-    assert user_state(vault)["authored"] == {
+    expected_authored = {
         "Notes/Opening.md": later_home,
         "Notes/Closing.md": b"closing incoming\n",
         "Manual.md": (
@@ -830,6 +836,21 @@ def _worker_real_undo_original_case(tmp_path):
         "Unrelated.bin": b"protected\x00\xff",
         original_path: original_produced,
     }
+    if with_created_memberships:
+        expected_authored.update({
+            "Categories/Review category.md": (
+                b'---\nsource_collection_id: "folio:collection"\n'
+                b'source_item_id: "definition:review-category"\ntags:\n  - categories\n'
+                b'---\n# Review category\n'
+            ),
+            "Templates/Review category.md": (
+                b'---\nsource_collection_id: "folio:collection"\n'
+                b'source_item_id: "support:Templates/Review category.md"\n'
+                b'categories:\n  - "[[Categories/Review category.md]]"\n'
+                b'---\n# New member\n'
+            ),
+        })
+    assert user_state(vault)["authored"] == expected_authored
     assert manual_before == b"[[Assets/data.bin|Keep first]] and [[Assets/data.bin|Redirect second]]"
     assert (vault / "Manual.md").read_bytes() == manual_produced
 
@@ -872,9 +893,36 @@ def _worker_real_undo_original_case(tmp_path):
         "command": "prepare_history", "binding": opened.binding, "kind": "undo",
     })
     assert prepared.status == "prepared_review", prepared.code
-    assert prepared.changes == 5 and prepared.unresolved == 5
+    total = 7 if with_created_memberships else 5
+    assert prepared.changes == total and prepared.unresolved == total
     assert preparations[-1].status == "offered"
     assert prepared.binding.target_receipt_commit == applied.receipt_commit
+    if with_created_memberships:
+        facts = preparations[-1].review.producer_facts
+        paths = {"Categories/Review category.md", "Templates/Review category.md"}
+        observed_memberships = []
+        for path, item_id in (
+            ("Categories/Review category.md", "definition:review-category"),
+            ("Templates/Review category.md", "support:Templates/Review category.md"),
+        ):
+            entry = next(e for e in facts.identity_inventory if e.current.path == path)
+            assert entry.identity.item_id == item_id
+            assert entry.current.content.data == expected_authored[path]
+        for target in facts.link_context.current_targets:
+            if target.canonical_path not in paths:
+                continue
+            state = next(s for s in facts.link_context.current_target_facts if s.target_id == target.target_id)
+            observed_memberships.append({
+                "path": target.canonical_path, "target_id": target.target_id,
+                "memberships": state.memberships,
+                "structure_memberships": None if state.structure is None else [
+                    (m.field_key, [e.target_id for e in m.entries])
+                    for m in state.structure.memberships
+                ],
+            })
+        (tmp_path / "actual-undo-memberships.json").write_text(
+            json.dumps(observed_memberships, ensure_ascii=True, indent=2), encoding="utf-8"
+        )
     assert preservation() == before
 
     def public_offer(binding, path):
@@ -897,7 +945,7 @@ def _worker_real_undo_original_case(tmp_path):
         })
         assert prepared.status == "prepared_review", prepared.code
         assert preservation() == before
-    assert prepared.changes == 5 and prepared.unresolved == 3
+    assert prepared.changes == total and prepared.unresolved == total - 2
     retained = tuple(preparations[-1].review.approvals)
     assert {(a.domain, a.choice) for a in retained} == {
         ("text", "current"), ("reversal", "reverse")
@@ -932,7 +980,7 @@ def _worker_real_undo_original_case(tmp_path):
         "assumptions_digest": offer.assumptions_digest,
     })
     assert chosen.status == "prepared_review", chosen.code
-    assert chosen.changes == 5 and chosen.unresolved == 2 and not chosen.ready
+    assert chosen.changes == total and chosen.unresolved == total - 3 and not chosen.ready
     assert chosen.binding.target_receipt_commit == applied.receipt_commit
     assert chosen.binding.checkpoint_commit == prepared.binding.checkpoint_commit
     assert chosen.binding.revision > prepared.binding.revision

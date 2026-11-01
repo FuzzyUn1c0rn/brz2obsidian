@@ -1428,7 +1428,7 @@ def test_production_undo_child_stops_partially_and_fresh_review_restores_same_ta
     )
 
 
-def _unassociated_reference_update(*, with_original=False):
+def _unassociated_reference_update(*, with_original=False, with_created_memberships=False):
     """Reuse the two-note physical setup with one ordinary reference owner."""
     vault, source, review_path, _, checkpoint_ref = _two_note_case()
     notes = ReviewPlan.model_validate_json(review_path.read_bytes()).producer_facts
@@ -1492,6 +1492,83 @@ def _unassociated_reference_update(*, with_original=False):
             output = directory / original_path
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_bytes(original_before)
+    if with_created_memberships:
+        from brz2obsidian.contracts import ContentVersion
+        from brz2obsidian.application.update_lifecycle import text_choice_action
+        from tests.reconciliation.test_memberships import target
+
+        assert with_original
+        created = {
+            "Categories/Review category.md": (
+                "definition:review-category", "category",
+                b'---\nsource_collection_id: "folio:collection"\n'
+                b'source_item_id: "definition:review-category"\ntags:\n  - categories\n'
+                b'---\n# Review category\n',
+            ),
+            "Templates/Review category.md": (
+                "support:Templates/Review category.md", "note",
+                b'---\nsource_collection_id: "folio:collection"\n'
+                b'source_item_id: "support:Templates/Review category.md"\n'
+                b'categories:\n  - "[[Categories/Review category.md]]"\n'
+                b'---\n# New member\n',
+            ),
+        }
+        entries, subjects, references = [], [], []
+        for path, (item_id, kind, raw) in created.items():
+            assert not (vault / path).exists() and not (source / path).exists()
+            observed = CurrentContent(existence="absent", path=path, content=None)
+            entry = inventory_item(item_id, item_id, path, b"").model_copy(
+                update={"current": observed}
+            )
+            subjects.append(notes.subjects[0].model_copy(update={
+                "item_id": item_id, "path": path, "title": Path(path).stem,
+                "current": observed, "source_target": entry.target,
+                "baseline": ContentVersion(status="unknown", content=None, unavailable_digest=None),
+                "incoming": ExactContent(data=raw), "structure": None,
+                "output_role": "note" if kind == "category" else "guide",
+            }))
+            entries.append(entry)
+            references.append(target_for_links(
+                "subject:" + item_id + ":content", path, kind=kind
+            ).model_copy(update={
+                "identity": entry.identity,
+                "representations": (path, "[[" + path + "]]"),
+            }))
+        facts = with_subjects(
+            facts, (*facts.subjects, *subjects), (*facts.identity_inventory, *entries)
+        )
+        registry = target("format:7:categories", "tag", "categories")
+        context = facts.link_context
+        current_targets = (*context.current_targets, registry, *references)
+        incoming_targets = (*context.incoming_targets, registry, *references)
+        current_states, incoming_states, incoming_docs = [], [], []
+        for (path, (_, kind, raw)), reference in zip(created.items(), references, strict=True):
+            current_states.append(interpret_link_target(
+                None, target_id=reference.target_id, existence="missing", memberships=(),
+                source_path=path,
+            ))
+            memberships = (registry.target_id,) if kind == "category" else (references[0].target_id,)
+            state = interpret_link_target(
+                ExactContent(data=raw), target_id=reference.target_id, existence="present",
+                memberships=memberships, membership_targets=incoming_targets, source_path=path,
+            )
+            assert state.structure.status == "supported" and state.memberships == memberships
+            incoming_states.append(state)
+        for (path, (_, _, raw)), reference in zip(created.items(), references, strict=True):
+            document = interpret_links(
+                ExactContent(data=raw), document_id=reference.target_id, source_path=path,
+                path_mode="vault", targets=incoming_targets,
+                target_facts=(*context.incoming_target_facts, *incoming_states),
+                inventory="complete",
+            )
+            assert document.status == "supported"
+            incoming_docs.append(document)
+        facts = facts.model_copy(update={"link_context": context.model_copy(update={
+            "current_targets": current_targets, "incoming_targets": incoming_targets,
+            "current_target_facts": (*context.current_target_facts, *current_states),
+            "incoming_target_facts": (*context.incoming_target_facts, *incoming_states),
+            "incoming_documents": (*context.incoming_documents, *incoming_docs),
+        })})
     operations = Operations()
     seeded = operations.capture_checkpoint(
         vault,
@@ -1507,10 +1584,19 @@ def _unassociated_reference_update(*, with_original=False):
     (source / "Assets/data.bin").write_bytes(b"abc")
     if with_original:
         (source / original_path).write_bytes(original_after)
+    if with_created_memberships:
+        for path, (_, _, raw) in created.items():
+            (source / path).parent.mkdir(parents=True, exist_ok=True)
+            (source / path).write_bytes(raw)
     history = operations.inspect_history(vault)
     assert not any(
         row.path == "Manual.md" for row in history.checkpoint.manifest.source
     )
+    if with_created_memberships:
+        assert not any(
+            row.path in created
+            for row in (*history.checkpoint.manifest.source, *history.checkpoint.manifest.vault)
+        )
     plan = prepare_review(facts, preflight=history.admission.preflight)
     for note in notes.subjects:
         change = next(row for row in plan.proposal.changes if row.path == note.path)
@@ -1555,6 +1641,20 @@ def _unassociated_reference_update(*, with_original=False):
         )
         selected = resolve_review(selected.plan, compiled)
         assert selected.status == "accepted", selected.code
+    if with_created_memberships:
+        for path in created:
+            offer = next(
+                row for row in inspect_review_choices(selected.plan)
+                if next(c for c in selected.plan.proposal.changes if c.change_id == row.change_id).path == path
+            )
+            choice = "restore_incoming" if offer.domain == "restoration" else "incoming"
+            assert choice in offer.enabled_choices
+            compiled = review_plan_choice_action(
+                selected.plan, requirement_id=offer.requirement_id, choice=choice,
+                assumptions_digest=requirement_digest(offer),
+            )
+            selected = resolve_review(selected.plan, text_choice_action(selected.plan, compiled))
+            assert selected.status == "accepted", (path, selected.code)
     assert selected.plan.ready, (selected.plan.requirements, selected.plan.blockers)
     applied = _apply(
         operations,
