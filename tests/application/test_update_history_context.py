@@ -796,6 +796,154 @@ def test_worker_history_original_incoming_keeps_home_current_and_manual_reverse(
     assert physical() == before
 
 
+def test_worker_real_undo_original_incoming_retains_home_and_manual(tmp_path):
+    """One fresh physical graph supplies every actual Undo producer response."""
+    from hashlib import sha256
+
+    from brz2obsidian.application.operations import Operations
+    from tests.application.test_vault_checkpoints import user_state
+    from tests.application.test_vault_undo import _unassociated_reference_update
+
+    _operations, vault, source, applied, manual_before, manual_produced, _ = (
+        _unassociated_reference_update(with_original=True)
+    )
+    assert applied.status == "applied" and applied.publication == "complete"
+    original_path = "Attachments/opening/Notes.md.original"
+    original_before = b"First source writing.\n# Shared heading\nOld block. ^original\n"
+    original_produced = b"Second source writing.\n# Shared heading\nNew block. ^original\n"
+    later_home = b"opening incoming\nLater independent Home writing.\n"
+    assert (vault / original_path).read_bytes() == original_produced
+    (vault / "Notes/Opening.md").write_bytes(later_home)
+    assert user_state(vault)["authored"] == {
+        "Notes/Opening.md": later_home,
+        "Notes/Closing.md": b"closing incoming\n",
+        "Manual.md": (
+            b"[[Assets/data.bin|Keep first]] and "
+            b"[Second edited alias](Assets/data%20%28incoming-ba7816bf%29.bin)"
+        ),
+        "Assets/data.bin": b"\x00authored",
+        "Assets/data (incoming-ba7816bf).bin": b"abc",
+        "Unrelated.bin": b"protected\x00\xff",
+        original_path: original_produced,
+    }
+    assert manual_before == b"[[Assets/data.bin|Keep first]] and [[Assets/data.bin|Redirect second]]"
+    assert (vault / "Manual.md").read_bytes() == manual_produced
+
+    def preservation():
+        return {
+            "user": user_state(vault),
+            "locator": (vault / ".brz2obsidian/locator.json").read_bytes(),
+            "source": {p.relative_to(source).as_posix(): p.read_bytes()
+                       for p in source.rglob("*") if p.is_file()},
+        }
+
+    before = preservation()
+    preparations = []
+
+    class ObservedOperations(Operations):
+        # Only observe public return values; the real storage producer runs unchanged.
+        def prepare_undo(self, path, *, previous=None):
+            result = super().prepare_undo(path, previous=previous)
+            preparations.append(result)
+            (tmp_path / f"real-preparation-{len(preparations)}.json").write_text(
+                result.model_dump_json(), encoding="utf-8"
+            )
+            return result
+
+        def resolve_undo(self, path, preparation, action):
+            result = super().resolve_undo(path, preparation, action)
+            preparations.append(result)
+            (tmp_path / f"real-preparation-{len(preparations)}.json").write_text(
+                result.model_dump_json(), encoding="utf-8"
+            )
+            return result
+
+    context = UpdateContext(operations=ObservedOperations())
+    opened = worker_context_call(context, {
+        "command": "history", "vault": str(vault),
+        "selection_id": "11111111-1111-4111-8111-111111111111",
+    })
+    assert "review_undo" in opened.next_actions
+    prepared = worker_context_call(context, {
+        "command": "prepare_history", "binding": opened.binding, "kind": "undo",
+    })
+    assert prepared.status == "prepared_review", prepared.code
+    assert prepared.changes == 5 and prepared.unresolved == 5
+    assert preparations[-1].status == "offered"
+    assert prepared.binding.target_receipt_commit == applied.receipt_commit
+    assert preservation() == before
+
+    def public_offer(binding, path):
+        page = worker_context_call(context, {"command": "page", "binding": binding})
+        assert page.status == "available" and page.binding == binding
+        row = next(r for r in page.page.items if r.current_path == path)
+        choices = worker_context_call(context, {"command": "history_choices", "binding": binding})
+        assert choices.status == "available" and choices.binding == binding
+        return next(o for o in choices.offers if o.change_id == row.change_id)
+
+    for path, choice, domain in (
+        ("Notes/Opening.md", "current", "text"), ("Manual.md", "reverse", "reversal")
+    ):
+        offer = public_offer(prepared.binding, path)
+        assert offer.domain == domain and choice in offer.choices
+        prepared = worker_context_call(context, {
+            "command": "choose_history", "binding": prepared.binding,
+            "requirement_id": offer.requirement_id, "choice": choice,
+            "assumptions_digest": offer.assumptions_digest,
+        })
+        assert prepared.status == "prepared_review", prepared.code
+        assert preservation() == before
+    assert prepared.changes == 5 and prepared.unresolved == 3
+    retained = tuple(preparations[-1].review.approvals)
+    assert {(a.domain, a.choice) for a in retained} == {
+        ("text", "current"), ("reversal", "reverse")
+    }
+    assert {a.target_path: a.result.data for a in retained} == {
+        "Notes/Opening.md": later_home, "Manual.md": manual_before
+    }
+    offer = public_offer(prepared.binding, original_path)
+    assert offer.domain == "attachment" and "incoming" in offer.choices
+    details = worker_context_call(context, {
+        "command": "choice_details", "binding": prepared.binding,
+        "requirement_id": offer.requirement_id,
+    })
+    assert details.status == "available" and details.binding == prepared.binding
+    assert {(d.choice, d.path, d.target_id, d.size, d.sha256) for d in details.choice_details} == {
+        ("current", original_path, "subject:entry:original:asset",
+         len(original_produced), sha256(original_produced).hexdigest()),
+        ("incoming", original_path, "subject:entry:original:asset",
+         len(original_before), sha256(original_before).hexdigest()),
+    }
+    references = worker_context_call(context, {
+        "command": "references", "binding": prepared.binding,
+        "requirement_id": offer.requirement_id,
+    })
+    assert references.status == "available" and references.binding == prepared.binding
+    assert references.references == () and references.total_references == 0
+    assert references.next_reference_offset is None
+    assert preservation() == before
+    chosen = worker_context_call(context, {
+        "command": "choose_history", "binding": prepared.binding,
+        "requirement_id": offer.requirement_id, "choice": "incoming",
+        "assumptions_digest": offer.assumptions_digest,
+    })
+    assert chosen.status == "prepared_review", chosen.code
+    assert chosen.changes == 5 and chosen.unresolved == 2 and not chosen.ready
+    assert chosen.binding.target_receipt_commit == applied.receipt_commit
+    assert chosen.binding.checkpoint_commit == prepared.binding.checkpoint_commit
+    assert chosen.binding.revision > prepared.binding.revision
+    assert chosen.binding.review_generation >= prepared.binding.review_generation
+    final = preparations[-1].review
+    assert all(approval in final.approvals for approval in retained)
+    selected = next(a for a in final.approvals if a.target_path == original_path)
+    assert selected.domain == "attachment" and selected.choice == "incoming"
+    assert selected.source_accepted and selected.result.data == original_before
+    assert [(o.path, o.content.data) for o in selected.attachment_candidate.outputs] == [
+        (original_path, original_before)
+    ]
+    assert preservation() == before
+
+
 def test_worker_history_refresh_counts_the_new_review_scope(tmp_path):
     from brz2obsidian.application.operations import Operations
     from brz2obsidian.core import prepare_review, select_review_effects

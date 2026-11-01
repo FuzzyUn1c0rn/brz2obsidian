@@ -1428,7 +1428,7 @@ def test_production_undo_child_stops_partially_and_fresh_review_restores_same_ta
     )
 
 
-def _unassociated_reference_update():
+def _unassociated_reference_update(*, with_original=False):
     """Reuse the two-note physical setup with one ordinary reference owner."""
     vault, source, review_path, _, checkpoint_ref = _two_note_case()
     notes = ReviewPlan.model_validate_json(review_path.read_bytes()).producer_facts
@@ -1445,6 +1445,53 @@ def _unassociated_reference_update():
     (source / "Assets/data.bin").write_bytes(b"\x00original")
     for path, raw in _BASE.items():
         (source / path).write_bytes(raw)
+    if with_original:
+        from brz2obsidian.contracts import AttachmentFacts
+        from tests.reconciliation.test_attachments import target_for_links
+        from tests.reconciliation.test_identity import inventory_item
+
+        original_path = "Attachments/opening/Notes.md.original"
+        original_before = b"First source writing.\n# Shared heading\nOld block. ^original\n"
+        original_after = b"Second source writing.\n# Shared heading\nNew block. ^original\n"
+        entry = inventory_item(
+            "original-entry", "entry:original", original_path, original_before,
+            facet="asset",
+        )
+        original_subject = notes.subjects[0].model_copy(update={
+            "item_id": "entry:original", "facet": "asset", "path": original_path,
+            "title": "Original evidence", "current": entry.current,
+            "baseline": notes.subjects[0].baseline.model_copy(
+                update={"content": ExactContent(data=original_before)}
+            ),
+            "incoming": ExactContent(data=original_after), "interpretation": "opaque",
+            "source_target": entry.target, "output_role": "guide", "structure": None,
+            "attachment": AttachmentFacts(
+                current_target_id="subject:entry:original:asset",
+                affected_documents=(), allocation_candidates=(),
+            ),
+        })
+        facts = with_subjects(
+            facts, (*facts.subjects, original_subject), (*facts.identity_inventory, entry)
+        )
+        reference = target_for_links(
+            "subject:entry:original:asset", original_path, kind="resource"
+        )
+        context = facts.link_context
+        additions = {}
+        for stage, raw in (("current", original_before), ("incoming", original_after)):
+            additions[stage + "_targets"] = (*getattr(context, stage + "_targets"), reference)
+            additions[stage + "_target_facts"] = (
+                *getattr(context, stage + "_target_facts"),
+                interpret_link_target(
+                    ExactContent(data=raw), target_id=reference.target_id,
+                    existence="present", memberships=(), source_path=original_path,
+                ),
+            )
+        facts = facts.model_copy(update={"link_context": context.model_copy(update=additions)})
+        for directory in (vault, source):
+            output = directory / original_path
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(original_before)
     operations = Operations()
     seeded = operations.capture_checkpoint(
         vault,
@@ -1458,6 +1505,8 @@ def _unassociated_reference_update():
     for path, raw in _AFTER.items():
         (source / path).write_bytes(raw)
     (source / "Assets/data.bin").write_bytes(b"abc")
+    if with_original:
+        (source / original_path).write_bytes(original_after)
     history = operations.inspect_history(vault)
     assert not any(
         row.path == "Manual.md" for row in history.checkpoint.manifest.source
@@ -1493,7 +1542,20 @@ def _unassociated_reference_update():
             attachment_candidate=candidate,
         ),
     )
-    assert selected.status == "accepted" and selected.plan.ready
+    assert selected.status == "accepted", selected.code
+    if with_original:
+        offer = next(
+            row for row in inspect_review_choices(selected.plan)
+            if next(c for c in selected.plan.proposal.changes if c.change_id == row.change_id).path
+            == original_path
+        )
+        compiled = review_plan_choice_action(
+            selected.plan, requirement_id=offer.requirement_id, choice="incoming",
+            assumptions_digest=requirement_digest(offer),
+        )
+        selected = resolve_review(selected.plan, compiled)
+        assert selected.status == "accepted", selected.code
+    assert selected.plan.ready, (selected.plan.requirements, selected.plan.blockers)
     applied = _apply(
         operations,
         vault,
