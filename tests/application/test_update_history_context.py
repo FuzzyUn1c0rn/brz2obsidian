@@ -797,6 +797,10 @@ def test_worker_history_original_incoming_keeps_home_current_and_manual_reverse(
 
 
 def test_worker_real_undo_original_incoming_retains_home_and_manual(tmp_path):
+    _worker_real_undo_original_case(tmp_path)
+
+
+def _worker_real_undo_original_case(tmp_path):
     """One fresh physical graph supplies every actual Undo producer response."""
     from hashlib import sha256
 
