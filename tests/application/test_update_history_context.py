@@ -397,6 +397,377 @@ def test_worker_resolves_canonical_history_current_offer_without_exporting_plan(
     assert (vault / "Personal.md").read_bytes() == b"Exact personal bytes\r\n"
 
 
+def test_worker_history_original_incoming_keeps_home_current_and_manual_reverse(tmp_path):
+    """A fresh canonical review crosses the worker; storage is a declared port."""
+    from hashlib import sha256
+
+    from brz2obsidian.application.operations import Operations
+    from brz2obsidian.application.review_choices import (
+        requirement_digest,
+        review_plan_attachment_references,
+        review_plan_choice_action,
+    )
+    from brz2obsidian.application.update_lifecycle import text_choice_action
+    from brz2obsidian.application.vault_undo_contracts import VaultUndoPreparation
+    from brz2obsidian.application.vault_update_contracts import VaultApplyResult
+    from brz2obsidian.contracts import (
+        AttachmentFacts,
+        ContentVersion,
+        CurrentContent,
+        ExactContent,
+        IdentityInventoryItem,
+        OperationReversalOutput,
+        OperationReversalTarget,
+        ReconciliationSubject,
+    )
+    from brz2obsidian.core import (
+        inspect_review_choices,
+        prepare_review,
+        resolve_review,
+        select_review_effects,
+    )
+    from brz2obsidian.core.reversals import review_owned_documents
+    from brz2obsidian.obsidian import interpret_link_target, interpret_links
+    from tests.application.test_history_workflow import (
+        intact_local_history,
+        operation_state,
+    )
+    from tests.application.test_vault_undo import _with_unassociated_manual
+    from tests.reconciliation.test_attachments import target_for_links
+    from tests.reconciliation.test_identity import inventory_item, with_subjects
+    from tests.reconciliation.test_proposals import request
+    from tests.reconciliation.test_resolution import preflight, with_review_links
+
+    home_before = b"Home before.\n"
+    home_produced = b"Home incoming.\n"
+    home_later = b"Home incoming.\nIndependent later Home writing.\n"
+    original_before = b"First source writing.\n# Shared heading\nOriginal block. ^original\n"
+    original_produced = b"Second source writing.\n# Shared heading\nChanged block. ^original\n"
+    original_path = "Attachments/opening/Notes.md.original"
+    original_target_id = "subject:entry:original:asset"
+    manual_before = (
+        b"[[Assets/data.bin|Keep first]] and [[Assets/data.bin|Redirect second]]"
+    )
+    manual_produced = (
+        b"[[Assets/data.bin|Keep first]] and "
+        b"[[Assets/data (incoming-ba7816bf).bin|Redirect second]]"
+    )
+    facts = with_review_links(
+        request(original=home_before, current=home_before, incoming=home_produced)
+    )
+    facts = _with_unassociated_manual(facts, manual_before)
+    home, linked = facts.subjects
+    resource_entry = inventory_item(
+        "original-entry", "entry:original", original_path, original_before, facet="asset"
+    )
+    resource = home.model_copy(
+        update={
+            "item_id": "entry:original",
+            "facet": "asset",
+            "path": original_path,
+            "title": "Original source evidence",
+            "baseline": home.baseline.model_copy(
+                update={"content": ExactContent(data=original_before)}
+            ),
+            "current": resource_entry.current,
+            "incoming": ExactContent(data=original_produced),
+            "interpretation": "opaque",
+            "source_target": resource_entry.target,
+            "output_role": "guide",
+            "attachment": AttachmentFacts(
+                current_target_id=original_target_id,
+                affected_documents=(),
+                allocation_candidates=(),
+            ),
+        }
+    )
+    facts = with_subjects(
+        facts, (*facts.subjects, resource), (*facts.identity_inventory, resource_entry)
+    )
+    context = facts.link_context
+    resource_target = target_for_links(
+        original_target_id, original_path, kind="resource"
+    )
+    additions = {}
+    for stage, raw in (("current", original_before), ("incoming", original_produced)):
+        additions[stage + "_targets"] = (
+            *getattr(context, stage + "_targets"), resource_target
+        )
+        additions[stage + "_target_facts"] = (
+            *getattr(context, stage + "_target_facts"),
+            interpret_link_target(
+                ExactContent(data=raw), target_id=original_target_id,
+                existence="present", memberships=(), source_path=original_path,
+            ),
+        )
+    facts = facts.model_copy(update={"link_context": context.model_copy(update=additions)})
+    origin = prepare_review(facts, preflight=preflight())
+
+    def origin_choice(plan, path, choice, references=()):
+        change = next(c for c in plan.proposal.changes if c.path == path)
+        offered = next(
+            o for o in inspect_review_choices(plan) if o.change_id == change.change_id
+        )
+        action = review_plan_choice_action(
+            plan, requirement_id=offered.requirement_id, choice=choice,
+            assumptions_digest=requirement_digest(offered), references=references,
+        )
+        result = resolve_review(plan, text_choice_action(plan, action))
+        assert result.status == "accepted", result.code
+        return result.plan
+
+    # The distinct linked binary creates real canonical changed-document ownership.
+    binary_change = next(c for c in origin.proposal.changes if c.path == linked.path)
+    binary_offer = next(
+        o for o in inspect_review_choices(origin) if o.change_id == binary_change.change_id
+    )
+    refs = review_plan_attachment_references(origin, binary_offer.requirement_id)
+    assert len(refs) == 2 and all(d.source_path == "Manual.md" for _, d, _ in refs)
+    origin = origin_choice(
+        origin, linked.path, "both",
+        tuple(
+            {"reference_id": token, "choice": choice}
+            for (token, _, _), choice in zip(
+                refs, ("keep_current", "use_secondary"), strict=True
+            )
+        ),
+    )
+    origin = origin_choice(origin, home.path, "incoming")
+    origin = origin_choice(origin, original_path, "incoming")
+    assert origin.ready and not origin.blockers
+    effects = select_review_effects(origin)
+    assert effects.status == "selected" and effects.remove_paths == ()
+    produced = {f.path: f.content for f in effects.files}
+    assert produced[home.path].data == home_produced
+    assert produced[original_path].data == original_produced
+    assert produced["Manual.md"].data == manual_produced != manual_before
+    owned = review_owned_documents(origin)
+    assert len(owned) == 1
+    origin_change, origin_decision, manual_target = owned[0]
+    assert manual_target.canonical_path == "Manual.md" and manual_target.identity is None
+    assert (origin_change, origin_decision) == (
+        binary_change.change_id,
+        next(a.decision_id for a in origin.approvals if a.change_id == binary_change.change_id),
+    )
+
+    # Observe only fresh in-memory fixture bytes. No physical history is manufactured.
+    targets = next(
+        a.attachment_candidate.targets for a in origin.approvals
+        if a.change_id == binary_change.change_id
+    )
+    current = {path: raw for path, raw in produced.items()}
+    current[home.path] = ExactContent(data=home_later)
+    states = tuple(
+        interpret_link_target(
+            current[t.canonical_path], target_id=t.target_id,
+            existence="present", memberships=(), source_path=t.canonical_path,
+        )
+        for t in targets
+    )
+    reverse_bytes = {
+        home.path: ExactContent(data=home_before),
+        original_path: ExactContent(data=original_before),
+        "Manual.md": ExactContent(data=manual_before),
+    }
+    incoming_states = tuple(
+        interpret_link_target(
+            reverse_bytes.get(t.canonical_path, current[t.canonical_path]),
+            target_id=t.target_id, existence="present", memberships=(),
+            source_path=t.canonical_path,
+        )
+        for t in targets
+    )
+    document_rows = {}
+    for stage, versions, stage_states in (
+        ("current", current, states), ("incoming", reverse_bytes, incoming_states)
+    ):
+        document_rows[stage + "_documents"] = tuple(
+            interpret_links(
+                versions[t.canonical_path], document_id=t.target_id,
+                source_path=t.canonical_path, path_mode="vault", targets=targets,
+                target_facts=stage_states, inventory="complete",
+            )
+            for t in targets if t.kind == "note"
+        )
+    observed = tuple(
+        entry.model_copy(update={"current": entry.current.model_copy(
+            update={"content": current[entry.current.path]}
+        )})
+        for entry in facts.identity_inventory
+    )
+    extra = next(t for t in targets if t.canonical_path == "Assets/data (incoming-ba7816bf).bin")
+    observed += (IdentityInventoryItem(
+        entry_id="physical:secondary", facet=None, identity_state="missing",
+        identity=None, raw_identity=None, title="Secondary resource",
+        current=CurrentContent(existence="present", path=extra.canonical_path,
+                               content=current[extra.canonical_path]), target=extra.target,
+    ),)
+    manual_entry = next(e for e in observed if e.current.path == "Manual.md")
+    assert manual_entry.identity is None and manual_entry.raw_identity is None
+    proof = OperationReversalTarget(
+        schema_id="brz2obsidian.operation-reversal-target", schema_version=1,
+        operation_id="1" * 32, operation_kind="apply", direction="restore",
+        operation_generation=1,
+        history_fingerprint=sha256(origin.model_dump_json().encode()).hexdigest(),
+        origin_change_id=origin_change, origin_decision_id=origin_decision,
+        owned_targets=(manual_target,),
+        outputs=(OperationReversalOutput(
+            path="Manual.md", target_id=manual_target.target_id,
+            produced_existence="present", produced=produced["Manual.md"],
+            current=manual_entry.current, target_existence="present",
+            target=ExactContent(data=manual_before),
+        ),),
+    )
+    manual = ReconciliationSubject(
+        item_id=manual_target.target_id, facet="content", path="Manual.md",
+        baseline=ContentVersion(status="unknown", content=None, unavailable_digest=None),
+        current=manual_entry.current, incoming=ExactContent(data=manual_before),
+        interpretation="supported", title="Manual", source_target=manual_target.target,
+        output_role="note", structure=None, attachment=None, operation_reversal=proof,
+    )
+    undo_subjects = tuple(
+        s.model_copy(update={
+            "baseline": s.baseline.model_copy(update={"content": produced[s.path]}),
+            "current": next(e.current for e in observed if e.current.path == s.path),
+            "incoming": reverse_bytes[s.path],
+        })
+        for s in (home, resource)
+    ) + (manual,)
+    undo_facts = with_subjects(facts, undo_subjects, observed)
+    undo_facts = undo_facts.model_copy(update={"link_context": context.model_copy(update={
+        "current_targets": targets, "incoming_targets": targets,
+        "current_target_facts": states, "incoming_target_facts": incoming_states,
+        **document_rows,
+    })})
+    review = prepare_review(undo_facts, preflight=preflight())
+    assert not review.ready and not review.blockers and len(review.requirements) == 3
+    native = VaultUndoPreparation(
+        schema_id="brz2obsidian.vault-undo-preparation", schema_version=1,
+        status="offered", code="undo_offered", checkpoint_commit="3" * 40,
+        generation=2, target_receipt_commit="4" * 40, review=review,
+    )
+    history = intact_local_history()
+    history = history.model_copy(update={"checkpoint": history.checkpoint.model_copy(update={
+        "locator": history.checkpoint.locator.model_copy(update={"commit": "3" * 40, "generation": 2}),
+        "manifest": history.checkpoint.manifest.model_copy(update={
+            "generation": 2, "boundary": "result", "previous": "1" * 40,
+            "operation_intent_commit": "2" * 40,
+        }),
+    })})
+    operation = VaultApplyResult.model_validate(operation_state("incomplete").model_dump() | {
+        "status": "applied", "code": "operation_terminal", "generation": 1,
+        "phase": "terminal", "publication": "complete", "history": "terminal",
+        "checkpoint_commit": "1" * 40, "result_commit": "3" * 40,
+        "receipt_commit": "4" * 40, "recovery_required": False, "origin_role": "source_update",
+    })
+    resolved = []
+
+    class NativePorts(Operations):
+        # Declared physical storage boundary only; real compilation/Core resolution.
+        def inspect_history(self, vault, **kwargs):
+            return history
+
+        def inspect_update_status(self, vault):
+            return operation
+
+        def prepare_undo(self, vault, *, previous=None):
+            return native
+
+        def resolve_undo(self, vault, preparation, action):
+            transition = resolve_review(preparation.review, action)
+            assert transition.status == "accepted", transition.code
+            result = VaultUndoPreparation.model_validate(
+                preparation.model_dump() | {"review": transition.plan, "code": "undo_choice_recorded"}
+            )
+            resolved.append(result)
+            return result
+
+        def execute_undo(self, *args, **kwargs):
+            raise AssertionError("Choosing an original must never publish")
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    for path, content in current.items():
+        output = vault / path
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(content.data)
+    (vault / "Personal.bin").write_bytes(b"Protected\x00\xff\r\n")
+
+    def physical():
+        return {p.relative_to(vault).as_posix(): p.read_bytes() for p in vault.rglob("*") if p.is_file()}
+
+    before = physical()
+    context = UpdateContext(operations=NativePorts())
+    opened = worker_context_call(context, {
+        "command": "history", "vault": str(vault),
+        "selection_id": "11111111-1111-4111-8111-111111111111",
+    })
+    assert "review_undo" in opened.next_actions
+    prepared = worker_context_call(context, {
+        "command": "prepare_history", "binding": opened.binding, "kind": "undo",
+    })
+    assert prepared.status == "prepared_review" and prepared.changes == prepared.unresolved == 3
+
+    def public_offer(binding, path):
+        page = worker_context_call(context, {"command": "page", "binding": binding})
+        row = next(r for r in page.page.items if r.current_path == path)
+        choices = worker_context_call(context, {"command": "history_choices", "binding": binding})
+        assert choices.status == "available" and choices.binding == binding
+        return next(o for o in choices.offers if o.change_id == row.change_id)
+
+    for path, choice, domain in ((home.path, "current", "text"), ("Manual.md", "reverse", "reversal")):
+        offer = public_offer(prepared.binding, path)
+        assert offer.domain == domain and choice in offer.choices
+        prepared = worker_context_call(context, {
+            "command": "choose_history", "binding": prepared.binding,
+            "requirement_id": offer.requirement_id, "choice": choice,
+            "assumptions_digest": offer.assumptions_digest,
+        })
+        assert prepared.status == "prepared_review", prepared.code
+    assert prepared.changes == 3 and prepared.unresolved == 1
+    retained = tuple(resolved[-1].review.approvals)
+    offer = public_offer(prepared.binding, original_path)
+    assert offer.domain == "attachment" and "incoming" in offer.choices
+    details = worker_context_call(context, {
+        "command": "choice_details", "binding": prepared.binding,
+        "requirement_id": offer.requirement_id,
+    })
+    assert details.status == "available" and details.binding == prepared.binding
+    assert {(d.choice, d.path, d.target_id, d.size, d.sha256) for d in details.choice_details} == {
+        ("current", original_path, original_target_id, len(original_produced), sha256(original_produced).hexdigest()),
+        ("incoming", original_path, original_target_id, len(original_before), sha256(original_before).hexdigest()),
+    }
+    references = worker_context_call(context, {
+        "command": "references", "binding": prepared.binding,
+        "requirement_id": offer.requirement_id,
+    })
+    assert references.status == "available" and references.binding == prepared.binding
+    assert references.references == () and references.total_references == 0
+    assert references.next_reference_offset is None
+    chosen = worker_context_call(context, {
+        "command": "choose_history", "binding": prepared.binding,
+        "requirement_id": offer.requirement_id, "choice": "incoming",
+        "assumptions_digest": offer.assumptions_digest,
+    })
+    assert chosen.status == "prepared_review", chosen.code
+    assert chosen.ready and chosen.changes == 3 and chosen.unresolved == 0
+    assert chosen.binding.proposal_id == prepared.binding.proposal_id
+    assert chosen.binding.revision > prepared.binding.revision
+    assert chosen.binding.review_generation >= prepared.binding.review_generation
+    final = resolved[-1].review
+    assert all(approval in final.approvals for approval in retained)
+    assert {(a.domain, a.choice) for a in final.approvals} == {
+        ("text", "current"), ("reversal", "reverse"), ("attachment", "incoming")
+    }
+    selected = select_review_effects(final)
+    assert selected.status == "selected" and selected.remove_paths == ()
+    selected_bytes = {f.path: f.content.data for f in selected.files}
+    assert selected_bytes[home.path] == home_later
+    assert selected_bytes["Manual.md"] == manual_before
+    assert selected_bytes[original_path] == original_before
+    assert physical() == before
+
+
 def test_worker_history_refresh_counts_the_new_review_scope(tmp_path):
     from brz2obsidian.application.operations import Operations
     from brz2obsidian.core import prepare_review, select_review_effects
