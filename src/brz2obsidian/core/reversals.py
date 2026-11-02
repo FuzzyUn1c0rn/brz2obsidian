@@ -1,6 +1,16 @@
 """Canonical operation-owned output facts; no storage, parsing or independent merger."""
 
+from typing import NamedTuple
+
+from brz2obsidian.contracts import ReferenceTarget, SelectedReviewEffects
+
 from .identity import _paths_collide, _target_safe
+
+
+class ReviewOwnedOutputs(NamedTuple):
+    target_groups: tuple[tuple[ReferenceTarget, ...], ...]
+    documents: tuple[tuple[str, str, ReferenceTarget], ...]
+    effects: SelectedReviewEffects
 
 
 def cleanup_removal_continuation(facts, subject):
@@ -378,6 +388,15 @@ def reversal_safe(facts, subject, target_path):
         ):
             return False
     return True
+
+
+def review_owned_outputs(plan, requests):
+    """Compose explicit historical ownership and effects; no current authority."""
+    from .selected_effects import select_review_effects
+
+    groups = review_owned_target_groups(plan, requests)
+    documents = review_owned_documents(plan)
+    return ReviewOwnedOutputs(groups, documents, select_review_effects(plan))
 
 
 def review_owned_targets(plan, change_id, decision_id):
