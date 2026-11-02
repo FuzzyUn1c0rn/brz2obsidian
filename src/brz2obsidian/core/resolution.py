@@ -1121,6 +1121,9 @@ def _reconstruct_review(plan: ReviewPlan) -> ReviewTransition:
 
     history = ReviewHistory.model_validate(plan.history)
     retained = _replay_memo.longest_prefix(history)
+    if retained is not None and retained[0] == len(history.events):
+        canonical = ReviewPlan.model_validate_json(retained[1])
+        return _transition(canonical, "accepted", "accepted")
     prefixes = _replay_memo.prefixes(history)
     initial_prefix = next(prefixes, None)
     if retained is None:
