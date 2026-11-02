@@ -1156,7 +1156,7 @@ def validate_review(plan: ReviewPlan) -> ReviewTransition:
     canonical = reconstructed.plan
     if canonical != plan:
         return _transition(canonical, "refused", "invalid_plan")
-    return _transition(canonical, "accepted", "accepted")
+    return reconstructed
 
 
 def resolve_review(plan: ReviewPlan, action: ReviewAction) -> ReviewTransition:

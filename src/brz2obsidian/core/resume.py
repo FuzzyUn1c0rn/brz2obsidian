@@ -46,13 +46,13 @@ def _load_result(code, saved=None, effects=None):
         schema_version=1,
         status="loaded" if saved is not None else "refused",
         code=code,
-        loaded=LoadedReview(
-            schema_id="brz2obsidian.loaded-review",
-            schema_version=1,
-            saved=saved,
-            readiness="revalidation_required",
-            ready=False,
-        )
+        loaded={
+            "schema_id": "brz2obsidian.loaded-review",
+            "schema_version": 1,
+            "saved": saved,
+            "readiness": "revalidation_required",
+            "ready": False,
+        }
         if saved is not None
         else None,
         ready=False,
