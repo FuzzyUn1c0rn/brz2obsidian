@@ -1042,7 +1042,9 @@ def test_partial_binary_both_finish_current_preserves_later_note_and_created_ass
     assert (vault / "Assets/data.bin").read_bytes() == b"\x00authored"
     assert created.read_bytes() == b"abc"
     fresh = Operations().inspect_update_status(vault)
-    assert fresh.status == "applied" and fresh.receipt_commit == completed.receipt_commit
+    assert (
+        fresh.status == "applied" and fresh.receipt_commit == completed.receipt_commit
+    )
     assert Operations().inspect_history(vault).status == "intact"
     after = user_state(vault)
     for key in ("index", "head", "config", "stages", "authored"):
