@@ -390,13 +390,39 @@ def reversal_safe(facts, subject, target_path):
     return True
 
 
+def _ready_origin(plan):
+    from .resolution import validate_review
+
+    checked = validate_review(plan)
+    if checked.status != "accepted" or not checked.plan.ready:
+        raise ValueError("A canonical ready origin review is required")
+    return checked.plan
+
+
+def _lazy_effects(plan):
+    from .selected_effects import _project_review_effects
+
+    effects = None
+
+    def selected_effects():
+        nonlocal effects
+        if effects is None:
+            effects = _project_review_effects(plan)
+        return effects
+
+    return selected_effects
+
+
 def review_owned_outputs(plan, requests):
     """Compose explicit historical ownership and effects; no current authority."""
-    from .selected_effects import select_review_effects
-
-    groups = review_owned_target_groups(plan, requests)
-    documents = review_owned_documents(plan)
-    return ReviewOwnedOutputs(groups, documents, select_review_effects(plan))
+    plan = _ready_origin(plan)
+    selected_effects = _lazy_effects(plan)
+    groups = tuple(
+        _owned_targets(plan, change_id, decision_id, selected_effects)
+        for change_id, decision_id in requests
+    )
+    documents = _owned_documents(plan, selected_effects)
+    return ReviewOwnedOutputs(groups, documents, selected_effects())
 
 
 def review_owned_targets(plan, change_id, decision_id):
@@ -406,21 +432,8 @@ def review_owned_targets(plan, change_id, decision_id):
 
 def review_owned_target_groups(plan, requests):
     """Return canonical owned targets in explicit (change, decision) query order."""
-    from .resolution import validate_review
-    from .selected_effects import _project_review_effects
-
-    checked = validate_review(plan)
-    if checked.status != "accepted" or not checked.plan.ready:
-        raise ValueError("A canonical ready origin review is required")
-    plan = checked.plan
-    effects = None
-
-    def selected_effects():
-        nonlocal effects
-        if effects is None:
-            effects = _project_review_effects(plan)
-        return effects
-
+    plan = _ready_origin(plan)
+    selected_effects = _lazy_effects(plan)
     return tuple(
         _owned_targets(plan, change_id, decision_id, selected_effects)
         for change_id, decision_id in requests
@@ -490,17 +503,15 @@ def review_owned_documents(plan):
     Each returned target is bound to its originating change and decision.
     Resource ownership remains the separate review_owned_targets projection.
     """
-    from .resolution import validate_review
-    from .selected_effects import select_review_effects
+    plan = _ready_origin(plan)
+    return _owned_documents(plan, _lazy_effects(plan))
 
-    checked = validate_review(plan)
-    if checked.status != "accepted" or not checked.plan.ready:
-        raise ValueError("A canonical ready origin review is required")
-    plan = checked.plan
+
+def _owned_documents(plan, selected_effects):
     context = plan.producer_facts.link_context
     if context is None:
         return ()
-    effects = select_review_effects(plan)
+    effects = selected_effects()
     selected = []
     for approval in plan.approvals:
         change = next(

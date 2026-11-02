@@ -38,7 +38,7 @@ from brz2obsidian.core import (
     prepare_review,
     refresh_review,
     resolve_review,
-    review_owned_target_groups,
+    review_owned_outputs,
     select_review_effects,
 )
 from brz2obsidian.core.reversals import reversal_document_target, review_owned_documents
@@ -1090,11 +1090,34 @@ def _operation_document_subjects(
     original, intent, origin_commit, git, current, *, direction, only_documents=None
 ):
     """Rebind exact dependent-document versions to this admitted operation."""
+    return _operation_document_subjects_from_owned(
+        original,
+        intent,
+        origin_commit,
+        git,
+        current,
+        review_owned_documents(original),
+        direction=direction,
+        only_documents=only_documents,
+    )
+
+
+def _operation_document_subjects_from_owned(
+    original,
+    intent,
+    origin_commit,
+    git,
+    current,
+    owned_documents,
+    *,
+    direction,
+    only_documents=None,
+):
     before = {row.path: row for row in intent.before}
     produced = {row.path: row for row in intent.proposed}
     approved = {approval.change_id: approval for approval in original.approvals}
     subjects = []
-    for change_id, decision_id, reference in review_owned_documents(original):
+    for change_id, decision_id, reference in owned_documents:
         if only_documents is not None and reference.target_id not in only_documents:
             continue
         approval = approved[change_id]
@@ -1222,11 +1245,8 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
             raise OSError("Recovery subject lacks original selected approval")
         ownership_subjects.append((subject, changes, approval))
         ownership_queries.append((approval.change_id, approval.decision_id))
-    owned_groups = (
-        review_owned_target_groups(original, tuple(ownership_queries))
-        if ownership_queries
-        else ()
-    )
+    owned_outputs = review_owned_outputs(original, tuple(ownership_queries))
+    owned_groups = owned_outputs.target_groups
     for (subject, changes, approval), owned in zip(
         ownership_subjects, owned_groups, strict=True
     ):
@@ -1309,8 +1329,14 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
                     item_id=subject.item_id, facet=subject.facet, content=generated
                 )
             )
-    for subject in _operation_document_subjects(
-        original, intent, origin_commit, git, current, direction="restore"
+    for subject in _operation_document_subjects_from_owned(
+        original,
+        intent,
+        origin_commit,
+        git,
+        current,
+        owned_outputs.documents,
+        direction="restore",
     ):
         if subject.path in output_references or any(
             row.path == subject.path for row in subjects
@@ -1325,9 +1351,7 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
     } | set(output_references)
     source_lineage = retained.owned[source_prepared.previous][0]
     generated_files = {row.path: row for row in source_lineage.source}
-    original_files = {
-        row.path: row.content for row in select_review_effects(original).files
-    }
+    original_files = {row.path: row.content for row in owned_outputs.effects.files}
     original_documents = (
         set()
         if original.facts.link_context is None
