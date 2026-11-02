@@ -1,5 +1,12 @@
 """Qualified document reversal composes with independently retained note versions."""
 
+import pytest
+
+from brz2obsidian.application.review_choices import (
+    requirement_digest,
+    review_plan_choice_action,
+)
+from brz2obsidian.application.update_lifecycle import text_choice_action
 from brz2obsidian.contracts import (
     ContentVersion,
     CurrentContent,
@@ -10,11 +17,6 @@ from brz2obsidian.contracts import (
     OperationReversalTarget,
     ReconciliationSubject,
 )
-from brz2obsidian.application.review_choices import (
-    requirement_digest,
-    review_plan_choice_action,
-)
-from brz2obsidian.application.update_lifecycle import text_choice_action
 from brz2obsidian.core import (
     inspect_review_choices,
     prepare_review,
@@ -35,13 +37,21 @@ MANUAL_BEFORE = (
     b"[[Notes/Opening.md#^kept|Block]]\n"
     b"[Relative](Notes/Opening.md)\n"
 )
-MANUAL_PRODUCED = MANUAL_BEFORE.replace(b"|Home]]", b"|Recorded home]]")
 
 
-def operation_document_facts():
+def operation_document_facts(*, changed="none"):
     """Public outer-fact contract: exact preimage/current/owned row, no imported Manual."""
+    current_home = HOME_LATER
+    if changed == "heading":
+        current_home = current_home.replace(b"## Shared", b"## Changed")
+    elif changed == "block":
+        current_home = current_home.replace(b"^kept", b"^changed")
+    manual_before = MANUAL_BEFORE
+    if changed == "resource":
+        manual_before += b"[[Assets/data.bin|Resource]]\n"
+    manual_produced = manual_before.replace(b"|Home]]", b"|Recorded home]]")
     facts = request(
-        original=HOME_APPLIED, current=HOME_LATER, incoming=HOME_OLD
+        original=HOME_APPLIED, current=current_home, incoming=HOME_OLD
     )
     home = target_for_links("review:opening-entry", "Notes/Opening.md").model_copy(
         update={
@@ -51,7 +61,7 @@ def operation_document_facts():
     )
     manual = target_for_links("file:Manual.md", "Manual.md")
     observed = CurrentContent(
-        existence="present", path="Manual.md", content=ExactContent(data=MANUAL_PRODUCED)
+        existence="present", path="Manual.md", content=ExactContent(data=manual_produced)
     )
     #This Core input declares previously verified outer history authority, just as
     #the existing reversal-output fixtures do. No retained fixture/plan is loaded.
@@ -71,10 +81,10 @@ def operation_document_facts():
                 path="Manual.md",
                 target_id="file:Manual.md",
                 produced_existence="present",
-                produced=ExactContent(data=MANUAL_PRODUCED),
+                produced=ExactContent(data=manual_produced),
                 current=observed,
                 target_existence="present",
-                target=ExactContent(data=MANUAL_BEFORE),
+                target=ExactContent(data=manual_before),
             ),
         ),
     )
@@ -84,7 +94,7 @@ def operation_document_facts():
         path="Manual.md",
         baseline=ContentVersion(status="unknown", content=None, unavailable_digest=None),
         current=observed,
-        incoming=ExactContent(data=MANUAL_BEFORE),
+        incoming=ExactContent(data=manual_before),
         interpretation="supported",
         title="Manual",
         source_target=manual.target,
@@ -103,13 +113,46 @@ def operation_document_facts():
         current=observed,
         target=manual.target,
     )
-    targets = (home, manual)
+    extra = None
+    extra_content = None
+    if changed == "resource":
+        extra = target_for_links("resource:retained", "Assets/data.bin", kind="resource")
+        extra_content = ExactContent(data=b"\x00current resource")
+    elif changed == "ambiguous":
+        extra = target_for_links(
+            "file:Other.md", "Other.md", aliases=("Other.md", "Notes/Opening.md")
+        )
+        extra_content = ExactContent(data=b"An independent authored note.\n")
+    entries = (entry,)
+    if extra is not None:
+        entries += (
+            IdentityInventoryItem(
+                entry_id="observed:extra",
+                facet=None,
+                identity_state="missing",
+                identity=None,
+                raw_identity=None,
+                title="Other authored target",
+                current=CurrentContent(
+                    existence="present", path=extra.canonical_path, content=extra_content
+                ),
+                target=extra.target,
+            ),
+        )
     contexts = {}
     for stage, home_bytes, manual_bytes in (
-        ("current", HOME_LATER, MANUAL_PRODUCED),
-        ("incoming", HOME_OLD, MANUAL_BEFORE),
+        ("current", current_home, manual_produced),
+        ("incoming", HOME_OLD, manual_before),
     ):
+        targets = (home, manual)
         content = (ExactContent(data=home_bytes), ExactContent(data=manual_bytes))
+        if extra is not None and (stage == "current" or changed == "resource"):
+            targets += (extra,)
+            content += (
+                ExactContent(data=b"\x00old resource")
+                if stage == "incoming" and changed == "resource"
+                else extra_content,
+            )
         states = tuple(
             interpret_link_target(
                 raw,
@@ -131,6 +174,7 @@ def operation_document_facts():
                 inventory="complete",
             )
             for target, raw in zip(targets, content, strict=True)
+            if target.kind != "resource"
         )
         assert all(d.status == "supported" for d in documents)
         contexts[stage + "_targets"] = targets
@@ -139,7 +183,7 @@ def operation_document_facts():
     return facts.model_copy(
         update={
             "subjects": facts.subjects + (subject,),
-            "identity_inventory": facts.identity_inventory + (entry,),
+            "identity_inventory": facts.identity_inventory + entries,
             "link_context": LinkContext(
                 schema_id="brz2obsidian.link-context",
                 schema_version=1,
@@ -187,3 +231,18 @@ def test_operation_document_reverse_keeps_later_referenced_note():
         "Manual.md": MANUAL_BEFORE,
     }
     assert selected.remove_paths == ()
+
+
+@pytest.mark.parametrize("changed", ["heading", "block", "ambiguous", "resource"])
+def test_operation_document_reverse_still_blocks_changed_reference_semantics(changed):
+    facts = operation_document_facts(changed=changed)
+    plan = prepare_review(facts, preflight=preflight())
+    plan = choose(plan, "Notes/Opening.md", "current")
+    assert not plan.blockers
+    plan = choose(plan, "Manual.md", "reverse")
+    assert not plan.requirements
+    assert "selected_link_context_conflict" in plan.blockers
+    assert not plan.ready
+    selected = select_review_effects(plan)
+    assert selected.status == "refused"
+    assert selected.files == () and selected.remove_paths == ()

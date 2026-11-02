@@ -501,7 +501,13 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
             and unchanged_current
             and document.document_id not in proof_documents
         )
-        if ordinary_renewal or document.document_id in attachment_documents:
+        operation_renewal = document.document_id in operation_documents
+        if (
+            ordinary_renewal
+            or operation_renewal
+            or document.document_id in attachment_documents
+        ):
+            # A proven reversal document can also retain a destination's later prose.
             # A retained note's unrelated prose version is not a link redirect. Resource choices
             # and path/identity/fragment changes still require their explicit selected proof.
             occurrences = []
@@ -512,6 +518,7 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
                     and target.kind != "resource"
                     and (
                         ordinary_renewal
+                        or operation_renewal
                         or prior is not None
                         and (document.document_id, occurrence.occurrence_id)
                         not in attachment_links
