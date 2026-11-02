@@ -419,12 +419,13 @@ def test_restore_review_binds_the_saved_prior_source_lineage():
     )
     # A fixture source version happens to equal the restoration target. The
     # complete recovery integration owns the distinct-source/authored case.
+    # The review still retains the original operation's incoming bytes.
     (source / "Notes/Opening.md").write_bytes(b"authored opening\r\n")
     facts = with_review_links(
         request(
             original=b"original\r\n",
             current=b"authored opening\r\n",
-            incoming=b"authored opening\r\n",
+            incoming=b"incoming opening\n",
         )
     )
     plan = prepare_review(facts, preflight=operations.inspect_vault(vault).preflight)
