@@ -118,7 +118,9 @@ def operation_document_facts(*, changed="none"):
     extra = None
     extra_content = None
     if changed == "resource":
-        extra = target_for_links("resource:retained", "Assets/data.bin", kind="resource")
+        extra = target_for_links(
+            "resource:retained", "Assets/data.bin", kind="resource"
+        )
         extra_content = ExactContent(data=b"\x00current resource")
     elif changed == "ambiguous":
         extra = target_for_links(
