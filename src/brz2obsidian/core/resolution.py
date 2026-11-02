@@ -48,7 +48,6 @@ from brz2obsidian.core.review_preflight import consent_requirements, preflight_b
 from brz2obsidian.core.structures import validate_structure_facts
 from brz2obsidian.core.text_candidates import validate_text_candidate
 
-
 # Pure computed values belong to this replay implementation's loaded lifetime.
 # Current storage observations, validation verdicts and caller plans are not cached.
 _replay_memo = _ReplayMemo()
