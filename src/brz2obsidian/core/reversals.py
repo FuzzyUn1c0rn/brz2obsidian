@@ -382,13 +382,33 @@ def reversal_safe(facts, subject, target_path):
 
 def review_owned_targets(plan, change_id, decision_id):
     """Return retained canonical output targets, never invent a version identity."""
+    return review_owned_target_groups(plan, ((change_id, decision_id),))[0]
+
+
+def review_owned_target_groups(plan, requests):
+    """Return canonical owned targets in explicit (change, decision) query order."""
     from .resolution import validate_review
-    from .selected_effects import select_review_effects
+    from .selected_effects import _project_review_effects
 
     checked = validate_review(plan)
     if checked.status != "accepted" or not checked.plan.ready:
         raise ValueError("A canonical ready origin review is required")
     plan = checked.plan
+    effects = None
+
+    def selected_effects():
+        nonlocal effects
+        if effects is None:
+            effects = _project_review_effects(plan)
+        return effects
+
+    return tuple(
+        _owned_targets(plan, change_id, decision_id, selected_effects)
+        for change_id, decision_id in requests
+    )
+
+
+def _owned_targets(plan, change_id, decision_id, selected_effects):
     approval = next(
         (
             a
@@ -414,7 +434,7 @@ def review_owned_targets(plan, change_id, decision_id):
     )
     if action.candidate is not None:
         targets = action.candidate.link_targets + targets
-    effects = select_review_effects(plan)
+    effects = selected_effects()
     paths = {f.path for f in effects.files if f.subject_id == change.subject_id}
     if (
         change.rename_review is not None

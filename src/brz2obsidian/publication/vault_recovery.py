@@ -38,7 +38,7 @@ from brz2obsidian.core import (
     prepare_review,
     refresh_review,
     resolve_review,
-    review_owned_targets,
+    review_owned_target_groups,
     select_review_effects,
 )
 from brz2obsidian.core.reversals import reversal_document_target, review_owned_documents
@@ -1199,6 +1199,8 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
         for subject in original.facts.subjects
         if reversal_document_target(subject) is not None
     }
+    ownership_queries = []
+    ownership_subjects = []
     for subject in facts.subjects:
         if (subject.item_id, subject.facet) in document_keys:
             continue
@@ -1218,7 +1220,16 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
                 # Affected outputs still require retained selected ownership.
                 continue
             raise OSError("Recovery subject lacks original selected approval")
-        owned = review_owned_targets(original, approval.change_id, approval.decision_id)
+        ownership_subjects.append((subject, changes, approval))
+        ownership_queries.append((approval.change_id, approval.decision_id))
+    owned_groups = (
+        review_owned_target_groups(original, tuple(ownership_queries))
+        if ownership_queries
+        else ()
+    )
+    for (subject, changes, approval), owned in zip(
+        ownership_subjects, owned_groups, strict=True
+    ):
         rows = []
         for reference in owned:
             path = reference.canonical_path
