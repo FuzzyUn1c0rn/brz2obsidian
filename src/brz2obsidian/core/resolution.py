@@ -20,6 +20,7 @@ from brz2obsidian.contracts import (
     ReviewRequirement,
     ReviewTransition,
 )
+from brz2obsidian.core._replay_memo import _ReplayMemo
 from brz2obsidian.core.attachment_validation import validate_attachment_candidate
 from brz2obsidian.core.identity import rename_source_path_safe
 from brz2obsidian.core.link_meanings import _semantic
@@ -46,6 +47,11 @@ from brz2obsidian.core.review_links import (
 from brz2obsidian.core.review_preflight import consent_requirements, preflight_blockers
 from brz2obsidian.core.structures import validate_structure_facts
 from brz2obsidian.core.text_candidates import validate_text_candidate
+
+
+# Pure computed values belong to this replay implementation's loaded lifetime.
+# Current storage observations, validation verdicts and caller plans are not cached.
+_replay_memo = _ReplayMemo()
 
 
 def _domain(facts, change):
@@ -1111,13 +1117,26 @@ def _resolve(plan, action):
 
 
 def _reconstruct_review(plan: ReviewPlan) -> ReviewTransition:
-    """Replay every typed historical event; refused replay never counts as complete."""
+    """Reconstruct typed history using only successfully computed exact prefixes."""
     from .refresh import _refresh
 
-    canonical = prepare_review(
-        plan.history.initial_facts, preflight=plan.history.initial_preflight
-    )
-    for event in plan.history.events:
+    history = ReviewHistory.model_validate(plan.history)
+    retained = _replay_memo.longest_prefix(history)
+    prefixes = _replay_memo.prefixes(history)
+    initial_prefix = next(prefixes, None)
+    if retained is None:
+        canonical = prepare_review(
+            history.initial_facts, preflight=history.initial_preflight
+        )
+        _replay_memo.retain(initial_prefix, canonical)
+        consumed = 0
+    else:
+        consumed, encoded = retained
+        canonical = ReviewPlan.model_validate_json(encoded)
+    for count, event in enumerate(history.events, 1):
+        prefix = next(prefixes, None)
+        if count <= consumed:
+            continue
         if isinstance(event, ReviewRefreshEvent):
             replayed = _refresh(canonical, event.facts, event.preflight)
         else:
@@ -1125,6 +1144,7 @@ def _reconstruct_review(plan: ReviewPlan) -> ReviewTransition:
         if replayed.status != "accepted":
             return _transition(canonical, "refused", "invalid_plan")
         canonical = replayed.plan
+        _replay_memo.retain(prefix, canonical)
     return _transition(canonical, "accepted", "accepted")
 
 

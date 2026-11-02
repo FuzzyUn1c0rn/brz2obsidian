@@ -160,10 +160,14 @@ def test_malformed_nested_history_cannot_use_a_warm_result():
         }
     )
     bad_facts = facts.model_copy(
-        update={"subjects": (facts.subjects[0].model_copy(update={"current": current}),)}
+        update={
+            "subjects": (facts.subjects[0].model_copy(update={"current": current}),)
+        }
     )
     forged = original.model_copy(
-        update={"history": original.history.model_copy(update={"initial_facts": bad_facts})}
+        update={
+            "history": original.history.model_copy(update={"initial_facts": bad_facts})
+        }
     )
     assert select_review_effects(forged).status == "refused"
     assert save_review(forged).code == "invalid_review"
