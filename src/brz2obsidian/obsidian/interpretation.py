@@ -1,6 +1,5 @@
 """Bounded format-7 interpretation, outside the source-neutral core.
 
-The exact grammar and merge bounds are documented in docs/structure-grammar.md.
 No bytes are normalized or rendered here; offsets always address supplied bytes.
 """
 
