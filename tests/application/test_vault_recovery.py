@@ -976,3 +976,74 @@ def test_cancel_after_recovery_preparation_retains_stopped_authority_for_retry()
     assert finished.status == "applied" and finished.receipt_commit, finished.code
     assert (vault / "Notes/Opening.md").read_bytes() == b"incoming opening\n"
     assert Operations().inspect_update_status(vault).status == "applied"
+
+
+def test_partial_binary_both_finish_current_preserves_later_note_and_created_asset():
+    from brz2obsidian.application.review_choices import (
+        requirement_digest,
+        review_plan_choice_action,
+    )
+    from brz2obsidian.core import inspect_review_choices
+    from brz2obsidian.publication.vault_replace import move_file
+
+    vault, source, _, reviewed, _, _ = _binary_link_case()
+    created = vault / "Assets/data (incoming-ba7816bf).bin"
+    note = vault / "Notes/Owner.md"
+
+    class StopAfterFirstMove:
+        def move(self, stage, target, *, replace):
+            move_file(stage, target, replace=replace)
+            raise OSError("Stop after the original asset move")
+
+        def remove(self, target, destination):
+            raise AssertionError("Original selection has no removal")
+
+    stopped = _apply(
+        Operations(vault_executor=StopAfterFirstMove()),
+        vault,
+        source,
+        review=reviewed,
+        vault_id="vault-one",
+        import_id="import-one",
+    )
+    assert stopped.status == "incomplete" and stopped.recovery_required
+    assert created.read_bytes() == b"abc"
+    later_note = (
+        b"[[Assets/data.bin|Keep first]] and [[Assets/data.bin|Redirect second]]"
+        b"\nLater independent note writing.\n"
+    )
+    note.write_bytes(later_note)
+    before = user_state(vault)
+    offered = Operations().prepare_recovery(vault, direction="finish")
+    assert offered.status == "offered" and offered.review is not None, offered.code
+    requirement = next(
+        row
+        for row in inspect_review_choices(offered.review)
+        if row.domain == "attachment"
+    )
+    choice = review_plan_choice_action(
+        offered.review,
+        requirement_id=requirement.requirement_id,
+        choice="current",
+        assumptions_digest=requirement_digest(requirement),
+    )
+    chosen = Operations().resolve_recovery(vault, offered, choice)
+    assert chosen.status == "offered" and chosen.review.ready, chosen.code
+    completed = Operations().execute_recovery(vault, chosen)
+    assert completed.status == "applied" and completed.publication == "complete", (
+        completed.code,
+        completed.phase,
+        completed.history,
+    )
+    assert completed.planned_files == completed.published_files == 0
+    assert completed.authored_files_changed is False
+    assert completed.result_commit and completed.receipt_commit
+    assert note.read_bytes() == later_note
+    assert (vault / "Assets/data.bin").read_bytes() == b"\x00authored"
+    assert created.read_bytes() == b"abc"
+    fresh = Operations().inspect_update_status(vault)
+    assert fresh.status == "applied" and fresh.receipt_commit == completed.receipt_commit
+    assert Operations().inspect_history(vault).status == "intact"
+    after = user_state(vault)
+    for key in ("index", "head", "config", "stages", "authored"):
+        assert after[key] == before[key]

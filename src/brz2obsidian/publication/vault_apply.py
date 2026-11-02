@@ -924,6 +924,77 @@ def _recovery_prepared_matches(
                     None,
                 )
                 chosen = selected_files.get(path)
+                current_change = next(
+                    (
+                        row
+                        for row in loaded.saved.plan.proposal.changes
+                        if (row.item_id, row.facet) == (change.item_id, change.facet)
+                    ),
+                    None,
+                )
+                current_approval = next(
+                    (
+                        row
+                        for row in loaded.saved.plan.approvals
+                        if current_change is not None
+                        and row.change_id == current_change.change_id
+                        and row.domain == "attachment"
+                        and row.choice == "current"
+                        and row.provenance == "explicit_user"
+                        and row.attachment_candidate is not None
+                    ),
+                    None,
+                )
+                output = tuple(row for row in owned if row.canonical_path == path)
+                if (
+                    original_file is not None
+                    and chosen is None
+                    and current_approval is not None
+                    and path not in intent.affected_paths
+                    and matches(original_proposed.get(path), original_file.content)
+                    and current.get(path) == proposed.get(path)
+                ):
+                    # Cover unchanged retained paths only with original ownership
+                    # and the fresh, explicitly selected Current review.
+                    if (
+                        len(output) == 1
+                        and output[0].kind == "resource"
+                        and path not in produced
+                        and current.get(path) == target.get(path)
+                    ):
+                        covered.add(path)
+                        continue
+                    document = observed_documents.get(path)
+                    approved_documents = tuple(
+                        row
+                        for row in current_approval.attachment_candidate.documents
+                        if row.source_path == path
+                    )
+                    owners = tuple(
+                        row
+                        for row in origin_plan.producer_facts.identity_inventory
+                        if row.identity_state == "valid"
+                        and row.identity is not None
+                        and row.facet == "content"
+                        and row.current.path == path
+                        and (row.identity.module_id, row.identity.collection_id)
+                        == (
+                            origin_plan.producer_facts.incoming_identity.module_id,
+                            origin_plan.producer_facts.incoming_identity.collection_id,
+                        )
+                    )
+                    if (
+                        len(owners) == 1
+                        and path in origin_documents
+                        and path in target
+                        and path in produced
+                        and document is not None
+                        and document.status == "supported"
+                        and approved_documents == (document,)
+                        and matches(current.get(path), document.content)
+                    ):
+                        covered.add(path)
+                        continue
                 if (
                     original_file is None
                     or chosen is None
@@ -932,7 +1003,6 @@ def _recovery_prepared_matches(
                     or not matches(proposed.get(path), chosen.content)
                 ):
                     continue
-                output = tuple(row for row in owned if row.canonical_path == path)
                 if len(output) == 1 and output[0].kind == "resource":
                     # Finish may reuse an already exact selected output, or
                     # create the original absent endpoint. A later different
