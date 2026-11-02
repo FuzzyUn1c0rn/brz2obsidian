@@ -353,3 +353,48 @@ def test_worker_launch_failure_explains_setup_and_allows_retry_without_false_pub
         window.hide()
         window.deleteLater()
         app.processEvents()
+
+
+def test_completed_unknown_history_keeps_current_recovery_route_and_retention(tmp_path):
+    from brz2obsidian_ui.window import MainWindow
+    from tests.application.test_history_workflow import (
+        intact_local_history,
+        operation_state,
+    )
+
+    app = QApplication.instance() or QApplication([])
+    vault = tmp_path / "Vault"
+    vault.mkdir()
+
+    class NativeInputs(Operations):
+        def inspect_update_status(self, vault):
+            return operation_state("unknown")
+
+        def inspect_history(self, vault):
+            return intact_local_history()
+
+    transport = ReviewWorkerTransport(NativeInputs())
+    window = MainWindow(supervisor=transport, dialogs=ReviewDialogs(vault, vault))
+    window.show()
+    controls = ReviewControls(window, app)
+    try:
+        controls.click("Choose update vault")
+        controls.click("Inspect history and recovery")
+        until(app, lambda: controls.button("Review interrupted update") is not None)
+        state = window.runner.session.update_snapshot
+        assert state.transport_phase == "completed"
+        assert isinstance(state.binding, HistoryContextBinding)
+        assert state.publication == "unknown" and state.needs_inspection
+        assert not state.ready
+        assert controls.button("Review interrupted update").isEnabled()
+        assert controls.button("Execute") is None
+        text = window_text(window)
+        assert "Connection lost" not in text
+        assert "Publication is unknown" in text
+        assert "Saved converter history: retained" in text
+    finally:
+        window.shutdown()
+        transport.close()
+        window.hide()
+        window.deleteLater()
+        app.processEvents()

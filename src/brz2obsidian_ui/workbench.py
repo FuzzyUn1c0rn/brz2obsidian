@@ -827,7 +827,12 @@ class UpdateWorkbench(QWidget):
                 )
             )
         elif uncertain:
-            self._body.addWidget(_label("Connection lost", "sectionTitle"))
+            heading = (
+                "Connection lost"
+                if state.transport_phase == "may_have_executed"
+                else "Publication outcome unknown"
+            )
+            self._body.addWidget(_label(heading, "sectionTitle"))
             self._body.addWidget(
                 _label(
                     "Publication is unknown. Inspect current history before continuing.",
@@ -862,7 +867,14 @@ class UpdateWorkbench(QWidget):
             )
             retained = (
                 "unknown"
-                if uncertain or state.history_retained is None
+                if state.history_retained is None
+                or uncertain
+                and not (
+                    state.transport_phase == "completed"
+                    and state.binding is not None
+                    and reply is not None
+                    and reply.binding == state.binding
+                )
                 else "retained"
                 if state.history_retained
                 else "not established"
