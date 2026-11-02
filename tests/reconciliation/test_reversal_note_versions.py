@@ -40,7 +40,7 @@ MANUAL_BEFORE = (
 
 
 def operation_document_facts(*, changed="none"):
-    """Public outer-fact contract: exact preimage/current/owned row, no imported Manual."""
+    """Outer facts bind the exact identityless document and operation preimage."""
     current_home = HOME_LATER
     if changed == "heading":
         current_home = current_home.replace(b"## Shared", b"## Changed")
@@ -50,9 +50,7 @@ def operation_document_facts(*, changed="none"):
     if changed == "resource":
         manual_before += b"[[Assets/data.bin|Resource]]\n"
     manual_produced = manual_before.replace(b"|Home]]", b"|Recorded home]]")
-    facts = request(
-        original=HOME_APPLIED, current=current_home, incoming=HOME_OLD
-    )
+    facts = request(original=HOME_APPLIED, current=current_home, incoming=HOME_OLD)
     home = target_for_links("review:opening-entry", "Notes/Opening.md").model_copy(
         update={
             "identity": facts.identity_inventory[0].identity,
@@ -61,10 +59,12 @@ def operation_document_facts(*, changed="none"):
     )
     manual = target_for_links("file:Manual.md", "Manual.md")
     observed = CurrentContent(
-        existence="present", path="Manual.md", content=ExactContent(data=manual_produced)
+        existence="present",
+        path="Manual.md",
+        content=ExactContent(data=manual_produced),
     )
-    #This Core input declares previously verified outer history authority, just as
-    #the existing reversal-output fixtures do. No retained fixture/plan is loaded.
+    # This Core input declares verified outer history authority, as the existing
+    # reversal-output fixtures do. No retained fixture or plan is loaded.
     proof = OperationReversalTarget(
         schema_id="brz2obsidian.operation-reversal-target",
         schema_version=1,
@@ -92,7 +92,9 @@ def operation_document_facts(*, changed="none"):
         item_id="file:Manual.md",
         facet="content",
         path="Manual.md",
-        baseline=ContentVersion(status="unknown", content=None, unavailable_digest=None),
+        baseline=ContentVersion(
+            status="unknown", content=None, unavailable_digest=None
+        ),
         current=observed,
         incoming=ExactContent(data=manual_before),
         interpretation="supported",
@@ -134,7 +136,9 @@ def operation_document_facts(*, changed="none"):
                 raw_identity=None,
                 title="Other authored target",
                 current=CurrentContent(
-                    existence="present", path=extra.canonical_path, content=extra_content
+                    existence="present",
+                    path=extra.canonical_path,
+                    content=extra_content,
                 ),
                 target=extra.target,
             ),
