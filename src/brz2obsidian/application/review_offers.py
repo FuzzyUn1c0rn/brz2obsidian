@@ -98,6 +98,23 @@ def review_plan_choice_offers(plan):
             disclosure = "Current file: " + current_path
             if change.target_path != current_path:
                 disclosure += "\nSelected destination: " + change.target_path
+        elif row.domain == "format":
+            change = changes[row.change_id]
+            review = change.format_review
+            disclosure = "\n".join(
+                (
+                    "File: " + change.path,
+                    f"Recorded output format: {review.old_identity.output_format}",
+                    f"Incoming output format: {review.target_identity.output_format}",
+                    "Keep vault version preserves the current vault content or its absence.",
+                    "Use incoming version replaces it with the reviewed generated content.",
+                    "Original generated content is available for comparison."
+                    if review.original_known
+                    else "Original generated content is unknown; current vault content is not assumed unchanged.",
+                )
+            )
+            if change.target_path != change.path:
+                disclosure += "\nSelected destination: " + change.target_path
         change = changes.get(row.change_id)
         selected_choice = selected.choice if selected else None
         decision_id = selected.decision_id if selected else None

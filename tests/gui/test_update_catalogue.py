@@ -496,3 +496,129 @@ def test_format_configuration_uses_supplied_group_scope_and_keeps_other_choice_u
         window.hide()
         window.deleteLater()
         app.processEvents()
+
+
+def test_format_worker_card_names_note_and_preserves_separate_configuration_choice(
+    tmp_path,
+):
+    from types import SimpleNamespace
+
+    from brz2obsidian.application.update_contracts import UpdateResult
+    from brz2obsidian_ui.window import MainWindow
+    from tests.application.test_format_configuration import configuration_preparation
+
+    app = QApplication.instance() or QApplication([])
+    vault = tmp_path / "Vault"
+    vault.mkdir()
+    personal = vault / "Personal.md"
+    personal.write_bytes(b"Personal writing.\r\n")
+    source = tmp_path / "source.brz"
+    source.write_bytes(b"Controlled source boundary")
+    prepared = configuration_preparation().model_copy(update={"vault": str(vault)})
+
+    class NativePorts(Operations):
+        # Source/history acquisition is controlled; Core preparation, offers,
+        # choices, worker protocol, session and Qt are the production path.
+        def prepare_format_transition(self, path, reference):
+            assert str(path) == str(vault) and str(reference) == str(source)
+            return UpdateResult(
+                status="unresolved",
+                code="format_review",
+                kind="format_transition",
+                preparation=prepared,
+                changes=3,
+                unresolved=3,
+                next_actions=("save_update", "resolve_update"),
+            )
+
+        def read_checkpoint(self, path, **kwargs):
+            return SimpleNamespace(status="valid", locator=prepared.locator)
+
+    transport = ReviewWorkerTransport(NativePorts())
+    window = MainWindow(supervisor=transport)
+    window.show()
+    controls = ReviewControls(window, app)
+    try:
+        selection = str(uuid4())
+        window.runner.select_update(str(vault), selection_id=selection)
+        window.runner.submit_update(
+            {
+                "command": "prepare",
+                "kind": "format_transition",
+                "vault": str(vault),
+                "source": str(source),
+                "selection_id": selection,
+            }
+        )
+        until(
+            app,
+            lambda: (
+                window.workbench.snapshot is not None
+                and window.workbench.snapshot.binding is not None
+                and not window.workbench.busy
+            ),
+        )
+        controls.select("Other choices")
+        until(
+            app,
+            lambda: (
+                "Format choice 1" in window_text(window) and not window.workbench.busy
+            ),
+        )
+        text = window_text(window)
+        assert "Notes/Opening.md" in text
+        assert "Keep vault version preserves the current vault content" in text
+        assert (
+            "Use incoming version replaces it with the reviewed generated content"
+            in text
+        )
+        assert (
+            "Recorded output format: 7" in text and "Incoming output format: 7" in text
+        )
+        controls.click("Review vault configuration")
+        controls.click("Keep current configuration")
+        until(
+            app,
+            lambda: (
+                window.runner.session.update_snapshot.unresolved == 1
+                and not window.workbench.busy
+            ),
+        )
+        assert not window.runner.session.update_snapshot.ready
+        controls.select("Other choices")
+        until(
+            app,
+            lambda: (
+                "Chosen: current" in window_text(window) and not window.workbench.busy
+            ),
+        )
+        assert "Notes/Opening.md" in window_text(window)
+        controls.click("Use incoming version for format choice 1")
+        until(
+            app,
+            lambda: (
+                window.runner.session.update_snapshot.ready
+                and not window.workbench.busy
+            ),
+        )
+        assert window.runner.session.update_snapshot.unresolved == 0
+        controls.select("All changes")
+        controls.select("Other choices")
+        until(
+            app,
+            lambda: (
+                "Chosen: incoming" in window_text(window) and not window.workbench.busy
+            ),
+        )
+        assert window_text(window).count("Chosen: current") == 2
+        assert "Notes/Opening.md" in window_text(window)
+        assert not any(row.command in ("save", "apply") for row in transport.commands)
+        assert personal.read_bytes() == b"Personal writing.\r\n" and list(
+            vault.iterdir()
+        ) == [personal]
+    finally:
+        window.shutdown()
+        transport.close()
+        window.hide()
+        window.deleteLater()
+        app.processEvents()

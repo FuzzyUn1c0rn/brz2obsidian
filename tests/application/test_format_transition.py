@@ -192,6 +192,8 @@ def transition_case(tmp_path, monkeypatch, known_original=True):
 def test_transition_compares_actual_stored_format6_original_current_and_format7_target(
     tmp_path, monkeypatch, known_original
 ):
+    from brz2obsidian.application.update_context import UpdateContext
+    from tests.application.test_update_context import worker_context_call
     from tests.support.recorded_format6 import CURRENT, FIXTURE, NOTE, ORIGINAL
 
     operations, vault, _history = transition_case(tmp_path, monkeypatch, known_original)
@@ -226,6 +228,51 @@ def test_transition_compares_actual_stored_format6_original_current_and_format7_
     assert not offered.ready and (vault / NOTE).read_bytes() == CURRENT
     roles = {s.output_role for s in facts.subjects}
     assert {"configuration", "guide", "note", "dashboard", "template"} <= roles
+
+    class PreparedSourcePort(Operations):
+        # Reuse the exact real preparation above, without rendering it twice.
+        # Offer production and worker framing remain real.
+        def prepare_format_transition(self, path, source):
+            assert str(path) == str(vault) and str(source) == str(
+                FIXTURE / "source.brz"
+            )
+            return offered
+
+    context = UpdateContext(operations=PreparedSourcePort())
+    prepared = worker_context_call(
+        context,
+        {
+            "command": "prepare",
+            "kind": "format_transition",
+            "vault": str(vault),
+            "source": str(FIXTURE / "source.brz"),
+            "selection_id": "11111111-1111-4111-8111-111111111111",
+        },
+    )
+    assert prepared.binding is not None and not prepared.ready
+    choices = worker_context_call(
+        context, {"command": "choices", "binding": prepared.binding}
+    )
+    note = next(
+        offer
+        for offer in choices.offers
+        if offer.domain == "format" and "Home — Format six seed.md" in offer.disclosure
+    )
+    assert "Recorded output format: 6" in note.disclosure
+    assert "Incoming output format: 7" in note.disclosure
+    assert "Keep vault version preserves the current vault content" in note.disclosure
+    assert (
+        "Use incoming version replaces it with the reviewed generated content"
+        in note.disclosure
+    )
+    if known_original:
+        assert (
+            "Original generated content is available for comparison" in note.disclosure
+        )
+    else:
+        assert "Original generated content is unknown" in note.disclosure
+        assert "current vault content is not assumed unchanged" in note.disclosure
+    assert not note.detail_omitted and (vault / NOTE).read_bytes() == CURRENT
 
 
 def test_format_transition_refuses_a_distinct_source_before_review(
