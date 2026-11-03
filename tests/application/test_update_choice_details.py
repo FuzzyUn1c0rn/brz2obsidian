@@ -172,20 +172,38 @@ def test_bound_rename_alternatives_identify_current_and_source_before_acceptance
     )
     assert result.status == "available" and result.binding == opened.binding
     (offer,) = result.offers
-    # Optional rename uses the actual primary text action before/after declining;
-    # an unaccepted target_path would name the current file twice.
+    # The text action identifies the current file; the separate optional rename
+    # action discloses both paths before and after declining the rename.
     assert offer.domain == "text" and offer.choices == ("current", "incoming", "edited")
-    assert (
-        offer.disclosure
-        == "Current path: Authored/Opening.md\nProposed source path: Notes/Opening.md"
+    assert offer.disclosure == "Current file: Authored/Opening.md"
+    assert not offer.detail_omitted
+    assert offer.selected is None and offer.decision_id is None
+    assert result.total_choices == 2 and result.next_choice_offset == 1
+
+    rename_result = worker_context_call(
+        context,
+        {
+            "command": "choices",
+            "binding": opened.binding,
+            "offset": 1,
+            "limit": 1,
+        },
     )
-    assert not offer.detail_omitted and offer.selected is None
-    assert (
-        choice_offers(prepared)[0].assumptions_digest,
-        choice_offers(prepared)[0].disclosure,
-    ) == (
-        offer.assumptions_digest,
-        offer.disclosure,
+    assert rename_result.status == "available"
+    assert rename_result.binding == opened.binding
+    assert rename_result.total_choices == 2 and rename_result.next_choice_offset is None
+    (rename,) = rename_result.offers
+    assert rename.domain == "rename" and rename.choices == ("keep_path", "source_path")
+    assert rename.disclosure == (
+        "Current path: Authored/Opening.md\nProposed source path: Notes/Opening.md"
     )
+    assert not rename.detail_omitted
+    assert rename.selected == (None if state == "offered" else "keep_path")
+    assert rename.decision_id == change.rename_review.decision_id
+    assert (rename.decision_id is None) == (state == "offered")
+    assert offer.change_id == rename.change_id == change.change_id
+    assert offer.requirement_id != rename.requirement_id
+    assert offer.assumptions_digest != rename.assumptions_digest
+    assert (offer, rename) == choice_offers(prepared)
     assert prepared.model_dump_json() == original and not prepared.review.ready
     assert list(vault.iterdir()) == []
