@@ -1288,7 +1288,6 @@ def check_protocol(record):
 def check_acquisition_protocol(value, collection):
     """Normative capture audit representation, not request-history truth.
 
-    docs/local-api-capture.md104-108 defines these closed protocol locations.
     Source preservation is independently checked from the baseline; this proof
     does not assert audit completeness or reproduce an integrity digest.
     """

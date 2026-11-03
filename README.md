@@ -8,7 +8,7 @@ No community plugins are required.
 The library, CLI and local Windows app also support a bounded local API source
 with qualified graph, classification, authored Markdown and owned resources,
 including explicit and inherited icons.
-See the [local API guide](docs/local-api.md) for Brain UUID selection, external
+See [local API import](#local-api-import) for Brain UUID selection, external
 credentials, search options and the current content-stage limits. Acquisition
 spans requests and is not an atomic snapshot. Editing or syncing during
 acquisition can produce a mixture of source states. Conversion verifies the
@@ -260,7 +260,7 @@ required images and Bases, and imported identities. It does not repair files
 or prove that missing source content was recovered. You can run it again after
 editing memberships, renaming categories or changing templates.
 
-See the [vault checker guide](docs/vault-checker.md) for diagnostic details.
+See [checker diagnostics](#checker-diagnostics) for common findings.
 
 ## More command examples
 
@@ -307,7 +307,62 @@ publication receipt; a conversion receipt records the verified published vault.
 Errors retain their existing codes and may include a diagnostic reason and safe
 item name. An absent name leaves the old JSON shape unchanged; a populated
 optional `subject` requires older strict readers to accept this extension.
-See [readable diagnostics and compatibility](docs/diagnostics.md).
+`Issue.rule_id` can carry a diagnostic reason identifier. Human explanations can
+change; scripts should use structured codes and fields. Unexpected conversion
+errors can leave publication status unknown, so check the destination before
+retrying. An unexpected checker error exits 1 and may provide only a safe
+explanation on stderr, without a JSON result.
+
+## Local API import
+
+Enable the local API in the running TheBrain desktop app and use the current
+address shown in its settings. The default is `http://127.0.0.1:11522/api`.
+Provide its key through the `THE_BRAIN_LOCAL_API_KEY` environment variable before
+launching the converter. Keep the key out of command arguments and saved reports.
+Requests are read-only and restricted to a local HTTP(S) origin; the converter
+does not scan ports or open a Brain for you.
+
+In the Windows app, choose **TheBrain local API**, enter the address, select
+**Refresh Brains**, then choose the Brain by name and full ID. Duplicate names
+remain separate choices. The app reads the key from its launch environment and
+has no key field. **Advanced search limits** exposes the options below.
+
+For the CLI, replace this example with the Brain's exact lowercase, hyphenated,
+nonzero UUID:
+
+```powershell
+$brain = '11111111-1111-4111-8111-111111111111'
+.\.venv\Scripts\python.exe -m brz2obsidian inspect $brain --source-kind local-api --api-url http://127.0.0.1:11522/api
+.\.venv\Scripts\python.exe -m brz2obsidian convert $brain 'C:\vaults\My Brain' --source-kind local-api --api-url http://127.0.0.1:11522/api
+```
+
+Omitting `--source-kind` selects BRZ input. `--json` and the normal exit codes
+apply to both sources. Use `inspect --help` or `convert --help` for option bounds.
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `--api-search-initial-results` | 5000 | Initial raw wildcard hit limit, before deduplication |
+| `--api-search-timeout` | 300 | Total wildcard search budget in seconds |
+| `--api-search-max-response-bytes` | 128000000 | Maximum decompressed bytes per wildcard reply |
+| `--api-search-max-results` | disabled | Optional positive result ceiling; saturation refuses import |
+
+The supported scope includes public, non-forgotten ordinary thoughts, types and
+tags, a valid ordinary Home, supported relationships, authored raw Markdown,
+qualified images, files and explicit/inherited icons. Private, custom,
+conflicting or unsupported included content refuses import. Rendered notes are
+never a substitute for raw authored Markdown, and external destinations remain
+references. Formatting adaptations can produce warnings. One reviewed case of a
+missing TXT attachment can warn when a separately preserved PDF from the same
+owner qualifies; this does not claim that the PDF replaces the missing text.
+Other unavailable required content refuses import. No partial vault is published.
+
+Inspection fully acquires content and releases its capture. Conversion acquires
+again; allow for that cost. In the app, changed settings or source invalidate the
+review, and warning publication requires **Convert with warnings**. Direct CLI
+conversion can publish with warnings and exit 2. Multi-request acquisition is
+not an atomic snapshot: avoid editing or syncing while it runs. Captured-copy
+integrity and reconciled counters do not prove universal discovery completeness
+or that the live Brain remained unchanged.
 
 ### Review an existing vault
 
@@ -374,8 +429,9 @@ reused; it does not report whether Save retained the incoming source.
 Use `review --help` and `review prepare --help` for the option reference and
 separate onboarding, format-transition and attachment-cleanup routes.
 Required configuration and consent remain explicit. Keep the vault idle during
-operations; supported Git and current storage policy are checked. Missing history
-cannot prove earlier versions. Retained history grows disk use, and attachment
+operations: concurrent editing or syncing by Obsidian, TheBrain or other programs
+is unsupported. Supported Git and current storage policy are checked. Missing
+history cannot prove earlier versions. Retained history grows disk use, and attachment
 cleanup does not prune it. History pruning and later stage-two category/tag
 remapping are unavailable.
 
@@ -408,9 +464,78 @@ with a notice. **Missing prose, captions and layout are not recovered.** Missing
 category text or icons are also explained in the migration report. Other missing
 required content or unsupported features can prevent conversion.
 
-For daily use, start with the generated `Vault guide.md`. The
-[vault maintenance guide](docs/vault-maintenance.md) explains category membership,
-icon inheritance, templates and safe editing in more detail.
+For daily use, start with the generated `Vault guide.md`, whose template links
+use the vault's actual sanitized or disambiguated names.
+
+## Maintain the converted vault
+
+Search existing names and aliases before creating a note. To create one, switch
+to Editing view, run **Templates: Insert template**, and choose `New note` or
+the full template named for its category. Templates initialize properties;
+choosing a category does not apply a template. Use full templates for new notes,
+since inserting one into an existing note can overwrite dates and providers.
+Maintain `updated` yourself after insertion.
+
+| Property | How to maintain it |
+| --- | --- |
+| `categories` | A list of links to category notes; empty is valid |
+| `appearance_category` | One optional category link also present in `categories`; blank opts out of inherited icons |
+| `icon` | One optional link to a local image; a valid override takes precedence over the category icon |
+| `created`, `updated` | Optional ISO dates; keep template variables quoted, such as `"{{date:YYYY-MM-DD}}"` |
+| `tags`, `aliases` | Native string lists; source tags remain distinct from categories |
+| `source_collection_id`, `source_item_id` | Preserve the paired imported identities through edits and renames; omit both on new notes |
+
+Edit membership directly in Properties or frontmatter. Removing the provider's
+category requires updating `appearance_category`; reordering memberships does not
+select another provider. Invalid providers are reported even if an explicit
+icon works. Body-icon references are separate migration-time snapshots: edit
+them separately if changing category or provider metadata. Replacing a shared
+image's bytes can affect every reference to it.
+
+Open Members/Gallery through category dashboards so their contextual queries
+have a category. Hierarchy, prose links and source tags do not create membership.
+Use Obsidian's native rename with automatic internal-link updates enabled;
+prefer qualified links when names collide. Migration records describe the
+original conversion and do not track later edits. Keep pristine output and safe
+`.md.original` backups if you need exact pre-edit bytes: Obsidian can normalize
+frontmatter and line endings when saving.
+
+To add a category:
+
+1. Create `Categories/Experiments.md` using `Category starter` in Editing view.
+   Keep its native `categories` tag and contextual dashboard embeds.
+2. Add `"[[Categories/Experiments]]"` to a member's `categories` list and, if
+   wanted, its `appearance_category` property.
+3. Copy `Templates/Member template starter.md` to `Templates/Experiments.md`.
+   Set those membership/provider links, keep quoted date variables, and omit
+   imported identities. Select this template manually for future members.
+4. Reuse Members/Gallery or customize a copy of `Templates/Bases/Starter.base`,
+   preserving contextual membership and exclusions for Templates/Attachments.
+
+Run `check-vault` after membership, template or rename changes. Ordinary links
+can intentionally point to uncreated notes; a clean check does not establish
+source preservation, image rendering, Base query behavior or automatic date
+maintenance.
+
+### Checker diagnostics
+
+The checker reads current vault files without the source archive and never
+repairs or rewrites them. Custom properties are allowed. Fix reported problems
+in Obsidian or your editor, then run it again.
+
+| Finding | What to check |
+| --- | --- |
+| `invalid_frontmatter` / `invalid_property` | YAML structure, duplicate keys and known property types, dates or paired identities |
+| `invalid_category` / `invalid_provider` | Category targets exist, carry the category role, and the provider is a member |
+| `missing_base` / `missing_image` / `invalid_base` | Required files exist; images are nonempty and Base YAML is valid data |
+| `ambiguous_reference` | Use a qualified vault path to distinguish colliding names |
+| `duplicate_source_identity` | Multiple notes carry the same imported identity pair |
+| `unsafe_reference` | A required reference or filesystem entry cannot be read safely inside the vault |
+| `read_failure` | Access permissions, text encoding or file/directory availability |
+
+Use `check-vault --json` for structured findings with artifact, property,
+reference, guidance and candidate paths. A clean result covers structural
+conventions, not all ordinary note links or native presentation.
 
 ## Results and troubleshooting
 
@@ -438,7 +563,7 @@ its exit code.
 | Home is missing or forgotten | Set an included Home thought in TheBrain, export again and inspect the new archive. |
 | Source content or features are refused | Follow the [inspection guidance](#4-inspect-the-archive) and the printed diagnostic. Follow the stated action: converter limitations need a report; source or access problems have their own guidance. |
 | Conversion succeeds with warnings | Review `MIGRATION REPORT.md`, including any optional source-repair steps. |
-| The checker reports issues | Follow its diagnostics and the [checker guide](docs/vault-checker.md). It does not modify the vault. |
+| The checker reports issues | Follow its diagnostics and [checker guidance](#checker-diagnostics). It does not modify the vault. |
 
 If a failure still prints `Verified vault published:` or reports
 `publication_occurred`, the vault was published before a later cleanup failure.
@@ -455,9 +580,8 @@ and [release verification record](https://github.com/FuzzyUn1c0rn/brz2obsidian/b
 
 For contributors and library users:
 
-- [Architecture and runnable library examples](docs/architecture.md)
+- [Python library examples](#python-library)
 - [Test commands and verification procedures](docs/testing.md)
-- [Source inclusion rules](docs/architecture.md#included-scope-and-version-3-facts)
 - [Workspace housekeeping and private-data locations](docs/workspace.md)
 - [Glossary](GLOSSARY.md) and [architecture decision](docs/adr/0001-source-neutral-core.md)
 
@@ -469,3 +593,42 @@ and build a wheel using the same environment:
 .\.venv\Scripts\python.exe -m pip install --no-build-isolation -e ".[dev]"
 .\.venv\Scripts\python.exe -m pip wheel --no-deps --no-build-isolation --wheel-dir tmp/build/wheels .
 ```
+
+### Python library
+
+Use the default factory to inspect or convert a BRZ archive:
+
+```python
+from brz2obsidian.application.wiring import default_workflow
+
+workflow = default_workflow()
+inspection = workflow.inspect("source.brz")
+result = workflow.convert("source.brz", "new-vault")
+```
+
+For the local API, the factory pairs the supported source profile and policy.
+It reads credentials from the environment by default; callers can supply a
+zero-argument `credentials` provider returning the key.
+
+```python
+from brz2obsidian.application.wiring import local_api_workflow
+from brz2obsidian.sources.thebrain.local_api import LocalApiConfig, LocalApiSourceRef
+
+workflow = local_api_workflow(LocalApiConfig())
+reference = LocalApiSourceRef("11111111-1111-4111-8111-111111111111")
+inspection = workflow.inspect(reference)
+result = workflow.convert(reference, "new-api-vault")
+```
+
+The standalone checker needs only the current vault:
+
+```python
+from brz2obsidian.vault_check import check_vault
+
+result = check_vault("new-vault")
+for issue in result.issues:
+    print(issue.code, issue.artifact, issue.guidance)
+```
+
+Implementation contracts live in [source code](src/brz2obsidian/);
+[AGENTS.md](AGENTS.md#documentation) defines where project documentation belongs.

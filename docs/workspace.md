@@ -16,7 +16,8 @@ locations below so a finished temporary effort can be deleted safely.
 | `.scratch/<effort>/` | Draft issue bodies, exploratory notes and other small temporary artifacts | Disposable; Git-ignored |
 | `tests/` | Synthetic fixtures, reusable test helpers and the independent acceptance driver | Versioned development support |
 | GitHub Issues | Specifications, Wayfinder maps, tickets, accepted decisions and durable discussion; see `docs/agents/issue-tracker.md` | Durable project records |
-| `docs/`, `GLOSSARY.md`, `AGENTS.md` | Current development guidance and domain decisions | Versioned project records |
+| `README.md` | Durable user guidance | Versioned project records |
+| `docs/`, `GLOSSARY.md`, `AGENTS.md` | Required agent guidance and domain decisions, under the [documentation rule](../AGENTS.md#documentation) | Versioned project records |
 
 The existing `brz/Software Engineering v2` vault keeps its established path.
 Future retained user vaults should have an explicit destination selected for
@@ -36,8 +37,9 @@ caches and build products can be recreated.
    paths preserve room for imported filenames under the converter's path limit.
 3. Promote reusable helpers into `src/`, `tests/` or a maintained tool directory.
    Publish specifications, Wayfinder maps, tickets and accepted decisions in
-   GitHub. Keep current architecture decisions in `docs/adr/` and maintained
-   development guidance in `docs/`. Record aggregate acceptance results before
+   GitHub. Keep current architecture decisions in `docs/adr/`, required agent
+   guidance in its existing instruction files, and user guidance in `README.md`.
+   Record aggregate acceptance results before
    retiring their temporary evidence.
 4. Keep original inputs and the only copy of user-created or edited content
    outside `tmp/` and `.scratch/`. Retain required restore copies under `backups/`.

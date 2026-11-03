@@ -19,6 +19,21 @@ Consult the glossary when domain terminology or behavior is relevant, and
 applicable ADRs when investigating or changing architecture, module boundaries,
 or public interfaces. Follow `docs/agents/domain.md` for these conventions.
 
+## Documentation
+
+Source code and tests are the source of truth for implemented behavior. Put
+durable user guidance, including setup, usage and troubleshooting, in `README.md`.
+Keep `docs/` limited to guidance required by `AGENTS.md`, other agent instructions
+or skills, including their required references, the glossary conventions and ADRs.
+Retain decisions and rationale rather than duplicating implementation details.
+
+Do not create standalone architecture summaries, implementation contracts,
+qualification reports or user guides as routine development output. This rule
+also applies when following skills. Use GitHub Issues for durable specifications,
+research and verification conclusions, and ignored `.scratch/<effort>/` or
+`tmp/<effort>/` for disposable notes and reports. An explicit user request for
+a separate document can override this default.
+
 ## Implementation Work
 
 Apply the `tdd` skill to features and behavior-changing fixes. For refactoring
