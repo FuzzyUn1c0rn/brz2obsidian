@@ -373,7 +373,9 @@ def test_refresh_counts_second_slot_and_preserves_guide_then_resets_for_next_ope
     guide_row = next(row for row in page.items if row.current_path == GUIDE)
     second_row = next(row for row in page.items if row.current_path == NOTE)
     assert guide_row.result == b"Authored Guide.\n" and not guide_row.omitted
-    assert second_row.current == note("Later Second writing.") and not second_row.omitted
+    assert (
+        second_row.current == note("Later Second writing.") and not second_row.omitted
+    )
     assert second_row.result is None
     assert [(r.domain, r.change_id) for r in retained.review.requirements] == [
         ("text", second_row.change_id)
