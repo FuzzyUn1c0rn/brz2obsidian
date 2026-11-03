@@ -364,7 +364,7 @@ class UpdateWorkbench(QWidget):
         if reply is not None and reply.history_action is not None:
             return reply.history_action.summary
         if reply is not None and reply.status == "cancelled_before_publication":
-            return "Stopped before file publication. Retained history and saved review remain available."
+            return "Stopped before file publication."
         if reply is not None and reply.code == "saved":
             return "Review saved. Reopening rechecks current source and vault inputs."
         return "Review the whole proposal before applying. Keep the target vault idle while an operation runs."

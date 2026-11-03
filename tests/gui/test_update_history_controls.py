@@ -473,7 +473,7 @@ def test_progress_safe_stop_and_active_close_keep_owner_until_truthful_terminal(
                 code="controlled_stopped",
                 kind="source_update",
                 publication="not_published" if outcome == "cancelled" else "partial",
-                history_retained=True,
+                history_retained=outcome != "cancelled",
                 next_actions=("inspect_history",),
             )
         raise AssertionError("Only the active preparation may execute")
@@ -539,6 +539,13 @@ def test_progress_safe_stop_and_active_close_keep_owner_until_truthful_terminal(
             else "unknown"
         )
         assert state.needs_inspection == (outcome != "cancelled")
+        if outcome == "cancelled":
+            until(
+                app, lambda: "Stopped before file publication." in window_text(window)
+            )
+            text = window_text(window)
+            assert "Stopped before file publication." in text
+            assert "Retained history and saved review remain available." not in text
         assert not transport.closed and window.isVisible()
         assert list(vault.iterdir()) == []
     finally:
