@@ -343,9 +343,41 @@ def test_refresh_counts_second_slot_and_preserves_guide_then_resets_for_next_ope
     assert guide.result.data == b"Authored Guide.\n"
     next_operation = case.operations.refresh_update(result.preparation)
     assert next_operation.stale == 0 and next_operation.unresolved == 1
+
+    retained = result.preparation
+    retained_json = retained.model_dump_json()
+    vault = Path(retained.vault)
+    before = {
+        p.relative_to(vault): p.read_bytes() for p in vault.rglob("*") if p.is_file()
+    }
+    assert before[Path(GUIDE)] == b"Authored Guide.\n"
+    assert before[Path(NOTE)] == note("Later Second writing.")
     rejected = case.operations.resolve_update(result.preparation, token)
-    assert rejected.status in ("refused", "stale_review") and rejected.stale == 0
-    assert rejected.preparation.review == result.preparation.review
+    assert (rejected.status, rejected.code) == ("refused", "invalid_review_action")
+    assert rejected.stale == 0 and not rejected.ready and rejected.preparation is None
+    assert rejected.operation_id is None and rejected.generation is None
+    assert rejected.checkpoint is None and rejected.checkpoint_commit is None
+    assert rejected.capture is None and rejected.application is None
+    assert rejected.publication == "not_started" and not rejected.history_retained
+    assert retained.model_dump_json() == retained_json
+    assert {
+        p.relative_to(vault): p.read_bytes() for p in vault.rglob("*") if p.is_file()
+    } == before
+
+    page = case.operations.inspect_update_review(
+        retained,
+        proposal_id=retained.review.proposal.proposal_id,
+        generation=retained.review.proposal.generation,
+    )
+    assert (page.status, page.code) == ("available", "available")
+    guide_row = next(row for row in page.items if row.current_path == GUIDE)
+    second_row = next(row for row in page.items if row.current_path == NOTE)
+    assert guide_row.result == b"Authored Guide.\n" and not guide_row.omitted
+    assert second_row.current == note("Later Second writing.") and not second_row.omitted
+    assert second_row.result is None
+    assert [(r.domain, r.change_id) for r in retained.review.requirements] == [
+        ("text", second_row.change_id)
+    ]
 
 
 def test_bulk_action_counts_each_invalidated_member_slot(tmp_path, request):
