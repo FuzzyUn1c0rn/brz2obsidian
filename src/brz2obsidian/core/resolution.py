@@ -20,12 +20,15 @@ from brz2obsidian.contracts import (
     ReviewRequirement,
     ReviewTransition,
 )
+from brz2obsidian.core._replay_memo import _ReplayMemo
 from brz2obsidian.core.attachment_validation import validate_attachment_candidate
+from brz2obsidian.core.identity import rename_source_path_safe
 from brz2obsidian.core.link_meanings import _semantic
 from brz2obsidian.core.memberships import used_mappings
 from brz2obsidian.core.reconciliation import _reconcile
 from brz2obsidian.core.reversals import (
     primary_reversal_content,
+    reversal_document_target,
     reversal_subject,
     reversal_text_comparison,
 )
@@ -44,6 +47,10 @@ from brz2obsidian.core.review_links import (
 from brz2obsidian.core.review_preflight import consent_requirements, preflight_blockers
 from brz2obsidian.core.structures import validate_structure_facts
 from brz2obsidian.core.text_candidates import validate_text_candidate
+
+# Pure computed values belong to this replay implementation's loaded lifetime.
+# Current storage observations, validation verdicts and caller plans are not cached.
+_replay_memo = _ReplayMemo()
 
 
 def _domain(facts, change):
@@ -109,7 +116,9 @@ def _choices(facts, change, domain):
             if (s.item_id, s.facet) == (change.item_id, change.facet)
         )
         return ("current", "reverse") + (
-            ("edited",) if subject.attachment is None else ()
+            ("edited",)
+            if subject.attachment is None and reversal_document_target(subject) is None
+            else ()
         )
     if domain == "identity":
         return ("associate",)
@@ -143,6 +152,132 @@ def _choices(facts, change, domain):
     )
 
 
+def _choice_requirements(facts, proposal):
+    return tuple(
+        ReviewRequirement(
+            requirement_id=c.change_id,
+            domain=_domain(facts, c),
+            change_id=c.change_id,
+            choices=_choices(facts, c, _domain(facts, c)),
+            assumptions=c.assumptions,
+        )
+        for c in proposal.changes
+    )
+
+
+def _format_choice_unavailable(change, domain, choice):
+    return domain in ("configuration", "format") and (
+        change.format_review is None
+        or choice != "current"
+        and not change.format_review.target_eligible
+    )
+
+
+def _choice_offer(change, requirement, *, source_path_safe=True):
+    from brz2obsidian.contracts import ReviewChoiceAvailability, ReviewChoiceOffer
+
+    alternatives = (
+        {a.choice: a for a in change.attachment_review.alternatives}
+        if change is not None
+        and change.attachment_review is not None
+        and requirement.domain not in ("reversal", "rename")
+        else {}
+    )
+    choices = tuple(dict.fromkeys((*requirement.choices, *alternatives)))
+    availability = []
+    for choice in choices:
+        reasons = []
+        if (
+            requirement.domain == "rename"
+            and choice == "source_path"
+            and not source_path_safe
+        ):
+            reasons.append("unsafe_producer_choice")
+        if change is not None and _format_choice_unavailable(
+            change, requirement.domain, choice
+        ):
+            reasons.append("unsafe_producer_choice")
+        if choice in alternatives and not alternatives[choice].eligible:
+            reasons.extend(alternatives[choice].unavailable_reasons)
+        if choice not in requirement.choices and not reasons:
+            reasons.append("choice_not_admitted")
+        availability.append(
+            ReviewChoiceAvailability(
+                choice=choice,
+                enabled=not reasons,
+                reasons=tuple(dict.fromkeys(reasons)),
+            )
+        )
+    return ReviewChoiceOffer(
+        **requirement.model_dump(), availability=tuple(availability)
+    )
+
+
+def inspect_review_choices(plan):
+    """Canonical offered decisions, including replacements of existing choices."""
+    checked = validate_review(plan)
+    if checked.status != "accepted":
+        raise ValueError("Invalid review")
+    plan = checked.plan
+    approved = {(a.change_id, a.domain) for a in plan.approvals}
+    rows = tuple(
+        _choice_offer(
+            change,
+            row,
+            source_path_safe=rename_source_path_safe(plan.producer_facts, change)
+            if row.domain == "rename"
+            else True,
+        )
+        for change, row in zip(
+            plan.proposal.changes,
+            _choice_requirements(plan.producer_facts, plan.proposal),
+            strict=True,
+        )
+        if change.requires_decision
+        or change.identity_review.repair_required
+        or change.rename_review is not None
+        and change.rename_review.requires_decision
+        or (row.change_id, row.domain) in approved
+    )
+    return (
+        rows
+        + tuple(
+            _choice_offer(
+                change,
+                ReviewRequirement(
+                    requirement_id="rename:" + change.change_id,
+                    domain="rename",
+                    change_id=change.change_id,
+                    choices=("keep_path", "source_path"),
+                    assumptions=change.assumptions,
+                ),
+                source_path_safe=rename_source_path_safe(plan.producer_facts, change),
+            )
+            for change in plan.proposal.changes
+            if change.rename_review is not None
+            and _domain(plan.producer_facts, change) != "rename"
+        )
+        + tuple(
+            _choice_offer(None, row)
+            for row in plan.requirements
+            if row.domain in ("tracking", "storage")
+        )
+        + tuple(
+            _choice_offer(
+                None,
+                ReviewRequirement(
+                    requirement_id=group.group_id,
+                    domain="compatible_group",
+                    change_id=group.group_id,
+                    choices=("approve",),
+                    assumptions=group.assumptions,
+                ),
+            )
+            for group in plan.groups
+        )
+    )
+
+
 def _plan(
     facts,
     preflight,
@@ -165,20 +300,16 @@ def _plan(
     effective_approvals = applicable_approvals(approvals, attachment_applicability)
     approved = {(a.change_id, a.domain) for a in approvals}
     requirements = tuple(
-        ReviewRequirement(
-            requirement_id=c.change_id,
-            domain=_domain(facts, c),
-            change_id=c.change_id,
-            choices=_choices(facts, c, _domain(facts, c)),
-            assumptions=c.assumptions,
+        row
+        for c, row in zip(
+            proposal.changes, _choice_requirements(facts, proposal), strict=True
         )
-        for c in proposal.changes
         if (
             c.requires_decision
             or c.identity_review.repair_required
             or (c.rename_review is not None and c.rename_review.requires_decision)
         )
-        and (c.change_id, _domain(facts, c)) not in approved
+        and (row.change_id, row.domain) not in approved
     )
     members = tuple(
         c
@@ -738,12 +869,7 @@ def _resolve_action(plan, action):
     ):
         if (
             action.domain != _domain(plan.producer_facts, change)
-            or action.choice
-            not in (
-                _choices(plan.producer_facts, change, action.domain)
-                if action.domain == "reversal"
-                else ("current", "incoming", "both")
-            )
+            or action.choice not in _choices(plan.producer_facts, change, action.domain)
             or action.candidate is not None
             or action.selected_entry_id is not None
             or action.disassociate_entry_ids
@@ -773,9 +899,7 @@ def _resolve_action(plan, action):
             )
         ):
             return _transition(plan, "refused", "attachment_invalid")
-        if action.domain in ("configuration", "format") and (
-            change.format_review is None or not change.format_review.target_eligible
-        ):
+        if _format_choice_unavailable(change, action.domain, action.choice):
             return _transition(plan, "refused", "unsafe_producer_choice")
         if not validate_attachment_candidate(
             plan.producer_facts, selection, candidate
@@ -785,6 +909,11 @@ def _resolve_action(plan, action):
         if (
             action.choice == "current"
             and plan.producer_facts.format_operation.kind == "source_update"
+            and not (
+                change.current is not None
+                and change.incoming is not None
+                and change.current.data == change.incoming.data
+            )
         ):
             memory = _preserved_memory(plan, change, action)
             if memory is None:
@@ -811,7 +940,8 @@ def _resolve_action(plan, action):
                 ),
             ),
             provenance="explicit_user",
-            source_accepted=action.choice != "current" and action.domain != "reversal",
+            source_accepted=action.choice not in ("current", "remove")
+            and action.domain != "reversal",
             source_memory=memory,
             attachment_selection=selection,
             attachment_candidate=candidate,
@@ -856,14 +986,14 @@ def _resolve_action(plan, action):
         return _transition(plan, "refused", "choice_not_admitted")
     if action.selected_entry_id is not None or action.disassociate_entry_ids:
         return _transition(plan, "refused", "choice_not_admitted")
-    if action.domain in ("configuration", "format") and (
-        change.format_review is None or not change.format_review.target_eligible
-    ):
+    if _format_choice_unavailable(change, action.domain, action.choice):
         return _transition(plan, "refused", "unsafe_producer_choice")
     reversal_present = (
         action.domain == "reversal"
         and action.choice == "reverse"
         and reversal_subject(plan.producer_facts, change).attachment is None
+        and reversal_document_target(reversal_subject(plan.producer_facts, change))
+        is None
         and any(
             r.target is not None
             for r in reversal_subject(
@@ -895,7 +1025,9 @@ def _resolve_action(plan, action):
         return _transition(plan, "refused", "choice_not_admitted")
     memory = None
     if action.choice == "current":
-        if not selected_current_links_safe(plan.producer_facts, change):
+        if not selected_current_links_safe(
+            plan.producer_facts, change, candidate=action.candidate
+        ):
             return _transition(plan, "refused", "invalid_candidate")
         if change.current is None and not _observed_absence(
             plan.producer_facts, change, action.domain
@@ -906,9 +1038,14 @@ def _resolve_action(plan, action):
             for s in plan.producer_facts.subjects
             if (s.item_id, s.facet) == (change.item_id, change.facet)
         )
-        if action.domain in ("text", "mapping") or (
-            action.domain == "configuration"
+        if (
+            action.domain in ("text", "mapping")
+            or action.domain == "configuration"
             and plan.producer_facts.format_operation.kind == "source_update"
+        ) and not (
+            change.current is not None
+            and change.incoming is not None
+            and change.current.data == change.incoming.data
         ):
             memory = _preserved_memory(plan, change, action)
             if memory is None:
@@ -978,15 +1115,30 @@ def _resolve(plan, action):
     return result
 
 
-def validate_review(plan: ReviewPlan) -> ReviewTransition:
-    """Reconstruct original actions and publication-free refreshes in their epochs."""
+def _reconstruct_review(plan: ReviewPlan) -> ReviewTransition:
+    """Reconstruct typed history using only successfully computed exact prefixes."""
     from .refresh import _refresh
 
-    plan = ReviewPlan.model_validate(plan)
-    canonical = prepare_review(
-        plan.history.initial_facts, preflight=plan.history.initial_preflight
-    )
-    for event in plan.history.events:
+    history = ReviewHistory.model_validate(plan.history)
+    retained = _replay_memo.longest_prefix(history)
+    if retained is not None and retained[0] == len(history.events):
+        canonical = ReviewPlan.model_validate_json(retained[1])
+        return _transition(canonical, "accepted", "accepted")
+    prefixes = _replay_memo.prefixes(history)
+    initial_prefix = next(prefixes, None)
+    if retained is None:
+        canonical = prepare_review(
+            history.initial_facts, preflight=history.initial_preflight
+        )
+        _replay_memo.retain(initial_prefix, canonical)
+        consumed = 0
+    else:
+        consumed, encoded = retained
+        canonical = ReviewPlan.model_validate_json(encoded)
+    for count, event in enumerate(history.events, 1):
+        prefix = next(prefixes, None)
+        if count <= consumed:
+            continue
         if isinstance(event, ReviewRefreshEvent):
             replayed = _refresh(canonical, event.facts, event.preflight)
         else:
@@ -994,9 +1146,20 @@ def validate_review(plan: ReviewPlan) -> ReviewTransition:
         if replayed.status != "accepted":
             return _transition(canonical, "refused", "invalid_plan")
         canonical = replayed.plan
+        _replay_memo.retain(prefix, canonical)
+    return _transition(canonical, "accepted", "accepted")
+
+
+def validate_review(plan: ReviewPlan) -> ReviewTransition:
+    """Reconstruct original actions and require the entire canonical plan exactly."""
+    plan = ReviewPlan.model_validate(plan)
+    reconstructed = _reconstruct_review(plan)
+    if reconstructed.status != "accepted":
+        return reconstructed
+    canonical = reconstructed.plan
     if canonical != plan:
         return _transition(canonical, "refused", "invalid_plan")
-    return _transition(canonical, "accepted", "accepted")
+    return reconstructed
 
 
 def resolve_review(plan: ReviewPlan, action: ReviewAction) -> ReviewTransition:

@@ -16,6 +16,10 @@ from pydantic import (
 from brz2obsidian.contracts import Contract, Counts, SourceIdentity
 from brz2obsidian.vault_check.contracts import VaultCheckCounts
 
+from .contract_values import absolute, request_identity
+from .update_context_contracts import UpdateContextResult
+from .update_worker_contracts import UpdateCommand
+
 Operation = Literal[
     "inspect", "validate_destination", "convert_reviewed", "check_vault", "list_brains"
 ]
@@ -37,18 +41,6 @@ Action = Literal[
     "close",
 ]
 FieldId = Literal["source", "parent", "vault_name", "destination", "vault"]
-
-
-def absolute(value: str) -> str:
-    if not Path(value).is_absolute():
-        raise ValueError("An absolute path is required")
-    return value
-
-
-def request_identity(value: str) -> str:
-    if str(UUID(value)) != value:
-        raise ValueError("A canonical UUID is required")
-    return value
 
 
 SourceKind = Literal["brz", "local-api"]
@@ -431,24 +423,39 @@ class CheckArguments(Contract):
     _absolute = field_validator("vault")(absolute)
 
 
-class WorkerRequest(Versioned):
+class WorkerEnvelope(Versioned):
+    """Transport version evolves independently of retained migration outputs."""
+
+    schema_version: Literal[4] = 4
+
+
+class WorkerRequest(WorkerEnvelope):
     schema_: Literal["brz2obsidian.worker-request"] = Field(
         default="brz2obsidian.worker-request", alias="schema"
     )
     request_id: str
-    operation: Operation
+    sequence: int | None = Field(default=None, ge=1, le=9223372036854775807)
+    operation: Operation | Literal["update"]
     arguments: (
         ConvertArguments
         | InspectArguments
         | DestinationArguments
         | CheckArguments
         | ListBrainsArguments
+        | UpdateCommand
     )
     _identity = field_validator("request_id")(request_identity)
 
     @field_validator("arguments", mode="before")
     @classmethod
     def operation_arguments(cls, value, info: ValidationInfo):
+        if info.data.get("operation") == "update":
+            adapter = TypeAdapter(UpdateCommand)
+            return (
+                adapter.validate_json(json.dumps(value))
+                if info.mode == "json"
+                else adapter.validate_python(value)
+            )
         expected = {
             "inspect": InspectArguments,
             "validate_destination": DestinationArguments,
@@ -466,6 +473,13 @@ class WorkerRequest(Versioned):
 
     @model_validator(mode="after")
     def argument_shape(self):
+        if self.operation == "update":
+            if self.sequence is None:
+                raise ValueError("A persistent request sequence is required")
+            TypeAdapter(UpdateCommand).validate_python(self.arguments)
+            return self
+        if self.sequence is not None:
+            raise ValueError("One-shot requests have no persistent sequence")
         expected = {
             "inspect": InspectArguments,
             "validate_destination": DestinationArguments,
@@ -487,22 +501,29 @@ class ProtocolError(Contract):
     ]
 
 
-class WorkerResponse(Versioned):
+class WorkerResponse(WorkerEnvelope):
     schema_: Literal["brz2obsidian.worker-response"] = Field(
         default="brz2obsidian.worker-response", alias="schema"
     )
     request_id: str
-    operation: Operation
-    result: OperationResult | None = None
+    sequence: int | None = Field(default=None, ge=1, le=9223372036854775807)
+    operation: Operation | Literal["update"]
+    result: OperationResult | UpdateContextResult | None = None
     protocol_error: ProtocolError | None = None
     _identity = field_validator("request_id")(request_identity)
 
     @model_validator(mode="after")
     def one_terminal(self):
+        if (self.operation == "update") != (self.sequence is not None):
+            raise ValueError("Response sequence differs from its operation")
         if (self.result is None) == (self.protocol_error is None):
             raise ValueError("Exactly one terminal result is required")
-        if self.result is not None and self.result.operation != self.operation:
-            raise ValueError("Result operation disagrees with response")
+        if self.result is not None:
+            if isinstance(self.result, UpdateContextResult):
+                if self.operation != "update":
+                    raise ValueError("Result operation disagrees with response")
+            elif self.result.operation != self.operation:
+                raise ValueError("Result operation disagrees with response")
         return self
 
 

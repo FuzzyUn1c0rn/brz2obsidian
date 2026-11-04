@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QStackedWidget,
     QStyle,
     QTabBar,
     QTextEdit,
@@ -51,6 +52,7 @@ from brz2obsidian.application.runner import HostRunner
 from brz2obsidian.application.transport import Supervisor
 from brz2obsidian_ui.platform_actions import CompletionActions, DiagnosticActions
 from brz2obsidian_ui.validation import api_configuration
+from brz2obsidian_ui.workbench import UpdateWorkbench
 
 EXPLANATIONS = (
     "Convert a BRZ archive into a new Obsidian vault.",
@@ -129,6 +131,11 @@ QTabBar, QTabBar::tab { background: #f8faf7; }
 QTabBar:focus { border: 1px solid #315b4c; }
 QTabBar::tab:selected { border-bottom: 3px solid #315b4c; color: #254b3d; }
 QScrollArea { border: none; background: white; }
+QListWidget#reviewQueue { background: #f8faf7; border: none; }
+QListWidget#reviewQueue::item { padding: 10px 8px; border-radius: 4px; }
+QListWidget#reviewQueue::item:selected { background: #e8f0e8; color: #254b3d; }
+QListWidget#reviewQueue::item:hover { background: #f0f4ef; }
+QListWidget#reviewQueue:focus { border: 2px solid #315b4c; }
 """.replace(
     "COMBO_CHEVRON", (Path(__file__).parent / "assets" / "chevron-down.svg").as_posix()
 )
@@ -237,6 +244,7 @@ class MainWindow(QMainWindow):
     diagnostic_action_ready = Signal(object)
     completion_action_ready = Signal(object)
     carry_ready = Signal(object)
+    review_prepared = Signal(object)
 
     def __init__(
         self,
@@ -258,6 +266,8 @@ class MainWindow(QMainWindow):
         self._name_edited = False
         self.diagnostics_expanded = False
         self._may_close = False
+        self._update_close_requested = None
+        self._update_background_requested = False
         self._started = None
         self._started_at = {}
         self._result_identity = None
@@ -279,6 +289,7 @@ class MainWindow(QMainWindow):
         self.completion_actions = completion_actions or CompletionActions()
         self.prepared.connect(self._present)
         self.carry_ready.connect(self._carried)
+        self.review_prepared.connect(self._present_review)
         self.diagnostic_page_ready.connect(self._diagnostic_page)
         self.diagnostic_action_ready.connect(self._diagnostic_finished)
         self.completion_action_ready.connect(self._completion_finished)
@@ -294,6 +305,7 @@ class MainWindow(QMainWindow):
             session=session,
             on_diagnostic_feedback=self.diagnostic_action_ready.emit,
             on_completion_feedback=self.completion_action_ready.emit,
+            on_update_review=self.review_prepared.emit,
         )
         self._build()
         self.setStyleSheet(STYLE)
@@ -321,7 +333,7 @@ class MainWindow(QMainWindow):
         top.addWidget(self.explanation)
         self.tabs = QTabBar()
         self.tabs.setAccessibleName("Operation")
-        for title in ("Convert", "Inspect", "Check vault"):
+        for title in ("Convert", "Inspect", "Check vault", "Update vault"):
             self.tabs.addTab(title)
         self.tabs.currentChanged.connect(self._render)
         top.addWidget(self.tabs)
@@ -648,7 +660,23 @@ class MainWindow(QMainWindow):
         body.addWidget(self.published_panel)
         body.addStretch()
         scroll.setWidget(content)
-        layout.addWidget(scroll, 1)
+        self.operation_pages = QStackedWidget()
+        self.operation_pages.addWidget(scroll)
+        self.workbench = UpdateWorkbench(
+            self.runner.submit_update,
+            select=self.runner.select_update,
+            pick_source=lambda callback, field="source": self._choose_update_path(
+                field, callback
+            ),
+            pick_vault=lambda callback, field="vault": self._choose_update_path(
+                field, callback
+            ),
+            path_widget=PathText,
+        )
+        self.operation_pages.addWidget(self.workbench)
+        self.workbench.availability_changed.connect(self._render)
+        self.workbench.close_choice.connect(self._review_close_choice)
+        layout.addWidget(self.operation_pages, 1)
         footer = Footer(objectName="footer")
         footer.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Minimum)
         foot = QHBoxLayout(footer)
@@ -896,6 +924,19 @@ class MainWindow(QMainWindow):
                 self.submit(command)
 
     def _primary_action(self):
+        if self.tabs.currentIndex() == 3:
+            state = self.workbench.snapshot
+            if (
+                state is not None
+                and state.ready
+                and not self.workbench.busy
+                and "apply_update" in state.next_actions
+            ):
+                self.primary.setEnabled(False)
+                self.runner.submit_update(
+                    {"command": "apply", "binding": state.binding}
+                )
+            return
         if (
             self.tabs.currentIndex() == 1
             and "convert_this_archive" in self.snapshot.allowed_actions
@@ -927,6 +968,58 @@ class MainWindow(QMainWindow):
         ):
             self.tabs.setCurrentIndex(0)
             self.primary.setFocus()
+
+    def _choose_update_path(self, field, callback):
+        def selected_path(path):
+            if path and Path(path).is_absolute():
+                path = str(Path(path).absolute())
+            callback(path)
+
+        if self.dialogs is not None:
+            (
+                self.dialogs.choose_source
+                if field in ("source", "original_source")
+                else self.dialogs.choose_vault
+            )(selected_path)
+            return
+        if self._dialog is not None:
+            return
+        origin = QApplication.focusWidget()
+        source = field in ("source", "original_source")
+        dialog = QFileDialog(
+            self,
+            "Choose original BRZ evidence"
+            if field == "original_source"
+            else "Choose incoming BRZ"
+            if source
+            else "Choose complete history copy"
+            if field == "history_copy"
+            else "Choose update vault",
+        )
+        selected = getattr(self.workbench, field)
+        initial = str(Path(selected).parent) if selected and source else selected
+        if initial or os.environ.get("USERPROFILE"):
+            dialog.setDirectory(initial or os.environ["USERPROFILE"])
+        if source:
+            dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
+            dialog.setNameFilters(
+                ["BRZ archives (*.brz *.BRZ *.[bB][rR][zZ])", "All files (*)"]
+            )
+        else:
+            dialog.setFileMode(QFileDialog.FileMode.Directory)
+            dialog.setOption(QFileDialog.Option.ShowDirsOnly, True)
+        dialog.fileSelected.connect(selected_path)
+
+        def finished(_):
+            if self._dialog is dialog:
+                self._dialog = None
+            dialog.deleteLater()
+            if origin is not None and origin.isVisible() and origin.isEnabled():
+                origin.setFocus()
+
+        dialog.finished.connect(finished)
+        self._dialog = dialog
+        dialog.open()
 
     def choose_source(self):
         if self.tabs.currentIndex() == 2:
@@ -1181,6 +1274,49 @@ class MainWindow(QMainWindow):
         self.next_page.setVisible(page.next_offset is not None)
 
     def _render(self, *_):
+        reviewing = self.tabs.currentIndex() == 3
+        self.operation_pages.setCurrentIndex(1 if reviewing else 0)
+        for button in (self.primary, self.recovery, self.close_button):
+            button.setVisible(not reviewing)
+        if reviewing:
+            state = self.workbench.snapshot
+            self.primary.setVisible(state is not None and state.binding is not None)
+            self.primary.setText("Apply update")
+            self.primary.setAccessibleName("Apply update")
+            self.primary.setEnabled(
+                state is not None
+                and state.ready
+                and not self.workbench.busy
+                and "apply_update" in state.next_actions
+            )
+            self.heading.setText("Review incoming update")
+            self.explanation.setText("Review the proposal and your decisions.")
+            self.guidance.setText(self.workbench.status_text)
+            if (
+                state is not None
+                and not state.active_request_id
+                and state.reply is not None
+                and state.reply.operation is not None
+            ):
+                self.guidance.setText(state.reply.operation.message)
+            active = bool(state and state.active_request_id)
+            self.activity.setAccessibleName("Update operation progress")
+            self.activity.setVisible(active)
+            progress = state.progress.value if active and state.progress else None
+            if (
+                progress
+                and progress.total_units is not None
+                and progress.completed_units is not None
+            ):
+                self.activity.setRange(0, progress.total_units)
+                self.activity.setValue(progress.completed_units)
+            else:
+                self.activity.setRange(0, 0)
+            self.tabs.setEnabled(not (active or self.snapshot.active_request_id))
+            self.workbench.setEnabled(not self.snapshot.active_request_id)
+            return
+        self.activity.setAccessibleName("Operation in progress")
+        self.activity.setRange(0, 0)
         self.diagnostic_path.setVisible(bool(self.diagnostic_path.toPlainText()))
         mode = self.tabs.currentIndex()
         self.findings.setAccessibleName(
@@ -1509,7 +1645,35 @@ class MainWindow(QMainWindow):
         self._render_api(mode, locked)
         self._elapsed()
 
+    def _present_review(self, state):
+        self.workbench.present(state)
+        if (
+            self._update_background_requested
+            and state.close_disposition == "background"
+        ):
+            self._update_background_requested = False
+            self.showMinimized()
+        if (
+            self._update_close_requested is not None
+            and not state.active_request_id
+            and state.reply is not None
+            and state.reply.code == "context_closed"
+        ):
+            self._update_close_requested = None
+            self.workbench.discard_local()
+            if self.snapshot.active_request_id or self.snapshot.validation_request_id:
+                self.submit(SimpleCommand(command="request_close"))
+            else:
+                self._may_close = True
+                self.close()
+            return
+        if self.tabs.currentIndex() == 3:
+            self._render()
+
     def _elapsed(self):
+        if self.tabs.currentIndex() == 3:
+            self.guidance.setText(self.workbench.status_text)
+            return
         if self.snapshot.active_request_id or self.snapshot.validation_request_id:
             seconds = (
                 int(monotonic() - self._started) if self._started is not None else 0
@@ -1543,7 +1707,34 @@ class MainWindow(QMainWindow):
             event.accept()
         else:
             event.ignore()
-            self.submit(SimpleCommand(command="request_close"))
+            if self.workbench.has_review:
+                self.tabs.setCurrentIndex(3)
+                self.workbench.open_close_choices()
+            else:
+                self.submit(SimpleCommand(command="request_close"))
+
+    def _review_close_choice(self, choice, revision):
+        state = self.workbench.snapshot
+        if state is None or state.revision != revision:
+            self.workbench.open_close_choices()
+            return
+        if choice == "save" and self.workbench.local_draft:
+            return
+        self.workbench.finish_close_choice()
+        if choice == "continue" and not state.active_request_id:
+            return
+        if choice in ("save", "discard", "close"):
+            self._update_close_requested = choice
+            if (
+                choice not in state.close_options
+                and choice == "discard"
+                and state.close_options == ("close",)
+            ):
+                choice = "close"
+        if choice in state.close_options:
+            if choice == "background":
+                self._update_background_requested = True
+            self.runner.request_update_close(choice, expected_revision=revision)
 
     def shutdown(self):
         self._timer.stop()

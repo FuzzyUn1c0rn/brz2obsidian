@@ -1,0 +1,1189 @@
+"""Qualified retained ownership at native read and publication boundaries."""
+
+import hashlib
+import json
+import tempfile
+from pathlib import Path
+from uuid import uuid4
+
+import pytest
+
+from brz2obsidian.application.checkpoint_payload_contracts import (
+    CheckpointPayloadRequest,
+)
+from brz2obsidian.application.operations import Operations
+from brz2obsidian.application.update_facts import output_identity
+from brz2obsidian.core import prepare_review
+from tests.application.test_update_lifecycle_admission import NOTE, payload
+from tests.application.test_vault_checkpoints import git, user_state
+
+
+def owned_history_case():
+    root = Path(tempfile.mkdtemp(prefix="brz2obsidian-283-"))
+    owner = uuid4().hex
+    marker = {
+        "owner": owner,
+        "root": str(root.resolve()),
+        "base": str(Path(tempfile.gettempdir()).resolve()),
+    }
+    (root / ".fixture-owner.json").write_text(json.dumps(marker), encoding="utf-8")
+    evidence = (
+        Path(__file__).resolve().parents[2] / "tmp/issue-283-application/fixtures"
+    )
+    evidence.mkdir(parents=True, exist_ok=True)
+    (evidence / (owner + ".json")).write_text(json.dumps(marker), encoding="utf-8")
+    vault, source = root / "vault", root / "converted"
+    vault.mkdir()
+    source.mkdir()
+    original = payload("a", "Original independently generated A.")
+    original["Assets/remove.bin"] = b"\x00historical source A\xff"
+    record = json.loads(original["migration-record.json"])
+    record["asset_targets"] = [
+        {"asset_id": "remove-asset", "relative_path": "Assets/remove.bin"}
+    ]
+    original["migration-record.json"] = json.dumps(record).encode()
+    for path, raw in original.items():
+        for directory in (vault, source):
+            destination = directory / path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(raw)
+    git(vault, "init", "-q")
+    git(vault, "config", "core.autocrlf", "false")
+    git(vault, "add", ".")
+    git(vault, "commit", "-qm", "Independent generated baseline and user index")
+    return vault, source, original
+
+
+def test_native_cleanup_ownership_reads_qualified_ancestor_without_changing_current_source():
+    vault, source, original = owned_history_case()
+    operations = Operations()
+    first = operations.capture_checkpoint(
+        vault,
+        source,
+        vault_id="cleanup-vault",
+        import_id="cleanup-import",
+        identity=output_identity(json.loads(original["migration-record.json"])),
+        admission=operations.inspect_history(vault).admission,
+    )
+    assert first.status == "captured", first.code
+    assert first.locator.generation == 1
+    (source / "Assets/remove.bin").unlink()
+    for version, text in (
+        ("b", "Unrelated source B."),
+        ("c", "Later unrelated source C."),
+    ):
+        next_payload = payload(version, text)
+        for path, raw in next_payload.items():
+            (source / path).write_bytes(raw)
+        captured = operations.capture_checkpoint(
+            vault,
+            source,
+            vault_id="cleanup-vault",
+            import_id="cleanup-import",
+            identity=output_identity(json.loads(next_payload["migration-record.json"])),
+            admission=operations.inspect_history(vault).admission,
+        )
+        assert captured.status == "captured", captured.code
+    source_bytes = {
+        p.relative_to(source).as_posix(): p.read_bytes()
+        for p in source.rglob("*")
+        if p.is_file()
+    }
+    before = user_state(vault)
+    with operations.inspect_update_inputs(vault) as observed:
+        current = observed.history.checkpoint
+        assert current.locator.generation == 3
+        assert all(row.path != "Assets/remove.bin" for row in current.manifest.source)
+        owners = observed.read_attachment_ownership(
+            locator=current.locator, paths=("Assets/remove.bin",)
+        )
+        assert len(owners) == 1
+        proof = owners[0]
+        assert proof.association_id == first.locator.association.association_id
+        assert proof.checkpoint_commit == first.commit and proof.generation == 1
+        assert proof.identity.item_id == "remove-asset" and proof.facet == "asset"
+        assert (
+            proof.source_path == "Assets/remove.bin"
+            and proof.source_version == "a" * 64
+        )
+        assert (
+            proof.mapping_sha256
+            == hashlib.sha256(original["migration-record.json"]).hexdigest()
+        )
+        assert (
+            proof.payload_sha256
+            == hashlib.sha256(b"\x00historical source A\xff").hexdigest()
+        )
+        assert (
+            proof.payload_size == len(b"\x00historical source A\xff")
+            and proof.payload_mode == "100644"
+        )
+        stale = observed.read_payload(
+            locator=first.locator,
+            role="source",
+            requests=(CheckpointPayloadRequest(path=NOTE, offset=0, limit=1),),
+            byte_limit=1,
+        )
+        assert stale.status == "refused" and stale.code == "stale_locator"
+        assert stale.chunks == ()
+    assert user_state(vault) == before
+    assert {
+        p.relative_to(source).as_posix(): p.read_bytes()
+        for p in source.rglob("*")
+        if p.is_file()
+    } == source_bytes
+    assert (vault / "Assets/remove.bin").read_bytes() == b"\x00historical source A\xff"
+
+
+def completed_native_ownership_case(*, manual=None):
+    from brz2obsidian.application.update_facts import assemble_facts
+    from brz2obsidian.contracts import SourceIdentity
+    from tests.application.test_attachment_cleanup_lifecycle import user_git
+
+    vault, source, original = owned_history_case()
+    current = dict(original)
+    if manual is not None:
+        (vault / "Manual.md").write_bytes(manual)
+        git(vault, "add", "Manual.md")
+        current["Manual.md"] = manual
+    operations = Operations()
+    identity = output_identity(json.loads(original["migration-record.json"]))
+    first = operations.capture_checkpoint(
+        vault,
+        source,
+        vault_id="cleanup-vault",
+        import_id="cleanup-import",
+        identity=identity,
+        admission=operations.inspect_history(vault).admission,
+    )
+    assert first.status == "captured", first.code
+    git(vault, "update-ref", "refs/notes/user-proof", "HEAD")
+    original_user_git = user_git(vault)
+    facts = assemble_facts(
+        original, original, current, proposal_id="actual-native-retain", generation=1
+    )
+    review = prepare_review(
+        facts, preflight=operations.inspect_history(vault).admission.preflight
+    )
+    assert review.ready, (review.requirements, review.blockers)
+    terminal = operations.apply_reviewed_update(
+        vault,
+        source,
+        review=review,
+        vault_id="cleanup-vault",
+        import_id="cleanup-import",
+        source_binding=operations.observe_reviewed_source(source, review),
+        observed_source=SourceIdentity.model_validate(
+            json.loads(original["migration-record.json"])["source_identity"]
+        ),
+    )
+    (vault.parent / "small-completed-native-apply.json").write_text(
+        terminal.model_dump_json(), encoding="utf-8"
+    )
+    assert terminal.status == "no_content_change" and terminal.phase == "terminal", (
+        terminal.code
+    )
+    assert terminal.result_commit is not None and terminal.receipt_commit is not None
+    before = operations.read_checkpoint(vault)
+    assert before.status == "valid" and before.manifest.boundary == "result", (
+        before.code
+    )
+    assert before.locator.commit == terminal.result_commit
+    assert git(vault, "rev-parse", first.ref).decode().strip() == terminal.result_commit
+    assert user_git(vault) == original_user_git
+    return vault, source, original, operations, first, original_user_git
+
+
+def test_native_cleanup_prepared_capture_keeps_completed_ownership_under_new_lease():
+    from tests.application.test_attachment_cleanup_application import (
+        cleanup_asset_action,
+    )
+    from tests.application.test_attachment_cleanup_lifecycle import user_git
+
+    vault, source, original, operations, first, original_user_git = (
+        completed_native_ownership_case()
+    )
+
+    offered = operations.prepare_attachment_cleanup(vault)
+    assert offered.preparation is not None, offered.code
+    asset = next(
+        s
+        for s in offered.preparation.review.producer_facts.subjects
+        if s.item_id == "remove-asset"
+    )
+    proof = asset.attachment.retained_ownership
+    assert proof.checkpoint_commit == first.commit and proof.source_version == "a" * 64
+    assert (
+        proof.payload_sha256
+        == hashlib.sha256(b"\x00historical source A\xff").hexdigest()
+    )
+    removed = operations.resolve_update(
+        offered.preparation,
+        cleanup_asset_action(
+            offered.preparation.review, "remove-asset", "remove", document_edits={}
+        ),
+    )
+    (vault.parent / "small-cleanup-resolution.json").write_text(
+        removed.model_dump_json(), encoding="utf-8"
+    )
+    assert removed.ready, (removed.code, removed.preparation.review.blockers)
+    applied = operations.apply_update(removed.preparation)
+    (vault.parent / "small-cleanup-native-apply.json").write_text(
+        applied.model_dump_json(), encoding="utf-8"
+    )
+    assert applied.status == "applied", applied.code
+    assert (
+        applied.application.kind == "apply" and applied.application.phase == "terminal"
+    )
+    assert applied.application.published_files == 1
+    assert not (vault / "Assets/remove.bin").exists()
+    assert all(
+        (vault / path).read_bytes() == raw
+        for path, raw in original.items()
+        if path != "Assets/remove.bin"
+    )
+    assert {
+        p.relative_to(source).as_posix(): p.read_bytes()
+        for p in source.rglob("*")
+        if p.is_file()
+    } == original
+    assert user_git(vault) == original_user_git
+    checkpoint = operations.read_checkpoint(vault)
+    assert checkpoint.status == "valid" and checkpoint.manifest.boundary == "result", (
+        checkpoint.code
+    )
+    assert checkpoint.locator.commit == applied.application.result_commit
+    assert (
+        git(vault, "rev-parse", first.ref).decode().strip() == checkpoint.locator.commit
+    )
+    retained = operations.read_checkpoint_payload(
+        vault,
+        locator=checkpoint.locator,
+        requests=(
+            CheckpointPayloadRequest(
+                path="Assets/remove.bin",
+                offset=0,
+                limit=len(b"\x00historical source A\xff"),
+            ),
+        ),
+        byte_limit=len(b"\x00historical source A\xff"),
+    )
+    assert (
+        retained.status == "available"
+        and retained.chunks[0].data == b"\x00historical source A\xff"
+    )
+    (vault / "Assets/remove.bin").write_bytes(b"\x00new manual content")
+    with operations.inspect_update_inputs(vault) as observed:
+        assert (
+            observed.read_attachment_ownership(
+                locator=observed.history.checkpoint.locator,
+                paths=("Assets/remove.bin",),
+            )
+            == ()
+        )
+    assert user_git(vault) == original_user_git
+
+
+def test_recovery_checks_new_references_without_reading_ungranted_private_bytes(
+    monkeypatch,
+):
+    from brz2obsidian.publication import vault_recovery
+    from tests.application.test_attachment_cleanup_application import (
+        cleanup_asset_action,
+    )
+    from tests.application.test_attachment_cleanup_lifecycle import all_bytes, user_git
+
+    manual = b"Manual [[Assets/remove.bin|old]].\r\n"
+    vault, source, original, operations, _, _ = completed_native_ownership_case(
+        manual=manual
+    )
+    (vault / ".gitignore").write_bytes(b"Private.MD\n")
+    git(vault, "add", ".gitignore")
+    before_git = user_git(vault)
+    offered = operations.prepare_attachment_cleanup(vault)
+    assert offered.preparation is not None, offered.code
+    removed = operations.resolve_update(
+        offered.preparation,
+        cleanup_asset_action(
+            offered.preparation.review,
+            "remove-asset",
+            "remove",
+            document_edits={"Manual.md": b"Manual .\r\n"},
+        ),
+    )
+    assert removed.ready, removed.code
+    stopped = operations.apply_update(
+        removed.preparation, cancel=lambda: not (vault / "Assets/remove.bin").exists()
+    )
+    assert stopped.status == "recovery_required", stopped.code
+    assert stopped.application.published_files == 1
+    raw_reads = []
+    real_observe = vault_recovery.observe_file
+
+    def observe(root, path, **kwargs):
+        if kwargs.get("sink") is not None:
+            raw_reads.append(Path(path).relative_to(vault).as_posix())
+        return real_observe(root, path, **kwargs)
+
+    monkeypatch.setattr(vault_recovery, "observe_file", observe)
+
+    def snapshot():
+        return {
+            path: ((vault / path).stat().st_mode, raw)
+            for path, raw in all_bytes(vault).items()
+        }
+
+    (vault / "Later.MD").write_bytes(b"New [[Assets/remove.bin|active]].\r\n")
+    before = snapshot()
+    related = operations.prepare_history_workflow(
+        vault, kind="recovery", direction="finish"
+    )
+    (vault.parent / "new-uppercase-reference-refusal.json").write_text(
+        related.model_dump_json(), encoding="utf-8"
+    )
+    assert (
+        related.preparation is None and related.code == "recovery_review_unavailable"
+    ), related.code
+    assert "Later.MD" in raw_reads
+    assert snapshot() == before
+    (vault / "Later.MD").unlink()
+    private = b"Private authored content must not enter review.\r\n"
+    (vault / "Private.MD").write_bytes(private)
+    raw_reads.clear()
+    before = snapshot()
+    refused = operations.prepare_history_workflow(
+        vault, kind="recovery", direction="finish"
+    )
+    (vault.parent / "new-private-note-refusal.json").write_text(
+        refused.model_dump_json(), encoding="utf-8"
+    )
+    assert "Private.MD" not in raw_reads, (refused.code, raw_reads)
+    assert (
+        refused.preparation is None and refused.code == "recovery_review_unavailable"
+    ), refused.code
+    assert snapshot() == before
+    assert (vault / "Private.MD").read_bytes() == private
+    assert (vault / "Manual.md").read_bytes() == manual
+    assert user_git(vault) == before_git
+    assert {
+        p.relative_to(source).as_posix(): p.read_bytes()
+        for p in source.rglob("*")
+        if p.is_file()
+    } == original
+
+
+def test_recovery_reuses_exact_canonical_tracking_grant_for_ignored_note(monkeypatch):
+    from brz2obsidian.publication import vault_recovery
+    from tests.application.test_attachment_cleanup_lifecycle import all_bytes
+    from tests.application.test_vault_apply import _apply, _ready_case
+
+    vault, source, operations, reviewed, _ = _ready_case(tracking_ignore=True)
+    calls = 0
+
+    def cancel():
+        nonlocal calls
+        calls += 1
+        return calls == 2
+
+    stopped = _apply(
+        operations,
+        vault,
+        source,
+        review=reviewed,
+        vault_id="vault-one",
+        import_id="import-one",
+        cancel=cancel,
+    )
+    assert stopped.code == "cancelled_after_intent" and stopped.recovery_required
+    assert stopped.published_files == 0
+    raw_reads = []
+    real_observe = vault_recovery.observe_file
+
+    def observe(root, path, **kwargs):
+        if kwargs.get("sink") is not None:
+            raw_reads.append(Path(path).relative_to(vault).as_posix())
+        return real_observe(root, path, **kwargs)
+
+    monkeypatch.setattr(vault_recovery, "observe_file", observe)
+
+    def snapshot():
+        return {
+            path: ((vault / path).stat().st_mode, raw)
+            for path, raw in all_bytes(vault).items()
+        }
+
+    before = snapshot()
+    offered = operations.prepare_recovery(vault, direction="finish")
+    (vault.parent / "canonical-tracking-grant-recovery.json").write_text(
+        offered.model_dump_json(), encoding="utf-8"
+    )
+    assert offered.status == "offered" and offered.review is not None, offered.code
+    assert "Notes/Opening.md" in raw_reads
+    observed = next(
+        s.current
+        for s in offered.review.facts.subjects
+        if s.current.path == "Notes/Opening.md"
+    )
+    assert observed.content.data == b"authored opening\r\n"
+    assert (vault / "Notes/Opening.md").read_bytes() == b"authored opening\r\n"
+    assert snapshot() == before
+
+
+def test_stopped_native_cleanup_finishes_current_generation_reference_edits():
+    from tests.application.test_attachment_cleanup_application import (
+        cleanup_asset_action,
+    )
+    from tests.application.test_attachment_cleanup_lifecycle import user_git
+
+    manual = b"Manual [[Assets/remove.bin|old]]. `[[Assets/remove.bin]]`\r\n"
+    without_reference = b"Manual . `[[Assets/remove.bin]]`\r\n"
+    later = b"Later independent writing.\r\n"
+    unrelated_note = b"Later unrelated note with exact authored bytes.\r\n"
+    vault, source, original, operations, first, original_user_git = (
+        completed_native_ownership_case(manual=manual)
+    )
+
+    def remember(name, value):
+        (vault.parent / (name + ".json")).write_text(
+            value.model_dump_json(), encoding="utf-8"
+        )
+        return value
+
+    offered = remember(
+        "small-stop-preparation", operations.prepare_attachment_cleanup(vault)
+    )
+    assert offered.preparation is not None, offered.code
+    removed = remember(
+        "small-stop-resolution",
+        operations.resolve_update(
+            offered.preparation,
+            cleanup_asset_action(
+                offered.preparation.review,
+                "remove-asset",
+                "remove",
+                document_edits={"Manual.md": without_reference},
+            ),
+        ),
+    )
+    assert removed.ready, (removed.code, removed.preparation.review.blockers)
+    stopped = remember(
+        "small-stop-result",
+        operations.apply_update(
+            removed.preparation,
+            cancel=lambda: not (vault / "Assets/remove.bin").exists(),
+        ),
+    )
+    assert stopped.status == "recovery_required", stopped.code
+    assert (
+        stopped.application.kind == "apply" and stopped.application.published_files == 1
+    )
+    assert not (vault / "Assets/remove.bin").exists()
+    assert (vault / "Manual.md").read_bytes() == manual
+    assert user_git(vault) == original_user_git
+    (vault / "Manual.md").write_bytes(manual + later)
+    (vault / "Later.MD").write_bytes(unrelated_note)
+    restarted = remember(
+        "small-stop-restarted", Operations().inspect_history_workflow(vault)
+    )
+    assert (
+        restarted.status == "recovery_required"
+        and restarted.operation.origin_role == "attachment_cleanup"
+    ), restarted.code
+    assert restarted.operation.kind == "apply"
+    paused_ref = git(vault, "rev-parse", first.ref)
+    fresh = remember(
+        "small-finish-preparation",
+        Operations().prepare_history_workflow(
+            vault, kind="recovery", direction="finish"
+        ),
+    )
+    assert fresh.preparation is not None, fresh.code
+    generation = fresh.preparation.native.review.proposal.generation
+    assert fresh.preparation.native.generation == stopped.application.generation
+    assert fresh.preparation.native.intent_commit == stopped.application.intent_commit
+    refreshed = remember(
+        "small-finish-refreshed",
+        Operations().refresh_history_workflow(fresh.preparation),
+    )
+    assert refreshed.preparation is not None, refreshed.code
+    assert refreshed.preparation.native.review.proposal.generation >= generation
+    assert (
+        refreshed.preparation.native.generation == fresh.preparation.native.generation
+    )
+    assert (
+        refreshed.preparation.native.intent_commit
+        == fresh.preparation.native.intent_commit
+    )
+    assert git(vault, "rev-parse", first.ref) == paused_ref
+    assert user_git(vault) == original_user_git
+    assert (vault / "Manual.md").read_bytes() == manual + later
+    context = refreshed.preparation.native.review.facts.link_context
+    assert any(
+        document.source_path == "Later.MD" and document.content.data == unrelated_note
+        for document in context.current_documents
+    )
+    assert any(
+        entry.current.path == "Later.MD"
+        and entry.current.content.data == unrelated_note
+        for entry in refreshed.preparation.native.review.facts.identity_inventory
+    )
+    finished = refreshed
+    limit = len(finished.preparation.native.review.proposal.changes) + 2
+    for index in range(limit):
+        if finished.preparation.ready:
+            break
+        plan = finished.preparation.native.review
+        assert not plan.blockers, plan.blockers
+        assert plan.requirements, plan.blockers
+        requirement = plan.requirements[0]
+        change = next(
+            c for c in plan.proposal.changes if c.change_id == requirement.change_id
+        )
+        assert requirement.domain == "attachment" and "remove" in requirement.choices, (
+            requirement.domain,
+            requirement.choices,
+        )
+        finished = remember(
+            "small-finish-choice-" + str(index),
+            Operations().resolve_history_workflow(
+                finished.preparation,
+                cleanup_asset_action(
+                    plan,
+                    change.item_id,
+                    "remove",
+                    document_edits={"Manual.md": without_reference + later},
+                ).model_copy(
+                    update={"decision_id": f"finish-cleanup:{index}:{change.item_id}"}
+                ),
+            ),
+        )
+        assert finished.preparation is not None, finished.code
+    assert finished.preparation.ready, finished.preparation.native.review.blockers
+    completed = remember(
+        "small-finish-completed",
+        Operations().execute_history_workflow(finished.preparation),
+    )
+    assert (
+        completed.status == "applied"
+        and completed.operation.origin_role == "attachment_cleanup"
+    ), completed.code
+    assert not (vault / "Assets/remove.bin").exists()
+    assert (vault / "Manual.md").read_bytes() == without_reference + later
+    assert (vault / "Later.MD").read_bytes() == unrelated_note
+    assert all(
+        (vault / path).read_bytes() == raw
+        for path, raw in original.items()
+        if path != "Assets/remove.bin"
+    )
+    assert {
+        p.relative_to(source).as_posix(): p.read_bytes()
+        for p in source.rglob("*")
+        if p.is_file()
+    } == original
+    assert user_git(vault) == original_user_git
+    checkpoint = operations.read_checkpoint(vault)
+    assert checkpoint.status == "valid" and checkpoint.manifest.boundary == "result", (
+        checkpoint.code
+    )
+    assert checkpoint.locator.commit == completed.operation.result_commit
+    assert (
+        git(vault, "rev-parse", first.ref).decode().strip()
+        == completed.operation.result_commit
+    )
+    # Retained continuation facts bind their saved before snapshot, not a later
+    # manual file at this old converter path. That file never revives ownership.
+    (vault / "Assets/remove.bin").write_bytes(b"\x00new manual content")
+    assert operations.read_checkpoint(vault).status == "valid"
+    with operations.inspect_update_inputs(vault) as observed:
+        assert (
+            observed.read_attachment_ownership(
+                locator=observed.history.checkpoint.locator,
+                paths=("Assets/remove.bin",),
+            )
+            == ()
+        )
+    assert user_git(vault) == original_user_git
+
+
+def test_removal_continuation_requires_exact_native_origin_and_absent_state():
+    from brz2obsidian.application.checkpoint_contracts import CheckpointFile
+    from brz2obsidian.application.vault_update_contracts import (
+        VaultOperationIntent,
+        VaultPathMetadata,
+    )
+    from brz2obsidian.contracts import (
+        AttachmentFacts,
+        ExactContent,
+        ImportedItemIdentity,
+        OperationReversalOutput,
+        OperationReversalTarget,
+        RetainedAttachmentOwnership,
+    )
+    from brz2obsidian.core import resolve_review, select_review_effects
+    from brz2obsidian.obsidian import interpret_link_target
+    from brz2obsidian.publication.attachment_ownership import (
+        compile_removal_continuations,
+        review_ownership_claims,
+        validate_removal_continuations,
+    )
+    from tests.reconciliation.test_attachment_cleanup import attachment_action
+    from tests.reconciliation.test_attachments import attachment_request, binary_context
+    from tests.reconciliation.test_identity import with_subjects
+    from tests.reconciliation.test_resolution import preflight
+
+    legacy = '{"current_target_id":"resource:payload","allocation_candidates":[],"affected_documents":[]}'
+    assert AttachmentFacts.model_validate_json(legacy).model_dump_json() == legacy
+    facts = attachment_request()
+    subject = facts.subjects[0]
+    owner = RetainedAttachmentOwnership(
+        schema_id="brz2obsidian.retained-attachment-ownership",
+        schema_version=1,
+        association_id="a" * 64,
+        checkpoint_commit="1" * 40,
+        generation=1,
+        identity=ImportedItemIdentity(
+            collection_id=facts.incoming_identity.collection_id,
+            module_id=facts.incoming_identity.module_id,
+            item_id=subject.item_id,
+        ),
+        facet=subject.facet,
+        source_path="Assets/data.bin",
+        source_version="source:A",
+        mapping_sha256=hashlib.sha256(b"literal qualified mapping").hexdigest(),
+        payload_sha256=hashlib.sha256(b"\x00original").hexdigest(),
+        payload_size=9,
+        payload_mode="100644",
+    )
+    subject = subject.model_copy(
+        update={
+            "incoming": subject.baseline.content,
+            "attachment": subject.attachment.model_copy(
+                update={"retained_ownership": owner}
+            ),
+        }
+    )
+    facts = with_subjects(facts, (subject,), facts.identity_inventory)
+    facts = facts.model_copy(
+        update={
+            "format_operation": facts.format_operation.model_copy(
+                update={
+                    "kind": "attachment_cleanup",
+                    "target_source_version": facts.format_operation.baseline_source_version,
+                }
+            ),
+            "link_context": binary_context(facts),
+        }
+    )
+    original = prepare_review(facts, preflight=preflight())
+    chosen = resolve_review(
+        original, attachment_action(original, subject.facet, "remove")
+    )
+    assert chosen.status == "accepted" and chosen.plan.ready, chosen.code
+    original = chosen.plan
+    effects = select_review_effects(original)
+    assert effects.status == "selected" and effects.remove_paths == ("Assets/data.bin",)
+    row = CheckpointFile(
+        path="Assets/data.bin",
+        mode="100644",
+        size=9,
+        sha256=hashlib.sha256(b"\x00authored").hexdigest(),
+        object_id="8" * 40,
+    )
+    intent = VaultOperationIntent(
+        schema_id="brz2obsidian.vault-operation-intent",
+        schema_version=1,
+        operation_id="a" * 32,
+        kind="apply",
+        generation=2,
+        direction="finish",
+        association_id="a" * 64,
+        prepared_commit="2" * 40,
+        before=(row,),
+        proposed=(),
+        affected_paths=("Assets/data.bin",),
+        protected_paths=(),
+        before_metadata=(
+            VaultPathMetadata(
+                path="Assets/data.bin",
+                mode=0,
+                attributes=0,
+                security="literal native metadata",
+            ),
+        ),
+        result_metadata=(),
+        created_directories=(),
+    )
+    # These literal DTOs qualify a descriptive projection, not a real operation.
+    # The fresh native 020 owner establishes actual graph/storage authority.
+    fact = compile_removal_continuations(original, intent, "3" * 40, effects=effects)[
+        (subject.item_id, subject.facet)
+    ]
+    assert fact.before_sha256 == hashlib.sha256(b"\x00authored").hexdigest()
+    assert (
+        fact.operation_id,
+        fact.origin_intent_commit,
+        fact.path,
+        fact.before_size,
+    ) == ("a" * 32, "3" * 40, "Assets/data.bin", 9)
+    with pytest.raises(OSError, match="selected effects"):
+        compile_removal_continuations(original, intent, "3" * 40, effects=None)
+    for altered in (
+        row.model_copy(update={"size": 8}),
+        row.model_copy(update={"sha256": "f" * 64}),
+    ):
+        with pytest.raises(OSError, match="unbound"):
+            compile_removal_continuations(
+                original,
+                intent.model_copy(update={"before": (altered,)}),
+                "3" * 40,
+                effects=effects,
+            )
+    duplicate = original.model_copy(update={"approvals": original.approvals * 2})
+    with pytest.raises(OSError, match="duplicate removal ownership"):
+        compile_removal_continuations(duplicate, intent, "3" * 40, effects=effects)
+    absent = subject.current.model_copy(update={"existence": "absent", "content": None})
+
+    def plan_for(
+        *,
+        continuation=fact,
+        current=absent,
+        reversal=None,
+        target=subject.source_target,
+        incoming=subject.incoming,
+        role="attachment_cleanup",
+    ):
+        observed_subject = subject.model_copy(
+            update={
+                "current": current,
+                "source_target": target,
+                "incoming": incoming,
+                "operation_reversal": reversal,
+                "attachment": subject.attachment.model_copy(
+                    update={"removal_continuation": continuation}
+                ),
+            }
+        )
+        entries = tuple(
+            entry.model_copy(update={"current": current})
+            for entry in facts.identity_inventory
+        )
+        observed = with_subjects(facts, (observed_subject,), entries)
+        context = facts.link_context.model_copy(
+            update={
+                "current_target_facts": (
+                    interpret_link_target(
+                        current.content,
+                        target_id="resource:payload",
+                        existence="missing"
+                        if current.existence == "absent"
+                        else current.existence,
+                        memberships=(),
+                    ),
+                )
+            }
+        )
+        observed = observed.model_copy(
+            update={
+                "format_operation": observed.format_operation.model_copy(
+                    update={"kind": role}
+                ),
+                "link_context": context,
+            }
+        )
+        return prepare_review(observed, preflight=preflight())
+
+    unavailable = plan_for(continuation=None)
+    assert not next(
+        a
+        for a in unavailable.proposal.changes[0].attachment_review.alternatives
+        if a.choice == "remove"
+    ).eligible
+    valid = plan_for()
+    assert next(
+        a
+        for a in valid.proposal.changes[0].attachment_review.alternatives
+        if a.choice == "remove"
+    ).eligible
+    claims = review_ownership_claims(valid)[0]
+    assert validate_removal_continuations(
+        claims,
+        origin=intent,
+        original=original,
+        origin_commit="3" * 40,
+        before=(),
+        direction="finish",
+        effects=effects,
+    ) == {"Assets/data.bin"}
+    assert validate_removal_continuations((), direction="finish") == set()
+    with pytest.raises(OSError, match="continuation"):
+        validate_removal_continuations(
+            claims,
+            origin=intent,
+            original=original,
+            origin_commit="3" * 40,
+            before=(),
+            direction="finish",
+            effects=effects,
+            expected={},
+        )
+    target = next(
+        t
+        for t in original.approvals[0].attachment_candidate.targets
+        if t.target_id == "resource:payload"
+    )
+    reversal = OperationReversalTarget(
+        schema_id="brz2obsidian.operation-reversal-target",
+        schema_version=1,
+        operation_id="other-operation",
+        operation_kind="apply",
+        direction="finish",
+        operation_generation=2,
+        history_fingerprint="different-history",
+        origin_change_id="different-change",
+        origin_decision_id="different-decision",
+        owned_targets=(target,),
+        outputs=(
+            OperationReversalOutput(
+                path="Assets/data.bin",
+                target_id="resource:payload",
+                produced_existence="present",
+                produced=ExactContent(data=b"\x00authored"),
+                current=absent,
+                target_existence="absent",
+                target=None,
+            ),
+        ),
+    )
+    vectors = {
+        "operation": {
+            "continuation": fact.model_copy(update={"operation_id": "b" * 32})
+        },
+        "path": {"continuation": fact.model_copy(update={"path": "Assets/other.bin"})},
+        "history": {
+            "continuation": fact.model_copy(update={"history_fingerprint": "f" * 64})
+        },
+        "present": {"current": subject.current},
+        "reversal": {"reversal": reversal},
+        "source_target": {
+            "target": subject.source_target.model_copy(
+                update={"normalized_path": "assets/other.bin"}
+            )
+        },
+        "incoming": {"incoming": ExactContent(data=b"not the retained source")},
+        "ordinary": {"role": "source_update"},
+    }
+    for label, changes in vectors.items():
+        forged = plan_for(**changes)
+        with pytest.raises(OSError, match="continuation") as refused:
+            validate_removal_continuations(
+                review_ownership_claims(forged)[0],
+                origin=intent,
+                original=original,
+                origin_commit="3" * 40,
+                before=(),
+                direction="finish",
+                effects=effects,
+            )
+        assert refused.value, label
+    with pytest.raises(OSError, match="continuation"):
+        validate_removal_continuations(
+            claims,
+            origin=intent,
+            original=original,
+            origin_commit="3" * 40,
+            before=(row,),
+            direction="finish",
+            effects=effects,
+        )
+    with pytest.raises(OSError, match="continuation"):
+        validate_removal_continuations(
+            claims,
+            origin=intent,
+            original=original,
+            origin_commit="3" * 40,
+            before=(),
+            direction="restore",
+            effects=effects,
+        )
+
+
+def test_native_cleanup_capture_rederives_witness_before_any_history_write():
+    vault, source, original = owned_history_case()
+    operations = Operations()
+    first = operations.capture_checkpoint(
+        vault,
+        source,
+        vault_id="cleanup-vault",
+        import_id="cleanup-import",
+        identity=output_identity(json.loads(original["migration-record.json"])),
+        admission=operations.inspect_history(vault).admission,
+    )
+    assert first.status == "captured", first.code
+    offered = operations.prepare_attachment_cleanup(vault)
+    assert offered.preparation is not None, offered.code
+    prepared = offered.preparation
+    with operations.inspect_update_inputs(vault) as observed:
+        (proof,) = observed.read_attachment_ownership(
+            locator=observed.history.checkpoint.locator, paths=("Assets/remove.bin",)
+        )
+    before = {
+        p.relative_to(vault).as_posix(): p.read_bytes()
+        for p in vault.rglob("*")
+        if p.is_file()
+    }
+    before_user = user_state(vault)
+
+    def capture(candidate):
+        facts = prepared.review.producer_facts
+        facts = facts.model_copy(
+            update={
+                "subjects": tuple(
+                    s.model_copy(
+                        update={
+                            "attachment": s.attachment.model_copy(
+                                update={"retained_ownership": candidate}
+                            )
+                        }
+                    )
+                    if s.item_id == "remove-asset"
+                    else s
+                    for s in facts.subjects
+                )
+            }
+        )
+        review = prepare_review(facts, preflight=prepared.review.preflight)
+        binding = operations.observe_reviewed_source(prepared.payload_directory, review)
+        return operations.capture_checkpoint(
+            vault,
+            source,
+            vault_id="cleanup-vault",
+            import_id="cleanup-import",
+            identity=review.facts.baseline_identity,
+            admission=operations.inspect_history(vault).admission,
+            review=review,
+            review_source=prepared.payload_directory,
+            source_binding=binding,
+            observed_source=prepared.observed_source,
+        )
+
+    for label, changes in (
+        ("association", {"association_id": "f" * 64}),
+        ("unreachable", {"checkpoint_commit": "f" * 40}),
+        (
+            "identity",
+            {"identity": proof.identity.model_copy(update={"item_id": "other-asset"})},
+        ),
+        ("payload", {"payload_sha256": "f" * 64}),
+    ):
+        refused = capture(proof.model_copy(update=changes))
+        (vault.parent / ("refused-" + label + ".json")).write_text(
+            refused.model_dump_json(), encoding="utf-8"
+        )
+        assert (
+            refused.status == "refused" and refused.code == "cleanup_ownership_unbound"
+        ), (label, refused.code)
+        assert not refused.objects_written and refused.object_storage == "not_started"
+        assert {
+            p.relative_to(vault).as_posix(): p.read_bytes()
+            for p in vault.rglob("*")
+            if p.is_file()
+        } == before
+        assert user_state(vault) == before_user
+    saved = capture(proof)
+    assert saved.status == "captured" and saved.locator.generation == 2, saved.code
+    assert operations.read_checkpoint(vault).status == "valid"
+    assert user_state(
+        vault, owned_ref=first.ref
+    ) == user_state_before_without_owned_ref(before_user, first.ref)
+
+
+def user_state_before_without_owned_ref(state, owned_ref):
+    return state | {
+        "refs": tuple(
+            row for row in state["refs"] if row.split(b" ", 1)[0] != owned_ref.encode()
+        )
+    }
+
+
+@pytest.mark.parametrize("outcome", ("removed", "restored", "no-op", "disassociated"))
+def test_completed_cleanup_disposition_does_not_reown_manual_path(outcome):
+    from brz2obsidian.application.checkpoint_contracts import CheckpointFile
+    from brz2obsidian.application.vault_update_contracts import (
+        VaultOperationIntent,
+        VaultOperationReceipt,
+        VaultPathMetadata,
+        VaultRecoveryIntent,
+    )
+    from brz2obsidian.contracts import (
+        ImportedItemIdentity,
+        RetainedAttachmentOwnership,
+    )
+    from brz2obsidian.publication.attachment_ownership import (
+        interpret_attachment_disposition,
+    )
+    from tests.reconciliation.test_attachment_cleanup import cleanup_request
+    from tests.reconciliation.test_resolution import preflight
+
+    plan = prepare_review(cleanup_request(), preflight=preflight())
+    subject = plan.facts.subjects[0]
+    proof = RetainedAttachmentOwnership(
+        schema_id="brz2obsidian.retained-attachment-ownership",
+        schema_version=1,
+        association_id="a" * 64,
+        checkpoint_commit="1" * 40,
+        generation=1,
+        identity=ImportedItemIdentity(
+            collection_id=plan.facts.incoming_identity.collection_id,
+            module_id=plan.facts.incoming_identity.module_id,
+            item_id=subject.item_id,
+        ),
+        facet=subject.facet,
+        source_path="Assets/data.bin",
+        source_version="source:A",
+        mapping_sha256=hashlib.sha256(b"literal mapping A").hexdigest(),
+        payload_sha256=hashlib.sha256(b"\x00original").hexdigest(),
+        payload_size=len(b"\x00original"),
+        payload_mode="100644",
+    )
+    row = CheckpointFile(
+        path="Assets/data.bin",
+        mode="100644",
+        size=9,
+        sha256=hashlib.sha256(b"\x00authored").hexdigest(),
+        object_id="8" * 40,
+    )
+    metadata = VaultPathMetadata(
+        path=row.path, mode=0, attributes=0, security="literal security"
+    )
+    removes = outcome in ("removed", "restored")
+    original = VaultOperationIntent(
+        schema_id="brz2obsidian.vault-operation-intent",
+        schema_version=1,
+        operation_id="a" * 32,
+        kind="apply",
+        generation=2,
+        direction="finish",
+        association_id=proof.association_id,
+        prepared_commit="2" * 40,
+        before=(row,),
+        proposed=() if removes else (row,),
+        affected_paths=(row.path,) if removes else (),
+        protected_paths=() if removes else (row.path,),
+        before_metadata=(metadata,) if removes else (),
+        result_metadata=(),
+        created_directories=(),
+    )
+    final = original
+    if outcome == "restored":
+        final = VaultRecoveryIntent(
+            **(
+                original.model_dump()
+                | {
+                    "schema_id": "brz2obsidian.vault-recovery-intent",
+                    "generation": 4,
+                    "direction": "restore",
+                    "prepared_commit": "6" * 40,
+                    "before": (),
+                    "proposed": (row,),
+                    "before_metadata": (),
+                    "result_metadata": (metadata,),
+                    "origin_intent_commit": "4" * 40,
+                    "previous_operation_commit": "5" * 40,
+                    "review_generation": 3,
+                }
+            )
+        )
+    receipt = VaultOperationReceipt(
+        schema_id="brz2obsidian.vault-operation-receipt",
+        schema_version=1,
+        operation_id=original.operation_id,
+        kind="apply",
+        generation=final.generation,
+        direction=final.direction,
+        status="restored"
+        if outcome == "restored"
+        else "applied"
+        if removes
+        else "no_content_change",
+        intent_commit="4" * 40,
+        prepared_commit=final.prepared_commit,
+        result_commit="7" * 40,
+        published_paths=final.affected_paths,
+    )
+    if outcome == "disassociated":
+        from brz2obsidian.core import reconcile
+        from tests.reconciliation.test_identity import association
+
+        entry = next(
+            e for e in plan.facts.identity_inventory if e.current.path == row.path
+        )
+        other = entry.model_copy(
+            update={
+                "entry_id": "other-bound-entry",
+                "current": entry.current.model_copy(
+                    update={"path": "Assets/other.bin"}
+                ),
+                "target": entry.target.model_copy(
+                    update={"normalized_path": "assets/other.bin"}
+                ),
+            }
+        )
+        facts = plan.producer_facts.model_copy(
+            update={
+                "identity_inventory": (*plan.producer_facts.identity_inventory, other)
+            }
+        )
+        offered = next(c for c in reconcile(facts).changes if c.facet == subject.facet)
+        decision = association(
+            facts, offered.identity_review, other.entry_id, (entry.entry_id,)
+        )
+        plan = prepare_review(
+            facts.model_copy(update={"association_decisions": (decision,)}),
+            preflight=preflight(),
+        )
+        change = next(c for c in plan.proposal.changes if c.facet == subject.facet)
+        assert change.identity_review.disassociate_entry_ids == (entry.entry_id,)
+        assert change.identity_review.provenance == "explicit_user"
+
+    # These pure native values describe completed disposition only. The native
+    # reader must independently bind their receipt graph and canonical review.
+    retained = interpret_attachment_disposition(
+        (proof,), original=original, final=final, receipt=receipt, plan=plan
+    )
+    assert retained == (() if outcome in ("removed", "disassociated") else (proof,))
+    if outcome == "removed":
+        for changed_final, changed_receipt in (
+            (final.model_copy(update={"operation_id": "b" * 32}), receipt),
+            (final, receipt.model_copy(update={"prepared_commit": "9" * 40})),
+        ):
+            with pytest.raises(ValueError, match="matching operation identity"):
+                interpret_attachment_disposition(
+                    (proof,),
+                    original=original,
+                    final=changed_final,
+                    receipt=changed_receipt,
+                    plan=plan,
+                )
+    if outcome == "disassociated":
+        broken_decision = plan.facts.association_decisions[0].model_copy(
+            update={"disassociate_entry_ids": ("missing-entry",)}
+        )
+        broken_facts = plan.facts.model_copy(
+            update={"association_decisions": (broken_decision,)}
+        )
+        broken = plan.model_copy(update={"facts": broken_facts})
+        with pytest.raises(ValueError, match="lacks its observed entry"):
+            interpret_attachment_disposition(
+                (proof,),
+                original=original,
+                final=final,
+                receipt=receipt,
+                plan=broken,
+            )
+    # A later manual file at the same name never creates a new historical owner.
+    assert (
+        interpret_attachment_disposition(
+            (), original=original, final=final, receipt=receipt, plan=plan
+        )
+        == ()
+    )

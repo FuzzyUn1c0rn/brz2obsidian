@@ -63,6 +63,125 @@ class Operations:
         self.credentials = credentials
         self.vault_executor = vault_executor
 
+    def prepare_update(self, vault, source):
+        """Prepare an ordinary source update using physical validated facts."""
+        from .update_lifecycle import prepare_update
+
+        return prepare_update(self, vault, source)
+
+    def prepare_attachment_cleanup(self, vault):
+        """Review recorded attachment ownership and current references explicitly."""
+        from .attachment_cleanup import prepare_attachment_cleanup
+
+        return prepare_attachment_cleanup(self, vault)
+
+    def prepare_format_transition(self, vault, source=None):
+        """Review presentation maintenance separately from incoming source changes."""
+        from .format_transition import prepare_format_transition
+
+        return prepare_format_transition(self, vault, source)
+
+    def prepare_onboarding(self, vault, source=None, *, original_source=None):
+        """Review legacy content without promoting authored bytes to originals."""
+        from .onboarding import prepare_onboarding
+
+        return prepare_onboarding(self, vault, source, original_source=original_source)
+
+    def read_checkpoint_payload(self, vault, **kwargs):
+        """Read finite exact-byte pages from currently validated owned history."""
+        from brz2obsidian.publication.checkpoint_payload import read_checkpoint_payload
+
+        return read_checkpoint_payload(vault, **kwargs)
+
+    def apply_update(self, preparation, *, cancel=None, progress=None):
+        """Reobserve and apply exactly one complete current source review."""
+        from .update_lifecycle import apply_update
+
+        return apply_update(self, preparation, cancel=cancel, progress=progress)
+
+    def resolve_configuration(self, preparation, actions):
+        """Record one explicit choice for the complete offered configuration group."""
+        from .format_configuration import resolve_configuration
+
+        return resolve_configuration(self, preparation, actions)
+
+    def configuration_choice_offer(self, preparation):
+        """Describe one canonical complete configuration group."""
+        from .format_configuration import configuration_choice_offer
+
+        return configuration_choice_offer(preparation)
+
+    def resolve_configuration_choice(self, preparation, *, group_id, choice):
+        """Reconstruct all group actions before the shared explicit group gate."""
+        from .format_configuration import resolve_configuration_choice
+
+        return resolve_configuration_choice(
+            self, preparation, group_id=group_id, choice=choice
+        )
+
+    def resolve_update_choice(
+        self,
+        preparation,
+        *,
+        requirement_id,
+        choice,
+        assumptions_digest,
+        references=(),
+        edited=None,
+        selected_entry_id=None,
+        disassociate_entry_ids=(),
+    ):
+        """Reconstruct an offered action and validate its canonical dependencies."""
+        from .review_choices import resolve_update_choice
+
+        return resolve_update_choice(
+            self,
+            preparation,
+            requirement_id=requirement_id,
+            choice=choice,
+            assumptions_digest=assumptions_digest,
+            references=references,
+            edited=edited,
+            selected_entry_id=selected_entry_id,
+            disassociate_entry_ids=disassociate_entry_ids,
+        )
+
+    def resolve_update(self, preparation, action, *, edited=None):
+        """Resolve one offered S1 choice, binding edited text to its actual target."""
+        from .update_lifecycle import resolve_update
+
+        return resolve_update(self, preparation, action, edited=edited)
+
+    def refresh_update(self, preparation, *, source=None):
+        """Reobserve current files or a newly supplied BRZ and retain safe choices."""
+        from .update_lifecycle import refresh_update
+
+        return refresh_update(self, preparation, source=source)
+
+    def save_update(self, preparation, *, cancel=None, progress=None):
+        """Retain a current unresolved or complete review in owned Git history."""
+        from .update_lifecycle import save_update
+
+        return save_update(self, preparation, cancel=cancel, progress=progress)
+
+    def load_update(self, vault):
+        """Load a saved review as explicitly unready historical evidence."""
+        from .update_lifecycle import load_update
+
+        return load_update(self, vault)
+
+    def resume_update(self, vault):
+        """Materialize saved inputs and revalidate against fresh physical facts."""
+        from .update_lifecycle import resume_update
+
+        return resume_update(self, vault)
+
+    def inspect_update_review(self, preparation, **kwargs):
+        """Read bounded comparisons for exactly the requested review generation."""
+        from .update_lifecycle import inspect_update_review
+
+        return inspect_update_review(self, preparation, **kwargs)
+
     def inspect_vault(
         self,
         vault: Path | str,
@@ -99,6 +218,12 @@ class Operations:
 
         return inspect_history(vault, **kwargs)
 
+    def inspect_update_inputs(self, vault, **kwargs):
+        """Read current update inputs within one single-use lexical observation."""
+        from brz2obsidian.publication.vault_history import inspect_update_inputs
+
+        return inspect_update_inputs(vault, **kwargs)
+
     def read_checkpoint(self, vault, **kwargs):
         """Validate and read current converter-owned checkpoint history."""
         from brz2obsidian.publication.vault_history import read_checkpoint
@@ -117,11 +242,16 @@ class Operations:
 
         return prepare_history_repair(vault, copy, validation)
 
-    def execute_history_repair(self, vault, copy, preparation):
+    def execute_history_repair(self, vault, copy, preparation, *, progress=None):
         """Repair exact missing or damaged converter-owned Git payloads."""
         from brz2obsidian.publication.vault_repair import execute_history_repair
 
-        return execute_history_repair(vault, copy, preparation)
+        return execute_history_repair(
+            vault,
+            copy,
+            preparation,
+            **({"progress": progress} if progress is not None else {}),
+        )
 
     def apply_reviewed_update(self, vault, source, **kwargs):
         """Apply one whole current S1 review through owned existing-vault history."""
@@ -155,12 +285,16 @@ class Operations:
 
         return resolve_recovery(vault, preparation, action)
 
-    def execute_recovery(self, vault, preparation, *, cancel=None):
+    def execute_recovery(self, vault, preparation, *, cancel=None, progress=None):
         """Publish one retained reviewed recovery direction and its exact result."""
         from brz2obsidian.publication.vault_recovery import execute_recovery
 
         return execute_recovery(
-            vault, preparation, cancel=cancel, executor=self.vault_executor
+            vault,
+            preparation,
+            cancel=cancel,
+            executor=self.vault_executor,
+            **({"progress": progress} if progress is not None else {}),
         )
 
     def prepare_undo(self, vault, *, previous=None):
@@ -175,30 +309,104 @@ class Operations:
 
         return resolve_undo(vault, preparation, action)
 
-    def execute_undo(self, vault, preparation, *, cancel=None):
+    def execute_undo(self, vault, preparation, *, cancel=None, progress=None):
         """Publish an eligible reviewed Undo through the existing operation executor."""
         from brz2obsidian.publication.vault_undo import execute_undo
 
         return execute_undo(
-            vault, preparation, cancel=cancel, executor=self.vault_executor
+            vault,
+            preparation,
+            cancel=cancel,
+            executor=self.vault_executor,
+            **({"progress": progress} if progress is not None else {}),
         )
 
-    def read_update_details(self, vault, *, offset=0, limit=100):
+    def read_update_details(self, vault, *, offset=0, limit=100, expected=None):
         """Page safe before/result comparisons from validated owned intent."""
         from brz2obsidian.publication.vault_apply import read_update_details
 
-        return read_update_details(vault, offset=offset, limit=limit)
+        return read_update_details(vault, offset=offset, limit=limit, expected=expected)
+
+    def read_history_details(self, vault, *, expected, offset=0, limit=100):
+        """Read metadata for exactly this expected native operation identity."""
+        from .vault_update_contracts import VaultApplyResult
+
+        if expected is None:
+            raise ValueError("History details require the expected native operation")
+        try:
+            expected = VaultApplyResult.model_validate(
+                expected.model_dump()
+                if isinstance(expected, VaultApplyResult)
+                else expected
+            )
+        except ValueError, TypeError:
+            raise ValueError(
+                "History details require a valid native operation"
+            ) from None
+        if not expected.operation_id or any(
+            getattr(expected, field) is None
+            for field in (
+                "intent_commit",
+                "generation",
+                "kind",
+                "direction",
+                "checkpoint_commit",
+            )
+        ):
+            raise ValueError(
+                "History details require complete expected operation identity"
+            )
+        return self.read_update_details(
+            vault, offset=offset, limit=limit, expected=expected
+        )
+
+    def inspect_history_workflow(self, vault):
+        """Inspect restart routing from fresh native operation and history facts."""
+        from .history_workflow import inspect_history_workflow
+
+        return inspect_history_workflow(self, vault)
+
+    def prepare_history_workflow(self, vault, *, kind, direction=None, copy=None):
+        """Prepare shared recovery, latest Undo or independently matched repair."""
+        from .history_workflow import prepare_history_workflow
+
+        return prepare_history_workflow(
+            self, vault, kind=kind, direction=direction, copy=copy
+        )
+
+    def refresh_history_workflow(self, preparation):
+        """Refresh the existing native review or exact local-copy repair proof."""
+        from .history_workflow import refresh_history_workflow
+
+        return refresh_history_workflow(self, preparation)
+
+    def resolve_history_workflow(self, preparation, action):
+        """Resolve current native recovery/Undo facts without publication."""
+        from .history_workflow import resolve_history_workflow
+
+        return resolve_history_workflow(self, preparation, action)
+
+    def execute_history_workflow(self, preparation, *, cancel=None, progress=None):
+        """Execute one freshly checked native action and project its exact result."""
+        from .history_workflow import execute_history_workflow
+
+        return execute_history_workflow(
+            self, preparation, cancel=cancel, progress=progress
+        )
+
+    def _configured_workflow(self):
+        if self.workflow is None:
+            from brz2obsidian.application.wiring import default_workflow
+
+            self.workflow = default_workflow()
+        return self.workflow
 
     def _selected_workflow(self, selection):
         if isinstance(selection, LocalApiSourceSelection):
             from brz2obsidian.application.wiring import selected_api_workflow
 
             return selected_api_workflow(selection, self.credentials)
-        if self.workflow is None:
-            from brz2obsidian.application.wiring import default_workflow
-
-            self.workflow = default_workflow()
-        return self.workflow, Path(selection.path).absolute()
+        return self._configured_workflow(), Path(selection.path).absolute()
 
     def list_brains(self, config: ApiAcquisitionConfig) -> BrainListResult:
         from brz2obsidian.application.wiring import list_api_brains
@@ -422,6 +630,9 @@ class ApplicationSession:
     """
 
     def __init__(self):
+        from .update_session import UpdateSession
+
+        self._updates = UpdateSession()
         self._snapshot = SessionSnapshot()
         self._active_revision = None
         self._validation_revision = None
@@ -433,6 +644,48 @@ class ApplicationSession:
     @property
     def snapshot(self) -> SessionSnapshot:
         return self._snapshot
+
+    @property
+    def update_snapshot(self):
+        return self._updates.snapshot
+
+    def select_update(self, vault, *, selection_id):
+        with self._lock:
+            return self._updates.select(vault, selection_id=selection_id)
+
+    def start_update(self, arguments):
+        with self._lock:
+            return self._updates.start(arguments)
+
+    def complete_update(self, request_id, terminal):
+        with self._lock:
+            return self._updates.complete(request_id, terminal)
+
+    def bind_update_worker(self, worker_id):
+        with self._lock:
+            self._updates.bind_worker(worker_id)
+
+    def update_contact_uncertain(self, worker_id):
+        with self._lock:
+            return self._updates.uncertain(worker_id)
+
+    def observe_update_progress(self, worker_id, request, progress):
+        with self._lock:
+            return self._updates.observe(worker_id, request, progress)
+
+    def complete_update_control(self, request_id, terminal):
+        with self._lock:
+            return self._updates.control(request_id, terminal)
+
+    def queue_update_cancel(self, request_id):
+        with self._lock:
+            return self._updates.queue_cancel(request_id)
+
+    def request_update_close(self, choice, *, expected_revision):
+        with self._lock:
+            return self._updates.request_close(
+                choice, expected_revision=expected_revision
+            )
 
     def dispatch(self, command: SessionCommand) -> SessionUpdate:
         with self._lock:

@@ -5,15 +5,34 @@ import json
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from brz2obsidian.application.operations import Operations
+from brz2obsidian.application.review_choices import (
+    requirement_digest,
+    review_plan_attachment_references,
+    review_plan_choice_action,
+)
+from brz2obsidian.application.update_lifecycle import text_choice_action
 from brz2obsidian.application.vault_recovery_contracts import VaultRecoveryPreparation
 from brz2obsidian.application.vault_undo_contracts import VaultUndoPreparation
-from brz2obsidian.contracts import ExactContent, LinkOccurrenceChoice, ReviewPlan
-from brz2obsidian.core import prepare_review, resolve_review, select_review_effects
+from brz2obsidian.contracts import (
+    CurrentContent,
+    ExactContent,
+    LinkOccurrenceChoice,
+    ReviewPlan,
+)
+from brz2obsidian.core import (
+    inspect_review_choices,
+    prepare_review,
+    resolve_review,
+    select_review_effects,
+)
+from brz2obsidian.core.reversals import review_owned_documents
 from brz2obsidian.obsidian import interpret_link_target, interpret_links
 from brz2obsidian.publication.vault_apply import _NativeExecutor
-from tests.application.test_vault_apply import _apply
-from tests.application.test_vault_checkpoints import user_state
+from tests.application.test_vault_apply import _apply, _ready_case
+from tests.application.test_vault_checkpoints import git, user_state
 from tests.application.test_vault_recovery_process import (
     _AFTER,
     _BASE,
@@ -28,7 +47,9 @@ from tests.reconciliation.test_attachments import (
     attachment_candidate,
     linked_attachment_request,
 )
-from tests.reconciliation.test_resolution import action
+from tests.reconciliation.test_identity import with_subjects
+from tests.reconciliation.test_proposals import request
+from tests.reconciliation.test_resolution import action, with_review_links
 
 _UNDO_CHILD = """
 import os
@@ -56,6 +77,784 @@ def _with_review(prepared, review):
     return contract.model_validate(
         {**prepared.model_dump(mode="python"), "review": review}
     )
+
+
+def _with_unassociated_manual(facts, raw):
+    """Ordinary authored link owner: no imported subject or source membership."""
+    binary = linked_attachment_request(payload_current=b"\x00authored", raw=raw)
+    asset = binary.subjects[0].model_copy(
+        update={
+            "item_id": "entry:asset",
+            "attachment": binary.subjects[0].attachment.model_copy(
+                update={"affected_documents": ("file:Manual.md",)}
+            ),
+        }
+    )
+    asset_entry = binary.identity_inventory[0].model_copy(
+        update={
+            "entry_id": "binary:payload",
+            "identity": binary.identity_inventory[0].identity.model_copy(
+                update={"item_id": "entry:asset"}
+            ),
+        }
+    )
+    manual_entry = binary.identity_inventory[1].model_copy(
+        update={
+            "entry_id": "file:Manual.md",
+            "identity_state": "missing",
+            "identity": None,
+            "raw_identity": None,
+            "current": CurrentContent(
+                existence="present", path="Manual.md", content=ExactContent(data=raw)
+            ),
+            "target": binary.identity_inventory[1].target.model_copy(
+                update={"normalized_path": "manual.md"}
+            ),
+        }
+    )
+    context = {}
+    for stage in ("current", "incoming"):
+        targets = tuple(
+            row.model_copy(
+                update={
+                    "target_id": "file:Manual.md",
+                    "canonical_path": "Manual.md",
+                    "identity": None,
+                    "target": manual_entry.target,
+                    "representations": ("Manual.md",),
+                }
+            )
+            if row.target_id == "owner:note"
+            else row
+            for row in getattr(binary.link_context, stage + "_targets")
+        )
+        states = tuple(
+            row.model_copy(update={"target_id": "file:Manual.md"})
+            if row.target_id == "owner:note"
+            else row
+            for row in getattr(binary.link_context, stage + "_target_facts")
+        )
+        document = interpret_links(
+            ExactContent(data=raw),
+            document_id="file:Manual.md",
+            source_path="Manual.md",
+            path_mode="vault",
+            targets=targets,
+            target_facts=states,
+            inventory="complete",
+        )
+        assert document.status == "supported"
+        for suffix, rows in (
+            ("_targets", targets),
+            ("_target_facts", states),
+            ("_documents", (document,)),
+        ):
+            name = stage + suffix
+            context[name] = getattr(facts.link_context, name) + rows
+    facts = with_subjects(
+        facts,
+        (*facts.subjects, asset),
+        (*facts.identity_inventory, asset_entry, manual_entry),
+    )
+    return facts.model_copy(
+        update={"link_context": facts.link_context.model_copy(update=context)}
+    )
+
+
+def test_small_latest_undo_reverses_one_note_and_refuses_reuse():
+    vault, source, operations, reviewed, before = _ready_case()
+    opening = vault / "Notes/Opening.md"
+    local = vault / "Notes/Local.md"
+
+    checkpoint_ref = operations.read_checkpoint(vault).locator.association.ref
+    allowed_refs = {checkpoint_ref.encode()}
+
+    def assert_user_git_unchanged():
+        _assert_user_state(before, user_state(vault), allowed_refs=allowed_refs)
+
+    assert operations.prepare_undo(vault).status == "none"
+    assert opening.read_bytes() == b"authored opening\r\n"
+    assert local.read_bytes() == b"local \xff\r\n"
+    assert_user_git_unchanged()
+
+    applied = _apply(
+        operations,
+        vault,
+        source,
+        review=reviewed,
+        vault_id="vault-one",
+        import_id="import-one",
+    )
+    assert applied.status == "applied" and applied.publication == "complete"
+    assert applied.receipt_commit
+    allowed_refs.add(_operation_ref(checkpoint_ref, applied.operation_id))
+    assert opening.read_bytes() == b"incoming opening\n"
+    assert local.read_bytes() == b"local \xff\r\n"
+    assert_user_git_unchanged()
+
+    prepared = operations.prepare_undo(vault)
+    assert prepared.status == "offered" and not prepared.review.ready
+    assert prepared.target_receipt_commit == applied.receipt_commit
+    refused = operations.execute_undo(vault, prepared)
+    assert (refused.status, refused.code) == ("refused", "undo_review_required")
+    assert not refused.authored_files_changed
+    requirement = prepared.review.requirements[0]
+    change = next(
+        c
+        for c in prepared.review.proposal.changes
+        if c.change_id == requirement.change_id
+    )
+    subject = next(
+        s
+        for s in prepared.review.facts.subjects
+        if (s.item_id, s.facet) == (change.item_id, change.facet)
+    )
+    choice = action(
+        prepared.review,
+        change,
+        choice="incoming",
+        decision_id="undo:opening",
+        candidate=_incoming_candidate(
+            prepared.review.facts, subject, b"authored opening\r\n"
+        ),
+    )
+    stale = operations.resolve_undo(
+        vault,
+        prepared,
+        choice.model_copy(
+            update={"expected_generation": choice.expected_generation + 1}
+        ),
+    )
+    assert stale.status == "refused"
+    assert opening.read_bytes() == b"incoming opening\n"
+    assert_user_git_unchanged()
+    resolved = operations.resolve_undo(vault, prepared, choice)
+    assert resolved.status == "offered" and resolved.review.ready, resolved.code
+    undone = operations.execute_undo(vault, resolved)
+    assert (undone.status, undone.kind, undone.publication) == (
+        "undone",
+        "undo",
+        "complete",
+    )
+    allowed_refs.add(_operation_ref(checkpoint_ref, undone.operation_id))
+    assert opening.read_bytes() == b"authored opening\r\n"
+    assert local.read_bytes() == b"local \xff\r\n"
+    assert_user_git_unchanged()
+    fresh = Operations()
+    status = fresh.inspect_update_status(vault)
+    assert (status.status, status.kind, status.receipt_commit) == (
+        "undone",
+        "undo",
+        undone.receipt_commit,
+    )
+    checkpoint = fresh.read_checkpoint(vault)
+    assert checkpoint.status == "valid" and checkpoint.manifest.boundary == "result"
+    assert checkpoint.manifest.operation_intent_commit == undone.intent_commit
+    receipt = json.loads(git(vault, "show", f"{undone.receipt_commit}:receipt.json"))
+    intent = json.loads(git(vault, "show", f"{undone.intent_commit}:intent.json"))
+    assert (receipt["kind"], receipt["status"], receipt["intent_commit"]) == (
+        "undo",
+        "undone",
+        undone.intent_commit,
+    )
+    assert intent["undo_of_receipt_commit"] == applied.receipt_commit
+    again = fresh.prepare_undo(vault)
+    assert (again.status, again.code) == (
+        "already_undone",
+        "latest_update_already_undone",
+    )
+    assert fresh.execute_undo(vault, resolved).status == "refused"
+    assert opening.read_bytes() == b"authored opening\r\n"
+    assert local.read_bytes() == b"local \xff\r\n"
+    assert_user_git_unchanged()
+
+
+def test_latest_undo_retains_created_definition_identities_and_later_home():
+    effort = Path(__file__).resolve().parents[2] / "tmp/issue-304/fixtures"
+    effort.mkdir(parents=True, exist_ok=True)
+    # Public history admission requires a vault outside any parent repository.
+    container = Path(tempfile.mkdtemp(prefix="brz2obsidian-304-definitions-"))
+    vault, source = container / "vault", container / "source"
+    ownership = json.dumps(
+        {
+            "owner": container.name,
+            "root": str(container.resolve()),
+            "base": str(Path(tempfile.gettempdir()).resolve()),
+            "vault": str(vault),
+            "source": str(source),
+        }
+    )
+    (container / ".fixture-owner.json").write_text(ownership, encoding="utf-8")
+    (effort / (container.name + ".json")).write_text(ownership, encoding="utf-8")
+    vault.mkdir()
+    source.mkdir()
+    manual_before = (
+        b"Authored prose.\n[[Assets/data.bin|Keep first]] and "
+        b"[[Assets/data.bin|Redirect second]]\n"
+    )
+    manual_after = (
+        b"Authored prose.\n[[Assets/data.bin|Keep first]] and "
+        b"[Second edited alias](Assets/data%20%28incoming-ba7816bf%29.bin)\n"
+    )
+    git(vault, "init", "-q")
+    git(vault, "config", "core.autocrlf", "false")
+    (vault / "Home.md").write_bytes(b"Home before.\n")
+    (vault / "Protected.bin").write_bytes(b"protected\x00\xff")
+    (vault / "Manual.md").write_bytes(manual_before)
+    (vault / "Assets").mkdir()
+    (source / "Assets").mkdir()
+    (vault / "Assets/data.bin").write_bytes(b"\x00original")
+    (source / "Assets/data.bin").write_bytes(b"\x00original")
+    git(vault, "add", ".")
+    git(vault, "commit", "-qm", "independent authored preimage")
+    git(vault, "update-ref", "refs/notes/user-proof", "HEAD")
+    # A mixed user index must survive preparation and Current resolution too.
+    (vault / "Home.md").write_bytes(b"User staged Home.\n")
+    git(vault, "add", "Home.md")
+    (vault / "Home.md").write_bytes(b"Home before.\n")
+    facts = request(
+        original=b"Home before.\n",
+        current=b"Home before.\n",
+        incoming=b"Home incoming.\n",
+    )
+    home = facts.subjects[0]
+    current = home.current.model_copy(update={"path": "Home.md"})
+    target = home.source_target.model_copy(update={"normalized_path": "home.md"})
+    subjects = [
+        home.model_copy(
+            update={"path": "Home.md", "current": current, "source_target": target}
+        )
+    ]
+    entries = [
+        facts.identity_inventory[0].model_copy(
+            update={"current": current, "target": target}
+        )
+    ]
+    definitions = (
+        (
+            "category",
+            "Categories/Experiments.md",
+            "definition:experiments",
+            b"# Old category\n",
+            b"# Experiments\n",
+        ),
+        (
+            "note",
+            "Templates/Experiments.md",
+            "support:template",
+            b"# Old template\n",
+            b'---\ncreated: "{{date:YYYY-MM-DD}}"\n---\n# New member\n',
+        ),
+        (
+            "relationship",
+            "Definitions/Related.md",
+            "definition:related",
+            b"# Old relation\n",
+            b"# Related\n",
+        ),
+    )
+    for _, path, item_id, old, incoming in definitions:
+        observed = CurrentContent(existence="absent", path=path, content=None)
+        target = home.source_target.model_copy(
+            update={"normalized_path": path.casefold()}
+        )
+        subjects.append(
+            home.model_copy(
+                update={
+                    "item_id": item_id,
+                    "path": path,
+                    "current": observed,
+                    "source_target": target,
+                    "baseline": home.baseline.model_copy(
+                        update={"content": ExactContent(data=old)}
+                    ),
+                    "incoming": ExactContent(data=incoming),
+                }
+            )
+        )
+        entries.append(
+            facts.identity_inventory[0].model_copy(
+                update={
+                    "entry_id": item_id,
+                    "identity": facts.identity_inventory[0].identity.model_copy(
+                        update={"item_id": item_id}
+                    ),
+                    "current": observed,
+                    "target": target,
+                }
+            )
+        )
+        (source / path).parent.mkdir(parents=True, exist_ok=True)
+        (source / path).write_bytes(old)
+    facts = with_review_links(with_subjects(facts, tuple(subjects), tuple(entries)))
+    kinds = {"review:" + item_id: kind for kind, _, item_id, _, _ in definitions}
+    context = facts.link_context
+    facts = facts.model_copy(
+        update={
+            "link_context": context.model_copy(
+                update={
+                    name: tuple(
+                        row.model_copy(
+                            update={"kind": kinds.get(row.target_id, row.kind)}
+                        )
+                        for row in getattr(context, name)
+                    )
+                    for name in ("current_targets", "incoming_targets")
+                }
+            )
+        }
+    )
+    facts = _with_unassociated_manual(facts, manual_before)
+    (manual,) = [
+        row for row in facts.identity_inventory if row.current.path == "Manual.md"
+    ]
+    assert manual.identity_state == "missing" and manual.identity is None
+    assert not any(row.path == "Manual.md" for row in facts.subjects)
+    assert not (source / "Manual.md").exists()
+    (source / "Home.md").write_bytes(b"Home before.\n")
+    operations = Operations()
+    admission = operations.inspect_history(vault).admission
+    assert admission.status == "supported", admission.model_dump_json()
+    captured = operations.capture_checkpoint(
+        vault,
+        source,
+        vault_id="definitions-vault",
+        import_id="definitions-import",
+        identity=facts.incoming_identity,
+        admission=admission,
+    )
+    assert captured.status == "captured", captured.code
+    (vault / "Assets/data.bin").write_bytes(b"\x00authored")
+    (source / "Assets/data.bin").write_bytes(b"abc")
+    (source / "Home.md").write_bytes(b"Home incoming.\n")
+    for _, path, _, _, incoming in definitions:
+        (source / path).write_bytes(incoming)
+    history = operations.inspect_history(vault)
+    assert not any(
+        row.path == "Manual.md" for row in history.checkpoint.manifest.source
+    )
+    reviewed = prepare_review(facts, preflight=history.admission.preflight)
+    for subject in subjects:
+        change = next(
+            row for row in reviewed.proposal.changes if row.item_id == subject.item_id
+        )
+        selected = resolve_review(
+            reviewed,
+            action(
+                reviewed,
+                change,
+                decision_id="apply:" + subject.item_id,
+                domain="text" if subject.path == "Home.md" else "restoration",
+                choice="incoming" if subject.path == "Home.md" else "restore_incoming",
+                candidate=_incoming_candidate(facts, subject, subject.incoming.data),
+            ),
+        )
+        assert selected.status == "accepted", selected.code
+        reviewed = selected.plan
+    selection, candidate = _both_with_owner(facts, manual_after, owner_path="Manual.md")
+    asset_change = next(
+        row for row in reviewed.proposal.changes if row.facet == "attachment:payload"
+    )
+    selected = resolve_review(
+        reviewed,
+        action(
+            reviewed,
+            asset_change,
+            domain="attachment",
+            choice="both",
+            decision_id="apply:authored-references",
+            attachment_selection=selection,
+            attachment_candidate=candidate,
+        ),
+    )
+    assert selected.status == "accepted", selected.code
+    reviewed = selected.plan
+    assert reviewed.ready, reviewed.blockers
+    applied = _apply(
+        operations,
+        vault,
+        source,
+        review=reviewed,
+        vault_id="definitions-vault",
+        import_id="definitions-import",
+    )
+    assert applied.status == "applied", applied.code
+    later = b"Home incoming.\nLater independent writing.\n"
+    (vault / "Home.md").write_bytes(later)
+    before = user_state(vault)
+    assert before["authored"] == {
+        "Home.md": later,
+        "Protected.bin": b"protected\x00\xff",
+        "Manual.md": manual_after,
+        "Assets/data.bin": b"\x00authored",
+        "Assets/data (incoming-ba7816bf).bin": b"abc",
+        **{path: incoming for _, path, _, _, incoming in definitions},
+    }
+    full_before = {
+        p.relative_to(vault).as_posix(): p.read_bytes()
+        for p in vault.rglob("*")
+        if p.is_file()
+    }
+    prepared = operations.prepare_undo(vault)
+    assert {
+        p.relative_to(vault).as_posix(): p.read_bytes()
+        for p in vault.rglob("*")
+        if p.is_file()
+    } == full_before
+    assert prepared.status == "offered", prepared.code
+    assert prepared.target_receipt_commit == applied.receipt_commit
+    assert prepared.checkpoint_commit == applied.result_commit
+    manual_subject = next(
+        row for row in prepared.review.facts.subjects if row.path == "Manual.md"
+    )
+    assert manual_subject.item_id == "file:Manual.md"
+    assert manual_subject.baseline.status == "unknown"
+    assert manual_subject.baseline.content is None
+    assert manual_subject.operation_reversal.outputs[0].produced.data == manual_after
+    assert manual_subject.operation_reversal.outputs[0].target.data == manual_before
+    manual_change = next(
+        row for row in prepared.review.proposal.changes if row.path == "Manual.md"
+    )
+    assert manual_change.identity_review.provenance == "operation_owned"
+    assert not manual_change.identity_review.repair_required
+    assert next(
+        row.choices
+        for row in prepared.review.requirements
+        if row.change_id == manual_change.change_id
+    ) == ("current", "reverse")
+    rejected_edit = resolve_review(
+        prepared.review,
+        action(prepared.review, manual_change, domain="reversal", choice="edited"),
+    )
+    assert rejected_edit.status == "refused"
+
+    # Generic missing identity, duplicate owners and inconsistent path/hash facts
+    # cannot acquire operation-owned binding from a matching file name.
+    observed_facts = prepared.review.facts
+    manual_entry = next(
+        row
+        for row in observed_facts.identity_inventory
+        if row.current.path == "Manual.md"
+    )
+    variants = (
+        observed_facts.model_copy(
+            update={
+                "subjects": tuple(
+                    row.model_copy(update={"operation_reversal": None})
+                    if row.path == "Manual.md"
+                    else row
+                    for row in observed_facts.subjects
+                )
+            }
+        ),
+        observed_facts.model_copy(
+            update={
+                "identity_inventory": observed_facts.identity_inventory
+                + (manual_entry.model_copy(update={"entry_id": "duplicate:manual"}),)
+            }
+        ),
+        observed_facts.model_copy(
+            update={
+                "subjects": tuple(
+                    row.model_copy(
+                        update={
+                            "source_target": row.source_target.model_copy(
+                                update={"normalized_path": "protected.bin"}
+                            )
+                        }
+                    )
+                    if row.path == "Manual.md"
+                    else row
+                    for row in observed_facts.subjects
+                )
+            }
+        ),
+        observed_facts.model_copy(
+            update={
+                "identity_inventory": tuple(
+                    row.model_copy(
+                        update={
+                            "current": row.current.model_copy(
+                                update={"content": ExactContent(data=b"foreign bytes")}
+                            )
+                        }
+                    )
+                    if row.current.path == "Manual.md"
+                    else row
+                    for row in observed_facts.identity_inventory
+                )
+            }
+        ),
+    )
+    for unsafe in variants:
+        refused = prepare_review(unsafe, preflight=prepared.review.preflight)
+        change = next(
+            row for row in refused.proposal.changes if row.path == "Manual.md"
+        )
+        assert change.identity_review.status != "matched"
+        assert not refused.ready
+        assert select_review_effects(refused).status != "selected"
+    context = prepared.review.facts.link_context
+    for kind, path, item_id, _, incoming in definitions:
+        (target,) = [
+            row for row in context.current_targets if row.canonical_path == path
+        ]
+        assert (
+            target.target_id,
+            target.kind,
+            target.identity.module_id,
+            target.identity.collection_id,
+            target.identity.item_id,
+        ) == (
+            "review:" + item_id,
+            kind,
+            "synthetic-folio",
+            "folio:collection",
+            item_id,
+        )
+        (state,) = [
+            row
+            for row in context.current_target_facts
+            if row.target_id == target.target_id
+        ]
+        assert state.existence == "present" and state.content.data == incoming
+        (document,) = [
+            row for row in context.current_documents if row.source_path == path
+        ]
+        assert (document.document_id, document.status, document.content.data) == (
+            target.target_id,
+            "supported",
+            incoming,
+        )
+    home_change = next(
+        row for row in prepared.review.proposal.changes if row.path == "Home.md"
+    )
+    assert home_change.current.data == later
+    assert any(
+        row.change_id == home_change.change_id and "current" in row.choices
+        for row in prepared.review.requirements
+    )
+    kept = operations.resolve_undo(
+        vault,
+        prepared,
+        action(
+            prepared.review,
+            home_change,
+            choice="current",
+            decision_id="keep:later-home",
+        ),
+    )
+    assert kept.status == "offered", kept.code
+    approval = next(
+        row for row in kept.review.approvals if row.change_id == home_change.change_id
+    )
+    assert approval.result.data == later
+    assert user_state(vault) == before
+    assert {
+        p.relative_to(vault).as_posix(): p.read_bytes()
+        for p in vault.rglob("*")
+        if p.is_file()
+    } == full_before
+
+    def complete(preparation, manual_choice):
+        for path, choice in (
+            ("Manual.md", manual_choice),
+            ("Home.md", "current"),
+            *((path, "reverse") for _, path, _, _, _ in definitions),
+            ("Assets/data.bin", "reverse"),
+        ):
+            plan = preparation.review
+            change = next(row for row in plan.proposal.changes if row.path == path)
+            if not any(row.change_id == change.change_id for row in plan.requirements):
+                continue
+            selected_action = text_choice_action(
+                plan,
+                action(
+                    plan,
+                    change,
+                    domain="text" if path == "Home.md" else "reversal",
+                    choice=choice,
+                    decision_id=f"undo:{plan.proposal.generation}:{path}:{choice}",
+                ),
+            )
+            if path == "Manual.md":
+                assert selected_action.candidate is None
+            transition = resolve_review(plan, selected_action)
+            assert transition.status == "accepted", (path, transition.code)
+            preparation = _with_review(preparation, transition.plan)
+        assert preparation.review.ready, preparation.review.blockers
+        return preparation
+
+    # The unchanged produced document reverses to literal authored preimage.
+    reversed_review = complete(kept, "reverse")
+    assert [
+        (target.target_id, target.canonical_path, target.identity)
+        for _, _, target in review_owned_documents(reversed_review.review)
+    ] == [("file:Manual.md", "Manual.md", None)]
+    selected = select_review_effects(reversed_review.review)
+    assert selected.status == "selected"
+    assert {row.path: row.content.data for row in selected.files} == {
+        "Home.md": later,
+        "Manual.md": manual_before,
+        "Assets/data.bin": b"\x00authored",
+    }
+    assert set(selected.remove_paths) == {
+        *(path for _, path, _, _, _ in definitions),
+        "Assets/data (incoming-ba7816bf).bin",
+    }
+    manual_change = next(
+        row
+        for row in reversed_review.review.proposal.changes
+        if row.path == "Manual.md"
+    )
+    unsafe_current = resolve_review(
+        reversed_review.review,
+        action(
+            reversed_review.review,
+            manual_change,
+            domain="reversal",
+            choice="current",
+            decision_id="keep:still-references-secondary",
+        ),
+    )
+    assert unsafe_current.status == "refused" or not unsafe_current.plan.ready
+    if unsafe_current.status != "refused":
+        assert select_review_effects(unsafe_current.plan).status != "selected"
+    assert {
+        p.relative_to(vault).as_posix(): p.read_bytes()
+        for p in vault.rglob("*")
+        if p.is_file()
+    } == full_before
+
+    # A self-consistent Core declaration cannot forge retained storage authority.
+    proof = manual_subject.operation_reversal
+    forged_subject = manual_subject.model_copy(
+        update={
+            "operation_reversal": proof.model_copy(
+                update={
+                    "outputs": (
+                        proof.outputs[0].model_copy(
+                            update={
+                                "produced": ExactContent(data=b"forged produced bytes")
+                            }
+                        ),
+                    )
+                }
+            )
+        }
+    )
+    forged_facts = observed_facts.model_copy(
+        update={
+            "subjects": tuple(
+                forged_subject if row.path == "Manual.md" else row
+                for row in observed_facts.subjects
+            )
+        }
+    )
+    forged_plan = prepare_review(forged_facts, preflight=prepared.review.preflight)
+    forged = complete(_with_review(prepared, forged_plan), "reverse")
+    refused = operations.execute_undo(vault, forged)
+    assert refused.status == "refused" and refused.code == "undo_review_stale"
+    assert {
+        p.relative_to(vault).as_posix(): p.read_bytes()
+        for p in vault.rglob("*")
+        if p.is_file()
+    } == full_before
+
+    # This third version restores original references AND adds later prose.
+    # Current therefore remains coherent when the secondary asset is reversed.
+    manual_later = manual_before + b"\nLater independent Manual writing.\n"
+    (vault / "Manual.md").write_bytes(manual_later)
+    later_before = {
+        p.relative_to(vault).as_posix(): p.read_bytes()
+        for p in vault.rglob("*")
+        if p.is_file()
+    }
+    refreshed = operations.prepare_undo(vault, previous=reversed_review)
+    assert refreshed.status == "offered", refreshed.code
+    manual_change = next(
+        row for row in refreshed.review.proposal.changes if row.path == "Manual.md"
+    )
+    assert manual_change.current.data == manual_later
+    assert not any(
+        row.change_id == manual_change.change_id for row in refreshed.review.approvals
+    )
+    current = operations.resolve_undo(
+        vault,
+        refreshed,
+        action(
+            refreshed.review,
+            manual_change,
+            domain="reversal",
+            choice="current",
+            decision_id="keep:later-manual",
+        ),
+    )
+    assert current.status == "offered", current.code
+    final = complete(current, "current")
+    assert review_owned_documents(final.review) == ()
+    selected = select_review_effects(final.review)
+    assert selected.status == "selected"
+    assert {row.path: row.content.data for row in selected.files} == {
+        "Home.md": later,
+        "Manual.md": manual_later,
+        "Assets/data.bin": b"\x00authored",
+    }
+    assert {
+        p.relative_to(vault).as_posix(): p.read_bytes()
+        for p in vault.rglob("*")
+        if p.is_file()
+    } == later_before
+    final_manual = next(
+        row
+        for row in final.review.facts.identity_inventory
+        if row.current.path == "Manual.md"
+    )
+    assert final_manual.identity is None and final_manual.raw_identity is None
+    assert final_manual.identity_state == "missing"
+    assert (
+        next(
+            row
+            for row in final.review.facts.link_context.current_targets
+            if row.canonical_path == "Manual.md"
+        ).identity
+        is None
+    )
+    assert not any(
+        row.source_memory
+        for row in final.review.approvals
+        if row.target_path == "Manual.md"
+    )
+    source_before = {
+        p.relative_to(source).as_posix(): p.read_bytes()
+        for p in source.rglob("*")
+        if p.is_file()
+    }
+    undone = operations.execute_undo(vault, final)
+    assert undone.status == "undone", undone.code
+    after = user_state(vault)
+    assert after["authored"] == {
+        "Home.md": later,
+        "Manual.md": manual_later,
+        "Assets/data.bin": b"\x00authored",
+        "Protected.bin": b"protected\x00\xff",
+    }
+    _assert_user_state(
+        before,
+        after,
+        allowed_refs=frozenset(
+            (
+                captured.locator.association.ref.encode(),
+                _operation_ref(captured.locator.association.ref, undone.operation_id),
+            )
+        ),
+    )
+    assert {
+        p.relative_to(source).as_posix(): p.read_bytes()
+        for p in source.rglob("*")
+        if p.is_file()
+    } == source_before
+    assert "Manual.md" not in source_before
 
 
 def _preserve_candidate_inputs(vault, preparation, selected_action):
@@ -218,12 +1017,12 @@ def _operation_ref(checkpoint_ref, operation_id):
     ).encode()
 
 
-def _both_with_owner(facts, content):
+def _both_with_owner(facts, content, *, owner_path="Notes/Owner.md"):
     selection, candidate = attachment_candidate(facts, "both")
     old_doc = next(
         row
         for row in facts.link_context.current_documents
-        if row.source_path == "Notes/Owner.md"
+        if row.source_path == owner_path
     )
     document = interpret_links(
         ExactContent(data=content),
@@ -258,11 +1057,11 @@ def _both_with_owner(facts, content):
             "target_facts": tuple(
                 interpret_link_target(
                     document.content,
-                    target_id="owner:note",
+                    target_id=old_doc.document_id,
                     existence="present",
                     memberships=(),
                 )
-                if row.target_id == "owner:note"
+                if row.target_id == old_doc.document_id
                 else row
                 for row in candidate.target_facts
             ),
@@ -735,3 +1534,766 @@ def test_production_undo_child_stops_partially_and_fresh_review_restores_same_ta
             )
         ),
     )
+
+
+def _unassociated_reference_update(
+    *, with_original=False, with_created_memberships=False
+):
+    """Reuse the two-note physical setup with one ordinary reference owner."""
+    vault, source, review_path, _, checkpoint_ref = _two_note_case()
+    notes = ReviewPlan.model_validate_json(review_path.read_bytes()).producer_facts
+    original = b"[[Assets/data.bin|Keep first]] and [[Assets/data.bin|Redirect second]]"
+    produced = (
+        b"[[Assets/data.bin|Keep first]] and "
+        b"[Second edited alias](Assets/data%20%28incoming-ba7816bf%29.bin)"
+    )
+    facts = _with_unassociated_manual(notes, original)
+    (vault / "Manual.md").write_bytes(original)
+    (vault / "Assets").mkdir()
+    (source / "Assets").mkdir()
+    (vault / "Assets/data.bin").write_bytes(b"\x00authored")
+    (source / "Assets/data.bin").write_bytes(b"\x00original")
+    for path, raw in _BASE.items():
+        (source / path).write_bytes(raw)
+    if with_original:
+        from brz2obsidian.contracts import AttachmentFacts
+        from tests.reconciliation.test_attachments import target_for_links
+        from tests.reconciliation.test_identity import inventory_item
+
+        original_path = "Attachments/opening/Notes.md.original"
+        original_before = (
+            b"First source writing.\n# Shared heading\nOld block. ^original\n"
+        )
+        original_after = (
+            b"Second source writing.\n# Shared heading\nNew block. ^original\n"
+        )
+        entry = inventory_item(
+            "original-entry",
+            "entry:original",
+            original_path,
+            original_before,
+            facet="asset",
+        )
+        original_subject = notes.subjects[0].model_copy(
+            update={
+                "item_id": "entry:original",
+                "facet": "asset",
+                "path": original_path,
+                "title": "Original evidence",
+                "current": entry.current,
+                "baseline": notes.subjects[0].baseline.model_copy(
+                    update={"content": ExactContent(data=original_before)}
+                ),
+                "incoming": ExactContent(data=original_after),
+                "interpretation": "opaque",
+                "source_target": entry.target,
+                "output_role": "guide",
+                "structure": None,
+                "attachment": AttachmentFacts(
+                    current_target_id="subject:entry:original:asset",
+                    affected_documents=(),
+                    allocation_candidates=(),
+                ),
+            }
+        )
+        facts = with_subjects(
+            facts,
+            (*facts.subjects, original_subject),
+            (*facts.identity_inventory, entry),
+        )
+        reference = target_for_links(
+            "subject:entry:original:asset", original_path, kind="resource"
+        )
+        context = facts.link_context
+        additions = {}
+        for stage, raw in (("current", original_before), ("incoming", original_after)):
+            additions[stage + "_targets"] = (
+                *getattr(context, stage + "_targets"),
+                reference,
+            )
+            additions[stage + "_target_facts"] = (
+                *getattr(context, stage + "_target_facts"),
+                interpret_link_target(
+                    ExactContent(data=raw),
+                    target_id=reference.target_id,
+                    existence="present",
+                    memberships=(),
+                    source_path=original_path,
+                ),
+            )
+        facts = facts.model_copy(
+            update={"link_context": context.model_copy(update=additions)}
+        )
+        for directory in (vault, source):
+            output = directory / original_path
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(original_before)
+    if with_created_memberships:
+        from brz2obsidian.application.update_lifecycle import text_choice_action
+        from brz2obsidian.contracts import ContentVersion
+        from tests.reconciliation.test_memberships import target
+
+        assert with_original
+        created = {
+            "Categories/Review category.md": (
+                "definition:review-category",
+                "category",
+                (
+                    b'---\nsource_collection_id: "folio:collection"\n'
+                    b'source_item_id: "definition:review-category"\ntags:\n  - categories\n'
+                    b"---\n# Review category\n"
+                ),
+            ),
+            "Templates/Review category.md": (
+                "support:Templates/Review category.md",
+                "note",
+                (
+                    b'---\nsource_collection_id: "folio:collection"\n'
+                    b'source_item_id: "support:Templates/Review category.md"\n'
+                    b'categories:\n  - "[[Categories/Review category.md]]"\n'
+                    b"---\n# New member\n"
+                ),
+            ),
+        }
+        entries, subjects, references = [], [], []
+        for path, (item_id, kind, raw) in created.items():
+            assert not (vault / path).exists() and not (source / path).exists()
+            observed = CurrentContent(existence="absent", path=path, content=None)
+            entry = inventory_item(item_id, item_id, path, b"").model_copy(
+                update={"current": observed}
+            )
+            subjects.append(
+                notes.subjects[0].model_copy(
+                    update={
+                        "item_id": item_id,
+                        "path": path,
+                        "title": Path(path).stem,
+                        "current": observed,
+                        "source_target": entry.target,
+                        "baseline": ContentVersion(
+                            status="unknown", content=None, unavailable_digest=None
+                        ),
+                        "incoming": ExactContent(data=raw),
+                        "structure": None,
+                        "output_role": "note" if kind == "category" else "guide",
+                    }
+                )
+            )
+            entries.append(entry)
+            references.append(
+                target_for_links(
+                    "subject:" + item_id + ":content", path, kind=kind
+                ).model_copy(
+                    update={
+                        "identity": entry.identity,
+                        "representations": (path, "[[" + path + "]]"),
+                    }
+                )
+            )
+        facts = with_subjects(
+            facts, (*facts.subjects, *subjects), (*facts.identity_inventory, *entries)
+        )
+        registry = target("format:7:categories", "tag", "categories")
+        context = facts.link_context
+        current_targets = (*context.current_targets, registry, *references)
+        incoming_targets = (*context.incoming_targets, registry, *references)
+        current_states, incoming_states, incoming_docs = [], [], []
+        for (path, (_, kind, raw)), reference in zip(
+            created.items(), references, strict=True
+        ):
+            current_states.append(
+                interpret_link_target(
+                    None,
+                    target_id=reference.target_id,
+                    existence="missing",
+                    memberships=(),
+                    source_path=path,
+                )
+            )
+            memberships = (
+                (registry.target_id,)
+                if kind == "category"
+                else (references[0].target_id,)
+            )
+            state = interpret_link_target(
+                ExactContent(data=raw),
+                target_id=reference.target_id,
+                existence="present",
+                memberships=memberships,
+                membership_targets=incoming_targets,
+                source_path=path,
+            )
+            assert (
+                state.structure.status == "supported"
+                and state.memberships == memberships
+            )
+            incoming_states.append(state)
+        for (path, (_, _, raw)), reference in zip(
+            created.items(), references, strict=True
+        ):
+            document = interpret_links(
+                ExactContent(data=raw),
+                document_id=reference.target_id,
+                source_path=path,
+                path_mode="vault",
+                targets=incoming_targets,
+                target_facts=(*context.incoming_target_facts, *incoming_states),
+                inventory="complete",
+            )
+            assert document.status == "supported"
+            incoming_docs.append(document)
+        facts = facts.model_copy(
+            update={
+                "link_context": context.model_copy(
+                    update={
+                        "current_targets": current_targets,
+                        "incoming_targets": incoming_targets,
+                        "current_target_facts": (
+                            *context.current_target_facts,
+                            *current_states,
+                        ),
+                        "incoming_target_facts": (
+                            *context.incoming_target_facts,
+                            *incoming_states,
+                        ),
+                        "incoming_documents": (
+                            *context.incoming_documents,
+                            *incoming_docs,
+                        ),
+                    }
+                )
+            }
+        )
+    operations = Operations()
+    seeded = operations.capture_checkpoint(
+        vault,
+        source,
+        vault_id="vault-one",
+        import_id="import-one",
+        identity=facts.incoming_identity,
+        admission=operations.inspect_history(vault).admission,
+    )
+    assert seeded.status == "captured", seeded.code
+    for path, raw in _AFTER.items():
+        (source / path).write_bytes(raw)
+    (source / "Assets/data.bin").write_bytes(b"abc")
+    if with_original:
+        (source / original_path).write_bytes(original_after)
+    if with_created_memberships:
+        for path, (_, _, raw) in created.items():
+            (source / path).parent.mkdir(parents=True, exist_ok=True)
+            (source / path).write_bytes(raw)
+    history = operations.inspect_history(vault)
+    assert not any(
+        row.path == "Manual.md" for row in history.checkpoint.manifest.source
+    )
+    if with_created_memberships:
+        assert not any(
+            row.path in created
+            for row in (
+                *history.checkpoint.manifest.source,
+                *history.checkpoint.manifest.vault,
+            )
+        )
+    plan = prepare_review(facts, preflight=history.admission.preflight)
+    for note in notes.subjects:
+        change = next(row for row in plan.proposal.changes if row.path == note.path)
+        selected = resolve_review(
+            plan,
+            action(
+                plan,
+                change,
+                choice="incoming",
+                decision_id="ordinary:apply:" + note.item_id,
+                candidate=_incoming_candidate(facts, note, _AFTER[note.path]),
+            ),
+        )
+        assert selected.status == "accepted", selected.code
+        plan = selected.plan
+    selection, candidate = _both_with_owner(facts, produced, owner_path="Manual.md")
+    change = next(
+        row for row in plan.proposal.changes if row.facet == "attachment:payload"
+    )
+    selected = resolve_review(
+        plan,
+        action(
+            plan,
+            change,
+            domain="attachment",
+            choice="both",
+            decision_id="ordinary:apply:references",
+            attachment_selection=selection,
+            attachment_candidate=candidate,
+        ),
+    )
+    assert selected.status == "accepted", selected.code
+    if with_original:
+        offer = next(
+            row
+            for row in inspect_review_choices(selected.plan)
+            if next(
+                c
+                for c in selected.plan.proposal.changes
+                if c.change_id == row.change_id
+            ).path
+            == original_path
+        )
+        compiled = review_plan_choice_action(
+            selected.plan,
+            requirement_id=offer.requirement_id,
+            choice="incoming",
+            assumptions_digest=requirement_digest(offer),
+        )
+        selected = resolve_review(selected.plan, compiled)
+        assert selected.status == "accepted", selected.code
+    if with_created_memberships:
+        for path in created:
+            offer = next(
+                row
+                for row in inspect_review_choices(selected.plan)
+                if next(
+                    c
+                    for c in selected.plan.proposal.changes
+                    if c.change_id == row.change_id
+                ).path
+                == path
+            )
+            choice = "restore_incoming" if offer.domain == "restoration" else "incoming"
+            assert choice in offer.enabled_choices
+            compiled = review_plan_choice_action(
+                selected.plan,
+                requirement_id=offer.requirement_id,
+                choice=choice,
+                assumptions_digest=requirement_digest(offer),
+            )
+            selected = resolve_review(
+                selected.plan, text_choice_action(selected.plan, compiled)
+            )
+            assert selected.status == "accepted", (path, selected.code)
+    assert selected.plan.ready, (selected.plan.requirements, selected.plan.blockers)
+    applied = _apply(
+        operations,
+        vault,
+        source,
+        review=selected.plan,
+        vault_id="vault-one",
+        import_id="import-one",
+    )
+    assert applied.status == "applied", applied.code
+    return operations, vault, source, applied, original, produced, checkpoint_ref
+
+
+def _ordinary_asset_choice(plan, choice="current"):
+    offer = next(
+        row for row in inspect_review_choices(plan) if row.domain == "attachment"
+    )
+    assert choice in offer.enabled_choices
+    if choice == "incoming":
+        assert review_plan_attachment_references(plan, offer.requirement_id) == ()
+    selected = review_plan_choice_action(
+        plan,
+        requirement_id=offer.requirement_id,
+        choice=choice,
+        assumptions_digest=requirement_digest(offer),
+    )
+    assert selected.attachment_selection.link_choices == ()
+    return selected
+
+
+@pytest.mark.parametrize("direction", ["finish", "restore"])
+def test_unassociated_document_partial_undo_recovery(direction):
+    operations, vault, source, applied, original, produced, checkpoint_ref = (
+        _unassociated_reference_update()
+    )
+    prepared = operations.prepare_undo(vault)
+    assert prepared.status == "offered", prepared.code
+    while prepared.review.requirements:
+        requirement = prepared.review.requirements[0]
+        plan = prepared.review
+        change = next(
+            row
+            for row in plan.proposal.changes
+            if row.change_id == requirement.change_id
+        )
+        subject = next(
+            row
+            for row in plan.facts.subjects
+            if (row.item_id, row.facet) == (change.item_id, change.facet)
+        )
+        choice = (
+            "reverse"
+            if subject.path == "Manual.md"
+            else "current"
+            if subject.attachment is not None
+            else "incoming"
+        )
+        selected_action = text_choice_action(
+            plan,
+            action(
+                plan,
+                change,
+                domain="reversal" if subject.operation_reversal is not None else "text",
+                choice=choice,
+                decision_id="ordinary:undo:" + subject.item_id,
+                candidate=_incoming_candidate(
+                    plan.facts, subject, _BEFORE[subject.path]
+                )
+                if choice == "incoming"
+                else None,
+            ),
+        )
+        transition = resolve_review(plan, selected_action)
+        assert transition.status == "accepted", transition.code
+        prepared = _with_review(prepared, transition.plan)
+    assert prepared.review.ready, prepared.review.blockers
+    selected = select_review_effects(prepared.review)
+    assert selected.status == "selected" and selected.remove_paths == ()
+    assert {row.path: row.content.data for row in selected.files} == {
+        **_BEFORE,
+        "Manual.md": original,
+        "Assets/data.bin": b"\x00authored",
+        "Assets/data (incoming-ba7816bf).bin": b"abc",
+    }
+    undo_path = vault.parent / "ordinary-undo-preparation.json"
+    undo_path.write_text(prepared.model_dump_json(), encoding="utf-8")
+    _child(_UNDO_CHILD, vault, undo_path, expected=81)
+    assert (vault / "Manual.md").read_bytes() == original
+    assert {path: (vault / path).read_bytes() for path in _AFTER} == _AFTER
+    stopped = _fresh_status(vault)
+    assert stopped.kind == "undo" and stopped.status == "incomplete", stopped.code
+    assert stopped.publication == "partial" and stopped.published_files == 1
+    before = user_state(vault)
+    full_before = {
+        p.relative_to(vault).as_posix(): p.read_bytes()
+        for p in vault.rglob("*")
+        if p.is_file()
+    }
+    recovery = operations.prepare_recovery(vault, direction=direction)
+    assert recovery.status == "offered", recovery.code
+    assert {
+        p.relative_to(vault).as_posix(): p.read_bytes()
+        for p in vault.rglob("*")
+        if p.is_file()
+    } == full_before
+    manual = next(
+        row for row in recovery.review.facts.subjects if row.path == "Manual.md"
+    )
+    proof = manual.operation_reversal
+    assert proof is not None
+    assert proof.operation_id == stopped.operation_id
+    assert proof.operation_kind == "undo" and proof.direction == direction
+    assert proof.operation_generation == stopped.generation
+    original_change = next(
+        row for row in prepared.review.proposal.changes if row.path == "Manual.md"
+    )
+    original_approval = next(
+        row
+        for row in prepared.review.approvals
+        if row.change_id == original_change.change_id
+    )
+    assert (proof.origin_change_id, proof.origin_decision_id) == (
+        original_change.change_id,
+        original_approval.decision_id,
+    )
+    asset = next(
+        row for row in recovery.review.facts.subjects if row.path == "Assets/data.bin"
+    )
+    asset_owner = next(
+        row
+        for row in recovery.review.facts.identity_inventory
+        if row.current.path == "Assets/data.bin"
+    )
+    assert asset_owner.identity_state == "valid"
+    assert (
+        asset_owner.identity.module_id,
+        asset_owner.identity.collection_id,
+        asset_owner.identity.item_id,
+        asset_owner.facet,
+    ) == ("synthetic-folio", "folio:collection", "entry:asset", "attachment:payload")
+    manual_owner = next(
+        row
+        for row in recovery.review.facts.identity_inventory
+        if row.current.path == "Manual.md"
+    )
+    assert manual_owner.identity_state == "missing"
+    assert manual_owner.identity is None and manual_owner.raw_identity is None
+    assert asset.operation_reversal is None
+    assert not any(
+        row.item_id == manual.item_id
+        for row in recovery.review.facts.format_operation.established_baseline.outputs
+    )
+    if direction == "finish":
+        assert proof.outputs[0].produced.data == produced
+        assert proof.outputs[0].target.data == original
+        expected_notes = _BEFORE
+        expected_terminal = "undone"
+        protected_selection = {"Assets/data.bin": b"\x00authored"}
+        assert asset.baseline.content.data == asset.incoming.data == b"abc"
+        operation = recovery.review.facts.format_operation
+        assert (operation.baseline_source_version, operation.target_source_version) == (
+            "source:b",
+            "source:a",
+        )
+        assert operation.established_baseline.source_version == "source:b"
+        assert (
+            next(
+                row.content.data
+                for row in operation.established_baseline.outputs
+                if (row.item_id, row.facet) == (asset.item_id, asset.facet)
+            )
+            == b"abc"
+        )
+    else:
+        assert proof.outputs[0].produced.data == original
+        assert proof.outputs[0].target.data == produced
+        expected_notes = _AFTER
+        expected_terminal = "restored"
+        protected_selection = {"Assets/data.bin": b"\x00authored"}
+    assert proof.outputs[0].current.content.data == original
+    assert not any(
+        row.path.startswith("Assets/")
+        for subject in recovery.review.facts.subjects
+        if subject.operation_reversal is not None
+        for row in subject.operation_reversal.outputs
+    )
+    assert manual.baseline.status == "unknown" and manual.baseline.content is None
+    if direction == "restore":
+        assert asset.operation_reversal is None
+        assert asset.baseline.status == "known"
+        assert asset.baseline.content.data == b"\x00original"
+        assert (
+            asset.incoming.data == b"abc"
+            and asset.current.content.data == b"\x00authored"
+        )
+        operation = recovery.review.facts.format_operation
+        assert (operation.baseline_source_version, operation.target_source_version) == (
+            "source:a",
+            "source:b",
+        )
+        assert (
+            next(
+                row.content.data
+                for row in operation.established_baseline.outputs
+                if (row.item_id, row.facet) == (asset.item_id, asset.facet)
+            )
+            == b"\x00original"
+        )
+        protected = resolve_review(
+            recovery.review, _ordinary_asset_choice(recovery.review)
+        )
+        assert protected.status == "accepted", protected.code
+        plan = protected.plan
+        change = next(row for row in plan.proposal.changes if row.path == "Manual.md")
+        selected_action = text_choice_action(
+            plan,
+            action(
+                plan,
+                change,
+                domain="reversal",
+                choice="reverse",
+                decision_id="ordinary:restore:preview",
+            ),
+        )
+        assert selected_action.candidate is None
+        preview = resolve_review(plan, selected_action)
+        assert preview.status == "accepted", preview.code
+        assert preview.plan.ready, preview.plan.blockers
+        effects = select_review_effects(preview.plan)
+        assert effects.status == "selected" and effects.remove_paths == ()
+        assert {row.path: row.content.data for row in effects.files} == {
+            **_AFTER,
+            "Manual.md": produced,
+            **protected_selection,
+        }
+        assert {
+            p.relative_to(vault).as_posix(): p.read_bytes()
+            for p in vault.rglob("*")
+            if p.is_file()
+        } == full_before
+    later = (
+        original + b"\nLater ordinary document writing after Undo stopped.\n"
+        if direction == "finish"
+        else b"User removed the references.\nLater independent ordinary writing.\n"
+    )
+    (vault / "Manual.md").write_bytes(later)
+    recovery = operations.prepare_recovery(vault, direction=direction)
+    assert recovery.status == "offered", recovery.code
+    if direction == "restore":
+        manual_change = next(
+            row for row in recovery.review.proposal.changes if row.path == "Manual.md"
+        )
+        kept = resolve_review(
+            recovery.review,
+            action(
+                recovery.review,
+                manual_change,
+                domain="reversal",
+                choice="current",
+                decision_id="ordinary:scope-negative:manual",
+            ),
+        )
+        assert kept.status == "accepted", kept.code
+        incoming = resolve_review(
+            kept.plan, _ordinary_asset_choice(kept.plan, "incoming")
+        )
+        assert incoming.status == "accepted" and incoming.plan.ready, (
+            incoming.code,
+            incoming.plan.blockers,
+        )
+        unsupported = select_review_effects(incoming.plan)
+        assert unsupported.status == "selected" and unsupported.remove_paths == ()
+        assert {row.path: row.content.data for row in unsupported.files} == {
+            **_AFTER,
+            "Manual.md": later,
+            "Assets/data.bin": b"abc",
+        }
+        refusal_before = {
+            p.relative_to(vault).as_posix(): p.read_bytes()
+            for p in vault.rglob("*")
+            if p.is_file()
+        }
+        marker = json.loads(refusal_before[".git/brz2obsidian/owner.json"])
+        assert marker["operation_id"] == stopped.operation_id
+        assert len(refusal_before[".git/brz2obsidian/held"]) == 1
+        refused = operations.execute_recovery(
+            vault, _with_review(recovery, incoming.plan)
+        )
+        assert refused.status == "refused" and refused.code == "recovery_scope_changed"
+        refusal_after = {
+            p.relative_to(vault).as_posix(): p.read_bytes()
+            for p in vault.rglob("*")
+            if p.is_file()
+        }
+        # Normal refusal releases its two coordination files; persistent state
+        # including every Git object/ref/index byte and authored file is exact.
+        released = {".git/brz2obsidian/owner.json", ".git/brz2obsidian/held"}
+        assert set(refusal_before) - set(refusal_after) == released
+        assert refusal_after == {
+            path: raw for path, raw in refusal_before.items() if path not in released
+        }
+        recovery = operations.refresh_recovery(vault, recovery)
+        assert recovery.status == "offered", recovery.code
+        assert recovery.operation_id == stopped.operation_id
+        assert recovery.intent_commit == stopped.intent_commit
+        selected_action = _ordinary_asset_choice(recovery.review)
+        recovery = operations.resolve_recovery(vault, recovery, selected_action)
+        assert recovery.status == "offered", recovery.code
+        approval = next(
+            row for row in recovery.review.approvals if row.domain == "attachment"
+        )
+        assert approval.choice == "current" and not approval.source_accepted
+        assert approval.source_memory.reviewed_incoming.data == b"abc"
+        assert (
+            approval.source_memory.source_version == hashlib.sha256(b"abc").hexdigest()
+        )
+        assert (
+            approval.source_memory.provenance.decision_id == selected_action.decision_id
+        )
+    change = next(
+        row for row in recovery.review.proposal.changes if row.path == "Manual.md"
+    )
+    assert change.current.data == later
+    recovery = operations.resolve_recovery(
+        vault,
+        recovery,
+        action(
+            recovery.review,
+            change,
+            domain="reversal",
+            choice="current",
+            decision_id="ordinary:recovery:current",
+        ),
+    )
+    assert recovery.status == "offered", recovery.code
+    while recovery.review.requirements:
+        requirement = recovery.review.requirements[0]
+        plan = recovery.review
+        change = next(
+            row
+            for row in plan.proposal.changes
+            if row.change_id == requirement.change_id
+        )
+        subject = next(
+            row
+            for row in plan.facts.subjects
+            if (row.item_id, row.facet) == (change.item_id, change.facet)
+        )
+        transition = resolve_review(
+            plan,
+            action(
+                plan,
+                change,
+                choice="incoming",
+                decision_id="ordinary:recovery:" + subject.item_id,
+                candidate=_incoming_candidate(
+                    plan.facts, subject, expected_notes[subject.path]
+                ),
+            ),
+        )
+        assert transition.status == "accepted", transition.code
+        recovery = _with_review(recovery, transition.plan)
+    assert recovery.review.ready, recovery.review.blockers
+    assert not any(
+        row.source_memory
+        for row in recovery.review.approvals
+        if row.target_path == "Manual.md"
+    )
+    selected = select_review_effects(recovery.review)
+    assert selected.status == "selected" and selected.remove_paths == ()
+    assert {row.path: row.content.data for row in selected.files} == {
+        **expected_notes,
+        "Manual.md": later,
+        **protected_selection,
+    }
+    source_before = {
+        p.relative_to(source).as_posix(): p.read_bytes()
+        for p in source.rglob("*")
+        if p.is_file()
+    }
+    completed = operations.execute_recovery(vault, recovery)
+    assert completed.status == expected_terminal and completed.direction == direction, (
+        completed.code
+    )
+    assert completed.operation_id == stopped.operation_id
+    terminal = _fresh_status(vault)
+    assert (
+        terminal.status == expected_terminal
+        and terminal.receipt_commit == completed.receipt_commit
+    )
+    assert terminal.kind == "undo" and terminal.direction == direction
+    assert terminal.operation_id == stopped.operation_id
+    after = user_state(vault)
+    assert after["authored"] == {
+        **expected_notes,
+        "Manual.md": later,
+        "Assets/data.bin": b"\x00authored",
+        "Assets/data (incoming-ba7816bf).bin": b"abc",
+        "Unrelated.bin": b"protected\x00\xff",
+    }
+    _assert_user_state(
+        before,
+        after,
+        allowed_refs=frozenset(
+            (
+                checkpoint_ref.encode(),
+                _operation_ref(checkpoint_ref, stopped.operation_id),
+            )
+        ),
+    )
+    assert {
+        p.relative_to(source).as_posix(): p.read_bytes()
+        for p in source.rglob("*")
+        if p.is_file()
+    } == source_before
+    assert "Manual.md" not in source_before
+    assert applied.operation_id != stopped.operation_id
+    checkpoint = operations.read_checkpoint(vault)
+    assert checkpoint.status == "valid", checkpoint.code
+    generated = {
+        **(_BASE if direction == "finish" else _AFTER),
+        "Assets/data.bin": b"\x00original" if direction == "finish" else b"abc",
+    }
+    assert {row.path: (row.size, row.sha256) for row in checkpoint.manifest.source} == {
+        path: (len(raw), hashlib.sha256(raw).hexdigest())
+        for path, raw in generated.items()
+    }

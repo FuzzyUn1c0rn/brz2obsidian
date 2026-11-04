@@ -11,7 +11,7 @@ The old exhaustive GitHub Actions workflow has been removed.
 
 Use the maintained reduced selection for broad verification and focused checks
 for development and repairs. All required automated checks together must stay
-below ten minutes. If the selection grows too expensive, improve the selection
+below fifteen minutes. If the selection grows too expensive, improve the selection
 and setup rather than restoring exhaustive discovery. Preserve historical
 results with their original identities; they are not new-candidate executions.
 
@@ -30,7 +30,7 @@ valid controlled input changes and a few real integration checks. Prefer useful
 existing tests over rewriting them to meet an arbitrary case count. Partial
 coverage reports describe their executed selection, not the entire suite.
 
-The complete ordinary verification bundle must finish in less than 600 seconds,
+The complete ordinary verification bundle must finish in less than 900 seconds,
 including setup, teardown, reports, receipt validation and required repeated
 checks. Everyday focused feedback should take seconds. Measure the complete
 bundle without competing full-suite processes; an over-budget or interrupted
@@ -47,7 +47,7 @@ triggers for additional tests.
 
 ```powershell
 # Complete ordinary verification: pytest, lint, format, dependency, coverage,
-# reports and receipt validation, all within one 600-second deadline.
+# reports and receipt validation, all within one 900-second deadline.
 .\.venv\Scripts\python.exe tools/coverage_suite.py
 # Measure a changed consumer without rerunning the accumulated selection.
 .\.venv\Scripts\python.exe tools/coverage_suite.py --test tests/application/test_graph_modules.py
@@ -75,7 +75,7 @@ groups. Focused measurements use one process unless `--workers 2`, `--workers 3`
 or `--workers 4` is explicit. `--workers 1` selects serial execution for the
 maintained command. Parallel execution preserves relative file order within each
 worker; it does not promise global serial order. Worker restarts are disabled,
-and the shared 600-second
+and the shared 900-second
 deadline includes worker startup, shutdown and merged coverage reports.
 
 

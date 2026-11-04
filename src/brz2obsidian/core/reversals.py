@@ -1,6 +1,52 @@
 """Canonical operation-owned output facts; no storage, parsing or independent merger."""
 
+from typing import NamedTuple
+
+from brz2obsidian.contracts import ReferenceTarget, SelectedReviewEffects
+
 from .identity import _paths_collide, _target_safe
+
+
+class ReviewOwnedOutputs(NamedTuple):
+    target_groups: tuple[tuple[ReferenceTarget, ...], ...]
+    documents: tuple[tuple[str, str, ReferenceTarget], ...]
+    effects: SelectedReviewEffects
+
+
+def cleanup_removal_continuation(facts, subject):
+    """Recognize a known-absent retained target, never authorize a new deletion."""
+    attachment = subject.attachment
+    if attachment is None:
+        return None
+    fact = attachment.removal_continuation
+    owner = attachment.retained_ownership
+    if (
+        fact is None
+        or owner is None
+        or subject.operation_reversal is not None
+        or facts.format_operation.kind != "attachment_cleanup"
+        or facts.inventory != "complete"
+        or subject.current.existence != "absent"
+        or subject.current.content is not None
+        or subject.path != subject.current.path
+        or fact.path != subject.current.path
+        or fact.target_id != attachment.current_target_id
+        or owner.source_path != fact.path
+        or (
+            owner.identity.module_id,
+            owner.identity.collection_id,
+            owner.identity.item_id,
+            owner.facet,
+        )
+        != (
+            facts.incoming_identity.module_id,
+            facts.incoming_identity.collection_id,
+            subject.item_id,
+            subject.facet,
+        )
+    ):
+        return None
+    return fact
 
 
 def content_bytes(content):
@@ -145,6 +191,92 @@ def reversal_physical_entry(facts, entry):
     )
 
 
+def reversal_document_target(subject):
+    """Recognize an operation-local document key, never an imported identity."""
+    proof = subject.operation_reversal
+    if (
+        proof is None
+        or subject.attachment is not None
+        or subject.facet != "content"
+        or subject.output_role != "note"
+        or subject.baseline.status != "unknown"
+        or subject.baseline.content is not None
+        or len(proof.outputs) != 1
+        or len(proof.owned_targets) != 1
+    ):
+        return None
+    row, target = proof.outputs[0], proof.owned_targets[0]
+    if (
+        row.path != subject.path
+        or row.current != subject.current
+        or row.target_id != subject.item_id
+        or row.produced is None
+        or row.target is None
+        or row.produced.data == row.target.data
+        or subject.incoming != row.target
+        or (target.target_id, target.canonical_path) != (row.target_id, row.path)
+        or target.kind != "note"
+        or target.identity is not None
+        or target.target != subject.source_target
+    ):
+        return None
+    return target
+
+
+def reversal_document_entry(facts, subject):
+    """Bind the exact observed identityless document under retained proof."""
+    target = reversal_document_target(subject)
+    context = facts.link_context
+    if target is None or facts.inventory != "complete" or context is None:
+        return None
+    entries = tuple(
+        e for e in facts.identity_inventory if e.current.path == subject.path
+    )
+    documents = tuple(
+        d for d in context.current_documents if d.source_path == subject.path
+    )
+    targets = tuple(
+        t for t in context.current_targets if t.canonical_path == subject.path
+    )
+    states = tuple(
+        s for s in context.current_target_facts if s.target_id == target.target_id
+    )
+    if len(entries) != 1 or len(documents) != 1 or targets != (target,):
+        return None
+    entry, document = entries[0], documents[0]
+    if (
+        entry.identity_state != "missing"
+        or entry.identity is not None
+        or entry.raw_identity is not None
+        or entry.facet != "content"
+        or entry.current != subject.current
+        or entry.current.existence != "present"
+        or entry.target != target.target
+        or target.status != "safe"
+        or document.document_id != target.target_id
+        or document.content != entry.current.content
+        or document.status != "supported"
+        or document.inventory != "complete"
+        or context.inventory != "complete"
+        or len(states) != 1
+        or states[0].existence != "present"
+        or states[0].content != entry.current.content
+        or not _target_safe(
+            subject.path,
+            entry.target,
+            tuple(
+                e
+                for e in facts.identity_inventory
+                if e.entry_id != entry.entry_id
+                and e.current.existence != "absent"
+                and _paths_collide(e.current.path, subject.path)
+            ),
+        )
+    ):
+        return None
+    return entry
+
+
 def reversal_safe(facts, subject, target_path):
     proof = subject.operation_reversal
     context = facts.link_context
@@ -169,6 +301,9 @@ def reversal_safe(facts, subject, target_path):
         retained = reversal_target(proof, row)
         if subject.attachment is not None:
             if retained.kind != "resource" or retained.identity is not None:
+                return False
+        elif reversal_document_target(subject) is not None:
+            if reversal_document_entry(facts, subject) is None:
                 return False
         elif (
             retained.identity is None
@@ -255,15 +390,57 @@ def reversal_safe(facts, subject, target_path):
     return True
 
 
-def review_owned_targets(plan, change_id, decision_id):
-    """Return retained canonical output targets, never invent a version identity."""
+def _ready_origin(plan):
     from .resolution import validate_review
-    from .selected_effects import select_review_effects
 
     checked = validate_review(plan)
     if checked.status != "accepted" or not checked.plan.ready:
         raise ValueError("A canonical ready origin review is required")
-    plan = checked.plan
+    return checked.plan
+
+
+def _lazy_effects(plan):
+    from .selected_effects import _project_review_effects
+
+    effects = None
+
+    def selected_effects():
+        nonlocal effects
+        if effects is None:
+            effects = _project_review_effects(plan)
+        return effects
+
+    return selected_effects
+
+
+def review_owned_outputs(plan, requests):
+    """Compose explicit historical ownership and effects; no current authority."""
+    plan = _ready_origin(plan)
+    selected_effects = _lazy_effects(plan)
+    groups = tuple(
+        _owned_targets(plan, change_id, decision_id, selected_effects)
+        for change_id, decision_id in requests
+    )
+    documents = _owned_documents(plan, selected_effects)
+    return ReviewOwnedOutputs(groups, documents, selected_effects())
+
+
+def review_owned_targets(plan, change_id, decision_id):
+    """Return retained canonical output targets, never invent a version identity."""
+    return review_owned_target_groups(plan, ((change_id, decision_id),))[0]
+
+
+def review_owned_target_groups(plan, requests):
+    """Return canonical owned targets in explicit (change, decision) query order."""
+    plan = _ready_origin(plan)
+    selected_effects = _lazy_effects(plan)
+    return tuple(
+        _owned_targets(plan, change_id, decision_id, selected_effects)
+        for change_id, decision_id in requests
+    )
+
+
+def _owned_targets(plan, change_id, decision_id, selected_effects):
     approval = next(
         (
             a
@@ -289,7 +466,7 @@ def review_owned_targets(plan, change_id, decision_id):
     )
     if action.candidate is not None:
         targets = action.candidate.link_targets + targets
-    effects = select_review_effects(plan)
+    effects = selected_effects()
     paths = {f.path for f in effects.files if f.subject_id == change.subject_id}
     if (
         change.rename_review is not None
@@ -316,3 +493,123 @@ def review_owned_targets(plan, change_id, decision_id):
             raise ValueError("Origin output has no unambiguous retained target")
         selected[path] = matching[0]
     return tuple(selected.values())
+
+
+def review_owned_documents(plan):
+    """Project exact identityless document ownership in one canonical pass.
+
+    Unchanged document context conveys no ownership. The exact candidate,
+    observed document, selected output and unique approval must all agree.
+    Each returned target is bound to its originating change and decision.
+    Resource ownership remains the separate review_owned_targets projection.
+    """
+    plan = _ready_origin(plan)
+    return _owned_documents(plan, _lazy_effects(plan))
+
+
+def _owned_documents(plan, selected_effects):
+    context = plan.producer_facts.link_context
+    if context is None:
+        return ()
+    effects = selected_effects()
+    selected = []
+    for approval in plan.approvals:
+        change = next(
+            c for c in plan.proposal.changes if c.change_id == approval.change_id
+        )
+        subject = reversal_subject(plan.producer_facts, change)
+        retained = reversal_document_target(subject)
+        if retained is not None:
+            files = tuple(f for f in effects.files if f.path == subject.path)
+            if len(files) != 1 or files[0].subject_id != change.subject_id:
+                raise ValueError("Reversed document lacks its selected owner")
+            if content_bytes(files[0].content) == content_bytes(
+                subject.current.content
+            ):
+                continue
+            documents = tuple(
+                d
+                for d in context.incoming_documents
+                if (d.document_id, d.source_path)
+                == (retained.target_id, retained.canonical_path)
+                and d.content == files[0].content
+                and d.status == "supported"
+                and d.inventory == "complete"
+            )
+            if (
+                reversal_document_entry(plan.producer_facts, subject) is None
+                or approval.domain != "reversal"
+                or approval.choice != "reverse"
+                or files[0].content != subject.operation_reversal.outputs[0].target
+                or len(documents) != 1
+            ):
+                raise ValueError(
+                    "Reversed document lacks exact retained byte authority"
+                )
+            selected.append((approval.change_id, approval.decision_id, retained))
+            continue
+        candidate = approval.attachment_candidate
+        if candidate is None:
+            continue
+        for document in candidate.documents:
+            prior = tuple(
+                d
+                for d in context.current_documents
+                if d.document_id == document.document_id
+            )
+            if len(prior) != 1 or document.content.data == prior[0].content.data:
+                continue
+            targets = tuple(
+                t for t in candidate.targets if t.canonical_path == document.source_path
+            )
+            if len(targets) != 1 or targets[0].identity is not None:
+                continue
+            target = targets[0]
+            entries = tuple(
+                e
+                for e in plan.producer_facts.identity_inventory
+                if e.current.path == document.source_path
+            )
+            owners = tuple(
+                a
+                for a in plan.approvals
+                if a.attachment_candidate is not None
+                and any(
+                    d.document_id == document.document_id
+                    and d.source_path == document.source_path
+                    and d.content.data != prior[0].content.data
+                    for d in a.attachment_candidate.documents
+                )
+            )
+            files = tuple(f for f in effects.files if f.path == document.source_path)
+            if (
+                target.kind != "note"
+                or target.target_id != document.document_id
+                or document.source_path != prior[0].source_path
+                or document.status != prior[0].status
+                or document.status != "supported"
+                or document.inventory != prior[0].inventory
+                or document.inventory != "complete"
+                or tuple(
+                    t
+                    for t in context.current_targets
+                    if t.target_id == target.target_id
+                )
+                != (target,)
+                or len(entries) != 1
+                or entries[0].identity_state != "missing"
+                or entries[0].identity is not None
+                or entries[0].raw_identity is not None
+                or entries[0].facet != "content"
+                or entries[0].current.content != prior[0].content
+                or entries[0].target != target.target
+                or owners != (approval,)
+                or len(files) != 1
+                or files[0].subject_id != change.subject_id
+                or files[0].content != document.content
+            ):
+                raise ValueError(
+                    "Changed document lacks unique retained selected authority"
+                )
+            selected.append((approval.change_id, approval.decision_id, target))
+    return tuple(selected)

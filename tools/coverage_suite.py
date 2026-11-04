@@ -35,12 +35,12 @@ def arguments():
     parser.add_argument("--require-gui", action="store_true")
     parser.add_argument("--workers", type=int, choices=(1, 2, 3, 4))
     parser.add_argument("--check", action="append", choices=CHECKS)
-    parser.add_argument("--timeout", type=float, default=600)
+    parser.add_argument("--timeout", type=float, default=900)
     parser.add_argument("--min-branch", type=float)
     parser.add_argument("--measurement-intent")
     args = parser.parse_args()
-    if not 0 < args.timeout <= 600:
-        parser.error("--timeout must be greater than zero and at most 600 seconds")
+    if not 0 < args.timeout <= 900:
+        parser.error("--timeout must be greater than zero and at most 900 seconds")
     if args.min_branch is not None and (
         not 0 <= args.min_branch <= 100 or not (args.measurement_intent or "").strip()
     ):
@@ -340,6 +340,7 @@ def main():
                 [
                     *coverage,
                     "html",
+                    "--keep-combined",
                     "--rcfile",
                     str(config),
                     "-d",

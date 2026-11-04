@@ -7,7 +7,14 @@ from datetime import date
 from hashlib import sha256
 from typing import BinaryIO, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    field_validator,
+    model_validator,
+)
 
 
 class Contract(BaseModel):
@@ -723,7 +730,9 @@ class FormatOperation(ReconciliationContract):
 
     schema_id: Literal["brz2obsidian.format-operation"]
     schema_version: Literal[1]
-    kind: Literal["source_update", "onboarding", "format_transition"]
+    kind: Literal[
+        "source_update", "onboarding", "format_transition", "attachment_cleanup"
+    ]
     recorded_generation: Literal["supported", "unavailable", "unknown"]
     baseline_source_version: str | None = Field(min_length=1)
     target_source_version: str | None = Field(min_length=1)
@@ -948,16 +957,17 @@ class OperationReversalOutput(ReconciliationContract):
     target: ExactContent | None
 
     @model_validator(mode="after")
-    def exact_existence_change(self):
+    def exact_version_change(self):
         if (
             (self.produced_existence == "present") != (self.produced is not None)
             or (self.target_existence == "present") != (self.target is not None)
-            or self.produced_existence == self.target_existence
+            or (None if self.produced is None else self.produced.data)
+            == (None if self.target is None else self.target.data)
             or self.current.existence == "unknown"
             or self.current.path != self.path
         ):
             raise ValueError(
-                "Operation reversal requires an exact proven existence change"
+                "Operation reversal requires an exact proven version change"
             )
         return self
 
@@ -1006,6 +1016,17 @@ class OperationReversalTarget(ReconciliationContract):
                 raise ValueError(
                     "One logical reversal target cannot occupy multiple present paths"
                 )
+        for row in self.outputs:
+            if row.produced_existence != row.target_existence:
+                continue
+            target = next(t for t in self.owned_targets if t.target_id == row.target_id)
+            if (
+                len(self.outputs) != 1
+                or len(self.owned_targets) != 1
+                or target.kind != "note"
+                or target.identity is not None
+            ):
+                raise ValueError("A byte reversal requires one identityless document")
         return self
 
 
@@ -1179,6 +1200,7 @@ class ChangeProvenance(ReconciliationContract):
         "remembered_decline",
         "preservation_decision",
         "operation_reversal",
+        "attachment_cleanup",
     ]
 
 
@@ -1314,7 +1336,9 @@ class UpdateProposal(ReconciliationContract):
     proposal_id: str = Field(min_length=1)
     generation: int = Field(ge=1)
     changes: tuple[ProposedChange, ...]
-    operation: Literal["source_update", "onboarding", "format_transition"]
+    operation: Literal[
+        "source_update", "onboarding", "format_transition", "attachment_cleanup"
+    ]
     findings: tuple[ReconciliationFinding, ...]
     readiness: Literal["ready", "review_required", "refused"]
     ready: bool
@@ -1618,12 +1642,67 @@ class AttachmentDestination(ReconciliationContract):
     target: IdentityTargetFacts
 
 
+class RetainedAttachmentOwnership(ReconciliationContract):
+    """Historical generated association, rederived by native history before writing."""
+
+    schema_id: Literal["brz2obsidian.retained-attachment-ownership"]
+    schema_version: Literal[1]
+    association_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    checkpoint_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+    generation: int = Field(ge=1, le=(1 << 63) - 1)
+    identity: ImportedItemIdentity
+    facet: str = Field(min_length=1)
+    source_path: str = Field(min_length=1)
+    source_version: str = Field(min_length=1)
+    mapping_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    payload_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    payload_size: int = Field(ge=0, le=(1 << 63) - 1)
+    payload_mode: Literal["100644", "100755"]
+
+    @model_validator(mode="after")
+    def safe_historical_path(self):
+        self.relative_vault_path(self.source_path)
+        return self
+
+
+class AttachmentRemovalContinuation(ReconciliationContract):
+    """A native approved removal already absent in this finish observation."""
+
+    schema_id: Literal["brz2obsidian.attachment-removal-continuation"]
+    schema_version: Literal[1]
+    operation_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    operation_kind: Literal["apply"]
+    direction: Literal["finish"]
+    operation_generation: int = Field(ge=1, le=(1 << 63) - 1)
+    origin_intent_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+    prepared_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+    history_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    origin_change_id: str = Field(min_length=1)
+    origin_decision_id: str = Field(min_length=1)
+    target_id: str = Field(min_length=1)
+    path: str = Field(min_length=1)
+    before_mode: Literal["100644", "100755"]
+    before_size: int = Field(ge=0, le=(1 << 63) - 1)
+    before_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def safe_removed_path(self):
+        self.relative_vault_path(self.path)
+        return self
+
+
 class AttachmentFacts(ReconciliationContract):
     """Canonical resource association plus explicitly attested allocation slots."""
 
     current_target_id: str = Field(min_length=1)
     allocation_candidates: tuple[AttachmentDestination, ...]
     affected_documents: tuple[str, ...]
+    retained_ownership: RetainedAttachmentOwnership | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    removal_continuation: AttachmentRemovalContinuation | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class AttachmentOutput(ReconciliationContract):
@@ -1640,7 +1719,7 @@ class AttachmentOutput(ReconciliationContract):
 
 
 class AttachmentAlternative(ReconciliationContract):
-    choice: Literal["current", "incoming", "both"]
+    choice: Literal["current", "incoming", "both", "remove"]
     outputs: tuple[AttachmentOutput, ...]
     eligible: bool
     operation_bound: bool = Field(default=False, exclude_if=lambda value: not value)
@@ -1651,6 +1730,7 @@ class AttachmentAlternative(ReconciliationContract):
             "allocation_unavailable",
             "unsafe_target",
             "collision",
+            "ownership_unavailable",
         ],
         ...,
     ]
@@ -1661,7 +1741,8 @@ class AttachmentAlternative(ReconciliationContract):
             complete = (
                 bool(self.outputs) and self.choice in ("current", "incoming")
                 if self.operation_bound
-                else len(self.outputs) == (2 if self.choice == "both" else 1)
+                else len(self.outputs)
+                == (0 if self.choice == "remove" else 2 if self.choice == "both" else 1)
             )
             if self.unavailable_reasons or not complete:
                 raise ValueError(
@@ -1894,7 +1975,7 @@ class AttachmentSelection(ReconciliationContract):
     facet: str = Field(min_length=1)
     reviewed_change_id: str = Field(min_length=1)
     reviewed_assumptions: tuple[ProposalAssumption, ...]
-    choice: Literal["current", "incoming", "both"]
+    choice: Literal["current", "incoming", "both", "remove"]
     link_choices: tuple[LinkOccurrenceChoice, ...]
     provenance: Literal["explicit_user"]
 
@@ -2045,6 +2126,7 @@ type ReviewDomain = Literal[
 
 type ReviewChoice = Literal[
     "reverse",
+    "remove",
     "approve",
     "current",
     "incoming",
@@ -2100,6 +2182,28 @@ class ReviewRequirement(ReconciliationContract):
     change_id: str
     choices: tuple[ReviewChoice, ...]
     assumptions: tuple[ProposalAssumption, ...]
+
+
+class ReviewChoiceAvailability(ReconciliationContract):
+    choice: ReviewChoice
+    enabled: bool
+    reasons: tuple[str, ...]
+
+    @model_validator(mode="after")
+    def truthful_availability(self):
+        if self.enabled != (not self.reasons):
+            raise ValueError("Unavailable choices require their shared reason")
+        return self
+
+
+class ReviewChoiceOffer(ReviewRequirement):
+    """Read-only action prerequisites; candidates still require full validation."""
+
+    availability: tuple[ReviewChoiceAvailability, ...]
+
+    @property
+    def enabled_choices(self):
+        return tuple(row.choice for row in self.availability if row.enabled)
 
 
 class CompatibleReviewGroup(ReconciliationContract):
@@ -2279,6 +2383,12 @@ class LoadedReview(ReconciliationContract):
     saved: SavedReview
     readiness: Literal["revalidation_required"]
     ready: Literal[False]
+    _historical_effects: SelectedReviewEffects | None = PrivateAttr(default=None)
+
+    @property
+    def historical_effects(self) -> SelectedReviewEffects | None:
+        """Derived historical comparison only; never current write authority."""
+        return self._historical_effects
 
     @field_validator("ready", mode="before")
     @classmethod

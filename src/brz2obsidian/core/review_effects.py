@@ -3,20 +3,81 @@
 from brz2obsidian.contracts import LinkTargetFacts
 from brz2obsidian.core.link_meanings import resolve_occurrence
 from brz2obsidian.core.link_validation import validate_link_document
+from brz2obsidian.core.review_composition import composed_text_documents
 from brz2obsidian.core.review_links import (
     bound_resource_record,
     current_baseline,
     current_keep_needs_proof,
     current_lookup_coverage,
     known_result_document,
+    onboarding_current_context,
 )
 
 from .reversals import (
     content_bytes,
+    reversal_document_target,
     reversal_subject,
     reversal_target,
     selected_reversal_outputs,
 )
+
+
+def _onboarding_current_effects(facts, proposal, actions, approvals):
+    context = facts.link_context
+    if not onboarding_current_context(facts):
+        return False
+    if any(
+        a.domain == "identity" or a.domain == "rename" and a.choice != "keep_path"
+        for a in actions
+    ):
+        return False
+    approved = {a.change_id: a for a in approvals}
+    action_by_id = {a.decision_id: a for a in actions}
+    for change in proposal.changes:
+        subject = next(
+            s
+            for s in facts.subjects
+            if (s.item_id, s.facet) == (change.item_id, change.facet)
+        )
+        approval = approved.get(change.change_id)
+        if approval is None and change.requires_decision:
+            continue
+        if change.target_path != subject.current.path:
+            return False
+        if approval is not None:
+            action = action_by_id.get(approval.decision_id)
+            if (
+                action is None
+                or action.candidate is not None
+                or approval.choice != "current"
+                or approval.source_accepted
+            ):
+                return False
+            candidate = approval.attachment_candidate
+            if candidate is not None and (
+                approval.attachment_selection.link_choices
+                or len(candidate.outputs) != 1
+                or len(candidate.targets) != len(context.current_targets)
+                or {t.target_id: t for t in candidate.targets}
+                != {t.target_id: t for t in context.current_targets}
+                or len(candidate.target_facts) != len(context.current_target_facts)
+                or {s.target_id: s for s in candidate.target_facts}
+                != {s.target_id: s for s in context.current_target_facts}
+                or len(candidate.documents) != len(context.current_documents)
+                or {d.document_id: d for d in candidate.documents}
+                != {d.document_id: d for d in context.current_documents}
+                or any(
+                    o.path != subject.current.path
+                    or o.content != subject.current.content
+                    for o in candidate.outputs
+                )
+            ):
+                return False
+        content = change.result if approval is None else approval.result
+        path = change.target_path if approval is None else approval.target_path
+        if content != subject.current.content or path != subject.current.path:
+            return False
+    return True
 
 
 def selected_effect_blockers(facts, proposal, actions, approvals):
@@ -34,6 +95,14 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
             )
             else ()
         )
+    if facts.format_operation.kind in ("onboarding", "format_transition") and any(
+        d.status != "supported" for d in context.current_documents
+    ):
+        return (
+            ()
+            if _onboarding_current_effects(facts, proposal, actions, approvals)
+            else ("onboarding_opaque_effects_unsafe",)
+        )
     targets = {t.target_id: t for t in context.current_targets}
     states = {s.target_id: s for s in context.current_target_facts}
     documents = {d.document_id: d for d in context.current_documents}
@@ -43,12 +112,19 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
     writes = {}
     proof_documents = {}
     explicit_documents = set()
+    operation_documents = set()
     changed_ids = set()
     blockers = []
+    composed_documents, composition_conflict = composed_text_documents(
+        facts, actions, approvals
+    )
 
     def add(code):
         if code not in blockers:
             blockers.append(code)
+
+    if composition_conflict:
+        add("selected_link_context_conflict")
 
     if any(
         c.provenance.rule == "remembered_keep" and current_keep_needs_proof(facts, c)
@@ -130,6 +206,30 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
                     interpretation="supported",
                 )
             write(target, content, target.canonical_path, state)
+            if reversal_document_target(subject) is not None:
+                source_documents = (
+                    context.incoming_documents
+                    if approval is not None and approval.choice == "reverse"
+                    else context.current_documents
+                )
+                retained_documents = tuple(
+                    d
+                    for d in source_documents
+                    if d.source_path == row.path
+                    and d.document_id == target_id
+                    and d.content == content
+                )
+                if len(retained_documents) != 1:
+                    add("selected_link_context_conflict")
+                    continue
+                documents = {
+                    key: doc
+                    for key, doc in documents.items()
+                    if doc.source_path != row.path
+                }
+                documents[target_id] = retained_documents[0]
+                explicit_documents.add(target_id)
+                operation_documents.add(target_id)
             absent = {r.path for r, data in members if data is None}
             documents = {
                 key: doc
@@ -155,6 +255,20 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
         candidate = approval.attachment_candidate
         if candidate is None:
             continue
+        change = next(c for c in proposal.changes if c.change_id == approval.change_id)
+        relevant = {link.document_id for link in change.attachment_review.links}
+        relevant.update(
+            choice.document_id for choice in approval.attachment_selection.link_choices
+        )
+        if (
+            facts.format_operation.kind == "attachment_cleanup"
+            and approval.choice == "remove"
+        ):
+            subject = reversal_subject(facts, change)
+            target_id = subject.attachment.current_target_id
+            target = next(t for t in candidate.targets if t.target_id == target_id)
+            state = next(s for s in candidate.target_facts if s.target_id == target_id)
+            write(target, None, change.path, state)
         for output in candidate.outputs:
             target = next(
                 t for t in candidate.targets if t.target_id == output.target_id
@@ -165,11 +279,15 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
             )
             write(target, output.content, output.path, state)
         for document in candidate.documents:
+            composed = composed_documents.get(document.document_id)
+            if composed is not None:
+                document = composed[0]
             prior = original_documents.get(document.document_id)
-            if prior is None or (prior.content, prior.source_path) != (
+            changed = prior is None or (prior.content, prior.source_path) != (
                 document.content,
                 document.source_path,
-            ):
+            )
+            if changed:
                 matching = tuple(
                     t
                     for t in candidate.targets
@@ -187,9 +305,15 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
                     ),
                     None,
                 )
+                if composed is not None:
+                    state = composed[1]
                 write(target, document.content, document.source_path, state)
                 explicit_documents.add(document.document_id)
-            proof_documents[document.document_id] = document
+            if changed or (
+                document.document_id in relevant
+                and document.document_id not in operation_documents
+            ):
+                proof_documents[document.document_id] = document
     documents.update(proof_documents)
 
     for change in proposal.changes:
@@ -209,6 +333,23 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
         if subject.attachment is not None:
             continue
         selected_path = change.target_path if approval is None else approval.target_path
+        if (
+            facts.format_operation.kind == "attachment_cleanup"
+            and approval is None
+            and not change.requires_decision
+            and change.disposition == "preserve_vault"
+            and selected_path == subject.current.path
+            and content == subject.current.content
+            and any(
+                document.document_id in explicit_documents
+                and document.source_path == selected_path
+                and document.content != content
+                and (prior := original_documents.get(document.document_id)) is not None
+                and (prior.content, prior.source_path) == (content, selected_path)
+                for document in proof_documents.values()
+            )
+        ):
+            continue
         action = None if approval is None else action_by_id.get(approval.decision_id)
         candidate = None if action is None else action.candidate
         known = (
@@ -217,9 +358,21 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
             else None
         )
         if candidate is not None:
-            document = candidate.links
+            composed = composed_documents.get(candidate.links.document_id)
+            document = candidate.links if composed is None else composed[0]
+            if composed is not None:
+                content = document.content
             source_targets = candidate.link_targets
-            source_states = candidate.link_target_facts
+            source_states = (
+                candidate.link_target_facts
+                if composed is None
+                else tuple(
+                    state
+                    for state in candidate.link_target_facts
+                    if state.target_id != composed[1].target_id
+                )
+                + (composed[1],)
+            )
         elif known is not None:
             document, source_targets, source_states = known
         else:
@@ -231,10 +384,17 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
             document = matching[0] if len(matching) == 1 else None
             source_targets = context.current_targets
             source_states = context.current_target_facts
+        observed_path = (
+            change.rename_review.current_path
+            if candidate is not None
+            and approval is not None
+            and approval.choice == "current"
+            and change.rename_review is not None
+            and change.rename_review.status == "accepted"
+            else subject.current.path
+        )
         own = tuple(
-            t
-            for t in context.current_targets
-            if t.canonical_path == subject.current.path
+            t for t in context.current_targets if t.canonical_path == observed_path
         )
         if len(own) == 1:
             target = own[0]
@@ -300,8 +460,20 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
 
     final_targets = tuple(targets.values())
     final_states = tuple(states.values())
+    attachment_links = {
+        (choice.document_id, choice.occurrence_id)
+        for approval in approvals
+        if approval.attachment_selection is not None
+        for choice in approval.attachment_selection.link_choices
+    }
+    attachment_documents = (
+        {key[0] for key in attachment_links}
+        if facts.format_operation.kind == "source_update"
+        else set()
+    )
     for document in documents.values():
         prior = original_documents.get(document.document_id)
+        unchanged_current = document == prior
         relevant = (
             document.document_id in explicit_documents
             or document.document_id in proof_documents
@@ -321,10 +493,21 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
         )
         if not relevant:
             continue
-        if (
+        ordinary_renewal = (
             document.document_id not in explicit_documents
             and document.document_id not in proof_documents
+        ) or (
+            facts.format_operation.kind == "format_transition"
+            and unchanged_current
+            and document.document_id not in proof_documents
+        )
+        operation_renewal = document.document_id in operation_documents
+        if (
+            ordinary_renewal
+            or operation_renewal
+            or document.document_id in attachment_documents
         ):
+            # A proven reversal document can also retain a destination's later prose.
             # A retained note's unrelated prose version is not a link redirect. Resource choices
             # and path/identity/fragment changes still require their explicit selected proof.
             occurrences = []
@@ -333,6 +516,24 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
                 if (
                     target is not None
                     and target.kind != "resource"
+                    and (
+                        ordinary_renewal
+                        or operation_renewal
+                        or prior is not None
+                        and (document.document_id, occurrence.occurrence_id)
+                        not in attachment_links
+                        and any(
+                            (old.raw, old.syntax, old.embedded, old.query, old.meaning)
+                            == (
+                                occurrence.raw,
+                                occurrence.syntax,
+                                occurrence.embedded,
+                                occurrence.query,
+                                occurrence.meaning,
+                            )
+                            for old in prior.occurrences
+                        )
+                    )
                     and occurrence.meaning.model_copy(
                         update={"target_version": actual.target_version}
                     )
@@ -356,6 +557,11 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
                 | (
                     {m.target_id for m in resolved if m.target_id is not None}
                     if document.document_id in explicit_documents
+                    and not (
+                        facts.format_operation.kind
+                        in ("onboarding", "format_transition")
+                        and unchanged_current
+                    )
                     else set()
                 )
             ),
@@ -413,6 +619,12 @@ def selected_effect_active(facts, proposal, approvals):
     for change in proposal.changes:
         approval = approved.get(change.change_id)
         if approval is not None and approval.choice == "reverse":
+            return True
+        if (
+            approval is not None
+            and approval.choice == "remove"
+            and facts.format_operation.kind == "attachment_cleanup"
+        ):
             return True
         if approval is not None and approval.attachment_candidate is not None:
             if any(

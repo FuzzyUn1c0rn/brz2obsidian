@@ -136,6 +136,53 @@ def _decision_current(decision, facts, subject, assumptions, applicability=()):
     )
 
 
+def _rename_target_context(facts, subject, selected, items, identity_review):
+    collisions = _target_context(subject.path, items, selected.entry_id)
+    planned = tuple(
+        sorted(
+            (other.item_id, other.facet, other.path, other.source_target.model_dump())
+            for other in facts.subjects
+            if (other.item_id, other.facet) != (subject.item_id, subject.facet)
+            and _paths_collide(other.path, subject.path)
+            and any(
+                (d.item_id, d.facet) == (other.item_id, other.facet)
+                and d.choice == "source_path"
+                for d in facts.rename_decisions
+            )
+        )
+    )
+    safe = (
+        identity_review.status == "matched"
+        and not identity_review.repair_required
+        and _target_safe(subject.path, subject.source_target, collisions)
+        and not planned
+    )
+    return collisions, planned, safe
+
+
+def rename_source_path_safe(facts, change):
+    """Use the producer's target predicate for canonical rename availability."""
+    items = tuple(sorted(facts.identity_inventory, key=lambda item: item.entry_id))
+    selected = next(
+        (
+            item
+            for item in items
+            if item.entry_id == change.identity_review.selected_entry_id
+        ),
+        None,
+    )
+    if selected is None:
+        return False
+    subject = next(
+        row
+        for row in facts.subjects
+        if (row.item_id, row.facet) == (change.item_id, change.facet)
+    ).model_copy(update={"current": selected.current})
+    return _rename_target_context(
+        facts, subject, selected, items, change.identity_review
+    )[2]
+
+
 def _rename(
     facts,
     subject,
@@ -170,25 +217,8 @@ def _rename(
     from .review_links import rename_link_assumptions
 
     link_assumptions = rename_link_assumptions(facts, subject, subject_id, assumptions)
-    collisions = _target_context(subject.path, items, selected.entry_id)
-    planned = tuple(
-        sorted(
-            (other.item_id, other.facet, other.path, other.source_target.model_dump())
-            for other in facts.subjects
-            if (other.item_id, other.facet) != (subject.item_id, subject.facet)
-            and _paths_collide(other.path, subject.path)
-            and any(
-                (d.item_id, d.facet) == (other.item_id, other.facet)
-                and d.choice == "source_path"
-                for d in facts.rename_decisions
-            )
-        )
-    )
-    safe = (
-        identity_review.status == "matched"
-        and not identity_review.repair_required
-        and _target_safe(subject.path, subject.source_target, collisions)
-        and not planned
+    collisions, planned, safe = _rename_target_context(
+        facts, subject, selected, items, identity_review
     )
     assumption = ProposalAssumption(
         key=f"rename:{subject_id}",
@@ -273,6 +303,11 @@ def bind_identity(facts, subject, subject_id, *, applicability=()):
         else None
     )
     operation_owned = False
+    if selected is None and not matches:
+        from .reversals import reversal_document_entry
+
+        selected = reversal_document_entry(facts, subject)
+        operation_owned = selected is not None
     if len(matches) > 1 and subject.operation_reversal is not None:
         from .reversals import reversal_physical_entry
 
@@ -323,6 +358,7 @@ def bind_identity(facts, subject, subject_id, *, applicability=()):
         same_path = item.current.path == subject.path
         if not (
             same
+            or (operation_owned and item.entry_id == selected.entry_id)
             or (
                 selected is None
                 and (item.identity_state != "valid" or same_title or same_path)
@@ -468,11 +504,13 @@ def bind_identity(facts, subject, subject_id, *, applicability=()):
         ):
             status, reason = "refused", "current_mismatch"
             finding("current_inventory_mismatch", True)
-    repair_required = (
-        selected is None
-        or selected.identity_state != "valid"
-        or selected.facet != subject.facet
-        or (len(matches) != 1 and not operation_owned)
+    repair_required = selected is None or (
+        not operation_owned
+        and (
+            selected.identity_state != "valid"
+            or selected.facet != subject.facet
+            or len(matches) != 1
+        )
     )
     if (
         selected is not None

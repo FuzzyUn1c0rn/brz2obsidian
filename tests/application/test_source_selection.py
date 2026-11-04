@@ -43,7 +43,7 @@ def test_typed_archive_request_roundtrips_without_a_legacy_source_field(tmp_path
     assert json.loads(wire)["arguments"] == {
         "source_selection": {"kind": "brz", "path": str(tmp_path / "Été.brz")}
     }
-    assert json.loads(wire)["schema_version"] == 3
+    assert json.loads(wire)["schema_version"] == 4
     assert decode_request(wire).arguments.source_selection == selection
 
 

@@ -8,6 +8,7 @@ from brz2obsidian.contracts import LinkValidationBaseline, ProposalAssumption
 from .identity import _paths_collide, _target_context, _target_safe
 from .link_meanings import _semantic, resolve_occurrence
 from .link_validation import validate_link_document
+from .reference_targets import validate_targets
 
 
 def consumed_context(
@@ -371,7 +372,43 @@ def rename_link_assumptions(facts, subject, subject_id, dependencies):
     )
 
 
-def selected_current_links_safe(facts, change):
+def onboarding_current_context(facts):
+    """Exact current observations, with no assertion about opaque link meanings."""
+    context = facts.link_context
+    if (
+        facts.format_operation.kind not in ("onboarding", "format_transition")
+        or context is None
+        or current_observation_problem(facts) is not None
+        or not current_lookup_coverage(facts)
+    ):
+        return False
+    try:
+        validate_targets(context.current_targets)
+    except ValueError:
+        return False
+    for entry in facts.identity_inventory:
+        if entry.current.existence != "present":
+            continue
+        targets = tuple(
+            t for t in context.current_targets if t.canonical_path == entry.current.path
+        )
+        if len(targets) != 1:
+            return False
+        if targets[0].kind == "resource":
+            continue
+        documents = tuple(
+            d for d in context.current_documents if d.source_path == entry.current.path
+        )
+        if (
+            len(documents) != 1
+            or documents[0].content != entry.current.content
+            or documents[0].inventory != "complete"
+        ):
+            return False
+    return True
+
+
+def selected_current_links_safe(facts, change, *, candidate=None):
     context = facts.link_context
     if change.current is None:
         return True
@@ -386,32 +423,88 @@ def selected_current_links_safe(facts, change):
         return current_lookup_coverage(facts)
     if current_keep_needs_proof(facts, change) and not current_lookup_coverage(facts):
         return False
+    observed_path = (
+        change.rename_review.current_path
+        if change.rename_review is not None
+        else change.target_path
+    )
+    relocated = change.target_path != observed_path
     documents = tuple(
         d
         for d in context.current_documents
-        if d.source_path == change.target_path and d.content == change.current
+        if d.source_path == observed_path and d.content == change.current
     )
     if len(documents) != 1:
         return False
     (document,) = documents
+    if relocated and candidate is None:
+        return False
+    if document.status != "supported" and (
+        onboarding_current_context(facts)
+        and change.identity_review.status == "matched"
+        and not change.identity_review.repair_required
+        and change.target_path == subject.current.path
+    ):
+        return True
     meanings = tuple(
         resolve_occurrence(
             o, context.current_targets, context.current_target_facts, context.inventory
         )
         for o in document.occurrences
     )
-    return validate_link_document(
+    valid = validate_link_document(
         document,
         expected_content=change.current,
-        expected_path=change.target_path,
+        expected_path=observed_path,
         targets=context.current_targets,
         target_facts=context.current_target_facts,
         inventory=context.inventory,
         baseline=current_baseline(context, document),
-        affected_target_ids=tuple(
-            m.target_id for m in meanings if m.target_id is not None
-        ),
+        affected_target_ids=()
+        if facts.format_operation.kind in ("onboarding", "format_transition")
+        else tuple(m.target_id for m in meanings if m.target_id is not None),
     ).valid
+    if not valid or not relocated:
+        return valid
+    rename = change.rename_review
+    if (
+        rename is None
+        or rename.status != "accepted"
+        or rename.source_path != change.target_path
+        or rename.current_path != observed_path
+        or not current_lookup_coverage(facts)
+        or candidate.content != change.current
+        or candidate.target != subject.source_target
+        or candidate.links.document_id != document.document_id
+        or candidate.links.path_mode != document.path_mode
+        or candidate.links.source_path != change.target_path
+        or candidate.links.inventory != context.inventory
+        or candidate.link_target_facts != context.current_target_facts
+    ):
+        return False
+    owners = tuple(
+        t for t in context.current_targets if t.canonical_path == observed_path
+    )
+    if len(owners) != 1:
+        return False
+    owner = owners[0]
+    prospective = owner.model_copy(
+        update={
+            "canonical_path": change.target_path,
+            "target": subject.source_target,
+            "representations": (change.target_path,),
+        }
+    )
+    if candidate.link_targets != tuple(
+        prospective if row.target_id == owner.target_id else row
+        for row in context.current_targets
+    ):
+        return False
+    return tuple(
+        (o.raw, o.syntax, o.embedded, o.meaning) for o in document.occurrences
+    ) == tuple(
+        (o.raw, o.syntax, o.embedded, o.meaning) for o in candidate.links.occurrences
+    )
 
 
 def current_keep_needs_proof(facts, change):
@@ -485,8 +578,33 @@ def bound_resource_record(facts, entry, target, state):
         and sub.current.content == entry.current.content
         for sub in facts.subjects
     )
+    context = facts.link_context
+    local = (
+        facts.inventory == "complete"
+        and entry.identity_state == "missing"
+        and entry.identity is None
+        and entry.raw_identity is None
+        and entry.facet is None
+        and entry.current.existence == "present"
+        and entry.current.content is not None
+        and not entry.current.path.casefold().endswith(".md")
+        and entry.target == target.target
+        and state.target_id == target.target_id
+        and context is not None
+        and context.inventory == "complete"
+        and not any(
+            document.source_path == entry.current.path
+            for document in context.current_documents + context.incoming_documents
+        )
+        and not any(
+            other.target_id != target.target_id
+            and other.canonical_path is not None
+            and _paths_collide(other.canonical_path, entry.current.path)
+            for other in context.current_targets
+        )
+    )
     return (
-        associated
+        (associated or local)
         and target.kind == "resource"
         and target.identity is None
         and target.canonical_path == entry.current.path

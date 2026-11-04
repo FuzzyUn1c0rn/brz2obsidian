@@ -168,6 +168,12 @@ class VaultApplyResult(ReconciliationContract):
     code: str
     operation_id: str | None
     kind: Literal["apply", "undo"]
+    origin_role: (
+        Literal[
+            "source_update", "onboarding", "format_transition", "attachment_cleanup"
+        ]
+        | None
+    ) = Field(default=None, exclude_if=lambda value: value is None)
     direction: Literal["finish", "restore"] | None = None
     review_generation: int | None = Field(default=None, ge=1)
     generation: int | None = Field(ge=1)
@@ -234,6 +240,22 @@ class VaultUpdateDetailPage(ReconciliationContract):
     status: Literal["available", "unavailable"]
     code: str
     operation_id: str | None
+    intent_commit: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{40}$", exclude_if=lambda value: value is None
+    )
+    generation: int | None = Field(
+        default=None, ge=1, exclude_if=lambda value: value is None
+    )
+    kind: Literal["apply", "undo"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    direction: Literal["finish", "restore"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    review_generation: int | None = Field(
+        default=None, ge=1, exclude_if=lambda value: value is None
+    )
+    content_omitted: Literal[True] = True
     offset: int = Field(ge=0)
     limit: int = Field(ge=1, le=100)
     total: int = Field(ge=0)
@@ -255,4 +277,15 @@ class VaultUpdateDetailPage(ReconciliationContract):
             raise ValueError("Detail page continuation disagrees")
         if self.status == "available" and self.operation_id is None:
             raise ValueError("Available detail page needs operation authority")
+        binding = (self.intent_commit, self.generation, self.kind, self.direction)
+        if (
+            any(value is not None for value in binding)
+            or self.review_generation is not None
+        ) and (
+            self.status != "available"
+            or not all(value is not None for value in binding)
+        ):
+            raise ValueError(
+                "Bound metadata needs one complete available operation identity"
+            )
         return self

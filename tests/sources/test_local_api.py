@@ -188,6 +188,76 @@ def test_public_capture_rejects_unqualified_shapes_before_writing(
 
 
 @pytest.mark.parametrize(
+    "mutation",
+    [
+        "record_key",
+        "brain_record",
+        "owner_key",
+        "inventory_role",
+        "payload_declaration",
+    ],
+)
+def test_capture_refuses_conflicting_canonical_source_authority(tmp_path, mutation):
+    source, snapshot, audit, payloads = golden_inputs()
+    sentinel = tmp_path / "caller.txt"
+    sentinel.write_bytes(b"caller-owned bytes\n")
+    # Empty input digests request fresh capture identity calculation; they do not
+    # authorize contradictory records or inventory roles.
+    snapshot["identity"]["source_sha256"] = ""
+    snapshot["identity"]["snapshot_digest"] = ""
+    if mutation == "record_key":
+        record = next(r for r in source["records"] if r["domain"] == "attachment")
+        record["key"] = "attachment:11111111-1111-4111-8111-111111111111"
+    elif mutation == "brain_record":
+        record = next(r for r in source["records"] if r["domain"] == "brain")
+        record["value"]["name"] = "SERVICE_TOKEN_CANARY"
+    elif mutation == "owner_key":
+        record = next(r for r in source["records"] if r["domain"] == "graph")
+        record["key"] = "graph:11111111-1111-4111-8111-111111111111"
+    elif mutation == "inventory_role":
+        identity = source["inventories"]["ordinary_ids"].pop()
+        source["inventories"]["type_ids"].append(identity)
+    else:
+        source["payloads"][0]["asset_id"] = "11111111-1111-4111-8111-111111111111"
+    with pytest.raises(MigrationRefused) as error:
+        LocalApiSession(
+            source=source,
+            snapshot=SourceSnapshot.model_validate_json(json.dumps(snapshot)),
+            audit=audit,
+            payloads=payloads,
+            capture_parent=tmp_path,
+        )
+    assert "SERVICE_TOKEN_CANARY" not in str(error.value) + repr(error.value.issues)
+    assert list(tmp_path.iterdir()) == [sentinel]
+    assert sentinel.read_bytes() == b"caller-owned bytes\n"
+
+
+def test_closed_capture_revokes_payload_access_and_preserves_caller_files(tmp_path):
+    source, snapshot, audit, payloads = golden_inputs()
+    sentinel = tmp_path / "caller.txt"
+    sentinel.write_bytes(b"caller-owned bytes\n")
+    session = LocalApiSession(
+        source=source,
+        snapshot=SourceSnapshot.model_validate_json(json.dumps(snapshot)),
+        audit=audit,
+        payloads=payloads,
+        capture_parent=tmp_path,
+    )
+    asset = "00000000-0000-4000-8000-000000000003"
+    with session.open_payload(asset) as stream:
+        assert stream.read() == b"A\nB\n"
+    session.close()
+    assert session.closed
+    with pytest.raises(MigrationRefused):
+        session.verify_consistency()
+    with pytest.raises(MigrationRefused), session.open_payload(asset):
+        pytest.fail("A closed capture cannot yield payload bytes")
+    session.close()
+    assert list(tmp_path.iterdir()) == [sentinel]
+    assert sentinel.read_bytes() == b"caller-owned bytes\n"
+
+
+@pytest.mark.parametrize(
     "target",
     [
         "source.json",

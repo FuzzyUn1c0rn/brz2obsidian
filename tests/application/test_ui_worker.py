@@ -99,9 +99,11 @@ def test_wire_rejects_untrustworthy_terminal_results(mutation):
         data["result"]["reviewed"]["outcome"] = "failed"
     wire = json.dumps(data).encode() + b"\n"
     if mutation == "duplicate":
+        original_wire = wire
         wire = wire.replace(
-            b'"schema_version": 3', b'"schema_version": 3, "schema_version": 3', 1
+            b'"schema_version": 4', b'"schema_version": 4, "schema_version": 4', 1
         )
+        assert wire != original_wire
     elif mutation == "extra_json":
         wire += b"{}\n"
     elif mutation == "missing_newline":
@@ -212,7 +214,7 @@ def test_real_worker_rejects_invalid_requests_without_inspection_success(
         data["arguments"]["payload"] = "PRIVATE_CANARY"
     wire = json.dumps(data).encode() + b"\n"
     if control == "extra_json":
-        wire += b"{}\n"
+        wire += b'{"payload":"PRIVATE_CANARY"}\n'
     elif control == "oversized_request":
         wire = b"x" * (REQUEST_LIMIT + 1)
     result = subprocess.run(
@@ -223,7 +225,7 @@ def test_real_worker_rejects_invalid_requests_without_inspection_success(
         check=False,
     )
     assert result.returncode == 1
-    if control in ("bad_schema", "extra_argument"):
+    if control in ("bad_schema", "extra_argument", "extra_json"):
         response = decode_response(result.stdout, request)
         assert response.result is None
         assert response.protocol_error.code == "invalid_request"

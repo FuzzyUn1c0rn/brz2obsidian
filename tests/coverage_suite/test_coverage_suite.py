@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 import pytest
+from coverage import CoverageData
 
 ROOT = Path(__file__).resolve().parents[2]
 SUITE = ROOT / "tools" / "coverage_suite.py"
@@ -158,9 +159,13 @@ def test_default_command_validates_four_checks_and_reports_all_production(
         ),
         encoding="utf-8",
     )
+    rejected = invoke(coverage_checkout, "--timeout", "901")
+    assert rejected.returncode == 2
+    assert "at most 900 seconds" in rejected.stderr
     result = invoke(coverage_checkout)
     assert result.returncode == 0, result.stdout + result.stderr
     report, output = summary(coverage_checkout)
+    assert report["timeout_seconds"] == 900
     assert report["status"] == "passed"
     assert report["measurement"] == "default suite"
     assert report["lines"] == {"covered": 11, "total": 12, "percent": 100 * 11 / 12}
@@ -237,6 +242,22 @@ def test_default_command_validates_four_checks_and_reports_all_production(
     unexecuted = files["src/brz2obsidian/unexecuted.py"]
     assert unexecuted["contexts"] == {} and unexecuted["executed_lines"] == []
     assert unexecuted["missing_lines"] == [1]
+
+    retained = {}
+    for path in output.glob(".coverage.*"):
+        data = CoverageData(basename=str(path))
+        data.read()
+        for context in data.measured_contexts():
+            data.set_query_context(context)
+            for filename in data.measured_files():
+                key = (Path(filename), context)
+                retained.setdefault(key, set()).update(data.arcs(filename) or ())
+    ui_decisions = coverage_checkout / "src" / "brz2obsidian_ui" / "decisions.py"
+    assert (2, 3) in retained.get((decisions, "test_decisions.test_yes"), set())
+    assert (2, 4) in retained.get((decisions, "test_other.test_no"), set())
+    assert {(2, 3), (2, 4)} <= retained.get(
+        (ui_decisions, "test_ui.test_ui_choices"), set()
+    )
 
 
 def test_focused_measurement_uses_all_source_denominator_and_rejects_threshold(

@@ -1,0 +1,251 @@
+"""Bounded read-only summaries over the canonical offered review actions."""
+
+from hashlib import sha256
+
+from brz2obsidian.core import inspect_review_choices
+
+from .review_choices import requirement_digest
+from .update_context_contracts import UpdateChoiceDetail, UpdateChoiceOffer
+from .update_contracts import UpdatePreparation
+
+
+def _slice(rows, offset, limit):
+    if (
+        type(offset) is not int
+        or offset < 0
+        or type(limit) is not int
+        or not 1 <= limit <= 100
+    ):
+        raise ValueError("Invalid action page")
+    end = min(len(rows), offset + limit)
+    return rows[offset:end], len(rows), end if end < len(rows) else None
+
+
+def _attachment_outputs(plan, requirement):
+    change = next(
+        row for row in plan.proposal.changes if row.change_id == requirement.change_id
+    )
+    return tuple(
+        (alternative.choice, output)
+        for alternative in change.attachment_review.alternatives
+        if alternative.eligible and alternative.choice in requirement.enabled_choices
+        for output in alternative.outputs
+    )
+
+
+def choice_offers(preparation):
+    plan = UpdatePreparation.model_validate(preparation).review
+    return review_plan_choice_offers(plan)
+
+
+def review_plan_choice_offers(plan):
+    result = []
+    changes = {row.change_id: row for row in plan.proposal.changes}
+    reference_changes = {
+        row.change_id
+        for row in plan.proposal.changes
+        if row.attachment_review is not None
+    }
+    for row in inspect_review_choices(plan):
+        selected = next(
+            (
+                a
+                for a in plan.approvals
+                if a.change_id == row.change_id and a.domain == row.domain
+            ),
+            None,
+        )
+        disclosure, policy, count = "", None, 0
+        if row.domain in ("tracking", "storage"):
+            consent = next(
+                c
+                for c in plan.preflight.consents
+                if c.consent_id == row.change_id.removeprefix("consent:")
+            )
+            decision = next(
+                (c for c in plan.consents if c.consent_id == consent.consent_id), None
+            )
+            selected = decision or selected
+            disclosure, policy, count = (
+                consent.disclosure,
+                consent.policy,
+                len(consent.subjects) or len(plan.proposal.changes),
+            )
+        elif row.domain == "compatible_group":
+            count = next(g.count for g in plan.groups if g.group_id == row.change_id)
+        elif row.domain == "identity":
+            count = len(
+                next(
+                    c.identity_review.candidates
+                    for c in plan.proposal.changes
+                    if c.change_id == row.change_id
+                )
+            )
+        elif row.domain == "attachment":
+            count = len(_attachment_outputs(plan, row))
+        elif row.domain == "restoration":
+            change = changes[row.change_id]
+            disclosure = "Restore to: " + change.target_path
+            if change.path != change.target_path:
+                disclosure += "\nDeleted path: " + change.path
+        elif row.domain == "text":
+            change = changes[row.change_id]
+            current_path = (
+                change.rename_review.current_path
+                if change.rename_review is not None
+                else change.path
+            )
+            disclosure = "Current file: " + current_path
+            if change.target_path != current_path:
+                disclosure += "\nSelected destination: " + change.target_path
+        elif row.domain == "format":
+            change = changes[row.change_id]
+            review = change.format_review
+            disclosure = "\n".join(
+                (
+                    "File: " + change.path,
+                    f"Recorded output format: {review.old_identity.output_format}",
+                    f"Incoming output format: {review.target_identity.output_format}",
+                    "Keep vault version preserves the current vault content or its absence.",
+                    "Use incoming version replaces it with the reviewed generated content.",
+                    "Original generated content is available for comparison."
+                    if review.original_known
+                    else "Original generated content is unknown; current vault content is not assumed unchanged.",
+                )
+            )
+            if change.target_path != change.path:
+                disclosure += "\nSelected destination: " + change.target_path
+        change = changes.get(row.change_id)
+        selected_choice = selected.choice if selected else None
+        decision_id = selected.decision_id if selected else None
+        if change is not None and row.domain == "rename":
+            selected_choice = {
+                "accepted": "source_path",
+                "declined": "keep_path",
+            }.get(change.rename_review.status)
+            decision_id = (
+                change.rename_review.decision_id
+                if selected_choice is not None
+                else None
+            )
+        if (
+            change is not None
+            and row.domain != "text"
+            and change.rename_review is not None
+            and (change.rename_review.status != "accepted" or row.domain == "rename")
+        ):
+            rename = change.rename_review
+            disclosure = "\n".join(
+                text
+                for text in (
+                    disclosure,
+                    "Current path: " + rename.current_path,
+                    "Proposed source path: " + rename.source_path,
+                )
+                if text
+            )
+        result.append(
+            UpdateChoiceOffer(
+                requirement_id=row.requirement_id,
+                change_id=row.change_id,
+                domain=row.domain,
+                choices=row.enabled_choices,
+                unavailable_choices=tuple(a for a in row.availability if not a.enabled),
+                assumptions_digest=requirement_digest(row),
+                selected=selected_choice,
+                decision_id=decision_id,
+                disclosure=disclosure[:2048],
+                policy=policy,
+                detail_count=count,
+                detail_omitted=len(disclosure) > 2048,
+                reference_review=row.change_id in reference_changes
+                and row.domain != "rename",
+            )
+        )
+    return tuple(result)
+
+
+def choice_page(preparation, *, offset=0, limit=100):
+    return _slice(choice_offers(preparation), offset, limit)
+
+
+def review_plan_choice_page(plan, *, offset=0, limit=100):
+    return _slice(review_plan_choice_offers(plan), offset, limit)
+
+
+def choice_detail_page(preparation, *, requirement_id, offset=0, limit=100):
+    plan = UpdatePreparation.model_validate(preparation).review
+    return review_plan_choice_detail_page(
+        plan, requirement_id=requirement_id, offset=offset, limit=limit
+    )
+
+
+def review_plan_choice_detail_page(plan, *, requirement_id, offset=0, limit=100):
+    requirement = next(
+        row
+        for row in inspect_review_choices(plan)
+        if row.requirement_id == requirement_id
+    )
+    rows = []
+    if requirement.domain == "attachment":
+        rows = [
+            UpdateChoiceDetail(
+                kind="attachment_output",
+                choice=choice,
+                target_id=output.target_id,
+                path=output.path,
+                size=len(output.content.data),
+                sha256=sha256(output.content.data).hexdigest(),
+            )
+            for choice, output in _attachment_outputs(plan, requirement)
+        ]
+    elif requirement.domain == "identity":
+        change = next(
+            c for c in plan.proposal.changes if c.change_id == requirement.change_id
+        )
+        for entry in change.identity_review.candidates:
+            content = entry.current.content
+            rows.append(
+                UpdateChoiceDetail(
+                    kind="identity",
+                    entry_id=entry.entry_id,
+                    path=entry.current.path,
+                    identity_state=entry.identity_state,
+                    eligible=entry.eligible,
+                    target_safe=entry.target_safe,
+                    existence=entry.current.existence,
+                    size=len(content.data) if content is not None else None,
+                    sha256=sha256(content.data).hexdigest()
+                    if content is not None
+                    else None,
+                )
+            )
+    elif requirement.domain == "compatible_group":
+        group = next(g for g in plan.groups if g.group_id == requirement.change_id)
+        rows = [
+            UpdateChoiceDetail(
+                kind="compatible_group",
+                change_id=c.change_id,
+                subject_id=c.subject_id,
+                path=c.path,
+                size=len(c.result.data),
+            )
+            for c in group.comparisons
+        ]
+    elif requirement.domain in ("tracking", "storage"):
+        consent = next(
+            c
+            for c in plan.preflight.consents
+            if c.consent_id == requirement.change_id.removeprefix("consent:")
+        )
+        rows = [
+            UpdateChoiceDetail(
+                kind="consent_scope",
+                change_id=c.change_id,
+                subject_id=c.subject_id,
+                path=c.target_path,
+            )
+            for c in plan.proposal.changes
+            if not consent.subjects or c.subject_id in consent.subjects
+        ]
+    return _slice(tuple(rows), offset, limit)

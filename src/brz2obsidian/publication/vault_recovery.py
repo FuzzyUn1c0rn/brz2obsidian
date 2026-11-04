@@ -12,6 +12,7 @@ import unicodedata
 from contextlib import contextmanager
 from pathlib import Path
 
+from brz2obsidian.application.update_facts import link_state
 from brz2obsidian.application.vault_recovery_contracts import VaultRecoveryPreparation
 from brz2obsidian.application.vault_update_contracts import (
     VaultOperationLock,
@@ -37,10 +38,16 @@ from brz2obsidian.core import (
     prepare_review,
     refresh_review,
     resolve_review,
-    review_owned_targets,
+    review_owned_outputs,
     select_review_effects,
 )
-from brz2obsidian.obsidian import interpret_link_target, interpret_links
+from brz2obsidian.core.reversals import reversal_document_target, review_owned_documents
+from brz2obsidian.obsidian import (
+    align_structure,
+    interpret_link_target,
+    interpret_links,
+    interpret_structure,
+)
 from brz2obsidian.publication.git_payload import verify_blobs
 from brz2obsidian.publication.vault_admission import (
     _inspect_vault_for_recovery,
@@ -169,9 +176,8 @@ def _review_observation(
         # document facets that were dependent outputs of the original apply.
         query_plan = pending.review.saved.plan
         query_effects = select_review_effects(query_plan)
-    admission = _inspect_vault_for_recovery(
-        root, retained, subjects=_review_subjects(query_plan, query_effects)
-    )
+    query_subjects = _review_subjects(query_plan, query_effects)
+    admission = _inspect_vault_for_recovery(root, retained, subjects=query_subjects)
     if (
         not admission.inventory_complete
         or admission.repository.kind != "root"
@@ -189,7 +195,7 @@ def _review_observation(
         row.path
         for row in (intent.proposed if direction == "finish" else intent.before)
     }
-    selected_removal = any(
+    selected_removal = bool(selected.remove_paths) or any(
         path in inventory and path not in target_paths for path in intent.affected_paths
     )
     if original.facts.link_context is not None:
@@ -201,8 +207,52 @@ def _review_observation(
             # Every present authored note can own an inbound link to a target
             # selected for removal, including notes added after the stop.
             paths.update(
-                row.path for row in admission.inventory if row.path.endswith(".md")
+                row.path
+                for row in admission.inventory
+                if row.path.casefold().endswith(".md")
             )
+    # Canonical grants are independent of a caller's previous review DTO.
+    granted_plans = [original, query_plan]
+    active_prepared = retained.graph.intent.prepared_commit
+    if active_prepared in retained.owned:
+        loaded = retained.owned[active_prepared][1]
+        if loaded is not None:
+            granted_plans.append(loaded.saved.plan)
+    if (
+        retained.unpublished_prepared == pending.locator.commit
+        and pending.review is not None
+    ):
+        granted_plans.append(pending.review.saved.plan)
+    for path in paths:
+        row = inventory.get(path)
+        if row is None or not row.excluded:
+            continue
+        queried_ids = {
+            subject.subject_id for subject in query_subjects if subject.path == path
+        }
+        if (
+            row.exclusion != "git_ignore"
+            or row.tracked
+            or not queried_ids
+            or not any(
+                required.kind == "tracking"
+                and required.requirement == "required"
+                and required.policy == "ordinary"
+                and queried_ids <= set(required.subjects)
+                and any(
+                    required in plan.preflight.consents
+                    and any(
+                        decision.consent_id == required.consent_id
+                        and decision.kind == required.kind
+                        and decision.choice == "accept"
+                        for decision in plan.consents
+                    )
+                    for plan in granted_plans
+                )
+                for required in admission.preflight.consents
+            )
+        ):
+            raise OSError("Excluded recovery bytes lack current scoped consent")
     needed = sum(inventory[path].size for path in paths if path in inventory)
     if available_memory() < 9 * needed + 64 * 1024 * 1024:
         raise OSError("Insufficient memory to review exact current recovery bytes")
@@ -230,16 +280,62 @@ def _review_observation(
     context = original_facts.link_context
     identity_inventory = list(original_facts.identity_inventory)
     if context is not None:
+        from brz2obsidian.core.identity import _paths_collide
+        from brz2obsidian.core.reference_targets import validate_targets
+        from brz2obsidian.core.review_links import (
+            consumed_context,
+            current_lookup_coverage,
+            current_observation_problem,
+        )
+
         target_by_id = {target.target_id: target for target in context.current_targets}
         state_by_id = {state.target_id: state for state in context.current_target_facts}
+        file_target_ids = {
+            target.target_id
+            for target in context.current_targets
+            if target.kind != "tag"
+        }
+        unobserved = file_target_ids - set(state_by_id)
         if (
             len(target_by_id) != len(context.current_targets)
             or len(state_by_id) != len(context.current_target_facts)
-            or set(target_by_id) != set(state_by_id)
+            or set(state_by_id) - file_target_ids
+            or unobserved
+            and (
+                current_observation_problem(original_facts) is not None
+                or not current_lookup_coverage(original_facts)
+            )
         ):
             raise OSError("Current recovery target lookup is incomplete")
+        for target_id in unobserved:
+            target = target_by_id[target_id]
+            path = target.canonical_path
+            if (
+                target.kind != "resource"
+                or target.identity is not None
+                or path is None
+                or not _safe_relative(path)
+                or target.representations != (path,)
+                or path.casefold().endswith(".md")
+                or path not in inventory
+                or any(entry.current.path == path for entry in identity_inventory)
+                or any(
+                    d.source_path == path
+                    for d in context.current_documents + context.incoming_documents
+                )
+                or any(
+                    other.path != path and _paths_collide(path, other.path)
+                    for other in admission.inventory
+                )
+            ):
+                raise OSError(
+                    "Unobserved recovery resource is not bounded physical metadata"
+                )
+            validate_targets((target,))
         target_facts = []
         for target in context.current_targets:
+            if target.kind == "tag" or target.target_id in unobserved:
+                continue
             old = state_by_id[target.target_id]
             observed_target = current.get(target.canonical_path)
             if observed_target is None or (
@@ -250,33 +346,17 @@ def _review_observation(
                 target_facts.append(old)
             else:
                 target_facts.append(
-                    interpret_link_target(
+                    link_state(
                         observed_target.content,
                         target_id=target.target_id,
                         existence="missing"
                         if observed_target.existence == "absent"
                         else "present",
-                        memberships=(),
+                        membership_targets=context.current_targets,
+                        source_path=target.canonical_path,
                     )
                 )
-        documents = []
-        for document in context.current_documents:
-            observed_document = current[document.source_path]
-            if observed_document.content is None:
-                continue
-            documents.append(
-                document
-                if observed_document.content == document.content
-                else interpret_links(
-                    observed_document.content,
-                    document_id=document.document_id,
-                    source_path=document.source_path,
-                    path_mode=document.path_mode,
-                    targets=context.current_targets,
-                    target_facts=tuple(target_facts),
-                    inventory="complete",
-                )
-            )
+        new_documents = []
         current_targets = list(context.current_targets)
         incoming_targets = list(context.incoming_targets)
         incoming_target_facts = list(context.incoming_target_facts)
@@ -288,7 +368,7 @@ def _review_observation(
         operation_owned_notes = {
             target.canonical_path
             for target in context.incoming_targets
-            if target.kind == "note"
+            if target.kind in ("note", "category", "relationship")
             and target.canonical_path in intent.affected_paths
             and target.canonical_path in selected_files
         }
@@ -296,7 +376,7 @@ def _review_observation(
             row.path
             for row in admission.inventory
             if (selected_removal or row.path in operation_owned_notes)
-            and row.path.endswith(".md")
+            and row.path.casefold().endswith(".md")
             and row.path not in known_document_paths
         ):
             observed_document = current[path]
@@ -305,7 +385,8 @@ def _review_observation(
             retained_targets = tuple(
                 target
                 for target in context.incoming_targets
-                if target.canonical_path == path and target.kind == "note"
+                if target.canonical_path == path
+                and target.kind in ("note", "category", "relationship")
             )
             if path in operation_owned_notes and retained_targets:
                 # The original selected effect can move one real note identity
@@ -352,11 +433,17 @@ def _review_observation(
                     if target.target_id == retained_target.target_id
                 )
                 current_targets[index] = retained_target
-                target_facts[index] = interpret_link_target(
+                state_index = next(
+                    i
+                    for i, state in enumerate(target_facts)
+                    if state.target_id == retained_target.target_id
+                )
+                target_facts[state_index] = link_state(
                     observed_document.content,
                     target_id=retained_target.target_id,
                     existence="present",
-                    memberships=(),
+                    membership_targets=tuple(current_targets),
+                    source_path=path,
                 )
                 parsed = interpret_links(
                     observed_document.content,
@@ -369,7 +456,7 @@ def _review_observation(
                 )
                 if parsed.status != "supported":
                     raise OSError("Operation-owned recovery note interpretation failed")
-                documents.append(parsed)
+                new_documents.append(parsed)
                 if owner[0].current.path == path:
                     # A created note already has the sole retained item at
                     # this physical path. Its ordinary inventory row below
@@ -443,6 +530,7 @@ def _review_observation(
                 target_id=target_id,
                 existence="present",
                 memberships=(),
+                source_path=path,
             )
             parsed = interpret_links(
                 observed_document.content,
@@ -462,7 +550,7 @@ def _review_observation(
             incoming_targets.append(reference)
             target_facts.append(state)
             incoming_target_facts.append(state)
-            documents.append(parsed)
+            new_documents.append(parsed)
             incoming_documents.append(parsed)
             identity_inventory.append(
                 IdentityInventoryItem(
@@ -477,11 +565,53 @@ def _review_observation(
                 )
             )
             known_identity_paths.add(path)
+        lookup_targets = tuple(current_targets)
+        lookup_states = tuple(target_facts)
+        lookup_unchanged = (
+            lookup_targets == context.current_targets
+            and lookup_states == context.current_target_facts
+            and context.inventory == "complete"
+        )
+        documents = []
+        for document in context.current_documents:
+            observed_document = current[document.source_path]
+            if observed_document.content is None:
+                continue
+            documents.append(
+                document
+                if (
+                    lookup_unchanged
+                    and observed_document.content == document.content
+                    and observed_document.path == document.source_path
+                    and document.inventory == "complete"
+                )
+                else interpret_links(
+                    observed_document.content,
+                    document_id=document.document_id,
+                    source_path=observed_document.path,
+                    path_mode=document.path_mode,
+                    targets=lookup_targets,
+                    target_facts=lookup_states,
+                    inventory="complete",
+                )
+            )
+        documents.extend(
+            interpret_links(
+                document.content,
+                document_id=document.document_id,
+                source_path=document.source_path,
+                path_mode=document.path_mode,
+                targets=lookup_targets,
+                target_facts=lookup_states,
+                inventory="complete",
+            )
+            for document in new_documents
+        )
         context = context.model_copy(
             update={
-                "current_targets": tuple(current_targets),
+                "current_targets": lookup_targets,
                 "incoming_targets": tuple(incoming_targets),
-                "current_target_facts": tuple(target_facts),
+                "current_target_facts": lookup_states,
                 "incoming_target_facts": tuple(incoming_target_facts),
                 "current_documents": tuple(documents),
                 "incoming_documents": tuple(incoming_documents),
@@ -542,14 +672,46 @@ def _review_observation(
             return old_current
         return observed
 
+    def observed_subject(subject):
+        observed = observed_subject_current(subject)
+        comparison = subject.structure
+        if comparison is not None and observed.content is not None:
+            targets = (
+                context.current_targets
+                if context is not None
+                else tuple(
+                    entry.target
+                    for membership in comparison.current.memberships
+                    for entry in membership.entries
+                )
+                + tuple(
+                    target
+                    for section in comparison.current.owned_sections
+                    for target in section.targets
+                )
+            )
+            current_structure = interpret_structure(
+                observed.content,
+                output_format=comparison.current.output_format,
+                membership_targets=targets,
+                section_bases=comparison.section_bases,
+                section_targets=targets,
+            )
+            comparison = align_structure(
+                comparison.original,
+                current_structure,
+                comparison.incoming,
+                prior_mappings=comparison.prior_mappings,
+                incoming_mappings=comparison.incoming_mappings,
+                section_bases=comparison.section_bases,
+            )
+        return subject.model_copy(update={"current": observed, "structure": comparison})
+
     facts = original_facts.model_copy(
         update={
             "generation": next_generation or original.proposal.generation + 1,
             "subjects": tuple(
-                subject.model_copy(
-                    update={"current": observed_subject_current(subject)}
-                )
-                for subject in original_facts.subjects
+                observed_subject(subject) for subject in original_facts.subjects
             ),
             "identity_inventory": tuple(
                 item.model_copy(update={"current": current[item.current.path]})
@@ -558,6 +720,30 @@ def _review_observation(
             "link_context": context,
         }
     )
+    if context is not None and unobserved:
+        if current_observation_problem(
+            facts
+        ) is not None or not current_lookup_coverage(facts):
+            raise OSError("Fresh recovery link lookup is unbound")
+        for documents, targets, states in (
+            (
+                context.current_documents,
+                context.current_targets,
+                context.current_target_facts,
+            ),
+            (
+                context.incoming_documents,
+                context.incoming_targets,
+                context.incoming_target_facts,
+            ),
+        ):
+            _, _, used, _ = consumed_context(
+                documents, targets, states, context.inventory
+            )
+            if unobserved.intersection(target.target_id for target in used):
+                raise OSError(
+                    "Current recovery consumes unobserved physical resource metadata"
+                )
     # The checkpoint locator advances during the already-authorized operation.
     # Only that validated movement is neutralized: changed policy, consents,
     # current bytes, or a broken graph still reach the ordinary refresh rules.
@@ -610,13 +796,167 @@ def _current_review_matches(review, admission):
     )
 
 
-def _finish_review(root, observed, *, previous=None, authority=None):
-    original, _, _, _, facts, preflight, _, _ = _review_observation(
+def _inactive_attachment_proof(original, intent, subject):
+    """Qualify a protected canonical Current, never an affected resource effect."""
+    proof = subject.operation_reversal
+    operation = original.producer_facts.format_operation
+    baseline = operation.established_baseline
+    if (
+        intent.kind != "undo"
+        or proof is None
+        or subject.attachment is None
+        or subject.baseline.status != "known"
+        or subject.incoming is None
+        or subject.incoming != subject.baseline.content
+        or baseline is None
+        or baseline.source_version != operation.baseline_source_version
+        or baseline.identity != original.producer_facts.baseline_identity
+    ):
+        return False
+    versions = tuple(
+        row
+        for row in baseline.outputs
+        if (row.item_id, row.facet) == (subject.item_id, subject.facet)
+    )
+    changes = tuple(
+        row
+        for row in original.proposal.changes
+        if (row.item_id, row.facet) == (subject.item_id, subject.facet)
+    )
+    if (
+        len(versions) != 1
+        or versions[0].content != subject.baseline.content
+        or len(changes) != 1
+        or not any(
+            row.change_id == changes[0].change_id
+            and row.domain == "reversal"
+            and row.choice == "current"
+            for row in original.approvals
+        )
+    ):
+        return False
+    before = {row.path: row for row in intent.before}
+    proposed = {row.path: row for row in intent.proposed}
+    paths = {subject.path, subject.current.path} | {row.path for row in proof.outputs}
+    return not paths & set(intent.affected_paths) and all(
+        path in before and path in proposed and before[path] == proposed[path]
+        for path in paths
+    )
+
+
+def _document_preflight(root, retained, original, intent, facts):
+    """Reinspect the exact retained subject query after inactive-proof removal."""
+    keys = {(subject.item_id, subject.facet) for subject in facts.subjects}
+    owners = {
+        change.subject_id
+        for change in original.proposal.changes
+        if (change.item_id, change.facet) in keys
+    }
+    paths = {
+        path
+        for subject in facts.subjects
+        for path in (subject.path, subject.current.path)
+    }
+    paths.update(
+        row.path
+        for subject in facts.subjects
+        if subject.operation_reversal is not None
+        for row in subject.operation_reversal.outputs
+    )
+    admission = _inspect_vault_for_recovery(
         root,
-        observed,
-        direction="finish",
-        authority=authority,
-        next_generation=(previous.proposal.generation + 1 if previous else None),
+        retained,
+        subjects=tuple(
+            subject
+            for subject in _review_subjects(original, select_review_effects(original))
+            if subject.subject_id in owners and subject.path in paths
+        ),
+    )
+    if (
+        not admission.inventory_complete
+        or admission.repository.kind != "root"
+        or any(finding.policy != "operation" for finding in admission.findings)
+        or admission.preflight.state_status != "supported"
+    ):
+        raise OSError("Current recovery policy or inventory is unavailable")
+    return _review_preflight(
+        admission, retained.owned[intent.prepared_commit][0], original, retained
+    )
+
+
+def _finish_review(root, observed, *, previous=None, authority=None):
+    original, intent, origin_commit, git, facts, preflight, current, retained = (
+        _review_observation(
+            root,
+            observed,
+            direction="finish",
+            authority=authority,
+            next_generation=(previous.proposal.generation + 1 if previous else None),
+        )
+    )
+    document_keys = {
+        (subject.item_id, subject.facet)
+        for subject in original.facts.subjects
+        if reversal_document_target(subject) is not None
+    }
+    if document_keys:
+        inactive_keys = {
+            (subject.item_id, subject.facet)
+            for subject in facts.subjects
+            if _inactive_attachment_proof(original, intent, subject)
+        }
+        facts = facts.model_copy(
+            update={
+                "subjects": tuple(
+                    subject.model_copy(update={"operation_reversal": None})
+                    if (subject.item_id, subject.facet) in inactive_keys
+                    else subject
+                    for subject in facts.subjects
+                    if (subject.item_id, subject.facet) not in document_keys
+                )
+                + _operation_document_subjects(
+                    original,
+                    intent,
+                    origin_commit,
+                    git,
+                    current,
+                    direction="finish",
+                    only_documents={item_id for item_id, _ in document_keys},
+                )
+            }
+        )
+        if inactive_keys:
+            preflight = _document_preflight(root, retained, original, intent, facts)
+    from .attachment_ownership import compile_removal_continuations
+
+    loaded = retained.owned[intent.prepared_commit][1]
+    continuations = compile_removal_continuations(
+        original,
+        intent,
+        origin_commit,
+        effects=loaded.historical_effects,
+    )
+    facts = facts.model_copy(
+        update={
+            "subjects": tuple(
+                subject.model_copy(
+                    update={
+                        "attachment": subject.attachment.model_copy(
+                            update={
+                                "removal_continuation": continuations.get(
+                                    (subject.item_id, subject.facet)
+                                )
+                            }
+                        )
+                    }
+                )
+                if subject.attachment is not None
+                and subject.current.existence == "absent"
+                and subject.current.content is None
+                else subject
+                for subject in facts.subjects
+            )
+        }
     )
     refreshed = refresh_review(previous or original, facts, preflight=preflight)
     if refreshed.status != "accepted":
@@ -690,6 +1030,8 @@ def _restore_link_context(original, facts, before, affected, git):
         raise OSError("Current recovery lookup is ambiguous")
     target_states = []
     for target in context.current_targets:
+        if target.kind == "tag":
+            continue
         path = target.canonical_path
         if path in affected:
             content = _owned_content(git, before.get(path))
@@ -699,6 +1041,7 @@ def _restore_link_context(original, facts, before, affected, git):
                     target_id=target.target_id,
                     existence="missing" if content is None else "present",
                     memberships=(),
+                    source_path=path,
                 )
             )
         else:
@@ -743,6 +1086,117 @@ def _restore_link_context(original, facts, before, affected, git):
     )
 
 
+def _operation_document_subjects(
+    original, intent, origin_commit, git, current, *, direction, only_documents=None
+):
+    """Rebind exact dependent-document versions to this admitted operation."""
+    return _operation_document_subjects_from_owned(
+        original,
+        intent,
+        origin_commit,
+        git,
+        current,
+        review_owned_documents(original),
+        direction=direction,
+        only_documents=only_documents,
+    )
+
+
+def _operation_document_subjects_from_owned(
+    original,
+    intent,
+    origin_commit,
+    git,
+    current,
+    owned_documents,
+    *,
+    direction,
+    only_documents=None,
+):
+    before = {row.path: row for row in intent.before}
+    produced = {row.path: row for row in intent.proposed}
+    approved = {approval.change_id: approval for approval in original.approvals}
+    subjects = []
+    for change_id, decision_id, reference in owned_documents:
+        if only_documents is not None and reference.target_id not in only_documents:
+            continue
+        approval = approved[change_id]
+        if approval.decision_id != decision_id:
+            raise OSError("Dependent recovery document decision is ambiguous")
+        path = reference.canonical_path
+        old = _owned_content(git, before.get(path))
+        new = _owned_content(git, produced.get(path))
+        documents = tuple(
+            d
+            for d in original.facts.link_context.current_documents
+            if (d.document_id, d.source_path) == (reference.target_id, path)
+        )
+        selected_documents = tuple(
+            d
+            for d in (
+                approval.attachment_candidate.documents
+                if approval.attachment_candidate is not None
+                else original.facts.link_context.incoming_documents
+            )
+            if (d.document_id, d.source_path) == (reference.target_id, path)
+        )
+        if (
+            path not in intent.affected_paths
+            or old is None
+            or new is None
+            or old == new
+            or len(documents) != 1
+            or documents[0].content != old
+            or len(selected_documents) != 1
+            or selected_documents[0].content != new
+            or any(s.path == path for s in subjects)
+        ):
+            raise OSError("Dependent recovery document lacks exact operation versions")
+        proof = OperationReversalTarget(
+            schema_id="brz2obsidian.operation-reversal-target",
+            schema_version=1,
+            operation_id=intent.operation_id,
+            operation_kind=intent.kind,
+            direction=direction,
+            operation_generation=intent.generation,
+            history_fingerprint=_operation_history_fingerprint(origin_commit, intent),
+            origin_change_id=approval.change_id,
+            origin_decision_id=approval.decision_id,
+            owned_targets=(reference,),
+            outputs=(
+                OperationReversalOutput(
+                    path=path,
+                    target_id=reference.target_id,
+                    produced_existence="present",
+                    produced=old if direction == "finish" else new,
+                    current=current[path],
+                    target_existence="present",
+                    target=new if direction == "finish" else old,
+                ),
+            ),
+        )
+        subjects.append(
+            ReconciliationSubject(
+                item_id=reference.target_id,
+                facet="content",
+                path=path,
+                baseline=ContentVersion(
+                    status="unknown", content=None, unavailable_digest=None
+                ),
+                current=current[path],
+                incoming=new if direction == "finish" else old,
+                interpretation="supported",
+                title=Path(path).stem,
+                source_target=reference.target,
+                output_role="note",
+                structure=None,
+                attachment=None,
+                operation_reversal=proof,
+            )
+        )
+    return tuple(subjects)
+
+
 def _restore_review(root, observed, *, previous=None, authority=None, undo_target=None):
     original, intent, origin_commit, git, facts, preflight, current, retained = (
         _review_observation(
@@ -760,9 +1214,19 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
     produced_source = {row.path: row for row in source_prepared.source}
     subjects = []
     baseline_outputs = []
+    protected_attachments = set()
     output_references = {}
     approved = {approval.change_id: approval for approval in original.approvals}
+    document_keys = {
+        (subject.item_id, subject.facet)
+        for subject in original.facts.subjects
+        if reversal_document_target(subject) is not None
+    }
+    ownership_queries = []
+    ownership_subjects = []
     for subject in facts.subjects:
+        if (subject.item_id, subject.facet) in document_keys:
+            continue
         changes = tuple(
             change
             for change in original.proposal.changes
@@ -779,7 +1243,13 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
                 # Affected outputs still require retained selected ownership.
                 continue
             raise OSError("Recovery subject lacks original selected approval")
-        owned = review_owned_targets(original, approval.change_id, approval.decision_id)
+        ownership_subjects.append((subject, changes, approval))
+        ownership_queries.append((approval.change_id, approval.decision_id))
+    owned_outputs = review_owned_outputs(original, tuple(ownership_queries))
+    owned_groups = owned_outputs.target_groups
+    for (subject, changes, approval), owned in zip(
+        ownership_subjects, owned_groups, strict=True
+    ):
         rows = []
         for reference in owned:
             path = reference.canonical_path
@@ -801,8 +1271,13 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
                 )
             )
             output_references[path] = reference
-        if subject.path not in intent.affected_paths and not rows:
+        protected = bool(document_keys) and _inactive_attachment_proof(
+            original, intent, subject
+        )
+        if subject.path not in intent.affected_paths and not rows and not protected:
             continue
+        if protected:
+            protected_attachments.add((subject.item_id, subject.facet))
         old = _owned_content(git, before.get(subject.path))
         if old is None and not rows:
             continue
@@ -854,6 +1329,21 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
                     item_id=subject.item_id, facet=subject.facet, content=generated
                 )
             )
+    for subject in _operation_document_subjects_from_owned(
+        original,
+        intent,
+        origin_commit,
+        git,
+        current,
+        owned_outputs.documents,
+        direction="restore",
+    ):
+        if subject.path in output_references or any(
+            row.path == subject.path for row in subjects
+        ):
+            raise OSError("Dependent recovery document has multiple owners")
+        subjects.append(subject)
+        output_references[subject.path] = subject.operation_reversal.owned_targets[0]
     covered = {
         path
         for subject in subjects
@@ -861,9 +1351,7 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
     } | set(output_references)
     source_lineage = retained.owned[source_prepared.previous][0]
     generated_files = {row.path: row for row in source_lineage.source}
-    original_files = {
-        row.path: row.content for row in select_review_effects(original).files
-    }
+    original_files = {row.path: row.content for row in owned_outputs.effects.files}
     original_documents = (
         set()
         if original.facts.link_context is None
@@ -968,6 +1456,7 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
                     target_id=reference.target_id,
                     existence="missing" if current[path].content is None else "present",
                     memberships=(),
+                    source_path=path,
                 )
             )
         if reference.target_id not in {target.target_id for target in incoming_refs}:
@@ -979,6 +1468,7 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
                     target_id=reference.target_id,
                     existence="missing" if target is None else "present",
                     memberships=(),
+                    source_path=path,
                 )
             )
         context = context.model_copy(
@@ -1057,6 +1547,8 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
             "preservation_decisions": (),
         }
     )
+    if protected_attachments:
+        preflight = _document_preflight(root, retained, original, intent, reverse_facts)
     if previous is None:
         return prepare_review(reverse_facts, preflight=preflight)
     refreshed = refresh_review(previous, reverse_facts, preflight=preflight)
@@ -1377,8 +1869,11 @@ def _cleanup_verified_terminal(root, saved, *, start):
         )
 
 
-def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
+def _execute_recovery(vault, preparation, *, cancel=None, progress=None, executor=None):
     """Retain selected direction before ordinary per-file publication."""
+    from brz2obsidian.application.vault_progress_contracts import report_progress
+
+    report_progress(progress, "review_validation")
     start = time.monotonic()
     try:
         saved = VaultRecoveryPreparation.model_validate(preparation)
@@ -1499,6 +1994,23 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
         }
         selected_files = {row.path: row.content.data for row in selected.files}
         removals = set(selected.remove_paths)
+        from .attachment_ownership import (
+            review_ownership_claims,
+            validate_removal_continuations,
+        )
+
+        satisfied = validate_removal_continuations(
+            review_ownership_claims(saved.review, selected)[0],
+            origin=origin,
+            original=current_authority.owned[origin.prepared_commit][1].saved.plan,
+            origin_commit=origin_commit,
+            before=tuple(before.values()),
+            direction=saved.direction,
+            effects=current_authority.owned[origin.prepared_commit][
+                1
+            ].historical_effects,
+        )
+        removals -= satisfied
         if any(not _safe_relative(path) for path in (*selected_files, *removals)):
             return _refuse_known_recovery(
                 current_status, "unsafe_recovery_path", start=start
@@ -1594,6 +2106,7 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
                     active_operation=operation_id,
                     recovery_direction=saved.direction,
                     _observation=(current_status, current_authority),
+                    progress=progress,
                 )
                 reused_preparation = (
                     prepared.status == "unchanged"
@@ -1625,9 +2138,14 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
                 tip = inspect_history(
                     root, subjects=subjects, active_operation=operation_id
                 )
-                manifest = tip.checkpoint.manifest
-                if tip.status != "intact" or manifest.boundary != "prepared":
+                if (
+                    tip.status != "intact"
+                    or tip.checkpoint is None
+                    or tip.checkpoint.manifest is None
+                    or tip.checkpoint.manifest.boundary != "prepared"
+                ):
                     raise OSError("Recovery preparation could not be rediscovered")
+                manifest = tip.checkpoint.manifest
                 generation = manifest.generation
                 intent = VaultRecoveryIntent(
                     schema_id="brz2obsidian.vault-recovery-intent",
@@ -1691,6 +2209,16 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
                     ref=op_ref,
                 )
                 phase = "publication"
+                report_progress(
+                    progress,
+                    "publication",
+                    operation_id=operation_id,
+                    operation_generation=generation,
+                    intent_commit=recovery_commit,
+                    completed_units=published,
+                    total_units=planned,
+                    unit="files",
+                )
                 proposed = {row.path: row for row in manifest.proposed}
                 prior = {row.path: row for row in manifest.preimage}
                 expected_metadata = {row.path: row for row in intent.result_metadata}
@@ -1762,6 +2290,23 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
                         ):
                             raise OSError("Published recovery result changed")
                     published += 1
+                    report_progress(
+                        progress,
+                        "publication",
+                        operation_id=operation_id,
+                        operation_generation=generation,
+                        intent_commit=recovery_commit,
+                        completed_units=published,
+                        total_units=planned,
+                        unit="files",
+                    )
+                report_progress(
+                    progress,
+                    "final_verification",
+                    operation_id=operation_id,
+                    operation_generation=generation,
+                    intent_commit=recovery_commit,
+                )
                 if any(not _same_file(root, row) for row in manifest.proposed):
                     raise OSError("Complete recovery inventory changed")
                 if any(
@@ -1769,6 +2314,13 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
                 ):
                     raise OSError("Removed recovery path remains visible")
                 phase = "result"
+                report_progress(
+                    progress,
+                    "final_reporting",
+                    operation_id=operation_id,
+                    operation_generation=generation,
+                    intent_commit=recovery_commit,
+                )
                 result_observation = _inspect_update_observation(root)
                 current = _inspect_retained_history(
                     root,
@@ -1789,6 +2341,7 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
                     active_operation=operation_id,
                     operation_intent_commit=recovery_commit,
                     _observation=result_observation,
+                    progress=progress,
                 )
                 if result_checkpoint.status != "captured":
                     failure_code = "result_" + result_checkpoint.code
@@ -1959,9 +2512,11 @@ def _execute_recovery(vault, preparation, *, cancel=None, executor=None):
                     )
 
 
-def execute_recovery(vault, preparation, *, cancel=None, executor=None):
+def execute_recovery(vault, preparation, *, cancel=None, progress=None, executor=None):
     """Apply a selected recovery direction through the shared Operations seam."""
     try:
-        return _execute_recovery(vault, preparation, cancel=cancel, executor=executor)
+        return _execute_recovery(
+            vault, preparation, cancel=cancel, progress=progress, executor=executor
+        )
     except _OwnedRecoveryCleanupFailure as failure:
         return failure.result

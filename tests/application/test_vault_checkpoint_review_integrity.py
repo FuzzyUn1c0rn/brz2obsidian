@@ -7,7 +7,11 @@ from dataclasses import dataclass
 
 import pytest
 
+from brz2obsidian.application.checkpoint_payload_contracts import (
+    CheckpointPayloadRequest,
+)
 from brz2obsidian.application.operations import Operations
+from brz2obsidian.application.vault_contracts import VaultSubject
 from brz2obsidian.core import prepare_review, resolve_review
 from tests.application.test_vault_checkpoint_integrity import _blob, _call, _git, _state
 from tests.application.test_vault_checkpoints import fixture_case
@@ -64,7 +68,7 @@ def _assert_intact(case):
 @pytest.fixture(scope="module")
 def compact_checkpoint():
     facts = with_review_links(
-        request(original=_BASELINE, current=_CURRENT, incoming=_INCOMING)
+        request(original=_BASELINE, current=_CURRENT, incoming=_INCOMING, generation=3)
     )
     initial = prepare_review(facts, preflight=preflight())
     chosen = resolve_review(
@@ -233,6 +237,72 @@ def _assert_refused_without_repair(case):
     assert reopened.status == "refused"
     assert refused.status == "refused"
     assert refused.authored_files_changed is False
+
+
+def test_public_history_retains_exact_derived_effects_without_current_authority(
+    compact_checkpoint,
+):
+    case = compact_checkpoint
+    before = _state(case.vault.parent)
+
+    def assert_selected(checkpoint):
+        assert checkpoint.status == "valid"
+        assert checkpoint.locator.commit == case.result.commit
+        assert checkpoint.locator.generation == 1
+        loaded = checkpoint.review
+        assert loaded.ready is False and loaded.readiness == "revalidation_required"
+        assert loaded.saved.plan == case.plan
+        effects = loaded.historical_effects
+        assert effects is not None, (
+            "The admitted public result must retain derived effects"
+        )
+        assert effects.status == "selected" and effects.code == "selected"
+        assert effects.proposal_id == case.plan.proposal.proposal_id
+        assert effects.generation == case.plan.proposal.generation == 3
+        assert effects.remove_paths == ()
+        assert [(row.path, row.content.data) for row in effects.files] == [
+            ("Notes/Opening.md", _CURRENT)
+        ]
+        assert "historical_effects" not in loaded.model_dump()
+        assert type(loaded).model_validate(loaded).historical_effects is None
+
+    observed = _call(case.operations.inspect_history, case.vault)
+    assert observed.status == "intact" and observed.admission.status == "supported"
+    assert_selected(observed.checkpoint)
+    reopened = _call(case.operations.read_checkpoint, case.vault)
+    assert_selected(reopened)
+    assert reopened == observed.checkpoint
+    assert (
+        type(observed).model_validate(observed).checkpoint.review.historical_effects
+        is None
+    )
+    with case.operations.inspect_update_inputs(case.vault) as reader:
+        assert reader.history == observed
+        assert_selected(reader.history.checkpoint)
+        payload = reader.read_payload(
+            locator=reopened.locator,
+            requests=(CheckpointPayloadRequest(path="Notes/Opening.md", limit=14),),
+            byte_limit=14,
+        )
+        assert payload.status == "available"
+        assert payload.chunks[0].data == _INCOMING
+        scoped = reader.inspect(
+            subjects=(
+                VaultSubject(
+                    path="Notes/Opening.md",
+                    subject_id=case.plan.proposal.changes[0].subject_id,
+                ),
+            )
+        )
+        assert scoped.status == "intact" and scoped.admission.status == "supported"
+        assert_selected(scoped.checkpoint)
+        assert scoped.checkpoint == reopened
+    assert _state(case.vault.parent) == before
+    assert (case.vault / ".brz2obsidian/locator.json").read_bytes() == case.locator
+    assert (
+        _git(case.vault, "show", case.result.commit + ":manifest.json") == case.manifest
+    )
+    assert _git(case.vault, "show", case.result.commit + ":review.json") == case.review
 
 
 def test_compact_review_duplicate_interpretation_key_refuses(compact_checkpoint):

@@ -249,6 +249,184 @@ def action(plan, change=None, **updates):
     return ReviewAction(**fields)
 
 
+def literal_text_candidate(facts, raw):
+    from brz2obsidian.contracts import ExactContent
+    from brz2obsidian.obsidian import inspect_text_candidate
+
+    subject = facts.subjects[0]
+    return inspect_text_candidate(
+        ExactContent(data=raw),
+        identity=facts.identity_inventory[0].identity,
+        target=subject.source_target,
+        output_format=7,
+        source_path=subject.path,
+        document_id="literal-action-candidate",
+        path_mode="vault",
+        link_targets=(),
+        link_target_facts=(),
+        link_inventory="complete",
+    )
+
+
+def test_storage_consent_rejects_content_and_unknown_scope_without_losing_approval():
+    from brz2obsidian.contracts import ReviewConsentRequirement
+    from brz2obsidian.core import prepare_review, resolve_review, select_review_effects
+
+    facts = with_review_links(request())
+    consent = ReviewConsentRequirement(
+        schema_id="brz2obsidian.review-consent-requirement",
+        schema_version=1,
+        consent_id="storage",
+        kind="storage",
+        requirement="required",
+        policy="builtin_transform",
+        fingerprint="literal-storage-policy",
+        disclosure="Retain exact preimage bytes before publication",
+        subjects=(),
+    )
+    pending = prepare_review(
+        facts, preflight=preflight().model_copy(update={"consents": (consent,)})
+    )
+    approved = resolve_review(pending, action(pending)).plan
+    assert not approved.ready
+    assert approved.approvals[0].result.data == b"incoming\n"
+    requirement = next(row for row in approved.requirements if row.domain == "storage")
+    scoped = action(
+        approved,
+        decision_id="storage:explicit",
+        domain="storage",
+        choice="accept",
+        change_id=requirement.change_id,
+        reviewed_assumptions=requirement.assumptions,
+    )
+    candidate = literal_text_candidate(facts, b"incoming\n")
+    with_content = resolve_review(
+        approved, scoped.model_copy(update={"candidate": candidate})
+    )
+    assert (with_content.status, with_content.code) == (
+        "refused",
+        "choice_not_admitted",
+    )
+    unknown = resolve_review(
+        approved, scoped.model_copy(update={"change_id": "consent:unobserved"})
+    )
+    assert (unknown.status, unknown.code) == ("refused", "unknown_change")
+    assert with_content.plan.approvals == unknown.plan.approvals
+    assert unknown.plan.approvals == approved.approvals
+    assert not with_content.plan.consents and not unknown.plan.consents
+    assert select_review_effects(with_content.plan).status == "refused"
+    accepted = resolve_review(approved, scoped)
+    assert accepted.status == "accepted" and accepted.plan.ready
+    assert accepted.plan.approvals == approved.approvals
+    assert accepted.plan.consents[0].consent_id == "storage"
+    assert accepted.plan.consents[0].choice == "accept"
+
+
+def test_compatible_bulk_cannot_smuggle_a_text_candidate_into_group_approval():
+    from brz2obsidian.core import prepare_review, resolve_review
+
+    facts = with_review_links(mixed_review_facts())
+    pending = prepare_review(facts, preflight=preflight())
+    group = pending.groups[0]
+    chosen = action(
+        pending,
+        change_id=group.group_id,
+        reviewed_assumptions=group.assumptions,
+        domain="compatible_group",
+        choice="approve",
+    )
+    candidate = literal_text_candidate(facts, b"new one")
+    rejected = resolve_review(
+        pending, chosen.model_copy(update={"candidate": candidate})
+    )
+    assert (rejected.status, rejected.code) == ("refused", "choice_not_admitted")
+    assert rejected.plan.approvals == () and rejected.plan.actions == ()
+    assert rejected.plan.groups[0].count == 2
+    accepted = resolve_review(pending, chosen)
+    assert accepted.status == "accepted" and not accepted.plan.ready
+    assert [row.result.data for row in accepted.plan.approvals] == [
+        b"new one",
+        b"new two",
+    ]
+    assert {row.domain for row in accepted.plan.requirements} == {
+        "text",
+        "configuration",
+    }
+
+
+def test_declining_restoration_cannot_restore_bytes_or_reassociate_an_identity():
+    from brz2obsidian.core import prepare_review, resolve_review, select_review_effects
+    from tests.reconciliation.test_absence import facts_for
+
+    facts = with_review_links(facts_for(existence="absent", incoming=b"incoming\n"))
+    pending = prepare_review(facts, preflight=preflight())
+    decline = action(pending, domain="restoration", choice="decline_restoration")
+    candidate = literal_text_candidate(facts, b"incoming\n")
+    candidate_result = resolve_review(
+        pending, decline.model_copy(update={"candidate": candidate})
+    )
+    identity_result = resolve_review(
+        pending, decline.model_copy(update={"selected_entry_id": "foreign-entry"})
+    )
+    for rejected in (candidate_result, identity_result):
+        assert (rejected.status, rejected.code) == ("refused", "choice_not_admitted")
+        assert rejected.plan.approvals == () and not rejected.plan.ready
+        assert rejected.plan.facts.subjects[0].current.existence == "absent"
+    accepted = resolve_review(pending, decline)
+    assert accepted.status == "accepted" and accepted.plan.ready
+    assert accepted.plan.approvals[0].result is None
+    memory = accepted.plan.approvals[0].source_memory
+    assert memory.choice == "decline_restoration"
+    assert memory.reviewed_incoming.data == b"incoming\n"
+    effects = select_review_effects(accepted.plan)
+    assert effects.status == "selected" and effects.files == effects.remove_paths == ()
+
+
+def test_saved_replay_refuses_a_later_invalid_action_and_retains_the_valid_prefix():
+    import pytest
+
+    from brz2obsidian.core import (
+        inspect_review_choices,
+        prepare_review,
+        resolve_review,
+        save_review,
+        select_review_effects,
+        validate_review,
+    )
+
+    pending = prepare_review(with_review_links(request()), preflight=preflight())
+    accepted = resolve_review(pending, action(pending)).plan
+    assert accepted.ready and accepted.approvals[0].result.data == b"incoming\n"
+    wrong_generation = action(
+        accepted, decision_id="later:stale", expected_generation=2
+    )
+    unknown_consent = action(
+        accepted,
+        decision_id="later:unknown",
+        domain="tracking",
+        choice="accept",
+        change_id="consent:unobserved",
+        reviewed_assumptions=(),
+    )
+    for later in (wrong_generation, unknown_consent):
+        forged = accepted.model_copy(
+            update={
+                "history": accepted.history.model_copy(
+                    update={"events": accepted.history.events + (later,)}
+                )
+            }
+        )
+        checked = validate_review(forged)
+        assert (checked.status, checked.code) == ("refused", "invalid_plan")
+        assert checked.plan.actions == accepted.actions
+        assert checked.plan.approvals[0].result.data == b"incoming\n"
+        assert checked.plan.consents == ()
+        assert select_review_effects(forged).status == "refused"
+        assert save_review(forged).status == "refused"
+        with pytest.raises(ValueError, match="Invalid review"):
+            inspect_review_choices(forged)
+
+
 def candidate_link_states(targets):
     """Available target bytes make membership-linked fixtures independently complete."""
     from brz2obsidian.contracts import ExactContent
@@ -1338,6 +1516,53 @@ def test_deleted_configuration_has_explicit_restoration_decline_and_scoped_memor
     assert not reopened.ready and {r.domain for r in reopened.requirements} == {
         "restoration"
     }
+
+
+def test_incoming_choice_preserves_empty_memberships_with_no_membership_targets():
+    from brz2obsidian.contracts import ExactContent, ImportedItemIdentity
+    from brz2obsidian.core import prepare_review, resolve_review
+    from brz2obsidian.obsidian import inspect_text_candidate
+    from tests.reconciliation.test_memberships import membership_request
+
+    original = (
+        b'---\ncategories: []\ntags: []\nappearance_category: ""\n---\nOriginal.\r\n'
+    )
+    current = original.replace(b"Original.", b"Local.")
+    incoming = (
+        b'---\ncategories: []\ntags: []\nappearance_category: ""\n---\nIncoming.\r\n'
+    )
+    facts = with_review_links(
+        membership_request(original, current, incoming, targets=())
+    )
+    plan = prepare_review(facts, preflight=preflight())
+    assert not plan.ready and "incoming" in plan.requirements[0].choices
+    context = facts.link_context
+    candidate = inspect_text_candidate(
+        ExactContent(data=incoming),
+        identity=ImportedItemIdentity(
+            collection_id="folio:collection",
+            module_id="synthetic-folio",
+            item_id="entry:opening",
+        ),
+        target=facts.subjects[0].source_target,
+        output_format=7,
+        membership_targets=(),
+        source_path="Notes/Opening.md",
+        document_id=context.incoming_documents[0].document_id,
+        path_mode="vault",
+        link_targets=context.incoming_targets,
+        link_target_facts=context.incoming_target_facts,
+        link_inventory="complete",
+    )
+    assert candidate.status == "safe"
+    accepted = resolve_review(
+        plan, action(plan, choice="incoming", candidate=candidate)
+    )
+    assert accepted.status == "accepted" and accepted.plan.ready, accepted
+    assert accepted.plan.approvals[0].choice == "incoming"
+    assert accepted.plan.approvals[0].result.data == (
+        b'---\ncategories: []\ntags: []\nappearance_category: ""\n---\nIncoming.\r\n'
+    )
 
 
 def test_exact_current_choice_cannot_reinterpret_bound_membership_identity():

@@ -41,6 +41,14 @@ class Supervisor:
             )
         self.interpreter, self.source_root = interpreter, source_root
 
+    def open_update(self, *, on_uncertain=None):
+        """Open a private producer; callers serialize work off the GUI thread."""
+        from .update_transport import UpdateChannel
+
+        return UpdateChannel(
+            self.interpreter, self.source_root, on_uncertain=on_uncertain
+        )
+
     def run(self, request: WorkerRequest) -> Terminal:
         try:
             wire = encode_request(request)

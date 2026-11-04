@@ -3,6 +3,8 @@
 import re
 from urllib.parse import unquote_to_bytes
 
+import yaml
+
 from brz2obsidian.contracts import (
     LinkAnchor,
     LinkDocument,
@@ -13,6 +15,8 @@ from brz2obsidian.contracts import (
     StructureSpan,
 )
 from brz2obsidian.core.link_meanings import resolve_link_meaning
+
+from .base_views import view_anchors
 
 
 def _code_ranges(text):
@@ -80,7 +84,13 @@ def _decode(value):
 
 
 def interpret_link_target(
-    content, *, target_id, existence, memberships, membership_targets=()
+    content,
+    *,
+    target_id,
+    existence,
+    memberships,
+    membership_targets=(),
+    source_path=None,
 ):
     from .interpretation import interpret_structure
 
@@ -99,6 +109,24 @@ def interpret_link_target(
         except UnicodeDecodeError:
             status = "unsupported"
         else:
+            if source_path is not None and source_path.casefold().endswith(".base"):
+                try:
+                    anchors = list(view_anchors(text))
+                    fragments = [anchor.fragment for anchor in anchors]
+                except ValueError, yaml.YAMLError:
+                    status = "unsupported"
+                return LinkTargetFacts(
+                    schema_id="brz2obsidian.link-target-facts",
+                    schema_version=1,
+                    target_id=target_id,
+                    existence=existence,
+                    content=content,
+                    fragments=tuple(fragments),
+                    anchors=tuple(anchors),
+                    structure=structure,
+                    memberships=memberships,
+                    interpretation=status,
+                )
             ranges, issues = _code_ranges(text)
             if issues:
                 status = "unsupported"

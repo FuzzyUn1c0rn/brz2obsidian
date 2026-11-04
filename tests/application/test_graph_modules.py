@@ -336,3 +336,63 @@ def test_rendering_preserves_authored_body_and_uses_exact_qualified_dotted_targe
         + body
         + "## Children\n\n- [[Notes/B.v2.md|B.v2]]\n"
     )
+
+
+@pytest.mark.parametrize(
+    "defect",
+    ["duplicate_key", "duplicate_original", "missing_document", "foreign_resource"],
+)
+def test_analysis_refuses_conflicting_identity_and_content_ownership(defect):
+    valid = snapshot((item("a"), item("b")))
+    assert analyze(valid, POLICY).snapshot == valid
+    a, b = valid.items[1:]
+    if defect == "duplicate_key":
+        altered = valid.model_copy(update={"items": (*valid.items, a)})
+        expected = "invalid_source"
+    elif defect == "duplicate_original":
+        altered = valid.model_copy(
+            update={
+                "items": (
+                    valid.items[0],
+                    a,
+                    b.model_copy(update={"original_identity": a.original_identity}),
+                )
+            }
+        )
+        expected = "invalid_source"
+    elif defect == "missing_document":
+        altered = valid.model_copy(
+            update={
+                "items": (
+                    valid.items[0],
+                    a.model_copy(update={"document_ids": ("missing",)}),
+                    b,
+                )
+            }
+        )
+        expected = "invalid_reference"
+    else:
+        asset = Asset(
+            asset_id="file",
+            owner="b",
+            naming_seed="ff",
+            original_name="data.bin",
+            role="file",
+            availability="present",
+            actual_length=1,
+            actual_sha256=hashlib.sha256(b"x").hexdigest(),
+        )
+        altered = valid.model_copy(
+            update={
+                "items": (
+                    valid.items[0],
+                    a.model_copy(update={"resource_ids": ("file",)}),
+                    b,
+                ),
+                "assets": (asset,),
+            }
+        )
+        expected = "invalid_reference"
+    with pytest.raises(MigrationRefused) as error:
+        analyze(altered, POLICY)
+    assert error.value.issues[0].code == expected

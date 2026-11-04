@@ -17,8 +17,15 @@ from brz2obsidian.application.protocol import (
 def main() -> int:
     data = b""
     try:
-        data = sys.stdin.buffer.read(REQUEST_LIMIT + 1)
+        data = sys.stdin.buffer.readline(REQUEST_LIMIT + 1)
         request = decode_request(data)
+        if request.operation == "update":
+            from brz2obsidian.application.update_worker import serve_updates
+
+            return serve_updates(request, sys.stdin.buffer, sys.stdout.buffer)
+        # One-shot migrations still require exact EOF before any operation.
+        if sys.stdin.buffer.read(1):
+            raise ProtocolFailure("Unexpected request continuation")
     except ProtocolFailure, OSError:
         response = rejected_request_response(data)
         if response is not None:

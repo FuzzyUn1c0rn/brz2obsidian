@@ -12,9 +12,25 @@ This is the complete ordinary bundle: selected pytest cases, Ruff lint and
 format checks, dependency checks, coverage reports and receipt validation. It
 requires the GUI development environment, actual GUI test execution, at least
 80% **branch coverage of all production Python**, and total elapsed time below
-600 seconds. Line coverage is reported separately. The generated summary,
+900 seconds. Line coverage is reported separately. The generated summary,
 coverage JSON and HTML identify the actual coverage and remaining gaps; the
 issue records the qualified candidate and measured baseline.
+
+For the current #314 qualification, the default bundle has an 800-second cap,
+including startup, reports and internal receipt validations. It includes the
+wrapper regression controls. Reserve 5 seconds for direct receipt validation,
+40 seconds for candidate, verification and integration records, 15 seconds for
+guards and bookkeeping, and 20 seconds as reserve. The earlier wrapper-family
+tooling measurement covered 42 of 60 branches; its source-bound evidence needs
+manual applicability assessment and is not a receipt for a changed candidate.
+The complete ledger must finish strictly below 900 seconds. Any additional
+required focused check belongs in that same ledger; the cap does not establish
+that a particular combination fits. Failed or interrupted qualifications remain
+failed and are preserved for diagnosis.
+
+```powershell
+.\.venv\Scripts\python.exe tools/coverage_suite.py --workers 4 --timeout 800
+```
 
 `coverage.json` retains exact contexts once per file, declared by
 `meta.context_scope="file"`. Function/class regions retain their ordinary summaries,
@@ -26,7 +42,7 @@ global deadline and validates the check receipt before and after reports.
 The maintained command uses four pytest-xdist workers, grouping module functions
 and class methods together with `loadscope`. It disables scope reordering and
 worker restarts. Manifest order is preserved within each worker; global serial
-order is not guaranteed. The existing 600-second deadline includes the worker
+order is not guaranteed. The existing 900-second deadline includes the worker
 processes and combined production coverage. Focused measurements and direct
 runner checks remain serial by default; `--workers 2`, `--workers 3` or
 `--workers 4` selects parallel execution, and `--workers 1` can select serial
@@ -78,11 +94,11 @@ matrix. These checks protect observable migration and filesystem safety outcomes
 | Family | Default responsibility | Trigger for additional focused checks |
 | --- | --- | --- |
 | Editable-vault reconciliation | Exact-byte proposals, owner/facet identity, formats/onboarding, structures/memberships, absence/memory, binary/link safety, review/consent, selective refresh and saved-review resume at their public in-memory boundaries | Changed normalized fact, interpretation, decision dependency, history, codec or readiness: select its owning `tests/reconciliation` family plus actual affected consumers. Opaque and malformed inputs, partial evidence and unaffected retained decisions remain independent outcomes. |
-| Converter-owned vault history | Real admission/layout and initialization, exact source binding, latest reviewed Undo with later writing, binary recovery and prepared-before-intent retry, malformed journal/owned-graph refusal, matching-history repair, persisted selective refresh, and closed wire meanings | Changed capture, retained graph, publication journal, Undo, matching-history repair or ownership: select the owning application controls and affected consumers, including a real process or native check where required. The complete functional leaf assessments retain their explicit source applicability; the default does not repeat each leaf lifecycle. |
+| Converter-owned vault history | Real admission/layout and initialization, exact source binding, partial-binary restore after a terminal-receipt fault, older-copy and exact missing-history repair, one-object source repair, malformed journal/owned-graph refusal, persisted selective refresh, and closed wire meanings | Changed capture, retained graph, publication journal, Undo, matching-history repair or ownership: select the owning application controls and affected consumers, including a real process or native check where required. The complete functional leaf assessments retain their explicit source applicability; the default does not repeat each leaf lifecycle. |
 | Core and rendering | Source-neutral planning, names, references, resources, tags, categories, strict facts and exact output examples | A changed planning rule, renderer, classification or resource obligation: select its owning public-module cases and affected output examples. |
 | BRZ source | Admission/read failures, exact reference spans, Markdown inserts, exclusion, and representative real conversion | Changed source predicates or formats: select their source-admission vectors. Add downstream checks for a distinct diagnostic, publication or output consequence. |
 | Local API source | Capture integrity, transport failures, payload roles, SVG/ICO/JPEG examples, external references, relationship discovery/reversal and qualified missing-TXT behavior | Changed HTTP, profile, codec, join or capture rule: select its positive, near-miss and tamper families at the source/session boundary. Codec-specific variant controls remain important even when their branches overlap. |
-| Application and CLI | State/revision handling, warning consent, worker protocol, recovery, truthful receipts, real entry points, JSON/text and safe diagnostics | Changed command, serializer, warning or recovery contract: select the affected result/state vectors and a real process example. Source variations need not all repeat through every entry point. |
+| Application and CLI | State/revision handling, warning consent, bounded worker transport and protocol, recovery, truthful receipts, public review preparation routes and current-review authority, JSON/text and safe diagnostics | Changed command, serializer, warning or recovery contract: select the affected result/state vectors and a real process example. Controlled CLI review ports establish routing and projection, not native persistence. Source variations need not all repeat through every entry point. |
 | Qt and platform | Actual worker conversion, API controls, responsiveness, diagnostics, recovery, completion actions, preferences and startup coordination | Changed controls, asynchronous callbacks, layout or Windows integration: select their adapter cases. Approved presentation changes also require the existing visual sampling procedure. |
 | Publication | Real filesystem staging, ownership, failure cleanup, retry and verified publication facts | Changed filesystem operation or artifact family: select the corresponding fault timing and affected nested-manifest examples. |
 | Production vault checker | Source-free conventions, findings, read-only behavior and application integration | Changed convention or checker command: select its direct checker/CLI cases and affected consumer projection. This checker does not prove migration preservation. |
@@ -110,21 +126,25 @@ affected consumer, an unresolved concern or a named acceptance requirement.
 Budget additional ordinary checks together with the default bundle when both
 are required.
 
-The longer S2 module groups start early: latest Undo, repair, recovery and
-reviewed apply occupy the first four scopes. The short wire-contract group,
-persisted review refresh and BOM controls follow. The standard scheduler queues
-another scope only while a worker has at most two pending tests: the initial
-Undo scope receives the wire controls, repair receives refresh, recovery
-receives BOM, and the three-case apply scope initially receives no extra work.
-All selected cases remain present. This ordering addresses the late apply tail
-observed in the failed three-worker measurement; the fresh complete bundle must
-still establish its elapsed time and coverage.
+The longer repair, recovery and reviewed Apply groups start early. The worker
+scheduler groups functions by module and class, so ordering and shared setup
+affect elapsed time. Historical timings and failed measurements do not predict
+the current candidate's wall time or coverage; its fresh complete bundle must
+establish both.
 
-The SOURCE-only one-object repair control remains focused when payload roles,
-baseline projection or repair change. Larger selected repair sequences exercise
-the declared-object engine and target/copy/user-Git preservation, but do not
-repeat that control's source-only blob exclusion from the user index/HEAD,
-full-manifest equality and exact one-object delta. Zero-additional-move recovery,
+The lifecycle-contract module uses one file selector because all 24 of its test
+functions, including every parameter case, were already selected. This preserves
+the executed cases while keeping both Windows command lines below the process
+creation limit. Review collection equivalence before consolidating selectors;
+shorter commands must not silently add or omit cases.
+
+The selected one-object repair control checks a source-only blob excluded from
+the user index/HEAD, full-manifest equality and the exact one-object delta. The
+selected older-copy repair separately checks refusal of older intact history,
+missing-history repair and target/copy/user-Git preservation. Neither replaces
+the focused complete terminal-operation-root and local-store copy control when
+copy graph closure, external stores, admission or repair changes.
+Zero-additional-move recovery,
 first-move failure versus uncertain discovery after a real move, empty-role
 metadata/review write failures, and extra legacy-CRLF/global-policy variants also
 retain their distinct focused assertions and original evidence. Their omission
@@ -182,7 +202,7 @@ matrices. Focused measurements guide additions and actual consolidation.
 
 The final assembled S1 check uses this maintained default once at its frozen
 head, including all four checks, actual GUI, all-production branch coverage and
-the total 600-second budget. A separately assigned fresh refresh/resume check may
+the total 900-second budget. A separately assigned fresh refresh/resume check may
 use the matching runner directly; the default supplies line/branch/context/time
 measurement. Exact-snapshot receipt reuse across assigned candidate/integration
 or aggregate assessments requires explicit requirements and rationale, and never
@@ -190,6 +210,16 @@ substitutes for required independent fresh execution or full manual scope. An
 unchanged head does not need duplicate broad execution for record bookkeeping.
 
 
+The small latest-Undo lifecycle selects one actual note Apply and reversal,
+including stale review refusal, exact restored bytes and user Git preservation.
+The retained mixed later-edit and recovery Undo control starts first and retains
+its independently checked later writing, binary and reference outcomes. Its
+focused measurement took 175.429 seconds; that is not a future runtime promise.
+The interrupted Undo control retains its focused trigger.
+Public value, history routing, candidate, source capture and link controls add
+independent refusal and exact-byte outcomes. Pure attachment ownership controls
+check continuation binding and disposition;
+their supplied descriptions do not establish native history authority.
 The maintained selection uses explicit cases from `test_vault_admission.py`:
 dirty/staged/Unicode user state, scoped storage choices, configured hooks,
 typed attributes, unavailable resource/access observations, denied parents and
@@ -210,9 +240,29 @@ real Git records, reloads them unready, reobserves current facts and retains
 choices across repeated memo saves. Editing one note invalidates only that
 choice; advancing the actual source/vault baseline invalidates the remaining
 stale choice. These controls compose storage with the existing canonical review.
-Full crash/restart, latest/interrupted Undo, repair and resource observations
+Full crash/restart, interrupted Undo, repair and resource observations
 retain their separately qualified evidence and freshness limits; they are not
 replayed as a broad matrix in every default run.
+
+Further native Undo controls remain focused when reversal ownership, journal
+or history graphs, later writing, attachment/link targets or worker integration
+change. Cancellation after recovery preparation and a fresh successful retry
+remain focused when recovery cancellation, stopped operation/intent/checkpoint
+identity, retry admission or user-Git preservation changes. The selected
+partial-binary restore retains the original binary, note and index after an
+actual first move and checks result retention after a terminal-receipt fault; it
+does not establish the cancellation/retry outcome.
+
+The changed-ref/lease and changed-current-rule retained-reader guards remain
+focused when their respective reader, ref, lease, attribute or consent rules
+change. Cleanup restart/origin projection and the explicit Current versus
+reference-edit conflict remain focused when their respective history-origin or
+choice-precedence contracts change. Their supplied observations retain their
+original limits. The selected public cleanup, identity, format, saved-review,
+worker and actual Qt controls retain their independently asserted outcomes and
+selected parameter variants. The review CLI boundary covers four prepare
+routes, saved unready/error results, inspect identity and bounds, and Apply
+readiness through controlled public ports; actual native effects remain separate.
 
 Measured focused fixture changes retain their independent outcomes: native Git
 CMD delegation reduced the old-format control from 3.56 to 0.87 seconds, the

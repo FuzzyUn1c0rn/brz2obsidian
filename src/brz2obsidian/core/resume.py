@@ -14,7 +14,8 @@ from brz2obsidian.contracts import (
 )
 
 from .refresh import refresh_review
-from .resolution import validate_review
+from .resolution import _reconstruct_review, validate_review
+from .selected_effects import _project_review_effects
 
 
 def save_review(plan: ReviewPlan) -> ReviewSaveResult:
@@ -39,23 +40,26 @@ def save_review(plan: ReviewPlan) -> ReviewSaveResult:
     )
 
 
-def _load_result(code, saved=None):
-    return ReviewLoadResult(
+def _load_result(code, saved=None, effects=None):
+    result = ReviewLoadResult(
         schema_id="brz2obsidian.review-load-result",
         schema_version=1,
         status="loaded" if saved is not None else "refused",
         code=code,
-        loaded=LoadedReview(
-            schema_id="brz2obsidian.loaded-review",
-            schema_version=1,
-            saved=saved,
-            readiness="revalidation_required",
-            ready=False,
-        )
+        loaded={
+            "schema_id": "brz2obsidian.loaded-review",
+            "schema_version": 1,
+            "saved": saved,
+            "readiness": "revalidation_required",
+            "ready": False,
+        }
         if saved is not None
         else None,
         ready=False,
     )
+    if result.loaded is not None:
+        result.loaded._historical_effects = effects
+    return result
 
 
 def load_review(raw: str | bytes | SavedReview) -> ReviewLoadResult:
@@ -86,7 +90,7 @@ def load_review(raw: str | bytes | SavedReview) -> ReviewLoadResult:
     except ValueError:
         return _load_result("invalid_review")
     return (
-        _load_result("loaded", saved)
+        _load_result("loaded", saved, _project_review_effects(validated.plan))
         if validated.status == "accepted"
         else _load_result("invalid_review")
     )
@@ -101,6 +105,54 @@ def _resume_result(status, code, loaded=None, plan=None):
         loaded=loaded,
         plan=plan,
         ready=plan is not None and plan.ready,
+    )
+
+
+def _load_local_review(saved: SavedReview) -> ReviewLoadResult:
+    """Verified local memo ingress only: reinterpret one historical derived cache.
+
+    The storage caller owns graph/boundary/integrity admission. This is not a
+    raw-load option, and no authority-bearing field may differ after full replay.
+    The returned SavedReview is canonical in memory; recorded bytes stay intact.
+    """
+    old = saved.plan
+    replayed = _reconstruct_review(old)
+    if replayed.status != "accepted":
+        return _load_result("invalid_review")
+    canonical = replayed.plan
+    effects = _project_review_effects(canonical)
+    if canonical == old:
+        return _load_result("loaded", saved, effects)
+    if (
+        old.facts.format_operation.kind != "source_update"
+        or old.requirements
+        or old.blockers != ("selected_link_context_conflict",)
+        or old.readiness != "refused"
+        or old.ready is not False
+    ):
+        return _load_result("invalid_review")
+    if (
+        canonical.requirements
+        or canonical.blockers
+        or canonical.readiness != "ready"
+        or canonical.ready is not True
+        or effects.status != "selected"
+        or old.model_copy(
+            update={
+                "blockers": canonical.blockers,
+                "readiness": canonical.readiness,
+                "ready": canonical.ready,
+            }
+        )
+        != canonical
+    ):
+        return _load_result("invalid_review")
+    return _load_result(
+        "loaded",
+        SavedReview(
+            schema_id="brz2obsidian.saved-review", schema_version=1, plan=canonical
+        ),
+        effects,
     )
 
 

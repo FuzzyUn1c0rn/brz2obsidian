@@ -453,8 +453,11 @@ def _discard_temporary(path, parent):
     shutil.rmtree(actual)
 
 
-def execute_history_repair(vault, copy, preparation):
+def execute_history_repair(vault, copy, preparation, *, progress=None):
     """Retain exact unavailable payloads proven by the target's own root."""
+    from brz2obsidian.application.vault_progress_contracts import report_progress
+
+    report_progress(progress, "current_inspection")
     root, supplied = Path(vault).absolute(), Path(copy).absolute()
 
     def outcome(
@@ -624,8 +627,23 @@ def execute_history_repair(vault, copy, preparation):
             )
             if damaged and retained_metadata(destination) != original_metadata[oid]:
                 raise OSError("Replaced Git object metadata changed")
+            report_progress(
+                progress,
+                "publication",
+                completed_units=written,
+                total_units=len(rows),
+                unit="history_objects",
+            )
+        report_progress(progress, "final_verification")
         if not complete():
             raise OSError("Repaired target history did not verify")
+        report_progress(
+            progress,
+            "final_reporting",
+            completed_units=len(rows),
+            total_units=len(rows),
+            unit="history_objects",
+        )
         return outcome(
             "repaired",
             "exact_dependency_restored",

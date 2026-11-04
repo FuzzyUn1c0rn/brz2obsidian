@@ -230,3 +230,39 @@ def test_open_source_payload_decoder_errors_remain_structured(
     assert issue.phase == "source"
     assert issue.affected == (asset_id,)
     assert issue.guidance
+
+
+@pytest.mark.parametrize(
+    ("change", "code"),
+    [
+        ({"DataLength": True}, "invalid_source"),
+        ({"SourceType": 3}, "unsupported_feature"),
+        ({"IsUnreviewedRole": True}, "unsupported_feature"),
+        ({"IsUnreviewedRole": "yes"}, "invalid_source"),
+        (
+            {"Type": 3, "NoteType": 0, "Location": "https://example.invalid/secret"},
+            "invalid_source",
+        ),
+    ],
+)
+def test_attachment_admission_rejects_unqualified_roles_without_changing_archive(
+    tmp_path, change, code
+):
+    source = make_archive(tmp_path / "brain.brz")
+    sentinel = tmp_path / "caller.txt"
+    sentinel.write_bytes(b"caller-owned\n")
+    with (
+        BrzSourceModule().open(source) as session,
+        session.open_payload(session.snapshot.assets[0].asset_id) as stream,
+    ):
+        assert stream.read() == b"Authored body.\r\n"
+    with ZipFile(source) as archive:
+        record = json.loads(archive.read("attachments.json"))
+    record.update(change)
+    rewrite(source, "attachments.json", json.dumps(record).encode())
+    original = source.read_bytes()
+    with pytest.raises(MigrationRefused) as error, BrzSourceModule().open(source):
+        pytest.fail("Unqualified attachment must not yield a source session")
+    assert error.value.issues[0].code == code
+    assert source.read_bytes() == original
+    assert sentinel.read_bytes() == b"caller-owned\n"

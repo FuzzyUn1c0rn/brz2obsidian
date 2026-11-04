@@ -176,6 +176,8 @@ def validate_record(
             )
             historical(item, bundle)
     used = set()
+    snapshots = {}
+    groups = []
     for needed in effective["checks"]:
         environment = needed.get("environment", effective["environment"])
         matches = [
@@ -210,17 +212,31 @@ def validate_record(
             and item["status"] != "unavailable"
             and (item["status"] in ("passed", "reused") or item.get("receipt"))
         ):
-            validate_receipt(
+            context, selection = prepare_receipt(
                 item,
                 needed,
                 environment,
                 bundle,
                 checkout,
                 record,
+                snapshots,
                 carried=carried,
                 prior_stage=prior_stage,
                 reuse_reason=reuse_reason,
             )
+            group = next(
+                (
+                    group
+                    for group in groups
+                    if group["context"] == context
+                    and all(check["id"] != selection["id"] for check in group["checks"])
+                ),
+                None,
+            )
+            if group is None:
+                group = {"context": context, "checks": []}
+                groups.append(group)
+            group["checks"].append(selection)
             used.add(id(item))
     # Even additional success claims must have intact receipts; unrequired text
     # claims cannot sneak into PASS as runner evidence.
@@ -231,6 +247,8 @@ def validate_record(
             and id(item) not in used
         ):
             require(False, "runner success check must have an independent requirement")
+    for group in groups:
+        validate_receipts(group, snapshots[group["context"][0]][0])
 
 
 def historical(item, bundle):
@@ -272,13 +290,14 @@ def historical(item, bundle):
     evidence(original.get("evidence"), source_path.parent, "historical check evidence")
 
 
-def validate_receipt(
+def prepare_receipt(
     item,
     needed,
     environment,
     bundle,
     checkout,
     record,
+    snapshots,
     *,
     carried,
     prior_stage,
@@ -291,7 +310,13 @@ def validate_receipt(
         item["status"] != "passed" or item["exit_code"] == 0,
         "runner passed check requires exit_code 0",
     )
-    facts = read_json(receipt)
+    if receipt not in snapshots:
+        contents = receipt.read_bytes()
+        snapshots[receipt] = (
+            hashlib.sha256(contents).digest(),
+            json.loads(contents.decode("utf-8"), object_pairs_hook=unique_object),
+        )
+    facts = snapshots[receipt][1]
     require(
         isinstance(facts, dict) and isinstance(facts.get("checks"), list),
         "malformed runner receipt",
@@ -332,11 +357,6 @@ def validate_receipt(
         for key, value in needed.items()
         if key not in ("fresh", "environment", "requirement_key")
     }
-    runner_requirements = {
-        "schema_version": 1,
-        "environment": environment,
-        "checks": [selection],
-    }
     held = (
         (
             record["kind"] == "candidate"
@@ -345,8 +365,41 @@ def validate_receipt(
         or (record["kind"] == "verification" and record.get("verdict") != "PASS")
         or (record["kind"] == "integration" and record.get("status") == "failed")
     )
+    mode, reason = "fresh", None
+    if item["status"] == "reused" or carried:
+        mode = "carried" if carried else "reused"
+        reason = item.get("reason")
+        if carried:
+            reason = reuse_reason or read_json(bundle / "carry-forward.json")["reason"]
+        require(text(reason), "receipt reuse requires applicability reason")
+    elif prior_stage:
+        mode = "prior_stage"
+        reason = "Read-only validation of this earlier stage's original execution against its declared Git contents"
+    context = (
+        receipt,
+        checkout.resolve(),
+        record.get("integration_commit", record["candidate_commit"]),
+        environment,
+        item["status"] == "failed" or held,
+        mode,
+        reason,
+    )
+    return context, selection
+
+
+def validate_receipts(group, snapshot):
+    receipt, checkout, ref, environment, allow_failed, _mode, reason = group["context"]
+    runner_requirements = {
+        "schema_version": 1,
+        "environment": environment,
+        "checks": group["checks"],
+    }
     runner = Path(__file__).resolve().parents[4] / "tools" / "check.py"
     require(runner.is_file(), f"runner unavailable: {runner}")
+    require(
+        hashlib.sha256(receipt.read_bytes()).digest() == snapshot,
+        "runner receipt changed during validation",
+    )
     # The runner receives structured requirements through its public process CLI.
     scratch = checkout / "tmp" / "handoff-validation"
     scratch.mkdir(parents=True, exist_ok=True)
@@ -364,25 +417,11 @@ def validate_receipt(
             "--requirements",
             str(path),
         ]
-        command += [
-            "--ref",
-            record.get("integration_commit", record["candidate_commit"]),
-        ]
-        if item["status"] == "failed" or held:
+        command += ["--ref", ref]
+        if allow_failed:
             command += ["--allow-failed"]
-        if item["status"] == "reused" or carried:
-            reason = item.get("reason")
-            if carried:
-                reason = (
-                    reuse_reason or read_json(bundle / "carry-forward.json")["reason"]
-                )
-            require(text(reason), "receipt reuse requires applicability reason")
+        if reason is not None:
             command += ["--reuse-reason", reason]
-        elif prior_stage:
-            command += [
-                "--reuse-reason",
-                "Read-only validation of this earlier stage's original execution against its declared Git contents",
-            ]
         result = subprocess.run(
             command,
             capture_output=True,
@@ -392,6 +431,11 @@ def validate_receipt(
             check=False,
         )
     require(
+        hashlib.sha256(receipt.read_bytes()).digest() == snapshot,
+        "runner receipt changed during validation",
+    )
+    check_ids = ", ".join(check["id"] for check in group["checks"])
+    require(
         result.returncode == 0,
-        f"invalid runner receipt for {needed['id']}: {result.stdout.strip()} {result.stderr.strip()}",
+        f"invalid runner receipt for {check_ids}: {result.stdout.strip()} {result.stderr.strip()}",
     )

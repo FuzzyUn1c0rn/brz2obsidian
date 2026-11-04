@@ -4,6 +4,7 @@ from brz2obsidian.contracts import ReviewPlan, SelectedReviewEffects, SelectedRe
 from brz2obsidian.core.resolution import validate_review
 from brz2obsidian.core.reversals import reversal_subject, selected_reversal_outputs
 from brz2obsidian.core.review_attachments import applicable_approvals
+from brz2obsidian.core.review_composition import composed_text_documents
 
 
 def _refused(code):
@@ -28,7 +29,11 @@ def select_review_effects(plan: ReviewPlan) -> SelectedReviewEffects:
         return _refused("invalid_plan")
     if transition.status != "accepted":
         return _refused("invalid_plan")
-    plan = transition.plan
+    return _project_review_effects(transition.plan)
+
+
+def _project_review_effects(plan: ReviewPlan) -> SelectedReviewEffects:
+    """Project a canonical plan already validated in this synchronous call."""
     if not plan.ready or plan.requirements or plan.blockers:
         return _refused("review_not_ready")
 
@@ -38,6 +43,12 @@ def select_review_effects(plan: ReviewPlan) -> SelectedReviewEffects:
             plan.approvals, plan.attachment_applicability
         )
     }
+    composed_documents, conflict = composed_text_documents(
+        plan.producer_facts, plan.actions, tuple(approvals.values())
+    )
+    if conflict:
+        return _refused("effect_conflict")
+    actions = {action.decision_id: action for action in plan.actions}
     current_documents = (
         {}
         if plan.producer_facts.link_context is None
@@ -46,6 +57,24 @@ def select_review_effects(plan: ReviewPlan) -> SelectedReviewEffects:
             for document in plan.producer_facts.link_context.current_documents
         }
     )
+    cleanup_reference_originals = {}
+    if plan.producer_facts.format_operation.kind == "attachment_cleanup":
+        for approval in approvals.values():
+            if approval.attachment_candidate is None:
+                continue
+            explicit = {
+                choice.document_id
+                for choice in approval.attachment_selection.link_choices
+            }
+            for document in approval.attachment_candidate.documents:
+                prior = current_documents.get(document.document_id)
+                if (
+                    document.document_id in explicit
+                    and prior is not None
+                    and prior.source_path == document.source_path
+                    and prior.content != document.content
+                ):
+                    cleanup_reference_originals[document.source_path] = prior.content
     files = {}
     removals = set()
 
@@ -71,9 +100,16 @@ def select_review_effects(plan: ReviewPlan) -> SelectedReviewEffects:
                     add(row.path, content, change.subject_id)
             if approval is not None and approval.attachment_candidate is not None:
                 candidate = approval.attachment_candidate
+                if (
+                    plan.producer_facts.format_operation.kind == "attachment_cleanup"
+                    and approval.choice == "remove"
+                ):
+                    removals.add(change.path)
                 for output in candidate.outputs:
                     add(output.path, output.content, change.subject_id)
                 for document in candidate.documents:
+                    if document.document_id in composed_documents:
+                        document = composed_documents[document.document_id][0]
                     prior = current_documents.get(document.document_id)
                     if prior is None or (prior.content, prior.source_path) != (
                         document.content,
@@ -99,6 +135,21 @@ def select_review_effects(plan: ReviewPlan) -> SelectedReviewEffects:
             if content is None:
                 continue
             path = change.target_path if approval is None else approval.target_path
+            action = None if approval is None else actions.get(approval.decision_id)
+            if action is not None and action.candidate is not None:
+                composed = composed_documents.get(action.candidate.links.document_id)
+                if composed is not None:
+                    content = composed[0].content
+            if (
+                approval is None
+                and not change.requires_decision
+                and change.disposition == "preserve_vault"
+                and subject.attachment is None
+                and path == subject.current.path
+                and content == subject.current.content
+                and cleanup_reference_originals.get(path) == content
+            ):
+                continue
             add(path, content, change.subject_id)
             if (
                 change.rename_review is not None

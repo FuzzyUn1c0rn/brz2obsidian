@@ -1023,6 +1023,19 @@ def test_prepared_roots_precede_intent_and_actual_result_requires_complete_match
     )
     assert prepared.status == "captured"
     assert not (vault / ".brz2obsidian/intent.json").exists()
+    from brz2obsidian.application.checkpoint_payload_contracts import (
+        CheckpointPayloadRequest,
+    )
+
+    with operations.inspect_update_inputs(vault) as observed:
+        assert observed.history.checkpoint.manifest.boundary == "prepared"
+        answer = observed.read_payload(
+            locator=observed.history.checkpoint.locator,
+            requests=(CheckpointPayloadRequest(path="note.md", limit=9),),
+            byte_limit=9,
+        )
+        assert answer.status == "available" and answer.chunks[0].data == b"incoming\n"
+        assert observed.inspect(subjects=()).admission.status == "supported"
     assert (
         git(vault, "cat-file", "blob", prepared.commit + ":source/note.md")
         == b"incoming\n"
@@ -1049,6 +1062,34 @@ def test_prepared_roots_precede_intent_and_actual_result_requires_complete_match
     assert refused.status == "refused" and refused.code == "result_inventory_mismatch"
     assert git(vault, "rev-parse", prepared.ref).decode().strip() == prepared.commit
     (vault / "note.md").write_bytes(b"after\n")
+    before_wrong = {
+        path.relative_to(vault).as_posix(): path.read_bytes()
+        for path in vault.rglob("*")
+        if path.is_file() and ".git" not in path.relative_to(vault).parts
+    }
+    before_refs = git(vault, "for-each-ref", "--format=%(refname) %(objectname)")
+    wrong_prepared = capture(
+        operations,
+        vault,
+        source,
+        vault_id="prepared-vault",
+        import_id="prepared-import",
+        identity=identity,
+        admission=inspect(operations, vault),
+        boundary="result",
+        expected_prepared="f" * 40,
+    )
+    assert wrong_prepared.status == "refused"
+    assert wrong_prepared.code == "prepared_history_required"
+    assert not wrong_prepared.objects_written
+    assert {
+        path.relative_to(vault).as_posix(): path.read_bytes()
+        for path in vault.rglob("*")
+        if path.is_file() and ".git" not in path.relative_to(vault).parts
+    } == before_wrong
+    assert (
+        git(vault, "for-each-ref", "--format=%(refname) %(objectname)") == before_refs
+    )
     actual = capture(
         operations,
         vault,
@@ -1063,6 +1104,9 @@ def test_prepared_roots_precede_intent_and_actual_result_requires_complete_match
     assert actual.status == "captured"
     reopened = read_history(operations, vault)
     assert reopened.manifest.boundary == "result"
+    with operations.inspect_update_inputs(vault) as observed:
+        assert observed.history.checkpoint.manifest.boundary == "result"
+        assert observed.inspect(subjects=()).admission.status == "supported"
     assert [(f.path, f.mode, f.size) for f in reopened.manifest.vault] == [
         ("note.md", "100644", 6),
         ("unrelated.bin", "100644", 10),
