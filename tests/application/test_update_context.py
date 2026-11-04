@@ -100,7 +100,24 @@ def test_reference_draft_blocks_other_operations_until_explicit_discard(tmp_path
 
 def test_cancelled_saved_inspection_never_retains_a_ready_context_handle(tmp_path):
     from brz2obsidian.application.update_context import UpdateContext
-    from brz2obsidian.application.update_contracts import UpdateResult
+    from brz2obsidian.application.update_contracts import UpdatePreparation, UpdateResult
+    from brz2obsidian.core import load_review, resolve_review, save_review
+    from tests.application.test_update_lifecycle_contracts import preparation
+    from tests.reconciliation.test_resolution import action
+
+    pending = preparation()
+    accepted = resolve_review(pending.review, action(pending.review, choice="current"))
+    assert accepted.status == "accepted" and accepted.plan.ready
+    prepared = UpdatePreparation.model_validate(
+        pending.model_dump(mode="python")
+        | {
+            "vault": str(tmp_path),
+            "review": accepted.plan,
+            "locator": pending.locator.model_copy(update={"commit": "c" * 40}),
+        }
+    )
+    loaded = load_review(save_review(accepted.plan).record.model_dump_json()).loaded
+    assert loaded is not None and not loaded.ready
 
     calls = []
 
@@ -110,6 +127,7 @@ def test_cancelled_saved_inspection_never_retains_a_ready_context_handle(tmp_pat
             return UpdateResult(
                 status="unresolved",
                 code="revalidation_required",
+                loaded=loaded,
                 history_retained=True,
                 checkpoint_commit="c" * 40,
             )
@@ -117,14 +135,29 @@ def test_cancelled_saved_inspection_never_retains_a_ready_context_handle(tmp_pat
         def resume_update(self, vault):
             calls.append("resume")
             return UpdateResult(
-                status="unresolved",
-                code="review_required",
+                status="prepared_review",
+                code="unchanged",
+                preparation=prepared,
+                ready=True,
                 history_retained=True,
                 checkpoint_commit="c" * 40,
             )
 
     selection = "11111111-1111-4111-8111-111111111111"
     for command in ("load", "resume"):
+        positive = UpdateContext(operations=SavedInspection())
+        available = getattr(positive, command)(tmp_path, selection_id=selection)
+        assert calls == [command]
+        calls.clear()
+        if command == "resume":
+            assert available.ready and available.binding is not None
+            assert available.binding.proposal_id == accepted.plan.proposal.proposal_id
+            assert available.binding.checkpoint_commit == "c" * 40
+            assert positive.close(available.binding, choice="continue").ready
+        else:
+            assert not available.ready and available.binding is None
+            assert available.code == "revalidation_required"
+            assert available.history_retained
         before = UpdateContext(operations=SavedInspection())
         result = getattr(before, command)(
             tmp_path, selection_id=selection, cancel=lambda: True
@@ -141,6 +174,8 @@ def test_cancelled_saved_inspection_never_retains_a_ready_context_handle(tmp_pat
         assert not result.ready and result.history_retained
         assert result.checkpoint_commit == "c" * 40
         assert result.next_actions == ("inspect_history",)
+        continued = after.close(choice="continue")
+        assert not continued.ready and continued.binding is None
         assert calls == [command]
         calls.clear()
 
