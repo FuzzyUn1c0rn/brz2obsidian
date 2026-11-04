@@ -84,8 +84,18 @@ def test_reference_draft_blocks_other_operations_until_explicit_discard(tmp_path
         ),
     ):
         assert blocked.code in ("close_decision_required", "uncommitted_draft")
-        assert blocked.binding == staged.binding and blocked.draft_pending
-        assert not blocked.ready
+        assert blocked.binding == staged.binding and not blocked.ready
+        assert context.draft_pending
+        retained = context.reference_page(
+            staged.binding, requirement_id=offer.requirement_id, limit=1
+        )
+        assert retained.references[0].reference_id == reference.reference_id
+        assert retained.references[0].selected == "drop"
+        wire_blocked = worker_context_call(
+            context, {"command": "save", "binding": staged.binding}
+        )
+        assert wire_blocked.code == "uncommitted_draft"
+        assert wire_blocked.draft_pending and not wire_blocked.ready
     assert context.page(staged.binding, byte_limit=0).page == page.page
     discarded = worker_context_call(
         context, {"command": "discard_draft", "binding": staged.binding}

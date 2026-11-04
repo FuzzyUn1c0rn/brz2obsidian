@@ -24,14 +24,14 @@ def test_selected_effects_cannot_conflict_or_survive_a_refused_selection():
         "code": "selected",
         "proposal_id": "literal-review",
         "generation": 3,
-        "files": [
+        "files": (
             {
                 "path": "Note.md",
                 "subject_id": "note",
                 "content": ExactContent(data=b"A\r\n"),
-            }
-        ],
-        "remove_paths": ["Old.md"],
+            },
+        ),
+        "remove_paths": ("Old.md",),
     }
     selected = SelectedReviewEffects.model_validate(value)
     reopened = SelectedReviewEffects.model_validate_json(selected.model_dump_json())
@@ -40,7 +40,7 @@ def test_selected_effects_cannot_conflict_or_survive_a_refused_selection():
     ]
     assert reopened.remove_paths == ("Old.md",)
     with pytest.raises(ValueError, match="also be removed"):
-        SelectedReviewEffects.model_validate(value | {"remove_paths": ["Note.md"]})
+        SelectedReviewEffects.model_validate(value | {"remove_paths": ("Note.md",)})
     with pytest.raises(ValueError, match="unique and sorted"):
         SelectedReviewEffects.model_validate(value | {"files": value["files"] * 2})
     with pytest.raises(ValueError, match="status and identity"):
@@ -54,7 +54,7 @@ def test_selected_effects_cannot_conflict_or_survive_a_refused_selection():
     with pytest.raises(ValueError, match="cannot authorize files"):
         SelectedReviewEffects.model_validate(refused)
     empty = SelectedReviewEffects.model_validate(
-        refused | {"files": [], "remove_paths": []}
+        refused | {"files": (), "remove_paths": ()}
     )
     assert empty.status == "refused" and not empty.files and not empty.remove_paths
 
@@ -110,17 +110,17 @@ def test_blocking_link_and_attachment_findings_cannot_be_labelled_valid():
     )
     assert good.valid and good.findings[0].code == "existing_link_warning"
     with pytest.raises(ValueError, match="blocking findings"):
-        LinkDocumentValidation.model_validate({"valid": True, "findings": [blocker]})
+        LinkDocumentValidation.model_validate({"valid": True, "findings": (blocker,)})
     blocked = LinkDocumentValidation.model_validate(
-        {"valid": False, "findings": [blocker]}
+        {"valid": False, "findings": (blocker,)}
     )
     assert not blocked.valid and blocked.findings[0].occurrence_id == "literal-link"
     with pytest.raises(ValueError, match="blocking findings"):
         AttachmentCandidateValidation.model_validate(
-            {"valid": True, "findings": [], "link_findings": [blocker]}
+            {"valid": True, "findings": (), "link_findings": (blocker,)}
         )
     attachment = AttachmentCandidateValidation.model_validate(
-        {"valid": False, "findings": [], "link_findings": [blocker]}
+        {"valid": False, "findings": (), "link_findings": (blocker,)}
     )
     assert not attachment.valid and not attachment.findings
     available = ReviewChoiceAvailability(choice="incoming", enabled=True, reasons=())
@@ -149,12 +149,12 @@ def test_worker_sequence_and_terminal_identity_do_not_cross_operation_boundaries
     request = WorkerRequest(
         request_id="11111111-1111-4111-8111-111111111111",
         operation="inspect",
-        arguments=InspectArguments(source=tmp_path / "source.brz"),
+        arguments=InspectArguments(source=str(tmp_path / "source.brz")),
     )
     assert decode_request(encode_request(request)) == request
     with pytest.raises(ValueError, match="One-shot"):
         WorkerRequest.model_validate(
-            request.model_dump(mode="python") | {"sequence": 1}
+            request.model_dump(mode="python", by_alias=True) | {"sequence": 1}
         )
     update = {
         "request_id": request.request_id,
@@ -185,11 +185,21 @@ def test_worker_sequence_and_terminal_identity_do_not_cross_operation_boundaries
             operation="inspect",
             result=CheckResult(outcome="failed", status="check_failed"),
         )
+    update_result = UpdateContextResult(
+        kind="source_update", status="refused", code="context_changed"
+    )
+    update_terminal = WorkerResponse(
+        request_id=request.request_id,
+        operation="update",
+        sequence=1,
+        result=update_result,
+    )
+    assert update_terminal.result.code == "context_changed"
     with pytest.raises(ValueError, match="operation disagrees"):
         WorkerResponse(
             request_id=request.request_id,
             operation="inspect",
-            result=UpdateContextResult(status="refused", code="context_changed"),
+            result=update_result,
         )
     with pytest.raises(ValueError, match="sequence differs"):
         WorkerResponse(

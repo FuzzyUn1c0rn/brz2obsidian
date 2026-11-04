@@ -1059,7 +1059,16 @@ def test_saved_update_without_complete_retained_authority_cannot_load_or_resume(
     monkeypatch.setattr(operations, "inspect_history", lambda vault: history)
     positive = operations.load_update(prepared.vault)
     assert positive.code == "revalidation_required" and not positive.ready
-    assert positive.loaded == loaded and positive.checkpoint == prepared.locator
+    assert positive.loaded is not None and not positive.loaded.ready
+    assert positive.loaded.readiness == "revalidation_required"
+    assert (
+        positive.loaded.saved.plan.proposal.proposal_id
+        == prepared.review.proposal.proposal_id
+    )
+    assert positive.loaded.saved.plan.proposal.generation == 1
+    assert positive.loaded.saved.plan.facts.subjects[0].incoming.data == b"incoming\n"
+    assert positive.checkpoint == prepared.locator and positive.history_retained
+    assert positive.next_actions == ("resume_update",)
     if missing == "review":
         history.checkpoint.review = None
     else:
