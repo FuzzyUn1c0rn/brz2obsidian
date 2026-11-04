@@ -262,8 +262,14 @@ def test_poisoned_hidden_child_is_drained_through_eof_without_admitting_result(
         encoding="utf-8",
     )
     uncertain = Event()
+    observations = []
+
+    def on_uncertain():
+        observations.append(channel.diagnostics)
+        uncertain.set()
+
     channel = Supervisor(Path(sys.executable), source).open_update(
-        on_uncertain=uncertain.set
+        on_uncertain=on_uncertain
     )
     try:
         terminal = channel.run(
@@ -282,9 +288,414 @@ def test_poisoned_hidden_child_is_drained_through_eof_without_admitting_result(
         )
         assert terminal.phase == "may_have_executed" and terminal.response is None
         assert channel.poisoned and uncertain.wait(1)
+        assert observations[0].first_failure == "invalid_outer_frame"
+        assert channel.diagnostics.first_failure == "invalid_outer_frame"
     finally:
         channel.close()
     assert marker.read_text(encoding="utf-8") == "drained"
+    snapshot = channel.diagnostics
+    assert snapshot.first_failure == "invalid_outer_frame"
+    assert snapshot.stdout_bytes == 14 + 2 * 1024 * 1024
+    assert snapshot.stdout_frames == 1 and snapshot.largest_frame_bytes == 14
+    assert snapshot.stderr_drain_finished and not snapshot.stderr_drain_error
+    assert channel.process_status == 0
+
+
+def test_hidden_child_diagnostics_are_immutable_and_drain_private_stderr(tmp_path):
+    from dataclasses import FrozenInstanceError, asdict
+
+    from brz2obsidian.application.contracts import WorkerResponse
+    from brz2obsidian.application.update_context_contracts import UpdateContextResult
+
+    request = WorkerRequest(
+        request_id=str(uuid4()),
+        operation="update",
+        sequence=1,
+        arguments={"command": "close", "binding": None, "choice": "discard"},
+    )
+    response = WorkerResponse(
+        request_id=request.request_id,
+        operation="update",
+        sequence=1,
+        result=UpdateContextResult(
+            status="declined", code="context_closed", kind="onboarding"
+        ),
+    )
+    frames = (encode_response(response), encode_end(response))
+    private_stderr = b"PRIVATE-SOURCE-CANARY\n" * 8192
+    uncertain = Event()
+    channel = controlled_update_channel(
+        tmp_path,
+        f"sys.stderr.buffer.write({private_stderr!r});sys.stderr.buffer.flush()\n"
+        f"sys.stdout.buffer.write({b''.join(frames)!r});sys.stdout.buffer.flush()\n",
+        on_uncertain=uncertain.set,
+    )
+    try:
+        initial = channel.diagnostics
+        assert initial.first_failure is None and initial.stdout_bytes == 0
+        terminal = channel.run(request)
+        assert terminal.phase == "completed" and terminal.response == response
+    finally:
+        channel.close()
+    snapshot = channel.diagnostics
+    assert channel.process_status == 0 and not uncertain.is_set()
+    assert asdict(snapshot) == {
+        "first_failure": None,
+        "stdout_bytes": sum(map(len, frames)),
+        "stdout_frames": 2,
+        "largest_frame_bytes": max(map(len, frames)),
+        "stderr_bytes": len(private_stderr),
+        "stderr_drain_finished": True,
+        "stderr_drain_error": False,
+        "worker_protocol_error": None,
+    }
+    assert "PRIVATE-SOURCE-CANARY" not in repr(snapshot)
+    assert initial.stdout_bytes == 0 and channel.diagnostics == snapshot
+    with pytest.raises(FrozenInstanceError):
+        snapshot.first_failure = "caller_close"
+
+
+def controlled_update_channel(tmp_path, body, *, on_uncertain):
+    import sys
+    from pathlib import Path
+
+    from brz2obsidian.application.transport import Supervisor
+
+    source = tmp_path / "child-source"
+    package = source / "brz2obsidian"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "worker.py").write_text(
+        "import os,sys,time\nfrom threading import Thread\n"
+        "def watchdog():\n time.sleep(4)\n os._exit(4)\n"
+        "Thread(target=watchdog,daemon=True).start()\n"
+        "request = sys.stdin.buffer.readline()\n" + body,
+        encoding="utf-8",
+    )
+    return Supervisor(Path(sys.executable), source).open_update(
+        on_uncertain=on_uncertain
+    )
+
+
+def test_hidden_child_observes_oversized_frame_without_admitting_it(tmp_path):
+    uncertain = Event()
+    channel = controlled_update_channel(
+        tmp_path,
+        "sys.stdout.buffer.write(b'x'*(16*1024*1024+1));sys.stdout.buffer.flush()\n"
+        "sys.stdin.buffer.read()\n",
+        on_uncertain=uncertain.set,
+    )
+    try:
+        terminal = channel.run(
+            WorkerRequest(
+                request_id=str(uuid4()),
+                operation="update",
+                sequence=1,
+                arguments={"command": "close", "binding": None, "choice": "discard"},
+            )
+        )
+        assert terminal.phase == "may_have_executed" and terminal.response is None
+        assert channel.poisoned and uncertain.wait(1)
+        assert channel.diagnostics.first_failure == "oversized_frame"
+    finally:
+        channel.close()
+    snapshot = channel.diagnostics
+    assert snapshot.first_failure == "oversized_frame"
+    assert snapshot.stdout_bytes == snapshot.largest_frame_bytes == 16 * 1024 * 1024 + 1
+    assert snapshot.stdout_frames == 1 and channel.process_status == 0
+
+
+def test_hidden_child_rejects_uncorrelated_output_without_restoring_authority(tmp_path):
+    frame = b'{"request_id":"11111111-1111-4111-8111-111111111111"}\n'
+    uncertain = Event()
+    channel = controlled_update_channel(
+        tmp_path,
+        f"sys.stdout.buffer.write({frame!r});sys.stdout.buffer.flush()\n"
+        "remaining = sys.stdin.buffer.read()\n"
+        "sys.exit(8 if remaining else 0)\n",
+        on_uncertain=uncertain.set,
+    )
+    request = WorkerRequest(
+        request_id=str(uuid4()),
+        operation="update",
+        sequence=1,
+        arguments={"command": "close", "binding": None, "choice": "discard"},
+    )
+    try:
+        terminal = channel.run(request)
+        assert (
+            terminal.phase == "may_have_executed"
+            and terminal.code == "protocol_failure"
+        )
+        assert terminal.response is None and uncertain.wait(1)
+        snapshot = channel.diagnostics
+        assert snapshot.first_failure == "unexpected_request"
+        assert channel.diagnostics == snapshot
+        refused = channel.run(request)
+        assert refused.phase == "may_have_executed" and refused.response is None
+    finally:
+        channel.close()
+    assert channel.diagnostics.first_failure == "unexpected_request"
+    assert channel.diagnostics.stdout_bytes == len(frame)
+    assert channel.process_status == 0
+
+
+def test_hidden_child_observes_coarse_decoder_rejection(tmp_path):
+    uncertain = Event()
+    channel = controlled_update_channel(
+        tmp_path,
+        "import json\n"
+        "value = {'request_id':json.loads(request)['request_id'],"
+        "'schema':'PRIVATE-DECODER-REJECTION-CANARY'}\n"
+        "sys.stdout.buffer.write(json.dumps(value).encode()+b'\\n');sys.stdout.buffer.flush()\n"
+        "sys.stdin.buffer.read()\n",
+        on_uncertain=uncertain.set,
+    )
+    try:
+        terminal = channel.run(
+            WorkerRequest(
+                request_id=str(uuid4()),
+                operation="update",
+                sequence=1,
+                arguments={"command": "close", "binding": None, "choice": "discard"},
+            )
+        )
+        assert terminal.phase == "may_have_executed" and terminal.response is None
+        assert uncertain.wait(1)
+        assert channel.diagnostics.first_failure == "decoder_rejected"
+        assert "PRIVATE-DECODER-REJECTION-CANARY" not in repr(channel.diagnostics)
+    finally:
+        channel.close()
+    assert channel.diagnostics.first_failure == "decoder_rejected"
+    assert channel.diagnostics.stdout_frames == 1 and channel.process_status == 0
+
+
+def test_hidden_child_reports_unsealed_eof_and_actual_exit(tmp_path):
+    from brz2obsidian.application.contracts import ProtocolError, WorkerResponse
+
+    request = WorkerRequest(
+        request_id=str(uuid4()),
+        operation="update",
+        sequence=1,
+        arguments={"command": "close", "binding": None, "choice": "discard"},
+    )
+    response = WorkerResponse(
+        request_id=request.request_id,
+        operation="update",
+        sequence=1,
+        protocol_error=ProtocolError(
+            code="internal_error", message="The operation could not complete."
+        ),
+    )
+    frame = encode_response(response)
+    uncertain = Event()
+    channel = controlled_update_channel(
+        tmp_path,
+        f"sys.stdout.buffer.write({frame!r});sys.stdout.buffer.flush()\nsys.exit(7)\n",
+        on_uncertain=uncertain.set,
+    )
+    try:
+        terminal = channel.run(request)
+        assert terminal.phase == "may_have_executed" and terminal.response is None
+        assert uncertain.wait(1)
+        assert channel.diagnostics.first_failure == "unexpected_eof"
+        assert channel.diagnostics.worker_protocol_error is None
+    finally:
+        channel.close()
+    assert channel.diagnostics.first_failure == "unexpected_eof"
+    assert channel.diagnostics.stdout_bytes == len(frame)
+    assert channel.process_status == 7
+
+
+def test_hidden_child_retains_only_sealed_safe_protocol_error(tmp_path):
+    from dataclasses import asdict
+
+    from brz2obsidian.application.contracts import ProtocolError, WorkerResponse
+
+    request = WorkerRequest(
+        request_id=str(uuid4()),
+        operation="update",
+        sequence=1,
+        arguments={"command": "close", "binding": None, "choice": "discard"},
+    )
+    response = WorkerResponse(
+        request_id=request.request_id,
+        operation="update",
+        sequence=1,
+        protocol_error=ProtocolError(
+            code="internal_error", message="The operation could not complete."
+        ),
+    )
+    frames = encode_response(response) + encode_end(response)
+    uncertain = Event()
+    observations = []
+
+    def on_uncertain():
+        observations.append(channel.diagnostics)
+        uncertain.set()
+
+    channel = controlled_update_channel(
+        tmp_path,
+        f"sys.stdout.buffer.write({frames!r});sys.stdout.buffer.flush()\n"
+        "sys.stdin.buffer.read()\n",
+        on_uncertain=on_uncertain,
+    )
+    try:
+        terminal = channel.run(request)
+        assert (
+            terminal.phase == "may_have_executed" and terminal.code == "worker_failure"
+        )
+        assert terminal.response is None and uncertain.wait(1)
+        snapshot = channel.diagnostics
+        assert snapshot.first_failure == "worker_protocol_error"
+        assert snapshot.worker_protocol_error == "internal_error"
+        assert observations[0] == snapshot
+        assert "The operation could not complete." not in repr(asdict(snapshot))
+        assert "MemoryError" not in repr(snapshot)
+    finally:
+        channel.close()
+    assert channel.diagnostics.first_failure == "worker_protocol_error"
+    assert channel.diagnostics.worker_protocol_error == "internal_error"
+    assert channel.process_status == 0
+
+
+def test_hidden_child_observes_caller_close_without_prior_fault(tmp_path):
+    uncertain = Event()
+    observations = []
+
+    def on_uncertain():
+        observations.append(channel.diagnostics)
+        uncertain.set()
+
+    channel = controlled_update_channel(
+        tmp_path, "sys.exit(0)\n", on_uncertain=on_uncertain
+    )
+    try:
+        initial = channel.diagnostics
+        assert initial.first_failure is None and channel.diagnostics == initial
+        assert not channel.poisoned and not channel.closed and not uncertain.is_set()
+        with pytest.raises(AttributeError):
+            channel.diagnostics = initial
+        assert channel.diagnostics == initial
+        assert not channel.poisoned and not channel.closed and not uncertain.is_set()
+    finally:
+        channel.close()
+    assert uncertain.is_set() and observations[0].first_failure == "caller_close"
+    snapshot = channel.diagnostics
+    assert snapshot.first_failure == "caller_close" and snapshot.stdout_bytes == 0
+    assert snapshot.stderr_drain_finished and not snapshot.stderr_drain_error
+    assert initial.first_failure is None and channel.process_status == 0
+
+
+def test_hidden_child_progress_observer_failure_cannot_admit_result(tmp_path):
+    from brz2obsidian.application.update_stream import WorkerProgress, encode_progress
+    from brz2obsidian.application.vault_progress_contracts import VaultProgress
+
+    request = WorkerRequest(
+        request_id=str(uuid4()),
+        operation="update",
+        sequence=1,
+        arguments={
+            "command": "prepare",
+            "vault": str(tmp_path / "vault"),
+            "selection_id": str(uuid4()),
+            "kind": "onboarding",
+            "source": None,
+        },
+    )
+    progress = WorkerProgress(
+        request_id=request.request_id,
+        sequence=1,
+        ordinal=1,
+        value=VaultProgress(phase="current_inspection"),
+    )
+    frame = encode_progress(progress)
+    uncertain = Event()
+    delivered = []
+    channel = controlled_update_channel(
+        tmp_path,
+        f"sys.stdout.buffer.write({frame!r});sys.stdout.buffer.flush()\n"
+        "sys.stdin.buffer.read()\n",
+        on_uncertain=uncertain.set,
+    )
+
+    def on_progress(actual, observed):
+        delivered.append((actual, observed, channel.diagnostics))
+        raise RuntimeError("PRIVATE-PROGRESS-OBSERVER-CANARY")
+
+    try:
+        terminal = channel.run(request, on_progress=on_progress)
+        assert terminal.phase == "may_have_executed" and terminal.response is None
+        assert uncertain.wait(1)
+        assert len(delivered) == 1
+        actual, observed, before_failure = delivered[0]
+        assert actual == request and observed == progress
+        assert before_failure.first_failure is None
+        assert channel.diagnostics.first_failure == "observer_failure"
+        assert "PRIVATE-PROGRESS-OBSERVER-CANARY" not in repr(channel.diagnostics)
+    finally:
+        channel.close()
+    assert channel.diagnostics.first_failure == "observer_failure"
+    assert channel.process_status == 0
+
+
+def test_hidden_child_dispatch_observer_failure_cannot_admit_result(tmp_path):
+    request = WorkerRequest(
+        request_id=str(uuid4()),
+        operation="update",
+        sequence=1,
+        arguments={"command": "close", "binding": None, "choice": "discard"},
+    )
+    uncertain = Event()
+    dispatched = []
+    channel = controlled_update_channel(
+        tmp_path, "sys.stdin.buffer.read()\n", on_uncertain=uncertain.set
+    )
+
+    def on_dispatched(actual):
+        dispatched.append((actual, channel.diagnostics))
+        raise ValueError("PRIVATE-DISPATCH-OBSERVER-CANARY")
+
+    try:
+        terminal = channel.run(request, on_dispatched=on_dispatched)
+        assert terminal.phase == "may_have_executed" and terminal.response is None
+        assert uncertain.wait(1)
+        assert len(dispatched) == 1 and dispatched[0][0] == request
+        assert dispatched[0][1].first_failure is None
+        assert channel.diagnostics.first_failure == "observer_failure"
+        assert "PRIVATE-DISPATCH-OBSERVER-CANARY" not in repr(channel.diagnostics)
+    finally:
+        channel.close()
+    assert channel.diagnostics.first_failure == "observer_failure"
+    assert channel.process_status == 0
+
+
+def test_update_channel_refuses_other_operation_with_safe_dispatch_failure(tmp_path):
+    from brz2obsidian.application.contracts import InspectArguments
+
+    request = WorkerRequest(
+        request_id=str(uuid4()),
+        operation="inspect",
+        arguments=InspectArguments(source=str(tmp_path / "unopened.brz")),
+    )
+    uncertain = Event()
+    dispatched = []
+    channel = controlled_update_channel(
+        tmp_path, "sys.exit(8 if request else 0)\n", on_uncertain=uncertain.set
+    )
+    try:
+        terminal = channel.run(request, on_dispatched=dispatched.append)
+        assert (
+            terminal.phase == "may_have_executed"
+            and terminal.code == "protocol_failure"
+        )
+        assert terminal.response is None and uncertain.wait(1)
+        assert channel.diagnostics.first_failure == "dispatch_failure"
+        assert not dispatched and channel.diagnostics.stdout_bytes == 0
+    finally:
+        channel.close()
+    assert channel.diagnostics.first_failure == "dispatch_failure"
+    assert channel.process_status == 0
 
 
 def test_prestart_prepare_cancel_is_bound_before_any_producer_io(tmp_path, monkeypatch):

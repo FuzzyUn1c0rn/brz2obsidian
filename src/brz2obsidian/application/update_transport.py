@@ -3,8 +3,10 @@
 import json
 import os
 import subprocess
+from dataclasses import dataclass, replace
 from queue import Queue
 from threading import Lock, Thread
+from typing import Literal
 from uuid import uuid4
 
 from .contracts import WorkerRequest
@@ -20,11 +22,50 @@ from .update_stream import WorkerStreamDecoder
 from .update_worker_contracts import update_control_scope
 
 
+@dataclass(frozen=True, slots=True)
+class UpdateDiagnostics:
+    """Bounded observations, without worker content or causal conclusions.
+
+    Byte counts include drainage after poisoning. Frame counts and largest size
+    describe bounded stdout readline observations; subsequent bulk drainage
+    contributes only bytes. Counts saturate at 2**63 - 1. First failure records
+    observed ordering without a causal diagnosis. Stderr completion includes
+    error completion, distinguished by stderr_drain_error.
+    """
+
+    first_failure: (
+        Literal[
+            "oversized_frame",
+            "invalid_outer_frame",
+            "unexpected_request",
+            "decoder_rejected",
+            "unexpected_eof",
+            "stdout_io",
+            "stderr_io",
+            "dispatch_failure",
+            "observer_failure",
+            "worker_protocol_error",
+            "caller_close",
+        ]
+        | None
+    ) = None
+    stdout_bytes: int = 0
+    stdout_frames: int = 0
+    largest_frame_bytes: int = 0
+    stderr_bytes: int = 0
+    stderr_drain_finished: bool = False
+    stderr_drain_error: bool = False
+    worker_protocol_error: (
+        Literal["invalid_request", "operation_unavailable", "internal_error"] | None
+    ) = None
+
+
 class UpdateChannel:
     def __init__(self, interpreter, source_root, *, on_uncertain=None):
         self._on_uncertain = on_uncertain or (lambda: None)
         self._serial, self._controls = Lock(), Lock()
         self._state, self._writer = Lock(), Lock()
+        self._diagnostics = UpdateDiagnostics()
         self._pending = {}
         self._next_sequence = 1
         self._expected_eof = False
@@ -57,8 +98,33 @@ class UpdateChannel:
     def process_status(self):
         return self._process.poll()
 
-    def _poison(self):
+    @property
+    def diagnostics(self):
+        """Return an immutable observation without changing channel authority."""
         with self._state:
+            return self._diagnostics
+
+    def _observe_stdout(self, data, *, frame=False):
+        with self._state:
+            prior = self._diagnostics
+            self._diagnostics = replace(
+                prior,
+                stdout_bytes=min(2**63 - 1, prior.stdout_bytes + len(data)),
+                stdout_frames=min(2**63 - 1, prior.stdout_frames + int(frame)),
+                largest_frame_bytes=max(
+                    prior.largest_frame_bytes, len(data) if frame else 0
+                ),
+            )
+
+    def _poison(self, category, *, stderr_error=False):
+        with self._state:
+            prior = self._diagnostics
+            if prior.first_failure is None or stderr_error:
+                self._diagnostics = replace(
+                    prior,
+                    first_failure=prior.first_failure or category,
+                    stderr_drain_error=prior.stderr_drain_error or stderr_error,
+                )
             if self.poisoned:
                 return
             self.poisoned = True
@@ -73,16 +139,22 @@ class UpdateChannel:
                 if self.poisoned:
                     # Unknown authority is permanent, but every remaining byte
                     # must still be drained so a writing child can terminate.
-                    if not self._process.stdout.read(65536):
+                    remaining = self._process.stdout.read(65536)
+                    self._observe_stdout(remaining)
+                    if not remaining:
                         break
                     continue
                 frame = self._process.stdout.readline(RESPONSE_LIMIT + 1)
                 if not frame:
                     break
+                self._observe_stdout(frame, frame=True)
+                category = "oversized_frame"
                 try:
                     if len(frame) > RESPONSE_LIMIT:
                         raise ProtocolFailure("Oversized worker frame")
+                    category = "invalid_outer_frame"
                     value = json.loads(frame.decode("utf-8"), object_pairs_hook=_pairs)
+                    category = "unexpected_request"
                     identity = (
                         value.get("request_id") if isinstance(value, dict) else None
                     )
@@ -91,12 +163,25 @@ class UpdateChannel:
                         pending = self._pending.get(identity)
                         if pending is None:
                             raise ProtocolFailure("Unexpected worker frame")
+                        category = "decoder_rejected"
                         decoder, answers, observer = pending
                         response = decoder.feed(frame)
                         if decoder.progress is not None and observer is not None:
                             observation = (observer, decoder.request, decoder.progress)
                         if response is not None:
                             del self._pending[identity]
+                            if response.protocol_error is not None:
+                                self._diagnostics = replace(
+                                    self._diagnostics,
+                                    first_failure=(
+                                        self._diagnostics.first_failure
+                                        or "worker_protocol_error"
+                                    ),
+                                    worker_protocol_error=(
+                                        self._diagnostics.worker_protocol_error
+                                        or response.protocol_error.code
+                                    ),
+                                )
                             if (
                                 response.result is not None
                                 and response.result.code == "context_closed"
@@ -105,29 +190,46 @@ class UpdateChannel:
                             answers.put_nowait(response)
                     if observation is not None:
                         callback, actual, progress = observation
+                        category = "observer_failure"
                         # User presentation must never run under transport locks.
                         try:
                             callback(actual, progress)
                         except Exception:  # noqa: BLE001 -- loss of observation delivery cannot confer authority.
                             raise ProtocolFailure("Progress delivery failed") from None
                 except ValueError, TypeError, KeyError, RecursionError:
-                    self._poison()
+                    self._poison(category)
             if not self._expected_eof:
-                self._poison()
+                self._poison("unexpected_eof")
         except OSError:
-            self._poison()
+            self._poison("stdout_io")
 
     def _drain_stderr(self):
         retained = bytearray()
+        finished = False
         try:
             while chunk := self._process.stderr.read(65536):
+                with self._state:
+                    self._diagnostics = replace(
+                        self._diagnostics,
+                        stderr_bytes=min(
+                            2**63 - 1, self._diagnostics.stderr_bytes + len(chunk)
+                        ),
+                    )
                 retained.extend(chunk[: max(0, STDERR_LIMIT - len(retained))])
+            finished = True
         except OSError:
-            self._poison()
+            finished = True
+            self._poison("stderr_io", stderr_error=True)
         finally:
             retained.clear()
+            if finished:
+                with self._state:
+                    self._diagnostics = replace(
+                        self._diagnostics, stderr_drain_finished=True
+                    )
 
     def _exchange(self, request, *, on_dispatched=None, on_progress=None):
+        category = "dispatch_failure"
         try:
             if request.operation != "update":
                 raise ProtocolFailure("Wrong producer operation")
@@ -160,16 +262,17 @@ class UpdateChannel:
                 self._process.stdin.write(wire)
                 self._process.stdin.flush()
             if on_dispatched is not None:
+                category = "observer_failure"
                 on_dispatched(request)
             response = answers.get()
             if response is None or self.poisoned:
                 return Terminal(phase="may_have_executed", code="protocol_failure")
             if response.protocol_error is not None:
-                self._poison()
+                self._poison("worker_protocol_error")
                 return Terminal(phase="may_have_executed", code="worker_failure")
             return Terminal(phase="completed", response=response)
         except OSError, ValueError:
-            self._poison()
+            self._poison(category)
             return Terminal(phase="may_have_executed", code="protocol_failure")
 
     def run(self, request, *, on_dispatched=None, on_progress=None):
@@ -206,7 +309,7 @@ class UpdateChannel:
         if self.closed:
             return
         if not self._expected_eof:
-            self._poison()
+            self._poison("caller_close")
         try:
             self._process.stdin.close()
         except OSError:
