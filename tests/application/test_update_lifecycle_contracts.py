@@ -1105,3 +1105,126 @@ def test_resume_rejects_saved_payload_identity_before_reading_retained_source(mo
     assert (refused.status, refused.code) == ("refused", "saved_payload_mismatch")
     assert refused.preparation is None and not refused.ready
     assert loaded.saved.plan.facts.subjects[0].incoming.data == b"incoming\n"
+
+
+@pytest.mark.parametrize(
+    "difference,expected_code",
+    (
+        ("unowned_incoming", "owned_payload_required"),
+        ("changed_current_source", "source_payload_changed"),
+        ("missing_saved_binding", "persisted_source_authority_required"),
+        ("changed_saved_binding", "persisted_source_authority_required"),
+    ),
+)
+def test_save_and_apply_reobserve_exact_incoming_authority_before_native_contact(
+    tmp_path, monkeypatch, difference, expected_code
+):
+    import tempfile
+    from pathlib import Path
+
+    from brz2obsidian.application import SourceModuleBinding, Workflow
+    from brz2obsidian.obsidian import ObsidianRenderer
+    from brz2obsidian.publication import FilesystemPublisher
+    from tests.support.folio_source import FOLIO_POLICY, FolioSourceModule
+
+    identity = request().incoming_identity.model_copy(
+        update={"settings_digest": hashlib.sha256(b"{}").hexdigest()}
+    )
+    facts = request()
+    established = facts.format_operation.established_baseline.model_copy(
+        update={"identity": identity}
+    )
+    facts = facts.model_copy(
+        update={
+            "baseline_identity": identity,
+            "incoming_identity": identity,
+            "format_operation": facts.format_operation.model_copy(
+                update={"established_baseline": established}
+            ),
+        }
+    )
+    policy = FOLIO_POLICY.model_copy(
+        update={
+            "module_version": "1",
+            "profile_id": "reviewed-folio",
+            "profile_version": "1",
+        }
+    )
+    workflow = Workflow(
+        SourceModuleBinding(FolioSourceModule(), policy),
+        ObsidianRenderer(),
+        FilesystemPublisher(),
+    )
+    operations = Operations(workflow=workflow)
+
+    def forbidden_native(*args, **kwargs):
+        raise AssertionError("Unbound incoming authority cannot capture or publish")
+
+    monkeypatch.setattr(operations, "capture_checkpoint", forbidden_native)
+    monkeypatch.setattr(operations, "apply_reviewed_update", forbidden_native)
+    with tempfile.TemporaryDirectory(prefix="brz2obsidian-update-") as owned:
+        incoming = Path(owned) / "incoming"
+        (incoming / "Notes").mkdir(parents=True)
+        note = incoming / "Notes/Opening.md"
+        note.write_bytes(b"incoming\n")
+        prepared = preparation(with_review_links(facts))
+        binding = operations.observe_reviewed_source(incoming, prepared.review)
+        prepared = prepared.model_copy(
+            update={
+                "vault": str(tmp_path),
+                "payload_directory": str(incoming),
+                "source_binding": binding,
+            }
+        )
+        selected = operations.resolve_update(prepared, action(prepared.review))
+        assert selected.code == "accepted" and selected.ready
+        prepared = selected.preparation
+        assert prepared.review.approvals[0].result.data == b"incoming\n"
+        history = recorded_history(identity, prepared.locator)
+        history.admission.preflight = preflight()
+        history.checkpoint.manifest.reviewed_source = binding
+        baseline = SourcePayloadFile(
+            path="Notes/Opening.md",
+            mode="100644",
+            size=len(b"original\r\n"),
+            sha256=hashlib.sha256(b"original\r\n").hexdigest(),
+        )
+        history.checkpoint.manifest.source = (baseline,)
+        history.checkpoint.manifest.observed_source = prepared.observed_source
+        monkeypatch.setattr(
+            operations, "inspect_history", lambda *args, **kwargs: history
+        )
+        monkeypatch.setattr(
+            operations,
+            "read_checkpoint_payload",
+            lambda *args, **kwargs: SimpleNamespace(
+                status="available",
+                chunks=(SimpleNamespace(path=baseline.path, data=b"original\r\n"),),
+            ),
+        )
+        if difference == "unowned_incoming":
+            foreign = tmp_path / "incoming"
+            (foreign / "Notes").mkdir(parents=True)
+            (foreign / "Notes/Opening.md").write_bytes(b"incoming\n")
+            prepared = prepared.model_copy(update={"payload_directory": str(foreign)})
+        elif difference == "changed_current_source":
+            note.write_bytes(b"Changed after review.\n")
+        elif difference == "missing_saved_binding":
+            history.checkpoint.manifest.reviewed_source = None
+        else:
+            row = binding.files[0].model_copy(update={"sha256": "e" * 64})
+            history.checkpoint.manifest.reviewed_source = binding.model_copy(
+                update={
+                    "files": (row,),
+                    "fingerprint": ReviewedSourceBinding.digest((row,)),
+                }
+            )
+        before = note.read_bytes()
+        for refused in (
+            operations.save_update(prepared),
+            operations.apply_update(prepared),
+        ):
+            assert (refused.status, refused.code) == ("refused", expected_code)
+            assert not refused.ready and refused.publication == "not_started"
+        assert note.read_bytes() == before
+        assert prepared.review.approvals[0].result.data == b"incoming\n"
