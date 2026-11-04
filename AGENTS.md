@@ -61,7 +61,7 @@ repeated-coverage hotspots and consolidate redundant cases, setup and repeated
 Workflow/CLI execution. Use focused measurements or applicable existing evidence;
 keep independently checked outcomes and meaningful input differences explicit
 when execution paths overlap. The complete ordinary verification bundle must
-finish in less than ten minutes; everyday feedback should take seconds.
+finish in less than fifteen minutes; everyday feedback should take seconds.
 
 Select checks from the actual change, affected consumers and mandatory acceptance
 criteria. Run or accept pytest, Ruff lint/format and dependency checks only through

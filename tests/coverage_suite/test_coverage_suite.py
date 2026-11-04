@@ -159,9 +159,13 @@ def test_default_command_validates_four_checks_and_reports_all_production(
         ),
         encoding="utf-8",
     )
+    rejected = invoke(coverage_checkout, "--timeout", "901")
+    assert rejected.returncode == 2
+    assert "at most 900 seconds" in rejected.stderr
     result = invoke(coverage_checkout)
     assert result.returncode == 0, result.stdout + result.stderr
     report, output = summary(coverage_checkout)
+    assert report["timeout_seconds"] == 900
     assert report["status"] == "passed"
     assert report["measurement"] == "default suite"
     assert report["lines"] == {"covered": 11, "total": 12, "percent": 100 * 11 / 12}
