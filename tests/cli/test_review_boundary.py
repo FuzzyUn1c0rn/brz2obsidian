@@ -204,9 +204,10 @@ def test_prepare_recovery_without_preparation_skips_save_and_apply(
             pytest.fail("a missing preparation must not be applied")
 
     monkeypatch.setattr("brz2obsidian.cli_review.Operations", Ports)
-    assert main(
-        ["review", "prepare", str(tmp_path), "--source", "incoming.brz", "--json"]
-    ) == 2
+    assert (
+        main(["review", "prepare", str(tmp_path), "--source", "incoming.brz", "--json"])
+        == 2
+    )
     captured = capsys.readouterr()
     assert captured.err == ""
     result = json.loads(captured.out)
@@ -267,9 +268,10 @@ def test_prepare_failed_save_reports_operational_failure(tmp_path, monkeypatch, 
             pytest.fail("failed save must not apply")
 
     monkeypatch.setattr("brz2obsidian.cli_review.Operations", Ports)
-    assert main(
-        ["review", "prepare", str(tmp_path), "--source", "incoming.brz", "--json"]
-    ) == 1
+    assert (
+        main(["review", "prepare", str(tmp_path), "--source", "incoming.brz", "--json"])
+        == 1
+    )
     captured = capsys.readouterr()
     assert captured.err == "" and len(saves) == 1
     result = json.loads(captured.out)
@@ -284,7 +286,9 @@ def test_prepare_failed_save_reports_operational_failure(tmp_path, monkeypatch, 
     assert sentinel.read_bytes() == b"owned sentinel\n"
 
 
-def test_inspect_matching_review_exposes_bounded_metadata(tmp_path, monkeypatch, capsys):
+def test_inspect_matching_review_exposes_bounded_metadata(
+    tmp_path, monkeypatch, capsys
+):
     sentinel = tmp_path / "note.md"
     sentinel.write_bytes(b"owned sentinel\n")
     payload_directory = tmp_path / "private-payload-marker"
@@ -372,22 +376,25 @@ def test_inspect_matching_review_exposes_bounded_metadata(tmp_path, monkeypatch,
             pytest.fail("inspection must not apply")
 
     monkeypatch.setattr("brz2obsidian.cli_review.Operations", Ports)
-    assert main(
-        [
-            "review",
-            "inspect",
-            str(tmp_path),
-            "--proposal-id",
-            proposal.proposal_id,
-            "--generation",
-            str(proposal.generation),
-            "--checkpoint",
-            "b" * 40,
-            "--byte-limit",
-            "0",
-            "--json",
-        ]
-    ) == 0
+    assert (
+        main(
+            [
+                "review",
+                "inspect",
+                str(tmp_path),
+                "--proposal-id",
+                proposal.proposal_id,
+                "--generation",
+                str(proposal.generation),
+                "--checkpoint",
+                "b" * 40,
+                "--byte-limit",
+                "0",
+                "--json",
+            ]
+        )
+        == 0
+    )
     captured = capsys.readouterr()
     assert captured.err == ""
     result = json.loads(captured.out)
@@ -555,20 +562,23 @@ def test_changed_current_checkpoint_refuses_before_page_or_apply(
             pytest.fail("changed current checkpoint must not apply")
 
     monkeypatch.setattr("brz2obsidian.cli_review.Operations", Ports)
-    assert main(
-        [
-            "review",
-            command,
-            str(tmp_path),
-            "--proposal-id",
-            proposal.proposal_id,
-            "--generation",
-            str(proposal.generation),
-            "--checkpoint",
-            "b" * 40,
-            "--json",
-        ]
-    ) == 2
+    assert (
+        main(
+            [
+                "review",
+                command,
+                str(tmp_path),
+                "--proposal-id",
+                proposal.proposal_id,
+                "--generation",
+                str(proposal.generation),
+                "--checkpoint",
+                "b" * 40,
+                "--json",
+            ]
+        )
+        == 2
+    )
     captured = capsys.readouterr()
     assert captured.err == ""
     assert reads == [("load", str(tmp_path)), ("resume", str(tmp_path))]
@@ -747,9 +757,9 @@ def test_inspect_refused_page_does_not_invent_choices(tmp_path, monkeypatch, cap
             pytest.fail("inspection must not apply")
 
     monkeypatch.setattr("brz2obsidian.cli_review.Operations", Ports)
-    assert main(
-        ["review", "inspect", str(tmp_path), "--byte-limit", "0", "--json"]
-    ) == 2
+    assert (
+        main(["review", "inspect", str(tmp_path), "--byte-limit", "0", "--json"]) == 2
+    )
     captured = capsys.readouterr()
     assert captured.err == ""
     result = json.loads(captured.out)
@@ -781,20 +791,23 @@ def test_apply_unresolved_current_review_requires_resolution(
             pytest.fail("unresolved review must not apply")
 
     monkeypatch.setattr("brz2obsidian.cli_review.Operations", Ports)
-    assert main(
-        [
-            "review",
-            "apply",
-            str(tmp_path),
-            "--proposal-id",
-            proposal.proposal_id,
-            "--generation",
-            str(proposal.generation),
-            "--checkpoint",
-            "b" * 40,
-            "--json",
-        ]
-    ) == 2
+    assert (
+        main(
+            [
+                "review",
+                "apply",
+                str(tmp_path),
+                "--proposal-id",
+                proposal.proposal_id,
+                "--generation",
+                str(proposal.generation),
+                "--checkpoint",
+                "b" * 40,
+                "--json",
+            ]
+        )
+        == 2
+    )
     captured = capsys.readouterr()
     assert captured.err == ""
     result = json.loads(captured.out)
@@ -892,20 +905,23 @@ def test_apply_exact_ready_review_dispatches_controlled_no_content_outcome(
             )
 
     monkeypatch.setattr("brz2obsidian.cli_review.Operations", Ports)
-    assert main(
-        [
-            "review",
-            "apply",
-            str(tmp_path),
-            "--proposal-id",
-            proposal.proposal_id,
-            "--generation",
-            str(proposal.generation),
-            "--checkpoint",
-            "b" * 40,
-            "--json",
-        ]
-    ) == 0
+    assert (
+        main(
+            [
+                "review",
+                "apply",
+                str(tmp_path),
+                "--proposal-id",
+                proposal.proposal_id,
+                "--generation",
+                str(proposal.generation),
+                "--checkpoint",
+                "b" * 40,
+                "--json",
+            ]
+        )
+        == 0
+    )
     captured = capsys.readouterr()
     assert captured.err == "" and calls == ["apply"]
     result = json.loads(captured.out)
