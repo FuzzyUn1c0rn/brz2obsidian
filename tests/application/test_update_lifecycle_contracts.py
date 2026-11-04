@@ -1041,3 +1041,58 @@ def test_saved_observation_module_version_binds_the_reviewed_incoming_identity()
     mismatched["observed_source"]["module_version"] = "99"
     with pytest.raises(ValidationError):
         CheckpointManifest.model_validate(mismatched)
+
+
+@pytest.mark.parametrize("missing", ("review", "reviewed_source"))
+def test_saved_update_without_complete_retained_authority_cannot_load_or_resume(
+    monkeypatch, missing
+):
+    from brz2obsidian.core import load_review, save_review
+
+    prepared = preparation()
+    loaded = load_review(save_review(prepared.review).record.model_dump_json()).loaded
+    history = recorded_history(prepared.review.facts.incoming_identity, prepared.locator)
+    history.admission.vault = prepared.vault
+    history.checkpoint.review = loaded
+    history.checkpoint.manifest.reviewed_source = prepared.source_binding
+    operations = Operations()
+    monkeypatch.setattr(operations, "inspect_history", lambda vault: history)
+    positive = operations.load_update(prepared.vault)
+    assert positive.code == "revalidation_required" and not positive.ready
+    assert positive.loaded == loaded and positive.checkpoint == prepared.locator
+    if missing == "review":
+        history.checkpoint.review = None
+    else:
+        history.checkpoint.manifest.reviewed_source = None
+    for refused in (
+        operations.load_update(prepared.vault),
+        operations.resume_update(prepared.vault),
+    ):
+        assert (refused.status, refused.code) == ("refused", "saved_update_unavailable")
+        assert not refused.ready and refused.preparation is None
+        assert refused.publication == "not_started"
+    assert not loaded.ready and loaded.saved.plan == prepared.review
+
+
+def test_resume_rejects_saved_payload_identity_before_reading_retained_source(monkeypatch):
+    from brz2obsidian.core import load_review, save_review
+
+    prepared = preparation()
+    loaded = load_review(save_review(prepared.review).record.model_dump_json()).loaded
+    history = recorded_history(prepared.review.facts.incoming_identity, prepared.locator)
+    history.checkpoint.review = loaded
+    changed = prepared.source_binding.files[0].model_copy(update={"sha256": "e" * 64})
+    history.checkpoint.manifest.reviewed_source = prepared.source_binding.model_copy(
+        update={"files": (changed,), "fingerprint": ReviewedSourceBinding.digest((changed,))}
+    )
+    operations = Operations()
+    monkeypatch.setattr(operations, "inspect_history", lambda vault: history)
+
+    def no_payload(*args, **kwargs):
+        raise AssertionError("Mismatched saved incoming bytes cannot read a baseline")
+
+    monkeypatch.setattr(operations, "read_checkpoint_payload", no_payload)
+    refused = operations.resume_update(prepared.vault)
+    assert (refused.status, refused.code) == ("refused", "saved_payload_mismatch")
+    assert refused.preparation is None and not refused.ready
+    assert loaded.saved.plan.facts.subjects[0].incoming.data == b"incoming\n"

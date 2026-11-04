@@ -50,6 +50,101 @@ def context_case(tmp_path):
     return UpdateContext(operations=case.operations), case
 
 
+def test_reference_draft_blocks_other_operations_until_explicit_discard(tmp_path):
+    context, case = context_case(tmp_path)
+    selection = "11111111-1111-4111-8111-111111111111"
+    opened = context.prepare(
+        case.vault, selection_id=selection, kind="attachment_cleanup"
+    )
+    page = context.page(opened.binding, byte_limit=0)
+    remove = next(row for row in page.page.items if row.item_id == "remove-asset")
+    offer = next(row for row in page.offers if row.change_id == remove.change_id)
+    reference = context.reference_page(
+        opened.binding, requirement_id=offer.requirement_id, limit=1
+    ).references[0]
+    staged = worker_context_call(
+        context,
+        {
+            "command": "stage_references",
+            "binding": opened.binding,
+            "requirement_id": offer.requirement_id,
+            "choices": ({"reference_id": reference.reference_id, "choice": "drop"},),
+        },
+    )
+    assert staged.draft_pending and not staged.ready
+    for blocked in (
+        context.history(case.vault, selection_id=selection),
+        context.initialize_vault(staged.binding, choice="initialize"),
+        context.prepare_history(staged.binding, action="undo"),
+        context.refresh_history(staged.binding),
+        context.execute_history(staged.binding),
+        context.refresh(staged.binding),
+        context.choose_configuration(
+            staged.binding, group_id="unselected-configuration", choice="current"
+        ),
+    ):
+        assert blocked.code in ("close_decision_required", "uncommitted_draft")
+        assert blocked.binding == staged.binding and blocked.draft_pending
+        assert not blocked.ready
+    assert context.page(staged.binding, byte_limit=0).page == page.page
+    discarded = worker_context_call(
+        context, {"command": "discard_draft", "binding": staged.binding}
+    )
+    assert discarded.code == "draft_discarded" and not discarded.draft_pending
+    assert not discarded.ready
+    assert discarded.binding.proposal_id == opened.binding.proposal_id
+    assert {
+        path: (case.vault / path).read_bytes() for path in case.current
+    } == case.current
+
+
+def test_cancelled_saved_inspection_never_retains_a_ready_context_handle(tmp_path):
+    from brz2obsidian.application.update_context import UpdateContext
+    from brz2obsidian.application.update_contracts import UpdateResult
+
+    calls = []
+
+    class SavedInspection:
+        def load_update(self, vault):
+            calls.append("load")
+            return UpdateResult(
+                status="unresolved",
+                code="revalidation_required",
+                history_retained=True,
+                checkpoint_commit="c" * 40,
+            )
+
+        def resume_update(self, vault):
+            calls.append("resume")
+            return UpdateResult(
+                status="unresolved",
+                code="review_required",
+                history_retained=True,
+                checkpoint_commit="c" * 40,
+            )
+
+    selection = "11111111-1111-4111-8111-111111111111"
+    for command in ("load", "resume"):
+        before = UpdateContext(operations=SavedInspection())
+        result = getattr(before, command)(
+            tmp_path, selection_id=selection, cancel=lambda: True
+        )
+        assert result.code == "cancelled_before_inspection" and result.binding is None
+        assert not result.ready and result.publication == "not_published"
+        assert calls == []
+        after = UpdateContext(operations=SavedInspection())
+        checks = iter((False, True))
+        result = getattr(after, command)(
+            tmp_path, selection_id=selection, cancel=lambda: next(checks)
+        )
+        assert result.code == "cancelled_after_inspection" and result.binding is None
+        assert not result.ready and result.history_retained
+        assert result.checkpoint_commit == "c" * 40
+        assert result.next_actions == ("inspect_history",)
+        assert calls == [command]
+        calls.clear()
+
+
 def test_onboarding_worker_preserves_separate_original_evidence_input(
     tmp_path, monkeypatch
 ):
