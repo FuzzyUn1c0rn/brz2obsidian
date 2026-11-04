@@ -62,14 +62,14 @@ class RunnerHandoffTests(GitCheckout, unittest.TestCase):
             check=False,
         )
 
-    def publish(self):
+    def publish(self, stage="candidate"):
         self.input_path.write_text(json.dumps(self.input), encoding="utf-8")
         self.requirements_path.write_text(
             json.dumps(self.requirements), encoding="utf-8"
         )
         return self.invoke(
             "write_handoff.py",
-            "candidate",
+            stage,
             self.attempt,
             "--checkout",
             self.checkout,
@@ -107,7 +107,7 @@ class RunnerHandoffTests(GitCheckout, unittest.TestCase):
                 result.stderr,
             )
 
-    def prepare_execution(self, *, fail=False):
+    def prepare_execution(self, *, fail=False, all_checks=False, full=False):
         self.scripts = (
             self.checkout / ".agents" / "skills" / "implement-spec-enhanced" / "scripts"
         )
@@ -117,13 +117,40 @@ class RunnerHandoffTests(GitCheckout, unittest.TestCase):
         (self.checkout / "tools").mkdir()
         for name in ("check.py", "check_pytest.py"):
             shutil.copy2(ROOT / "tools" / name, self.checkout / "tools" / name)
+        if all_checks:
+            runner = self.checkout / "tools" / "check.py"
+            runner.write_text(
+                runner.read_text(encoding="utf-8").replace(
+                    "    raise SystemExit(main())",
+                    """    if sys.argv[1] == "validate":
+        requirements_path = Path(sys.argv[sys.argv.index("--requirements") + 1])
+        audit = Path(__file__).resolve().parents[1] / "tmp" / "validations.jsonl"
+        with audit.open("a", encoding="utf-8") as stream:
+            stream.write(
+                json.dumps(
+                    {
+                        "argv": sys.argv[1:],
+                        "requirements": json.loads(requirements_path.read_bytes()),
+                    }
+                )
+                + "\\n"
+            )
+    exit_code = main()
+    trigger = Path(__file__).resolve().parents[1] / "tmp" / "mutate-receipt"
+    if sys.argv[1] == "validate" and trigger.exists():
+        receipt_path = Path(sys.argv[sys.argv.index("--receipt") + 1])
+        receipt_path.write_bytes(receipt_path.read_bytes() + b"\\n")
+    raise SystemExit(exit_code)""",
+                ),
+                encoding="utf-8",
+            )
         for package in ("brz2obsidian", "brz2obsidian_ui"):
             path = self.checkout / "src" / package
             path.mkdir(parents=True)
             (path / "__init__.py").write_text("")
         (self.checkout / "tests").mkdir()
         (self.checkout / "tests" / "test_public.py").write_text(
-            "import pytest\n\n@pytest.mark.gui\ndef test_public():\n    assert "
+            "import pytest\n\n\n@pytest.mark.gui\ndef test_public():\n    assert "
             + ("False" if fail else "True")
             + "\n"
         )
@@ -147,8 +174,12 @@ class RunnerHandoffTests(GitCheckout, unittest.TestCase):
                 "auto",
                 "--check",
                 "pytest",
-                "--test",
-                "tests/test_public.py",
+                *(
+                    ["--check", "lint", "--check", "format", "--check", "dependency"]
+                    if all_checks
+                    else []
+                ),
+                *([] if full else ["--test", "tests/test_public.py"]),
             ],
             capture_output=True,
             text=True,
@@ -165,8 +196,8 @@ class RunnerHandoffTests(GitCheckout, unittest.TestCase):
             {
                 "id": "pytest",
                 "fresh": True,
-                "scope": "focused",
-                "selectors": ["tests/test_public.py"],
+                "scope": "full" if full else "focused",
+                "selectors": [] if full else ["tests/test_public.py"],
                 "keyword": None,
                 "marker": None,
                 "require_gui": False,
@@ -185,14 +216,204 @@ class RunnerHandoffTests(GitCheckout, unittest.TestCase):
                 **({"reason": "Observed assertion failure"} if fail else {}),
             }
         ]
+        if all_checks:
+            self.requirements["checks"] += [
+                {"id": check_id, "fresh": True}
+                for check_id in ("lint", "format", "dependency")
+            ]
+            for row in facts["checks"][1:]:
+                self.input["checks"].append(
+                    dict(
+                        self.input["checks"][0],
+                        check_id=row["id"],
+                        name=f"Public fixture {row['id']}",
+                        status=row["status"],
+                        exit_code=row["exit_code"],
+                    )
+                )
         return receipt, facts
 
-    def validate(self, expected=0):
+    def test_compatible_receipt_validates_all_four_requirements_once_per_record(self):
+        receipt, _ = self.prepare_execution(all_checks=True)
+        original = receipt.read_bytes()
+        expected = {
+            "schema_version": 1,
+            "environment": self.requirements["environment"],
+            "checks": [
+                {
+                    "id": "pytest",
+                    "scope": "focused",
+                    "selectors": ["tests/test_public.py"],
+                    "keyword": None,
+                    "marker": None,
+                    "require_gui": False,
+                },
+                {"id": "lint"},
+                {"id": "format"},
+                {"id": "dependency"},
+            ],
+        }
+        # A late member cannot borrow the other members' success.
+        self.input["checks"][-1]["exit_code"] = 1
+        result = self.publish()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("passed check has nonzero exit_code", result.stderr)
+        self.assertFalse((self.attempt / "candidate.json").exists())
+        self.assertEqual(self.validation_requests(), [])
+        self.input["checks"][-1]["exit_code"] = 0
+        checks = self.input["checks"]
+        inputs = {
+            "candidate": self.input,
+            "verification": {
+                "actor": "independent-verifier",
+                "verdict": "PASS",
+                "criteria": [
+                    {"id": "A1", "status": "satisfied", "evidence": ["observation.txt"]}
+                ],
+                "findings": [],
+                "checks": checks,
+                "limits": [],
+            },
+            "integration": {
+                "actor": "merger",
+                "status": "integrated",
+                "previous_tip_ref": self.head,
+                "checks": checks,
+                "limits": [],
+            },
+        }
+        counts = []
+        for stage, count in (("candidate", 1), ("verification", 2), ("integration", 3)):
+            self.input = inputs[stage]
+            self.requirements["stage"] = stage
+            before = len(self.validation_requests())
+            result = self.publish(stage)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            counts.append(len(self.validation_requests()) - before)
+            self.assertEqual(counts[-1], count)
+            before = len(self.validation_requests())
+            self.validate(stage=stage)
+            counts.append(len(self.validation_requests()) - before)
+            self.assertEqual(counts[-1], count)
+        self.assertEqual(counts, [1, 1, 2, 2, 3, 3])
+        requests = self.validation_requests()
+        self.assertEqual(len(requests), 12)
+        for request in requests:
+            self.assertEqual(request["requirements"], expected)
+            self.assertEqual(
+                request["argv"][request["argv"].index("--receipt") + 1],
+                str(receipt),
+            )
+        self.assertEqual(receipt.read_bytes(), original)
+        observations = Path.cwd() / "tmp" / "runner-handoff-observations"
+        observations.mkdir(parents=True, exist_ok=True)
+        (observations / f"{self.root.name}.json").write_text(
+            json.dumps({"calls_per_command": counts, "requests": requests}),
+            encoding="utf-8",
+        )
+
+    def validation_requests(self):
+        audit = self.checkout / "tmp" / "validations.jsonl"
+        return (
+            [
+                json.loads(line)
+                for line in audit.read_text(encoding="utf-8").splitlines()
+            ]
+            if audit.exists()
+            else []
+        )
+
+    def test_receipt_changed_after_public_validation_blocks_publication(self):
+        receipt, _ = self.prepare_execution(all_checks=True)
+        original = receipt.read_bytes()
+        (self.checkout / "tmp" / "mutate-receipt").touch()
+        result = self.publish()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("runner receipt changed during validation", result.stderr)
+        self.assertFalse((self.attempt / "candidate.json").exists())
+        self.assertNotEqual(receipt.read_bytes(), original)
+
+    def test_distinct_reuse_reasons_and_fresh_mode_are_validated_separately(self):
+        receipt, _ = self.prepare_execution(all_checks=True)
+        original = receipt.read_bytes()
+        reasons = ["Pytest applies to identical contents", "Lint applies after review"]
+        for index, reason in enumerate(reasons):
+            self.requirements["checks"][index]["fresh"] = False
+            self.input["checks"][index].update(
+                status="reused",
+                exit_code=None,
+                source_commit=self.head,
+                reason=reason,
+            )
+        result = self.publish()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.validate()
+        requests = self.validation_requests()
+        self.assertEqual(len(requests), 6)
+        self.assertEqual(
+            [
+                [check["id"] for check in request["requirements"]["checks"]]
+                for request in requests
+            ],
+            [["pytest"], ["lint"], ["format", "dependency"]] * 2,
+        )
+        for offset in (0, 3):
+            for index, reason in enumerate(reasons):
+                argv = requests[offset + index]["argv"]
+                self.assertEqual(argv[argv.index("--reuse-reason") + 1], reason)
+            self.assertNotIn("--reuse-reason", requests[offset + 2]["argv"])
+        self.assertEqual(receipt.read_bytes(), original)
+
+    def test_same_receipt_duplicate_id_scopes_split_and_keep_requirement_keys(self):
+        # Full protocol scope contains this fixture's single known synthetic test.
+        # It can independently satisfy both full and focused requirements.
+        self.prepare_execution(all_checks=True, full=True)
+        self.requirements["checks"].append(
+            dict(
+                self.requirements["checks"][0],
+                scope="focused",
+                requirement_key="specific-case",
+                selectors=["tests/test_public.py::test_public"],
+            )
+        )
+        extra = dict(self.input["checks"][0])
+        self.input["checks"].append(extra)
+        result = self.publish()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("duplicate result", result.stderr)
+        self.assertFalse((self.attempt / "candidate.json").exists())
+        self.assertEqual(self.validation_requests(), [])
+        extra["requirement_key"] = "specific-case"
+        result = self.publish()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.validate()
+        requests = self.validation_requests()
+        self.assertEqual(len(requests), 4)
+        for offset in (0, 2):
+            self.assertEqual(
+                [check["id"] for check in requests[offset]["requirements"]["checks"]],
+                ["pytest", "lint", "format", "dependency"],
+            )
+            self.assertEqual(
+                requests[offset + 1]["requirements"]["checks"],
+                [
+                    {
+                        "id": "pytest",
+                        "scope": "focused",
+                        "selectors": ["tests/test_public.py::test_public"],
+                        "keyword": None,
+                        "marker": None,
+                        "require_gui": False,
+                    }
+                ],
+            )
+
+    def validate(self, expected=0, *, stage="candidate"):
         result = self.invoke(
             "validate_handoff.py",
             self.attempt,
             "--stage",
-            "candidate",
+            stage,
             "--checkout",
             self.checkout,
             "--requirements",
