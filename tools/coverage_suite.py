@@ -340,6 +340,7 @@ def main():
                 [
                     *coverage,
                     "html",
+                    "--keep-combined",
                     "--rcfile",
                     str(config),
                     "-d",
