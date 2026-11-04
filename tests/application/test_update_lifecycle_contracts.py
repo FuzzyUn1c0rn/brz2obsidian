@@ -1228,3 +1228,227 @@ def test_save_and_apply_reobserve_exact_incoming_authority_before_native_contact
             assert not refused.ready and refused.publication == "not_started"
         assert note.read_bytes() == before
         assert prepared.review.approvals[0].result.data == b"incoming\n"
+
+
+@pytest.mark.parametrize("known_original", (True, False))
+def test_saved_format_review_reopens_as_maintenance_and_blocks_ordinary_update(
+    tmp_path, monkeypatch, known_original
+):
+    from pathlib import Path
+
+    from brz2obsidian.application.checkpoint_contracts import CheckpointResult
+    from brz2obsidian.core import load_review, save_review
+    from tests.application.test_format_transition import transition_case
+    from tests.support.recorded_format6 import CURRENT, FIXTURE, NOTE
+
+    operations, vault, history = transition_case(
+        tmp_path, monkeypatch, known_original=known_original
+    )
+    before = {
+        path.relative_to(vault).as_posix(): path.read_bytes()
+        for path in vault.rglob("*") if path.is_file()
+    }
+    offered = operations.prepare_format_transition(vault, FIXTURE / "source.brz")
+    assert offered.preparation is not None and offered.kind == "format_transition"
+    note = next(
+        row for row in offered.preparation.review.proposal.changes
+        if row.path == NOTE
+    )
+    kept = operations.resolve_update(
+        offered.preparation,
+        action(
+            offered.preparation.review, note, domain="format", choice="current",
+            decision_id="saved-format-current",
+        ),
+    )
+    assert kept.code == "accepted"
+    chosen = next(
+        row for row in kept.preparation.review.approvals
+        if row.decision_id == "saved-format-current"
+    )
+    assert chosen.result.data == CURRENT
+    captured = []
+    stored_source = {}
+
+    def retain_description(vault_arg, source_arg, **values):
+        # This declared native port retains descriptions for lifecycle routing;
+        # no real checkpoint graph or file-publication claim follows.
+        assert vault_arg == str(vault)
+        source_root = Path(source_arg)
+        stored_source.update({
+            path.relative_to(source_root).as_posix(): path.read_bytes()
+            for path in source_root.rglob("*") if path.is_file()
+        })
+        saved = save_review(values["review"])
+        assert saved.status == "saved"
+        loaded = load_review(saved.record.model_dump_json())
+        assert loaded.status == "loaded" and not loaded.ready
+        checkpoint = history.checkpoint
+        checkpoint.review = loaded.loaded
+        checkpoint.locator = checkpoint.locator.model_copy(
+            update={"commit": "c" * 40, "generation": 2}
+        )
+        checkpoint.manifest.identity = values["identity"]
+        checkpoint.manifest.boundary = "local"
+        checkpoint.manifest.reviewed_source = values["source_binding"]
+        checkpoint.manifest.observed_source = values["observed_source"]
+        checkpoint.manifest.source = tuple(
+            SourcePayloadFile(
+                path=path, mode="100644", size=len(raw),
+                sha256=hashlib.sha256(raw).hexdigest(),
+            )
+            for path, raw in sorted(stored_source.items())
+        )
+        captured.append(True)
+        return CheckpointResult(
+            schema_id="brz2obsidian.checkpoint-result", schema_version=1,
+            status="captured", code="captured", commit="c" * 40,
+            ref=checkpoint.locator.association.ref, history_retained=True,
+            objects_written=True, object_storage="verified",
+            authored_files_changed=False, message="Controlled saved-review port.",
+            locator=checkpoint.locator,
+        )
+
+    monkeypatch.setattr(operations, "capture_checkpoint", retain_description)
+    saved = operations.save_update(kept.preparation)
+    assert saved.code == "saved" and captured == [True]
+    assert saved.kind == "format_transition" and saved.checkpoint_commit == "c" * 40
+    loaded = operations.load_update(vault)
+    assert loaded.kind == "format_transition" and loaded.code == "revalidation_required"
+    assert not loaded.ready and not loaded.loaded.ready
+
+    def unopened_source(*args, **kwargs):
+        raise AssertionError("Pending maintenance cannot start ordinary source access")
+
+    with monkeypatch.context() as blocked_source:
+        blocked_source.setattr(operations, "read_checkpoint_payload", unopened_source)
+        blocked = operations.prepare_update(vault, "unopened-reference.brz")
+    assert (blocked.status, blocked.code) == ("refused", "format_transition_review_required")
+    assert not blocked.ready and blocked.next_actions == ("resume_update",)
+    monkeypatch.setattr(
+        operations, "read_checkpoint_payload",
+        lambda *args, **kwargs: SimpleNamespace(
+            status="available",
+            chunks=tuple(
+                SimpleNamespace(path=path, data=raw)
+                for path, raw in stored_source.items()
+            ),
+        ),
+    )
+    resumed = operations.resume_update(vault)
+    assert resumed.kind == "format_transition" and resumed.preparation is not None
+    assert resumed.code in ("unchanged", "refreshed")
+    retained = next(
+        row for row in resumed.preparation.review.approvals
+        if row.decision_id == "saved-format-current"
+    )
+    assert retained.result.data == CURRENT
+    assert resumed.preparation.review.facts.baseline_identity.output_format == 6
+    assert resumed.preparation.review.facts.incoming_identity.output_format == 7
+    assert not resumed.ready and captured == [True]
+    assert {
+        path.relative_to(vault).as_posix(): path.read_bytes()
+        for path in vault.rglob("*") if path.is_file()
+    } == before
+
+
+@pytest.mark.parametrize(
+    "changed",
+    (
+        "recovery_required",
+        "incomplete_inventory",
+        "unknown_history",
+        "unowned_payload",
+        "invalid_saved_actions",
+        "changed_generated_payload",
+        "changed_source_reference",
+        "missing_persisted_authority",
+    ),
+)
+def test_onboarding_save_rechecks_current_authority_before_any_checkpoint(
+    tmp_path, monkeypatch, changed
+):
+    import json
+    import shutil
+    from pathlib import Path
+
+    from tests.application.test_onboarding import legacy_inputs
+
+    operations, vault, source, authored = legacy_inputs(tmp_path, monkeypatch)
+    before = {path.name: path.read_bytes() for path in vault.iterdir()}
+    original_source = source.read_bytes()
+
+    def no_native_write(*args, **kwargs):
+        raise AssertionError("Unqualified onboarding must not capture or publish")
+
+    monkeypatch.setattr(operations, "capture_checkpoint", no_native_write)
+    monkeypatch.setattr(operations, "apply_reviewed_update", no_native_write)
+    offered = operations.prepare_onboarding(vault, source)
+    assert offered.preparation is not None and offered.kind == "onboarding"
+    prepared = offered.preparation
+    assert prepared.locator is None and not prepared.review.ready
+    assert all(row.baseline.status == "unknown" for row in prepared.review.facts.subjects)
+    # Valid current source/vault facts reach the public before-snapshot boundary.
+    cancelled = operations.save_update(prepared, cancel=lambda: True)
+    assert (cancelled.status, cancelled.code) == (
+        "cancelled_before_publication", "cancelled_before_snapshot"
+    )
+    assert cancelled.kind == "onboarding" and not cancelled.ready
+    assert cancelled.publication == "not_published"
+    assert source.read_bytes() == original_source
+    assert {path.name: path.read_bytes() for path in vault.iterdir()} == before
+    history = operations.inspect_history(vault)
+    if changed == "recovery_required":
+        history.admission.status = "recovery_first"
+        history.admission.recovery_gaps = ("Personal.bin",)
+    elif changed == "incomplete_inventory":
+        history.admission.inventory_complete = False
+    elif changed == "unknown_history":
+        history.status = "unavailable"
+    elif changed == "unowned_payload":
+        foreign = tmp_path / "foreign" / "incoming"
+        shutil.copytree(prepared.payload_directory, foreign)
+        prepared = prepared.model_copy(update={"payload_directory": str(foreign)})
+    elif changed == "invalid_saved_actions":
+        stale = action(
+            prepared.review, domain="format", choice="current",
+            expected_generation=prepared.review.proposal.generation + 1,
+        )
+        review = prepared.review.model_copy(update={
+            "history": prepared.review.history.model_copy(
+                update={"events": prepared.review.history.events + (stale,)}
+            )
+        })
+        prepared = prepared.model_copy(update={"review": review})
+    elif changed == "changed_generated_payload":
+        (Path(prepared.payload_directory) / "Home \u2014 Opening.md").write_bytes(
+            b"Unreviewed generated replacement.\n"
+        )
+    elif changed == "changed_source_reference":
+        data = json.loads(source.read_bytes())
+        data["entries"][0]["title"] = "Changed after preparation"
+        source.write_text(json.dumps(data))
+    else:
+        prepared = prepared.model_copy(update={"source_ref": None})
+    expected_source = source.read_bytes()
+    expected_incoming = {
+        path.relative_to(prepared.payload_directory).as_posix(): path.read_bytes()
+        for path in Path(prepared.payload_directory).rglob("*") if path.is_file()
+    }
+    result = operations.save_update(prepared)
+    if changed == "recovery_required":
+        assert (result.status, result.code) == ("recovery_required", "recovery_first")
+        assert result.next_actions == ("review_recovery",)
+        assert result.recovery_gaps == ("Personal.bin",)
+    else:
+        assert (result.status, result.code) == ("refused", "current_onboarding_unavailable")
+    assert result.kind == "onboarding" and not result.ready
+    assert result.publication == "not_started"
+    assert source.read_bytes() == expected_source
+    assert (vault / "Home \u2014 Opening.md").read_bytes() == authored
+    assert (vault / "Personal.bin").read_bytes() == b"\x00\xffprivate\r\n"
+    assert {path.name: path.read_bytes() for path in vault.iterdir()} == before
+    assert {
+        path.relative_to(prepared.payload_directory).as_posix(): path.read_bytes()
+        for path in Path(prepared.payload_directory).rglob("*") if path.is_file()
+    } == expected_incoming
