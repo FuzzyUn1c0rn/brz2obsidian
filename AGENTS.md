@@ -79,7 +79,7 @@ batches that reconstruct it. The user's 2026-10-17 decision supersedes every
 older ticket, specification or skill requirement for those runs, including
 fresh independent repetitions. Do not treat an obsolete gate as a blocker or
 ask to restore it. Use the reduced selection and focused checks within the
-total ten-minute budget. Source/native and user acceptance remain separate
+total fifteen-minute budget. Source/native and user acceptance remain separate
 from automated regression requirements.
 
 ## Temporary artifacts
