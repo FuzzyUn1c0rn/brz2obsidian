@@ -219,3 +219,53 @@ def test_base_named_view_fragments_refuse_unestablished_destinations(
         inventory="complete",
     )
     assert document.occurrences[0].meaning.status == expected
+
+
+def test_link_replacement_requires_the_bound_resolved_occurrence():
+    from brz2obsidian.obsidian import render_link_replacement
+
+    target = target_for_links("asset", "Assets/data.bin", kind="resource")
+    state = interpret_link_target(
+        ExactContent(data=b"# Intro\n"),
+        target_id="asset",
+        existence="present",
+        memberships=(),
+    )
+    raw = b"[[Assets/data.bin#Intro|Exact alias]]"
+    document = interpret_links(
+        ExactContent(data=raw),
+        document_id="owner",
+        source_path="Owner.md",
+        path_mode="vault",
+        targets=(target,),
+        target_facts=(state,),
+        inventory="complete",
+    )
+    occurrence = document.occurrences[0]
+    assert occurrence.meaning.status == "resolved"
+    assert (
+        render_link_replacement(
+            document,
+            occurrence.occurrence_id,
+            occurrence.meaning,
+            targets=(target,),
+            target_facts=(state,),
+        )
+        == raw
+    )
+    with pytest.raises(ValueError, match="bound resolved"):
+        render_link_replacement(
+            document,
+            "unknown-occurrence",
+            occurrence.meaning,
+            targets=(target,),
+            target_facts=(state,),
+        )
+    with pytest.raises(ValueError, match="bound resolved"):
+        render_link_replacement(
+            document,
+            occurrence.occurrence_id,
+            occurrence.meaning.model_copy(update={"status": "unknown"}),
+            targets=(target,),
+            target_facts=(state,),
+        )

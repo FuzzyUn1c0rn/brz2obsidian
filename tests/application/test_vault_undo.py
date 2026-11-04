@@ -31,7 +31,7 @@ from brz2obsidian.core import (
 from brz2obsidian.core.reversals import review_owned_documents
 from brz2obsidian.obsidian import interpret_link_target, interpret_links
 from brz2obsidian.publication.vault_apply import _NativeExecutor
-from tests.application.test_vault_apply import _apply
+from tests.application.test_vault_apply import _apply, _ready_case
 from tests.application.test_vault_checkpoints import git, user_state
 from tests.application.test_vault_recovery_process import (
     _AFTER,
@@ -159,6 +159,114 @@ def _with_unassociated_manual(facts, raw):
     return facts.model_copy(
         update={"link_context": facts.link_context.model_copy(update=context)}
     )
+
+
+def test_small_latest_undo_reverses_one_note_and_refuses_reuse():
+    vault, source, operations, reviewed, before = _ready_case()
+    opening = vault / "Notes/Opening.md"
+    local = vault / "Notes/Local.md"
+
+    checkpoint_ref = operations.read_checkpoint(vault).locator.association.ref
+    allowed_refs = {checkpoint_ref.encode()}
+
+    def assert_user_git_unchanged():
+        _assert_user_state(before, user_state(vault), allowed_refs=allowed_refs)
+
+    assert operations.prepare_undo(vault).status == "none"
+    assert opening.read_bytes() == b"authored opening\r\n"
+    assert local.read_bytes() == b"local \xff\r\n"
+    assert_user_git_unchanged()
+
+    applied = _apply(
+        operations,
+        vault,
+        source,
+        review=reviewed,
+        vault_id="vault-one",
+        import_id="import-one",
+    )
+    assert applied.status == "applied" and applied.publication == "complete"
+    assert applied.receipt_commit
+    allowed_refs.add(_operation_ref(checkpoint_ref, applied.operation_id))
+    assert opening.read_bytes() == b"incoming opening\n"
+    assert local.read_bytes() == b"local \xff\r\n"
+    assert_user_git_unchanged()
+
+    prepared = operations.prepare_undo(vault)
+    assert prepared.status == "offered" and not prepared.review.ready
+    assert prepared.target_receipt_commit == applied.receipt_commit
+    refused = operations.execute_undo(vault, prepared)
+    assert (refused.status, refused.code) == ("refused", "undo_review_required")
+    assert not refused.authored_files_changed
+    requirement = prepared.review.requirements[0]
+    change = next(
+        c
+        for c in prepared.review.proposal.changes
+        if c.change_id == requirement.change_id
+    )
+    subject = next(
+        s
+        for s in prepared.review.facts.subjects
+        if (s.item_id, s.facet) == (change.item_id, change.facet)
+    )
+    choice = action(
+        prepared.review,
+        change,
+        choice="incoming",
+        decision_id="undo:opening",
+        candidate=_incoming_candidate(
+            prepared.review.facts, subject, b"authored opening\r\n"
+        ),
+    )
+    stale = operations.resolve_undo(
+        vault,
+        prepared,
+        choice.model_copy(
+            update={"expected_generation": choice.expected_generation + 1}
+        ),
+    )
+    assert stale.status == "refused"
+    assert opening.read_bytes() == b"incoming opening\n"
+    assert_user_git_unchanged()
+    resolved = operations.resolve_undo(vault, prepared, choice)
+    assert resolved.status == "offered" and resolved.review.ready, resolved.code
+    undone = operations.execute_undo(vault, resolved)
+    assert (undone.status, undone.kind, undone.publication) == (
+        "undone",
+        "undo",
+        "complete",
+    )
+    allowed_refs.add(_operation_ref(checkpoint_ref, undone.operation_id))
+    assert opening.read_bytes() == b"authored opening\r\n"
+    assert local.read_bytes() == b"local \xff\r\n"
+    assert_user_git_unchanged()
+    fresh = Operations()
+    status = fresh.inspect_update_status(vault)
+    assert (status.status, status.kind, status.receipt_commit) == (
+        "undone",
+        "undo",
+        undone.receipt_commit,
+    )
+    checkpoint = fresh.read_checkpoint(vault)
+    assert checkpoint.status == "valid" and checkpoint.manifest.boundary == "result"
+    assert checkpoint.manifest.operation_intent_commit == undone.intent_commit
+    receipt = json.loads(git(vault, "show", f"{undone.receipt_commit}:receipt.json"))
+    intent = json.loads(git(vault, "show", f"{undone.intent_commit}:intent.json"))
+    assert (receipt["kind"], receipt["status"], receipt["intent_commit"]) == (
+        "undo",
+        "undone",
+        undone.intent_commit,
+    )
+    assert intent["undo_of_receipt_commit"] == applied.receipt_commit
+    again = fresh.prepare_undo(vault)
+    assert (again.status, again.code) == (
+        "already_undone",
+        "latest_update_already_undone",
+    )
+    assert fresh.execute_undo(vault, resolved).status == "refused"
+    assert opening.read_bytes() == b"authored opening\r\n"
+    assert local.read_bytes() == b"local \xff\r\n"
+    assert_user_git_unchanged()
 
 
 def test_latest_undo_retains_created_definition_identities_and_later_home():

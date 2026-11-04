@@ -719,6 +719,28 @@ def test_removal_continuation_requires_exact_native_origin_and_absent_state():
         (subject.item_id, subject.facet)
     ]
     assert fact.before_sha256 == hashlib.sha256(b"\x00authored").hexdigest()
+    assert (
+        fact.operation_id,
+        fact.origin_intent_commit,
+        fact.path,
+        fact.before_size,
+    ) == ("a" * 32, "3" * 40, "Assets/data.bin", 9)
+    with pytest.raises(OSError, match="selected effects"):
+        compile_removal_continuations(original, intent, "3" * 40, effects=None)
+    for altered in (
+        row.model_copy(update={"size": 8}),
+        row.model_copy(update={"sha256": "f" * 64}),
+    ):
+        with pytest.raises(OSError, match="unbound"):
+            compile_removal_continuations(
+                original,
+                intent.model_copy(update={"before": (altered,)}),
+                "3" * 40,
+                effects=effects,
+            )
+    duplicate = original.model_copy(update={"approvals": original.approvals * 2})
+    with pytest.raises(OSError, match="duplicate removal ownership"):
+        compile_removal_continuations(duplicate, intent, "3" * 40, effects=effects)
     absent = subject.current.model_copy(update={"existence": "absent", "content": None})
 
     def plan_for(
@@ -792,6 +814,18 @@ def test_removal_continuation_requires_exact_native_origin_and_absent_state():
         direction="finish",
         effects=effects,
     ) == {"Assets/data.bin"}
+    assert validate_removal_continuations((), direction="finish") == set()
+    with pytest.raises(OSError, match="continuation"):
+        validate_removal_continuations(
+            claims,
+            origin=intent,
+            original=original,
+            origin_commit="3" * 40,
+            before=(),
+            direction="finish",
+            effects=effects,
+            expected={},
+        )
     target = next(
         t
         for t in original.approvals[0].attachment_candidate.targets
@@ -1117,6 +1151,35 @@ def test_completed_cleanup_disposition_does_not_reown_manual_path(outcome):
         (proof,), original=original, final=final, receipt=receipt, plan=plan
     )
     assert retained == (() if outcome in ("removed", "disassociated") else (proof,))
+    if outcome == "removed":
+        for changed_final, changed_receipt in (
+            (final.model_copy(update={"operation_id": "b" * 32}), receipt),
+            (final, receipt.model_copy(update={"prepared_commit": "9" * 40})),
+        ):
+            with pytest.raises(ValueError, match="matching operation identity"):
+                interpret_attachment_disposition(
+                    (proof,),
+                    original=original,
+                    final=changed_final,
+                    receipt=changed_receipt,
+                    plan=plan,
+                )
+    if outcome == "disassociated":
+        broken_decision = plan.facts.association_decisions[0].model_copy(
+            update={"disassociate_entry_ids": ("missing-entry",)}
+        )
+        broken_facts = plan.facts.model_copy(
+            update={"association_decisions": (broken_decision,)}
+        )
+        broken = plan.model_copy(update={"facts": broken_facts})
+        with pytest.raises(ValueError, match="lacks its observed entry"):
+            interpret_attachment_disposition(
+                (proof,),
+                original=original,
+                final=final,
+                receipt=receipt,
+                plan=broken,
+            )
     # A later manual file at the same name never creates a new historical owner.
     assert (
         interpret_attachment_disposition(

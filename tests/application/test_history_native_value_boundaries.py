@@ -135,7 +135,10 @@ def test_known_file_progress_counts_require_a_declared_unit():
     )
     assert unknown.completed_units is unknown.total_units is unknown.unit is None
     value = {
-        "phase": "publication", "completed_units": 1, "total_units": 2, "unit": "files"
+        "phase": "publication",
+        "completed_units": 1,
+        "total_units": 2,
+        "unit": "files",
     }
     known = VaultProgress.model_validate_json(json.dumps(value))
     assert (known.completed_units, known.total_units, known.unit) == (1, 2, "files")
@@ -145,7 +148,10 @@ def test_known_file_progress_counts_require_a_declared_unit():
 
 def test_completed_progress_cannot_exceed_its_known_total():
     value = {
-        "phase": "publication", "completed_units": 1, "total_units": 2, "unit": "files"
+        "phase": "publication",
+        "completed_units": 1,
+        "total_units": 2,
+        "unit": "files",
     }
     known = VaultProgress.model_validate_json(json.dumps(value))
     assert known.phase == "publication" and known.completed_units == 1

@@ -16,17 +16,20 @@ requires the GUI development environment, actual GUI test execution, at least
 coverage JSON and HTML identify the actual coverage and remaining gaps; the
 issue records the qualified candidate and measured baseline.
 
-For the current #314 qualification, the default bundle has a 740-second cap,
-including startup, reports and internal receipt validations. Reserve 65 seconds for the fresh wrapper-family checks, 5 seconds for direct
-receipt validation, 40 seconds for candidate, verification and integration
-records, 15 seconds for guards and bookkeeping, and 20 seconds as reserve.
+For the current #314 qualification, the default bundle has an 800-second cap,
+including startup, reports and internal receipt validations. It includes the
+wrapper regression controls. Reserve 5 seconds for direct receipt validation,
+40 seconds for candidate, verification and integration records, 15 seconds for
+guards and bookkeeping, and 20 seconds as reserve. The earlier wrapper-family
+tooling measurement covered 42 of 60 branches; its source-bound evidence needs
+manual applicability assessment and is not a receipt for a changed candidate.
 The complete ledger must finish strictly below 900 seconds. Any additional
 required focused check belongs in that same ledger; the cap does not establish
 that a particular combination fits. Failed or interrupted qualifications remain
 failed and are preserved for diagnosis.
 
 ```powershell
-.\.venv\Scripts\python.exe tools/coverage_suite.py --workers 4 --timeout 740
+.\.venv\Scripts\python.exe tools/coverage_suite.py --workers 4 --timeout 800
 ```
 
 `coverage.json` retains exact contexts once per file, declared by
@@ -129,6 +132,12 @@ affect elapsed time. Historical timings and failed measurements do not predict
 the current candidate's wall time or coverage; its fresh complete bundle must
 establish both.
 
+The lifecycle-contract module uses one file selector because all 24 of its test
+functions, including every parameter case, were already selected. This preserves
+the executed cases while keeping both Windows command lines below the process
+creation limit. Review collection equivalence before consolidating selectors;
+shorter commands must not silently add or omit cases.
+
 The selected one-object repair control checks a source-only blob excluded from
 the user index/HEAD, full-manifest equality and the exact one-object delta. The
 selected older-copy repair separately checks refusal of older intact history,
@@ -201,6 +210,16 @@ substitutes for required independent fresh execution or full manual scope. An
 unchanged head does not need duplicate broad execution for record bookkeeping.
 
 
+The small latest-Undo lifecycle selects one actual note Apply and reversal,
+including stale review refusal, exact restored bytes and user Git preservation.
+The retained mixed later-edit and recovery Undo control starts first and retains
+its independently checked later writing, binary and reference outcomes. Its
+focused measurement took 175.429 seconds; that is not a future runtime promise.
+The interrupted Undo control retains its focused trigger.
+Public value, history routing, candidate, source capture and link controls add
+independent refusal and exact-byte outcomes. Pure attachment ownership controls
+check continuation binding and disposition;
+their supplied descriptions do not establish native history authority.
 The maintained selection uses explicit cases from `test_vault_admission.py`:
 dirty/staged/Unicode user state, scoped storage choices, configured hooks,
 typed attributes, unavailable resource/access observations, denied parents and
@@ -221,11 +240,11 @@ real Git records, reloads them unready, reobserves current facts and retains
 choices across repeated memo saves. Editing one note invalidates only that
 choice; advancing the actual source/vault baseline invalidates the remaining
 stale choice. These controls compose storage with the existing canonical review.
-Full crash/restart, latest/interrupted Undo, repair and resource observations
+Full crash/restart, interrupted Undo, repair and resource observations
 retain their separately qualified evidence and freshness limits; they are not
 replayed as a broad matrix in every default run.
 
-The latest native Undo control remains focused when reversal ownership, journal
+Further native Undo controls remain focused when reversal ownership, journal
 or history graphs, later writing, attachment/link targets or worker integration
 change. Cancellation after recovery preparation and a fresh successful retry
 remain focused when recovery cancellation, stopped operation/intent/checkpoint

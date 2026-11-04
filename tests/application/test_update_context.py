@@ -110,7 +110,10 @@ def test_reference_draft_blocks_other_operations_until_explicit_discard(tmp_path
 
 def test_cancelled_saved_inspection_never_retains_a_ready_context_handle(tmp_path):
     from brz2obsidian.application.update_context import UpdateContext
-    from brz2obsidian.application.update_contracts import UpdatePreparation, UpdateResult
+    from brz2obsidian.application.update_contracts import (
+        UpdatePreparation,
+        UpdateResult,
+    )
     from brz2obsidian.core import load_review, resolve_review, save_review
     from tests.application.test_update_lifecycle_contracts import preparation
     from tests.reconciliation.test_resolution import action
@@ -178,7 +181,7 @@ def test_cancelled_saved_inspection_never_retains_a_ready_context_handle(tmp_pat
         after = UpdateContext(operations=SavedInspection())
         checks = iter((False, True))
         result = getattr(after, command)(
-            tmp_path, selection_id=selection, cancel=lambda: next(checks)
+            tmp_path, selection_id=selection, cancel=lambda checks=checks: next(checks)
         )
         assert result.code == "cancelled_after_inspection" and result.binding is None
         assert not result.ready and result.history_retained
@@ -1243,63 +1246,87 @@ def test_owned_edit_survives_stale_actions_and_only_its_matching_handle_can_comm
 
     operations, vault, history = transition_case(tmp_path, monkeypatch)
     monkeypatch.setattr(
-        operations, "read_checkpoint",
+        operations,
+        "read_checkpoint",
         lambda *args, **kwargs: SimpleNamespace(
             **(vars(history.checkpoint) | {"status": "valid"})
         ),
     )
     context = UpdateContext(operations=operations)
     opened = context.prepare(
-        vault, selection_id="11111111-1111-4111-8111-111111111111",
-        kind="format_transition", source=FIXTURE / "source.brz",
+        vault,
+        selection_id="11111111-1111-4111-8111-111111111111",
+        kind="format_transition",
+        source=FIXTURE / "source.brz",
     )
     page = context.page(opened.binding, byte_limit=0)
     index, note = next(
-        (index, row) for index, row in enumerate(page.page.items)
+        (index, row)
+        for index, row in enumerate(page.page.items)
         if row.current_path == NOTE
     )
     offer = next(row for row in page.offers if row.change_id == note.change_id)
     assert "edited" in offer.choices
     missing = context.choose(
-        opened.binding, requirement_id=offer.requirement_id,
-        choice="edited", assumptions_digest=offer.assumptions_digest,
+        opened.binding,
+        requirement_id=offer.requirement_id,
+        choice="edited",
+        assumptions_digest=offer.assumptions_digest,
     )
     assert missing.code == "edit_changed" and not context.draft_pending
     stale = opened.binding.model_copy(update={"revision": opened.binding.revision + 1})
     for refused in (
-        context.save(stale), context.refresh(stale),
-        context.choose_configuration(stale, group_id="current-configuration", choice="current"),
+        context.save(stale),
+        context.refresh(stale),
+        context.choose_configuration(
+            stale, group_id="current-configuration", choice="current"
+        ),
         context.close(stale, choice="continue"),
     ):
         assert refused.code == "context_changed" and not refused.ready
     assert context.page(opened.binding, byte_limit=0).page == page.page
     edited = CURRENT + b"\r\nReviewed owned edit.\r\n"
     draft = context.begin_edit(
-        opened.binding, requirement_id=offer.requirement_id,
-        size=len(edited), sha256=hashlib.sha256(edited).hexdigest(),
+        opened.binding,
+        requirement_id=offer.requirement_id,
+        size=len(edited),
+        sha256=hashlib.sha256(edited).hexdigest(),
     )
     assert draft.edit is not None and context.draft_pending
     second = context.begin_edit(
-        draft.binding, requirement_id=offer.requirement_id,
-        size=len(edited), sha256=hashlib.sha256(edited).hexdigest(),
+        draft.binding,
+        requirement_id=offer.requirement_id,
+        size=len(edited),
+        sha256=hashlib.sha256(edited).hexdigest(),
     )
     assert second.code == "uncommitted_draft" and second.binding == draft.binding
     handle = draft.edit.handle
     written = context.write_edit(handle, offset=0, data=edited)
     assert written.edit.received_bytes == len(edited)
     assert context.seal_edit(handle).edit.sealed
-    other = next(row for row in page.offers if row.requirement_id != offer.requirement_id)
+    other = next(
+        row for row in page.offers if row.requirement_id != offer.requirement_id
+    )
     wrong_row = context.choose(
-        draft.binding, requirement_id=other.requirement_id, choice="edited",
-        assumptions_digest=other.assumptions_digest, edit_handle=handle,
+        draft.binding,
+        requirement_id=other.requirement_id,
+        choice="edited",
+        assumptions_digest=other.assumptions_digest,
+        edit_handle=handle,
     )
     assert wrong_row.code == "edit_changed" and context.draft_pending
     assert wrong_row.binding == draft.binding and not wrong_row.ready
-    accepted = worker_context_call(context, {
-        "command": "choose", "binding": draft.binding,
-        "requirement_id": offer.requirement_id, "choice": "edited",
-        "assumptions_digest": offer.assumptions_digest, "edit_handle": handle,
-    })
+    accepted = worker_context_call(
+        context,
+        {
+            "command": "choose",
+            "binding": draft.binding,
+            "requirement_id": offer.requirement_id,
+            "choice": "edited",
+            "assumptions_digest": offer.assumptions_digest,
+            "edit_handle": handle,
+        },
+    )
     assert accepted.code == "accepted" and not context.draft_pending
     assert not accepted.draft_pending
     shown = context.page(accepted.binding, offset=index, limit=1, byte_limit=65536)

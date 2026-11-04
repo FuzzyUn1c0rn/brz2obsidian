@@ -290,9 +290,7 @@ def test_storage_consent_rejects_content_and_unknown_scope_without_losing_approv
     approved = resolve_review(pending, action(pending)).plan
     assert not approved.ready
     assert approved.approvals[0].result.data == b"incoming\n"
-    requirement = next(
-        row for row in approved.requirements if row.domain == "storage"
-    )
+    requirement = next(row for row in approved.requirements if row.domain == "storage")
     scoped = action(
         approved,
         decision_id="storage:explicit",
@@ -306,7 +304,8 @@ def test_storage_consent_rejects_content_and_unknown_scope_without_losing_approv
         approved, scoped.model_copy(update={"candidate": candidate})
     )
     assert (with_content.status, with_content.code) == (
-        "refused", "choice_not_admitted"
+        "refused",
+        "choice_not_admitted",
     )
     unknown = resolve_review(
         approved, scoped.model_copy(update={"change_id": "consent:unobserved"})
@@ -346,10 +345,12 @@ def test_compatible_bulk_cannot_smuggle_a_text_candidate_into_group_approval():
     accepted = resolve_review(pending, chosen)
     assert accepted.status == "accepted" and not accepted.plan.ready
     assert [row.result.data for row in accepted.plan.approvals] == [
-        b"new one", b"new two"
+        b"new one",
+        b"new two",
     ]
     assert {row.domain for row in accepted.plan.requirements} == {
-        "text", "configuration"
+        "text",
+        "configuration",
     }
 
 

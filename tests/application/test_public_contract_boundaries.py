@@ -249,9 +249,7 @@ def test_publication_and_listing_descriptions_require_their_own_evidence(tmp_pat
         "brain_id": "11111111-1111-4111-8111-111111111111",
         "name": "Literal Brain",
     }
-    listed = BrainListResult(
-        outcome="clean", status="brains_listed", brains=(brain,)
-    )
+    listed = BrainListResult(outcome="clean", status="brains_listed", brains=(brain,))
     assert [row.name for row in listed.brains] == ["Literal Brain"]
     with pytest.raises(ValueError, match="distinct"):
         BrainListResult(outcome="clean", status="brains_listed", brains=(brain, brain))
