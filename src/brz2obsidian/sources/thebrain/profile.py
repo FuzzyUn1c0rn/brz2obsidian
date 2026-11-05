@@ -31,7 +31,7 @@ BRZ_POLICY = SourcePolicy(
             disposition="warning",
             issue_code="approved_source_gap",
             permits_absent_payload=True,
-            message="Source category icon is absent; its provider and inheriting members have neutral appearance.",
+            message="Source category icon is absent.",
             guidance="Review the provider and affected included members in the Migration report; optionally restore the source icon and re-export.",
         ),
         FindingDisposition(
