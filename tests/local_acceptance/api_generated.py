@@ -25,9 +25,71 @@ from .api_note_text import (
     tables,
 )
 from .api_scope import strict
+from .appearance import check_depth_warnings, source_icon
 from .checker import contender_keys, escaped, wiki
-from .support import check_support_content
+from .support import REOPEN_GUIDANCE, check_support_content, tag_listing
 from .text import literal_edits
+
+
+def versioned_static(output_version):
+    """Keep historical format7 literals; state accepted format8 guidance here.
+
+    Source profile/capture versions do not select the renderer generation.
+    These presentation literals are independent of production imports.
+    """
+    assert output_version in {7, 8}, "reviewed output generation"
+    result = dict(STATIC)
+    if output_version == 7:
+        return result
+    guide = result["GP05-GUIDE-00"]
+    start = guide.index("Choose appearance_category explicitly")
+    end = guide.index("Imported created/updated", start)
+    appearance = """Choose appearance_category explicitly from memberships, independently of
+membership order. Empty means no inheritance. A populated invalid/nonmember
+provider shows "Invalid appearance category."; it never selects a substitute. A valid local
+icon override wins even with an empty or invalid provider. After reopening, dashboards
+follow the selected provider chain, taking the nearest valid owned image.
+Members, Gallery and Categories overview check the note's own icon at link zero
+and at most eight provider links. If no icon is found and a valid unrepeated
+chain continues, they show no inherited image and the exact status
+**Icon lookup exceeds 8 links.** Assign a nearer valid icon or change a selected
+provider to resolve this warning. Blank stops normally; invalid/repeated
+providers have distinct statuses. A valid icon found within the limit succeeds
+even if the remaining chain is longer. Lookup never selects another membership
+or writes a borrowed icon into an owned icon property. Category changes do not rewrite
+ordinary/member body-icon snapshots; those full-chain migration-time image
+references are separately editable and can show an image while the live view
+reports the eight-link limit. Declared
+source colours remain in migration-record.json without vault colour properties
+or the decorative Appearance display.
+
+When a source category icon is absent, its icon property is empty and inheriting
+members keep their categories and appearance_category links. Lookup uses a
+farther valid selected icon if available, otherwise appearance is neutral. A valid explicit member icon still wins. Add a valid local image to
+the category's icon property to supply future dashboard defaults. The Migration
+report identifies the missing provider and affected included members separately.
+Missing source category text remains unknown; its notice does not reconstruct a
+body from images or declared length. Source repair and re-export are optional.
+
+"""
+    guide = guide[:start] + REOPEN_GUIDANCE + appearance + guide[end:]
+    anchor = "Every direct included parent is linked; hierarchy does not create membership.\n"
+    assert guide.count(anchor) == 1, "historical guidance boundary"
+    guide = guide.replace(
+        anchor,
+        anchor
+        + "A category can itself be a direct member and has one unique category note.\nDashboards list direct members only; B's member template initializes B, never\nB's own parent A.\n",
+    )
+    guide = guide.replace(
+        "## Check current vault conventions\n",
+        "Source-tag tokens remain independent. Tag memberships.md lists explicit\nnested source-tag facts even when a child tag has a created note. A nested fact\nmay also point to an uncreated tag target. The parent tag is not inferred on the\nchild tag's members; discover created assignments through native tag search.\n\n## Check current vault conventions\n",
+    )
+    guide = guide.replace(
+        "unambiguously; blank appearance providers opt out. Results are clean/issues/failed\n",
+        'unambiguously; blank appearance providers opt out. provider_cycle reports the\nfull repeated provider chain, including cycles beyond the native search.\ninvalid_provider also identifies affected chains reaching invalid declarations,\neven when a nearer owned icon displays. icon_lookup_depth reports the affected\nchain with "Icon lookup exceeds 8 links."; it is a nonblocking warning. Results are clean/issues/failed\n',
+    )
+    result["GP05-GUIDE-00"] = guide
+    return result
 
 
 def check_complete_shape(record):
@@ -63,6 +125,11 @@ def check_complete_shape(record):
     assert type(record) is dict and set(record) == envelope, (
         "closed complete support record envelope"
     )
+    if "schema_version" in record:
+        assert type(record["schema_version"]) is int and record["schema_version"] in {
+            7,
+            8,
+        }, "generated output format version"
     identity = record["source_identity"]
     assert type(identity) is dict and set(identity) == {
         "source_id",
@@ -406,6 +473,36 @@ def check_warning_records(
                 "leftover_path": None,
             }
         )
+    if record.get("schema_version") == 8:
+        thoughts = {key: row["activeThought"] for key, row in scoped.graphs.items()}
+        providers = {
+            key: row["typeId"] for key, row in thoughts.items() if row["typeId"]
+        }
+        evidence = {}
+        for key, provider in providers.items():
+            edges = [
+                row
+                for row in scoped.graphs[key]["links"]
+                if row["meaning"] in {2, 3}
+                and row["thoughtIdA"] == provider
+                and row["thoughtIdB"] == key
+            ]
+            assert len(edges) == 1, "independent icon provider source edge"
+            evidence[key] = sorted(
+                ["link:" + edges[0]["id"], "thought:" + key, "thought:" + provider]
+            )
+        expected += check_depth_warnings(
+            record,
+            {key for key, row in targets.items() if row["created"]},
+            {
+                row["sourceId"]: key
+                for key, row in attachments.items()
+                if row["type"] == 5
+            },
+            providers,
+            {key for key, row in thoughts.items() if row["kind"] == 2},
+            evidence,
+        )
     assert strict(record["issues"]) == strict(expected), (
         "closed source-bound warning census/observations"
     )
@@ -427,23 +524,24 @@ def check_complete_report(
     warnings,
     findings,
 ):
+    constants = versioned_static(record.get("schema_version", 7))
     names = {key: row["relative_path"] for key, row in targets.items()}
     linked = lambda key: wiki(names[key], thoughts[key]["name"])
     plain = lambda value: escaped(value).replace("\r", " ").replace("\n", " ")
     created = {key for key, row in targets.items() if row["created"]}
     present = sum(row["availability"] == "present" for row in assets.values())
     text = (
-        STATIC["GP05-REPORT-00"]
-        + STATIC["GP05-REPORT-04"]
+        constants["GP05-REPORT-00"]
+        + constants["GP05-REPORT-04"]
         + str(len(created))
-        + STATIC["GP05-REPORT-05"]
+        + constants["GP05-REPORT-05"]
         + str(present)
-        + STATIC["GP05-REPORT-06"]
+        + constants["GP05-REPORT-06"]
     )
     documents = source_documents(record)
     edits = sum(len(row["text_adaptations"]) for row in documents.values())
     if edits:
-        text += STATIC["GP05-REPORT-15"] + str(edits) + STATIC["GP05-REPORT-16"]
+        text += constants["GP05-REPORT-15"] + str(edits) + constants["GP05-REPORT-16"]
         owners = sorted(
             {
                 note.owner
@@ -457,9 +555,13 @@ def check_complete_report(
         )
     external = sum(row["type"] == 2 for row in attachments.values())
     if external:
-        text += STATIC["GP05-REPORT-17"] + str(external) + STATIC["GP05-REPORT-18"]
+        text += (
+            constants["GP05-REPORT-17"] + str(external) + constants["GP05-REPORT-18"]
+        )
     text += (
-        STATIC["GP05-REPORT-01"] + STATIC["GP05-REPORT-02"] + STATIC["GP05-REPORT-03"]
+        constants["GP05-REPORT-01"]
+        + constants["GP05-REPORT-02"]
+        + constants["GP05-REPORT-03"]
     )
     if any(
         key in assets
@@ -467,20 +569,20 @@ def check_complete_report(
         and row["location"].lower().endswith(".pdf")
         for key, row in attachments.items()
     ):
-        text += STATIC["GP05-REPORT-08"]
+        text += constants["GP05-REPORT-08"]
     missing = [
         finding for finding in findings if finding["kind"] == "known_absent_payload"
     ]
     if missing:
         brain = baseline.json(baseline.data["brain"])
         text += (
-            STATIC["GP05-GAP-00"]
-            + STATIC["GP05-GAP-01"]
-            + STATIC["GP05-GAP-07"]
+            constants["GP05-GAP-00"]
+            + constants["GP05-GAP-01"]
+            + constants["GP05-GAP-07"]
             + plain(brain["name"])
-            + STATIC["GP05-GAP-08"]
+            + constants["GP05-GAP-08"]
             + plain(brain["id"])
-            + STATIC["GP05-GAP-09"]
+            + constants["GP05-GAP-09"]
         )
         for finding in missing:
             key = finding["affected"][0]
@@ -496,22 +598,22 @@ def check_complete_report(
                 + ")"
             )
             text += (
-                STATIC["GP05-GAP-10"]
+                constants["GP05-GAP-10"]
                 + title
-                + STATIC["GP05-GAP-11"]
+                + constants["GP05-GAP-11"]
                 + plain(owner)
-                + STATIC["GP05-GAP-12"]
+                + constants["GP05-GAP-12"]
                 + plain(key)
-                + STATIC["GP05-GAP-13"]
+                + constants["GP05-GAP-13"]
                 + assets[key]["role"]
-                + STATIC["GP05-GAP-14"]
+                + constants["GP05-GAP-14"]
                 + "metadata retained; bytes absent"
-                + STATIC["GP05-GAP-15"]
+                + constants["GP05-GAP-15"]
             )
             text += (
-                STATIC["GP05-GAP-17"]
+                constants["GP05-GAP-17"]
                 + plain(canonical_json(finding["observed_json"]))
-                + STATIC["GP05-GAP-16"]
+                + constants["GP05-GAP-16"]
             )
     normalized = [
         (key, ref)
@@ -520,7 +622,7 @@ def check_complete_report(
         if ref["presentation_normalization"]
     ]
     if normalized:
-        text += STATIC["GP05-REPORT-10"]
+        text += constants["GP05-REPORT-10"]
         for key, ref in normalized:
             declaration = (
                 ref["presentation_normalization"]["declaration"]
@@ -529,39 +631,46 @@ def check_complete_report(
                 .replace("\n", " ")
             )
             text += (
-                STATIC["GP05-REPORT-30"]
+                constants["GP05-REPORT-30"]
                 + linked(scoped.safe_notes[key].owner)
-                + STATIC["GP05-REPORT-29"]
+                + constants["GP05-REPORT-29"]
                 + declaration
-                + STATIC["GP05-REPORT-27"]
+                + constants["GP05-REPORT-27"]
             )
+    depth = [row for row in warnings if row["code"] == "icon_lookup_depth"]
+    if depth:
+        text += "\n## Native icon lookup warnings\n\nIcon lookup exceeds 8 links. Native dashboards display no inherited icon for these lookups; ordinary body snapshots use the full finite migration-time chain. Memberships and owned icon declarations are unchanged. After category icon, membership or provider edits, close and reopen affected category dashboards and Categories overview; open views may retain stale or inconsistent icons and statuses.\n\n"
+        text += "".join(
+            "- " + " -> ".join(linked(key) for key in row["affected"]) + "\n"
+            for row in depth
+        )
     if warnings:
-        text += STATIC["GP05-REPORT-11"]
+        text += constants["GP05-REPORT-11"]
         for warning in warnings:
             affected = [
                 linked(key) for key in sorted(created) if key in warning["affected"]
             ]
             text += (
-                STATIC["GP05-REPORT-19"]
-                + STATIC["GP05-REPORT-28"].join(affected)
-                + STATIC["GP05-REPORT-20"]
+                constants["GP05-REPORT-19"]
+                + constants["GP05-REPORT-28"].join(affected)
+                + constants["GP05-REPORT-20"]
                 + warning["code"]
-                + STATIC["GP05-REPORT-21"]
+                + constants["GP05-REPORT-21"]
                 + (warning["rule_id"] or "None")
-                + STATIC["GP05-REPORT-22"]
+                + constants["GP05-REPORT-22"]
                 + plain(warning["message"])
-                + STATIC["GP05-REPORT-23"]
+                + constants["GP05-REPORT-23"]
                 + warning["guidance"]
-                + STATIC["GP05-REPORT-24"]
+                + constants["GP05-REPORT-24"]
             )
     if any(row["kind"] in {"hierarchy", "related"} for row in relationships.values()):
-        text += STATIC["GP05-REPORT-12"]
+        text += constants["GP05-REPORT-12"]
     for path, chunk in (
         ("Uncreated targets.md", "GP05-REPORT-13"),
         ("Tag memberships.md", "GP05-REPORT-14"),
     ):
         if conditional[path]:
-            text += STATIC[chunk]
+            text += constants[chunk]
     assert (vault / "MIGRATION REPORT.md").read_bytes() == text.encode("utf-8"), (
         "closed source-derived complete report"
     )
@@ -772,7 +881,6 @@ def source_documents(record):
 def check_counts(record, thoughts, relationships, targets, assets, references, support):
     created = {key for key, row in targets.items() if row["created"]}
     definitions = {key for key, row in thoughts.items() if row["kind"] == 2}
-    tags = {key for key, row in thoughts.items() if row["kind"] == 4}
     assigned = [row for row in relationships.values() if row["kind"] == "tag"]
     classified = [
         row for row in relationships.values() if row["kind"] == "classification"
@@ -807,12 +915,14 @@ def check_counts(record, thoughts, relationships, targets, assets, references, s
         "actual_assets": None,
         "actual_files": None,
         "actual_references": live,
-        "source_tags": len(tags),
+        "source_tags": sum(row["kind"] == 4 for row in thoughts.values()),
         "tag_memberships": len(assigned),
         "native_tag_memberships": native,
         "uncreated_tag_memberships": len(assigned) - native,
-        "created_tag_items": len(tags & created),
-        "uncreated_tag_items": len(tags - created),
+        "created_tag_items": sum(thoughts[key]["kind"] == 4 for key in created),
+        "uncreated_tag_items": sum(
+            row["kind"] == 4 and key not in created for key, row in thoughts.items()
+        ),
         "source_definitions": len(definitions),
         "classification_assignments": len(classified),
         "typed_members": len({row["item_b"] for row in classified}),
@@ -837,6 +947,7 @@ def check_adaptation_records(
     attachments,
     references,
 ):
+    constants = versioned_static(record.get("schema_version", 7))
     expected = {}
 
     def add(kind, affected, description, **extra):
@@ -857,7 +968,7 @@ def check_adaptation_records(
         ("categories_overview", home, 21),
         ("native_bases_configuration", ".obsidian/core-plugins.json", 22),
     ):
-        add(kind, target, STATIC[f"GP07-DESCRIPTION-{index:02d}"])
+        add(kind, target, constants[f"GP07-DESCRIPTION-{index:02d}"])
     documents = source_documents(record)
     icons = {
         row["sourceId"]: key for key, row in attachments.items() if row["type"] == 5
@@ -872,53 +983,64 @@ def check_adaptation_records(
             add(
                 "item_target",
                 key,
-                STATIC["GP07-DESCRIPTION-07"] + target["relative_path"],
+                constants["GP07-DESCRIPTION-07"] + target["relative_path"],
             )
         if not target["created"]:
             continue
-        add("canonical_properties", key, STATIC["GP07-DESCRIPTION-16"])
+        add("canonical_properties", key, constants["GP07-DESCRIPTION-16"])
         if thoughts[key].get("creationDateTime") or thoughts[key].get(
             "modificationDateTime"
         ):
-            add("source_calendar_dates", key, STATIC["GP07-DESCRIPTION-14"])
+            add("source_calendar_dates", key, constants["GP07-DESCRIPTION-14"])
         if (
             icons.get(key)
             or thoughts[key]["foregroundColor"]
             or thoughts[key]["backgroundColor"]
         ):
-            add("declared_appearance", key, STATIC["GP07-DESCRIPTION-10"])
+            add("declared_appearance", key, constants["GP07-DESCRIPTION-10"])
         if thoughts[key]["kind"] == 2:
-            add("category_dashboard", key, STATIC["GP07-DESCRIPTION-26"])
-            add("category_template", key, STATIC["GP07-DESCRIPTION-23"])
+            add("category_dashboard", key, constants["GP07-DESCRIPTION-26"])
+            add("category_template", key, constants["GP07-DESCRIPTION-23"])
         else:
-            effective = icons.get(key) or icons.get(providers.get(key))
+            effective = source_icon(
+                key,
+                icons,
+                providers,
+                {key for key, row in thoughts.items() if row["kind"] == 2},
+            ).asset
             if effective:
                 suffix = (
-                    STATIC["GP07-DESCRIPTION-18"]
+                    constants["GP07-DESCRIPTION-18"]
                     if icons.get(key)
-                    else STATIC["GP07-DESCRIPTION-25"]
+                    else (
+                        " through the selected appearance-category chain starting at "
+                        if record.get("schema_version") == 8
+                        else constants["GP07-DESCRIPTION-25"]
+                    )
                     + providers[key]
-                    + STATIC["GP07-DESCRIPTION-24"]
+                    + constants["GP07-DESCRIPTION-24"]
                 )
                 add(
                     "body_icon_snapshot",
                     key,
-                    STATIC["GP07-DESCRIPTION-17"]
+                    constants["GP07-DESCRIPTION-17"]
                     + effective
                     + suffix
-                    + STATIC["GP07-DESCRIPTION-11"],
+                    + constants["GP07-DESCRIPTION-11"],
                 )
     for key, relation in relationships.items():
         if relation["kind"] in {"hierarchy", "related"}:
             label = (
-                STATIC["GP07-DESCRIPTION-12"]
+                constants["GP07-DESCRIPTION-12"]
                 if relation["kind"] == "hierarchy"
-                else STATIC["GP07-DESCRIPTION-13"]
+                else constants["GP07-DESCRIPTION-13"]
             )
             add(
                 "relationship_presentation",
                 key,
-                STATIC["GP07-DESCRIPTION-08"] + label + STATIC["GP07-DESCRIPTION-04"],
+                constants["GP07-DESCRIPTION-08"]
+                + label
+                + constants["GP07-DESCRIPTION-04"],
             )
     for key, (owner, refs) in references.items():
         for index, ref in enumerate(refs):
@@ -927,17 +1049,17 @@ def check_adaptation_records(
                 add(
                     ref["kind"] + "_reference",
                     affected,
-                    STATIC["GP07-DESCRIPTION-05"]
+                    constants["GP07-DESCRIPTION-05"]
                     + ref["target"]
-                    + STATIC["GP07-DESCRIPTION-03"],
+                    + constants["GP07-DESCRIPTION-03"],
                 )
             if ref["presentation_normalization"]:
                 add(
                     "image_presentation",
                     affected,
-                    STATIC["GP07-DESCRIPTION-29"]
+                    constants["GP07-DESCRIPTION-29"]
                     + ref["presentation_normalization"]["declaration"]
-                    + STATIC["GP07-DESCRIPTION-28"],
+                    + constants["GP07-DESCRIPTION-28"],
                     owner=owner,
                     document_key=key,
                     evidence=["attachment:" + key],
@@ -946,7 +1068,7 @@ def check_adaptation_records(
             add(
                 edit["kind"],
                 "text:" + key + ":" + str(index),
-                STATIC["GP07-DESCRIPTION-27"],
+                constants["GP07-DESCRIPTION-27"],
                 owner=owner,
                 document_key=key,
                 evidence=["attachment:" + key],
@@ -966,6 +1088,7 @@ def check_support(
     Target/path/materialization and references arrive only after their independent
     raw-source audits. A record's support declaration never decides this census.
     """
+    constants = versioned_static(record.get("schema_version", 7))
     names = {key: row["relative_path"] for key, row in targets.items()}
     created = {key for key, row in targets.items() if row["created"]}
     definitions = {key for key, row in thoughts.items() if row["kind"] == 2}
@@ -1017,41 +1140,15 @@ def check_support(
         for row in relationships.values()
         if row["kind"] == "tag"
     ]
-    tags = {key for key, row in thoughts.items() if row["kind"] == 4}
-    focused = sorted(
-        key
-        for key in tags
-        if not any(row["tag_key"] == key for row in tag_rows)
-        or any(row["tag_key"] == key and not row["native"] for row in tag_rows)
+    tag_listing_text = tag_listing(
+        {key: row["kind"] for key, row in thoughts.items()},
+        {key: row["name"] for key, row in thoughts.items()},
+        names,
+        created,
+        tokens,
+        [(row["tag_key"], row["item_key"]) for row in tag_rows],
+        output_version=record["schema_version"],
     )
-    tag_listing = ""
-    if focused:
-        tag_listing = "# Tag memberships\n\nAssignments on uncreated targets and source tags without assignments. Use native tag search for created assigned notes.\n\n"
-        for key in focused:
-            tag_listing += (
-                "## #"
-                + tokens[key]
-                + "\n\nSource tag: "
-                + wiki(names[key], thoughts[key]["name"])
-                + "\n\n"
-            )
-            hidden = sorted(
-                {
-                    row["item_key"]
-                    for row in tag_rows
-                    if row["tag_key"] == key and not row["native"]
-                }
-            )
-            tag_listing += (
-                "".join(
-                    "- " + wiki(names[item], thoughts[item]["name"]) + "\n"
-                    for item in hidden
-                )
-                + "\n"
-                if hidden
-                else "No source assignments.\n\n"
-            )
-        tag_listing = tag_listing.rstrip("\n") + "\n"
     support = {
         ".obsidian/app.json": "configuration",
         ".obsidian/bookmarks.json": "configuration",
@@ -1076,7 +1173,10 @@ def check_support(
             for key in definitions
         }
     )
-    conditional = {"Uncreated targets.md": listing, "Tag memberships.md": tag_listing}
+    conditional = {
+        "Uncreated targets.md": listing,
+        "Tag memberships.md": tag_listing_text,
+    }
     support.update({path: "listing" for path, text in conditional.items() if text})
     declared = record["support_artifacts"]
     assert type(declared) is list and all(
@@ -1113,11 +1213,11 @@ def check_support(
             assert (vault / path).read_bytes() == text.encode("utf-8"), (
                 "closed conditional support listing"
             )
-    assert (
-        vault / "Categories.md"
-    ).read_bytes() == b"# Categories\n\n![[Templates/Bases/Categories.base]]\n", (
-        "closed categories overview"
-    )
+    assert (vault / "Categories.md").read_bytes() == (
+        "# Categories\n\n"
+        + (REOPEN_GUIDANCE if record["schema_version"] == 8 else "")
+        + "![[Templates/Bases/Categories.base]]\n"
+    ).encode(), "closed categories overview"
     home = baseline.json(baseline.data["brain"])["homeThoughtId"]
     configurations = {
         ".obsidian/app.json": (
@@ -1192,7 +1292,9 @@ def check_support(
     assert strict(
         read_json((vault / ".obsidian/bookmarks.json").read_bytes())
     ) == strict(bookmarks), "closed source/protocol bookmark"
-    check_support_content(vault, names, definitions)
+    check_support_content(
+        vault, names, definitions, output_version=record["schema_version"]
+    )
     mappings = [
         "- [[Templates/"
         + PurePosixPath(names[key]).name
@@ -1202,9 +1304,9 @@ def check_support(
         for key in sorted(definitions)
     ]
     guide = (
-        STATIC["GP05-GUIDE-00"]
-        + STATIC["GP05-GUIDE-02"]
-        + ("\n".join(mappings) + "\n" if mappings else STATIC["GP05-GUIDE-03"])
+        constants["GP05-GUIDE-00"]
+        + constants["GP05-GUIDE-02"]
+        + ("\n".join(mappings) + "\n" if mappings else constants["GP05-GUIDE-03"])
     )
     assert (vault / "Vault guide.md").read_bytes() == guide.encode("utf-8"), (
         "closed source-derived complete guide"
@@ -1214,7 +1316,7 @@ def check_support(
 
 def check_protocol(record):
     """Check present protocol envelopes before their exact locations are trusted."""
-    for name, expected in (("schema", "brz2obsidian.migration"), ("schema_version", 7)):
+    for name, expected in (("schema", "brz2obsidian.migration"),):
         if name in record:
             assert type(record[name]) is type(expected) and record[name] == expected, (
                 "generated protocol schema"
@@ -1239,7 +1341,9 @@ def check_protocol(record):
             record["converter_version"],
         ), "generated converter version"
     if "renderer_version" in record:
-        assert record["renderer_version"] == "7", "generated renderer version"
+        assert record["renderer_version"] == str(record.get("schema_version", 7)), (
+            "generated renderer/output version binding"
+        )
     if "run_metadata" not in record:
         return
     run = record["run_metadata"]

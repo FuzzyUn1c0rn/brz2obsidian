@@ -166,7 +166,7 @@ def scope_note(raw, excluded):
 
 def qualify_scope(baseline, *, profile_version):
     """Derive scope only; no safe text/availability assertion is an input."""
-    assert profile_version in {"1", "2", "3"}, "unsupported API profile version"
+    assert profile_version in {"1", "2", "3", "4"}, "unsupported API profile version"
     baseline.verify()
     data = baseline.data
     graphs = {

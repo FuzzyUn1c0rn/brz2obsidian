@@ -12,6 +12,26 @@ def identities(records, label):
     return result
 
 
+def assert_acyclic(edges, message):
+    """Iterative source-edge check, including branching and self-assignment."""
+    adjacent = {}
+    for left, right in edges:
+        adjacent.setdefault(left, set()).add(right)
+    done = set()
+    for start in adjacent:
+        active, stack = set(), [(start, False)]
+        while stack:
+            node, leaving = stack.pop()
+            if leaving:
+                active.remove(node)
+                done.add(node)
+            elif node not in done:
+                assert node not in active, message
+                active.add(node)
+                stack.append((node, True))
+                stack.extend((child, False) for child in adjacent.get(node, ()))
+
+
 def relationships(raw):
     thoughts = identities(raw["thoughts.json"], "item")
     sources = identities(raw["links.json"], "relationship")
@@ -33,7 +53,13 @@ def relationships(raw):
         if signature == (1, 1, 1, 3) and roles == (1, 1):
             # Child Relation1 fixes parent A/child B; backward arrow is separate.
             kind = "hierarchy"
-        elif signature == (1, 3, 1, -1) and roles == (1, 2):
+        elif signature == (1, 3, 1, -1) and roles in {
+            (1, 2),
+            (2, 1),
+            (2, 2),
+            (2, 4),
+            (4, 2),
+        }:
             # Normal jump contributes connectivity, never instance membership.
             kind = "related"
         elif (
@@ -52,13 +78,25 @@ def relationships(raw):
             kind = "related"
         elif signature == (1, 1, 6, -1) and roles[0] == 5 and roles[1] in {1, 2, 4}:
             kind = "system"
-        elif signature == (1, 1, 2, -1) and roles == (2, 1):
+        elif (signature == (1, 1, 2, -1) and roles == (2, 1)) or (
+            signature == (1, 1, 3, -1) and roles == (2, 2)
+        ):
             kind = "classification"
-        elif signature == (1, 1, 5, -1) and roles == (4, 1):
+        elif (signature == (1, 1, 5, -1) and roles in {(4, 1), (4, 2)}) or (
+            signature == (1, 1, 7, -1) and roles == (4, 4)
+        ):
             kind = "tag"
         else:
             raise AssertionError("raw relationship signature/roles")
         result[key] = kind
+    assert_acyclic(
+        (
+            (r["ThoughtIdA"], r["ThoughtIdB"])
+            for r in sources.values()
+            if result[r["Id"]] == "tag"
+        ),
+        "unqualified source tag cycle",
+    )
     return result
 
 
@@ -76,7 +114,7 @@ def classifications(raw):
         provider = thought.get("TypeId")
         if provider:
             assert (
-                thought["Kind"] == 1
+                thought["Kind"] in {1, 2}
                 and provider in thoughts
                 and thoughts[provider]["Kind"] == 2
             ), "raw classification roles"
@@ -95,6 +133,12 @@ def classifications(raw):
             }
         else:
             assert not instances, "raw instance lacks TypeId"
+    for origin in result:
+        chain, node = [], origin
+        while node in result:
+            assert node not in chain, "raw source type-assignment cycle"
+            chain.append(node)
+            node = result[node]["definition_key"]
     return result
 
 

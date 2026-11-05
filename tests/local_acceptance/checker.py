@@ -19,6 +19,7 @@ from urllib.parse import quote, unquote
 from uuid import UUID, uuid5
 from zipfile import ZipFile
 
+from .appearance import check_depth_warnings, source_icon
 from .facts import (
     classifications,
     identities,
@@ -32,7 +33,12 @@ from .facts import (
 )
 from .gaps import derive_gaps, diagnostic_targets
 from .scope import dump_json, scope
-from .support import check_support_content
+from .support import (
+    CATEGORY_VIEWS_8,
+    REOPEN_GUIDANCE,
+    check_support_content,
+    tag_listing,
+)
 from .text import generated_boundary, inline_candidates, literal_edits
 
 ROOTS = (
@@ -127,7 +133,7 @@ def check_vault(source, vault):
     }, "migration record schema fields"
     assert (record["schema"], record["schema_version"]) == (
         "brz2obsidian.migration",
-        7,
+        8,
     ), "record schema version"
     assert (
         record["converter_version"]
@@ -135,7 +141,7 @@ def check_vault(source, vault):
         == "0.3.0"
     ), "converter version"
     assert (
-        record["renderer_version"] == record["run_metadata"]["renderer_version"] == "7"
+        record["renderer_version"] == record["run_metadata"]["renderer_version"] == "8"
     ), "renderer version"
     with Path(source).open("rb") as stream:
         assert (
@@ -202,11 +208,11 @@ def check_vault(source, vault):
         ), "collection source identity"
         assert (
             record["source_identity"]["module_id"] == "thebrain-brz"
-            and record["source_identity"]["module_version"] == "10"
+            and record["source_identity"]["module_version"] == "11"
         ), "source module identity"
         assert (record["profile_id"], record["profile_version"]) == (
             "thebrain-format5-reviewed",
-            "10",
+            "11",
         ), "reviewed source profile"
         originals = {e["key"]: e for e in record["original_evidence"]}
         for name in ROOTS:
@@ -372,6 +378,11 @@ def check_vault(source, vault):
             }
         )
         summary["warnings"] += len(sized)
+        depth = [
+            issue for issue in record["issues"] if issue["code"] == "icon_lookup_depth"
+        ]
+        summary["native_icon_depth_warnings"] = len(depth)
+        summary["warnings"] += len(depth)
         summary["text_adaptations"] = sum(map(len, raw.text_edits.values()))
         summary["literal_owners"] = len(
             {
@@ -450,7 +461,21 @@ def check_vault(source, vault):
             )
         },
         "neutral_affected_members": len(
-            {k for g in diagnostics for k in g["affected_member_keys"]}
+            {
+                k
+                for g in diagnostics
+                if g["outcome"] == "neutral_icon"
+                for k in g["affected_member_keys"]
+            }
+        ),
+        "inherited_fallback_affected_members": len(
+            {
+                key
+                for gap in diagnostics
+                if gap["gap"]["role"] == "definition_icon"
+                and gap["outcome"] == "image_fallback"
+                for key in gap["affected_member_keys"]
+            }
         ),
         "txt_gaps": sum(a["Type"] == 15 for a in raw["attachments.json"]),
         "present_icon_discrepancies": sum(
@@ -644,6 +669,8 @@ def check_items(raw, record, archive, vault, assets):
     names = expected_names(thoughts, home)
     tag_tokens = expected_tags(thoughts)
     assigned_types = classifications(raw)
+    providers = {key: row["definition_key"] for key, row in assigned_types.items()}
+    owned = {key: expected_metadata(raw, key, assets)[2] for key in thoughts}
     relation_kinds = relationships(raw)
     definitions = {k for k, t in thoughts.items() if t["Kind"] == 2}
     originals = note_ids(raw, archive)
@@ -675,6 +702,14 @@ def check_items(raw, record, archive, vault, assets):
             candidates, key=lambda k: (-sum(k in {a, b} for a, b in uncovered), k)
         )
         created.add(chosen)
+    check_depth_warnings(
+        record,
+        created,
+        owned,
+        providers,
+        definitions,
+        {key: row["evidence"] for key, row in assigned_types.items()},
+    )
     for key, target in targets.items():
         assert (
             target["original_identity"] == key
@@ -694,9 +729,7 @@ def check_items(raw, record, archive, vault, assets):
         assert target["vault_tag_token"] == tag_tokens.get(key), "native tag token"
         declared, calendar, icon = expected_metadata(raw, key, assets)
         provider = assigned_types.get(key, {}).get("definition_key")
-        effective = icon or (
-            expected_metadata(raw, provider, assets)[2] if provider else None
-        )
+        effective = source_icon(key, owned, providers, definitions).asset
         assert target["declared_appearance"] == declared, "declared icon/colour facts"
         assert target["calendar_dates"] == calendar, "source calendar dates"
         assert target["metadata_evidence"] == [
@@ -751,7 +784,7 @@ def check_items(raw, record, archive, vault, assets):
             }[kind]
         ), "relationship presentation"
     memberships = {m["relationship_key"]: m for m in record["tag_memberships"]}
-    assignments = [r for r in raw["links.json"] if r["Meaning"] == 5]
+    assignments = [r for r in raw["links.json"] if r["Meaning"] in {5, 7}]
     assert len(memberships) == len(
         record["tag_memberships"]
     ) and memberships.keys() == {r["Id"] for r in assignments}, (
@@ -804,9 +837,7 @@ def check_items(raw, record, archive, vault, assets):
             tags = sorted(set(tags) | {"categories"}, key=str.casefold)
         provider = assigned_types.get(key, {}).get("definition_key")
         category = "[[" + names[provider] + "]]" if provider else None
-        effective = icon or (
-            expected_metadata(raw, provider, assets)[2] if provider else None
-        )
+        effective = source_icon(key, owned, providers, definitions).asset
         expected = "---\ncategories:" + (
             "\n  - "
             + json.dumps(category, ensure_ascii=False)
@@ -884,16 +915,30 @@ def check_items(raw, record, archive, vault, assets):
         for _, gap in sorted(raw.gaps.items()):
             if gap["role"] != "definition_icon":
                 continue
+            appearance = (
+                "a farther selected appearance-category icon is used"
+                if effective
+                else "appearance is neutral"
+            )
             if gap["owner"] == key:
-                expected += "> [!warning] Source category icon unavailable\n> Source category icon is absent; appearance is neutral. See [[MIGRATION REPORT.md|Migration report]] for provider evidence and optional repair steps.\n\n"
-            elif provider == gap["owner"] and not icon:
+                expected += (
+                    "> [!warning] Source category icon unavailable\n> Source category icon is absent; "
+                    + appearance
+                    + ". See [[MIGRATION REPORT.md|Migration report]] for provider evidence and optional repair steps.\n\n"
+                )
+            elif (
+                gap["owner"]
+                in source_icon(key, owned, providers, definitions).chain[1:]
+            ):
                 expected += (
                     "> [!warning] Inherited icon unavailable\n> The inherited icon is unavailable from "
-                    + wiki(names[provider], thoughts[provider]["Name"])
-                    + "; appearance is neutral. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
+                    + wiki(names[gap["owner"]], thoughts[gap["owner"]]["Name"])
+                    + "; "
+                    + appearance
+                    + ". See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
                 )
         if key in definitions:
-            expected += "## Members\n\n![[Templates/Bases/Members.base#Members]]\n\n## Gallery\n\n![[Templates/Bases/Gallery.base#Gallery]]\n\n"
+            expected += CATEGORY_VIEWS_8 + "\n"
         if thoughts[key].get("Label"):
             expected += thoughts[key]["Label"] + "\n\n"
         body = documents.get(key, (None, ""))[1]
@@ -1000,7 +1045,7 @@ def check_items(raw, record, archive, vault, assets):
             ),
             "typed_inherited_icons": sum(
                 expected_metadata(raw, k, assets)[2] is None
-                and expected_metadata(raw, a["definition_key"], assets)[2] is not None
+                and source_icon(k, owned, providers, definitions).asset is not None
                 for k, a in assigned_types.items()
             ),
             "uncreated": len(thoughts) - len(created),
@@ -1062,7 +1107,7 @@ def check_listings(
     represented = set()
     pairs = set()
     for r in raw["links.json"]:
-        if r["Meaning"] in {1, 5}:
+        if r["Meaning"] in {1, 5, 7}:
             represented.update((r["ThoughtIdA"], r["ThoughtIdB"]))
         if (
             r["Meaning"] == 1
@@ -1116,45 +1161,22 @@ def check_listings(
         assert (vault / "Uncreated targets.md").read_bytes() == listing.encode(), (
             "focused uncreated listing"
         )
-    focused = [
-        k
-        for k in sorted(tokens)
-        if not any(r["ThoughtIdA"] == k for r in assignments)
-        or any(
-            r["ThoughtIdA"] == k and r["ThoughtIdB"] not in created for r in assignments
-        )
-    ]
-    assert (vault / "Tag memberships.md").is_file() == bool(focused), (
+    listing = tag_listing(
+        {key: row["Kind"] for key, row in thoughts.items()},
+        {key: row["Name"] for key, row in thoughts.items()},
+        names,
+        created,
+        tokens,
+        [(row["ThoughtIdA"], row["ThoughtIdB"]) for row in assignments],
+        output_version=8,
+    )
+    assert (vault / "Tag memberships.md").is_file() == bool(listing), (
         "conditional tag listing"
     )
-    if focused:
-        listing = "# Tag memberships\n\nAssignments on uncreated targets and source tags without assignments. Use native tag search for created assigned notes.\n\n"
-        for tag in focused:
-            listing += (
-                "## #"
-                + tokens[tag]
-                + "\n\nSource tag: "
-                + wiki(names[tag], thoughts[tag]["Name"])
-                + "\n\n"
-            )
-            hidden = sorted(
-                {
-                    r["ThoughtIdB"]
-                    for r in assignments
-                    if r["ThoughtIdA"] == tag and r["ThoughtIdB"] not in created
-                }
-            )
-            listing += (
-                "".join(
-                    "- " + wiki(names[k], thoughts[k]["Name"]) + "\n" for k in hidden
-                )
-                + "\n"
-                if hidden
-                else "No source assignments.\n\n"
-            )
-        assert (vault / "Tag memberships.md").read_bytes() == (
-            listing.rstrip("\n") + "\n"
-        ).encode(), "focused tag listing"
+    if listing:
+        assert (vault / "Tag memberships.md").read_bytes() == listing.encode(), (
+            "focused direct/nested tag listing"
+        )
 
 
 def inline_display(value):
@@ -1786,7 +1808,7 @@ def check_assets(raw, record, archive, vault, targets):
     issues = {
         i["affected"][0]: i
         for i in record["issues"]
-        if i["code"] != "image_presentation_normalized"
+        if i["code"] not in {"image_presentation_normalized", "icon_lookup_depth"}
     }
     assert (
         len(issues)
@@ -1794,7 +1816,8 @@ def check_assets(raw, record, archive, vault, targets):
             [
                 i
                 for i in record["issues"]
-                if i["code"] != "image_presentation_normalized"
+                if i["code"]
+                not in {"image_presentation_normalized", "icon_lookup_depth"}
             ]
         )
         and issues.keys() == expected_warnings.keys()
@@ -1814,6 +1837,30 @@ def check_assets(raw, record, archive, vault, targets):
         assert issue["guidance"] and issue["message"].endswith(
             "Observed: " + targets[key]["source_findings"][0]["observed_json"]
         ), "warning issue observation"
+        if raw.gaps.get(key, {}).get("role") == "definition_icon":
+            owner = raw.gaps[key]["owner"]
+            providers = {
+                item: row["definition_key"]
+                for item, row in classifications(raw).items()
+            }
+            owned = {
+                row["SourceId"]: row["Id"]
+                for row in raw["attachments.json"]
+                if row["Type"] == 5 and row["Id"] not in raw.gaps
+            }
+            categories = {row["Id"] for row in raw["thoughts.json"] if row["Kind"] == 2}
+            fallback = source_icon(owner, owned, providers, categories).asset
+            claim = issue["message"].split("Observed:", 1)[0].lower()
+            if fallback:
+                assert (
+                    "farther" in claim
+                    and "neutral appearance" not in claim
+                    and "appearance is neutral" not in claim
+                ), "source icon-gap warning contradicts actual farther fallback"
+            else:
+                assert "neutral" in claim, (
+                    "source icon-gap warning must retain neutral outcome"
+                )
         assert (
             code in report
             and rule in report
@@ -1965,7 +2012,9 @@ def check_actual_files(vault, record, targets, names, raw, summary):
     assert len(record["support_artifacts"]) == len(support), (
         "duplicate support artifact"
     )
-    check_support_content(vault, names, definitions)
+    check_support_content(
+        vault, names, definitions, output_version=record["schema_version"]
+    )
     inactive = {"Uncreated targets.md", "Tag memberships.md"} - actual
     assert (
         len(record["reserved_support_paths"]) == len(inactive)
@@ -1998,7 +2047,11 @@ def check_actual_files(vault, record, targets, names, raw, summary):
             if str(parent) != "."
         ), "file/directory path prefix"
     assert (vault / "Categories.md").read_bytes() == (
-        b"# Categories\n\n![[Templates/Bases/Categories.base]]\n"
+        (
+            "# Categories\n\n"
+            + REOPEN_GUIDANCE
+            + "![[Templates/Bases/Categories.base]]\n"
+        ).encode()
     ), "native categories overview"
     assert load_json((vault / ".obsidian/core-plugins.json").read_bytes()) == {
         "file-explorer": True,
@@ -2084,7 +2137,7 @@ def check_actual_files(vault, record, targets, names, raw, summary):
 
 def check_counts(raw, record, summary, references, targets, files):
     created = {t["item_key"] for t in record["item_targets"] if t["created"]}
-    assigned = [r for r in raw["links.json"] if r["Meaning"] == 5]
+    assigned = [r for r in raw["links.json"] if r["Meaning"] in {5, 7}]
     native = sum(r["ThoughtIdB"] in created for r in assigned)
     tags = {t["Id"] for t in raw["thoughts.json"] if t["Kind"] == 4}
     owners = {a["Id"]: a["SourceId"] for a in raw["attachments.json"]}
@@ -2172,6 +2225,8 @@ def check_adaptations(raw, record, documents, names, assets):
                 for i, ref in enumerate(source_references(body, owner, assets))
             }
     assignments = classifications(raw)
+    providers = {key: row["definition_key"] for key, row in assignments.items()}
+    owned = {key: expected_metadata(raw, key, assets)[2] for key in names}
     for key in created:
         declared, calendar, icon = expected_metadata(raw, key, assets)
         if any(calendar.values()):
@@ -2179,9 +2234,7 @@ def check_adaptations(raw, record, documents, names, assets):
         if any(declared.values()):
             expected.add(("declared_appearance", key))
         provider = assignments.get(key, {}).get("definition_key")
-        effective = icon or (
-            expected_metadata(raw, provider, assets)[2] if provider else None
-        )
+        effective = source_icon(key, owned, providers, definitions).asset
         if effective and key not in definitions:
             expected.add(("body_icon_snapshot", key))
     for a in raw["attachments.json"]:
@@ -2263,7 +2316,7 @@ def check_adaptations(raw, record, documents, names, assets):
         if kind == "body_icon_snapshot":
             provider = assignments.get(key, {}).get("definition_key")
             icon = expected_metadata(raw, key, assets)[2]
-            effective = icon or expected_metadata(raw, provider, assets)[2]
+            effective = source_icon(key, owned, providers, definitions).asset
             assert (
                 effective in actual[kind, key]
                 and ("owned icon" if icon else provider) in actual[kind, key]
@@ -2332,6 +2385,7 @@ def check_report(vault, raw, record, names, assets, summary, payloads):
                 1
             ]
             .split("\n## Source warnings\n", 1)[0]
+            .split("\n## Native icon lookup warnings\n", 1)[0]
             .split("\n> [!warning] Image sizing normalized", 1)[0]
         )
         assert "Unknown prose, captions and layout were not recovered." in checklist, (
