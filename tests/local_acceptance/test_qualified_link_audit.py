@@ -593,3 +593,47 @@ def test_independent_scope_preserves_local_removal_and_protected_entity_literals
             local + safe + literal, HOME, {}, {ALONE}, qualified_brain=BRAIN
         )
         assert len(references) == 1 and references[0]["target"] == ALONE
+
+
+def test_supported_profile_scope_cache_keeps_qualified_uri_boundary_after_caught_failure(
+    qualified_outputs, monkeypatch
+):
+    from pathlib import Path
+
+    from tests.local_acceptance.api_scope import qualify_scope
+
+    _, _, baseline, vault = qualified_outputs
+    reason = "qualified URI outside retained source profile"
+    # Profile3 is supported. These ordinary source facts differ from profile4
+    # only at the qualified thought-link capability, not a generic version gate.
+    with pytest.raises(AssertionError, match=reason):
+        qualify_scope(baseline, profile_version="3")
+    record = json.loads((vault / "migration-record.json").read_bytes())
+    authored = next(row for row in record["item_targets"] if row["documents"])
+    target = (vault / authored["relative_path"]).resolve()
+    real_read = Path.read_bytes
+    attempted = False
+
+    def observed_read(path):
+        nonlocal attempted
+        if path.resolve() == target and not attempted:
+            attempted = True
+            # The public outer audit has already qualified profile4. A nested
+            # supported profile must establish its own source interpretation.
+            with pytest.raises(AssertionError, match=reason):
+                qualify_scope(baseline, profile_version="3")
+            current = qualify_scope(baseline, profile_version="4")
+            assert set(current.graphs) == {HOME, ALONE}
+            assert current.safe_notes[NOTE].scoped_text == AUTHORED.decode()
+        return real_read(path)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "read_bytes", observed_read)
+        assert check_api_vault(baseline, vault, profile_version="4") == {
+            "thoughts": 2,
+            "relationships": 0,
+            "payloads": 1,
+        }
+    assert attempted
+    with pytest.raises(AssertionError, match=reason):
+        qualify_scope(baseline, profile_version="3")
