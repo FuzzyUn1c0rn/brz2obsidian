@@ -118,7 +118,7 @@ def role(value, profile_version):
         if kind == 1 and location == "Notes.md" and name is None:
             return "note_original"
         refuse("The authored note declaration is not qualified")
-    if profile_version == "3" and kind in {2, 8} and name is None:
+    if profile_version in {"3", "4"} and kind in {2, 8} and name is None:
         reference_uri(location, profile_version)
         return {2: "file", 8: "directory"}[kind]
     if kind == 3:
@@ -142,9 +142,9 @@ def role(value, profile_version):
         and name is None
         and location
         in {value["id"] + ".webp"}
-        | ({value["id"] + ".png"} if profile_version in {"2", "3"} else set())
-        | ({value["id"] + ".jpg"} if profile_version == "3" else set())
-        | ({value["id"] + ".svg"} if profile_version == "3" else set())
+        | ({value["id"] + ".png"} if profile_version in {"2", "3", "4"} else set())
+        | ({value["id"] + ".jpg"} if profile_version in {"3", "4"} else set())
+        | ({value["id"] + ".svg"} if profile_version in {"3", "4"} else set())
     ):
         return "image"
     if kind in {1, 15}:
@@ -159,7 +159,7 @@ def role(value, profile_version):
         suffix = location.rsplit(".", 1)[-1].lower() if "." in location else ""
         if (
             (kind, suffix) in {(1, "pdf"), (15, "txt")}
-            or profile_version in {"2", "3"}
+            or profile_version in {"2", "3", "4"}
             and name is None
             and (kind, suffix) in {(1, "png"), (1, "zip")}
         ):
@@ -203,7 +203,7 @@ def validate_bytes(value, raw, profile_version):
         except BadZipFile, ValueError, OSError:
             refuse("Required ZIP bytes have no valid central directory")
         return selected
-    if selected == "image" and suffix == "svg" and profile_version == "3":
+    if selected == "image" and suffix == "svg" and profile_version in {"3", "4"}:
         validate_svg(raw)
         return selected
     expected = None
@@ -213,9 +213,9 @@ def validate_bytes(value, raw, profile_version):
         expected = "PNG"
     elif prefix.startswith(b"\xff\xd8\xff") and (
         selected == "icon"
-        and profile_version in {"2", "3"}
+        and profile_version in {"2", "3", "4"}
         or selected == "image"
-        and profile_version == "3"
+        and profile_version in {"3", "4"}
         and suffix == "jpg"
     ):
         expected = "JPEG"
@@ -228,14 +228,16 @@ def validate_bytes(value, raw, profile_version):
         expected = "WEBP"
     if (
         selected == "icon"
-        and profile_version == "3"
+        and profile_version in {"3", "4"}
         and prefix[:4] == b"\x00\x00\x01\x00"
     ):
         validate_ico(raw)
         return selected
     if expected is None:
         refuse("Required image/icon bytes do not match the qualified signature")
-    strict_jpeg = selected == "image" and profile_version == "3" and suffix == "jpg"
+    strict_jpeg = (
+        selected == "image" and profile_version in {"3", "4"} and suffix == "jpg"
+    )
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)

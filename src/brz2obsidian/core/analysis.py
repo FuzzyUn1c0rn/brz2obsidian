@@ -17,13 +17,15 @@ from .text import validate_text_adaptations
 
 
 def analyze(snapshot: SourceSnapshot, policy: SourcePolicy) -> Analysis:
-    def refuse(code, message):
+    def refuse(code, message, *, affected=(), evidence=()):
         raise MigrationRefused(
             (
                 Issue(
                     code=code,
                     phase="analysis",
                     message=message,
+                    affected=affected,
+                    evidence=evidence,
                     guidance="Correct the source or select a compatible reviewed source profile.",
                 ),
             )

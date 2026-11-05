@@ -12,12 +12,11 @@ from pathlib import Path
 from brz2obsidian.contracts import SourceSnapshot
 
 from .capture import (
-    DESKTOP_BUILD,
     IDENTIFIERS,
-    SCHEMA_SHA256,
     canonical,
     identifiers,
     parse_json,
+    qualification_baseline,
     snapshot_projection,
     source_projection,
     validate_binding,
@@ -142,8 +141,7 @@ class LocalApiSession:
                     {
                         "identifiers": source["identifiers"],
                         "identity": projected["identity"],
-                        "schema_sha256": SCHEMA_SHA256,
-                        "desktop_build": DESKTOP_BUILD,
+                        **qualification_baseline(profile_version),
                     }
                 ),
                 "audit.json": canonical(audit),
@@ -402,8 +400,7 @@ class LocalApiSession:
             metadata = {
                 "identifiers": self._identifiers,
                 "identity": self.source_identity.model_dump(mode="json"),
-                "schema_sha256": SCHEMA_SHA256,
-                "desktop_build": DESKTOP_BUILD,
+                **qualification_baseline(self._identifiers["profile_version"]),
             }
             if parsed["metadata.json"] != metadata:
                 refuse("Captured metadata compatibility or identity changed")

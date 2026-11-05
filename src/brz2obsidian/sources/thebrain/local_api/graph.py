@@ -7,6 +7,7 @@ from brz2obsidian.contracts import (
     MigrationRefused,
     Relationship,
 )
+from brz2obsidian.core.cycles import directed_cycle
 from brz2obsidian.diagnostics import with_subject
 
 from .declarations import source_date, uuid
@@ -87,9 +88,13 @@ def normalize_relationships(
                 if type(value[name]) is not int:
                     refuse("A relationship scalar is not qualified")
             a, b = value["thoughtIdA"], value["thoughtIdB"]
-            if a == b:
+            if a == b and not (
+                profile_version == "4"
+                and value["meaning"] == 3
+                and thoughts[a]["kind"] == 2
+            ):
                 refuse("An included relationship meaning is not qualified")
-            if profile_version == "3" and value["typeId"] is not None:
+            if profile_version in {"3", "4"} and value["typeId"] is not None:
                 uuid(value["typeId"])
             if value["kind"] != 1 or value["typeId"] is not None:
                 unsupported_shape(
@@ -98,8 +103,15 @@ def normalize_relationships(
                     "An included relationship meaning is not qualified",
                 )
             pair = value["relation"], value["direction"]
-            if value["meaning"] == 2 and pair == (1, -1):
-                if thoughts[a]["kind"] != 2 or thoughts[b]["kind"] != 1:
+            roles = thoughts[a]["kind"], thoughts[b]["kind"]
+            if (
+                value["meaning"] == 2
+                and pair == (1, -1)
+                or profile_version == "4"
+                and value["meaning"] == 3
+                and pair == (1, -1)
+            ):
+                if roles != ((2, 2) if value["meaning"] == 3 else (2, 1)):
                     refuse(
                         "A type assignment requires an inventoried definition and ordinary member"
                     )
@@ -109,20 +121,38 @@ def normalize_relationships(
                         relationship_key=key,
                         definition_key=a,
                         item_key=b,
-                        evidence=("link:" + key, "thought:" + a, "thought:" + b),
+                        evidence=tuple(
+                            dict.fromkeys(
+                                ("link:" + key, "thought:" + a, "thought:" + b)
+                            )
+                        ),
                     )
                 )
                 providers_by_item.setdefault(b, []).append(a)
-                if a in graphs[b][0]["parents_ids"]:
+                if value["meaning"] == 3 or a in graphs[b][0]["parents_ids"]:
                     expected_graphs[b]["parents_ids"].add(a)
-            elif value["meaning"] == 5 and pair == (1, -1):
+            elif (
+                value["meaning"] == 5
+                and pair == (1, -1)
+                or profile_version == "4"
+                and value["meaning"] == 7
+                and pair == (1, -1)
+            ):
                 if thoughts[a]["kind"] != 4:
                     refuse("A tag association requires an inventoried source tag")
+                if profile_version == "4" and roles not in (
+                    {(4, 4)} if value["meaning"] == 7 else {(4, 1), (4, 2)}
+                ):
+                    unsupported_shape(
+                        profile_version, "relationship", "Unqualified tag endpoints"
+                    )
                 kind, left, right = "tag", "children_ids", "tag_ids"
+                if value["meaning"] == 7:
+                    expected_graphs[b]["parents_ids"].add(a)
             elif value["meaning"] == 1 and (
                 pair in {(1, -1), (1, 1)}
                 or (
-                    profile_version == "3"
+                    profile_version in {"3", "4"}
                     and pair == (1, 3)
                     and thoughts[a]["kind"] == 1
                     and thoughts[b]["kind"] == 1
@@ -136,6 +166,23 @@ def normalize_relationships(
                     profile_version,
                     "relationship",
                     "An included relationship tuple is not qualified",
+                )
+            if profile_version == "4" and (
+                kind == "hierarchy"
+                and not (
+                    roles == (1, 1) or roles in {(1, 2), (1, 4)} and pair == (1, -1)
+                )
+                or kind == "related"
+                and not (
+                    roles == (1, 1)
+                    or roles in {(1, 2), (2, 2), (2, 1), (2, 4)}
+                    and pair == (3, -1)
+                )
+            ):
+                unsupported_shape(
+                    profile_version,
+                    "relationship",
+                    "Unqualified navigation endpoint roles",
                 )
             if b not in graphs[a][0][left] or a not in graphs[b][0][right]:
                 refuse("Relationship endpoints do not agree with graph adjacency")
@@ -203,4 +250,12 @@ def normalize_relationships(
                 refuse("Type field, graph type and assignment links disagree")
         except MigrationRefused as error:
             raise with_subject(error, "item", value["name"]) from None
+    if profile_version == "4":
+        cycle = directed_cycle((r.item_a, r.item_b) for r in result if r.kind == "tag")
+        if cycle:
+            refuse(
+                "Source tag cycles and self-tagging are outside reviewed coverage",
+                "api_relationship_shape_unsupported",
+                subject=("item", thoughts[cycle[0]]["name"]),
+            )
     return tuple(result), tuple(assignments)

@@ -12,9 +12,9 @@ from .inserts import INSERT_RULE
 
 BRZ_POLICY = SourcePolicy(
     profile_id="thebrain-format5-reviewed",
-    profile_version="10",
+    profile_version="11",
     module_id="thebrain-brz",
-    module_version="10",
+    module_version="11",
     format_version="5",
     finding_dispositions=(
         FindingDisposition(

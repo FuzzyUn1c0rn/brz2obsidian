@@ -1,5 +1,9 @@
 """Validate source-neutral classification facts without interpreting source fields."""
 
+from itertools import pairwise
+
+from .cycles import directed_cycle
+
 
 def validate_classifications(snapshot, refuse):
     items = {item.key: item for item in snapshot.items}
@@ -32,7 +36,7 @@ def validate_classifications(snapshot, refuse):
             or not definition.live
             or not member.live
             or definition.role != "definition"
-            or member.role != "ordinary"
+            or member.role not in {"ordinary", "definition"}
             or (relationship.item_a, relationship.item_b)
             != (definition.key, member.key)
             or not assignment.evidence
@@ -40,5 +44,24 @@ def validate_classifications(snapshot, refuse):
         ):
             refuse(
                 "invalid_reference",
-                "Classification requires a live definition and matching ordinary member",
+                "Classification requires a live definition and matching ordinary or definition member",
             )
+    cycle = directed_cycle((a.item_key, a.definition_key) for a in assignments)
+    if cycle:
+        cycle_pairs = set(pairwise(cycle))
+        cycle_assignments = tuple(
+            a for a in assignments if (a.item_key, a.definition_key) in cycle_pairs
+        )
+        refuse(
+            "source_type_cycle",
+            "Source type assignment cycle: "
+            + " -> ".join(items[key].title for key in cycle),
+            affected=tuple(
+                dict.fromkeys(
+                    (*cycle, *(a.relationship_key for a in cycle_assignments))
+                )
+            ),
+            evidence=tuple(
+                dict.fromkeys(e for a in cycle_assignments for e in a.evidence)
+            ),
+        )

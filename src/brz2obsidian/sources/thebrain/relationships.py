@@ -3,6 +3,7 @@
 import json
 
 from brz2obsidian.contracts import Relationship
+from brz2obsidian.core.cycles import directed_cycle
 
 from .semantics import validate_semantic_fields
 
@@ -87,14 +88,24 @@ def decode_relationships(
             signature in {(1, 3, 1, -1), (1, 3, 1, 3), (1, 3, 1, 5), (1, 3, 1, 7)}
             and roles == (1, 1)
             or signature == (1, 3, 1, -1)
-            and roles == (1, 2)
+            and roles in {(1, 2), (2, 2), (2, 1), (2, 4)}
         ):
             kind = "related"
         elif signature == (1, 1, 6, -1) and roles[0] == 5 and roles[1] in {1, 2, 4}:
             kind = "system"
-        elif signature == (1, 1, 2, -1) and roles == (2, 1):
+        elif (
+            signature == (1, 1, 2, -1)
+            and roles == (2, 1)
+            or signature == (1, 1, 3, -1)
+            and roles == (2, 2)
+        ):
             kind = "classification"
-        elif signature == (1, 1, 5, -1) and roles == (4, 1):
+        elif (
+            signature == (1, 1, 5, -1)
+            and roles in {(4, 1), (4, 2)}
+            or signature == (1, 1, 7, -1)
+            and roles == (4, 4)
+        ):
             kind = "tag"
         if kind is None:
             problem(
@@ -110,5 +121,20 @@ def decode_relationships(
                 item_b=b,
                 evidence=(f"links.json:{index}",),
             )
+        )
+    cycle = directed_cycle((r.item_a, r.item_b) for r in result if r.kind == "tag")
+    if cycle:
+        index = next(
+            i
+            for i, r in enumerate(result)
+            if r.item_a == cycle[0] and r.item_b == cycle[1]
+        )
+        relationship_problem(
+            records[index],
+            index,
+            refuse,
+            uuid,
+            "unsupported_feature",
+            "Source tag cycles and self-tagging are outside reviewed coverage",
         )
     return tuple(result)

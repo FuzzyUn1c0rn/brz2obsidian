@@ -48,6 +48,6 @@ SHAPE_MESSAGES = {
 
 
 def unsupported_shape(profile_version, stage, legacy_message):
-    if profile_version == "3":
+    if profile_version in {"3", "4"}:
         refuse(SHAPE_MESSAGES[stage], f"api_{stage}_shape_unsupported")
     refuse(legacy_message)

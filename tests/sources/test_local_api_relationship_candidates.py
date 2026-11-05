@@ -86,7 +86,10 @@ def test_zero_brain_link_discovers_authoritative_disconnected_endpoints(tmp_path
     assert "CANARY" not in json.dumps(record)
 
 
-def test_reverse_arrow_hierarchy_retains_parent_child_and_raw_direction(tmp_path):
+@pytest.mark.parametrize("profile", ["3", "4"])
+def test_reverse_arrow_hierarchy_retains_parent_child_and_raw_direction(
+    tmp_path, profile
+):
     api = LinkCandidateApi(direction=3)
     from tests.support.local_api_payloads import NOTE, attachment
 
@@ -111,7 +114,7 @@ def test_reverse_arrow_hierarchy_retains_parent_child_and_raw_direction(tmp_path
         module = LocalApiSourceModule(
             LocalApiConfig(api_url=address),
             credentials=lambda: KEY,
-            profile_version="3",
+            profile_version=profile,
         )
         with module.open(LocalApiSourceRef(BRAIN)) as session:
             relationship = session.snapshot.relationships[0]

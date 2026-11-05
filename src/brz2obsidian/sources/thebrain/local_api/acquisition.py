@@ -75,7 +75,7 @@ def _candidate_shape(hit, brain_id, profile_version="1"):
     if not all(type(value) is int for value in values):
         return None
     if (
-        profile_version == "3"
+        profile_version in {"3", "4"}
         and hit["brainId"] == ZERO_UUID
         and values == (1, 3, 0)
         and hit["sourceThought"] is None
@@ -208,7 +208,7 @@ class Acquisition:
                 ),
             )
         self.links[key] = value
-        if self.profile_version == "3":
+        if self.profile_version in {"3", "4"}:
             self.queue_link(key)
         else:
             self.link_ids.add(key)
@@ -223,7 +223,7 @@ class Acquisition:
             or hit.get("isFromOtherBrain") is not False
         ):
             refuse("A wildcard candidate has foreign or invalid ownership")
-        if self.profile_version == "3" and any(
+        if self.profile_version in {"3", "4"} and any(
             node is not None
             and (not isinstance(node, dict) or node.get("brainId") != self.brain_id)
             for node in (hit.get("sourceThought"), hit.get("sourceLink"))
@@ -251,7 +251,7 @@ class Acquisition:
         if link is not None:
             if not isinstance(link, dict) or link.get("brainId") != self.brain_id:
                 refuse("A wildcard link has foreign or invalid ownership")
-            if self.profile_version == "3":
+            if self.profile_version in {"3", "4"}:
                 self.queue_link(link.get("id"))
             else:
                 self.link_ids.add(uuid(link.get("id")))
@@ -408,9 +408,18 @@ class Acquisition:
                 links = array(graph["links"])
                 incident_links = set()
                 for link in links:
-                    if not isinstance(link, dict) or link.get("thoughtIdA") == link.get(
-                        "thoughtIdB"
+                    if not isinstance(link, dict) or (
+                        link.get("thoughtIdA") == link.get("thoughtIdB")
+                        and not (
+                            self.profile_version == "4" and link.get("meaning") == 3
+                        )
                     ):
+                        if isinstance(link, dict) and self.profile_version == "4":
+                            unsupported_shape(
+                                self.profile_version,
+                                "relationship",
+                                "An unqualified self relationship",
+                            )
                         refuse("A graph carries a malformed relationship candidate")
                     incident = key in (link.get("thoughtIdA"), link.get("thoughtIdB"))
                     # Discovery is Brain-wide; only complete authoritative endpoint

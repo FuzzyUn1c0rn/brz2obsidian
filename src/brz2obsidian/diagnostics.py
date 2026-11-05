@@ -130,6 +130,10 @@ _KNOWN_MESSAGES = {
 # Broad codes remain compatible. Their explanation states only facts supported by
 # that code; detailed causes require a reviewed (code, reason) above.
 CODE_EXPLANATIONS = {
+    "source_type_cycle": (
+        "the source type assignments contain a cycle, including a possible self-assignment.",
+        "Review the affected type chain in the diagnostic report and correct the assignments in TheBrain, then inspect again. For a BRZ archive, export it again first.",
+    ),
     "api_credentials_missing": (
         "the local API key has not been configured.",
         "Set THE_BRAIN_LOCAL_API_KEY in the application's launch environment or configure its credential provider, then try again.",
