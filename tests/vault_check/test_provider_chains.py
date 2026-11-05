@@ -137,6 +137,7 @@ def test_invalid_provider_chain_remains_diagnostic_after_nearer_icon_success(tmp
         categories=("[[Categories/H8.md]]",),
         icon="[[Attachments/owned.png]]",
     )
+    downstream_before = (tmp_path / "Notes/N9.md").read_bytes()
     result = check_vault(tmp_path)
     assert result.outcome == "issues"
     assert not any(i.code == "icon_lookup_depth" for i in result.issues)
@@ -156,12 +157,33 @@ def test_invalid_provider_chain_remains_diagnostic_after_nearer_icon_success(tmp
     assert "chain" in affected.message
     projected = check_application(tmp_path)
     assert not projected.field_errors
-    assert any(
-        f.code == "invalid_provider"
-        and f.path == "Notes/N9.md"
-        and f.severity == "warning"
+    (downstream,) = [
+        f
         for f in projected.findings
+        if f.code == "invalid_provider" and f.path == "Notes/N9.md"
+    ]
+    assert downstream.severity == "warning"
+    assert downstream.message == (
+        "Invalid appearance-category chain. Review the selected providers."
     )
+    assert (
+        "In the note with the invalid declaration, choose one of its category memberships"
+        in projected.diagnostic_text
+    )
+    assert "Choose one of this note’s categories" not in projected.model_dump_json()
+    # N9's own H8 choice is valid; repairing only upstream H1 clears its finding.
+    assert (tmp_path / "Notes/N9.md").read_bytes() == downstream_before
+    write_note(
+        tmp_path,
+        "Categories/H1.md",
+        provider="[[Categories/H0.md]]",
+        categories=("[[Categories/H0.md]]",),
+        role=True,
+    )
+    repaired = check_application(tmp_path)
+    assert not any(f.code == "invalid_provider" for f in repaired.findings)
+    assert not any(f.path == "Notes/N9.md" for f in repaired.findings)
+    assert (tmp_path / "Notes/N9.md").read_bytes() == downstream_before
 
 
 @pytest.mark.parametrize("repeated", [False, True])

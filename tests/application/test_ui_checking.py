@@ -258,7 +258,10 @@ def test_check_findings_keep_artifact_context_and_exclude_authored_references(tm
             "invalid_category",
             "Link to a category note in Categories with the categories tag.",
         ),
-        ("invalid_provider", "Choose one of this note’s categories, or leave blank."),
+        (
+            "invalid_provider",
+            "Invalid appearance-category chain. Review the selected providers.",
+        ),
         (
             "missing_base",
             "Couldn’t verify the Base file. Check its link and contents.",
