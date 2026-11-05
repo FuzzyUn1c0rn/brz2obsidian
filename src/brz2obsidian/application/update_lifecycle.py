@@ -113,7 +113,7 @@ def _history(operations, vault, observed=None, *, onboarding=False, maintenance=
     if onboarding and onboarding_pending:
         return history, None
     identity = history.checkpoint.manifest.identity
-    if identity.output_format != 7:
+    if identity.output_format != 8:
         return history, _refused(
             "format_transition_required", history, action="review_format_transition"
         )
@@ -730,6 +730,7 @@ def _text_choice(plan, change, choice, edited):
             existence="present",
             membership_targets=targets,
             source_path=change.target_path,
+            output_format=plan.facts.incoming_identity.output_format,
         )
         states = tuple(s for s in states if s.target_id != own.target_id) + (observed,)
     return inspect_text_candidate(
@@ -740,7 +741,7 @@ def _text_choice(plan, change, choice, edited):
             item_id=change.item_id,
         ),
         target=target(change.target_path),
-        output_format=7,
+        output_format=plan.facts.incoming_identity.output_format,
         source_path=change.target_path,
         document_id=document_id,
         path_mode="vault",

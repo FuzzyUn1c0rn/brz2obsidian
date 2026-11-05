@@ -5,6 +5,7 @@ import subprocess
 import sys
 
 from brz2obsidian.application.update_contracts import UpdateResult
+from brz2obsidian.application.update_lifecycle import text_choice_action
 from brz2obsidian.application.vault_update_contracts import VaultApplyResult
 from brz2obsidian.contracts import AttachmentCandidate, AttachmentSelection
 from brz2obsidian.publication.vault_replace import move_file
@@ -179,7 +180,7 @@ def finish_interrupted_transition(operations, vault, prepared, root):
     assert recovering.status == "offered" and recovering.review is not None, recovering
     assert recovering.review.facts.format_operation.kind == "format_transition"
     assert recovering.review.facts.baseline_identity.output_format == 6
-    assert recovering.review.facts.incoming_identity.output_format == 7
+    assert recovering.review.facts.incoming_identity.output_format == 8
     refreshed = operations.refresh_recovery(vault, recovering)
     (root / "transition-recovery-refreshed.json").write_text(
         refreshed.model_dump_json(), encoding="utf-8"
@@ -216,13 +217,16 @@ def finish_interrupted_transition(operations, vault, prepared, root):
         resolved = operations.resolve_recovery(
             vault,
             refreshed,
-            action(
+            text_choice_action(
                 plan,
-                change,
-                domain=required.domain,
-                choice=choice,
-                decision_id=f"finish-transition-{index}",
-                **options,
+                action(
+                    plan,
+                    change,
+                    domain=required.domain,
+                    choice=choice,
+                    decision_id=f"finish-transition-{index}",
+                    **options,
+                ),
             ),
         )
         assert resolved.status == "offered", (change.item_id, resolved)
@@ -258,7 +262,7 @@ def test_actual_format6_transition_resumes_declines_config_then_applies_distinct
     facts = offered.preparation.review.facts
     assert (
         facts.baseline_identity.output_format == 6
-        and facts.incoming_identity.output_format == 7
+        and facts.incoming_identity.output_format == 8
     )
     assert (
         facts.format_operation.baseline_source_version
@@ -329,7 +333,7 @@ def test_actual_format6_transition_resumes_declines_config_then_applies_distinct
     assert user_git_state(vault) == user_before
     retained = operations.read_checkpoint(vault)
     assert retained.status == "valid" and retained.manifest.boundary == "result"
-    assert retained.manifest.identity.output_format == 7
+    assert retained.manifest.identity.output_format == 8
     assert retained.review.saved.plan.facts.format_operation.kind == "format_transition"
     assert (
         next(row.sha256 for row in retained.manifest.source if row.path == NOTE)
@@ -359,7 +363,7 @@ def test_actual_format6_transition_resumes_declines_config_then_applies_distinct
     assert (
         plan.facts.baseline_identity.output_format
         == plan.facts.incoming_identity.output_format
-        == 7
+        == 8
     )
     assert (
         plan.facts.format_operation.baseline_source_version

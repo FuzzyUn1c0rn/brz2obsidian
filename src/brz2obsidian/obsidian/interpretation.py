@@ -143,7 +143,7 @@ def interpret_structure(
     fields, body_start, status, issues = (), 0, "supported", ()
     memberships, appearance, sections = (), None, ()
     try:
-        if output_format != 7:
+        if output_format not in (7, 8):
             raise _Unsupported("format_unsupported")
         try:
             raw.decode("utf-8")

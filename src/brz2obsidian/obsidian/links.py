@@ -91,6 +91,7 @@ def interpret_link_target(
     memberships,
     membership_targets=(),
     source_path=None,
+    output_format=7,
 ):
     from .interpretation import interpret_structure
 
@@ -102,7 +103,7 @@ def interpret_link_target(
     )
     if content is not None:
         structure = interpret_structure(
-            content, output_format=7, membership_targets=membership_targets
+            content, output_format=output_format, membership_targets=membership_targets
         )
         try:
             text = content.data.decode("utf-8")

@@ -810,7 +810,7 @@ def _ownership_at_cutoffs(git, *, association, roles, requests, observation=None
             else _manifest(git, association, role)
         )
         if (
-            manifest.identity.output_format != 7
+            manifest.identity.output_format not in (7, 8)
             or manifest.identity.settings_digest != hashlib.sha256(b"{}").hexdigest()
         ):
             # An unqualified old format cannot establish an origin. It also

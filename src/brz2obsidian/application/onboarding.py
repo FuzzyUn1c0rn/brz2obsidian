@@ -33,7 +33,7 @@ def refused(code, history=None, *, action="inspect_history"):
 
 def transition_required(facts):
     old, target = facts.baseline_identity, facts.incoming_identity
-    return old.output_format != 7 or (
+    return old.output_format != 8 or (
         old.output_format,
         old.profile_id,
         old.profile_version,
@@ -126,7 +126,7 @@ def _facts(history, original, incoming, *, proposal_id, generation):
 
 
 def _original_payload(operations, history, source):
-    """Reproduce supported historical bytes from an independently bound archive."""
+    """Reproduce exact bytes only under the configured policy and renderer."""
     if source is None:
         return None
     try:
@@ -140,8 +140,8 @@ def _original_payload(operations, history, source):
         metadata = RunMetadata.model_validate(old["run_metadata"])
         policy = operations._configured_workflow().binding.policy
         if (
-            old["schema_version"] != 7
-            or metadata.renderer_version != "7"
+            old["schema_version"] != 8
+            or metadata.renderer_version != "8"
             or (
                 identity.module_id,
                 identity.module_version,

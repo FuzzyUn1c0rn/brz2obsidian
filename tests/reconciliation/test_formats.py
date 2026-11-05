@@ -311,7 +311,7 @@ def test_unsupported_target_and_duplicate_establishment_records_are_rejected():
     from pydantic import ValidationError
 
     facts = request()
-    unsupported = facts.incoming_identity.model_copy(update={"output_format": 8})
+    unsupported = facts.incoming_identity.model_copy(update={"output_format": 9})
     result = reconcile(
         facts.model_copy(
             update={

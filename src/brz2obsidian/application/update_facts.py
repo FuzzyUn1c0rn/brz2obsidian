@@ -166,7 +166,10 @@ def _membership_targets(records, inventory=()):
                 status="safe",
             )
         )
-    if rows:
+    # Current templates carry the reserved role even when this source has no
+    # definitions. Keep recorded7 target registries deterministic for replay.
+    # The shared role identity remains stable across the qualified7/8 grammar.
+    if rows or identity.output_format == 8:
         result.append(
             ReferenceTarget(
                 schema_id="brz2obsidian.reference-target",
@@ -185,11 +188,17 @@ def _membership_targets(records, inventory=()):
 
 
 def link_state(
-    content, *, target_id, existence, membership_targets=(), source_path=None
+    content,
+    *,
+    target_id,
+    existence,
+    membership_targets=(),
+    source_path=None,
+    output_format=7,
 ):
     document = (
         interpret_structure(
-            content, output_format=7, membership_targets=membership_targets
+            content, output_format=output_format, membership_targets=membership_targets
         )
         if content is not None
         else None
@@ -208,6 +217,7 @@ def link_state(
         memberships=memberships,
         membership_targets=membership_targets,
         source_path=source_path,
+        output_format=output_format,
     )
 
 
@@ -216,7 +226,10 @@ def _observed_identity(path, content, identity, established):
         return "valid", _identity(identity, established[path][0]), established[path][2]
     if not path.lower().endswith(".md"):
         return "missing", None, None
-    document = interpret_structure(content, output_format=7)
+    # Recorded6 retains the delivered bounded identity grammar, without gaining
+    # structured merge or original-reproduction authority for that generation.
+    read_format = 7 if identity.output_format == 6 else identity.output_format
+    document = interpret_structure(content, output_format=read_format)
     fields = {
         field.identity_component: field.value
         for field in document.fields
@@ -301,7 +314,9 @@ def assemble_facts(
     inventory = []
     for path, raw in sorted(current.items()):
         content = ExactContent(data=raw)
-        state, claim, facet = _observed_identity(path, content, identity, established)
+        state, claim, facet = _observed_identity(
+            path, content, old_identity, established
+        )
         inventory.append(
             IdentityInventoryItem(
                 entry_id="file:" + path,
@@ -373,11 +388,16 @@ def assemble_facts(
         ):
             documents = tuple(
                 interpret_structure(
-                    content, output_format=7, membership_targets=targets
+                    content, output_format=version, membership_targets=targets
                 )
-                for content, targets in zip(
+                for content, targets, version in zip(
                     (original, selected.content, received),
                     membership_views,
+                    (
+                        old_identity.output_format,
+                        old_identity.output_format,
+                        identity.output_format,
+                    ),
                     strict=True,
                 )
             )
@@ -580,6 +600,11 @@ def _link_context(facts, baseline_record, incoming_record, physical_inventory):
                 existence="present" if row.current.content is not None else "missing",
                 membership_targets=current_memberships,
                 source_path=actual.canonical_path,
+                output_format=(
+                    7
+                    if facts.baseline_identity.output_format == 6
+                    else facts.baseline_identity.output_format
+                ),
             )
         )
         incoming_states.append(
@@ -589,6 +614,7 @@ def _link_context(facts, baseline_record, incoming_record, physical_inventory):
                 existence="present" if received is not None else "missing",
                 membership_targets=incoming_memberships,
                 source_path=future.canonical_path,
+                output_format=facts.incoming_identity.output_format,
             )
         )
         paths.append((row, subject, actual, received))

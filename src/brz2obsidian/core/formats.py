@@ -4,6 +4,10 @@ from hashlib import sha256
 
 from brz2obsidian.contracts import FormatReview
 
+# Historical review replay retains its recorded generation. Application admission
+# separately selects the current format for new source-update operations.
+REVIEW_FORMATS = frozenset({7, 8})
+
 
 def output_semantics(identity):
     """Compatibility meaning excludes informational source-module release metadata."""
@@ -23,11 +27,13 @@ def format_findings(facts):
             return ("format_source_changed",)
         if output_semantics(baseline) != output_semantics(target):
             return ("profile_transition_required",)
-        return () if baseline.output_format == 7 else ("unsupported_format",)
+        return (
+            () if baseline.output_format in REVIEW_FORMATS else ("unsupported_format",)
+        )
     if operation.kind != "source_update":
         if not facts.subjects:
             return ("format_outputs_unavailable",)
-        if target.output_format != 7:
+        if target.output_format not in REVIEW_FORMATS:
             return ("format_target_unsupported",)
         if (
             operation.baseline_source_version is not None
@@ -40,7 +46,7 @@ def format_findings(facts):
         return ()
     if baseline.output_format != target.output_format:
         return ("format_transition_required",)
-    if baseline.output_format != 7:
+    if baseline.output_format not in REVIEW_FORMATS:
         return ("unsupported_format",)
     if (baseline.profile_id, baseline.profile_version, baseline.settings_digest) != (
         target.profile_id,
@@ -59,7 +65,7 @@ def established_original(facts, subject):
         baseline is None
         or output_semantics(baseline.identity)
         != output_semantics(facts.baseline_identity)
-        or baseline.identity.output_format != 7
+        or baseline.identity.output_format not in REVIEW_FORMATS
         or baseline.source_version != operation.baseline_source_version
         or subject.baseline.content is None
     ):
@@ -121,7 +127,7 @@ def _new_source_output(facts, subject):
         operation.kind == "source_update"
         and operation.recorded_generation == "supported"
         and baseline is not None
-        and baseline.identity.output_format == 7
+        and baseline.identity.output_format in REVIEW_FORMATS
         and output_semantics(baseline.identity)
         == output_semantics(facts.baseline_identity)
         and output_semantics(facts.baseline_identity)
@@ -163,7 +169,7 @@ def review_facts(facts, subject):
         target_generated=subject.incoming,
         target_eligible=(
             subject.incoming is not None
-            and facts.incoming_identity.output_format == 7
+            and facts.incoming_identity.output_format in REVIEW_FORMATS
             and (
                 (
                     facts.format_operation.kind == "source_update"
