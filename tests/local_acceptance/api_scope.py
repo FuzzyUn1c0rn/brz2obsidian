@@ -10,6 +10,7 @@ from types import MappingProxyType
 from uuid import UUID
 
 from .api_manifest import read_json
+from .note_links import markdown_destination, thought_destination
 from .text import inline_candidates
 
 THOUGHT_REQUIRED = {
@@ -118,24 +119,19 @@ class ScopeView:
         return thaw(self._declarations)
 
 
-def scope_note(raw, excluded):
+def scope_note(raw, excluded, *, qualified_brain=None):
     """Remove whole active outer phrases before inspecting enclosed images."""
     removals, removed = [], set()
     for begin, end, _image, _label, start, finish in inline_candidates(raw)[0]:
         target = raw[start:finish]
-        if not target.startswith("brain://"):
+        if not markdown_destination(target).casefold().startswith("brain://"):
             continue
-        spelling = target[8:].split("/", 1)[0]
-        try:
-            key = str(
-                UUID(
-                    bytes_le=base64.urlsafe_b64decode(
-                        spelling + "=" * (-len(spelling) % 4)
-                    )
-                )
+        destination = thought_destination(target, qualified_brain=qualified_brain)
+        if destination.qualified:
+            assert not _image and not inline_candidates(_label, inline_only=True)[0], (
+                "qualified ordinary inline phrase"
             )
-        except (ValueError, TypeError) as exc:
-            raise AssertionError("qualified scoped thought destination") from exc
+        key = destination.local_id
         if key in excluded:
             removals.append((begin, end))
             removed.add(key)
@@ -460,7 +456,11 @@ def qualify_scope(baseline, *, profile_version):
                 "required raw note HTTP outcome"
             )
             raw = baseline.bytes(value["path"]).decode("utf8", errors="strict")
-            text, removed = scope_note(raw, excluded)
+            text, removed = scope_note(
+                raw,
+                excluded,
+                qualified_brain=collection if profile_version == "4" else None,
+            )
             safe_notes[key] = SafeNote(row["sourceId"], text, removed)
     omitted = frozenset(
         key for key, note in safe_notes.items() if note.removed_thought_ids

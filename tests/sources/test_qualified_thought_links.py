@@ -129,7 +129,7 @@ def test_qualified_brain_and_thought_tokens_use_guid_little_endian_fields(tmp_pa
 
 def test_inert_qualified_examples_are_not_interpreted_or_rebuilt(tmp_path):
     uri = BRZ_QUALIFIED + "/bad%"
-    text = f"`[example]({uri})`\r\n<!-- {uri} -->\r\n\\[escaped]({uri})\r\n```md\r\n[example]({uri})\r\n```\r\n"
+    text = f"`[example]({uri})`\r\n<!-- {uri} -->\r\n\\[escaped]({uri})\r\n```md\r\n[example]({uri})\r\n```\r\n\r\n[unused]: {uri}\r\n"
     source = graph_archive(
         tmp_path / "source.brz", {1: "Home", 2: "Target"}, notes={1: (text.encode(), 4)}
     )
@@ -151,6 +151,21 @@ def test_current_brz_missing_target_refuses_included_document_context(tmp_path):
     assert issue.affected == (identity(1), identity(2001))
     assert issue.evidence == ("attachments.json:0",)
     assert issue.subject.name == "Home"
+
+
+def test_qualified_identity_follows_existing_markdown_destination_escaping(tmp_path):
+    destination = BRZ_QUALIFIED.replace("brain:", r"brain\:") + r"/caf&#233;\(name\)"
+    phrase = f"[Label]( \t<{destination}>)"
+    source = graph_archive(
+        tmp_path / "source.brz",
+        {1: "Home", 2: "Target"},
+        notes={1: (phrase.encode(), 4)},
+    )
+    with BrzSourceModule().open(source) as session:
+        reference = session.snapshot.documents[0].references[0]
+        assert reference.target == identity(2)
+        assert reference.source_target == BRZ_QUALIFIED + "/caf%C3%A9(name)"
+        assert reference.expected_original == phrase
 
 
 def test_api_current_qualified_reference_uses_authoritative_context_on_capture_and_replay(

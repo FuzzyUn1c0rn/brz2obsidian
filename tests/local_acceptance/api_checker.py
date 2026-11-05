@@ -717,7 +717,14 @@ def check_new_image_preservation(
             expected_metadata
         ), "image document source binding/evidence/copy flag"
         validate_document_adaptations(original, body, document["text_adaptations"])
-        expected = document_references(body, row["sourceId"], bindings)
+        expected = document_references(
+            body,
+            row["sourceId"],
+            bindings,
+            qualified_brain=baseline.json(baseline.data["brain"])["id"]
+            if profile_version == "4"
+            else None,
+        )
         references = document["references"]
         assert type(references) is list and len(references) == len(expected), (
             "all source image references"
@@ -733,9 +740,7 @@ def check_new_image_preservation(
                 "display_text": source["label"],
                 "table_cell": source["table_cell"],
                 "document_digest": digest,
-                "source_target": body[
-                    source["destination_start"] : source["destination_end"]
-                ],
+                "source_target": source["source_target"],
                 "destination_start": None if item else source["destination_start"],
                 "destination_end": None if item else source["destination_end"],
                 "presentation_normalization": source["presentation_normalization"],
@@ -747,7 +752,14 @@ def check_new_image_preservation(
         if not targets[owner]["created"]:
             continue
         expected_text = expected_note_text(
-            original, owner, names[owner], names, bindings
+            original,
+            owner,
+            names[owner],
+            names,
+            bindings,
+            qualified_brain=baseline.json(baseline.data["brain"])["id"]
+            if profile_version == "4"
+            else None,
         )
         authored_texts[owner].append(expected_text)
         generated = safe_path(vault, names[owner]).read_text(encoding="utf-8")
@@ -1164,7 +1176,14 @@ def audit_baseline(baseline, *, profile_version="1"):
                 if profile_version in {"3", "4"}
                 else source_references
             )
-            references = scanner(body, attachment["sourceId"], bindings)
+            references = scanner(
+                body,
+                attachment["sourceId"],
+                bindings,
+                qualified_brain=baseline.json(baseline.data["brain"])["id"]
+                if profile_version == "4"
+                else None,
+            )
             assert all(
                 r["target"] in thoughts for r in references if r["kind"] == "item"
             ), "included API note reference target"
@@ -1309,7 +1328,14 @@ def check_reverse_navigation(
                 )
                 authored.append(
                     expected_note_text(
-                        note, owner, target["relative_path"], names, assets
+                        note,
+                        owner,
+                        target["relative_path"],
+                        names,
+                        assets,
+                        qualified_brain=baseline.json(baseline.data["brain"])["id"]
+                        if profile_version == "4"
+                        else None,
                     )
                 )
         for source in authored:
@@ -1412,6 +1438,9 @@ def check_external_resources(
                         target["relative_path"],
                         {key: row.get("relative_path") for key, row in targets.items()},
                         assets,
+                        qualified_brain=baseline.json(baseline.data["brain"])["id"]
+                        if profile_version == "4"
+                        else None,
                     )
                 )
         metadata_span = None
@@ -1578,7 +1607,16 @@ def check_svg_notes(
                 continue
             raw = scoped_note_text(baseline, row["id"], profile_version=profile_version)
             wanted = (
-                expected_note_text(raw, owner, target["relative_path"], names, assets)
+                expected_note_text(
+                    raw,
+                    owner,
+                    target["relative_path"],
+                    names,
+                    assets,
+                    qualified_brain=baseline.json(baseline.data["brain"])["id"]
+                    if profile_version == "4"
+                    else None,
+                )
                 .replace("\r\n", "\n")
                 .replace("\r", "\n")
             )
@@ -1588,7 +1626,14 @@ def check_svg_notes(
             adapted = expected_document_text(raw)
             referenced.update(
                 r["target"]
-                for r in document_references(adapted, owner, assets)
+                for r in document_references(
+                    adapted,
+                    owner,
+                    assets,
+                    qualified_brain=baseline.json(baseline.data["brain"])["id"]
+                    if profile_version == "4"
+                    else None,
+                )
                 if r["kind"] == "image"
             )
         owned = sorted(key for key in svg if attachments[key]["sourceId"] == owner)
@@ -2099,6 +2144,7 @@ def check_scoped_output_content(
         assets,
         attachments,
         require_complete=complete_output,
+        profile_version=profile_version,
     )
 
     def strings(value):
@@ -2353,6 +2399,9 @@ def check_scoped_output_content(
                         names[owner],
                         names,
                         assets,
+                        qualified_brain=baseline.json(baseline.data["brain"])["id"]
+                        if profile_version == "4"
+                        else None,
                     )
                 )
             elif row["type"] in {2, 8} or row["type"] == 3:

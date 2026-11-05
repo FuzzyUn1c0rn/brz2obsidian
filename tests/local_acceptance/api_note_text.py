@@ -592,14 +592,16 @@ def table_contexts(text):
     return contexts
 
 
-def document_references(text, owner, assets):
+def document_references(text, owner, assets, *, qualified_brain=None):
     """Reference coordinates from active adapted text, with its exact digest."""
     masked = re.sub(
         r"<code>[^<]*</code>",
         lambda match: "".join(char if char in "\r\n" else " " for char in match[0]),
         protect_cross_container_code(text),
     )
-    references = source_references(masked, owner, assets)
+    references = source_references(
+        masked, owner, assets, qualified_brain=qualified_brain
+    )
     digest = hashlib.sha256(text.encode()).hexdigest()
     contexts = table_contexts(masked)
     for reference in references:
@@ -612,7 +614,7 @@ def document_references(text, owner, assets):
     return references
 
 
-def render_references(text, owner, path, names, assets):
+def render_references(text, owner, path, names, assets, *, qualified_brain=None):
     result = text
     contexts = table_contexts(text)
     masked = re.sub(
@@ -620,7 +622,9 @@ def render_references(text, owner, path, names, assets):
         lambda match: " " * len(match[0]),
         protect_cross_container_code(text),
     )
-    for reference in reversed(source_references(masked, owner, assets)):
+    for reference in reversed(
+        source_references(masked, owner, assets, qualified_brain=qualified_brain)
+    ):
         if reference["kind"] == "item":
             begin, end = reference["start"], reference["end"]
             replacement = wiki(names[reference["target"]], reference["label"])
@@ -648,10 +652,12 @@ def expected_document_text(raw):
     return contents(callouts(tables(text)))
 
 
-def expected_note_text(raw, owner, path, names, assets):
+def expected_note_text(raw, owner, path, names, assets, *, qualified_brain=None):
     normalized = raw.replace("\r\n", "\n").replace("\r", "\n")
     text = expected_document_text(normalized)
-    return render_references(text, owner, path, names, assets)
+    return render_references(
+        text, owner, path, names, assets, qualified_brain=qualified_brain
+    )
 
 
 def adaptation_activity(raw):

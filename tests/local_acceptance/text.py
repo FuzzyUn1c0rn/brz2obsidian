@@ -478,22 +478,26 @@ def inline_candidates(body, *, inline_only=False):
             cursor += 1
             continue
         start = index + 1
-        if scan[start : start + 1] == "<":
-            stop = scan.find(">", start + 1)
+        while start < len(body) and body[start] in " \t\r\n":
+            start += 1
+        # The opening phrase is proven active. Its destination owns escapes;
+        # the literal mask may have replaced escaped punctuation with spaces.
+        if body[start : start + 1] == "<":
+            stop = body.find(">", start + 1)
             destination_start, destination_end = start + 1, stop
             after = stop + 1
         else:
             after, nesting = start, 0
             while after < len(scan):
-                if scan[after] == "\\":
+                if body[after] == "\\":
                     after += 2
                     continue
-                if scan[after] == ")" and nesting == 0 or scan[after].isspace():
+                if body[after] == ")" and nesting == 0 or body[after].isspace():
                     break
-                nesting += (scan[after] == "(") - (scan[after] == ")")
+                nesting += (body[after] == "(") - (body[after] == ")")
                 after += 1
             destination_start, destination_end = start, after
-        end = re.match(r'(?:\s+["\'][^"\']*["\'])?\)', scan[after:])
+        end = re.match(r'(?:\s+["\'][^"\']*["\'])?\)', body[after:])
         if end is None or destination_end < destination_start:
             cursor += 1
             continue
