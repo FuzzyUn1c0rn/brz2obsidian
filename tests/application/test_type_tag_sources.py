@@ -167,8 +167,9 @@ def test_type_cycles_refuse_with_chain_and_subject_before_publication(
         assert result.outcome == "refused", result.issues
         issue = result.issues[0]
         assert issue.code == "source_type_cycle"
-        assert "A" in issue.message and (self_assignment or "B" in issue.message)
-        assert issue.affected
+        assert IDS["A"] in issue.affected
+        if not self_assignment:
+            assert IDS["B"] in issue.affected
         assert "00000000-0000-0000-0000-0000000003f5" in issue.affected
         assert issue.subject is not None
         finding = finding_for(issue, "convert")
@@ -295,9 +296,64 @@ def test_source_type_cycle_beyond_native_icon_limit_refuses_whole_chain(
     assert result.outcome == "refused", result.issues
     issue = result.issues[0]
     assert issue.code == "source_type_cycle"
-    assert all(f"H{i}" in issue.message for i in range(10))
+    assert {
+        f"00000000-0000-0000-0000-{number:012x}" for number in range(30, 40)
+    } <= set(issue.affected)
     assert len(issue.affected) == 20  # Ten distinct items and ten relationships.
     assert issue.subject is not None and issue.evidence
+    assert not (tmp_path / "vault").exists()
+
+
+@pytest.mark.parametrize("adapter", ["brz", "api"])
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Authorization: Bearer TYPE_CYCLE_CANARY",
+        "password=TYPE_CYCLE_CANARY",
+        "https://user:TYPE_CYCLE_CANARY@example.invalid/type",
+    ],
+)
+def test_cycle_diagnostics_keep_unsafe_titles_out_of_public_results(
+    tmp_path, adapter, title
+):
+    fields = TYPE_FIELDS | {10: 11}
+    edges = (*EDGES, (11, 10, 1, 3, -1))
+    api = TypeTagApi(edges=edges, type_fields=fields)
+    api.thoughts[IDS["A"]]["name"] = title
+    source = brz_source(tmp_path / "source.brz", edges=edges, type_fields=fields)
+    with ZipFile(source) as archive:
+        parts = {name: archive.read(name) for name in archive.namelist()}
+    thoughts = [json.loads(line) for line in parts["thoughts.json"].splitlines()]
+    next(value for value in thoughts if value["Id"] == IDS["A"])["Name"] = title
+    parts["thoughts.json"] = b"\n".join(
+        json.dumps(value).encode() for value in thoughts
+    )
+    with ZipFile(source, "w") as archive:
+        for name, raw in parts.items():
+            archive.writestr(name, raw)
+    with source_transport(adapter, api=api) as (_, address):
+        workflow = (
+            default_workflow()
+            if adapter == "brz"
+            else local_api_workflow(
+                LocalApiConfig(api_url=address), credentials=lambda: KEY
+            )
+        )
+        result = workflow.convert(
+            source if adapter == "brz" else LocalApiSourceRef(BRAIN), tmp_path / "vault"
+        )
+    assert result.outcome == "refused", result.issues
+    issue = result.issues[0]
+    assert issue.code == "source_type_cycle"
+    assert set(issue.affected) == {
+        IDS["A"],
+        IDS["B"],
+        "00000000-0000-0000-0000-0000000003e8",
+        "00000000-0000-0000-0000-0000000003f5",
+    }
+    assert issue.evidence and issue.subject.name == "B"
+    assert "TYPE_CYCLE_CANARY" not in result.model_dump_json()
+    assert title not in result.model_dump_json()
     assert not (tmp_path / "vault").exists()
 
 

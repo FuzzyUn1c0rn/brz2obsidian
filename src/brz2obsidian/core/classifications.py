@@ -54,8 +54,7 @@ def validate_classifications(snapshot, refuse):
         )
         refuse(
             "source_type_cycle",
-            "Source type assignment cycle: "
-            + " -> ".join(items[key].title for key in cycle),
+            "Source type assignments contain a cycle or self-assignment",
             affected=tuple(
                 dict.fromkeys(
                     (*cycle, *(a.relationship_key for a in cycle_assignments))
