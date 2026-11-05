@@ -32,6 +32,12 @@ from .facts import (
     member as raw_member,
 )
 from .gaps import derive_gaps, diagnostic_targets
+from .note_links import (
+    assert_no_omitted,
+    label_entity,
+    markdown_destination,
+    thought_destination,
+)
 from .scope import dump_json, scope
 from .support import (
     CATEGORY_VIEWS_8,
@@ -39,7 +45,12 @@ from .support import (
     check_support_content,
     tag_listing,
 )
-from .text import generated_boundary, inline_candidates, literal_edits
+from .text import (
+    generated_boundary,
+    inline_candidates,
+    inline_code_spans,
+    literal_edits,
+)
 
 ROOTS = (
     "meta.json",
@@ -187,7 +198,12 @@ def check_vault(source, vault):
                 removals = [
                     r
                     for r in source_references(
-                        body, a["SourceId"], bindings, raw.excluded
+                        body,
+                        a["SourceId"],
+                        bindings,
+                        raw.excluded,
+                        qualified_brain=raw["meta.json"][0]["BrainId"],
+                        omitted_tokens=raw.tokens,
                     )
                     if r["kind"] == "item" and r["target"] in raw.excluded
                 ]
@@ -944,7 +960,14 @@ def check_items(raw, record, archive, vault, assets):
         body = documents.get(key, (None, ""))[1]
         if key in documents:
             expected += generated_boundary(expected)
-        expected += adapt_body(body, key, names[key], names, assets)
+        expected += adapt_body(
+            body,
+            key,
+            names[key],
+            names,
+            assets,
+            qualified_brain=raw["meta.json"][0]["BrainId"],
+        )
         if presentation_images:
             expected += (
                 "\n\n".join(
@@ -1125,7 +1148,9 @@ def check_listings(
         if owner in created:
             represented.update(
                 r["target"]
-                for r in source_references(body, owner, assets)
+                for r in source_references(
+                    body, owner, assets, qualified_brain=raw["meta.json"][0]["BrainId"]
+                )
                 if r["kind"] == "item"
             )
     isolated = sorted(
@@ -1188,21 +1213,19 @@ def inline_display(value):
         protected.append(text)
         return "\x00" + str(len(protected) - 1) + "\x00"
 
-    def code(match):
-        text = re.sub(r"\r\n?|\n", " ", match[2])
+    for begin, end, content_start, content_end in reversed(inline_code_spans(value)):
+        text = re.sub(r"\r\n?|\n", " ", value[content_start:content_end])
         if text.startswith(" ") and text.endswith(" ") and text.strip():
             text = text[1:-1]
-        return keep(text)
-
-    value = re.sub(r"(?<!`)(`+)(?!`)(.*?)\1(?!`)", code, value, flags=re.DOTALL)
+        value = value[:begin] + keep(text) + value[end:]
     value = re.sub(
         r'\\([!"#$%&\'()*+,\-./:;<=>?@\[\]\\^_`{|}~])',
         lambda match: keep(match[0] if match[1] == "<" else match[1]),
         value,
     )
     value = re.sub(
-        r"&(?:#[0-9]+|#x[0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]+);",
-        lambda match: keep(html.unescape(match[0])),
+        r"&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});",
+        lambda match: keep(label_entity(match[0])),
         value,
     )
     for _ in range(3):
@@ -1212,7 +1235,9 @@ def inline_display(value):
     return re.sub(r"\x00([0-9]+)\x00", lambda match: protected[int(match[1])], value)
 
 
-def source_references(body, owner, assets, excluded=()):
+def source_references(
+    body, owner, assets, excluded=(), *, qualified_brain=None, omitted_tokens=None
+):
     """Separate syntax scan without converter spans or markdown-it-py.
 
     Protected regions retain source offsets. Unrecognized active local syntax
@@ -1230,21 +1255,38 @@ def source_references(body, owner, assets, excluded=()):
     ) in candidates:
         url = body[destination_start:destination_end]
         kind, target = None, None
-        if url.startswith("brain://"):
-            compact = url[8:].split("/")[0]
-            target = str(
-                UUID(
-                    bytes_le=base64.urlsafe_b64decode(
-                        compact + "=" * (-len(compact) % 4)
-                    )
-                )
-            )
-            kind = "item"
-            assert not image or target in excluded, "unexpected linked thought image"
+        if markdown_destination(url).casefold().startswith("brain://"):
+            destination = thought_destination(url, qualified_brain=qualified_brain)
+            target = destination.local_id
+            legacy_excluded = not destination.qualified and target in excluded
+            assert not image or legacy_excluded, "unexpected linked thought image"
             assert (
-                target in excluded
+                legacy_excluded
                 or not inline_candidates(label_text, inline_only=True)[0]
             ), "unsupported included nested thought phrase"
+            if qualified_brain is not None and target not in excluded:
+                tokens = (
+                    omitted_tokens
+                    if omitted_tokens is not None
+                    else {
+                        token
+                        for key in excluded
+                        for token in (
+                            key,
+                            key.replace("-", ""),
+                            base64.urlsafe_b64encode(UUID(key).bytes_le)
+                            .decode()
+                            .rstrip("="),
+                        )
+                    }
+                )
+                assert_no_omitted(
+                    (destination.source_target, inline_display(label_text)), tokens
+                )
+            if target is None:
+                mask[begin:finish] = " " * (finish - begin)
+                continue
+            kind = "item"
         elif image and url.startswith(".data/md-images/"):
             path, separator, fragment = url.partition("#")
             assert "?" not in url, "independent image query refusal"
@@ -1289,6 +1331,9 @@ def source_references(body, owner, assets, excluded=()):
                     "end": finish,
                     "kind": kind,
                     "target": target,
+                    "source_target": destination.source_target
+                    if kind == "item"
+                    else url,
                     "label": label,
                     "destination_start": destination_start,
                     "destination_end": destination_end,
@@ -1297,15 +1342,44 @@ def source_references(body, owner, assets, excluded=()):
             )
             mask[begin:finish] = " " * (finish - begin)
     remainder = "".join(mask)
+    decoded_remainder = markdown_destination(remainder)
+    definitions = list(
+        re.finditer(
+            r"(?mi)^ {0,3}\[([^\]\r\n]+)\]:[ \t]*<?brain://[^\r\n]*", decoded_remainder
+        )
+    )
+    usage = decoded_remainder
+    for definition in reversed(definitions):
+        usage = (
+            usage[: definition.start()]
+            + " " * len(definition[0])
+            + usage[definition.end() :]
+        )
+    for definition in definitions:
+        label = r"\s+".join(
+            re.escape(part) for part in definition[1].casefold().split()
+        )
+        assert not re.search(
+            r"\]\[\s*" + label + r"\s*\]|\[\s*" + label + r"\s*\](?:\[\s*\]|(?![\[(]))",
+            usage.casefold(),
+        ), "independent unsupported reference-style thought link"
     assert not re.search(
-        r"(?:\]\(<?|<)brain://|!\[[^\]]*\]\(<?\.data/md-images/", remainder
+        r"(?i)<[^>]*\b(?:href|src)\s*=\s*[\"']?brain://",
+        decoded_remainder,
+    ), "independent unsupported rich thought reference"
+    assert not re.search(
+        r"(?:\[[^\]\r\n]*\]\(\s*<?|<)brain://|!\[[^\]]*\]\(<?\.data/md-images/",
+        decoded_remainder,
+        re.IGNORECASE,
     ), "independent scanner cannot establish all active local reference coverage"
     return result
 
 
-def adapt_body(body, owner, note_path, names, assets):
+def adapt_body(body, owner, note_path, names, assets, *, qualified_brain=None):
     result = body
-    for ref in reversed(source_references(body, owner, assets)):
+    for ref in reversed(
+        source_references(body, owner, assets, qualified_brain=qualified_brain)
+    ):
         if ref["kind"] == "item":
             assert ref["target"] in names, "source local thought target"
             replacement = wiki(names[ref["target"]], ref["label"])
@@ -1326,7 +1400,9 @@ def adapt_body(body, owner, note_path, names, assets):
 def expected_resources(raw, owner, body, assets):
     inline = {
         r["target"]
-        for r in source_references(body, owner, assets)
+        for r in source_references(
+            body, owner, assets, qualified_brain=raw["meta.json"][0]["BrainId"]
+        )
         if r["kind"] == "image"
     }
     lines = []
@@ -1430,7 +1506,9 @@ def check_documents(raw, record, documents, names, assets):
                 next(i for i, a in enumerate(raw["attachments.json"]) if a["Id"] == key)
             )
         ], "document source provenance"
-        independent = source_references(body, owner, assets)
+        independent = source_references(
+            body, owner, assets, qualified_brain=raw["meta.json"][0]["BrainId"]
+        )
         assert len(d["references"]) == len(independent), "all source references"
         for emitted_ref, actual in zip(d["references"], independent, strict=True):
             assert (
@@ -1451,10 +1529,7 @@ def check_documents(raw, record, documents, names, assets):
                 == body[actual["start"] : actual["end"]]
                 and emitted_ref["document_digest"] == digest
             ), "reference binding"
-            source_target = body[
-                actual["destination_start"] : actual["destination_end"]
-            ]
-            assert emitted_ref["source_target"] == source_target, (
+            assert emitted_ref["source_target"] == actual["source_target"], (
                 "reference original destination"
             )
             assert (
@@ -1563,7 +1638,9 @@ def check_assets(raw, record, archive, vault, targets):
     inline = {
         r["target"]
         for owner, body in raw_documents.items()
-        for r in source_references(body, owner, bindings)
+        for r in source_references(
+            body, owner, bindings, qualified_brain=raw["meta.json"][0]["BrainId"]
+        )
         if r["kind"] == "image"
     }
     expected_warnings = dict(raw.gap_warnings)
@@ -2216,13 +2293,24 @@ def check_adaptations(raw, record, documents, names, assets):
         }
         expected |= {
             ("image_presentation", f"reference:{key}:{i}")
-            for i, ref in enumerate(source_references(body, owner, assets))
+            for i, ref in enumerate(
+                source_references(
+                    body, owner, assets, qualified_brain=raw["meta.json"][0]["BrainId"]
+                )
+            )
             if ref["presentation_normalization"]
         }
         if owner in created:
             expected |= {
                 (ref["kind"] + "_reference", f"reference:{key}:{i}")
-                for i, ref in enumerate(source_references(body, owner, assets))
+                for i, ref in enumerate(
+                    source_references(
+                        body,
+                        owner,
+                        assets,
+                        qualified_brain=raw["meta.json"][0]["BrainId"],
+                    )
+                )
             }
     assignments = classifications(raw)
     providers = {key: row["definition_key"] for key, row in assignments.items()}
@@ -2250,7 +2338,11 @@ def check_adaptations(raw, record, documents, names, assets):
         "complete adaptation obligations"
     )
     for owner, (key, body) in documents.items():
-        for index, reference in enumerate(source_references(body, owner, assets)):
+        for index, reference in enumerate(
+            source_references(
+                body, owner, assets, qualified_brain=raw["meta.json"][0]["BrainId"]
+            )
+        ):
             if reference["presentation_normalization"]:
                 adaptation = next(
                     a
@@ -2323,7 +2415,11 @@ def check_adaptations(raw, record, documents, names, assets):
             ), "icon adaptation factual asset/provider"
     for owner, (key, body) in documents.items():
         if owner in created:
-            for i, ref in enumerate(source_references(body, owner, assets)):
+            for i, ref in enumerate(
+                source_references(
+                    body, owner, assets, qualified_brain=raw["meta.json"][0]["BrainId"]
+                )
+            ):
                 assert (
                     ref["target"]
                     in actual[ref["kind"] + "_reference", f"reference:{key}:{i}"]

@@ -392,7 +392,9 @@ def capture_owner(
             client.ensure_safe(text)
             if documents:
                 refuse("Multiple authored notes have ambiguous ownership")
-            text, removed = scope_text(text, excluded)
+            text, removed = scope_text(
+                text, excluded, brain_id=brain, allow_qualified=profile_version == "4"
+            )
             record("note_text", "note_text:" + owner, owner, {"text": text})
             if removed:
                 decisions.append(
@@ -450,6 +452,11 @@ def validate_payload_binding(source, snapshot, audit):
     from .notes import bind_documents
 
     profile = source["identifiers"]["profile_version"]
+    excluded_thoughts = {
+        record["value"]["id"]
+        for record in source["records"]
+        if record["domain"] == "exclusion"
+    }
     attachments = {
         r["value"]["id"]: r["value"]
         for r in source["records"]
@@ -596,6 +603,9 @@ def validate_payload_binding(source, snapshot, audit):
                     compact_tables=compact_tables,
                     legacy_table_boundaries=legacy_table_boundaries,
                     preserve_table_warnings=preserve_table_warnings,
+                    brain_id=source["brain"]["id"],
+                    allow_qualified=profile == "4",
+                    excluded=excluded_thoughts,
                 )
             except MigrationRefused:
                 continue

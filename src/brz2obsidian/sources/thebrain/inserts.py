@@ -849,7 +849,7 @@ def bind_table_context(text, references):
     )
 
 
-def trace_adapted_references(text, edits):
+def trace_adapted_references(text, edits, *, allow_qualified=False):
     """Mask only adapter-generated code elements during source reference tracing.
 
     Their escaped literal payload cannot contain active references. Coordinate
@@ -869,6 +869,6 @@ def trace_adapted_references(text, edits):
     digest = sha256(text.encode()).hexdigest()
     references = tuple(
         reference.model_copy(update={"document_digest": digest})
-        for reference in trace_note_references(masked)
+        for reference in trace_note_references(masked, allow_qualified=allow_qualified)
     )
     return bind_table_context(text, references)

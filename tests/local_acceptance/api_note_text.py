@@ -11,7 +11,7 @@ import re
 from urllib.parse import quote
 
 from .checker import inline_display, source_references, wiki
-from .text import active_mask, inline_candidates, literal_edits
+from .text import active_mask, inline_candidates, inline_code_spans, literal_edits
 
 KINDS = frozenset(
     [
@@ -306,42 +306,10 @@ def label_text(value):
     def escaped_at(text, position):
         return (len(text[:position]) - len(text[:position].rstrip("\\"))) % 2 == 1
 
-    def owned_codes(text):
-        ranges, cursor = [], 0
-        while cursor < len(text):
-            if text.startswith("<!--", cursor) and not escaped_at(text, cursor):
-                close = text.find("-->", cursor + 4)
-                if close >= 0:
-                    cursor = close + 3
-                    continue
-            if text[cursor] != "`":
-                cursor += 1
-                continue
-            if escaped_at(text, cursor):
-                cursor += 1
-                continue
-            opening = re.match(r"`+", text[cursor:])
-            start = cursor
-            cursor += len(opening[0])
-            closing = next(
-                (
-                    run
-                    for run in re.finditer(r"`+", text[cursor:])
-                    if len(run[0]) == len(opening[0])
-                ),
-                None,
-            )
-            if closing is not None:
-                content_end = cursor + closing.start()
-                finish = cursor + closing.end()
-                ranges.append((start, finish, cursor, content_end))
-                cursor = finish
-        return ranges
-
     phrases = [
         (start, end) for start, end, *_ in inline_candidates(value, inline_only=True)[0]
     ]
-    codes = [(start, end) for start, end, _, _ in owned_codes(value)]
+    codes = [(start, end) for start, end, _, _ in inline_code_spans(value)]
     dollars = [
         (i - 1, i + 1)
         for i, char in enumerate(value)
@@ -363,7 +331,7 @@ def label_text(value):
         literals.append(text)
         return placeholder + "L" + str(len(literals) - 1) + placeholder
 
-    for begin, end, content_start, content_end in reversed(owned_codes(value)):
+    for begin, end, content_start, content_end in reversed(inline_code_spans(value)):
         text = re.sub(r"\r\n?|\n", " ", value[content_start:content_end])
         if text.startswith(" ") and text.endswith(" ") and text.strip():
             text = text[1:-1]
@@ -391,7 +359,7 @@ def label_text(value):
         display = inline_display(label)
         if not visible_literals(display).strip():
             display = "Image" if image else ""
-        value = value[:begin] + display + value[end:]
+        value = value[:begin] + keep(visible_literals(display)) + value[end:]
     value = inline_display(value)
     value = re.sub(r"(?: {2,}|\\)?(?:\r\n?|\n)", " ", value)
     value = visible_literals(value).strip() or "Heading"
@@ -592,14 +560,16 @@ def table_contexts(text):
     return contexts
 
 
-def document_references(text, owner, assets):
+def document_references(text, owner, assets, *, qualified_brain=None):
     """Reference coordinates from active adapted text, with its exact digest."""
     masked = re.sub(
         r"<code>[^<]*</code>",
         lambda match: "".join(char if char in "\r\n" else " " for char in match[0]),
         protect_cross_container_code(text),
     )
-    references = source_references(masked, owner, assets)
+    references = source_references(
+        masked, owner, assets, qualified_brain=qualified_brain
+    )
     digest = hashlib.sha256(text.encode()).hexdigest()
     contexts = table_contexts(masked)
     for reference in references:
@@ -612,7 +582,7 @@ def document_references(text, owner, assets):
     return references
 
 
-def render_references(text, owner, path, names, assets):
+def render_references(text, owner, path, names, assets, *, qualified_brain=None):
     result = text
     contexts = table_contexts(text)
     masked = re.sub(
@@ -620,7 +590,9 @@ def render_references(text, owner, path, names, assets):
         lambda match: " " * len(match[0]),
         protect_cross_container_code(text),
     )
-    for reference in reversed(source_references(masked, owner, assets)):
+    for reference in reversed(
+        source_references(masked, owner, assets, qualified_brain=qualified_brain)
+    ):
         if reference["kind"] == "item":
             begin, end = reference["start"], reference["end"]
             replacement = wiki(names[reference["target"]], reference["label"])
@@ -648,10 +620,12 @@ def expected_document_text(raw):
     return contents(callouts(tables(text)))
 
 
-def expected_note_text(raw, owner, path, names, assets):
+def expected_note_text(raw, owner, path, names, assets, *, qualified_brain=None):
     normalized = raw.replace("\r\n", "\n").replace("\r", "\n")
     text = expected_document_text(normalized)
-    return render_references(text, owner, path, names, assets)
+    return render_references(
+        text, owner, path, names, assets, qualified_brain=qualified_brain
+    )
 
 
 def adaptation_activity(raw):

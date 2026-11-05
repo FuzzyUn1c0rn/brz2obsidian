@@ -201,6 +201,7 @@ def checked_generated_regions(
     attachments,
     *,
     require_complete,
+    profile_version="1",
 ):
     """Return only complete proved generated regions; absent regions grant nothing."""
     check_protocol(record)
@@ -219,7 +220,12 @@ def checked_generated_regions(
         key: (
             note.owner,
             document_references(
-                expected_document_text(note.scoped_text), note.owner, bindings
+                expected_document_text(note.scoped_text),
+                note.owner,
+                bindings,
+                qualified_brain=baseline.json(baseline.data["brain"])["id"]
+                if profile_version == "4"
+                else None,
             ),
         )
         for key, note in scoped.safe_notes.items()

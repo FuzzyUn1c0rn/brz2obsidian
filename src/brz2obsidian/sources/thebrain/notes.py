@@ -77,14 +77,53 @@ class _HtmlReferences(HTMLParser):
         )
 
 
-def compact_thought_identity(destination):
-    """Validate the reviewed compact URI boundary before decoding its identity."""
+def _qualified_identities(destination):
+    prefix = "brain://api.thebrain.com/"
+    components = destination.removeprefix(prefix).split("/")
+    if (
+        not destination.startswith(prefix)
+        or len(components) not in {2, 3}
+        or any(c in destination for c in "?#\\")
+        or any(ord(c) < 32 or ord(c) == 127 for c in destination)
+        or re.search(
+            r"%(?![0-9a-fA-F]{2})|%(?:0[0-9a-f]|1[0-9a-f]|7f|5c)",
+            destination,
+            re.IGNORECASE,
+        )
+        or any(not re.fullmatch(r"[A-Za-z0-9_-]{22}", c) for c in components[:2])
+    ):
+        _refuse(
+            "invalid_reference", "Invalid or unsupported qualified thought reference"
+        )
+    identities = []
+    for token in components[:2]:
+        raw = base64.urlsafe_b64decode(token + "==")
+        if base64.urlsafe_b64encode(raw).decode().rstrip("=") != token:
+            _refuse("invalid_reference", "Noncanonical qualified thought identity")
+        identities.append(str(UUID(bytes_le=raw)))
+    return identities
+
+
+def compact_thought_identity(destination, *, brain_id=None, allow_qualified=False):
+    """Decode local identity; qualified foreign namespaces return no local ID.
+
+    Qualified handling requires both an explicit capability and authoritative
+    Brain context. Defaults retain historical compact-only interpretation.
+    """
     parts = urlsplit(destination)
     if parts.netloc.casefold() in {"api.thebrain.com", "api.bra.in"}:
-        _refuse(
-            "unsupported_feature",
-            "Cross-Brain/server-qualified thought references are unsupported",
-        )
+        if not allow_qualified:
+            _refuse(
+                "unsupported_feature",
+                "Cross-Brain/server-qualified thought references are unsupported",
+            )
+        if not brain_id:
+            _refuse(
+                "invalid_reference",
+                "Qualified thought reference needs authoritative Brain context",
+            )
+        identities = _qualified_identities(destination)
+        return identities[1] if identities[0] == brain_id else None
     compact = parts.netloc
     if (
         parts.scheme != "brain"
@@ -103,14 +142,22 @@ def compact_thought_identity(destination):
     return str(UUID(bytes_le=raw))
 
 
-def bind_note_references(document, assets, thoughts):
+def bind_note_references(
+    document, assets, thoughts, *, brain_id=None, allow_qualified=False
+):
     """Bind parsed source destinations to canonical IDs after asset inventory."""
     bound = []
     for reference in document.references:
         destination = reference.target
         normalization = None
         if reference.kind == "item":
-            canonical = compact_thought_identity(destination)
+            canonical = compact_thought_identity(
+                destination, brain_id=brain_id, allow_qualified=allow_qualified
+            )
+            if canonical is None:
+                # A qualified foreign link remains the exact authored Markdown;
+                # it is not a local relation and grants no foreign acquisition.
+                continue
             if canonical not in thoughts or thoughts[canonical]["Kind"] == 5:
                 _refuse(
                     "invalid_reference",
@@ -303,7 +350,9 @@ def trace_inline_literal_ranges(text):
     return tuple(code), tuple(comments)
 
 
-def trace_note_references(text: str, excluded=()) -> tuple[ReferenceSpan, ...]:
+def trace_note_references(
+    text: str, excluded=(), *, allow_qualified=False
+) -> tuple[ReferenceSpan, ...]:
     """Trace parser-recognized active links into exact original text spans.
 
     Carry character provenance through normalization and block indentation;
@@ -337,7 +386,7 @@ def trace_note_references(text: str, excluded=()) -> tuple[ReferenceSpan, ...]:
                     state, begin + (1 if kind == "image" else 0), kind == "item"
                 )
             if (
-                kind == "image"
+                kind in {"item", "image"}
                 and not silent
                 and label_end >= 0
                 and state.src[label_end + 1 : label_end + 2] == "("
@@ -366,6 +415,28 @@ def trace_note_references(text: str, excluded=()) -> tuple[ReferenceSpan, ...]:
                     if target and _local(target):
                         removed_subject = False
                         parts = urlsplit(target)
+                        if (
+                            allow_qualified
+                            and destination
+                            and parts.netloc.casefold()
+                            in {"api.thebrain.com", "api.bra.in"}
+                        ):
+                            # Check the parsed Markdown destination before URL
+                            # normalization can repair malformed percent data.
+                            _qualified_identities(parsed.str)
+                            raw_destination = text[
+                                state.src.offsets[destination[0]] : state.src.offsets[
+                                    destination[1] - 1
+                                ]
+                                + 1
+                            ]
+                            if any(
+                                ord(c) < 32 or ord(c) == 127 for c in raw_destination
+                            ):
+                                _refuse(
+                                    "invalid_reference",
+                                    "Control character in qualified thought destination",
+                                )
                         if parts.scheme == "brain" and re.fullmatch(
                             r"[A-Za-z0-9_-]{22}", parts.netloc
                         ):
@@ -436,7 +507,7 @@ def trace_note_references(text: str, excluded=()) -> tuple[ReferenceSpan, ...]:
                                 "item" if removed_subject else kind,
                                 target,
                                 display,
-                                destination,
+                                destination if kind == "image" else None,
                             )
                         )
             return success

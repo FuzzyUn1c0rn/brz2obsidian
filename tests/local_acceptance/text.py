@@ -390,7 +390,7 @@ def generated_boundary(prefix):
     return ""
 
 
-def active_mask(body, *, autolinks=True, inline_only=False):
+def active_mask(body, *, autolinks=True, inline_only=False, _code_spans=None):
     """Lexically protect constructs in source order with exact raw coordinates."""
     if inline_only:
         # A reference display label is an inline fragment, not a new block.
@@ -416,6 +416,8 @@ def active_mask(body, *, autolinks=True, inline_only=False):
                 )
                 if close:
                     stop = end + close.end()
+                    if _code_spans is not None:
+                        _code_spans.append((cursor, stop, end, stop - (end - cursor)))
                 else:
                     cursor = end
                     continue
@@ -443,6 +445,13 @@ def active_mask(body, *, autolinks=True, inline_only=False):
             else:
                 cursor += 1
     return "".join(mask)
+
+
+def inline_code_spans(body):
+    """Exact code coordinates from the established source-order activity scan."""
+    spans = []
+    active_mask(body, inline_only=True, _code_spans=spans)
+    return tuple(spans)
 
 
 def inline_candidates(body, *, inline_only=False):
@@ -478,22 +487,26 @@ def inline_candidates(body, *, inline_only=False):
             cursor += 1
             continue
         start = index + 1
-        if scan[start : start + 1] == "<":
-            stop = scan.find(">", start + 1)
+        while start < len(body) and body[start] in " \t\r\n":
+            start += 1
+        # The opening phrase is proven active. Its destination owns escapes;
+        # the literal mask may have replaced escaped punctuation with spaces.
+        if body[start : start + 1] == "<":
+            stop = body.find(">", start + 1)
             destination_start, destination_end = start + 1, stop
             after = stop + 1
         else:
             after, nesting = start, 0
             while after < len(scan):
-                if scan[after] == "\\":
+                if body[after] == "\\":
                     after += 2
                     continue
-                if scan[after] == ")" and nesting == 0 or scan[after].isspace():
+                if body[after] == ")" and nesting == 0 or body[after].isspace():
                     break
-                nesting += (scan[after] == "(") - (scan[after] == ")")
+                nesting += (body[after] == "(") - (body[after] == ")")
                 after += 1
             destination_start, destination_end = start, after
-        end = re.match(r'(?:\s+["\'][^"\']*["\'])?\)', scan[after:])
+        end = re.match(r'(?:\s+["\'][^"\']*["\'])?\)', body[after:])
         if end is None or destination_end < destination_start:
             cursor += 1
             continue

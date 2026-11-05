@@ -33,6 +33,7 @@ def test_expected_fact_oracle_has_only_reviewed_imports():
         "api_recording",
         "api_baseline",
         "appearance",
+        "note_links",
         "api_checker",
         "api_manifest",
         "api_generated",
