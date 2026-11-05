@@ -120,7 +120,8 @@ def _semantic(value):
         result = {
             name: _semantic(getattr(value, name))
             for name in type(value).model_fields
-            if name != "file_roles" or getattr(value, name) is not None
+            if name not in ("file_roles", "resource_origin")
+            or getattr(value, name) is not None
         }
         # These spellings are lookup alternatives, not authored occurrence order.
         if isinstance(value, ReferenceTarget):

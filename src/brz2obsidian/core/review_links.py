@@ -690,6 +690,24 @@ def bound_resource_record(facts, entry, target, state):
         and sub.current.content == entry.current.content
         for sub in facts.subjects
     )
+    origin = state.resource_origin
+    retained = (
+        origin is not None
+        and entry.identity_state == "valid"
+        and entry.identity is not None
+        and origin.identity == entry.identity
+        and origin.facet == entry.facet
+        and origin.source_path == entry.current.path
+        and state.target_id == target.target_id
+        and (
+            origin.identity.module_id,
+            origin.identity.collection_id,
+        )
+        == (
+            facts.incoming_identity.module_id,
+            facts.incoming_identity.collection_id,
+        )
+    )
     context = facts.link_context
     local = (
         facts.inventory == "complete"
@@ -716,7 +734,7 @@ def bound_resource_record(facts, entry, target, state):
         )
     )
     return (
-        (associated or local)
+        (associated or local or retained)
         and target.kind == "resource"
         and target.identity is None
         and target.canonical_path == entry.current.path

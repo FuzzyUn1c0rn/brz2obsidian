@@ -1824,6 +1824,11 @@ class LinkTargetFacts(ReconciliationContract):
     file_roles: FileRoleFacts | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    # Read-only association to retained generated content. It creates neither
+    # a reconciliation subject nor permission to write this resource.
+    resource_origin: RetainedAttachmentOwnership | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def bound_fragment_and_membership_evidence(self):

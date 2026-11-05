@@ -57,11 +57,16 @@ def _target_from_graph(graph, observation):
     # the completed selected inventory is the actual produced endpoint.
     before = {row.path: row for row in origin.before}
     proposed = {row.path: row for row in graph.intent.proposed}
+    # A terminal recovery inventory also retains later protected writing.
+    # Its difference from the original preimage grants no write ownership.
+    owned_paths = {
+        path for _, authority in graph.authorities for path in authority.affected_paths
+    }
     affected = tuple(
         sorted(
             path
             for path in before.keys() | proposed.keys()
-            if before.get(path) != proposed.get(path)
+            if path in owned_paths and before.get(path) != proposed.get(path)
         )
     )
     target = _ReversalTarget(

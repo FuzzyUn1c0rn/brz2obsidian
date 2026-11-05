@@ -354,6 +354,13 @@ def _review_observation(
                         else "present",
                         membership_targets=context.current_targets,
                         source_path=target.canonical_path,
+                        output_format=old.structure.output_format
+                        if old.structure is not None
+                        else 7
+                        if original_facts.baseline_identity.output_format == 6
+                        else original_facts.baseline_identity.output_format,
+                        qualify_roles=original_facts.incoming_identity.output_format
+                        == 8,
                     )
                 )
         new_documents = []
@@ -1042,6 +1049,10 @@ def _restore_link_context(original, facts, before, affected, git):
                     existence="missing" if content is None else "present",
                     memberships=(),
                     source_path=path,
+                    output_format=7
+                    if original.facts.baseline_identity.output_format == 6
+                    else original.facts.baseline_identity.output_format,
+                    qualify_roles=original.facts.incoming_identity.output_format == 8,
                 )
             )
         else:
@@ -1099,6 +1110,70 @@ def _operation_document_subjects(
         review_owned_documents(original),
         direction=direction,
         only_documents=only_documents,
+    )
+
+
+def _protected_resource_context(facts, subjects, context, retained, git):
+    """Keep exact historical associations for resources outside reversal writes."""
+    if context is None or facts.incoming_identity.output_format != 8:
+        return context
+    included = {(subject.item_id, subject.facet) for subject in subjects}
+    protected = {
+        subject.current.path: subject
+        for subject in facts.subjects
+        if subject.attachment is not None
+        and (subject.item_id, subject.facet) not in included
+        and subject.current.existence == "present"
+    }
+    if not protected:
+        return context
+    from .attachment_ownership import read_attachment_ownership
+
+    proofs = read_attachment_ownership(
+        git,
+        association=retained.checkpoint.locator.association,
+        roles=retained.checkpoint_roles,
+        paths=set(protected),
+        observation=retained,
+    )
+    roles = {role.commit: role.generation for role in retained.checkpoint_roles}
+    bindings = {}
+    for proof in proofs:
+        subject = protected.get(proof.source_path)
+        if (
+            subject is None
+            or proof.association_id != retained.checkpoint.manifest.association_id
+            or roles.get(proof.checkpoint_commit) != proof.generation
+            or (
+                proof.identity.module_id,
+                proof.identity.collection_id,
+                proof.identity.item_id,
+                proof.facet,
+            )
+            != (
+                facts.incoming_identity.module_id,
+                facts.incoming_identity.collection_id,
+                subject.item_id,
+                subject.facet,
+            )
+        ):
+            raise OSError("Protected resource origin is not the retained association")
+        target_id = subject.attachment.current_target_id
+        if target_id in bindings:
+            raise OSError("Protected resource origin is ambiguous")
+        bindings[target_id] = proof
+    # The origin's source version can precede the latest whole-vault version.
+    # The native reader verifies its historical mapping/checkpoint. Current
+    # bytes stay separately bound by each observed state and inventory entry.
+    return context.model_copy(
+        update={
+            "current_target_facts": tuple(
+                state.model_copy(update={"resource_origin": bindings[state.target_id]})
+                if state.target_id in bindings
+                else state
+                for state in context.current_target_facts
+            )
+        }
     )
 
 
@@ -1501,6 +1576,7 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
                 ),
             }
         )
+    context = _protected_resource_context(facts, subjects, context, retained, git)
     facts = facts.model_copy(
         update={
             "identity_inventory": tuple(identity_inventory),
