@@ -160,6 +160,13 @@ class _AuditPass:
         if not valid:
             self.fail()
             raise AssertionError("baseline manifest changed in memory")
+        try:
+            assert hashlib.sha256(self.path.read_bytes()).hexdigest() == self.pin, (
+                "baseline manifest changed; independent requalification required"
+            )
+        except Exception:
+            self.fail()
+            raise
 
 
 class _PassView:

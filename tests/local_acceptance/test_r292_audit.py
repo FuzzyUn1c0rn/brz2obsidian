@@ -509,6 +509,43 @@ def test_manifest_association_preserves_numeric_declaration_types(
     baseline.verify()
 
 
+def test_nested_scope_refuses_a_manifest_changed_and_restored_during_audit(
+    tmp_path, paired_outputs, monkeypatch
+):
+    from tests.local_acceptance.api_scope import qualify_scope
+
+    _, _, original, vault = paired_outputs
+    evidence = tmp_path / "evidence"
+    shutil.copytree(original.manifest_path.parent, evidence)
+    manifest = evidence / "manifest.json"
+    initial = manifest.read_bytes()
+    baseline = load_baseline(manifest, original.fingerprint)
+    record = json.loads((vault / "migration-record.json").read_bytes())
+    row = next(row for row in record["item_targets"] if row["original_title"] == "T")
+    target = (vault / row["relative_path"]).resolve()
+    real_read = Path.read_bytes
+    attempted = False
+
+    def observed_read(path):
+        nonlocal attempted
+        if path.resolve() == target and not attempted:
+            attempted = True
+            manifest.write_bytes(initial + b" ")
+            try:
+                with pytest.raises(AssertionError, match="baseline manifest changed"):
+                    qualify_scope(baseline, profile_version="4")
+            finally:
+                manifest.write_bytes(initial)
+        return real_read(path)
+
+    monkeypatch.setattr(Path, "read_bytes", observed_read)
+    with pytest.raises(AssertionError):
+        check_api_vault(baseline, vault, profile_version="4")
+    assert attempted and manifest.read_bytes() == initial
+    monkeypatch.undo()
+    assert check_api_vault(baseline, vault, profile_version="4")["thoughts"] == 22
+
+
 def test_copied_execution_context_cannot_reuse_a_finished_audit(
     tmp_path, paired_outputs, monkeypatch
 ):
@@ -871,6 +908,60 @@ def test_pair_audit_refuses_inputs_changed_during_comparison(
     assert result["outcome"] == "refused"
     assert result["failure"]["stage"] == "final-input-binding"
     assert result["m5_acceptance"] is False
+    assert json.loads(output.read_bytes()) == result
+
+
+def test_final_audit_binding_covers_pass_closure_filesystem_reads(
+    tmp_path, paired_outputs, monkeypatch
+):
+    from tests.local_acceptance.audit_run import audit_selected, vault_identity
+
+    _, _, baseline, original = paired_outputs
+    vault = tmp_path / "vault"
+    shutil.copytree(original, vault)
+    record = json.loads((vault / "migration-record.json").read_bytes())
+    row = next(row for row in record["item_targets"] if row["original_title"] == "T")
+    note = vault / row["relative_path"]
+    initial = note.read_bytes()
+    payload = (
+        baseline.manifest_path.parent / baseline.data["payloads"][TAG_NOTE]["path"]
+    ).resolve()
+    checkout = Path(__file__).resolve().parents[2]
+    candidate = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    real_read, real_open = Path.read_bytes, Path.open
+    candidate_reads = 0
+    injected = False
+
+    def tracked_read(path):
+        nonlocal candidate_reads
+        if path == checkout / "README.md":
+            candidate_reads += 1
+        return real_read(path)
+
+    def changed_during_later_evidence_read(path, *args, **kwargs):
+        nonlocal injected
+        if candidate_reads >= 2 and path.resolve() == payload and not injected:
+            injected = True
+            note.write_bytes(initial + b"\nlate change during evidence I/O\n")
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_bytes", tracked_read)
+    monkeypatch.setattr(Path, "open", changed_during_later_evidence_read)
+    output = tmp_path / "audit.json"
+    result = audit_selected(
+        candidate=candidate,
+        output=output,
+        api_manifest=baseline.manifest_path,
+        manifest_sha256=baseline.fingerprint,
+        api_vault=vault,
+    )
+    # A late evidence scan may occur only while the final output binding can
+    # still see a change. If no such I/O remains, this control need not inject.
+    assert candidate_reads >= 2
+    assert result["outcome"] == "qualified", result
+    assert result["inputs"]["api"]["vault_sha256"] == vault_identity(vault)
+    assert note.read_bytes() == initial
+    assert not injected
     assert json.loads(output.read_bytes()) == result
 
 

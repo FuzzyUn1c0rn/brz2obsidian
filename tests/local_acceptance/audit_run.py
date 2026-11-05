@@ -301,6 +301,7 @@ def audit_selected(
             stage = "final-input-binding"
             if baseline:
                 baseline.verify()
+            passes.close()
             for row in report["inputs"].values():
                 assert (
                     fingerprint(row["source"]) == row["source_sha256"]
@@ -313,7 +314,6 @@ def audit_selected(
             assert candidate_identity(candidate) == identity, (
                 "candidate changed during audit"
             )
-            passes.close()
             report["outcome"] = "qualified"
     except Exception as error:  # noqa: BLE001 - retain a safe refusal for every failure
         report["failure"] = {
