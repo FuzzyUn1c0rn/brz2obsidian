@@ -133,8 +133,12 @@ def test_public_reference_and_independent_render_label_match_pinned_inline_known
     assert len(references) == 1 and references[0]["label"] == visible
 
 
+@pytest.mark.parametrize(
+    "damage", ["uppercase-entity", "escaped-code", "longer-closer"]
+)
 def test_independent_vault_audit_rejects_matching_unsafe_label_source_and_output(
     tmp_path,
+    damage,
 ):
     import hashlib
     import json
@@ -143,8 +147,17 @@ def test_independent_vault_audit_rejects_matching_unsafe_label_source_and_output
     from brz2obsidian.application.wiring import default_workflow
     from tests.local_acceptance.checker import check_vault
 
-    safe = f"[\\&#X4D;{TOKEN[1:]}]({FOREIGN})"
-    unsafe = safe.replace(r"\&#X4D;", "&#X4D;")
+    encoded = "&#X4D;" + TOKEN[1:]
+    if damage == "uppercase-entity":
+        safe = f"[\\{encoded}]({FOREIGN})"
+        unsafe = f"[{encoded}]({FOREIGN})"
+    else:
+        safe = f"[`{encoded}`]({FOREIGN})"
+        unsafe = (
+            f"[\\`{encoded}`]({FOREIGN})"
+            if damage == "escaped-code"
+            else f"[`{encoded}``]({FOREIGN})"
+        )
     source = graph_archive(
         tmp_path / "safe.brz",
         {1: "Home", int(UUID(ALONE)): "Private"},
@@ -223,9 +236,18 @@ def label_outputs(tmp_path_factory):
 
     def authored(home):
         uri = f"brain://api.thebrain.com/{BRAIN_TOKEN}/{home}"
-        return foreign + "\n".join(
+        return foreign + "\n\n".join(
             f"[{label}]({uri})"
-            for label in ["&#X4D;", "&#000000077;", "&copycat;", "&#128;", "&amp;copy;"]
+            for label in [
+                "&#X4D;",
+                "&#000000077;",
+                "&copycat;",
+                "&#128;",
+                "&amp;copy;",
+                r"\`A&copy;`",
+                "`A&copy;``",
+                r"`A&copy;\`",
+            ]
         )
 
     brz_body = authored("AAAAAAAAAAAAAAAAAAAAAQ")
@@ -288,7 +310,7 @@ def test_independent_full_audit_accepts_literal_and_decoded_labels_from_public_o
             for target in record["item_targets"]
             for d in target["documents"]
         )
-        == 5
+        == 8
     )
 
 

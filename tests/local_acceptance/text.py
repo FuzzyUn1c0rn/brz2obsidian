@@ -390,7 +390,7 @@ def generated_boundary(prefix):
     return ""
 
 
-def active_mask(body, *, autolinks=True, inline_only=False):
+def active_mask(body, *, autolinks=True, inline_only=False, _code_spans=None):
     """Lexically protect constructs in source order with exact raw coordinates."""
     if inline_only:
         # A reference display label is an inline fragment, not a new block.
@@ -416,6 +416,8 @@ def active_mask(body, *, autolinks=True, inline_only=False):
                 )
                 if close:
                     stop = end + close.end()
+                    if _code_spans is not None:
+                        _code_spans.append((cursor, stop, end, stop - (end - cursor)))
                 else:
                     cursor = end
                     continue
@@ -443,6 +445,13 @@ def active_mask(body, *, autolinks=True, inline_only=False):
             else:
                 cursor += 1
     return "".join(mask)
+
+
+def inline_code_spans(body):
+    """Exact code coordinates from the established source-order activity scan."""
+    spans = []
+    active_mask(body, inline_only=True, _code_spans=spans)
+    return tuple(spans)
 
 
 def inline_candidates(body, *, inline_only=False):

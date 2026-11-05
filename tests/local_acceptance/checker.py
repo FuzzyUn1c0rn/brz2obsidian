@@ -45,7 +45,12 @@ from .support import (
     check_support_content,
     tag_listing,
 )
-from .text import generated_boundary, inline_candidates, literal_edits
+from .text import (
+    generated_boundary,
+    inline_candidates,
+    inline_code_spans,
+    literal_edits,
+)
 
 ROOTS = (
     "meta.json",
@@ -1208,13 +1213,11 @@ def inline_display(value):
         protected.append(text)
         return "\x00" + str(len(protected) - 1) + "\x00"
 
-    def code(match):
-        text = re.sub(r"\r\n?|\n", " ", match[2])
+    for begin, end, content_start, content_end in reversed(inline_code_spans(value)):
+        text = re.sub(r"\r\n?|\n", " ", value[content_start:content_end])
         if text.startswith(" ") and text.endswith(" ") and text.strip():
             text = text[1:-1]
-        return keep(text)
-
-    value = re.sub(r"(?<!`)(`+)(?!`)(.*?)\1(?!`)", code, value, flags=re.DOTALL)
+        value = value[:begin] + keep(text) + value[end:]
     value = re.sub(
         r'\\([!"#$%&\'()*+,\-./:;<=>?@\[\]\\^_`{|}~])',
         lambda match: keep(match[0] if match[1] == "<" else match[1]),
