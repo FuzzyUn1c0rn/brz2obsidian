@@ -116,7 +116,9 @@ def transition_facts(history, original, incoming, *, proposal_id, generation):
 def prepare_format_transition(operations, vault, source=None):
     history = None
     try:
-        history, stopped = _history(operations, vault, onboarding=True)
+        history, stopped = _history(
+            operations, vault, onboarding=True, new_operation="format_transition"
+        )
         if stopped is not None and stopped.code not in (
             "format_transition_required",
             "source_profile_unavailable",

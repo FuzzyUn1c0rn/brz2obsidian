@@ -2088,6 +2088,12 @@ def _apply_reviewed_update(
     selected = select_review_effects(review)
     if selected.status != "selected":
         return outcome("refused", selected.code, start=start)
+    purpose = (
+        {"new_operation": "format_transition"}
+        if undo_target is None
+        and review.facts.format_operation.kind == "format_transition"
+        else {}
+    )
     root, source = Path(vault).absolute(), Path(source).absolute()
     if not supported_durable_volume(root):
         return outcome("refused", "unsupported_durable_volume", start=start)
@@ -2137,6 +2143,7 @@ def _apply_reviewed_update(
             inspections = []
             reviewed_observation = _inspect_history(
                 root,
+                **purpose,
                 _capture=lambda inspection, admission: inspections.append(inspection),
             )
             inspected = inspections[0] if inspections else None
@@ -2152,6 +2159,7 @@ def _apply_reviewed_update(
             first = _inspect_history(
                 root,
                 subjects=subjects,
+                **purpose,
                 recovery_observation=retained_history[1] if retained_history else None,
             )
         else:
@@ -2220,7 +2228,9 @@ def _apply_reviewed_update(
         _acquire(root, operation_id)
         acquired = True
         observed = (
-            inspect_history(root, subjects=subjects, active_operation=operation_id)
+            inspect_history(
+                root, subjects=subjects, active_operation=operation_id, **purpose
+            )
             if retained_history is None
             else _inspect_retained_history(
                 root,

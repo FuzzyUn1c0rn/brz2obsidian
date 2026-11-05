@@ -383,6 +383,23 @@ recovery, latest Undo and matching-history repair actions. Closing an active
 operation offers background/wait/safe-stop choices; a stop request is not a
 completed rollback.
 
+Older BRZ vaults using profile 10/output 7 or recorded profile 9/output 6 need a
+separate format transition to profile 11/output 8. Keep the same unchanged,
+scoped BRZ while reviewing and completing that transition. Then prepare the
+changed BRZ as a separate source update. If supported history is missing, review
+onboarding and save the preservation choices first. Local notes, aliases,
+category memberships, appearance providers, templates and configuration remain
+subject to the explicit review choices.
+
+Saved output 7 reviews retain their recorded interpretation and original-byte
+evidence. Missing originals stay unknown: current vault notes and a new output 8
+render cannot prove the bytes an older renderer produced. Refreshing a review
+rechecks the full selected category/provider chains and their used resources,
+including providers beyond the native eight-link display limit; changes can
+retire dependent approvals while preserving unrelated decisions. After applying
+changes, close and reopen affected category dashboards and the Categories
+overview in Obsidian as described below.
+
 Review preparation currently accepts **BRZ sources**. Start with status, then
 prepare and persist the incoming review:
 

@@ -691,6 +691,7 @@ class CheckpointReviewMemo:
                 _onboarding_absence_review(review),
                 review_ownership_claims(review.saved.plan, review.historical_effects),
                 _review_queries(review),
+                review.saved.plan.facts.format_operation.kind,
             )
         else:
             metadata = self._entries[key]
@@ -860,6 +861,8 @@ def _role_policy(association, manifest, queries):
     # Policy equivalence requires separate fresh proof of BOTH stored policies.
     # A completed SOURCE RESULT may instead supply ONLY its physical history
     # anchor to its first LOCAL memo, with that memo's own policy freshly proved.
+    # A new format memo may likewise use its actual onboarding LOCAL as a
+    # supported storage parent, without changing the onboarding replay meaning.
     # Neither basis transfers a grant or a saved readiness verdict.
     return _RolePolicy(
         (
@@ -921,6 +924,7 @@ class _CheckpointRole(NamedTuple):
     onboarding_absence: bool = False
     review_context_fingerprint: str | None = None
     policy_context: _RolePolicy | None = None
+    review_kind: str | None = None
 
 
 def _review_context_fingerprint(association, manifest):
@@ -1270,6 +1274,9 @@ def _read(
                         if manifest.review_object is not None
                         else None,
                     ),
+                    review_kind=review_metadata[10]
+                    if manifest.review_object is not None
+                    else None,
                 )
             )
         if manifest.reviewed_source is not None and (
@@ -1367,6 +1374,9 @@ def _read(
                         if manifest.review_object is not None
                         else None,
                     ),
+                    review_kind=review_metadata[10]
+                    if manifest.review_object is not None
+                    else None,
                 )
             )
         if tip_manifest is None:
@@ -1570,6 +1580,7 @@ def _inspect_history(
     checkpoint_observation=None,
     recovery_observation=None,
     _capture=None,
+    new_operation=None,
 ):
     root = Path(vault).absolute()
     admission, history = _observe_vault(
@@ -1580,6 +1591,7 @@ def _inspect_history(
         checkpoint_observation=checkpoint_observation,
         recovery_observation=recovery_observation,
         _capture=_capture,
+        _new_operation=new_operation,
     )
     status = "unavailable"
     try:
@@ -1614,12 +1626,20 @@ def _inspect_history(
     )
 
 
-def inspect_history(vault, *, subjects=(), git_executable=None, active_operation=None):
+def inspect_history(
+    vault,
+    *,
+    subjects=(),
+    git_executable=None,
+    active_operation=None,
+    new_operation=None,
+):
     return _inspect_history(
         vault,
         subjects=subjects,
         git_executable=git_executable,
         active_operation=active_operation,
+        new_operation=new_operation,
     )
 
 
@@ -1757,7 +1777,7 @@ class _UpdateRead:
         self._check()
         return result
 
-    def inspect(self, *, subjects):
+    def inspect(self, *, subjects, new_operation=None):
         from .vault_admission import _same_current_domain
 
         self._check()
@@ -1771,6 +1791,7 @@ class _UpdateRead:
             _capture=lambda inspection, admission: captured.append(
                 (inspection, admission)
             ),
+            new_operation=new_operation,
         )
         self._check()
         if (
@@ -1884,6 +1905,21 @@ def capture_checkpoint(
             )
         ):
             return result("refused", "invalid_checkpoint_boundary")
+        saved_result = (
+            save_review(review)
+            if review is not None
+            and review.facts.format_operation.kind == "format_transition"
+            else None
+        )
+        if saved_result is not None and saved_result.status != "saved":
+            return result("refused", "invalid_current_review")
+        new_operation = (
+            "format_transition"
+            if saved_result is not None
+            and saved_result.record.plan.facts.format_operation.kind
+            == "format_transition"
+            else None
+        )
         captured_inspections = []
         observed_history = (
             _inspect_history(
@@ -1891,6 +1927,7 @@ def capture_checkpoint(
                 subjects=subjects,
                 git_executable=git_executable,
                 active_operation=active_operation,
+                new_operation=new_operation,
                 _capture=lambda inspection, admission: captured_inspections.append(
                     inspection
                 ),
@@ -2048,7 +2085,8 @@ def capture_checkpoint(
             return result("refused", "prepared_history_required")
         saved = None
         if review is not None:
-            saved_result = save_review(review)
+            if saved_result is None:
+                saved_result = save_review(review)
             if (
                 saved_result.status != "saved"
                 or (

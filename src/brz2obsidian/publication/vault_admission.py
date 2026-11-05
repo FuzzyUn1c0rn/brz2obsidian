@@ -396,7 +396,11 @@ class _Inspection:
         recovery_observation=None,
         checkpoint_observation=None,
         policy_probe=False,
+        new_operation=None,
     ):
+        if new_operation not in (None, "format_transition"):
+            raise ValueError("Unsupported new-operation observation purpose")
+        self.new_operation = new_operation
         self.root = Path(vault).absolute()
         self.subjects = ()
         self.request_subjects = subjects
@@ -2066,6 +2070,49 @@ class _Inspection:
             and fresh.preflight.consents == current.requirements
         )
 
+    def _saved_format_parent(self, role, parent, admission, observations):
+        """A saved format memo may use its actual onboarding LOCAL as storage."""
+        if (
+            self.policy_probe
+            or admission is None
+            or admission.status != "supported"
+            or not admission.inventory_complete
+            or self.operation != "idle"
+            or role.boundary != "local"
+            or role.review_kind != "format_transition"
+            or parent.boundary != "local"
+            or parent.review_kind != "onboarding"
+            or role.previous != parent.commit
+            or role.generation != parent.generation + 1
+        ):
+            return False
+        current, previous = role.policy_context, parent.policy_context
+        tip = self.checkpoint_roles[0].policy_context
+        physical = self.history.locator.model_copy(
+            update={"commit": parent.commit, "generation": parent.generation}
+        )
+        if (
+            current is None
+            or previous is None
+            or tip is None
+            or current.context_basis != previous.context_basis
+            or current.context_basis != tip.context_basis
+            or current.memo_basis != tip.memo_basis
+            or role.review_parent_fingerprint != self._state_fingerprint(physical)
+        ):
+            return False
+        try:
+            fresh = self._policy_observation(current.subjects, admission, observations)
+        except OSError, ValueError, TypeError:
+            return False
+        # Only the memo's history anchor is proved; no parent grant is borrowed.
+        return (
+            fresh is not None
+            and (fresh.policy_fingerprint, fresh.policy_continuity_fingerprint)
+            == current.fingerprints
+            and fresh.preflight.consents == current.requirements
+        )
+
     def _review_locator(self, admission=None, observations=None):
         """Keep memo dependencies on their proved parent, after full validation."""
         locator = self.history.locator
@@ -2098,6 +2145,7 @@ class _Inspection:
                     or self._completed_source_review_parent(
                         role, parent, admission, observations
                     )
+                    or self._saved_format_parent(role, parent, admission, observations)
                     or parent.boundary in ("local", "result")
                     and self._qualified_policy_context(
                         role, parent, admission, observations
@@ -2117,7 +2165,15 @@ class _Inspection:
                         physical_parent
                     ):
                         selected = physical_parent
-                elif role.review_parent_fingerprint == self._review_state(context)[0]:
+                elif (
+                    role.review_parent_fingerprint
+                    == self._review_state(
+                        context,
+                        checkpoint_state=parent.review_kind == "format_transition"
+                        and parent.review_parent_fingerprint
+                        == self._state_fingerprint(context),
+                    )[0]
+                ):
                     selected = context
                 elif role.review_parent_fingerprint == self._state_fingerprint(
                     physical_parent
@@ -2126,9 +2182,49 @@ class _Inspection:
             parent, context = role, selected
         return context
 
-    def _review_state(self, locator):
+    def _review_context(self, admission=None, observations=None):
+        locator = self._review_locator(admission, observations)
+        roles = self.checkpoint_roles
+        if (
+            self.new_operation == "format_transition"
+            and not self.policy_probe
+            and self.operation == "idle"
+            and self.complete
+            and not self.findings
+            and self.history is not None
+            and self.history.status == "valid"
+            and roles
+            and roles[0].commit == self.history.locator.commit
+            and roles[0].generation == self.history.locator.generation
+            and roles[0].boundary == "local"
+            and roles[0].review_kind == "onboarding"
+            and roles[0].operation_intent_commit is None
+            and roles[0].undo_of_receipt_commit is None
+            and roles[0].recovery_origin_intent_commit is None
+            and roles[0].recovery_previous_operation_commit is None
+            and roles[0].recovery_direction is None
+        ):
+            return self.history.locator, True
+        return locator, bool(
+            roles
+            and roles[0].boundary == "local"
+            and roles[0].review_kind == "format_transition"
+            and roles[0].operation_intent_commit is None
+            and roles[0].undo_of_receipt_commit is None
+            and roles[0].recovery_origin_intent_commit is None
+            and roles[0].recovery_previous_operation_commit is None
+            and roles[0].recovery_direction is None
+            and roles[0].review_parent_fingerprint == self._state_fingerprint(locator)
+        )
+
+    def _review_state(self, locator, *, checkpoint_state=False):
         supported = self.history is not None and self.history.status == "valid"
-        if supported and self.operation == "idle" and locator is not None:
+        if (
+            not checkpoint_state
+            and supported
+            and self.operation == "idle"
+            and locator is not None
+        ):
             role = next(
                 (
                     role
@@ -2234,10 +2330,13 @@ class _Inspection:
             if self.repo.kind == "none"
             else ("review_history",)
         )
-        authority, state_status, state_schema, state_version = self._review_state(
-            self._review_locator()
+        locator, checkpoint_state = (
+            self._review_context()
             if self.history is not None and self.history.status == "valid"
-            else None
+            else (None, False)
+        )
+        authority, state_status, state_schema, state_version = self._review_state(
+            locator, checkpoint_state=checkpoint_state
         )
         preflight = ReviewPreflight(
             schema_id="brz2obsidian.review-preflight",
@@ -2286,8 +2385,9 @@ class _Inspection:
                     self,
                 )
             }
+            locator, checkpoint_state = self._review_context(result, observations)
             authority, state_status, state_schema, state_version = self._review_state(
-                self._review_locator(result, observations)
+                locator, checkpoint_state=checkpoint_state
             )
             result = result.model_copy(
                 update={
@@ -2314,6 +2414,7 @@ def _observe_vault(
     checkpoint_observation=None,
     _capture=None,
     _policy_probe=False,
+    _new_operation=None,
 ):
     """Observe current storage; caller assertions cannot grant trusted proof."""
     inspection = _Inspection(
@@ -2324,6 +2425,7 @@ def _observe_vault(
         recovery_observation,
         checkpoint_observation,
         _policy_probe,
+        _new_operation,
     )
     try:
         with inspection.resources:

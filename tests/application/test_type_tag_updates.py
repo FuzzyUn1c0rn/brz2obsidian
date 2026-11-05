@@ -225,7 +225,7 @@ def test_current_type_tag_vault_prepares_same_source_without_format_transition(
     ).read_bytes()
 
 
-def fresh_resume(vault, output):
+def fresh_resume(vault, output, *, expected_code="unchanged"):
     checkout = Path(__file__).resolve().parents[2]
     script = (
         "import json,pathlib,sys\n"
@@ -260,7 +260,7 @@ def fresh_resume(vault, output):
         "loaded_code": "revalidation_required",
         "loaded_ready": False,
         "status": "prepared_review",
-        "code": "unchanged",
+        "code": expected_code,
     }, summary
     return UpdatePreparation.model_validate_json(output.read_bytes())
 
@@ -285,6 +285,68 @@ def test_type_tag_changes_survive_partial_save_fresh_resume_selective_refresh_an
         update_root, source=source, onboarding=True
     )
     exercise_partial_update(update_root, operations, vault, original)
+
+
+def test_type_tag_update_inputs_preserve_qualified_reference_and_video_versions(
+    tmp_path,
+):
+    for version, uri, title in (
+        (
+            1,
+            "https://www.youtube.com/watch?index=00&list=original%2Fcontext&v=SYNTHVID001",
+            "Original video",
+        ),
+        (
+            2,
+            "https://www.youtube.com/watch?list=updated%2Bcontext&v=SYNTHVID002&index=next",
+            "Updated video",
+        ),
+    ):
+        source = update_source(tmp_path / f"source{version}.brz", version=version)
+        vault = tmp_path / f"vault{version}"
+        result = default_workflow().convert(source, vault)
+        assert result.outcome == "clean", result.issues
+        independent = (vault / "Notes/Independent.md").read_bytes()
+        assert f"- [{title}](<{uri}>)".encode() in independent
+        video_id = "SYNTHVID001" if version == 1 else "SYNTHVID002"
+        assert (
+            f'<iframe src="https://www.youtube.com/embed/{video_id}?start=0"'.encode()
+            in independent
+        )
+        label = "Original reference" if version == 1 else "Updated reference"
+        assert (
+            f"[[Notes/Independent.md|{label}]]".encode()
+            in (vault / "Notes/D.md").read_bytes()
+        )
+        record = json.loads((vault / "migration-record.json").read_bytes())
+        external = next(a for a in record["asset_targets"] if a.get("external_uri"))
+        assert external["external_uri"] == external["resource_link"] == uri
+        assert external["video_presentation"]["embed_uri"] == (
+            f"https://www.youtube.com/embed/{video_id}?start=0"
+        )
+        raw = next(
+            r
+            for group in record["original_evidence"]
+            for r in group["records"]
+            if r.get("Type") == 3
+        )
+        assert raw["Name"] == title and raw["Location"] == uri
+        assert raw["VideoHtml"] == (
+            "<iframe width='100%' height='100%' "
+            f"src='https://www.youtube.com/embed/{video_id}?start=0' "
+            "frameborder='0'></iframe>"
+        )
+        source_reference = next(
+            reference
+            for item in record["item_targets"]
+            for document in item["documents"]
+            for reference in document["references"]
+            if reference["target"] == INDEPENDENT
+        )
+        assert source_reference["source_target"] == (
+            "brain://api.thebrain.com/EREREREREUGBEREREREREQ/"
+            f"AAAAAAAAAAAAAAAAAAAAEw/version-{version}"
+        )
 
 
 def exercise_partial_update(update_root, operations, vault, original):

@@ -27,7 +27,7 @@ from tests.support.type_tag_sources import BRAIN, ICON, PNG, brz_source
 __all__ = ["update_root"]
 
 
-def seed_format7(root, *, category_edit=False):
+def seed_format7(root, *, category_edit=False, tracked=True):
     payload, _ = historical_payload()
     original, vault = root / "original7", root / "vault"
     for relative, raw in payload.items():
@@ -55,6 +55,8 @@ def seed_format7(root, *, category_edit=False):
     git(vault, "add", "Manual.md")
     git(vault, "commit", "-qm", "Retained independent user history")
     operations = Operations()
+    if not tracked:
+        return operations, vault, source, current
     identity = OutputIdentity(
         collection_id="7b170eec-a7e4-49f6-a0b4-bd553528a201",
         module_id="thebrain-brz",
@@ -152,6 +154,39 @@ def test_actual_format7_requires_source_stable_transition_and_accepts_target8_ch
         for state in context.incoming_target_facts
         if state.structure
     } == {8}
+    complete_format7_route(
+        operations,
+        vault,
+        source,
+        current,
+        update_root,
+        prepared,
+        support_path=support_path,
+        support=support,
+        configuration=configuration,
+        user_before=user_before,
+        item_id=note.item_id,
+        current_path=note.current.path,
+    )
+
+
+def complete_format7_route(
+    operations,
+    vault,
+    source,
+    current,
+    update_root,
+    prepared,
+    *,
+    support_path,
+    support,
+    configuration,
+    user_before,
+    item_id,
+    current_path,
+    unknown_originals=False,
+):
+    """The same explicitly chosen transition and separate source operation."""
     guide = next(
         c
         for c in prepared.review.proposal.changes
@@ -173,8 +208,30 @@ def test_actual_format7_requires_source_stable_transition_and_accepts_target8_ch
         a for a in chosen.preparation.review.approvals if a.change_id == guide.change_id
     )
     assert approval.result.data == guide.incoming.data
-    assert (vault / "Categories/Local category.md").read_bytes() == current
+    assert (vault / current_path).read_bytes() == current
     prepared = chosen.preparation
+    anchor = prepared.review.preflight
+    if unknown_originals:
+        original_parent = prepared.locator
+        saved_partial = measured(
+            update_root, "unknown7-format-first-save", operations.save_update, prepared
+        )
+        assert saved_partial.code == "saved", saved_partial.code
+        assert saved_partial.checkpoint.generation == original_parent.generation + 1
+        prepared = measured(
+            update_root,
+            "unknown7-format-first-cold",
+            fresh_resume,
+            vault,
+            update_root / "unknown7-format-first-cold.json",
+        )
+        assert prepared.review.approvals == chosen.preparation.review.approvals
+        assert prepared.review.preflight == anchor
+        assert anchor.state_status == "supported"
+        assert all(
+            s.baseline.status == "unknown" and s.baseline.content is None
+            for s in prepared.review.facts.subjects
+        )
     template = next(
         change
         for change in prepared.review.proposal.changes
@@ -191,6 +248,27 @@ def test_actual_format7_requires_source_stable_transition_and_accepts_target8_ch
         ),
     )
     assert preserved.code == "accepted", preserved.code
+    if unknown_originals:
+        saved_again = measured(
+            update_root,
+            "unknown7-format-second-save",
+            operations.save_update,
+            preserved.preparation,
+        )
+        assert saved_again.code == "saved", saved_again.code
+        assert (
+            saved_again.checkpoint.generation == saved_partial.checkpoint.generation + 1
+        )
+        second = measured(
+            update_root,
+            "unknown7-format-second-cold",
+            fresh_resume,
+            vault,
+            update_root / "unknown7-format-second-cold.json",
+        )
+        assert second.review.preflight == anchor
+        assert second.review.approvals == preserved.preparation.review.approvals
+        preserved = preserved.model_copy(update={"preparation": second})
     prepared = measured(
         update_root,
         "format7-resolve",
@@ -204,7 +282,7 @@ def test_actual_format7_requires_source_stable_transition_and_accepts_target8_ch
     # versions. Current Home and template bytes retain their authored contents;
     # stock guide and report references name their explicitly selected versions.
     for index, item in enumerate(
-        (note.item_id, "support:MIGRATION REPORT.md", "support:Vault guide.md")
+        (item_id, "support:MIGRATION REPORT.md", "support:Vault guide.md")
     ):
         plan = prepared.review
         comparison = next(c for c in plan.proposal.changes if c.item_id == item)
@@ -246,12 +324,25 @@ def test_actual_format7_requires_source_stable_transition_and_accepts_target8_ch
     )
     assert resumed.review.approvals == decisions
     assert resumed.review.ready and resumed.kind == "format_transition"
+    if unknown_originals:
+        assert resumed.review.preflight == anchor
+        assert resumed.review.facts.format_operation.established_baseline is None
+        assert all(
+            s.baseline.status == "unknown" and s.baseline.content is None
+            for s in resumed.review.facts.subjects
+        )
+    refreshed = measured(
+        update_root, "format7-refresh", operations.refresh_update, resumed
+    )
+    assert refreshed.ready, (refreshed.code, refreshed.preparation.review.blockers)
+    assert refreshed.preparation.review.approvals == decisions
+    resumed = refreshed.preparation
     applied = measured(update_root, "format7-apply", operations.apply_update, resumed)
     assert applied.status == "applied" and applied.kind == "format_transition", (
         applied.code
     )
     assert applied.application.history == "terminal"
-    assert (vault / "Categories/Local category.md").read_bytes() == current
+    assert (vault / current_path).read_bytes() == current
     assert (vault / support_path).read_bytes() == support
     assert (vault / ".obsidian/app.json").read_bytes() == configuration
     assert user_git_state(vault) == user_before
@@ -260,6 +351,11 @@ def test_actual_format7_requires_source_stable_transition_and_accepts_target8_ch
         checkpoint.status == "valid" and checkpoint.manifest.identity.output_format == 8
     )
     assert checkpoint.review.saved.plan.facts.baseline_identity.output_format == 7
+    if unknown_originals:
+        assert all(
+            s.baseline.status == "unknown" and s.baseline.content is None
+            for s in checkpoint.review.saved.plan.facts.subjects
+        )
     assert operations.prepare_undo(vault).code == "latest_operation_is_maintenance"
     archive_b = changed_source(update_root / "separate-source-b.brz")
     updated = measured(
@@ -274,12 +370,19 @@ def test_actual_format7_requires_source_stable_transition_and_accepts_target8_ch
     )
     assert updated.preparation.review.facts.baseline_identity.output_format == 8
     assert updated.preparation.review.facts.incoming_identity.output_format == 8
+    if unknown_originals:
+        # This is the actually published format8 source baseline. It supplies
+        # no missing original bytes to the retained historical7 review above.
+        assert (
+            updated.preparation.review.facts.format_operation.established_baseline.identity.output_format
+            == 8
+        )
     assert (
         updated.preparation.review.facts.format_operation.baseline_source_version
         != updated.preparation.review.facts.format_operation.target_source_version
     )
     plan = updated.preparation.review
-    change = next(c for c in plan.proposal.changes if c.item_id == note.item_id)
+    change = next(c for c in plan.proposal.changes if c.item_id == item_id)
     expected = current.replace(
         b"Independent legacy source body.", b"Separate source B body."
     )
@@ -303,10 +406,107 @@ def test_actual_format7_requires_source_stable_transition_and_accepts_target8_ch
         published.code
     )
     assert published.application.history == "terminal"
-    assert (vault / "Categories/Local category.md").read_bytes() == expected
+    assert (vault / current_path).read_bytes() == expected
     assert (vault / support_path).read_bytes() == support
     assert (vault / ".obsidian/app.json").read_bytes() == configuration
     assert user_git_state(vault) == user_before
+
+
+def test_unknown_format7_original_survives_saved_onboarding_and_separate_transition(
+    update_root,
+):
+    operations, vault, source, current = seed_format7(update_root, tracked=False)
+    configuration = b'{"user":"retain legacy7 configuration"}\r\n'
+    (vault / ".obsidian/app.json").write_bytes(configuration)
+    support_path = "Templates/New note.md"
+    support = (vault / support_path).read_bytes() + b"\nLocal template writing.\n"
+    (vault / support_path).write_bytes(support)
+    before = user_git_state(vault)
+    offered = measured(
+        update_root, "unknown7-onboarding", operations.prepare_onboarding, vault, source
+    )
+    assert offered.status == "prepared_review" and offered.kind == "onboarding", (
+        offered.code
+    )
+    prepared = offered.preparation
+    assert prepared.original_source_ref is None
+    assert prepared.review.facts.baseline_identity.output_format == 7
+    assert prepared.review.facts.incoming_identity.output_format == 8
+    assert prepared.review.facts.format_operation.established_baseline is None
+    assert all(
+        s.baseline.status == "unknown" and s.baseline.content is None
+        for s in prepared.review.facts.subjects
+    )
+    change = next(
+        c
+        for c in prepared.review.proposal.changes
+        if c.item_id == "5f71e626-527e-47b4-abaa-e53d124619f8"
+    )
+    chosen = operations.resolve_update(
+        prepared,
+        action(
+            prepared.review,
+            change,
+            domain="format",
+            choice="current",
+            decision_id="preserve-unknown7-current",
+        ),
+    )
+    assert chosen.code == "accepted", chosen.code
+    saved = measured(
+        update_root, "unknown7-save", operations.save_update, chosen.preparation
+    )
+    assert saved.code == "saved", saved.code
+    resumed = measured(
+        update_root,
+        "unknown7-fresh-resume",
+        fresh_resume,
+        vault,
+        update_root / "unknown7-resumed.json",
+        expected_code="current",
+    )
+    assert resumed.review.approvals == chosen.preparation.review.approvals
+    assert resumed.original_source_ref is None
+    assert all(
+        s.baseline.status == "unknown" and s.baseline.content is None
+        for s in resumed.review.facts.subjects
+    )
+    transitioned = measured(
+        update_root,
+        "unknown7-transition",
+        operations.prepare_format_transition,
+        vault,
+        source,
+    )
+    assert transitioned.status == "prepared_review", transitioned.code
+    facts = transitioned.preparation.review.facts
+    assert facts.baseline_identity.output_format == 7
+    assert facts.incoming_identity.output_format == 8
+    assert facts.format_operation.kind == "format_transition"
+    assert facts.format_operation.baseline_source_version == (
+        facts.format_operation.target_source_version
+    )
+    assert all(
+        s.baseline.status == "unknown" and s.baseline.content is None
+        for s in facts.subjects
+    )
+    assert (vault / NOTE).read_bytes() == current
+    assert user_git_state(vault) == before
+    complete_format7_route(
+        operations,
+        vault,
+        source,
+        current,
+        update_root,
+        transitioned.preparation,
+        support_path=support_path,
+        support=support,
+        configuration=configuration,
+        user_before=before,
+        item_id=change.item_id,
+        current_path=NOTE,
+        unknown_originals=True,
+    )
 
 
 @pytest.mark.parametrize("version,profile", [(6, "9"), (7, "10"), (8, "11")])

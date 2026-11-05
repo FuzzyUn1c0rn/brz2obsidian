@@ -64,8 +64,20 @@ def update_source(path, *, version=1):
     parts["thoughts.json"] = b"\n".join(json.dumps(row).encode() for row in thoughts)
     attachments = [json.loads(line) for line in parts["attachments.json"].splitlines()]
     meta = json.loads(parts["meta.json"])
-    for number, label in ((11, "B"), (12, "C"), (17, "T"), (19, "Independent")):
+    for number, label in (
+        (11, "B"),
+        (12, "C"),
+        (13, "D"),
+        (17, "T"),
+        (19, "Independent"),
+    ):
         raw = f"Source {label} v{version}.\r\n".encode()
+        if number == 13:
+            label = "Original reference" if version == 1 else "Updated reference"
+            raw += (
+                f"[{label}](brain://api.thebrain.com/EREREREREUGBEREREREREQ/"
+                f"AAAAAAAAAAAAAAAAAAAAEw/version-{version})\r\n"
+            ).encode()
         asset = identity(2100 + number)
         attachments.append(
             {
@@ -82,6 +94,28 @@ def update_source(path, *, version=1):
         )
         meta["AttachmentFileStates"][asset] = 1
         parts[identity(number) + "/Notes.md"] = raw
+    attachments.append(
+        {
+            "Id": identity(2200),
+            "BrainId": BRAIN,
+            "SourceId": INDEPENDENT,
+            "SourceType": 2,
+            "Type": 3,
+            "NoteType": 0,
+            "DataLength": 0,
+            "Location": (
+                "https://www.youtube.com/watch?index=00&list=original%2Fcontext&v=SYNTHVID001"
+                if version == 1
+                else "https://www.youtube.com/watch?list=updated%2Bcontext&v=SYNTHVID002&index=next"
+            ),
+            "Name": "Original video" if version == 1 else "Updated video",
+            "VideoHtml": (
+                "<iframe width='100%' height='100%' "
+                "src='https://www.youtube.com/embed/SYNTHVID001?start=0' "
+                "frameborder='0'></iframe>"
+            ).replace("SYNTHVID001", "SYNTHVID002" if version >= 2 else "SYNTHVID001"),
+        }
+    )
     icon = GREEN if version == 1 else BLUE
     attachments[0]["DataLength"] = len(icon)
     parts[identity(10) + "/.data/Icon.png"] = icon

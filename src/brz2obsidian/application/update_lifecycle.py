@@ -64,9 +64,22 @@ def _refused(code, history=None, *, action="inspect_history", preparation=None):
     )
 
 
-def _history(operations, vault, observed=None, *, onboarding=False, maintenance=False):
+def _history(
+    operations,
+    vault,
+    observed=None,
+    *,
+    onboarding=False,
+    maintenance=False,
+    new_operation=None,
+):
+    purpose = {"new_operation": new_operation} if new_operation is not None else {}
     history = (
-        operations.inspect_history(vault) if observed is None else observed.history
+        operations.inspect_history(vault, **purpose)
+        if observed is None
+        else observed.inspect(subjects=(), **purpose)
+        if purpose
+        else observed.history
     )
     if history.admission.status == "recovery_first":
         checkpoint = history.checkpoint
@@ -610,10 +623,17 @@ def _prepared(
 
 def _scoped(operations, history, facts, review=None, observed=None):
     subjects = _subjects(facts, review)
+    purpose = (
+        {"new_operation": "format_transition"}
+        if facts.format_operation.kind == "format_transition"
+        else {}
+    )
     scoped = (
-        operations.inspect_history(history.admission.vault, subjects=subjects)
+        operations.inspect_history(
+            history.admission.vault, subjects=subjects, **purpose
+        )
         if observed is None
-        else observed.inspect(subjects=subjects)
+        else observed.inspect(subjects=subjects, **purpose)
     )
     if (
         scoped.status != history.status
@@ -1031,7 +1051,11 @@ def _refresh_source_update(operations, preparation, observed, *, source):
     try:
         maintenance = preparation.kind == "format_transition"
         history, stopped = _history(
-            operations, preparation.vault, observed, maintenance=maintenance
+            operations,
+            preparation.vault,
+            observed,
+            maintenance=maintenance,
+            new_operation="format_transition" if maintenance else None,
         )
         if stopped is not None:
             return stopped
@@ -1579,6 +1603,9 @@ def _reobserve_inputs(operations, preparation, observed):
         preparation.vault,
         observed,
         maintenance=preparation.kind == "format_transition",
+        new_operation="format_transition"
+        if preparation.kind == "format_transition"
+        else None,
     )
     if stopped is not None:
         return (None, stopped.model_copy(update={"kind": preparation.kind}), None)

@@ -125,7 +125,8 @@ def test_native_local_checkpoint_keeps_old_identity_and_complete_target_without_
         actual.manifest.identity.output_format == 6
         and actual.manifest.identity.profile_version == "9"
     )
-    assert actual.manifest.reviewed_source.incoming_identity.output_format == 7
+    # This target is rendered by default_workflow with current METADATA.
+    assert actual.manifest.reviewed_source.incoming_identity.output_format == 8
     assert {
         (r.path, r.mode, r.size, r.sha256)
         for r in actual.manifest.reviewed_source.files
