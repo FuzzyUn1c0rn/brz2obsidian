@@ -13,12 +13,13 @@ import os
 import re
 import stat
 import subprocess
+from contextlib import ExitStack
 from pathlib import Path
 from zipfile import ZipFile
 
 from .api_baseline import prepare_controls
 from .api_checker import audit_baseline, check_api_vault, source_facts
-from .api_manifest import load_baseline
+from .api_manifest import _audit_pass, audited, load_baseline
 from .api_recording import ApiRecording, RecordingError, write_json
 from .checker import check_run_result, check_vault, read_source
 from .facts import classifications, member, relationships
@@ -83,6 +84,7 @@ def vault_identity(vault):
     return hashlib.sha256(json.dumps(rows, ensure_ascii=False).encode()).hexdigest()
 
 
+@audited
 def compare_pair(source, baseline, profile_version):
     """Compare raw identities/direct facts and actually measured payload bytes.
 
@@ -200,109 +202,119 @@ def audit_selected(
     }
     stage = "selection"
     try:
-        assert bool(brz_source) == bool(brz_vault), "complete BRZ selection required"
-        assert bool(api_manifest) == bool(manifest_sha256) == bool(api_vault), (
-            "complete API selection required"
-        )
-        assert brz_source or api_manifest, (
-            "at least one complete source selection required"
-        )
-        assert not brz_result or brz_source, "BRZ result requires BRZ selection"
-        assert not api_result or api_manifest, "API result requires API selection"
-        identity = candidate_identity(candidate)
-        report["candidate"] = identity
-        report["inputs"] = {}
-        baseline = None
-        for label, source, vault in (
-            ("brz", brz_source, brz_vault),
-            ("api", api_manifest, api_vault),
-        ):
-            if source is None:
-                continue
-            stage = label + "-source-audit"
-            vault = Path(vault)
-            before_source, before_vault = fingerprint(source), vault_identity(vault)
-            if label == "brz":
-                summary = check_vault(source, vault)
-            else:
-                baseline = load_baseline(source, manifest_sha256)
-                raw_audit = audit_baseline(baseline, profile_version=profile_version)
-                summary = check_api_vault(
-                    baseline, vault, profile_version=profile_version
+        with ExitStack() as passes:
+            assert bool(brz_source) == bool(brz_vault), (
+                "complete BRZ selection required"
+            )
+            assert bool(api_manifest) == bool(manifest_sha256) == bool(api_vault), (
+                "complete API selection required"
+            )
+            assert brz_source or api_manifest, (
+                "at least one complete source selection required"
+            )
+            assert not brz_result or brz_source, "BRZ result requires BRZ selection"
+            assert not api_result or api_manifest, "API result requires API selection"
+            identity = candidate_identity(candidate)
+            report["candidate"] = identity
+            report["inputs"] = {}
+            baseline = None
+            for label, source, vault in (
+                ("brz", brz_source, brz_vault),
+                ("api", api_manifest, api_vault),
+            ):
+                if source is None:
+                    continue
+                stage = label + "-source-audit"
+                vault = Path(vault)
+                before_source, before_vault = fingerprint(source), vault_identity(vault)
+                if label == "brz":
+                    summary = check_vault(source, vault)
+                else:
+                    baseline = passes.enter_context(
+                        _audit_pass(load_baseline(source, manifest_sha256))
+                    )
+                    raw_audit = audit_baseline(
+                        baseline, profile_version=profile_version
+                    )
+                    summary = check_api_vault(
+                        baseline, vault, profile_version=profile_version
+                    )
+                    report["api_source_audit"] = raw_audit
+                    report["non_atomic_acquisition"] = True
+                    if "http_responses" in baseline.data:
+                        acquisition = baseline.json(baseline.data["http_responses"])
+                        report["api_acquisition"] = {
+                            key: acquisition[key]
+                            for key in (
+                                "acquisition_id",
+                                "purpose",
+                                "upstream_api_url",
+                                "upstream_origin",
+                                "effective_upstream_endpoint",
+                            )
+                        }
+                record = json.loads((vault / "migration-record.json").read_bytes())
+                assert record["schema_version"] == output_version and record[
+                    "renderer_version"
+                ] == str(output_version), "explicit audited output generation"
+                result_path = brz_result if label == "brz" else api_result
+                result_binding = {}
+                if result_path:
+                    result_bytes = Path(result_path).read_bytes()
+                    result_binding = {
+                        "result": str(Path(result_path).resolve()),
+                        "result_sha256": hashlib.sha256(result_bytes).hexdigest(),
+                    }
+                    if label == "api":
+                        summary = summary | {
+                            "notes": sum(
+                                row["created"] for row in record["item_targets"]
+                            ),
+                            "files": sum(path.is_file() for path in vault.rglob("*")),
+                            "category_notes": sum(
+                                row["kind"] == 2
+                                for row in source_facts(
+                                    baseline, profile_version=profile_version
+                                )[0].values()
+                            ),
+                            "warnings": len(record["issues"]),
+                        }
+                    check_run_result(json.loads(result_bytes), vault, summary)
+                assert (
+                    fingerprint(source) == before_source
+                    and vault_identity(vault) == before_vault
+                ), "source or output changed during audit"
+                if baseline:
+                    baseline.verify()
+                report["inputs"][label] = {
+                    "source": str(Path(source).resolve()),
+                    "source_sha256": before_source,
+                    "vault": str(vault.resolve()),
+                    "vault_sha256": before_vault,
+                } | result_binding
+                report["audits"][label] = {"outcome": "qualified", "summary": summary}
+            if brz_source and baseline:
+                stage = "pair-comparison"
+                report["pair_comparison"] = compare_pair(
+                    brz_source, baseline, profile_version
                 )
-                report["api_source_audit"] = raw_audit
-                report["non_atomic_acquisition"] = True
-                if "http_responses" in baseline.data:
-                    acquisition = baseline.json(baseline.data["http_responses"])
-                    report["api_acquisition"] = {
-                        key: acquisition[key]
-                        for key in (
-                            "acquisition_id",
-                            "purpose",
-                            "upstream_api_url",
-                            "upstream_origin",
-                            "effective_upstream_endpoint",
-                        )
-                    }
-            record = json.loads((vault / "migration-record.json").read_bytes())
-            assert record["schema_version"] == output_version and record[
-                "renderer_version"
-            ] == str(output_version), "explicit audited output generation"
-            result_path = brz_result if label == "brz" else api_result
-            result_binding = {}
-            if result_path:
-                result_bytes = Path(result_path).read_bytes()
-                result_binding = {
-                    "result": str(Path(result_path).resolve()),
-                    "result_sha256": hashlib.sha256(result_bytes).hexdigest(),
-                }
-                if label == "api":
-                    summary = summary | {
-                        "notes": sum(row["created"] for row in record["item_targets"]),
-                        "files": sum(path.is_file() for path in vault.rglob("*")),
-                        "category_notes": sum(
-                            row["kind"] == 2
-                            for row in source_facts(
-                                baseline, profile_version=profile_version
-                            )[0].values()
-                        ),
-                        "warnings": len(record["issues"]),
-                    }
-                check_run_result(json.loads(result_bytes), vault, summary)
-            assert (
-                fingerprint(source) == before_source
-                and vault_identity(vault) == before_vault
-            ), "source or output changed during audit"
+            stage = "final-input-binding"
             if baseline:
                 baseline.verify()
-            report["inputs"][label] = {
-                "source": str(Path(source).resolve()),
-                "source_sha256": before_source,
-                "vault": str(vault.resolve()),
-                "vault_sha256": before_vault,
-            } | result_binding
-            report["audits"][label] = {"outcome": "qualified", "summary": summary}
-        if brz_source and baseline:
-            stage = "pair-comparison"
-            report["pair_comparison"] = compare_pair(
-                brz_source, baseline, profile_version
+            for row in report["inputs"].values():
+                assert (
+                    fingerprint(row["source"]) == row["source_sha256"]
+                    and vault_identity(row["vault"]) == row["vault_sha256"]
+                ), "source or output changed during final comparison"
+                if "result" in row:
+                    assert fingerprint(row["result"]) == row["result_sha256"], (
+                        "run result changed during audit"
+                    )
+            assert candidate_identity(candidate) == identity, (
+                "candidate changed during audit"
             )
-        stage = "final-input-binding"
-        if baseline:
-            baseline.verify()
-        for row in report["inputs"].values():
-            assert (
-                fingerprint(row["source"]) == row["source_sha256"]
-                and vault_identity(row["vault"]) == row["vault_sha256"]
-            ), "source or output changed during final comparison"
-            if "result" in row:
-                assert fingerprint(row["result"]) == row["result_sha256"], (
-                    "run result changed during audit"
-                )
-        assert candidate_identity(candidate) == identity, (
-            "candidate changed during audit"
-        )
-        report["outcome"] = "qualified"
+            passes.close()
+            report["outcome"] = "qualified"
     except Exception as error:  # noqa: BLE001 - retain a safe refusal for every failure
         report["failure"] = {
             "stage": stage,

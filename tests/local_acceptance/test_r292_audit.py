@@ -1,9 +1,13 @@
 """Independent source-bound complete auditors for the accepted #292 output."""
 
+import asyncio
 import hashlib
 import json
 import shutil
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
+from pathlib import Path
 from zipfile import ZipFile
 
 import pytest
@@ -24,6 +28,7 @@ from tests.local_acceptance.test_api_scope_v3 import scope_baseline
 from tests.support.audit_sources import (
     ABSENT_INTERMEDIATE_ICON,
     SCHEMA,
+    TAG_NOTE,
     VIDEO_URLS,
     paired_audit_source,
     uncreated_tag_source,
@@ -365,6 +370,363 @@ def test_audit_entry_refuses_partial_selection(tmp_path):
     assert json.loads(output.read_bytes()) == result
 
 
+def test_complete_api_audit_bounds_repeated_payload_reads(
+    tmp_path, paired_outputs, monkeypatch
+):
+    _, _, baseline, vault = paired_outputs
+    payload = baseline.data["payloads"][TAG_NOTE]["path"]
+    target = (baseline.manifest_path.parent / payload).resolve()
+    length = target.stat().st_size
+    assert length > 0
+    real_open = Path.open
+    read_bytes = 0
+
+    class MeasuredRead:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def __getattr__(self, name):
+            return getattr(self.stream, name)
+
+        def __enter__(self):
+            self.stream.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.stream.__exit__(*args)
+
+        def read(self, *args):
+            nonlocal read_bytes
+            data = self.stream.read(*args)
+            read_bytes += len(data)
+            return data
+
+        def readinto(self, buffer):
+            nonlocal read_bytes
+            count = self.stream.readinto(buffer)
+            read_bytes += count
+            return count
+
+    def measured_open(path, *args, **kwargs):
+        stream = real_open(path, *args, **kwargs)
+        return MeasuredRead(stream) if path.resolve() == target else stream
+
+    monkeypatch.setattr(Path, "open", measured_open)
+    summary = check_api_vault(baseline, vault, profile_version="4")
+    assert summary == {"thoughts": 22, "relationships": 26, "payloads": 3}
+    (tmp_path / "payload-read-volume.json").write_text(
+        json.dumps({"payload": TAG_NOTE, "length": length, "bytes_read": read_bytes}),
+        encoding="utf-8",
+    )
+    # Full entry/exit scans and necessary consumed reads are allowed. Repeating
+    # a complete payload scan for every asset/note qualification is not.
+    assert 0 < read_bytes <= 12 * length
+
+
+def test_standalone_pair_comparison_rechecks_unused_bound_evidence(
+    tmp_path, paired_outputs, monkeypatch
+):
+    from tests.local_acceptance.audit_run import compare_pair
+
+    source, _, original, _ = paired_outputs
+    evidence = tmp_path / "evidence"
+    shutil.copytree(original.manifest_path.parent, evidence)
+    baseline = load_baseline(evidence / "manifest.json", original.fingerprint)
+    unused = evidence / baseline.data["http_responses"]
+    initial = unused.read_bytes()
+    archive_exit = ZipFile.__exit__
+
+    def after_comparison_read(archive, *args):
+        result = archive_exit(archive, *args)
+        if str(archive.filename) == str(source):
+            unused.write_bytes(initial + b" ")
+        return result
+
+    monkeypatch.setattr(ZipFile, "__exit__", after_comparison_read)
+    with pytest.raises(AssertionError, match="baseline evidence changed"):
+        compare_pair(source, baseline, "4")
+    assert unused.read_bytes() != initial
+
+
+@pytest.mark.parametrize("mutation", ["ids", "numeric-type"])
+def test_caught_nested_declaration_failure_cannot_publish_a_success(
+    paired_outputs, monkeypatch, mutation
+):
+    from tests.local_acceptance.api_scope import qualify_scope
+
+    _, _, baseline, vault = paired_outputs
+    target = (
+        baseline.manifest_path.parent / baseline.data["payloads"][TAG_NOTE]["path"]
+    ).resolve()
+    real_read = Path.read_bytes
+    attempted = False
+
+    def observed_read(path):
+        nonlocal attempted
+        if path.resolve() == target and not attempted:
+            attempted = True
+            container, key = (
+                (baseline.data["scope"], "thought_ids")
+                if mutation == "ids"
+                else (baseline.data["payloads"][TAG_NOTE], "status")
+            )
+            previous = container[key]
+            container[key] = [] if mutation == "ids" else float(previous)
+            try:
+                with pytest.raises(AssertionError, match="changed in memory"):
+                    qualify_scope(baseline, profile_version="4")
+            finally:
+                container[key] = previous
+        return real_read(path)
+
+    monkeypatch.setattr(Path, "read_bytes", observed_read)
+    with pytest.raises(AssertionError):
+        check_api_vault(baseline, vault, profile_version="4")
+    assert attempted
+    monkeypatch.undo()
+    assert check_api_vault(baseline, vault, profile_version="4")["thoughts"] == 22
+
+
+@pytest.mark.parametrize("entry", ["verify", "scope"])
+def test_manifest_association_preserves_numeric_declaration_types(
+    paired_outputs, entry
+):
+    from tests.local_acceptance.api_scope import qualify_scope
+
+    _, _, baseline, _ = paired_outputs
+    outcome = baseline.data["payloads"][TAG_NOTE]
+    previous = outcome["status"]
+    assert type(previous) is int and previous == 200
+    outcome["status"] = 200.0
+    try:
+        with pytest.raises(AssertionError, match="changed in memory"):
+            if entry == "verify":
+                baseline.verify()
+            else:
+                qualify_scope(baseline, profile_version="4")
+    finally:
+        outcome["status"] = previous
+    baseline.verify()
+
+
+def test_copied_execution_context_cannot_reuse_a_finished_audit(
+    tmp_path, paired_outputs, monkeypatch
+):
+    from tests.local_acceptance.api_scope import qualify_scope
+
+    _, _, original, vault = paired_outputs
+    evidence = tmp_path / "evidence"
+    shutil.copytree(original.manifest_path.parent, evidence)
+    baseline = load_baseline(evidence / "manifest.json", original.fingerprint)
+    target = (evidence / baseline.data["payloads"][TAG_NOTE]["path"]).resolve()
+    real_read = Path.read_bytes
+    captured = None
+
+    def observed_read(path):
+        nonlocal captured
+        if path.resolve() == target and captured is None:
+            captured = copy_context()
+        return real_read(path)
+
+    monkeypatch.setattr(Path, "read_bytes", observed_read)
+    assert check_api_vault(baseline, vault, profile_version="4")["thoughts"] == 22
+    assert captured is not None
+    unused = evidence / baseline.data["http_responses"]
+    initial = unused.read_bytes()
+    unused.write_bytes(initial + b" ")
+    try:
+        with pytest.raises(AssertionError, match="baseline evidence changed"):
+            captured.run(qualify_scope, baseline, profile_version="4")
+    finally:
+        unused.write_bytes(initial)
+    assert len(captured.run(qualify_scope, baseline, profile_version="4").graphs) == 22
+
+
+@pytest.mark.parametrize("entry", ["scope", "vault"])
+def test_consumed_evidence_is_pinned_even_when_restored_before_exit(
+    tmp_path, paired_outputs, monkeypatch, entry
+):
+    from tests.local_acceptance.api_scope import qualify_scope
+
+    _, _, original, vault = paired_outputs
+    evidence = tmp_path / "evidence"
+    shutil.copytree(original.manifest_path.parent, evidence)
+    baseline = load_baseline(evidence / "manifest.json", original.fingerprint)
+    target = (evidence / baseline.data["payloads"][TAG_NOTE]["path"]).resolve()
+    initial = target.read_bytes()
+    real_read = Path.read_bytes
+    injected = False
+
+    def transient_read(path):
+        nonlocal injected
+        if path.resolve() == target and not injected:
+            injected = True
+            target.write_bytes(initial + b" tampered")
+            try:
+                return real_read(path)
+            finally:
+                target.write_bytes(initial)
+        return real_read(path)
+
+    monkeypatch.setattr(Path, "read_bytes", transient_read)
+    with pytest.raises(AssertionError):
+        if entry == "scope":
+            qualify_scope(baseline, profile_version="4")
+        else:
+            check_api_vault(baseline, vault, profile_version="4")
+    assert injected and target.read_bytes() == initial
+    monkeypatch.undo()
+    assert len(qualify_scope(baseline, profile_version="4").graphs) == 22
+
+
+@pytest.mark.parametrize("execution", ["thread", "task"])
+def test_concurrent_context_does_not_borrow_the_parent_audit_pass(
+    tmp_path, paired_outputs, monkeypatch, execution
+):
+    from tests.local_acceptance.api_scope import qualify_scope
+
+    _, _, original, vault = paired_outputs
+    evidence = tmp_path / "evidence"
+    shutil.copytree(original.manifest_path.parent, evidence)
+    baseline = load_baseline(evidence / "manifest.json", original.fingerprint)
+    target = (evidence / baseline.data["payloads"][TAG_NOTE]["path"]).resolve()
+    unused = evidence / baseline.data["http_responses"]
+    initial = unused.read_bytes()
+    real_read = Path.read_bytes
+    attempted = False
+
+    def concurrent_check():
+        with pytest.raises(AssertionError, match="baseline evidence changed"):
+            qualify_scope(baseline, profile_version="4")
+
+    async def task_check():
+        concurrent_check()
+
+    def observed_read(path):
+        nonlocal attempted
+        if path.resolve() == target and not attempted:
+            attempted = True
+            unused.write_bytes(initial + b" ")
+            try:
+                if execution == "thread":
+                    copied = copy_context()
+                    with ThreadPoolExecutor(max_workers=1) as executor:
+                        executor.submit(copied.run, concurrent_check).result()
+                else:
+                    asyncio.run(task_check())
+            finally:
+                unused.write_bytes(initial)
+        return real_read(path)
+
+    monkeypatch.setattr(Path, "read_bytes", observed_read)
+    assert check_api_vault(baseline, vault, profile_version="4")["thoughts"] == 22
+    assert attempted and unused.read_bytes() == initial
+
+
+def test_scoped_reads_recheck_containment_after_entry_verification(
+    tmp_path, paired_outputs, monkeypatch
+):
+    from tests.local_acceptance.api_scope import qualify_scope
+
+    _, _, original, _ = paired_outputs
+    evidence = tmp_path / "evidence"
+    shutil.copytree(original.manifest_path.parent, evidence)
+    baseline = load_baseline(evidence / "manifest.json", original.fingerprint)
+    target = (evidence / baseline.data["payloads"][TAG_NOTE]["path"]).resolve()
+    outside = tmp_path / "outside.md"
+    outside.write_bytes(target.read_bytes())
+    probe = tmp_path / "capability-link"
+    try:
+        probe.symlink_to(outside)
+    except OSError as error:
+        pytest.skip("File symlink capability unavailable: " + str(error.errno))
+    probe.unlink()
+    real_open = Path.open
+    backup = target.with_name(target.name + ".retained")
+    injected = False
+
+    class EntryRead:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def __getattr__(self, name):
+            return getattr(self.stream, name)
+
+        def __enter__(self):
+            self.stream.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            nonlocal injected
+            result = self.stream.__exit__(*args)
+            if not injected:
+                target.rename(backup)
+                target.symlink_to(outside)
+                injected = True
+            return result
+
+    def observed_open(path, *args, **kwargs):
+        stream = real_open(path, *args, **kwargs)
+        return EntryRead(stream) if path == target and not injected else stream
+
+    monkeypatch.setattr(Path, "open", observed_open)
+    try:
+        with pytest.raises(AssertionError, match="unsafe audit path"):
+            qualify_scope(baseline, profile_version="4")
+        assert injected and target.is_symlink()
+    finally:
+        if target.is_symlink():
+            target.unlink()
+        if backup.exists():
+            backup.rename(target)
+    monkeypatch.undo()
+    assert len(qualify_scope(baseline, profile_version="4").graphs) == 22
+
+
+def test_scope_results_do_not_share_mutable_data_or_other_baselines(
+    tmp_path, paired_outputs
+):
+    from tests.local_acceptance.api_scope import qualify_scope
+
+    _, _, baseline, _ = paired_outputs
+    first = qualify_scope(baseline, profile_version="4")
+    original_keys = set(first.graphs)
+    assert len(original_keys) == 22 and TAG_NOTE in first.declarations
+    returned_graphs = first.graphs
+    returned_graphs.clear()
+    returned_declarations = first.declarations
+    returned_declarations.clear()
+    assert set(first.graphs) == original_keys and TAG_NOTE in first.declarations
+    other = scope_baseline(tmp_path / "other-source")
+    assert set(qualify_scope(other, profile_version="4").graphs) != original_keys
+    assert set(qualify_scope(baseline, profile_version="4").graphs) == original_keys
+
+
+def test_nested_scope_cache_does_not_authorize_an_unsupported_profile(
+    paired_outputs, monkeypatch
+):
+    from tests.local_acceptance.api_scope import qualify_scope
+
+    _, _, baseline, vault = paired_outputs
+    record = json.loads((vault / "migration-record.json").read_bytes())
+    note = next(row for row in record["item_targets"] if row["original_title"] == "T")
+    target = (vault / note["relative_path"]).resolve()
+    real_read = Path.read_bytes
+    attempted = False
+
+    def observed_read(path):
+        nonlocal attempted
+        if path.resolve() == target and not attempted:
+            attempted = True
+            with pytest.raises(AssertionError, match="unsupported API profile"):
+                qualify_scope(baseline, profile_version="5")
+        return real_read(path)
+
+    monkeypatch.setattr(Path, "read_bytes", observed_read)
+    assert check_api_vault(baseline, vault, profile_version="4")["thoughts"] == 22
+    assert attempted
+
+
 @pytest.mark.parametrize(
     "subject_name",
     [
@@ -452,7 +814,9 @@ def test_pair_comparison_reports_changed_direct_facts(
     assert comparison["direct_classifications_equal"] is True
 
 
-@pytest.mark.parametrize("changed_input", ["bound-payload", "run-result"])
+@pytest.mark.parametrize(
+    "changed_input", ["bound-payload", "run-result", "unused-evidence"]
+)
 def test_pair_audit_refuses_inputs_changed_during_comparison(
     tmp_path, paired_outputs, monkeypatch, changed_input
 ):
@@ -471,8 +835,10 @@ def test_pair_audit_refuses_inputs_changed_during_comparison(
             if row["status"] == 200
         )
         changed = evidence / payload
-    else:
+    elif changed_input == "run-result":
         changed = run_result
+    else:
+        changed = evidence / baseline.data["http_responses"]
     initial = changed.read_bytes()
     real_archive_exit = ZipFile.__exit__
     completed_source_reads = 0

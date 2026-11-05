@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
-from .api_manifest import load_baseline, read_json, safe_path
+from .api_manifest import audited, load_baseline, read_json, safe_path
 from .api_recording import write_json
 from .api_scope import strict
 
@@ -466,6 +466,7 @@ def prepare_controls(directory):
     return load_baseline(directory / "manifest.json", pin)
 
 
+@audited(reuse="coverage")
 def verify_recorded_baseline(baseline):
     """Re-derive coverage and index bindings when a recorded baseline is audited.
 
