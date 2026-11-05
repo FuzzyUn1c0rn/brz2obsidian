@@ -32,7 +32,12 @@ from .facts import (
     member as raw_member,
 )
 from .gaps import derive_gaps, diagnostic_targets
-from .note_links import assert_no_omitted, markdown_destination, thought_destination
+from .note_links import (
+    assert_no_omitted,
+    label_entity,
+    markdown_destination,
+    thought_destination,
+)
 from .scope import dump_json, scope
 from .support import (
     CATEGORY_VIEWS_8,
@@ -1216,8 +1221,8 @@ def inline_display(value):
         value,
     )
     value = re.sub(
-        r"&(?:#[0-9]+|#x[0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]+);",
-        lambda match: keep(html.unescape(match[0])),
+        r"&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});",
+        lambda match: keep(label_entity(match[0])),
         value,
     )
     for _ in range(3):

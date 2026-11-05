@@ -391,7 +391,7 @@ def label_text(value):
         display = inline_display(label)
         if not visible_literals(display).strip():
             display = "Image" if image else ""
-        value = value[:begin] + display + value[end:]
+        value = value[:begin] + keep(visible_literals(display)) + value[end:]
     value = inline_display(value)
     value = re.sub(r"(?: {2,}|\\)?(?:\r\n?|\n)", " ", value)
     value = visible_literals(value).strip() or "Heading"

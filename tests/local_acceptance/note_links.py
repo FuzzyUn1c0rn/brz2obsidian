@@ -17,6 +17,40 @@ class ThoughtDestination:
     qualified: bool
 
 
+def _entity_character(value):
+    """Independent scalar validity shared by the two pinned entity contexts."""
+    if (
+        value > 0x10FFFF
+        or value & 0xFFFF in {0xFFFE, 0xFFFF}
+        or 0xFDD0 <= value <= 0xFDEF
+    ):
+        return None
+    character = chr(value)
+    if unicodedata.category(character) == "Cs" or (
+        unicodedata.category(character) == "Cc" and value not in {9, 10, 12, 13}
+    ):
+        return None
+    return character
+
+
+def label_entity(authored):
+    """Decode one lexically admitted inline label entity, never its output.
+
+    The caller admits decimal1-7/hex1-6 digits with either x case, protects
+    code and escaped openers, and keeps emitted text out of later parsing.
+    These are inline4.2.0 semantics, distinct from destination unescaping.
+    """
+    entity = authored[1:-1]
+    if entity.startswith("#"):
+        hexadecimal = entity[1:2] in {"x", "X"}
+        value = int(
+            entity[2:] if hexadecimal else entity[1:], 16 if hexadecimal else 10
+        )
+        character = _entity_character(value)
+        return character if character is not None else "\ufffd"
+    return html5.get(entity + ";", authored)
+
+
 def markdown_destination(authored):
     """One lexical pass: escaped openers and emitted text are never reparsed."""
 
@@ -29,20 +63,10 @@ def markdown_destination(authored):
             value = int(
                 entity[2:] if hexadecimal else entity[1:], 16 if hexadecimal else 10
             )
-            # The pinned destination grammar retains invalid references as
-            # literal text (then the qualified URI's '#' guard refuses them).
-            if (
-                value > 0x10FFFF
-                or value & 0xFFFF in {0xFFFE, 0xFFFF}
-                or 0xFDD0 <= value <= 0xFDEF
-            ):
-                return match[0]
-            character = chr(value)
-            if unicodedata.category(character) == "Cs" or (
-                unicodedata.category(character) == "Cc" and value not in {9, 10, 12, 13}
-            ):
-                return match[0]
-            return character
+            character = _entity_character(value)
+            # Destination references retain invalid spellings; inline labels
+            # instead emit U+FFFD. Their numeric widths also differ.
+            return character if character is not None else match[0]
         return html5.get(entity + ";", match[0])
 
     return re.sub(
