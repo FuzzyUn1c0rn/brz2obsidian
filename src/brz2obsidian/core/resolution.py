@@ -288,10 +288,23 @@ def _plan(
     producer_facts=None,
     producer_applicability=(),
     attachment_applicability=(),
+    _canonical_prior=None,
 ):
+    """Rebuild action safety; reuse a pure proposal only for identical bound facts.
+
+    Only replay/resolution of an internally reconstructed canonical state supplies
+    the prior. Initial preparation and refresh derive their proposal independently;
+    no caller-provided derived plan or live admission verdict enters this reuse.
+    """
     initial = facts
     facts = producer_facts or facts
-    proposal = _reconcile(facts, _applicability=producer_applicability)
+    proposal = (
+        _canonical_prior.proposal
+        if _canonical_prior is not None
+        and _canonical_prior.producer_facts == facts
+        and _canonical_prior.producer_applicability == producer_applicability
+        else _reconcile(facts, _applicability=producer_applicability)
+    )
     attachment_applicability = tuple(
         a
         for a in attachment_applicability
@@ -519,6 +532,7 @@ def _producer_transition(plan, action, facts):
         producer_facts=facts,
         producer_applicability=plan.producer_applicability,
         attachment_applicability=plan.attachment_applicability,
+        _canonical_prior=plan,
     )
 
 
@@ -598,6 +612,7 @@ def _resolve_action(plan, action):
                 producer_facts=plan.producer_facts,
                 producer_applicability=plan.producer_applicability,
                 attachment_applicability=plan.attachment_applicability,
+                _canonical_prior=plan,
             ),
             "accepted",
             "accepted",
@@ -644,6 +659,7 @@ def _resolve_action(plan, action):
                 producer_facts=plan.producer_facts,
                 producer_applicability=plan.producer_applicability,
                 attachment_applicability=plan.attachment_applicability,
+                _canonical_prior=plan,
             ),
             "accepted",
             "accepted",
@@ -813,6 +829,7 @@ def _resolve_action(plan, action):
                 producer_facts=plan.producer_facts,
                 producer_applicability=plan.producer_applicability,
                 attachment_applicability=plan.attachment_applicability,
+                _canonical_prior=plan,
             ),
             "accepted",
             "accepted",
@@ -961,6 +978,7 @@ def _resolve_action(plan, action):
                 producer_facts=plan.producer_facts,
                 producer_applicability=plan.producer_applicability,
                 attachment_applicability=plan.attachment_applicability,
+                _canonical_prior=plan,
             ),
             "accepted",
             "accepted",
@@ -1093,6 +1111,7 @@ def _resolve_action(plan, action):
         producer_facts=plan.producer_facts,
         producer_applicability=plan.producer_applicability,
         attachment_applicability=plan.attachment_applicability,
+        _canonical_prior=plan,
     )
     return _transition(updated, "accepted", "accepted")
 
