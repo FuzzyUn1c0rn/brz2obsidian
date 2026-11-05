@@ -1987,6 +1987,85 @@ class _Inspection:
             and old.preflight.consents != previous.requirements
         )
 
+    def _completed_source_review_parent(self, role, parent, admission, observations):
+        """Prove only a first memo's history anchor, using its OWN current policy."""
+        if (
+            self.policy_probe
+            or admission is None
+            or admission.status != "supported"
+            or not admission.inventory_complete
+            or self.operation != "idle"
+            or role.boundary != "local"
+            or parent.boundary != "result"
+            or role.previous != parent.commit
+            or role.generation != parent.generation + 1
+        ):
+            return False
+        current = role.policy_context
+        previous = parent.policy_context
+        tip = self.checkpoint_roles[0].policy_context
+        terminal = self.recovery_observation
+        if (
+            current is None
+            or previous is None
+            or tip is None
+            or current.context_basis != previous.context_basis
+            or current.context_basis != tip.context_basis
+            or current.memo_basis != tip.memo_basis
+            or terminal is None
+        ):
+            return False
+        graph = terminal.graph
+        receipt = graph.receipt
+        intent = graph.intent
+        if (
+            receipt is None
+            or receipt.status not in ("applied", "no_content_change")
+            or receipt.kind != "apply"
+            or receipt.direction != "finish"
+            or intent.kind != "apply"
+            or intent.direction != "finish"
+            or graph.intent_commit != graph.origin_intent_commit
+            or graph.stopped is not None
+            or receipt.result_commit != parent.commit
+            or receipt.prepared_commit != previous.prepared_commit
+            or intent.prepared_commit != previous.prepared_commit
+            or parent.operation_intent_commit != graph.intent_commit
+            or parent.previous != previous.prepared_commit
+            or parent.undo_of_receipt_commit is not None
+            or parent.recovery_origin_intent_commit is not None
+            or parent.recovery_previous_operation_commit is not None
+            or parent.recovery_direction is not None
+            or parent.commit not in terminal.owned
+            or previous.prepared_commit not in terminal.owned
+        ):
+            return False
+        result, _ = terminal.owned[parent.commit]
+        _, prepared = terminal.owned[previous.prepared_commit]
+        if (
+            result.previous != previous.prepared_commit
+            or prepared is None
+            or prepared.saved.plan.facts.format_operation.kind != "source_update"
+        ):
+            return False
+        physical_parent = self.history.locator.model_copy(
+            update={"commit": parent.commit, "generation": parent.generation}
+        )
+        if role.review_parent_fingerprint != self._state_fingerprint(physical_parent):
+            return False
+        try:
+            fresh = self._policy_observation(current.subjects, admission, observations)
+        except OSError, ValueError, TypeError:
+            return False
+        # Pending/rejected grants remain pending/rejected in the saved review.
+        # This proof neither borrows the publication's grants nor grants readiness.
+        return (
+            fresh is not None
+            and (fresh.policy_fingerprint, fresh.policy_continuity_fingerprint)
+            == current.fingerprints
+            and fresh.preflight.consents == current.requirements
+        )
+
     def _review_locator(self, admission=None, observations=None):
         """Keep memo dependencies on their proved parent, after full validation."""
         locator = self.history.locator
@@ -2016,6 +2095,9 @@ class _Inspection:
                     and role.memo_fingerprint == parent.memo_fingerprint
                     or parent.boundary == "result"
                     and self._same_review_context(role, parent)
+                    or self._completed_source_review_parent(
+                        role, parent, admission, observations
+                    )
                     or parent.boundary in ("local", "result")
                     and self._qualified_policy_context(
                         role, parent, admission, observations

@@ -64,21 +64,21 @@ def note(body):
     ).encode()
 
 
-def payload(version, body):
+def payload(version, body, *, output_format=7):
     identity = SourceIdentity(
         source_id=COLLECTION,
         module_id="thebrain-brz",
-        module_version="10",
+        module_version="11" if output_format == 8 else "10",
         format_version="5",
         source_sha256=version * 64,
         snapshot_digest=version * 64,
     )
     record = {
         "schema": "brz2obsidian.migration",
-        "schema_version": 7,
+        "schema_version": output_format,
         "source_identity": identity.model_dump(),
         "profile_id": "thebrain-format5-reviewed",
-        "profile_version": "10",
+        "profile_version": "11" if output_format == 8 else "10",
         "item_targets": [
             {
                 "created": True,
@@ -122,7 +122,11 @@ def refused_publication():
 def admitted_case(tmp_path, monkeypatch, request):
     vault = tmp_path / "vault"
     vault.mkdir()
-    before, incoming = payload("a", "Original A."), payload("b", "Incoming B.")
+    output_format = getattr(request, "param", 7)
+    before, incoming = (
+        payload("a", "Original A.", output_format=output_format),
+        payload("b", "Incoming B.", output_format=output_format),
+    )
     current = {**incoming, NOTE: note("Kept authored C.")}
     for path, raw in {**current, "Ignored/private.bin": b"private"}.items():
         target = vault / path
@@ -410,7 +414,11 @@ def binary_scope_case(case, monkeypatch, kind):
     asset_id = "33333333-3333-4333-8333-333333333333"
 
     def with_asset(version, data):
-        content = payload(version, "Incoming B.")
+        content = payload(
+            version,
+            "Incoming B.",
+            output_format=case.preparation.review.facts.incoming_identity.output_format,
+        )
         record = json.loads(content["migration-record.json"])
         record["asset_targets"] = [{"asset_id": asset_id, "relative_path": asset}]
         return {
@@ -617,6 +625,7 @@ def choose_both(operations, prepared):
 
 
 @pytest.mark.parametrize("kind", ("tracking", "storage"))
+@pytest.mark.parametrize("admitted_case", (8,), indirect=True)
 def test_only_selected_binary_slot_exposes_fresh_consent_and_rule_changes(
     admitted_case, monkeypatch, kind
 ):

@@ -857,7 +857,10 @@ def _role_policy(association, manifest, queries):
     if manifest.boundary == "result" and (queries is None or queries.selected is None):
         return None
     # These bases never replace the ordinary policy-bearing fingerprints.
-    # They are usable only with separate fresh proof of BOTH stored policies.
+    # Policy equivalence requires separate fresh proof of BOTH stored policies.
+    # A completed SOURCE RESULT may instead supply ONLY its physical history
+    # anchor to its first LOCAL memo, with that memo's own policy freshly proved.
+    # Neither basis transfers a grant or a saved readiness verdict.
     return _RolePolicy(
         (
             ()
