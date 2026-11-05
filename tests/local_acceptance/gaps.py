@@ -172,18 +172,26 @@ def derive_gaps(raw, archive):
 
 
 def diagnostic_targets(raw, names, created, icons):
+    from .appearance import source_icon
+
     assignments = {t["Id"]: t.get("TypeId") for t in raw["thoughts.json"]}
+    providers = {key: value for key, value in assignments.items() if value}
+    definitions = {row["Id"] for row in raw["thoughts.json"] if row["Kind"] == 2}
+    paths = {key: source_icon(key, icons, providers, definitions) for key in created}
     result, presentations = [], []
     for key, fact in sorted(raw.gaps.items()):
         owner, images = fact["owner"], fact["images"]
         icon = fact["role"] == "definition_icon"
+        diagnostic_images = (
+            [paths[owner].asset] if icon and paths[owner].asset else images
+        )
         result.append(
             {
                 "gap": {k: v for k, v in fact.items() if k != "images"},
                 "owner_target": names[owner],
                 "owner_created": owner in created,
                 "outcome": "image_fallback"
-                if images
+                if diagnostic_images
                 else "neutral_icon"
                 if icon
                 else "unknown_note",
@@ -191,9 +199,9 @@ def diagnostic_targets(raw, names, created, icons):
                 "affected_member_keys": sorted(
                     k
                     for k in created
-                    if icon and assignments.get(k) == owner and not icons[k]
+                    if icon and k != owner and owner in paths[k].chain
                 ),
-                "image_asset_ids": images,
+                "image_asset_ids": diagnostic_images,
             }
         )
         if images:
