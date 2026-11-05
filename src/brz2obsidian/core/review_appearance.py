@@ -67,23 +67,29 @@ def _chain_problems(states, targets):
             if roles.category_memberships.status == "invalid" or any(
                 member is None for member in memberships
             ):
-                invalid[state.target_id] = (
+                invalid[(state.target_id, "categories")] = (
                     "category_declaration",
                     roles.category_memberships.status,
                     memberships,
                 )
             provider = roles.provider
             if provider.status == "invalid":
-                invalid[state.target_id] = ("provider_declaration", provider.status)
+                invalid[(state.target_id, "provider")] = (
+                    "provider_declaration",
+                    provider.status,
+                )
             elif provider.status == "valid":
                 selected = _category_reference(provider.query, targets, states)
                 if selected is None or selected not in memberships:
-                    invalid[state.target_id] = ("provider_member", selected)
+                    invalid[(state.target_id, "provider")] = (
+                        "provider_member",
+                        selected,
+                    )
                 else:
                     providers[state.target_id] = selected
             problem = _icon_problem(state, targets, states)
             if problem is not None:
-                invalid[state.target_id] = problem
+                invalid[(state.target_id, "icon")] = problem
             continue
         document = state.structure
         if document is None:
@@ -104,26 +110,31 @@ def _chain_problems(states, targets):
             provider = matches.pop()
             providers[state.target_id] = provider
         else:
-            invalid[state.target_id] = (field.kind, field.scalar_type, field.value)
+            invalid[(state.target_id, "provider")] = (
+                field.kind,
+                field.scalar_type,
+                field.value,
+            )
     problems = {}
     for state in states:
         chain = [state.target_id]
         while chain[-1] in providers:
             provider = providers[chain[-1]]
             if provider in chain:
-                problems[state.target_id] = (
+                problems[(state.target_id, "cycle")] = (
                     "selected_provider_cycle",
                     (*chain, provider),
                 )
                 break
             chain.append(provider)
-        failed = next((node for node in chain if node in invalid), None)
-        if state.target_id not in problems and failed is not None:
-            problems[state.target_id] = (
-                "selected_provider_invalid",
-                tuple(chain),
-                invalid[failed],
-            )
+        # Each declaration remains independent of cycles and other defects.
+        for (failed, declaration), detail in invalid.items():
+            if failed in chain:
+                problems[(state.target_id, failed, declaration)] = (
+                    "selected_provider_invalid",
+                    tuple(chain),
+                    detail,
+                )
     return problems
 
 

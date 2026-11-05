@@ -429,6 +429,155 @@ def invalid_provider_graph():
     return baseline, incoming, current
 
 
+def test_unchanged_provider_cycle_does_not_hide_new_invalid_owned_icon():
+    from brz2obsidian.core import select_review_effects
+
+    baseline = graph_payload()
+    record = json.loads(baseline["migration-record.json"])
+    record["asset_targets"].append(
+        {"asset_id": "ordinary:manual", "relative_path": "Attachments/Manual.bin"}
+    )
+    baseline["migration-record.json"] = json.dumps(record).encode()
+    baseline["Attachments/Manual.bin"] = b"An ordinary non-image resource."
+    current, incoming = dict(baseline), dict(baseline)
+    # Only authored Current closes B->C->B. Both generated source versions
+    # retain the acyclic A->B->C assignment family.
+    current["Categories/B.md"] = note(
+        "category:B", provider="[[Categories/C.md]]", icon="[[A.svg]]", body="Local B."
+    )
+    incoming["Categories/B.md"] = note(
+        "category:B",
+        provider="[[Categories/A.md]]",
+        icon="[[A.svg]]",
+        body="Incoming B.",
+    )
+    incoming["Notes/Independent.md"] = note(
+        "entry:I", category=False, body="Incoming I. [[Attachments/Manual.bin]]"
+    )
+    facts = facts_for(baseline, incoming, current)
+    for bad_icon in (False, True):
+        selected = dict(current)
+        selected["Notes/Independent.md"] = incoming["Notes/Independent.md"]
+        if bad_icon:
+            selected["Categories/B.md"] = note(
+                "category:B",
+                provider="[[Categories/C.md]]",
+                icon="[[Attachments/Manual.bin]]",
+                body="Explicitly edited B.",
+            )
+        prospective = facts_for(baseline, selected, current)
+        plan = prepare_review(facts, preflight=preflight())
+        independent = next(c for c in plan.proposal.changes if c.item_id == "entry:I")
+        kept = resolve_review(
+            plan,
+            action(
+                plan,
+                independent,
+                choice="incoming",
+                decision_id="ordinary-resource-consumer",
+                candidate=selected_candidate(facts, prospective, "entry:I"),
+            ),
+        )
+        assert kept.status == "accepted", kept.code
+        plan = kept.plan
+        member = next(c for c in plan.proposal.changes if c.item_id == "category:B")
+        result = resolve_review(
+            plan,
+            action(
+                plan,
+                member,
+                choice="edited" if bad_icon else "current",
+                decision_id="existing-cycle-member",
+                candidate=selected_candidate(facts, prospective, "category:B"),
+            ),
+        )
+        assert result.status == "accepted" and result.plan.requirements == ()
+        assert result.plan.ready is not bad_icon, result.plan.blockers
+        if bad_icon:
+            assert "selected_provider_invalid" in result.plan.blockers
+            assert select_review_effects(result.plan).status == "refused"
+        else:
+            effects = select_review_effects(result.plan)
+            assert effects.status == "selected"
+            expected = dict(current)
+            expected["Notes/Independent.md"] = incoming["Notes/Independent.md"]
+            assert {row.path: row.content.data for row in effects.files} == expected
+            assert effects.remove_paths == ()
+
+
+def test_existing_bad_icon_does_not_hide_new_noncategory_provider():
+    from brz2obsidian.core import select_review_effects
+
+    baseline = graph_payload()
+    record = json.loads(baseline["migration-record.json"])
+    record["asset_targets"].append(
+        {"asset_id": "ordinary:manual", "relative_path": "Attachments/Manual.bin"}
+    )
+    baseline["migration-record.json"] = json.dumps(record).encode()
+    baseline["Attachments/Manual.bin"] = b"An ordinary non-image resource."
+    current, incoming = dict(baseline), dict(baseline)
+    current["Categories/A.md"] = note("category:A", icon="[[Attachments/Manual.bin]]")
+    current["Categories/C.md"] = current["Categories/C.md"].replace(
+        b"tags:\n  - categories", b"tags: []"
+    )
+    incoming["Categories/A.md"] = note(
+        "category:A", icon="[[A.svg]]", body="Incoming A."
+    )
+    incoming["Notes/Independent.md"] = note(
+        "entry:I", category=False, body="Incoming I. [[Attachments/Manual.bin]]"
+    )
+    facts = facts_for(baseline, incoming, current)
+    for new_provider in (False, True):
+        selected = dict(current)
+        selected["Notes/Independent.md"] = incoming["Notes/Independent.md"]
+        if new_provider:
+            selected["Categories/A.md"] = note(
+                "category:A",
+                provider="[[Categories/C.md]]",
+                icon="[[Attachments/Manual.bin]]",
+                body="Explicitly edited A.",
+            )
+        prospective = facts_for(baseline, selected, current)
+        plan = prepare_review(facts, preflight=preflight())
+        independent = next(c for c in plan.proposal.changes if c.item_id == "entry:I")
+        result = resolve_review(
+            plan,
+            action(
+                plan,
+                independent,
+                choice="incoming",
+                decision_id="preserve-independent-I",
+                candidate=selected_candidate(facts, prospective, "entry:I"),
+            ),
+        )
+        assert result.status == "accepted", result.code
+        plan = result.plan
+        change = next(c for c in plan.proposal.changes if c.item_id == "category:A")
+        result = resolve_review(
+            plan,
+            action(
+                plan,
+                change,
+                choice="edited" if new_provider else "current",
+                decision_id="selected-A",
+                candidate=selected_candidate(facts, prospective, "category:A")
+                if new_provider
+                else None,
+            ),
+        )
+        assert result.status == "accepted" and result.plan.requirements == ()
+        assert result.plan.ready is not new_provider, result.plan.blockers
+        if new_provider:
+            assert "selected_provider_invalid" in result.plan.blockers
+            assert select_review_effects(result.plan).status == "refused"
+        else:
+            effects = select_review_effects(result.plan)
+            expected = dict(current)
+            expected["Notes/Independent.md"] = incoming["Notes/Independent.md"]
+            assert effects.status == "selected"
+            assert {row.path: row.content.data for row in effects.files} == expected
+
+
 def test_new_chain_cannot_reach_invalid_declaration_behind_nearer_owned_icon():
     baseline, incoming, current = invalid_provider_graph()
     facts = facts_for(baseline, incoming, current)
@@ -455,7 +604,9 @@ def test_new_chain_cannot_reach_invalid_declaration_behind_nearer_owned_icon():
             assert "selected_provider_invalid" in result.plan.blockers
 
 
-@pytest.mark.parametrize("fault", ["wrong_extension", "empty_image", "missing_image"])
+@pytest.mark.parametrize(
+    "fault", ["wrong_extension", "empty_image", "missing_image", "invalid_declaration"]
+)
 def test_selected_chain_checks_owned_icon_without_rejecting_ordinary_resource(fault):
     from brz2obsidian.core import select_review_effects
 
@@ -478,7 +629,9 @@ def test_selected_chain_checks_owned_icon_without_rejecting_ordinary_resource(fa
         declared = "[[Attachments/Manual.png]]"
     else:
         path, content = "Attachments/Manual.txt", b"An ordinary local document."
-        declared = "[[Missing.png]]"
+        declared = (
+            "not a wiki link" if fault == "invalid_declaration" else "[[Missing.png]]"
+        )
     current[path] = content
     current["Categories/A.md"] = note("category:A", icon=declared)
     current["Notes/Independent.md"] = note(
