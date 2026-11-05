@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 import unicodedata
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -16,6 +17,7 @@ from brz2obsidian.contracts import (
     Issue,
     MigrationFailed,
     MigrationRefused,
+    PayloadReadViews,
     Receipt,
     RenderedVault,
     SourceSession,
@@ -340,15 +342,24 @@ def publish(
             with path.open("xb") as target:
                 target.write(artifact.content)
             expected[artifact.relative_path] = (len(artifact.content), artifact.sha256)
-        for copy in artifacts.copies:
-            path = staging / copy.relative_path
-            _safe_ancestors(path)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with payloads.open_payload(copy.asset_id) as source:
+        read_view = (
+            payloads.payload_read_view()
+            if isinstance(payloads, PayloadReadViews)
+            else nullcontext(payloads)
+        )
+        with read_view as reader:
+            for copy in artifacts.copies:
+                path = staging / copy.relative_path
                 _safe_ancestors(path)
-                with path.open("xb") as target:
-                    shutil.copyfileobj(source, target, 1024 * 1024)
-            expected[copy.relative_path] = (copy.expected_length, copy.expected_sha256)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with reader.open_payload(copy.asset_id) as source:
+                    _safe_ancestors(path)
+                    with path.open("xb") as target:
+                        shutil.copyfileobj(source, target, 1024 * 1024)
+                expected[copy.relative_path] = (
+                    copy.expected_length,
+                    copy.expected_sha256,
+                )
         payloads.verify_consistency()
         _safe_ancestors(staging)
         actual = _staged_files(staging)

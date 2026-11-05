@@ -5,7 +5,7 @@ import unicodedata
 from contextlib import AbstractContextManager
 from datetime import date
 from hashlib import sha256
-from typing import BinaryIO, Literal, Protocol
+from typing import BinaryIO, Literal, Protocol, runtime_checkable
 
 from pydantic import (
     BaseModel,
@@ -538,6 +538,21 @@ class SourceSession(Protocol):
 
     def open_payload(self, asset_id: str) -> AbstractContextManager[BinaryIO]: ...
     def verify_consistency(self) -> None: ...
+
+
+class PayloadReader(Protocol):
+    def open_payload(self, asset_id: str) -> AbstractContextManager[BinaryIO]: ...
+
+
+@runtime_checkable
+class PayloadReadViews(Protocol):
+    """Optional finite copy reader; original session verification stays forceful.
+
+    The view validates selected/consumed bytes and closes with a complete source
+    check. Its lifetime ends before the publisher validates staged output.
+    """
+
+    def payload_read_view(self) -> AbstractContextManager[PayloadReader]: ...
 
 
 class SourceModule(Protocol):

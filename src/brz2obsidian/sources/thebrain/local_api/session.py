@@ -8,6 +8,7 @@ import tempfile
 from contextlib import contextmanager
 from io import BytesIO
 from pathlib import Path
+from threading import Lock
 
 from brz2obsidian.contracts import SourceSnapshot
 
@@ -23,6 +24,7 @@ from .capture import (
 )
 from .errors import failure, refuse
 from .metadata import AcquisitionAudit, SourceAcquisition
+from .read_view import CaptureReadView
 from .storage import StagedPayload
 
 
@@ -86,6 +88,8 @@ class LocalApiSession:
         self._closed = False
         self._streams = []
         self._metadata_proof = None
+        self._read_lock = Lock()
+        self._read_view = None
         try:
             self._audit = AcquisitionAudit.model_validate_json(canonical(audit))
             source = source_projection(source)
@@ -292,6 +296,14 @@ class LocalApiSession:
         return info.st_dev, info.st_ino
 
     def verify_consistency(self):
+        try:
+            self._verify_consistency()
+        except BaseException:
+            if self._read_view is not None:
+                self._read_view.failed = True
+            raise
+
+    def _verify_consistency(self):
         if self.closed:
             refuse("The captured source session is closed")
         try:
@@ -449,6 +461,9 @@ class LocalApiSession:
         finally:
             stream.close()
             self._streams.remove(stream)
+
+    def payload_read_view(self):
+        return CaptureReadView(self)
 
     def close(self):
         if self.closed:
