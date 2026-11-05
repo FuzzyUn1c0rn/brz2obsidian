@@ -328,3 +328,15 @@ def test_independent_qualified_destination_uses_markdown_escaping_before_identit
     assert len(references) == 1
     assert references[0]["target"] == ALONE
     assert references[0]["source_target"] == CURRENT_URI + "/caf%C3%A9(name)"
+
+
+def test_independent_namespace_oracle_checks_non_symmetric_guid_known_answers():
+    uri = "brain://api.thebrain.com/1MOyofbleEqavN7wEjRWeA/RDMiEWZViHeZqrvM3e7_AA/name"
+    phrase = f"[Label]({uri})"
+    local = source_references(
+        phrase, HOME, {}, qualified_brain="a1b2c3d4-e5f6-4a78-9abc-def012345678"
+    )
+    assert len(local) == 1
+    assert local[0]["target"] == "11223344-5566-7788-99aa-bbccddeeff00"
+    assert local[0]["source_target"] == uri
+    assert source_references(phrase, HOME, {}, qualified_brain=BRAIN) == []
