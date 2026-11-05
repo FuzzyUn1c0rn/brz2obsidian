@@ -4,6 +4,7 @@ from pathlib import Path
 
 import yaml
 
+from ._appearance import appearance_issues
 from ._filesystem import (
     UnsafePath,
     guard,
@@ -104,6 +105,7 @@ def check_vault(vault: str | Path) -> VaultCheckResult:
                     guidance="Correct the Base YAML; formulas are never evaluated by this checker.",
                 )
             )
+    providers, owned_icons = {}, set()
     for artifact, (properties, body) in notes.items():
         memberships = set()
         unavailable_memberships = set()
@@ -150,17 +152,27 @@ def check_vault(vault: str | Path) -> VaultCheckResult:
                         guidance="Choose a category in categories, or leave the provider blank to opt out.",
                     )
                 )
+            elif target in memberships:
+                providers[artifact] = target
         icon = properties.get("icon")
         if not blank(icon) and wikilink(icon):
             target, issue = resolve(root, names, icon, artifact, "image", "icon")
             if issue:
                 issues.append(issue)
+            else:
+                owned_icons.add(artifact)
         for reference, kind, relative in required_references(body):
             target, issue = resolve(
                 root, names, reference, artifact, kind, relative=relative
             )
             if issue:
                 issues.append(issue)
+    invalid_providers = {
+        issue.artifact
+        for issue in issues
+        if issue.property == "appearance_category" and issue.code != "read_failure"
+    }
+    issues.extend(appearance_issues(notes, providers, owned_icons, invalid_providers))
     for artifacts in identities.values():
         if len(artifacts) > 1:
             for artifact in artifacts:

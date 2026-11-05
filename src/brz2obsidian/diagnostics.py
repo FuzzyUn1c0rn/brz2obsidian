@@ -293,6 +293,7 @@ CODE_EXPLANATIONS = {
 }
 
 WARNING_EXPLANATIONS = {
+    "icon_lookup_depth": "Icon lookup exceeds 8 links. Native dashboards show no inherited icon for this lookup. Assign a nearer valid icon or change a selected appearance category, then close and reopen affected category dashboards and Categories overview. Migration-time body snapshots use the full finite chain; depth alone does not prevent conversion.",
     "image_presentation_normalized": "An authored image width will be replaced by a responsive image that fits the available space. The exact percentage width will not be reproduced. Review the image's placement in the converted thought note.",
     "formatting_loss": "Some thought-note formatting needs review. Tables may become responsive, custom icons may use text labels, or an inserted element may be unsupported. Review the affected thought notes and the Migration report after conversion.",
     "absent_payload": "An attachment is unavailable. Review the source warnings before conversion; the converter cannot preserve bytes it could not read.",

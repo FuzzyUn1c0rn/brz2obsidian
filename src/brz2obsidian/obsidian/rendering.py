@@ -17,6 +17,7 @@ from brz2obsidian.contracts import (
 from brz2obsidian.core import analyze
 from brz2obsidian.core import plan as build_plan
 from brz2obsidian.core.appearance import icon_snapshots as expected_icon_snapshots
+from brz2obsidian.core.appearance import native_icon_limits
 from brz2obsidian.core.items import assign_item_targets
 from brz2obsidian.core.references import validate_references
 from brz2obsidian.core.resources import assign_asset_targets, resource_owners
@@ -47,7 +48,7 @@ def _json(value):
 def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     snapshot = plan.analysis.snapshot
     if (
-        run_metadata.renderer_version != "7"
+        run_metadata.renderer_version != "8"
         or snapshot.contract_version != 7
         or plan.analysis.policy.contract_version != 7
     ):
@@ -56,8 +57,8 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
                 Issue(
                     code="unsupported_format",
                     phase="rendering",
-                    message="Renderer requires version-7 contracts and renderer metadata",
-                    guidance="Use the current contract and set renderer_version to 7.",
+                    message="Renderer requires source contract 7 and renderer metadata 8",
+                    guidance="Use source contract 7 and set renderer_version to 8.",
                 ),
             )
         )
@@ -139,8 +140,11 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
             for t in expected_targets
             if t.item_key in gap_subjects
         }
-        or bool(gap_subjects)
-        and plan.issues != checked_analysis.issues
+        or plan.issues
+        != checked_analysis.issues
+        + native_icon_limits(
+            snapshot, {t.item_key for t in plan.item_targets if t.created}
+        )
         or plan.source_gaps != expected_gaps
         or plan.generated_presentations != expected_presentations
         or any(
@@ -248,10 +252,19 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         elif icon is not None:
             text += "![[" + asset_paths[icon] + "]]\n\n"
         for gap in plan.source_gaps:
-            if gap.outcome != "neutral_icon":
+            if gap.gap.role != "definition_icon":
                 continue
+            appearance = (
+                "a farther selected appearance-category icon is used"
+                if icon is not None
+                else "appearance is neutral"
+            )
             if gap.gap.owner == item.key:
-                text += "> [!warning] Source category icon unavailable\n> Source category icon is absent; appearance is neutral. See [[MIGRATION REPORT.md|Migration report]] for provider evidence and optional repair steps.\n\n"
+                text += (
+                    "> [!warning] Source category icon unavailable\n> Source category icon is absent; "
+                    + appearance
+                    + ". See [[MIGRATION REPORT.md|Migration report]] for provider evidence and optional repair steps.\n\n"
+                )
             elif item.key in gap.affected_member_keys:
                 provider = items[gap.provider_key]
                 provider_target = next(
@@ -260,7 +273,9 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
                 text += (
                     "> [!warning] Inherited icon unavailable\n> The inherited icon is unavailable from "
                     + note_link(provider_target, provider.title)
-                    + "; appearance is neutral. See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
+                    + "; "
+                    + appearance
+                    + ". See [[MIGRATION REPORT.md|Migration report]] for evidence and optional repair steps.\n\n"
                 )
         if item.role == "definition":
             text += CATEGORY_VIEWS + "\n"
@@ -429,6 +444,19 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
                         + declaration
                         + "`; exact declaration, scoped document codepoint span/digest and original reference remain in migration-record.json.\n"
                     )
+    depth_warnings = [i for i in plan.issues if i.code == "icon_lookup_depth"]
+    if depth_warnings:
+        target_by_key = {t.item_key: t for t in plan.item_targets}
+        report += "\n## Native icon lookup warnings\n\nIcon lookup exceeds 8 links. Native dashboards display no inherited icon for these lookups; ordinary body snapshots use the full finite migration-time chain. Memberships and owned icon declarations are unchanged. After category icon, membership or provider edits, close and reopen affected category dashboards and Categories overview; open views may retain stale or inconsistent icons and statuses.\n\n"
+        for issue in depth_warnings:
+            report += (
+                "- "
+                + " -> ".join(
+                    note_link(target_by_key[key], target_by_key[key].original_title)
+                    for key in issue.affected
+                )
+                + "\n"
+            )
     if plan.issues:
         report += "\n## Source warnings\n\n"
         for issue in plan.issues:
@@ -478,7 +506,7 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
     }
     record = {
         "schema": "brz2obsidian.migration",
-        "schema_version": 7,
+        "schema_version": 8,
         "converter_version": run_metadata.converter_version,
         "renderer_version": run_metadata.renderer_version,
         "source_identity": plan.source_identity.model_dump(),

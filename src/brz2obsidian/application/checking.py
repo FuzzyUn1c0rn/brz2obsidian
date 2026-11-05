@@ -11,6 +11,8 @@ from brz2obsidian.vault_check.contracts import VaultCheckResult
 # Raw messages, references and candidate lists can contain authored content.
 # Only known codes, static guidance and the affected artifact path are admitted.
 DETAILED_FINDINGS = {
+    "provider_cycle": "The full appearance-category chain contains a repeated provider. Review the affected note and selected categories and remove the cycle. An owned icon may still display; it does not repair the independent chain problem.",
+    "icon_lookup_depth": "Icon lookup exceeds 8 links. Native dashboards show no inherited icon for this lookup; migration-time body snapshots use the full finite chain. Assign a nearer valid icon or change a selected appearance category, then close and reopen affected category dashboards and Categories overview. Depth alone does not prevent import, update or checking.",
     "invalid_frontmatter": "Vault check found invalid frontmatter, the properties at the start of a note. These properties must use YAML (a text data format) with one value per key and no executable tags. Correct the properties in the affected note, then check again.",
     "invalid_property": "Vault check found a note property with an invalid value. Review that property's type and supported format in the affected note, then check again.",
     "invalid_category": "Vault check found an invalid category membership. Link it to a note in Categories with the categories tag, then check again.",
@@ -24,6 +26,8 @@ DETAILED_FINDINGS = {
     "invalid_base": "Vault check found invalid Base data. A Base must use YAML (a text data format), with one value per key and no executable tags. Correct the affected Base file, then check again.",
 }
 SAFE_FINDINGS = {
+    "provider_cycle": "Appearance-category chain contains a cycle. Review the selected providers.",
+    "icon_lookup_depth": "Icon lookup exceeds 8 links. Choose a nearer icon or change the selected appearance category.",
     "invalid_frontmatter": "Invalid note properties. Check their format.",
     "invalid_property": "Invalid property value. Check its type and format.",
     "invalid_category": "Link to a category note in Categories with the categories tag.",

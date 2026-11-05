@@ -4,7 +4,7 @@ from pathlib import PurePosixPath
 
 from brz2obsidian.contracts import Adaptation, Analysis, MigrationPlan
 
-from .appearance import icon_snapshots
+from .appearance import icon_snapshots, native_icon_limits
 from .items import assign_item_targets, select_fallbacks
 from .resources import assign_asset_targets, resource_owners
 from .source_gaps import source_gap_targets
@@ -180,7 +180,9 @@ def plan(analysis: Analysis) -> MigrationPlan:
                 + (
                     " from its owned icon."
                     if s.explicit_icon_asset_id
-                    else " from appearance category " + s.appearance_category_key + "."
+                    else " through the selected appearance-category chain starting at "
+                    + s.appearance_category_key
+                    + "."
                 )
                 + " Later category/property edits do not rewrite this body snapshot.",
             )
@@ -241,6 +243,6 @@ def plan(analysis: Analysis) -> MigrationPlan:
             for asset in sorted(snapshot.assets, key=lambda a: a.asset_id)
             if asset.video_presentation and asset.video_presentation.start_seconds
         ),
-        issues=analysis.issues,
+        issues=analysis.issues + native_icon_limits(snapshot, created),
         counts=counts,
     )

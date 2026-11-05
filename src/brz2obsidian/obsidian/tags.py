@@ -8,16 +8,36 @@ def tag_listing(plan):
         return ""
     targets = {t.item_key: t for t in plan.item_targets}
     items = {i.key: i for i in plan.analysis.snapshot.items}
-    text = "# Tag memberships\n\nAssignments on uncreated targets and source tags without assignments. Use native tag search for created assigned notes.\n\n"
+    tokens = {t.tag_key: t.token for t in plan.tag_targets}
+    text = "# Tag memberships\n\nExplicit nested source-tag facts, assignments on uncreated targets and source tags without assignments. Tokens are independent: a parent tag is not inferred on a child tag's members. Use native tag search for created assigned notes.\n\n"
     for tag in plan.tag_targets:
         memberships = [m for m in plan.tag_memberships if m.tag_key == tag.tag_key]
-        hidden = sorted({m.item_key for m in memberships if not m.native})
-        if memberships and not hidden:
+        nested = sorted({m.item_key for m in memberships if m.item_key in tokens})
+        hidden = sorted(
+            {
+                m.item_key
+                for m in memberships
+                if not m.native and m.item_key not in tokens
+            }
+        )
+        if memberships and not hidden and not nested:
             continue
         text += "## #" + tag.token + "\n\n"
         text += (
             "Source tag: " + note_link(targets[tag.tag_key], tag.original_name) + "\n\n"
         )
+        for key in nested:
+            text += (
+                "- Nested source tag: "
+                + note_link(targets[key], items[key].title)
+                + " (#"
+                + tokens[key]
+                + ")"
+                + ("; uncreated target" if not targets[key].created else "")
+                + ".\n"
+            )
+        if nested:
+            text += "\n"
         if hidden:
             text += (
                 "".join(
@@ -26,7 +46,7 @@ def tag_listing(plan):
                 )
                 + "\n"
             )
-        else:
+        elif not nested:
             text += "No source assignments.\n\n"
     return text.rstrip("\n") + "\n"
 
@@ -44,7 +64,9 @@ def tag_records(plan):
             tag_target=targets[m.tag_key].relative_path,
             item_target=targets[m.item_key].relative_path,
             evidence=relations[m.relationship_key].evidence,
-            listing_path=None if m.native else plan.tag_memberships_path,
+            listing_path=plan.tag_memberships_path
+            if not m.native or m.item_key in tags
+            else None,
         )
         for m in plan.tag_memberships
     ]

@@ -4,7 +4,7 @@ import re
 
 from brz2obsidian.contracts import GeneratedPresentationTarget, SourceGapDiagnostic
 
-from .appearance import icon_snapshots
+from .appearance import icon_lookup_paths, icon_snapshots
 
 
 def validate_source_gaps(snapshot, policy, refuse):
@@ -136,6 +136,13 @@ def source_gap_targets(snapshot, item_targets, asset_targets):
     selections = icon_snapshots(
         snapshot, {t.item_key for t in item_targets if t.created}
     )
+    lookup_paths = icon_lookup_paths(snapshot, {s.item_key for s in selections})
+    effective_icons = {s.item_key: s.effective_icon_asset_id for s in selections}
+    images.update(
+        (g.asset_id, (effective_icons[g.owner],))
+        for g in snapshot.source_gaps
+        if g.role == "definition_icon" and effective_icons.get(g.owner) is not None
+    )
     diagnostics = tuple(
         SourceGapDiagnostic(
             gap=g,
@@ -151,9 +158,9 @@ def source_gap_targets(snapshot, item_targets, asset_targets):
                 sorted(
                     s.item_key
                     for s in selections
-                    if s.appearance_category_key == g.owner
-                    and g.role == "definition_icon"
-                    and s.explicit_icon_asset_id is None
+                    if g.role == "definition_icon"
+                    and s.item_key != g.owner
+                    and g.owner in lookup_paths[s.item_key]
                 )
             ),
             image_asset_ids=images.get(g.asset_id, ()),

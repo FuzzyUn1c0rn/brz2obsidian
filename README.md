@@ -492,10 +492,35 @@ icon works. Body-icon references are separate migration-time snapshots: edit
 them separately if changing category or provider metadata. Replacing a shared
 image's bytes can affect every reference to it.
 
+A category note can itself be a direct member of another category. Each category
+has one note and its dashboard lists direct members only, including category
+notes. B's member template initializes B alone; it does not add B's parent A.
+Source-tag tokens remain independent. `Tag memberships.md` records explicit
+nested tag facts, including links to tag targets without created notes; a
+parent tag is not inferred on the child tag's members.
+
+Members, Gallery and the Categories overview first check a note's valid owned
+`icon`, then follow up to eight selected `appearance_category` links. The nearest
+valid owned image wins. If no image is found and a valid unrepeated chain
+continues, the visible status is **Icon lookup exceeds 8 links.** Set a nearer
+category's `icon` or change a selected provider to resolve it. Blank opts out;
+invalid or repeated providers have distinct statuses. Lookup never switches to
+another membership or copies a borrowed image into an owned `icon` property.
+Ordinary body images are full-chain migration-time snapshots and can still show
+an icon when a live dashboard reaches the eight-link limit.
+
+After changing category icons, memberships or appearance providers, **close and
+reopen the affected category dashboard notes and Categories overview**. Open
+views may retain stale or inconsistent icons and statuses until reopened.
+Reopening recalculates the native views. The converter's Update vault
+**Refresh review** action refreshes its saved review separately.
+
 Open Members/Gallery through category dashboards so their contextual queries
 have a category. Hierarchy, prose links and source tags do not create membership.
 Use Obsidian's native rename with automatic internal-link updates enabled;
-prefer qualified links when names collide. Migration records describe the
+prefer qualified links when names collide. For example, `[[Categories/B]]` and
+`[[Categories/B.md]]` identify the same category, while bare `[[B]]` is ambiguous
+to the checker when `Templates/B.md` also exists. Migration records describe the
 original conversion and do not track later edits. Keep pristine output and safe
 `.md.original` backups if you need exact pre-edit bytes: Obsidian can normalize
 frontmatter and line endings when saving.
@@ -520,7 +545,8 @@ maintenance.
 ### Checker diagnostics
 
 The checker reads current vault files without the source archive and never
-repairs or rewrites them. Custom properties are allowed. Fix reported problems
+repairs or rewrites them. It checks full provider chains, including problems
+beyond the native eight-link lookup and declarations hidden by nearer icons. Custom properties are allowed. Fix reported problems
 in Obsidian or your editor, then run it again.
 
 | Finding | What to check |
@@ -529,6 +555,8 @@ in Obsidian or your editor, then run it again.
 | `invalid_category` / `invalid_provider` | Category targets exist, carry the category role, and the provider is a member |
 | `missing_base` / `missing_image` / `invalid_base` | Required files exist; images are nonempty and Base YAML is valid data |
 | `ambiguous_reference` | Use a qualified vault path to distinguish colliding names |
+| `provider_cycle` | Review the full selected provider chain and remove the repeated category; a nearer owned icon does not repair the cycle |
+| `icon_lookup_depth` | Icon lookup exceeds 8 links. Assign a nearer valid icon or change a selected provider; this warning does not block import or checking |
 | `duplicate_source_identity` | Multiple notes carry the same imported identity pair |
 | `unsafe_reference` | A required reference or filesystem entry cannot be read safely inside the vault |
 | `read_failure` | Access permissions, text encoding or file/directory availability |

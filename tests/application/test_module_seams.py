@@ -25,7 +25,7 @@ from tests.application.test_minimal_workflow import PROPERTIES, make_archive
 
 METADATA = RunMetadata(
     converter_version="0.1.0",
-    renderer_version="7",
+    renderer_version="8",
     run_id="test-run",
     run_time="2026-10-03T00:00:00+00:00",
     obsidian_version="1.13.7",

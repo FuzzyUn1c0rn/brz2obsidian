@@ -284,7 +284,11 @@ def test_deep_type_chain_counts_are_direct_and_navigation_cycles_remain_allowed(
             else LocalApiSourceRef(BRAIN)
         )
         result = workflow.inspect(source)
-    assert result.outcome == "clean", result.issues
+    assert result.outcome == "warnings", result.issues
+    assert {(i.code, i.affected[0]) for i in result.issues} == {
+        ("icon_lookup_depth", "00000000-0000-0000-0000-000000000027"),
+        ("icon_lookup_depth", "00000000-0000-0000-0000-000000000029"),
+    }
     # Base has 13 links, deep direct assignments add 11, ordinary D -> F -> D
     # contributes two navigation links. BRZ additionally retains the system pin.
     assert result.counts.source_relationships == (27 if adapter == "brz" else 26)
