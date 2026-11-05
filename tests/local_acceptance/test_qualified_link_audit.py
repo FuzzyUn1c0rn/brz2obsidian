@@ -7,6 +7,8 @@ from uuid import UUID
 import pytest
 
 from brz2obsidian.application.wiring import default_workflow, local_api_workflow
+from brz2obsidian.contracts import MigrationRefused
+from brz2obsidian.sources.thebrain import BrzSourceModule
 from brz2obsidian.sources.thebrain.local_api import LocalApiConfig, LocalApiSourceRef
 from tests.application.test_forgotten_workflow import forget, rewrite
 from tests.application.test_graph_workflow import graph_archive
@@ -340,3 +342,254 @@ def test_independent_namespace_oracle_checks_non_symmetric_guid_known_answers():
     assert local[0]["target"] == "11223344-5566-7788-99aa-bbccddeeff00"
     assert local[0]["source_target"] == uri
     assert source_references(phrase, HOME, {}, qualified_brain=BRAIN) == []
+
+
+ENTITY_SUFFIXES = ("/a&copy", "/a&copy;", r"/a\&copy;", "/a&amp;copy;")
+ENTITY_TARGETS = ("/a&copy", "/a%C2%A9", "/a&copy;", "/a&copy;")
+
+
+@pytest.fixture(scope="module")
+def entity_outputs(tmp_path_factory):
+    directory = tmp_path_factory.mktemp("qualified-entities")
+    authored = (
+        "\r\n".join(
+            f"[Label {i}]({CURRENT_URI}{suffix})"
+            for i, suffix in enumerate(ENTITY_SUFFIXES)
+        )
+        + "\r\n"
+    )
+    source = graph_archive(
+        directory / "source.brz",
+        {1: "Home", int(UUID(ALONE)): "Target"},
+        notes={1: (authored.encode(), 4)},
+    )
+    vault = directory / "vault"
+    result = default_workflow().convert(source, vault)
+    assert result.outcome == "clean", result.issues
+    api = PayloadApi()
+    api.payloads[NOTE] = authored.encode()
+    api.attachments[NOTE]["dataLength"] = len(authored.encode())
+    api.overrides["/api/v1/docs.json"] = (200, SCHEMA)
+    controls = prepare_controls(directory / "controls")
+    api_vault = directory / "api-vault"
+    with api_server(api) as (_, upstream):
+        recording = ApiRecording(
+            directory / "http",
+            upstream,
+            brain_id=BRAIN,
+            credential=KEY,
+            purpose="convert",
+        )
+        with recording:
+            result = local_api_workflow(
+                LocalApiConfig(api_url=recording.api_url), credentials=lambda: KEY
+            ).convert(LocalApiSourceRef(BRAIN), api_vault)
+            assert result.outcome == "clean", result.issues
+            recording.complete()
+        baseline = recording.seal(qualification=controls)
+    return source, vault, authored, baseline, api_vault
+
+
+@pytest.mark.parametrize("adapter", ["brz", "api"])
+def test_public_entity_destinations_and_independent_audit_keep_exact_original_meaning(
+    entity_outputs, adapter
+):
+    source, brz_vault, authored, baseline, api_vault = entity_outputs
+    with BrzSourceModule().open(source) as session:
+        references = session.snapshot.documents[0].references
+        assert [r.source_target for r in references] == [
+            CURRENT_URI + s for s in ENTITY_TARGETS
+        ]
+        assert [r.expected_original for r in references] == [
+            f"[Label {i}]({CURRENT_URI}{s})" for i, s in enumerate(ENTITY_SUFFIXES)
+        ]
+    vault = brz_vault if adapter == "brz" else api_vault
+    assert next(vault.rglob("*.original")).read_bytes() == authored.encode()
+    if adapter == "brz":
+        assert check_vault(source, vault)["thought_references"] == 4
+    else:
+        assert check_api_vault(baseline, vault, profile_version="4")["payloads"] == 1
+    record = json.loads((vault / "migration-record.json").read_bytes())
+    document = next(d for t in record["item_targets"] for d in t["documents"])
+    assert [r["source_target"] for r in document["references"]] == [
+        CURRENT_URI + s for s in ENTITY_TARGETS
+    ]
+
+
+@pytest.mark.parametrize("index", [0, 2])
+def test_independent_audit_rejects_entity_reinterpretation_in_original_destination_only(
+    tmp_path, index
+):
+    authored = f"[Label]({CURRENT_URI}{ENTITY_SUFFIXES[index]})\r\n"
+    source = graph_archive(
+        tmp_path / "source.brz",
+        {1: "Home", int(UUID(ALONE)): "Target"},
+        notes={1: (authored.encode(), 4)},
+    )
+    vault = tmp_path / "vault"
+    result = default_workflow().convert(source, vault)
+    assert result.outcome == "clean", result.issues
+    path = vault / "migration-record.json"
+    record = json.loads(path.read_bytes())
+    document = next(d for t in record["item_targets"] for d in t["documents"])
+    assert len(document["references"]) == 1
+    document["references"][0]["source_target"] = CURRENT_URI + "/a%C2%A9"
+    path.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(AssertionError, match="reference original destination"):
+        check_vault(source, vault)
+
+
+@pytest.mark.parametrize(
+    "suffix,normalized",
+    [
+        ("/a&copy", "/a&copy"),
+        ("/a&copy;", "/a%C2%A9"),
+        (r"/a\&copy;", "/a&copy;"),
+        ("/a&amp;copy;", "/a&copy;"),
+        ("/a&copycat;", "/a&copycat;"),
+        ("/a&AMP;copy;", "/a&copy;"),
+        ("/a&Copy;", "/a&Copy;"),
+        (r"/a\&amp;copy;", "/a&amp;copy;"),
+        (r"/a&copy\;", "/a&copy;"),
+        ("/a&copy&semi;", "/a&copy;"),
+        ("/a&amp;amp;copy;", "/a&amp;copy;"),
+        ("/a&#169;", "/a%C2%A9"),
+        ("/a&#xA9;", "/a%C2%A9"),
+        ("/a&#X0000A9;", "/a%C2%A9"),
+        ("/a&#0000169;", "/a%C2%A9"),
+        ("/a&#38;copy;", "/a&copy;"),
+        ("/a&#x26;copy;", "/a&copy;"),
+        ("/a&#00000169;", "/a%C2%A9"),
+        ("/a&#x000000A9;", "/a%C2%A9"),
+        ("/a&#x10FFFD;", "/a%F4%8F%BF%BD"),
+        ("/a&#xD7FF;", "/a%ED%9F%BF"),
+        ("/a&#xE000;", "/a%EE%80%80"),
+        ("/a&NotEqualTilde;", "/a%E2%89%82%CC%B8"),
+        ("/a\u0080", "/a%C2%80"),
+        ("/a\ufdd0", "/a%EF%B7%90"),
+    ],
+)
+def test_public_source_and_independent_scanner_agree_on_single_pass_entity_known_answers(
+    tmp_path, suffix, normalized
+):
+    phrase = f"[Label]({CURRENT_URI}{suffix})"
+    source = graph_archive(
+        tmp_path / "source.brz",
+        {1: "Home", int(UUID(ALONE)): "Target"},
+        notes={1: (phrase.encode(), 4)},
+    )
+    with BrzSourceModule().open(source) as session:
+        reference = session.snapshot.documents[0].references[0]
+        assert reference.source_target == CURRENT_URI + normalized
+        assert reference.expected_original == phrase
+    independent = source_references(phrase, HOME, {}, qualified_brain=BRAIN)
+    assert len(independent) == 1
+    assert independent[0]["source_target"] == CURRENT_URI + normalized
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        r"/a\\&copy;",
+        r"/a\\\&copy;",
+        "/a&#1;",
+        "/a&#x1f;",
+        "/a&#127;",
+        "/a&#000000169;",
+        "/a&#x0000000A9;",
+        "/a&#169",
+        "/a&#xA9",
+        "/a&#-1;",
+        "/a&#x;",
+        "/a&#;",
+        "/a&bsol;",
+        "/a&#92;copy;",
+        "/a&#0;",
+        "/a&#xD800;",
+        "/a&#1114112;",
+        "/a&#x110000;",
+        "/a&#128;",
+        "/a&#x10FFFF;",
+        "/a&#xFDD0;",
+        "/a&#xFFFE;",
+        "/a&Tab;",
+        "/a&NewLine;",
+    ],
+)
+def test_public_source_and_independent_scanner_keep_numeric_and_backslash_refusals(
+    tmp_path, suffix
+):
+    phrase = f"[Label]({CURRENT_URI}{suffix})"
+    source = graph_archive(
+        tmp_path / "source.brz",
+        {1: "Home", int(UUID(ALONE)): "Target"},
+        notes={1: (phrase.encode(), 4)},
+    )
+    with pytest.raises(MigrationRefused), BrzSourceModule().open(source):
+        pass
+    with pytest.raises(AssertionError):
+        source_references(phrase, HOME, {}, qualified_brain=BRAIN)
+
+
+@pytest.mark.parametrize("adapter", ["brz", "api"])
+def test_entity_spelling_cannot_exempt_a_foreign_omitted_identity(tmp_path, adapter):
+    encoded = "&#77;" + TARGET_TOKEN[1:]
+    uri = f"brain://api.thebrain.com/AAAAAAAAAAAAAAAAAAAAAg/{encoded}"
+    if adapter == "brz":
+        source = graph_archive(
+            tmp_path / "source.brz",
+            {1: "Home", int(UUID(ALONE)): "Private"},
+            notes={1: (f"[Foreign]({uri})".encode(), 4)},
+        )
+        rewrite(source, lambda parts: forget(parts, int(UUID(ALONE))))
+        result = default_workflow().convert(source, tmp_path / "vault")
+    else:
+        api = PayloadApi()
+        api.thoughts[ALONE]["forgottenDateTime"] = "2026-10-15T10:00:00"
+        api.payloads[NOTE] = f"[Foreign]({uri})".encode()
+        api.attachments[NOTE]["dataLength"] = len(api.payloads[NOTE])
+        with api_server(api) as (_, address):
+            result = local_api_workflow(
+                LocalApiConfig(api_url=address), credentials=lambda: KEY
+            ).convert(LocalApiSourceRef(BRAIN), tmp_path / "vault")
+    assert result.outcome == "refused", result.issues
+    assert not (tmp_path / "vault").exists()
+    assert TARGET_TOKEN not in repr(result.issues) and uri not in repr(result.issues)
+
+
+@pytest.mark.parametrize("where", ["target", "label", "suffix", "brain"])
+@pytest.mark.parametrize("oracle", ["brz", "api"])
+def test_independent_scope_rejects_semantic_foreign_omitted_associations(where, oracle):
+    encoded = "&#77;" + TARGET_TOKEN[1:]
+    safe = "brain://api.thebrain.com/AAAAAAAAAAAAAAAAAAAAAg/EREREREREUGBEREREREREQ"
+    phrases = {
+        "target": f"[Foreign]({safe.replace(BRAIN_TOKEN, encoded)})",
+        "label": f"[{encoded}]({safe})",
+        "suffix": f"[Foreign]({safe}/{encoded})",
+        "brain": f"[Foreign](brain://api.thebrain.com/{encoded}/{BRAIN_TOKEN})",
+    }
+    with pytest.raises(AssertionError, match="excluded"):
+        if oracle == "brz":
+            source_references(phrases[where], HOME, {}, {ALONE}, qualified_brain=BRAIN)
+        else:
+            scope_note(phrases[where], {ALONE}, qualified_brain=BRAIN)
+
+
+@pytest.mark.parametrize("oracle", ["brz", "api"])
+def test_independent_scope_preserves_local_removal_and_protected_entity_literals(
+    oracle,
+):
+    encoded = "&#77;" + TARGET_TOKEN[1:]
+    local = f"[{encoded}](brain://api.thebrain.com/{BRAIN_TOKEN}/{encoded}/{encoded})"
+    safe = f"[Foreign](brain://api.thebrain.com/AAAAAAAAAAAAAAAAAAAAAg/{BRAIN_TOKEN}/exact%252F)"
+    literal = f"`{encoded}`\n<!-- {encoded} -->\n"
+    if oracle == "api":
+        assert scope_note(local + safe + literal, {ALONE}, qualified_brain=BRAIN) == (
+            safe + literal,
+            frozenset({ALONE}),
+        )
+    else:
+        references = source_references(
+            local + safe + literal, HOME, {}, {ALONE}, qualified_brain=BRAIN
+        )
+        assert len(references) == 1 and references[0]["target"] == ALONE

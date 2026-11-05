@@ -1,10 +1,11 @@
 """Independent URI facts from authored Markdown, with explicit source namespace."""
 
 import base64
-import html
 import re
 import string
+import unicodedata
 from dataclasses import dataclass
+from html.entities import html5
 from urllib.parse import quote
 from uuid import UUID
 
@@ -17,8 +18,39 @@ class ThoughtDestination:
 
 
 def markdown_destination(authored):
-    return html.unescape(
-        re.sub(r"\\([" + re.escape(string.punctuation) + r"])", r"\1", authored)
+    """One lexical pass: escaped openers and emitted text are never reparsed."""
+
+    def replacement(match):
+        escaped, entity = match.groups()
+        if escaped is not None:
+            return escaped
+        if entity.startswith("#"):
+            hexadecimal = entity[1:2] in {"x", "X"}
+            value = int(
+                entity[2:] if hexadecimal else entity[1:], 16 if hexadecimal else 10
+            )
+            # The pinned destination grammar retains invalid references as
+            # literal text (then the qualified URI's '#' guard refuses them).
+            if (
+                value > 0x10FFFF
+                or value & 0xFFFF in {0xFFFE, 0xFFFF}
+                or 0xFDD0 <= value <= 0xFDEF
+            ):
+                return match[0]
+            character = chr(value)
+            if unicodedata.category(character) == "Cs" or (
+                unicodedata.category(character) == "Cc" and value not in {9, 10, 12, 13}
+            ):
+                return match[0]
+            return character
+        return html5.get(entity + ";", match[0])
+
+    return re.sub(
+        r"\\(["
+        + re.escape(string.punctuation)
+        + r"])|&(#(?:[0-9]{1,8}|[xX][0-9A-Fa-f]{1,8})|[A-Za-z][A-Za-z0-9]{0,31});",
+        replacement,
+        authored,
     )
 
 
@@ -68,3 +100,19 @@ def thought_destination(authored, *, qualified_brain=None):
     return ThoughtDestination(
         str(UUID(bytes_le=base64.urlsafe_b64decode(spelling + "=="))), authored, False
     )
+
+
+def assert_no_omitted(values, tokens):
+    """Screen admitted semantic fields with the existing single-pass policy."""
+    for value in values:
+        decoded = re.sub(r"%([0-9a-fA-F]{2})", lambda m: chr(int(m[1], 16)), value)
+        decoded = re.sub(r"\\u([0-9a-fA-F]{4})", lambda m: chr(int(m[1], 16)), decoded)
+        assert not any(
+            token in candidate for candidate in (value, decoded) for token in tokens
+        ), "unremoved excluded note association"
+        assert not any(
+            m[0].lower() in tokens
+            for m in re.finditer(
+                r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", decoded
+            )
+        ), "unremoved excluded note association"

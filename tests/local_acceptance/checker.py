@@ -4,6 +4,7 @@ Direct archive records/bytes are authoritative. The migration record supplies
 assignments to audit, never the expected source data, eligibility or graph.
 """
 
+import base64
 import hashlib
 import html
 import json
@@ -31,7 +32,7 @@ from .facts import (
     member as raw_member,
 )
 from .gaps import derive_gaps, diagnostic_targets
-from .note_links import markdown_destination, thought_destination
+from .note_links import assert_no_omitted, markdown_destination, thought_destination
 from .scope import dump_json, scope
 from .support import (
     CATEGORY_VIEWS_8,
@@ -192,6 +193,7 @@ def check_vault(source, vault):
                         bindings,
                         raw.excluded,
                         qualified_brain=raw["meta.json"][0]["BrainId"],
+                        omitted_tokens=raw.tokens,
                     )
                     if r["kind"] == "item" and r["target"] in raw.excluded
                 ]
@@ -1225,7 +1227,9 @@ def inline_display(value):
     return re.sub(r"\x00([0-9]+)\x00", lambda match: protected[int(match[1])], value)
 
 
-def source_references(body, owner, assets, excluded=(), *, qualified_brain=None):
+def source_references(
+    body, owner, assets, excluded=(), *, qualified_brain=None, omitted_tokens=None
+):
     """Separate syntax scan without converter spans or markdown-it-py.
 
     Protected regions retain source offsets. Unrecognized active local syntax
@@ -1252,6 +1256,25 @@ def source_references(body, owner, assets, excluded=(), *, qualified_brain=None)
                 legacy_excluded
                 or not inline_candidates(label_text, inline_only=True)[0]
             ), "unsupported included nested thought phrase"
+            if qualified_brain is not None and target not in excluded:
+                tokens = (
+                    omitted_tokens
+                    if omitted_tokens is not None
+                    else {
+                        token
+                        for key in excluded
+                        for token in (
+                            key,
+                            key.replace("-", ""),
+                            base64.urlsafe_b64encode(UUID(key).bytes_le)
+                            .decode()
+                            .rstrip("="),
+                        )
+                    }
+                )
+                assert_no_omitted(
+                    (destination.source_target, inline_display(label_text)), tokens
+                )
             if target is None:
                 mask[begin:finish] = " " * (finish - begin)
                 continue

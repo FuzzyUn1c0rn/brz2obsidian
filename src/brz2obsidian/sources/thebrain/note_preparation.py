@@ -19,7 +19,7 @@ def prepare_note(
     pointer,
     member,
     excluded=(),
-    scope_tokens=(),
+    scope_tokens=None,
     brain_id=None,
     allow_qualified=False,
     source_refuse,
@@ -30,6 +30,14 @@ def prepare_note(
     text afresh. Exact edits describe scoped text; references describe final
     text. Original-copy eligibility is decided before removing references.
     """
+    if allow_qualified and scope_tokens is None:
+        source_refuse(
+            "invalid_source",
+            "Current note binding needs authoritative exclusion context",
+            (owner, asset_id),
+            evidence=(pointer, "meta.json"),
+        )
+    scope_tokens = scope_tokens if scope_tokens is not None else ()
     findings = []
     try:
         adapted, text_adaptations = adapt_literals(text)
@@ -80,6 +88,18 @@ def prepare_note(
             (owner, asset_id),
             evidence=(pointer,),
             guidance=issue.guidance,
+        )
+    if allow_qualified and any(
+        contains_omitted_identity(value, scope_tokens)
+        for reference in references
+        for value in (reference.target, reference.display_text)
+    ):
+        source_refuse(
+            "invalid_reference",
+            "Note contains an excluded association outside removable references",
+            (owner, asset_id),
+            evidence=(pointer, "meta.json"),
+            guidance="Review this attachment's declared role and owned archive payload.",
         )
     for loss in insert_losses:
         findings.append(

@@ -10,7 +10,7 @@ from types import MappingProxyType
 from uuid import UUID
 
 from .api_manifest import read_json
-from .note_links import markdown_destination, thought_destination
+from .note_links import assert_no_omitted, markdown_destination, thought_destination
 from .text import inline_candidates
 
 THOUGHT_REQUIRED = {
@@ -157,6 +157,14 @@ def scope_note(raw, excluded, *, qualified_brain=None):
             r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", decoded
         )
     ), "unremoved excluded note association"
+    if qualified_brain is not None:
+        # This is an expected-fact dependency, separate from production parsing.
+        from .checker import inline_display
+
+        for _, _, _, label, begin, end in inline_candidates(raw)[0]:
+            assert_no_omitted(
+                (markdown_destination(raw[begin:end]), inline_display(label)), tokens
+            )
     return raw, frozenset(removed)
 
 

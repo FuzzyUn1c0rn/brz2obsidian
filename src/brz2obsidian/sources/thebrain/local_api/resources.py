@@ -452,6 +452,11 @@ def validate_payload_binding(source, snapshot, audit):
     from .notes import bind_documents
 
     profile = source["identifiers"]["profile_version"]
+    excluded_thoughts = {
+        record["value"]["id"]
+        for record in source["records"]
+        if record["domain"] == "exclusion"
+    }
     attachments = {
         r["value"]["id"]: r["value"]
         for r in source["records"]
@@ -600,6 +605,7 @@ def validate_payload_binding(source, snapshot, audit):
                     preserve_table_warnings=preserve_table_warnings,
                     brain_id=source["brain"]["id"],
                     allow_qualified=profile == "4",
+                    excluded=excluded_thoughts,
                 )
             except MigrationRefused:
                 continue

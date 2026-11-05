@@ -19,6 +19,18 @@ from .errors import refuse
 from .markdown import adapt_literals, adapt_note
 
 
+def _omitted_tokens(excluded):
+    return {
+        token
+        for key in excluded
+        for token in (
+            key,
+            key.replace("-", ""),
+            base64.urlsafe_b64encode(UUID(key).bytes_le).decode().rstrip("="),
+        )
+    }
+
+
 def scope_text(text, excluded, *, brain_id=None, allow_qualified=False):
     adapted, edits = adapt_literals(text)
     references = trace_note_references(
@@ -39,16 +51,18 @@ def scope_text(text, excluded, *, brain_id=None, allow_qualified=False):
             source_position(reference.end, edits),
         )
         text = text[:begin] + text[end:]
-    tokens = {
-        token
-        for key in excluded
-        for token in (
-            key,
-            key.replace("-", ""),
-            base64.urlsafe_b64encode(UUID(key).bytes_le).decode().rstrip("="),
+    tokens = _omitted_tokens(excluded)
+    removed_spans = {(r.start, r.end) for r in removals}
+    if (
+        contains_omitted_identity(text, tokens)
+        or allow_qualified
+        and any(
+            contains_omitted_identity(value, tokens)
+            for reference in references
+            if (reference.start, reference.end) not in removed_spans
+            for value in (reference.target, reference.display_text)
         )
-    }
-    if contains_omitted_identity(text, tokens):
+    ):
         refuse("Excluded note associations cannot be removed safely")
     return text, removed
 
@@ -69,9 +83,13 @@ def bind_documents(
     subjects=None,
     brain_id=None,
     allow_qualified=False,
+    excluded=None,
 ):
     from .capture import canonical
 
+    if allow_qualified and excluded is None:
+        refuse("Current note binding needs authoritative exclusion context")
+    tokens = _omitted_tokens(excluded) if allow_qualified else set()
     result, findings = [], []
     for document in documents:
         try:
@@ -105,6 +123,15 @@ def bind_documents(
                     ),
                 }
             )
+            if allow_qualified and (
+                contains_omitted_identity(document.text, tokens)
+                or any(
+                    contains_omitted_identity(value, tokens)
+                    for reference in document.references
+                    for value in (reference.target, reference.display_text)
+                )
+            ):
+                refuse("Excluded note associations cannot be removed safely")
             bound = []
             for reference in document.references:
                 if reference.kind == "item":
