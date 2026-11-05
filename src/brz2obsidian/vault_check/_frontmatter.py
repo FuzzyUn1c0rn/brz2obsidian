@@ -3,68 +3,24 @@
 import re
 from datetime import date, datetime
 
-import yaml
+from brz2obsidian.obsidian_dialect import (
+    blank,
+    category,
+    frontmatter,
+    mapping,
+    wikilink,
+)
 
 from .contracts import VaultCheckIssue
 
-
-class _UniqueSafeLoader(yaml.SafeLoader):
-    def construct_mapping(self, node, deep=False):
-        if isinstance(node, yaml.MappingNode):
-            self.flatten_mapping(node)
-            seen = set()
-            for key_node, _ in node.value:
-                key = self.construct_object(key_node, deep=deep)
-                try:
-                    if key in seen:
-                        raise yaml.constructor.ConstructorError(
-                            None, None, "duplicate mapping key", key_node.start_mark
-                        )
-                    seen.add(key)
-                except TypeError as error:
-                    raise yaml.constructor.ConstructorError(
-                        None, None, "non-scalar mapping key", key_node.start_mark
-                    ) from error
-        return super().construct_mapping(node, deep=deep)
-
-
-def mapping(text):
-    value = yaml.load(text, Loader=_UniqueSafeLoader)
-    if value is None and not text.strip():
-        return {}
-    if not isinstance(value, dict) or any(
-        not isinstance(key, str) or not key.strip() for key in value
-    ):
-        raise ValueError("Expected a mapping with nonempty string property names")
-    return value
-
-
-def frontmatter(text):
-    lines = text.splitlines(keepends=True)
-    if not lines or lines[0].strip("\r\n") != "---":
-        return {}, text
-    for index, line in enumerate(lines[1:], 1):
-        if line.strip("\r\n") in {"---", "..."}:
-            return mapping("".join(lines[1:index])), "".join(lines[index + 1 :])
-    raise ValueError("Frontmatter has no closing delimiter")
-
-
-def blank(value):
-    return value is None or (isinstance(value, str) and not value.strip())
-
-
-def wikilink(value):
-    return isinstance(value, str) and bool(re.fullmatch(r"\[\[[^\[\]\r\n]+\]\]", value))
-
-
-def category(properties, artifact):
-    parts = artifact.split("/")
-    return (
-        parts[0] == "Categories"
-        and not any(part in {"Templates", "Attachments"} for part in parts[:-1])
-        and isinstance(properties.get("tags"), list)
-        and "categories" in properties["tags"]
-    )
+__all__ = [
+    "blank",
+    "category",
+    "frontmatter",
+    "mapping",
+    "valid_date",
+    "wikilink",
+]
 
 
 def valid_date(value, template):

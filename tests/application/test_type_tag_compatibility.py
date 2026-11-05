@@ -19,7 +19,7 @@ from tests.support.type_tag_sources import BRAIN, ICON, PNG, brz_source
 __all__ = ["update_root"]
 
 
-def seed_format7(root):
+def seed_format7(root, *, category_edit=False):
     payload, _ = historical_payload()
     original, vault = root / "original7", root / "vault"
     for relative, raw in payload.items():
@@ -30,7 +30,17 @@ def seed_format7(root):
     source = root / "unchanged.brz"
     shutil.copyfile(FIXTURE / "source.brz", source)
     current = ORIGINAL + b"\nIndependent old-vault local writing.\n"
-    (vault / NOTE).write_bytes(current)
+    current_path = NOTE
+    if category_edit:
+        # This is an authored destination role on the genuine ordinary source
+        # item, rather than fabricated historical source-definition output.
+        current = current.replace(b"tags: []", b"tags: [categories]").replace(
+            b"---\n\n#", b"custom: [one, two]\n---\n\n#"
+        )
+        current_path = "Categories/Local category.md"
+        (vault / NOTE).unlink()
+        (vault / current_path).parent.mkdir(parents=True, exist_ok=True)
+    (vault / current_path).write_bytes(current)
     (vault / "Manual.md").write_bytes(b"Independent user history.\n")
     git(vault, "init", "-q")
     git(vault, "config", "core.autocrlf", "false")
@@ -61,7 +71,7 @@ def seed_format7(root):
 def test_actual_format7_requires_source_stable_transition_and_accepts_target8_choice(
     update_root,
 ):
-    operations, vault, source, current = seed_format7(update_root)
+    operations, vault, source, current = seed_format7(update_root, category_edit=True)
     ordinary = operations.prepare_update(vault, source)
     assert (ordinary.code, ordinary.next_actions) == (
         "format_transition_required",
@@ -87,10 +97,37 @@ def test_actual_format7_requires_source_stable_transition_and_accepts_target8_ch
     note = next(
         s for s in facts.subjects if s.item_id == "5f71e626-527e-47b4-abaa-e53d124619f8"
     )
-    assert (
-        note.baseline.content.data == ORIGINAL and note.current.content.data == current
-    )
+    assert note.baseline.content.data == ORIGINAL
+    assert note.current.content is not None
+    assert note.current.content.data == current
+    assert note.current.path == "Categories/Local category.md"
+    assert note.item_id == "5f71e626-527e-47b4-abaa-e53d124619f8"
     context = prepared.review.producer_facts.link_context
+    current_target = next(
+        target
+        for target in context.current_targets
+        if target.canonical_path == "Categories/Local category.md"
+    )
+    assert current_target.kind == "note"
+    assert current_target.identity.item_id == note.item_id
+    assert current_target.identity.collection_id == (
+        "7b170eec-a7e4-49f6-a0b4-bd553528a201"
+    )
+    current_state = next(
+        state
+        for state in context.current_target_facts
+        if state.target_id == current_target.target_id
+    )
+    assert current_state.content.data == current
+    assert current_state.file_roles.category
+    assert current_state.file_roles.path == "Categories/Local category.md"
+    assert current_state.structure.output_format == 7
+    assert current_state.structure.status == "unsupported"
+    assert all(
+        state.file_roles is not None
+        for state in context.current_target_facts
+        if state.content is not None
+    )
     assert {
         state.structure.output_format
         for state in context.current_target_facts
@@ -122,7 +159,7 @@ def test_actual_format7_requires_source_stable_transition_and_accepts_target8_ch
         a for a in chosen.preparation.review.approvals if a.change_id == guide.change_id
     )
     assert approval.result.data == guide.incoming.data
-    assert (vault / NOTE).read_bytes() == current
+    assert (vault / "Categories/Local category.md").read_bytes() == current
 
 
 @pytest.mark.parametrize("version,profile", [(6, "9"), (7, "10"), (8, "11")])

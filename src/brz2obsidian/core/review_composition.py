@@ -1,5 +1,7 @@
 """Compose explicit reference authority with an independently approved edited body."""
 
+from hashlib import sha256
+
 from brz2obsidian.contracts import (
     ExactContent,
     LinkDocument,
@@ -28,6 +30,16 @@ def _rewritten_state(state, content, edits):
         or any(start < structure.body.start for start, _, _ in edits)
     ):
         raise ValueError("Reference rewrite lacks bounded body evidence")
+    roles = state.file_roles
+    if roles is not None:
+        prefix = state.content.data[: structure.body.start]
+        if content.data[: structure.body.start] != prefix or (
+            structure.body.start == 0 and content.data.startswith(b"---")
+        ):
+            raise ValueError("Reference rewrite changes native property evidence")
+        roles = roles.model_copy(
+            update={"content_sha256": sha256(content.data).hexdigest()}
+        )
     structure = structure.model_copy(
         update={
             "content": content,
@@ -43,6 +55,7 @@ def _rewritten_state(state, content, edits):
             update={
                 "content": content,
                 "structure": structure,
+                "file_roles": roles,
                 "anchors": tuple(
                     anchor.model_copy(
                         update={
@@ -57,6 +70,8 @@ def _rewritten_state(state, content, edits):
 
 
 def _compose(document, state, prior, choices):
+    if state.file_roles is not None and state.file_roles.path != document.source_path:
+        raise ValueError("Reference rewrite changes the qualified file path")
     replacements = {}
     for choice, proof, later_reference in choices:
         old = next(
@@ -212,3 +227,79 @@ def composed_text_documents(facts, actions, approvals):
         except ValueError:
             conflict = True
     return documents, conflict
+
+
+def automatic_reference_document(facts, change, approval, approvals):
+    """A current8 explicit reference choice outranks only an automatic keep."""
+    if (
+        facts.incoming_identity.output_format != 8
+        or facts.format_operation.kind != "source_update"
+        or approval is not None
+        or change.requires_decision
+        or change.disposition not in ("preserve_vault", "no_change")
+        or facts.link_context is None
+    ):
+        return None
+    subject = next(
+        row
+        for row in facts.subjects
+        if (row.item_id, row.facet) == (change.item_id, change.facet)
+    )
+    if (
+        subject.attachment is not None
+        or change.target_path != subject.current.path
+        or change.result != subject.current.content
+    ):
+        return None
+    owners = {
+        row.target_id
+        for row in facts.link_context.current_targets
+        if row.canonical_path == subject.current.path
+    }
+    states = tuple(
+        row
+        for row in facts.link_context.current_target_facts
+        if row.target_id in owners
+    )
+    if len(states) != 1:
+        return None
+    state = states[0]
+    if (
+        state.file_roles is None
+        or state.file_roles.path != subject.current.path
+        or state.content != subject.current.content
+        or state.content is None
+        or state.file_roles.content_sha256 != sha256(state.content.data).hexdigest()
+    ):
+        return None
+    selected = []
+    for binary in approvals:
+        if binary.attachment_candidate is None or binary.attachment_selection is None:
+            continue
+        explicit = {
+            choice.document_id for choice in binary.attachment_selection.link_choices
+        }
+        for document in binary.attachment_candidate.documents:
+            if (
+                document.document_id not in explicit
+                or document.source_path != subject.current.path
+            ):
+                continue
+            prior = next(
+                (
+                    row
+                    for row in facts.link_context.current_documents
+                    if row.document_id == document.document_id
+                ),
+                None,
+            )
+            if prior is not None and (prior.source_path, prior.content) == (
+                subject.current.path,
+                subject.current.content,
+            ):
+                selected.append(document)
+    return (
+        selected[0]
+        if selected and all(row == selected[0] for row in selected)
+        else None
+    )

@@ -6,6 +6,7 @@ from urllib.parse import unquote_to_bytes
 import yaml
 
 from brz2obsidian.contracts import (
+    ExactContent,
     LinkAnchor,
     LinkDocument,
     LinkFragment,
@@ -15,6 +16,7 @@ from brz2obsidian.contracts import (
     StructureSpan,
 )
 from brz2obsidian.core.link_meanings import resolve_link_meaning
+from brz2obsidian.obsidian_dialect import file_roles
 
 from .base_views import view_anchors
 
@@ -92,8 +94,36 @@ def interpret_link_target(
     membership_targets=(),
     source_path=None,
     output_format=7,
+    qualify_roles=False,
 ):
     from .interpretation import interpret_structure
+
+    def reference_query(value):
+        if not value[2:-2].split("|", 1)[0].split("#", 1)[0]:
+            return None
+        document = interpret_links(
+            ExactContent(data=value.encode("utf-8")),
+            document_id="native-reference",
+            source_path=source_path,
+            path_mode="shortened",
+            targets=(),
+            target_facts=(),
+            inventory="complete",
+        )
+        if document.status != "supported" or len(document.occurrences) != 1:
+            return None
+        return document.occurrences[0].query
+
+    roles = (
+        file_roles(
+            content,
+            path=source_path,
+            existence=existence,
+            reference_query=reference_query,
+        )
+        if (output_format == 8 or qualify_roles) and source_path is not None
+        else None
+    )
 
     fragments, anchors, status, structure = (
         [],
@@ -127,6 +157,7 @@ def interpret_link_target(
                     structure=structure,
                     memberships=memberships,
                     interpretation=status,
+                    file_roles=roles,
                 )
             ranges, issues = _code_ranges(text)
             if issues:
@@ -187,6 +218,7 @@ def interpret_link_target(
         structure=structure,
         memberships=memberships,
         interpretation=status,
+        file_roles=roles,
     )
 
 

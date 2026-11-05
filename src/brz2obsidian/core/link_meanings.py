@@ -118,7 +118,9 @@ def _semantic(value):
         if hasattr(value, "data"):
             return {"available_sha256": sha256(value.data).hexdigest()}
         result = {
-            name: _semantic(getattr(value, name)) for name in type(value).model_fields
+            name: _semantic(getattr(value, name))
+            for name in type(value).model_fields
+            if name != "file_roles" or getattr(value, name) is not None
         }
         # These spellings are lookup alternatives, not authored occurrence order.
         if isinstance(value, ReferenceTarget):

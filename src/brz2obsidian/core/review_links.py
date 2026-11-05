@@ -6,7 +6,7 @@ from hashlib import sha256
 from brz2obsidian.contracts import LinkValidationBaseline, ProposalAssumption
 
 from .identity import _paths_collide, _target_context, _target_safe
-from .link_meanings import _semantic, resolve_occurrence
+from .link_meanings import _semantic, resolve_link_meaning, resolve_occurrence
 from .link_validation import validate_link_document
 from .reference_targets import validate_targets
 
@@ -62,6 +62,28 @@ def consumed_context(
                     e.target_id for m in state.structure.memberships for e in m.entries
                 )
                 owner = by_id.get(state.target_id)
+                roles = state.file_roles
+                if roles is not None:
+                    if (
+                        state.target_id in expanded
+                        or owner is None
+                        or roles.path != owner.canonical_path
+                    ):
+                        continue
+                    expanded.add(state.target_id)
+                    queries = roles.category_memberships.queries + tuple(
+                        declaration.query
+                        for declaration in (roles.provider, roles.owned_icon)
+                        if declaration.status == "valid"
+                    )
+                    for query in queries:
+                        for target in targets:
+                            meaning = resolve_link_meaning(
+                                query, "", None, (target,), states, inventory
+                            )
+                            if meaning.target_id is not None or meaning.candidates:
+                                ids.add(target.target_id)
+                    continue
                 if (
                     owner is None
                     or owner.kind != "category"
@@ -464,6 +486,40 @@ def onboarding_current_context(facts):
     return True
 
 
+def _relocated_current_states(facts, candidate, owner, selected_path):
+    prior = facts.link_context.current_target_facts
+    if candidate.link_target_facts == prior:
+        return True
+    if facts.incoming_identity.output_format != 8 or len(
+        candidate.link_target_facts
+    ) != len(prior):
+        return False
+    for current, selected in zip(prior, candidate.link_target_facts, strict=True):
+        if current.target_id != owner.target_id:
+            if selected != current:
+                return False
+            continue
+        roles, qualified = current.file_roles, selected.file_roles
+        if (
+            roles is None
+            or qualified is None
+            or qualified.path != selected_path
+            or selected.content is None
+            or qualified.content_sha256 != sha256(selected.content.data).hexdigest()
+            or qualified
+            != roles.model_copy(
+                update={
+                    "path": selected_path,
+                    "category": qualified.category,
+                    "image_path": qualified.image_path,
+                }
+            )
+            or selected.model_copy(update={"file_roles": roles}) != current
+        ):
+            return False
+    return True
+
+
 def selected_current_links_safe(facts, change, *, candidate=None):
     context = facts.link_context
     if change.current is None:
@@ -522,6 +578,12 @@ def selected_current_links_safe(facts, change, *, candidate=None):
     ).valid
     if not valid or not relocated:
         return valid
+    owners = tuple(
+        t for t in context.current_targets if t.canonical_path == observed_path
+    )
+    if len(owners) != 1:
+        return False
+    owner = owners[0]
     rename = change.rename_review
     if (
         rename is None
@@ -535,15 +597,9 @@ def selected_current_links_safe(facts, change, *, candidate=None):
         or candidate.links.path_mode != document.path_mode
         or candidate.links.source_path != change.target_path
         or candidate.links.inventory != context.inventory
-        or candidate.link_target_facts != context.current_target_facts
+        or not _relocated_current_states(facts, candidate, owner, change.target_path)
     ):
         return False
-    owners = tuple(
-        t for t in context.current_targets if t.canonical_path == observed_path
-    )
-    if len(owners) != 1:
-        return False
-    owner = owners[0]
     prospective = owner.model_copy(
         update={
             "canonical_path": change.target_path,

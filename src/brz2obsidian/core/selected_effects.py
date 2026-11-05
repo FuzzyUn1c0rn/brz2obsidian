@@ -4,7 +4,10 @@ from brz2obsidian.contracts import ReviewPlan, SelectedReviewEffects, SelectedRe
 from brz2obsidian.core.resolution import validate_review
 from brz2obsidian.core.reversals import reversal_subject, selected_reversal_outputs
 from brz2obsidian.core.review_attachments import applicable_approvals
-from brz2obsidian.core.review_composition import composed_text_documents
+from brz2obsidian.core.review_composition import (
+    automatic_reference_document,
+    composed_text_documents,
+)
 
 
 def _refused(code):
@@ -126,6 +129,11 @@ def _project_review_effects(plan: ReviewPlan) -> SelectedReviewEffects:
                         )
                 continue
             content = change.result if approval is None else approval.result
+            reference = automatic_reference_document(
+                plan.producer_facts, change, approval, tuple(approvals.values())
+            )
+            if reference is not None:
+                content = reference.content
             subject = reversal_subject(plan.producer_facts, change)
             if subject.operation_reversal is not None:
                 content = next(

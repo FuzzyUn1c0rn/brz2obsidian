@@ -393,7 +393,7 @@ def test_public_binary_choice_retains_exact_base_named_view_facts():
     assert result.publication == "not_started" and result.application is None
 
 
-def overlapping_preparation():
+def overlapping_preparation(*, output_format=7):
     """Real public producers see an edited owner and a separate split-reference note."""
     prepared, _ = membership_preparation("both")
     facts = prepared.review.facts
@@ -484,6 +484,46 @@ def overlapping_preparation():
             )
         }
     )
+    if output_format == 8:
+        baseline_identity = facts.baseline_identity.model_copy(
+            update={"output_format": 8}
+        )
+        incoming_identity = facts.incoming_identity.model_copy(
+            update={"output_format": 8}
+        )
+        stages = {}
+        for stage in ("current", "incoming"):
+            targets = getattr(facts.link_context, stage + "_targets")
+            stages[stage + "_target_facts"] = tuple(
+                interpret_link_target(
+                    state.content,
+                    target_id=state.target_id,
+                    existence=state.existence,
+                    memberships=state.memberships,
+                    membership_targets=targets,
+                    output_format=8,
+                    source_path=next(
+                        row.canonical_path
+                        for row in targets
+                        if row.target_id == state.target_id
+                    ),
+                )
+                for state in getattr(facts.link_context, stage + "_target_facts")
+            )
+        facts = facts.model_copy(
+            update={
+                "baseline_identity": baseline_identity,
+                "incoming_identity": incoming_identity,
+                "format_operation": facts.format_operation.model_copy(
+                    update={
+                        "established_baseline": facts.format_operation.established_baseline.model_copy(
+                            update={"identity": baseline_identity}
+                        )
+                    }
+                ),
+                "link_context": facts.link_context.model_copy(update=stages),
+            }
+        )
     prepared = preparation(type(facts).model_validate(facts.model_dump()))
     return choose_text(prepared, "entry:independent", EDITED).preparation
 
@@ -540,9 +580,12 @@ def choose_overlapping_binary(prepared, *, owner_choice="keep_current"):
 
 
 @pytest.mark.parametrize("owner_choice", ("keep_current", "use_secondary"))
-def test_edited_owner_composes_with_later_explicit_attachment_reference(owner_choice):
+@pytest.mark.parametrize("output_format", (7, 8))
+def test_edited_owner_composes_with_later_explicit_attachment_reference(
+    owner_choice, output_format
+):
     """#298 A1: the later link decision preserves already approved prose exactly."""
-    prepared = overlapping_preparation()
+    prepared = overlapping_preparation(output_format=output_format)
     prepared = choose_text(prepared, "entry:owner", OWNER_EDITED).preparation
     prior_approvals = prepared.review.approvals
     result = choose_overlapping_binary(prepared, owner_choice=owner_choice)

@@ -1774,6 +1774,40 @@ class LinkAnchor(ReconciliationContract):
     raw_parts: tuple[bytes, ...]
 
 
+class LinkQuery(ReconciliationContract):
+    value: str = Field(min_length=1)
+    mode: Literal["exact", "shortened"]
+    spellings: tuple[str, ...]
+
+
+class ReferenceDeclarationFacts(ReconciliationContract):
+    status: Literal["absent", "blank", "valid", "invalid"]
+    query: LinkQuery | None
+
+    @model_validator(mode="after")
+    def qualified_query(self):
+        if (self.status == "valid") != (self.query is not None):
+            raise ValueError("Only a valid reference declaration has a query")
+        return self
+
+
+class MembershipDeclarationFacts(ReconciliationContract):
+    status: Literal["absent", "valid", "invalid"]
+    queries: tuple[LinkQuery, ...]
+
+
+class FileRoleFacts(ReconciliationContract):
+    """Dialect-qualified roles bound to one exact file version and path."""
+
+    path: str = Field(min_length=1)
+    content_sha256: str | None = Field(pattern=r"^[0-9a-f]{64}$")
+    category: bool
+    image_path: bool
+    category_memberships: MembershipDeclarationFacts
+    provider: ReferenceDeclarationFacts
+    owned_icon: ReferenceDeclarationFacts
+
+
 class LinkTargetFacts(ReconciliationContract):
     schema_id: Literal["brz2obsidian.link-target-facts"]
     schema_version: Literal[1]
@@ -1787,9 +1821,16 @@ class LinkTargetFacts(ReconciliationContract):
     structure: StructuredDocument | None
     memberships: tuple[str, ...]
     interpretation: Literal["supported", "unsupported", "unknown"]
+    file_roles: FileRoleFacts | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def bound_fragment_and_membership_evidence(self):
+        if self.file_roles is not None and self.file_roles.content_sha256 != (
+            None if self.content is None else sha256(self.content.data).hexdigest()
+        ):
+            raise ValueError("File roles must bind exact available target bytes")
         if tuple(a.fragment for a in self.anchors) != self.fragments:
             raise ValueError("Fragment facts require exact available anchors")
         for anchor in self.anchors:
@@ -1820,12 +1861,6 @@ class LinkTargetFacts(ReconciliationContract):
         elif self.memberships:
             raise ValueError("Membership facts require exact normalized structure")
         return self
-
-
-class LinkQuery(ReconciliationContract):
-    value: str = Field(min_length=1)
-    mode: Literal["exact", "shortened"]
-    spellings: tuple[str, ...]
 
 
 class LinkMeaning(ReconciliationContract):

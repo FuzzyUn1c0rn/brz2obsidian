@@ -16,11 +16,11 @@ def owned_note(collection, body):
     ).encode()
 
 
-def owner_facts(role, *, duplicate=False, asset=False):
+def owner_facts(role, *, duplicate=False, asset=False, output_format=7):
     path = "Categories/Own.md" if role == "category" else "Notes/Own.md"
     source = {
         "schema": "brz2obsidian.migration",
-        "schema_version": 7,
+        "schema_version": output_format,
         "profile_id": "reviewed-folio",
         "profile_version": "1",
         "source_identity": {
@@ -126,8 +126,11 @@ def test_foreign_same_item_keeps_its_path_bytes_and_role_in_incoming_context(rol
     assert change.current.data == original
 
 
-def test_genuine_same_owner_duplicate_remains_ambiguous():
-    facts, _, _, _, foreign = owner_facts("note", duplicate=True)
+@pytest.mark.parametrize("output_format", (7, 8))
+def test_genuine_same_owner_duplicate_remains_ambiguous(output_format):
+    facts, _, _, _, foreign = owner_facts(
+        "note", duplicate=True, output_format=output_format
+    )
     change = next(c for c in reconcile(facts).changes if c.item_id == "entry:opening")
     assert change.disposition == "identity_resolution"
     assert change.identity_review.reason == "duplicate_identity"

@@ -72,6 +72,7 @@ def selected_attachment_candidate(plan, change, alternative, references, offered
             existence="present",
             memberships=(),
             source_path=output.path,
+            output_format=plan.facts.incoming_identity.output_format,
         )
     offered = {
         (row.document_id, row.occurrence_id): row
@@ -147,6 +148,7 @@ def selected_attachment_candidate(plan, change, alternative, references, offered
                 memberships=state.memberships,
                 membership_targets=tuple(targets.values()),
                 source_path=bound[0].source_path,
+                output_format=plan.facts.incoming_identity.output_format,
             )
     return tuple(links), AttachmentCandidate(
         schema_id="brz2obsidian.attachment-candidate",

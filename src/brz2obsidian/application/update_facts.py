@@ -30,6 +30,7 @@ from brz2obsidian.obsidian import (
     interpret_links,
     interpret_structure,
 )
+from brz2obsidian.obsidian_dialect import native_properties
 
 
 def digest(value):
@@ -195,6 +196,7 @@ def link_state(
     membership_targets=(),
     source_path=None,
     output_format=7,
+    qualify_roles=False,
 ):
     document = (
         interpret_structure(
@@ -218,14 +220,37 @@ def link_state(
         membership_targets=membership_targets,
         source_path=source_path,
         output_format=output_format,
+        qualify_roles=qualify_roles,
     )
 
 
-def _observed_identity(path, content, identity, established):
+def _observed_identity(path, content, identity, established, *, native_metadata=False):
     if path in established and established[path][1] != "note":
         return "valid", _identity(identity, established[path][0]), established[path][2]
     if not path.lower().endswith(".md"):
         return "missing", None, None
+    if identity.output_format == 8 or native_metadata:
+        properties = native_properties(content)
+        names = ("source_collection_id", "source_item_id")
+        if properties is not None and all(
+            isinstance(properties.get(name), str) and properties[name] for name in names
+        ):
+            return (
+                "valid",
+                ImportedItemIdentity(
+                    collection_id=properties[names[0]],
+                    module_id=identity.module_id,
+                    item_id=properties[names[1]],
+                ),
+                "content",
+            )
+        return (
+            "malformed"
+            if properties is None or any(name in properties for name in names)
+            else "missing",
+            None,
+            "content",
+        )
     # Recorded6 retains the delivered bounded identity grammar, without gaining
     # structured merge or original-reproduction authority for that generation.
     read_format = 7 if identity.output_format == 6 else identity.output_format
@@ -315,7 +340,13 @@ def assemble_facts(
     for path, raw in sorted(current.items()):
         content = ExactContent(data=raw)
         state, claim, facet = _observed_identity(
-            path, content, old_identity, established
+            path,
+            content,
+            old_identity,
+            established,
+            # A new format8 operation qualifies edited native metadata while
+            # the baseline identity and merge grammar retain their generation.
+            native_metadata=identity.output_format == 8,
         )
         inventory.append(
             IdentityInventoryItem(
@@ -600,6 +631,7 @@ def _link_context(facts, baseline_record, incoming_record, physical_inventory):
                 existence="present" if row.current.content is not None else "missing",
                 membership_targets=current_memberships,
                 source_path=actual.canonical_path,
+                qualify_roles=facts.incoming_identity.output_format == 8,
                 output_format=(
                     7
                     if facts.baseline_identity.output_format == 6

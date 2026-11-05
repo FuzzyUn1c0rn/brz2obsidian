@@ -282,7 +282,16 @@ def review_plan_choice_action(
                 raise ValueError("Reference choice is unavailable")
             states = tuple(
                 interpret_link_target(
-                    None, target_id=row.target_id, existence="missing", memberships=()
+                    None,
+                    target_id=row.target_id,
+                    existence="missing",
+                    memberships=(),
+                    source_path=next(
+                        target.canonical_path
+                        for target in context.current_targets
+                        if target.target_id == row.target_id
+                    ),
+                    output_format=plan.facts.incoming_identity.output_format,
                 )
                 if row.target_id == target_id
                 else row
@@ -331,6 +340,7 @@ def review_plan_choice_action(
                     memberships=row.memberships,
                     membership_targets=context.current_targets,
                     source_path=document.source_path,
+                    output_format=plan.facts.incoming_identity.output_format,
                 )
                 if (
                     document := next(

@@ -819,6 +819,19 @@ def _current_path_choice(plan, change):
         prospective if row.target_id == owner.target_id else row
         for row in context.current_targets
     )
+    observed = link_state(
+        change.current,
+        target_id=owner.target_id,
+        existence="present",
+        membership_targets=targets,
+        source_path=change.target_path,
+        output_format=facts.baseline_identity.output_format,
+        qualify_roles=facts.incoming_identity.output_format == 8,
+    )
+    states = tuple(
+        observed if row.target_id == owner.target_id else row
+        for row in context.current_target_facts
+    )
     return inspect_text_candidate(
         change.current,
         identity=ImportedItemIdentity(
@@ -832,7 +845,7 @@ def _current_path_choice(plan, change):
         document_id=document.document_id,
         path_mode=document.path_mode,
         link_targets=targets,
-        link_target_facts=context.current_target_facts,
+        link_target_facts=states,
         link_inventory=context.inventory,
         membership_targets=targets,
     )

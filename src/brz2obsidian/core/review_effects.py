@@ -4,7 +4,10 @@ from brz2obsidian.contracts import LinkTargetFacts
 from brz2obsidian.core.link_meanings import resolve_occurrence
 from brz2obsidian.core.link_validation import validate_link_document
 from brz2obsidian.core.review_appearance import provider_chain_blockers
-from brz2obsidian.core.review_composition import composed_text_documents
+from brz2obsidian.core.review_composition import (
+    automatic_reference_document,
+    composed_text_documents,
+)
 from brz2obsidian.core.review_links import (
     bound_resource_record,
     current_baseline,
@@ -334,6 +337,11 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
         if subject.attachment is not None:
             continue
         selected_path = change.target_path if approval is None else approval.target_path
+        reference = automatic_reference_document(facts, change, approval, approvals)
+        if reference is not None:
+            documents[reference.document_id] = reference
+            proof_documents[reference.document_id] = reference
+            continue
         if (
             facts.format_operation.kind == "attachment_cleanup"
             and approval is None
@@ -463,7 +471,12 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
     final_states = tuple(states.values())
     # Historical7 persisted reviews retain their qualified replay semantics.
     if facts.incoming_identity.output_format == 8:
-        for code in provider_chain_blockers(context.current_target_facts, final_states):
+        for code in provider_chain_blockers(
+            context.current_target_facts,
+            final_states,
+            current_targets=context.current_targets,
+            selected_targets=final_targets,
+        ):
             add(code)
     attachment_links = {
         (choice.document_id, choice.occurrence_id)
