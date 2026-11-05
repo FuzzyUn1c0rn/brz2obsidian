@@ -9,7 +9,7 @@ from decimal import Decimal
 from types import MappingProxyType
 from uuid import UUID
 
-from .api_manifest import read_json
+from .api_manifest import audited, read_json
 from .note_links import assert_no_omitted, markdown_destination, thought_destination
 from .text import inline_candidates
 
@@ -168,10 +168,10 @@ def scope_note(raw, excluded, *, qualified_brain=None):
     return raw, frozenset(removed)
 
 
+@audited(reuse="scope")
 def qualify_scope(baseline, *, profile_version):
     """Derive scope only; no safe text/availability assertion is an input."""
     assert profile_version in {"1", "2", "3", "4"}, "unsupported API profile version"
-    baseline.verify()
     data = baseline.data
     graphs = {
         key: read_json(baseline.bytes(path), parse_float=Decimal)

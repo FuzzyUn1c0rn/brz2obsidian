@@ -22,7 +22,7 @@ import yaml
 from .api_baseline import verify_recorded_baseline
 from .api_generated import check_complete_shape, checked_generated_regions
 from .api_image_proofs import ico_proof, jpeg_headers, jpeg_proof
-from .api_manifest import read_json, safe_path
+from .api_manifest import audited, read_json, safe_path
 from .api_note_text import (
     document_references,
     expected_document_text,
@@ -321,6 +321,7 @@ def qualify_reverse_joins(baseline, row, thoughts, links, graphs):
         ), "reverse graph type declaration"
 
 
+@audited
 def scoped_note_text(baseline, key, *, profile_version="3"):
     if baseline.data["schema"] == "brz2obsidian.api-acceptance/2":
         return (
@@ -331,9 +332,9 @@ def scoped_note_text(baseline, key, *, profile_version="3"):
     return baseline.bytes(baseline.data["payloads"][key]["path"]).decode("utf-8")
 
 
+@audited
 def source_facts(baseline, *, profile_version="1"):
     assert profile_version in {"1", "2", "3", "4"}, "unsupported API profile version"
-    baseline.verify()
     data = baseline.data
     scoped = qualify_scope(baseline, profile_version=profile_version)
     for values in data["scope"].values():
@@ -919,6 +920,7 @@ def external_projection(baseline, attachment, profile_version):
     return ("file" if attachment["type"] == 2 else "directory"), parts[-1], uri
 
 
+@audited
 def expected_asset(baseline, attachment, profile_version="1", proofs=None):
     assert profile_version in {"1", "2", "3", "4"}, "unsupported API profile version"
     if profile_version in {"3", "4"}:
@@ -1126,10 +1128,10 @@ def has_measured_pdf(baseline, attachments, owner, profile_version, proofs):
     return False
 
 
+@audited
 def audit_baseline(baseline, *, profile_version="1"):
     """Qualify every scoped raw fact/outcome independently of generated output."""
     if "http_responses" in baseline.data:
-        baseline.verify()
         verify_recorded_baseline(baseline)
     thoughts, relationships, attachments, _ = source_facts(
         baseline, profile_version=profile_version
@@ -1208,7 +1210,6 @@ def audit_baseline(baseline, *, profile_version="1"):
             assert archive.read(match["member"]) == payload, (
                 "archive/live byte equivalence"
             )
-    baseline.verify()
     summary = {
         "thoughts": len(thoughts),
         "relationships": len(relationships),
@@ -2494,6 +2495,7 @@ def check_scoped_output_content(
         )
 
 
+@audited
 def check_api_vault(baseline, vault, *, profile_version="1"):
     """Audit complete source-bound output, including mandatory /2 support proof."""
     return _check_api_vault(
@@ -2501,6 +2503,7 @@ def check_api_vault(baseline, vault, *, profile_version="1"):
     )
 
 
+@audited
 def check_api_component_vault(baseline, vault, *, profile_version="1"):
     """Exercise source-preservation components; does not establish full-vault PASS."""
     return _check_api_vault(
@@ -2727,7 +2730,6 @@ def _check_api_vault(baseline, vault, *, profile_version, complete_output):
             profile_version,
             complete_output,
         )
-    baseline.verify()
     return {
         "thoughts": len(thoughts),
         "relationships": len(expected),
