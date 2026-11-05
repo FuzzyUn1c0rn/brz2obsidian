@@ -670,3 +670,38 @@ for issue in result.issues:
 
 Implementation contracts live in [source code](src/brz2obsidian/);
 [AGENTS.md](AGENTS.md#documentation) defines where project documentation belongs.
+
+### Independent source audits (development support)
+
+Use `python -m tests.local_acceptance.audit_run --help` for one explicitly
+selected BRZ/API source or pair. These independent auditors compare pristine
+outputs with original BRZ bytes or a pinned raw API baseline; the source-free
+vault checker serves a separate purpose. Keep private evidence under an ignored
+`tmp/<effort>/` directory and use new attempt/output paths.
+
+```powershell
+$candidate = (git rev-parse HEAD).Trim()
+.\.venv\Scripts\python.exe -m tests.local_acceptance.audit_run audit --candidate $candidate --brz-source 'source.brz' --brz-vault 'C:\audit\brz-vault' --output 'tmp\source-audit\brz.json'
+.\.venv\Scripts\python.exe -m tests.local_acceptance.audit_run prepare-controls --directory 'tmp\source-audit\controls'
+$pin = (Get-FileHash 'tmp\source-audit\controls\manifest.json' -Algorithm SHA256).Hash.ToLowerInvariant()
+.\.venv\Scripts\python.exe -m tests.local_acceptance.audit_run capture-api --candidate $candidate --api-url 'http://localhost:11522/api' --brain $brain --qualification 'tmp\source-audit\controls\manifest.json' --qualification-sha256 $pin --attempt 'tmp\source-audit\api-attempt-001' --vault 'C:\audit\api-vault'
+```
+
+Replace the source, fresh vault paths and Brain selection for the authorized
+rehearsal. `capture-api` uses the configured API-key environment variable,
+records its own public conversion through a bounded loopback recorder, then
+seals and audits those observations. It retains each response occurrence and
+exact transport/content-decoded bytes; supplemental audit reads remain distinct
+from the converter's acquisition. Credentials are never retained. Missing,
+contradictory, interrupted or unsafe evidence refuses qualification and preserves
+the failed attempt. The approved upstream and effective loopback endpoint remain
+bound to the transcript, independently of the proxy's temporary address.
+
+`prepare-controls` reuses the maintained synthetic API3 direction/control
+provenance; it performs no network operation or new native qualification. The
+current capture's schema and source facts are checked separately. Inspect and
+convert are distinct non-atomic acquisitions. Pair comparisons report measured
+byte matches, direct classifications/tags and ordered navigation declarations
+without assuming parity or shared update history. Audit results bind the
+candidate/content, all selected evidence, optional run-result bytes and outputs;
+they never grant complete M5, native, user or delivery acceptance.
