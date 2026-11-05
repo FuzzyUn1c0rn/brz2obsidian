@@ -35,13 +35,21 @@ def reviewed_video(record, refuse):
         or uri.netloc != "www.youtube.com"
         or uri.path != "/watch"
         or uri.fragment
-        or set(query) not in ({"v"}, {"v", "t"})
+        or set(query) not in ({"v"}, {"v", "t"}, {"v", "list"}, {"v", "list", "index"})
         or len(query.get("v", [])) != 1
         or not re.fullmatch(_VIDEO_ID, query["v"][0])
     ):
         refuse(
             "unsupported_feature", "Video provider or metadata is unreviewed", affected
         )
+    # Context belongs to the original link, never to the single-video player.
+    for key in ("list", "index"):
+        if key in query and (len(query[key]) != 1 or not query[key][0]):
+            refuse(
+                "unsupported_feature",
+                "Video URL context is empty or repeated",
+                affected,
+            )
     video_id = query["v"][0]
     if metadata["video_id"] != video_id:
         refuse("invalid_source", "Video URL and metadata identities conflict", affected)

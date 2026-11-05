@@ -165,9 +165,15 @@ def video(a):
         "/watch",
         "",
     ), "raw reviewed video provider"
-    assert set(query) in ({"v"}, {"v", "t"}) and query["v"] == [match[1]], (
-        "raw video identity/query"
-    )
+    assert set(query) in (
+        {"v"},
+        {"v", "t"},
+        {"v", "list"},
+        {"v", "list", "index"},
+    ) and query["v"] == [match[1]], "raw video identity/query"
+    for context in ("list", "index"):
+        if context in query:
+            assert len(query[context]) == 1 and query[context][0], "raw video context"
     seconds = 0
     if "t" in query:
         assert len(query["t"]) == 1 and re.fullmatch(r"[0-9]+s", query["t"][0]), (

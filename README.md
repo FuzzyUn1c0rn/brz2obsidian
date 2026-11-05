@@ -454,6 +454,16 @@ originals containing excluded references are omitted explicitly. Present
 attachment bytes are preserved. External URLs and directory links remain
 references; the converter does not download their contents.
 
+Reviewed YouTube video attachments in BRZ exports retain their exact original
+resource link alongside a single-video player. Supported watch URLs use `v`,
+`v` with seconds-based `t`, `v` with `list`, or `v` with `list` and `index`.
+Playlist context stays in the original link; `list` and `index` must each be
+nonempty and unique and do not select playlist playback in the embedded player.
+The source video ID must agree with its reviewed player metadata. Playlist-only
+URLs remain ordinary links. Local API imports also retain ordinary links because
+the API does not expose that player metadata. Playback depends on YouTube and
+the network; the converter does not download videos.
+
 Some empty thoughts deliberately remain links to notes that have not yet been
 created. Clicking one in Obsidian lets you create its note later. Conditional
 `Uncreated targets.md` and `Tag memberships.md` files record otherwise hidden
