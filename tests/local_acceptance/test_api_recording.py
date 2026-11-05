@@ -244,13 +244,18 @@ def test_capture_scopes_excluded_metadata_before_content(
             tmp_path / disposition, upstream, brain_id=BRAIN, credential="KEY"
         )
         if disposition == "private":
-            with pytest.raises(AssertionError, match="private source metadata"):
-                with recording:
-                    recording.complete()
+            with (
+                pytest.raises(AssertionError, match="private source metadata"),
+                recording,
+            ):
+                recording.complete()
             assert not (recording.directory / "manifest.json").exists()
-            assert json.loads((recording.directory / "recording.json").read_bytes())[
-                "complete"
-            ] is False
+            assert (
+                json.loads((recording.directory / "recording.json").read_bytes())[
+                    "complete"
+                ]
+                is False
+            )
         else:
             with recording:
                 recording.complete()
