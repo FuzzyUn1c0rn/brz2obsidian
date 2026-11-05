@@ -178,6 +178,11 @@ def test_api_current_qualified_reference_uses_authoritative_context_on_capture_a
                 == API_QUALIFIED + "/Different-name"
             )
             assert snapshot.documents[0].text.encode() == body
+            assert snapshot.documents[0].references[0].expected_original == (
+                f"[Authored]({API_QUALIFIED}/Different-name)"
+            )
+            with session.open_payload(NOTE) as stream:
+                assert stream.read() == body
             session.verify_consistency()
     with closing(
         LocalApiSession(
@@ -245,6 +250,9 @@ def test_api_namespace_classification_preserves_scope_and_never_fetches_foreign(
                 if case.startswith("foreign"):
                     assert document.text.encode() == body
                     assert document.original_copy_omitted is False
+                    assert session.snapshot.relationships == ()
+                    with session.open_payload(document.original_asset_id) as stream:
+                        assert stream.read() == body
                 else:
                     assert document.text == "Before\r\n after\r\n"
                     assert document.original_copy_omitted is True
