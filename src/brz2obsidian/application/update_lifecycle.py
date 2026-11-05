@@ -496,6 +496,39 @@ def _stale_slots(before, after):
     return len((prior - current) & required)
 
 
+def _review_explanation(result):
+    """Expose approved guidance without copying authored names or references."""
+    messages = (
+        (
+            "selected_provider_cycle",
+            "The selected appearance-category chains contain a cycle.",
+            "Review the selected appearance-category chains and remove the repeated provider before applying. A nearer owned icon does not repair the independent cycle.",
+        ),
+        (
+            "selected_provider_invalid",
+            "A selected appearance-category chain reaches an invalid declaration.",
+            "Follow the selected appearance-category chain to the note with the invalid declaration. Choose a valid category membership there or leave its appearance category blank, then refresh the review. A nearer owned icon does not repair the independent declaration.",
+        ),
+    )
+    selected = tuple(
+        row
+        for row in messages
+        if result.preparation is not None
+        and row[0] in result.preparation.review.blockers
+    )
+    if selected:
+        return result.model_copy(
+            update={
+                "summary": " ".join(row[1] for row in selected),
+                "findings": tuple(
+                    dict.fromkeys((*result.findings, *(row[0] for row in selected)))
+                ),
+                "guidance": " ".join([row[2] for row in selected] + [result.guidance]),
+            }
+        )
+    return result
+
+
 def _prepared(
     history,
     directory,
@@ -572,7 +605,7 @@ def _prepared(
         if preparation.kind == "onboarding"
         else (),
     )
-    return _configuration_route(result)
+    return _review_explanation(_configuration_route(result))
 
 
 def _scoped(operations, history, facts, review=None, observed=None):
@@ -899,7 +932,7 @@ def resolve_update(operations, preparation, action, *, edited=None):
             if result_plan.ready
             else ("resolve_update", "save_update"),
         )
-        return _configuration_route(result)
+        return _review_explanation(_configuration_route(result))
     except OSError, ValueError, KeyError, TypeError, StopIteration, AttributeError:
         return _refused("invalid_review_action", preparation=preparation)
 

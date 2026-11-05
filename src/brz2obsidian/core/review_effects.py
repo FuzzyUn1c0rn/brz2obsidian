@@ -3,6 +3,7 @@
 from brz2obsidian.contracts import LinkTargetFacts
 from brz2obsidian.core.link_meanings import resolve_occurrence
 from brz2obsidian.core.link_validation import validate_link_document
+from brz2obsidian.core.review_appearance import provider_chain_blockers
 from brz2obsidian.core.review_composition import composed_text_documents
 from brz2obsidian.core.review_links import (
     bound_resource_record,
@@ -460,6 +461,10 @@ def selected_effect_blockers(facts, proposal, actions, approvals):
 
     final_targets = tuple(targets.values())
     final_states = tuple(states.values())
+    # Historical7 persisted reviews retain their qualified replay semantics.
+    if facts.incoming_identity.output_format == 8:
+        for code in provider_chain_blockers(context.current_target_facts, final_states):
+            add(code)
     attachment_links = {
         (choice.document_id, choice.occurrence_id)
         for approval in approvals

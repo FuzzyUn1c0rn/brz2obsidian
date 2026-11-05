@@ -1373,7 +1373,7 @@ def test_saved_format_review_reopens_as_maintenance_and_blocks_ordinary_update(
     )
     assert retained.result.data == CURRENT
     assert resumed.preparation.review.facts.baseline_identity.output_format == 6
-    assert resumed.preparation.review.facts.incoming_identity.output_format == 7
+    assert resumed.preparation.review.facts.incoming_identity.output_format == 8
     assert not resumed.ready and captured == [True]
     assert {
         path.relative_to(vault).as_posix(): path.read_bytes()

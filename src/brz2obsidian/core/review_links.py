@@ -11,6 +11,14 @@ from .link_validation import validate_link_document
 from .reference_targets import validate_targets
 
 
+def provider_documents(facts):
+    """New reviews consume owned-icon links; recorded7 replay keeps its meaning."""
+    context = facts.link_context
+    if facts.incoming_identity.output_format != 8 or context is None:
+        return ()
+    return context.current_documents + context.incoming_documents
+
+
 def consumed_context(
     documents,
     targets,
@@ -19,6 +27,7 @@ def consumed_context(
     *,
     include_document_targets=True,
     target_ids=(),
+    appearance_documents=(),
 ):
     """Include query competitors, selected membership facts and path collisions."""
     ids = set(target_ids) | {
@@ -34,6 +43,16 @@ def consumed_context(
                 meaning = resolve_occurrence(occurrence, (target,), states, inventory)
                 if meaning.target_id is not None or meaning.candidates:
                     ids.add(target.target_id)
+    by_id = {target.target_id: target for target in targets}
+    icon_documents = (
+        {
+            (doc.source_path, doc.content.data): doc
+            for doc in appearance_documents + documents
+        }
+        if appearance_documents
+        else {}
+    )
+    expanded = set()
     changed = True
     while changed:
         previous = set(ids)
@@ -42,6 +61,35 @@ def consumed_context(
                 ids.update(
                     e.target_id for m in state.structure.memberships for e in m.entries
                 )
+                owner = by_id.get(state.target_id)
+                if (
+                    owner is None
+                    or owner.kind != "category"
+                    or state.target_id in expanded
+                ):
+                    continue
+                expanded.add(state.target_id)
+                document = icon_documents.get(
+                    (owner.canonical_path, state.content.data)
+                )
+                if document is None:
+                    continue
+                fields = [
+                    field for field in state.structure.fields if field.key == "icon"
+                ]
+                for occurrence in document.occurrences:
+                    if not any(
+                        field.span.start <= occurrence.span.start
+                        and occurrence.span.end <= field.span.end
+                        for field in fields
+                    ):
+                        continue
+                    for target in targets:
+                        meaning = resolve_occurrence(
+                            occurrence, (target,), states, inventory
+                        )
+                        if meaning.target_id is not None or meaning.candidates:
+                            ids.add(target.target_id)
         for target in targets:
             if target.canonical_path is not None and any(
                 t.target_id in ids
@@ -102,7 +150,15 @@ def text_link_assumptions(facts, subject, subject_id, target_path):
             and content is not None
             and d.content.data == content.data
         )
-        portions.append(consumed_context(selected, targets, states, context.inventory))
+        portions.append(
+            consumed_context(
+                selected,
+                targets,
+                states,
+                context.inventory,
+                appearance_documents=provider_documents(facts),
+            )
+        )
     return (
         ProposalAssumption(
             key="text-links:" + subject_id,
