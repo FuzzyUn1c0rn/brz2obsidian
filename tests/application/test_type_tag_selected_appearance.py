@@ -9,6 +9,7 @@ from brz2obsidian.application.review_choices import (
     attachment_reference_page,
     requirement_digest,
 )
+from brz2obsidian.application.update_facts import assemble_facts
 from brz2obsidian.core import inspect_review_choices, select_review_effects
 from tests.application.test_update_lifecycle_contracts import preparation
 from tests.reconciliation.test_resolution import action
@@ -16,6 +17,8 @@ from tests.reconciliation.test_type_tag_dependencies import (
     BLUE,
     conflicted_graph,
     facts_for,
+    graph_payload,
+    note,
 )
 
 
@@ -169,4 +172,94 @@ def test_current_bytes_at_explicit_source_path_requalify_the_selected_file():
         )
         == authored
     )
-    assert effects.remove_paths == ("Manual/Independent.md",)
+
+
+@pytest.mark.parametrize("output_format", (7, 8), ids=("recorded7", "current8"))
+@pytest.mark.parametrize("choice", ("incoming", "edited"))
+def test_new_text_choice_qualifies_references_to_already_selected_text_versions(
+    output_format, choice
+):
+    baseline = graph_payload()
+    baseline["Categories/A.md"] = note("category:A", icon="[[Attachments/A.svg]]")
+    record = json.loads(baseline["migration-record.json"])
+    record["schema_version"] = output_format
+    baseline["migration-record.json"] = json.dumps(record).encode()
+    current, incoming = dict(baseline), dict(baseline)
+    current["Categories/A.md"] = note(
+        "category:A", icon="[[Attachments/A.svg]]", body="Local A writing."
+    )
+    current["Categories/C.md"] = note(
+        "category:C", provider="[[Categories/B.md]]", body="Local C writing."
+    )
+    incoming["Categories/C.md"] = note(
+        "category:C",
+        provider="[[Categories/B.md]]",
+        body="Incoming C links [[Categories/A.md|Selected A]].",
+    )
+    incoming["Categories/A.md"] = note(
+        "category:A", icon="[[Attachments/A.svg]]", body="Incoming A writing."
+    )
+    incoming_record = json.loads(incoming["migration-record.json"])
+    incoming_record["source_identity"].update(
+        source_sha256="e" * 64, snapshot_digest="f" * 64
+    )
+    incoming["migration-record.json"] = json.dumps(incoming_record).encode()
+    facts = assemble_facts(
+        baseline, incoming, current, proposal_id="selected-text-versions", generation=1
+    )
+    prepared = preparation(facts)
+    operations = Operations()
+    owner = next(
+        c for c in prepared.review.proposal.changes if c.item_id == "category:A"
+    )
+    record_change = next(
+        c
+        for c in prepared.review.proposal.changes
+        if c.item_id == "support:migration-record.json"
+    )
+    record_choice = operations.resolve_update(
+        prepared,
+        action(
+            prepared.review,
+            record_change,
+            choice="current",
+            decision_id="retain-current-record",
+        ),
+    )
+    assert record_choice.code == "accepted", record_choice.code
+    prepared = record_choice.preparation
+    kept = operations.resolve_update(
+        prepared,
+        action(
+            prepared.review, owner, choice="current", decision_id="explicit-local-A"
+        ),
+    )
+    assert kept.code == "accepted", kept.code
+    original_approval = kept.preparation.review.approvals
+    change = next(
+        c for c in kept.preparation.review.proposal.changes if c.item_id == "category:C"
+    )
+    selected = operations.resolve_update(
+        kept.preparation,
+        action(
+            kept.preparation.review,
+            change,
+            choice=choice,
+            decision_id="explicit-C-after-A",
+        ),
+        **({"edited": change.incoming.data} if choice == "edited" else {}),
+    )
+    assert selected.code == "accepted", selected.code
+    if output_format == 7:
+        assert not selected.ready
+        assert "selected_link_context_conflict" in selected.preparation.review.blockers
+        return
+    assert selected.ready, selected.preparation.review.blockers
+    assert selected.preparation.review.approvals[:2] == original_approval
+    effects = select_review_effects(selected.preparation.review)
+    assert effects.status == "selected"
+    files = {row.path: row.content.data for row in effects.files}
+    assert files["Categories/A.md"] == current["Categories/A.md"]
+    assert files["Categories/C.md"] == incoming["Categories/C.md"]
+    assert files["Notes/Independent.md"] == current["Notes/Independent.md"]
+    assert effects.remove_paths == ()

@@ -9,9 +9,17 @@ from brz2obsidian.application.operations import Operations
 from brz2obsidian.application.wiring import default_workflow
 from brz2obsidian.contracts import ExactContent, OutputIdentity
 from brz2obsidian.obsidian import interpret_attachment_mapping
-from tests.application.test_type_tag_updates import update_root
+from tests.application.test_format_transition_completion import finish_transition
+from tests.application.test_format_transition_native import user_git_state
+from tests.application.test_type_tag_updates import (
+    fresh_resume,
+    measured,
+    update_root,
+    use_incoming,
+)
 from tests.application.test_update_lifecycle import git
 from tests.reconciliation.test_resolution import action
+from tests.support.recorded_format6 import changed_source
 from tests.support.recorded_format6 import historical_payload as format6_payload
 from tests.support.recorded_format7 import FIXTURE, NOTE, ORIGINAL, historical_payload
 from tests.support.type_tag_sources import BRAIN, ICON, PNG, brz_source
@@ -72,6 +80,12 @@ def test_actual_format7_requires_source_stable_transition_and_accepts_target8_ch
     update_root,
 ):
     operations, vault, source, current = seed_format7(update_root, category_edit=True)
+    configuration = b'{"user":"retain legacy7 configuration"}\r\n'
+    (vault / ".obsidian/app.json").write_bytes(configuration)
+    support_path = "Templates/New note.md"
+    support = (vault / support_path).read_bytes() + b"\nLocal template writing.\n"
+    (vault / support_path).write_bytes(support)
+    user_before = user_git_state(vault)
     ordinary = operations.prepare_update(vault, source)
     assert (ordinary.code, ordinary.next_actions) == (
         "format_transition_required",
@@ -160,6 +174,139 @@ def test_actual_format7_requires_source_stable_transition_and_accepts_target8_ch
     )
     assert approval.result.data == guide.incoming.data
     assert (vault / "Categories/Local category.md").read_bytes() == current
+    prepared = chosen.preparation
+    template = next(
+        change
+        for change in prepared.review.proposal.changes
+        if change.item_id == "support:" + support_path
+    )
+    preserved = operations.resolve_update(
+        prepared,
+        action(
+            prepared.review,
+            template,
+            domain="format",
+            choice="current",
+            decision_id="retain-local-template",
+        ),
+    )
+    assert preserved.code == "accepted", preserved.code
+    prepared = measured(
+        update_root,
+        "format7-resolve",
+        finish_transition,
+        operations,
+        preserved.preparation,
+        update_root,
+        resolved_only=True,
+    )
+    # Explicitly resubmit these exact texts against the now-selected target
+    # versions. Current Home and template bytes retain their authored contents;
+    # stock guide and report references name their explicitly selected versions.
+    for index, item in enumerate(
+        (note.item_id, "support:MIGRATION REPORT.md", "support:Vault guide.md")
+    ):
+        plan = prepared.review
+        comparison = next(c for c in plan.proposal.changes if c.item_id == item)
+        approved = next(
+            a for a in plan.approvals if a.change_id == comparison.change_id
+        )
+        exact = approved.result.data
+        requalified = operations.resolve_update(
+            prepared,
+            action(
+                plan,
+                comparison,
+                domain="format",
+                choice="edited",
+                decision_id=f"explicit-selected-text-{index}",
+            ),
+            edited=exact,
+        )
+        assert requalified.code == "accepted", requalified.code
+        assert (
+            next(
+                a.result.data
+                for a in requalified.preparation.review.approvals
+                if a.change_id == comparison.change_id
+            )
+            == exact
+        )
+        prepared = requalified.preparation
+    assert prepared.review.ready
+    decisions = prepared.review.approvals
+    saved = measured(update_root, "format7-save", operations.save_update, prepared)
+    assert saved.code == "saved", saved.code
+    resumed = measured(
+        update_root,
+        "format7-fresh-resume",
+        fresh_resume,
+        vault,
+        update_root / "format7-resumed.json",
+    )
+    assert resumed.review.approvals == decisions
+    assert resumed.review.ready and resumed.kind == "format_transition"
+    applied = measured(update_root, "format7-apply", operations.apply_update, resumed)
+    assert applied.status == "applied" and applied.kind == "format_transition", (
+        applied.code
+    )
+    assert applied.application.history == "terminal"
+    assert (vault / "Categories/Local category.md").read_bytes() == current
+    assert (vault / support_path).read_bytes() == support
+    assert (vault / ".obsidian/app.json").read_bytes() == configuration
+    assert user_git_state(vault) == user_before
+    checkpoint = operations.read_checkpoint(vault)
+    assert (
+        checkpoint.status == "valid" and checkpoint.manifest.identity.output_format == 8
+    )
+    assert checkpoint.review.saved.plan.facts.baseline_identity.output_format == 7
+    assert operations.prepare_undo(vault).code == "latest_operation_is_maintenance"
+    archive_b = changed_source(update_root / "separate-source-b.brz")
+    updated = measured(
+        update_root,
+        "after7-source-b-prepare",
+        operations.prepare_update,
+        vault,
+        archive_b,
+    )
+    assert updated.status == "prepared_review" and updated.kind == "source_update", (
+        updated.code
+    )
+    assert updated.preparation.review.facts.baseline_identity.output_format == 8
+    assert updated.preparation.review.facts.incoming_identity.output_format == 8
+    assert (
+        updated.preparation.review.facts.format_operation.baseline_source_version
+        != updated.preparation.review.facts.format_operation.target_source_version
+    )
+    plan = updated.preparation.review
+    change = next(c for c in plan.proposal.changes if c.item_id == note.item_id)
+    expected = current.replace(
+        b"Independent legacy source body.", b"Separate source B body."
+    )
+    selected = operations.resolve_update(
+        updated.preparation,
+        action(plan, change, choice="edited", decision_id="source-b-local-prose"),
+        edited=expected,
+    )
+    assert selected.code == "accepted", selected.code
+    ready = measured(
+        update_root,
+        "after7-source-b-resolve",
+        use_incoming,
+        operations,
+        selected.preparation,
+    )
+    published = measured(
+        update_root, "after7-source-b-apply", operations.apply_update, ready
+    )
+    assert published.status == "applied" and published.kind == "source_update", (
+        published.code
+    )
+    assert published.application.history == "terminal"
+    assert (vault / "Categories/Local category.md").read_bytes() == expected
+    assert (vault / support_path).read_bytes() == support
+    assert (vault / ".obsidian/app.json").read_bytes() == configuration
+    assert user_git_state(vault) == user_before
 
 
 @pytest.mark.parametrize("version,profile", [(6, "9"), (7, "10"), (8, "11")])

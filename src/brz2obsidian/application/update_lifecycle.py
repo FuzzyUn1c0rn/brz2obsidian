@@ -756,6 +756,56 @@ def _text_choice(plan, change, choice, edited):
         states = tuple(s for s in states if s.target_id not in selected_ids) + tuple(
             s for s in candidate.target_facts if s.target_id in selected_ids
         )
+    if plan.facts.incoming_identity.output_format == 8:
+        # A new explicit text choice observes earlier approved text versions.
+        # This does not reinterpret the references of those earlier approvals.
+        selected = []
+        for approval in plan.approvals:
+            if approval.domain not in ("text", "format", "mapping"):
+                continue
+            comparison = next(
+                row
+                for row in plan.proposal.changes
+                if row.change_id == approval.change_id
+            )
+            matches = tuple(
+                row
+                for row in targets
+                if row.identity is not None
+                and row.identity.item_id == comparison.item_id
+                and row.identity.collection_id
+                == plan.facts.incoming_identity.collection_id
+                and row.identity.module_id == plan.facts.incoming_identity.module_id
+            )
+            if comparison.facet != "content" or len(matches) != 1:
+                continue
+            owner = next(
+                (
+                    row
+                    for row in (*context.current_targets, *targets)
+                    if row.target_id == matches[0].target_id
+                    and row.canonical_path == approval.target_path
+                ),
+                None,
+            )
+            if owner is None:
+                continue
+            targets = tuple(
+                owner if row.target_id == owner.target_id else row for row in targets
+            )
+            selected.append((owner, approval.result))
+        for owner, chosen in selected:
+            observed = link_state(
+                chosen,
+                target_id=owner.target_id,
+                existence="present" if chosen is not None else "missing",
+                membership_targets=targets,
+                source_path=owner.canonical_path,
+                output_format=8,
+            )
+            states = tuple(s for s in states if s.target_id != owner.target_id) + (
+                observed,
+            )
     if own is not None:
         observed = link_state(
             content,

@@ -18,7 +18,7 @@ from tests.reconciliation.test_resolution import action
 from tests.support.recorded_format6 import CURRENT, NOTE, ORIGINAL, changed_source
 
 
-def finish_transition(operations, prepared, root):
+def finish_transition(operations, prepared, root, *, resolved_only=False):
     """Make literal preservation choices against the finite actual offered review."""
     configurations = [
         c
@@ -48,6 +48,8 @@ def finish_transition(operations, prepared, root):
         if prepared.review.ready:
             return prepared
         plan = prepared.review
+        if resolved_only and not plan.requirements:
+            return prepared
         assert plan.requirements, plan.blockers
         required = plan.requirements[0]
         change = next(
