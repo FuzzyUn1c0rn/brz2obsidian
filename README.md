@@ -454,6 +454,17 @@ originals containing excluded references are omitted explicitly. Present
 attachment bytes are preserved. External URLs and directory links remain
 references; the converter does not download their contents.
 
+Current BRZ and local API imports support inline TheBrain links of the form
+`brain://api.thebrain.com/<Brain token>/<thought token>`, with an optional
+descriptive path component. The two canonical identity tokens determine the
+target. Same-Brain links use the corresponding vault target; foreign-Brain links
+retain their exact original Markdown and are never fetched or imported. Existing
+excluded-content safeguards still apply, including refusal when a retained
+foreign link contains an excluded local identity. Unsupported authorities,
+queries, fragments, ambiguous encodings and richer local-link syntax refuse
+with a diagnostic. Descriptive suffixes supply no title lookup or foreign
+target-liveness guarantee.
+
 Reviewed YouTube video attachments in BRZ exports retain their exact original
 resource link alongside a single-video player. Supported watch URLs use `v`,
 `v` with seconds-based `t`, `v` with `list`, or `v` with `list` and `index`.

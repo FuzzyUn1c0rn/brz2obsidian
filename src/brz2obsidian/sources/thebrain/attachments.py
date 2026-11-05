@@ -408,6 +408,8 @@ def normalize_attachments(
                 excluded=excluded,
                 scope_tokens=scope_tokens,
                 source_refuse=source_refuse,
+                brain_id=meta["BrainId"],
+                allow_qualified=True,
             )
             documents.append(document)
             findings.extend(note_findings)
@@ -625,7 +627,14 @@ def normalize_attachments(
                 image_asset_ids=tuple(a.asset_id for a in images),
             )
         )
-    documents = bind_prepared_notes(documents, assets, thoughts, source_refuse)
+    documents = bind_prepared_notes(
+        documents,
+        assets,
+        thoughts,
+        source_refuse,
+        brain_id=meta["BrainId"],
+        allow_qualified=True,
+    )
     accounting.extend(
         AccountingEntry(
             identity=f"reference:{document.key}:{index}",

@@ -686,6 +686,8 @@ class Acquisition:
             set().union(*map(set, included.values())),
             with_findings=True,
             subjects={key: value["name"] for key, value in self.thoughts.items()},
+            brain_id=b,
+            allow_qualified=self.profile_version == "4",
         )
         from .gaps import gap_projections
 

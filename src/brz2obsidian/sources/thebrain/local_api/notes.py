@@ -19,15 +19,20 @@ from .errors import refuse
 from .markdown import adapt_literals, adapt_note
 
 
-def scope_text(text, excluded):
+def scope_text(text, excluded, *, brain_id=None, allow_qualified=False):
     adapted, edits = adapt_literals(text)
-    references = trace_note_references(adapted, excluded)
-    removals = [
-        r
-        for r in references
-        if r.kind == "item" and compact_thought_identity(r.target) in excluded
-    ]
-    removed = {compact_thought_identity(r.target) for r in removals}
+    references = trace_note_references(
+        adapted, excluded, allow_qualified=allow_qualified
+    )
+    removals, removed = [], set()
+    for reference in references:
+        if reference.kind == "item":
+            target = compact_thought_identity(
+                reference.target, brain_id=brain_id, allow_qualified=allow_qualified
+            )
+            if target in excluded:
+                removals.append(reference)
+                removed.add(target)
     for reference in reversed(removals):
         begin, end = (
             source_position(reference.start, edits),
@@ -62,6 +67,8 @@ def bind_documents(
     legacy_table_boundaries=False,
     preserve_table_warnings=False,
     subjects=None,
+    brain_id=None,
+    allow_qualified=False,
 ):
     from .capture import canonical
 
@@ -93,13 +100,21 @@ def bind_documents(
                     "text": adapted,
                     "text_digest": hashlib.sha256(adapted.encode("utf-8")).hexdigest(),
                     "text_adaptations": edits,
-                    "references": trace_adapted_references(adapted, edits),
+                    "references": trace_adapted_references(
+                        adapted, edits, allow_qualified=allow_qualified
+                    ),
                 }
             )
             bound = []
             for reference in document.references:
                 if reference.kind == "item":
-                    target = compact_thought_identity(reference.target)
+                    target = compact_thought_identity(
+                        reference.target,
+                        brain_id=brain_id,
+                        allow_qualified=allow_qualified,
+                    )
+                    if target is None:
+                        continue
                     if target not in included:
                         refuse("A note reference has no included source target")
                     bound.append(

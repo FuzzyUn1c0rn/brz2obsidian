@@ -20,6 +20,8 @@ def prepare_note(
     member,
     excluded=(),
     scope_tokens=(),
+    brain_id=None,
+    allow_qualified=False,
     source_refuse,
 ):
     """Return a prepared Document and its formatting-loss findings.
@@ -31,7 +33,18 @@ def prepare_note(
     findings = []
     try:
         adapted, text_adaptations = adapt_literals(text)
-        references = trace_note_references(adapted, excluded)
+        references = trace_note_references(
+            adapted, excluded, allow_qualified=allow_qualified
+        )
+        removals = [
+            reference
+            for reference in references
+            if reference.kind == "item"
+            and compact_thought_identity(
+                reference.target, brain_id=brain_id, allow_qualified=allow_qualified
+            )
+            in excluded
+        ]
     except MigrationRefused as error:
         issue = error.issues[0]
         source_refuse(
@@ -41,12 +54,6 @@ def prepare_note(
             evidence=(pointer, "payload:" + member),
             guidance="Review the affected thought-note Markdown and its preserved source evidence; unsupported HTML or reference syntax must be resolved before retrying.",
         )
-    removals = []
-    for reference in references:
-        if reference.kind == "item":
-            target = compact_thought_identity(reference.target)
-            if target in excluded:
-                removals.append(reference)
     unsafe_original = bool(removals) or contains_omitted_identity(text, scope_tokens)
     for reference in reversed(removals):
         begin = source_position(reference.start, text_adaptations)
@@ -62,7 +69,9 @@ def prepare_note(
         )
     try:
         adapted, text_adaptations, insert_losses = adapt_note(text)
-        references = trace_adapted_references(adapted, text_adaptations)
+        references = trace_adapted_references(
+            adapted, text_adaptations, allow_qualified=allow_qualified
+        )
     except MigrationRefused as error:
         issue = error.issues[0]
         source_refuse(
@@ -97,7 +106,9 @@ def prepare_note(
     return document, tuple(findings)
 
 
-def bind_prepared_notes(documents, assets, thoughts, source_refuse):
+def bind_prepared_notes(
+    documents, assets, thoughts, source_refuse, *, brain_id=None, allow_qualified=False
+):
     """Bind prepared documents after all owned assets have been inventoried.
 
     Preserve document evidence and fixed binding guidance for typed refusals.
@@ -105,7 +116,15 @@ def bind_prepared_notes(documents, assets, thoughts, source_refuse):
     bound_documents = []
     for document in documents:
         try:
-            bound_documents.append(bind_note_references(document, assets, thoughts))
+            bound_documents.append(
+                bind_note_references(
+                    document,
+                    assets,
+                    thoughts,
+                    brain_id=brain_id,
+                    allow_qualified=allow_qualified,
+                )
+            )
         except MigrationRefused as error:
             issue = error.issues[0]
             source_refuse(
