@@ -95,7 +95,7 @@ def test_optional_version_two_facts_are_strict_immutable_durable_values():
         VideoPresentation(provider="youtube", embed_uri="url", start_seconds=-1)
 
 
-@pytest.mark.parametrize("version", ["1", "2", "3", "4", "5", "6", "8"])
+@pytest.mark.parametrize("version", ["1", "2", "3", "4", "5", "6", "7", "9"])
 def test_public_renderer_requires_explicit_current_metadata(tmp_path, version):
     with BrzSourceModule().open(make_archive(tmp_path / "source.brz")) as session:
         migration = plan(analyze(session.snapshot, BRZ_POLICY))
