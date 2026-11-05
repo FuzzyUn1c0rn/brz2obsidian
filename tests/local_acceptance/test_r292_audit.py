@@ -15,8 +15,9 @@ from tests.local_acceptance.api_checker import (
     check_api_vault,
     source_facts,
 )
+from tests.local_acceptance.api_manifest import load_baseline
 from tests.local_acceptance.api_recording import ApiRecording
-from tests.local_acceptance.checker import check_vault, read_source
+from tests.local_acceptance.checker import check_run_result, check_vault, read_source
 from tests.local_acceptance.facts import relationships
 from tests.local_acceptance.test_api_acceptance import source_case
 from tests.local_acceptance.test_api_scope_v3 import scope_baseline
@@ -28,7 +29,7 @@ from tests.support.audit_sources import (
     uncreated_tag_source,
 )
 from tests.support.local_api import BRAIN, api_server
-from tests.support.type_tag_sources import TypeTagApi, brz_source
+from tests.support.type_tag_sources import IDS, TypeTagApi, brz_source
 
 
 @pytest.fixture(scope="module")
@@ -53,6 +54,9 @@ def paired_outputs(tmp_path_factory):
             )
             result = workflow.convert(LocalApiSourceRef(BRAIN), api_vault)
             assert result.outcome in {"clean", "warnings"}, result.issues
+            (directory / "api-result.json").write_bytes(
+                result.model_dump_json(by_alias=True).encode()
+            )
             recording.complete()
         baseline = recording.seal(qualification=qualification)
     return source, brz_vault, baseline, api_vault
@@ -329,6 +333,7 @@ def test_explicit_one_source_or_pair_audit_records_bound_verdicts(
         api_manifest=baseline.manifest_path,
         manifest_sha256=baseline.fingerprint,
         api_vault=api_vault,
+        api_result=api_vault.parent / "api-result.json",
     )
     assert result["outcome"] == "qualified"
     assert set(result["audits"]) == {"brz", "api"}
@@ -353,6 +358,131 @@ def test_audit_entry_refuses_partial_selection(tmp_path):
     )
     assert result["outcome"] == "refused"
     assert not result["audits"] and result["m5_acceptance"] is False
+    assert json.loads(output.read_bytes()) == result
+
+
+def test_run_result_display_context_cannot_change_warning_facts(paired_outputs):
+    _, _, _, vault = paired_outputs
+    result = json.loads((vault.parent / "api-result.json").read_bytes())
+    assert result["issues"][0]["subject"] == {"kind": "item", "name": "H0"}
+    result["issues"][0]["message"] = "No depth limit applies."
+    with pytest.raises(AssertionError, match="result warning evidence"):
+        check_run_result(
+            result,
+            vault,
+            {
+                "notes": 21,
+                "files": 55,
+                "payloads": 3,
+                "category_notes": 14,
+                "warnings": 2,
+            },
+        )
+
+
+@pytest.mark.parametrize("changed_fact", ["direct-tag", "nested-tag", "navigation"])
+def test_pair_comparison_reports_changed_direct_facts(
+    tmp_path, paired_outputs, changed_fact
+):
+    from tests.local_acceptance.audit_run import compare_pair
+
+    source, _, baseline, _ = paired_outputs
+    original = compare_pair(source, baseline, "4")
+    with ZipFile(source) as archive:
+        parts = {name: archive.read(name) for name in archive.namelist()}
+    links = [json.loads(line) for line in parts["links.json"].splitlines()]
+    if changed_fact == "navigation":
+        removed = next(row for row in links if row["Relation"] == 3)
+        links.remove(removed)
+        field = "navigation_declarations"
+        old = [
+            "related",
+            removed["ThoughtIdA"],
+            removed["ThoughtIdB"],
+            removed["Direction"],
+        ]
+        added = []
+    else:
+        edge = next(
+            row
+            for row in links
+            if row["Meaning"] == (5 if changed_fact == "direct-tag" else 7)
+        )
+        old = [edge["ThoughtIdA"], edge["ThoughtIdB"]]
+        if changed_fact == "direct-tag":
+            edge["ThoughtIdA"] = IDS["U"]
+        else:
+            edge["ThoughtIdA"], edge["ThoughtIdB"] = (
+                edge["ThoughtIdB"],
+                edge["ThoughtIdA"],
+            )
+        added = [[edge["ThoughtIdA"], edge["ThoughtIdB"]]]
+        field = "direct_tag_memberships"
+    parts["links.json"] = b"\n".join(json.dumps(row).encode() for row in links)
+    changed = tmp_path / "changed.brz"
+    with ZipFile(changed, "w") as archive:
+        for name, content in parts.items():
+            archive.writestr(name, content)
+    comparison = compare_pair(changed, baseline, "4")
+    assert original[field + "_equal"] is True
+    assert comparison[field + "_equal"] is False
+    assert comparison["api_only_" + field] == [old]
+    assert comparison["brz_only_" + field] == added
+    assert comparison["direct_classifications_equal"] is True
+
+
+@pytest.mark.parametrize("changed_input", ["bound-payload", "run-result"])
+def test_pair_audit_refuses_inputs_changed_during_comparison(
+    tmp_path, paired_outputs, monkeypatch, changed_input
+):
+    from tests.local_acceptance import audit_run
+
+    source, brz_vault, original, api_vault = paired_outputs
+    evidence = tmp_path / "evidence"
+    shutil.copytree(original.manifest_path.parent, evidence)
+    baseline = load_baseline(evidence / "manifest.json", original.fingerprint)
+    run_result = tmp_path / "api-result.json"
+    shutil.copyfile(api_vault.parent / "api-result.json", run_result)
+    if changed_input == "bound-payload":
+        payload = next(
+            row["path"]
+            for row in baseline.data["payloads"].values()
+            if row["status"] == 200
+        )
+        changed = evidence / payload
+    else:
+        changed = run_result
+    initial = changed.read_bytes()
+    real_archive_exit = ZipFile.__exit__
+    completed_source_reads = 0
+
+    def source_archive_exit(archive, *args):
+        nonlocal completed_source_reads
+        result = real_archive_exit(archive, *args)
+        if str(archive.filename) == str(source):
+            completed_source_reads += 1
+            if completed_source_reads == 2:
+                # External filesystem fault after the pair's real archive read;
+                # the source auditors and comparison execute without replacement.
+                changed.write_bytes(initial + b" ")
+        return result
+
+    monkeypatch.setattr(ZipFile, "__exit__", source_archive_exit)
+    candidate = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    output = tmp_path / "changed-input-audit.json"
+    result = audit_run.audit_selected(
+        candidate=candidate,
+        output=output,
+        brz_source=source,
+        brz_vault=brz_vault,
+        api_manifest=baseline.manifest_path,
+        manifest_sha256=baseline.fingerprint,
+        api_vault=api_vault,
+        api_result=run_result if changed_input == "run-result" else None,
+    )
+    assert changed.read_bytes() != initial
+    assert result["outcome"] == "refused"
+    assert result["m5_acceptance"] is False
     assert json.loads(output.read_bytes()) == result
 
 

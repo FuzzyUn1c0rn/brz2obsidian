@@ -21,7 +21,7 @@ from .api_checker import audit_baseline, check_api_vault, source_facts
 from .api_manifest import load_baseline
 from .api_recording import ApiRecording, RecordingError, write_json
 from .checker import check_run_result, check_vault, read_source
-from .facts import classifications, member
+from .facts import classifications, member, relationships
 from .scope import scope
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -88,7 +88,7 @@ def compare_pair(source, baseline, profile_version):
 
     Differences are observations, not forced source parity or shared history.
     """
-    api_thoughts, _, api_attachments, _ = source_facts(
+    api_thoughts, api_relations, api_attachments, api_links = source_facts(
         baseline, profile_version=profile_version
     )
     with ZipFile(source) as archive:
@@ -103,6 +103,37 @@ def compare_pair(source, baseline, profile_version):
         api_direct = {
             (row["typeId"], key) for key, row in api_thoughts.items() if row["typeId"]
         }
+        kinds = relationships(raw)
+        brz_tags = {
+            (row["ThoughtIdA"], row["ThoughtIdB"])
+            for row in raw["links.json"]
+            if kinds[row["Id"]] == "tag"
+        }
+        api_tags = {
+            (row["item_a"], row["item_b"])
+            for row in api_relations.values()
+            if row["kind"] == "tag"
+        }
+        # These preserve declared endpoint order and arrow metadata, rather
+        # than assuming every source declaration has equivalent navigation.
+        brz_navigation = {
+            (kinds[row["Id"]], row["ThoughtIdA"], row["ThoughtIdB"], row["Direction"])
+            for row in raw["links.json"]
+            if kinds[row["Id"]] in {"hierarchy", "related"}
+        }
+        api_navigation = {
+            (row["kind"], row["item_a"], row["item_b"], api_links[key]["direction"])
+            for key, row in api_relations.items()
+            if row["kind"] in {"hierarchy", "related"}
+        }
+
+        def direct_comparison(name, brz, api):
+            return {
+                name + "_equal": brz == api,
+                "brz_only_" + name: [list(row) for row in sorted(brz - api)],
+                "api_only_" + name: [list(row) for row in sorted(api - brz)],
+            }
+
         matches, differences = [], []
         for row in raw["attachments.json"]:
             outcome = baseline.data["payloads"].get(row["Id"])
@@ -121,7 +152,11 @@ def compare_pair(source, baseline, profile_version):
             "source_identities_equal": raw["meta.json"][0]["BrainId"]
             == baseline.json(baseline.data["brain"])["id"],
             "item_roles_equal": brz_items == api_items,
-            "direct_classifications_equal": direct == api_direct,
+            **direct_comparison("direct_classifications", direct, api_direct),
+            **direct_comparison("direct_tag_memberships", brz_tags, api_tags),
+            **direct_comparison(
+                "navigation_declarations", brz_navigation, api_navigation
+            ),
             "brz_only_attachment_ids": sorted(
                 {row["Id"] for row in raw["attachments.json"]} - api_attachments.keys()
             ),
@@ -214,7 +249,13 @@ def audit_selected(
                 "renderer_version"
             ] == str(output_version), "explicit audited output generation"
             result_path = brz_result if label == "brz" else api_result
+            result_binding = {}
             if result_path:
+                result_bytes = Path(result_path).read_bytes()
+                result_binding = {
+                    "result": str(Path(result_path).resolve()),
+                    "result_sha256": hashlib.sha256(result_bytes).hexdigest(),
+                }
                 if label == "api":
                     summary = summary | {
                         "notes": sum(row["created"] for row in record["item_targets"]),
@@ -227,9 +268,7 @@ def audit_selected(
                         ),
                         "warnings": len(record["issues"]),
                     }
-                check_run_result(
-                    json.loads(Path(result_path).read_bytes()), vault, summary
-                )
+                check_run_result(json.loads(result_bytes), vault, summary)
             assert (
                 fingerprint(source) == before_source
                 and vault_identity(vault) == before_vault
@@ -241,18 +280,25 @@ def audit_selected(
                 "source_sha256": before_source,
                 "vault": str(vault.resolve()),
                 "vault_sha256": before_vault,
-            }
+            } | result_binding
             report["audits"][label] = {"outcome": "qualified", "summary": summary}
         if brz_source and baseline:
             stage = "pair-comparison"
             report["pair_comparison"] = compare_pair(
                 brz_source, baseline, profile_version
             )
+        stage = "final-input-binding"
+        if baseline:
+            baseline.verify()
         for row in report["inputs"].values():
             assert (
                 fingerprint(row["source"]) == row["source_sha256"]
                 and vault_identity(row["vault"]) == row["vault_sha256"]
             ), "source or output changed during final comparison"
+            if "result" in row:
+                assert fingerprint(row["result"]) == row["result_sha256"], (
+                    "run result changed during audit"
+                )
         assert candidate_identity(candidate) == identity, (
             "candidate changed during audit"
         )

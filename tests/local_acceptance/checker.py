@@ -2623,10 +2623,27 @@ def check_run_result(result, vault, summary):
     assert result["counts"] == expected and result["receipt"]["counts"] == expected, (
         "actual result counts"
     )
-    assert (
-        result["issues"] == record["issues"]
-        and len(result["issues"]) == summary["warnings"]
-    ), "result warning evidence"
+    # The public envelope adds optional display context after the durable
+    # warning facts have been recorded. It must retain every recorded fact.
+    assert len(result["issues"]) == len(record["issues"]) == summary["warnings"], (
+        "result warning count"
+    )
+    for actual_issue, recorded_issue in zip(result["issues"], record["issues"]):
+        assert {k: v for k, v in actual_issue.items() if k != "subject"} == {
+            k: v for k, v in recorded_issue.items() if k != "subject"
+        }, "result warning evidence"
+        if recorded_issue.get("subject") is not None:
+            assert actual_issue.get("subject") == recorded_issue["subject"], (
+                "recorded warning context"
+            )
+        subject = actual_issue.get("subject")
+        if subject is not None:
+            assert (
+                set(subject) == {"kind", "name"}
+                and subject["kind"] in {"item", "asset", "document", "relationship"}
+                and isinstance(subject["name"], str)
+                and 0 < len(subject["name"]) <= 120
+            ), "result warning display context"
     receipt = result["receipt"]
     assert (
         result["source_identity"]

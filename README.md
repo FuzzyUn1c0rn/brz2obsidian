@@ -701,6 +701,7 @@ bound to the transcript, independently of the proxy's temporary address.
 provenance; it performs no network operation or new native qualification. The
 current capture's schema and source facts are checked separately. Inspect and
 convert are distinct non-atomic acquisitions. Pair comparisons report measured
-byte matches and source-specific differences without assuming parity or shared
-update history. Audit results bind the candidate/content, inputs and outputs;
+byte matches, direct classifications/tags and ordered navigation declarations
+without assuming parity or shared update history. Audit results bind the
+candidate/content, all selected evidence, optional run-result bytes and outputs;
 they never grant complete M5, native, user or delivery acceptance.
