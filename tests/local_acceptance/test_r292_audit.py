@@ -39,6 +39,9 @@ def paired_outputs(tmp_path_factory):
     brz_vault, api_vault = directory / "brz-vault", directory / "api-vault"
     result = default_workflow().convert(source, brz_vault)
     assert result.outcome in {"clean", "warnings"}, result.issues
+    (directory / "brz-result.json").write_bytes(
+        result.model_dump_json(by_alias=True).encode()
+    )
     qualification = scope_baseline(directory / "separate-direction-controls")
     with api_server(api) as (_, upstream):
         recording = ApiRecording(
@@ -330,6 +333,7 @@ def test_explicit_one_source_or_pair_audit_records_bound_verdicts(
         output=output,
         brz_source=source,
         brz_vault=brz_vault,
+        brz_result=brz_vault.parent / "brz-result.json",
         api_manifest=baseline.manifest_path,
         manifest_sha256=baseline.fingerprint,
         api_vault=api_vault,
@@ -361,12 +365,29 @@ def test_audit_entry_refuses_partial_selection(tmp_path):
     assert json.loads(output.read_bytes()) == result
 
 
-def test_run_result_display_context_cannot_change_warning_facts(paired_outputs):
+@pytest.mark.parametrize(
+    "subject_name",
+    [
+        None,
+        "H0\nForged warning detail",
+        "password=synthetic-secret",
+        "https://private.example/secret",
+        "Unrelated private identity",
+    ],
+)
+def test_run_result_display_context_cannot_change_warning_facts(
+    paired_outputs, subject_name
+):
     _, _, _, vault = paired_outputs
     result = json.loads((vault.parent / "api-result.json").read_bytes())
     assert result["issues"][0]["subject"] == {"kind": "item", "name": "H0"}
-    result["issues"][0]["message"] = "No depth limit applies."
-    with pytest.raises(AssertionError, match="result warning evidence"):
+    if subject_name is None:
+        result["issues"][0]["message"] = "No depth limit applies."
+    else:
+        result["issues"][0]["subject"]["name"] = subject_name
+    with pytest.raises(
+        AssertionError, match="result warning (evidence|display context)"
+    ):
         check_run_result(
             result,
             vault,
@@ -482,6 +503,7 @@ def test_pair_audit_refuses_inputs_changed_during_comparison(
     )
     assert changed.read_bytes() != initial
     assert result["outcome"] == "refused"
+    assert result["failure"]["stage"] == "final-input-binding"
     assert result["m5_acceptance"] is False
     assert json.loads(output.read_bytes()) == result
 

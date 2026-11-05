@@ -2610,6 +2610,53 @@ def compare_vaults(first, second):
             assert a[name] == b[name], "reproducible content/resource bytes"
 
 
+def warning_subjects(record, affected):
+    """Admitted labels from affected entities in the source-audited record."""
+    items = {row["item_key"]: row for row in record["item_targets"]}
+    affected = set(affected)
+    labels = [
+        ("item", row["original_title"]) for key, row in items.items() if key in affected
+    ]
+    original_assets = set()
+    for row in items.values():
+        for document in row["documents"]:
+            if document["key"] in affected:
+                labels.append(("document", row["original_title"]))
+                original_assets.add(document["original_asset_id"])
+    for row in record["asset_targets"]:
+        if row["asset_id"] in affected | original_assets:
+            labels.extend(
+                ("asset", row[key]) for key in ("display_name", "original_name")
+            )
+    for row in record["relationships"]:
+        if row["key"] in affected and all(
+            key in items for key in (row["item_a"], row["item_b"])
+        ):
+            labels.append(
+                (
+                    "relationship",
+                    " — ".join(
+                        items[row[key]]["original_title"]
+                        for key in ("item_a", "item_b")
+                    ),
+                )
+            )
+    admitted = set()
+    for kind, original in labels:
+        if not isinstance(original, str):
+            continue
+        name = "".join(
+            c for c in original if not unicodedata.category(c).startswith("C")
+        ).strip()[:120]
+        if name and not any(
+            token in text.casefold()
+            for text in (original, name)
+            for token in ("://", "token=", "key=", "password=", "authorization:")
+        ):
+            admitted.add((kind, name))
+    return admitted
+
+
 def check_run_result(result, vault, summary):
     vault = Path(vault)
     record = load_json((vault / "migration-record.json").read_bytes())
@@ -2642,7 +2689,8 @@ def check_run_result(result, vault, summary):
                 set(subject) == {"kind", "name"}
                 and subject["kind"] in {"item", "asset", "document", "relationship"}
                 and isinstance(subject["name"], str)
-                and 0 < len(subject["name"]) <= 120
+                and (subject["kind"], subject["name"])
+                in warning_subjects(record, recorded_issue["affected"])
             ), "result warning display context"
     receipt = result["receipt"]
     assert (
