@@ -138,8 +138,10 @@ def test_native_bases_share_eight_link_lookup_and_report_depth_without_refusal(
     }
 
 
+@pytest.mark.parametrize("fallback", [False, True])
 def test_missing_category_icon_reports_transitive_members_and_farther_fallback(
     tmp_path,
+    fallback,
 ):
     from zipfile import ZipFile
 
@@ -150,6 +152,16 @@ def test_missing_category_icon_reports_transitive_members_and_farther_fallback(
         parts = {name: archive.read(name) for name in archive.namelist()}
     absent = identity(503)
     add_attachment(parts, absent, 5, "Missing.png", declared=7, state=3, owner=IDS["B"])
+    if not fallback:
+        parts["attachments.json"] = b"\n".join(
+            line
+            for line in parts["attachments.json"].splitlines()
+            if json.loads(line)["Id"] != ICON
+        )
+        meta = json.loads(parts["meta.json"])
+        del meta["AttachmentFileStates"][ICON]
+        parts["meta.json"] = json.dumps(meta).encode()
+        del parts[IDS["A"] + "/.data/Icon.png"]
     source = write_source(tmp_path, parts)
     inspected = default_workflow().inspect(source)
     assert inspected.outcome == "warnings", inspected.issues
@@ -157,22 +169,43 @@ def test_missing_category_icon_reports_transitive_members_and_farther_fallback(
     assert gap.gap.asset_id == absent
     assert gap.provider_key == IDS["B"]
     assert gap.affected_member_keys == (IDS["C"], IDS["D"])
-    assert gap.outcome == "image_fallback" and gap.image_asset_ids == (ICON,)
+    assert gap.outcome == ("image_fallback" if fallback else "neutral_icon")
+    assert gap.image_asset_ids == ((ICON,) if fallback else ())
     icons = {s.item_key: s for s in inspected.inspection.icon_snapshots}
     assert icons[IDS["B"]].explicit_icon_asset_id is None
-    assert {icons[IDS[n]].effective_icon_asset_id for n in "BCD"} == {ICON}
+    assert {icons[IDS[n]].effective_icon_asset_id for n in "BCD"} == (
+        {ICON} if fallback else {None}
+    )
     vault = tmp_path / "vault"
     result = default_workflow().convert(source, vault)
     assert result.outcome == "warnings", result.issues
     for relative in ("Categories/B.md", "Categories/C.md", "Notes/D.md"):
         text = (vault / relative).read_text(encoding="utf-8")
-        assert "farther selected appearance-category icon" in text
-        assert "appearance is neutral" not in text
+        assert ("farther selected appearance-category icon" in text) is fallback
+        assert ("appearance is neutral" in text) is (not fallback)
         assert yaml.safe_load(text.split("---", 2)[1])["icon"] is None
     report = (vault / "MIGRATION REPORT.md").read_text(encoding="utf-8")
     assert "Affected included members (2)" in report
     assert "Categories/C.md" in report and "Notes/D.md" in report
-    assert "outcome image_fallback" in report
+    assert f"outcome {gap.outcome}" in report
+    record = json.loads((vault / "migration-record.json").read_bytes())
+    warning = next(
+        i
+        for i in record["issues"]
+        if i["code"] == "approved_source_gap" and i["affected"] == [absent]
+    )
+    if fallback:
+        assert (
+            "farther selected appearance-category icon is available"
+            in warning["message"]
+        )
+        assert "have neutral appearance" not in warning["message"]
+    else:
+        assert (
+            "no farther selected appearance-category icon is available"
+            in warning["message"]
+        )
+        assert "neutral" in warning["message"]
     assert check_vault(vault).issues == ()
 
 

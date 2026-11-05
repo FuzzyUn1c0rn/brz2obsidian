@@ -168,3 +168,37 @@ def source_gap_targets(snapshot, item_targets, asset_targets):
         for g in snapshot.source_gaps
     )
     return diagnostics, presentations
+
+
+def source_gap_issues(snapshot, issues):
+    """Describe the actual planned fallback, retaining original finding evidence."""
+    gaps = {
+        (g.rule_id, (g.asset_id,)): g
+        for g in snapshot.source_gaps
+        if g.role == "definition_icon"
+    }
+    available = {
+        s.item_key: s.effective_icon_asset_id
+        for s in icon_snapshots(snapshot, {g.owner for g in gaps.values()})
+    }
+    observed = {(f.rule_id, f.affected): f.observed_json for f in snapshot.findings}
+    result = []
+    for issue in issues:
+        key = issue.rule_id, issue.affected
+        gap = gaps.get(key)
+        if gap is not None:
+            outcome = (
+                "a farther selected appearance-category icon is available for migration-time lookup."
+                if available[gap.owner] is not None
+                else "no farther selected appearance-category icon is available; affected migration-time appearance is neutral."
+            )
+            issue = issue.model_copy(
+                update={
+                    "message": "Source category icon is absent; "
+                    + outcome
+                    + " Observed: "
+                    + observed[key]
+                }
+            )
+        result.append(issue)
+    return tuple(result)
