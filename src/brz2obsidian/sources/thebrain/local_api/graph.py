@@ -175,7 +175,7 @@ def normalize_relationships(
                 or kind == "related"
                 and not (
                     roles == (1, 1)
-                    or roles in {(1, 2), (2, 2), (2, 1), (2, 4)}
+                    or roles in {(1, 2), (2, 2), (2, 1), (2, 4), (4, 2)}
                     and pair == (3, -1)
                 )
             ):

@@ -88,7 +88,7 @@ def decode_relationships(
             signature in {(1, 3, 1, -1), (1, 3, 1, 3), (1, 3, 1, 5), (1, 3, 1, 7)}
             and roles == (1, 1)
             or signature == (1, 3, 1, -1)
-            and roles in {(1, 2), (2, 2), (2, 1), (2, 4)}
+            and roles in {(1, 2), (2, 2), (2, 1), (2, 4), (4, 2)}
         ):
             kind = "related"
         elif signature == (1, 1, 6, -1) and roles[0] == 5 and roles[1] in {1, 2, 4}:

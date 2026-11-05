@@ -31,8 +31,15 @@ def source_transport(adapter, api=None, **values):
 
 
 @pytest.mark.parametrize("adapter", ["brz", "api"])
-def test_paired_direct_type_tag_facts_inspect_and_convert(tmp_path, adapter):
-    with source_transport(adapter) as (_, address):
+@pytest.mark.parametrize("tag_first_jump", [False, True])
+def test_paired_direct_type_tag_facts_inspect_and_convert(
+    tmp_path, adapter, tag_first_jump
+):
+    edges = tuple(
+        (17, 11, 3, 1, -1) if edge == (11, 17, 3, 1, -1) and tag_first_jump else edge
+        for edge in EDGES
+    )
+    with source_transport(adapter, edges=edges) as (_, address):
         workflow = (
             default_workflow()
             if adapter == "brz"
@@ -41,7 +48,7 @@ def test_paired_direct_type_tag_facts_inspect_and_convert(tmp_path, adapter):
             )
         )
         source = (
-            brz_source(tmp_path / "source.brz")
+            brz_source(tmp_path / "source.brz", edges=edges)
             if adapter == "brz"
             else LocalApiSourceRef(BRAIN)
         )
@@ -51,6 +58,11 @@ def test_paired_direct_type_tag_facts_inspect_and_convert(tmp_path, adapter):
         assert result.counts.classification_assignments == 6
         assert result.counts.typed_members == 6
         names = {value: key for key, value in IDS.items()}
+        expected_navigation = (
+            NAVIGATION - {("related", "B", "T")} | {("related", "T", "B")}
+            if tag_first_jump
+            else NAVIGATION
+        )
         assert {
             (names[a.definition_key], names[a.item_key])
             for a in result.inspection.classification_assignments
@@ -81,7 +93,7 @@ def test_paired_direct_type_tag_facts_inspect_and_convert(tmp_path, adapter):
             (r["kind"], names[r["item_a"]], names[r["item_b"]])
             for r in record["relationships"]
             if r["kind"] in {"hierarchy", "related"}
-        } == NAVIGATION
+        } == expected_navigation
         assert converted.counts.classification_assignments == 6
         assert result.counts.present_assets == 1
         assert [
@@ -97,7 +109,28 @@ def test_paired_direct_type_tag_facts_inspect_and_convert(tmp_path, adapter):
             for e in record["original_evidence"]
             if e["kind"] == "records"
         }
+        jump_key = "00000000-0000-0000-0000-0000000003f3"
+        jump = next(r for r in record["relationships"] if r["key"] == jump_key)
+        expected_endpoints = (
+            (IDS["T"], IDS["B"]) if tag_first_jump else (IDS["B"], IDS["T"])
+        )
+        assert (jump["kind"], jump["item_a"], jump["item_b"]) == (
+            "related",
+            *expected_endpoints,
+        )
+        assert "[[Notes/T.md|T]]" in (destination / "Categories/B.md").read_text(
+            encoding="utf-8"
+        )
         if adapter == "brz":
+            raw_jump = next(r for r in evidence["links.json"] if r["Id"] == jump_key)
+            assert (
+                raw_jump["ThoughtIdA"],
+                raw_jump["ThoughtIdB"],
+                raw_jump["Kind"],
+                raw_jump["Relation"],
+                raw_jump["Meaning"],
+                raw_jump["Direction"],
+            ) == (*expected_endpoints, 1, 3, 1, -1)
             assert [
                 (r["item_a"], r["item_b"])
                 for r in record["relationships"]
@@ -118,6 +151,15 @@ def test_paired_direct_type_tag_facts_inspect_and_convert(tmp_path, adapter):
                 evidence["links.json"][0]["Direction"],
             ) == (1, 1, 3, -1)
         else:
+            raw_jump = evidence["link:" + jump_key]
+            assert (
+                raw_jump["thoughtIdA"],
+                raw_jump["thoughtIdB"],
+                raw_jump["kind"],
+                raw_jump["relation"],
+                raw_jump["meaning"],
+                raw_jump["direction"],
+            ) == (*expected_endpoints, 1, 3, 1, -1)
             assert evidence["thought:" + IDS["A"]]["typeId"] is None
             assert evidence["thought:" + IDS["B"]]["typeId"] == IDS["A"]
             edge = evidence[
@@ -359,7 +401,14 @@ def test_cycle_diagnostics_keep_unsafe_titles_out_of_public_results(
 
 @pytest.mark.parametrize("adapter", ["brz", "api"])
 @pytest.mark.parametrize(
-    "extra", [(10, 12, 1, 1, -1), (10, 12, 3, 1, 3), (17, 13, 3, 1, -1)]
+    "extra",
+    [
+        (10, 12, 1, 1, -1),
+        (10, 12, 3, 1, 3),
+        (17, 13, 3, 1, -1),
+        (17, 11, 1, 1, -1),
+        (17, 11, 3, 1, 3),
+    ],
 )
 def test_unobserved_navigation_endpoint_signatures_remain_unsupported(
     tmp_path, adapter, extra
@@ -403,6 +452,7 @@ def test_unobserved_navigation_endpoint_signatures_remain_unsupported(
         "missing_direction",
         "boolean_direction",
         "typed_tag",
+        "tag_provider",
     ],
 )
 def test_malformed_type_joins_and_link_declarations_refuse_before_publication(
@@ -419,6 +469,8 @@ def test_malformed_type_joins_and_link_declarations_refuse_before_publication(
         edges = (*EDGES, EDGES[0])
     if defect == "typed_tag":
         edges, fields = (*EDGES, (10, 17, 1, 3, -1)), fields | {17: 10}
+    if defect == "tag_provider":
+        edges, fields = ((17, 11, 1, 3, -1), *EDGES[1:]), fields | {11: 17}
     api = TypeTagApi(edges=edges, type_fields=fields)
     changes = {
         "foreign_link": {"brainId": "99999999-9999-4999-8999-999999999999"},
@@ -473,6 +525,7 @@ def test_malformed_type_joins_and_link_declarations_refuse_before_publication(
             "missing_direction": "unsupported_feature",
             "boolean_direction": "unsupported_feature",
             "typed_tag": "unsupported_feature",
+            "tag_provider": "unsupported_feature",
         }
         if adapter == "brz"
         else {
@@ -486,6 +539,7 @@ def test_malformed_type_joins_and_link_declarations_refuse_before_publication(
             "missing_direction": "invalid_source",
             "boolean_direction": "invalid_source",
             "typed_tag": "invalid_source",
+            "tag_provider": "invalid_source",
         }
     )
     assert issue.code == expected[defect], issue
