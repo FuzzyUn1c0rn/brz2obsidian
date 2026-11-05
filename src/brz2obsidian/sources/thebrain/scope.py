@@ -354,6 +354,8 @@ def scope_records(records, physical_members, refuse, uuid):
         if record.get("TypeId"):
             provider = uuid(record["TypeId"])
             if provider not in thoughts:
+                if record["Id"] in diagnostic_omitted or diagnostic_unsafe(record):
+                    refuse("invalid_reference", "Classification provider is not live")
                 try:
                     refuse(
                         "invalid_reference",
@@ -362,11 +364,7 @@ def scope_records(records, physical_members, refuse, uuid):
                         evidence=(f"thoughts.json:{index}",),
                     )
                 except MigrationRefused as error:
-                    if record["Id"] not in diagnostic_omitted and not diagnostic_unsafe(
-                        record
-                    ):
-                        raise with_subject(error, "item", record.get("Name")) from None
-                    raise
+                    raise with_subject(error, "item", record.get("Name")) from None
     states = records["meta.json"][0].get("AttachmentFileStates")
     if type(states) is not dict:
         refuse("invalid_source", "AttachmentFileStates must be an object")

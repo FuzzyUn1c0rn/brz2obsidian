@@ -486,3 +486,31 @@ def test_api_graph_inventories_and_adjacency_must_be_completely_explained(
         "endpoint graph" if defect == "missing_endpoint_link" else "Graph adjacency"
     ) in result.issues[0].message
     assert not (tmp_path / "vault").exists()
+
+
+def test_forgotten_type_with_dangling_provider_refuses_without_omitted_context(
+    tmp_path,
+):
+    source = brz_source(tmp_path / "source.brz", type_fields=TYPE_FIELDS | {11: 99})
+    with ZipFile(source) as archive:
+        parts = {name: archive.read(name) for name in archive.namelist()}
+    thoughts = [json.loads(line) for line in parts["thoughts.json"].splitlines()]
+    forgotten = next(value for value in thoughts if value["Id"] == IDS["B"])
+    forgotten.update(
+        Name="FORGOTTEN_TYPE_CANARY", ForgottenDateTime="2026-10-14T10:00:00"
+    )
+    parts["thoughts.json"] = b"\n".join(
+        json.dumps(value).encode() for value in thoughts
+    )
+    with ZipFile(source, "w") as archive:
+        for name, raw in parts.items():
+            archive.writestr(name, raw)
+    result = default_workflow().convert(source, tmp_path / "vault")
+    assert result.outcome == "refused", result.issues
+    issue = result.issues[0]
+    assert issue.code == "invalid_reference"
+    assert "provider is not live" in issue.message
+    assert issue.affected == () and issue.evidence == () and issue.subject is None
+    assert IDS["B"] not in result.model_dump_json()
+    assert "FORGOTTEN_TYPE_CANARY" not in result.model_dump_json()
+    assert not (tmp_path / "vault").exists()
