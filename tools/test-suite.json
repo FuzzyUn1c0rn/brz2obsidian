@@ -317,7 +317,12 @@
     "tests/application/test_update_context.py::test_reference_draft_blocks_other_operations_until_explicit_discard",
     "tests/application/test_update_context.py::test_cancelled_saved_inspection_never_retains_a_ready_context_handle",
     "tests/application/test_update_context.py::test_owned_edit_survives_stale_actions_and_only_its_matching_handle_can_commit",
-    "tests/cli/test_review_boundary.py"
+    "tests/cli/test_review_boundary.py",
+    "tests/publication/test_capture_read_view.py::test_publication_view_faults_cannot_publish_complete_output",
+    "tests/sources/test_local_api_read_view.py::test_view_metadata_observation_is_pinned_even_after_restoration",
+    "tests/sources/test_local_api_read_view.py::test_view_keeps_complete_checks_forceful_for_unrequested_same_stat_corruption",
+    "tests/sources/test_local_api_read_view.py::test_session_closure_revokes_view_and_open_stream_before_cleanup",
+    "tests/sources/test_local_api_read_view.py::test_view_rejected_at_nested_admission_cannot_later_be_revived"
   ],
   "schema_version": 1
 }
