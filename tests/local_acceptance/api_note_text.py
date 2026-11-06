@@ -768,6 +768,11 @@ def validate_document_adaptations(raw, adapted, edits, *, profile_version="1"):
         "adapted_basis",
     }
     activity = adaptation_activity(raw, profile_version=profile_version)
+    current_literals = (
+        literal_note_edits(raw, profile_version=profile_version)
+        if profile_version == "4"
+        else None
+    )
     digest = hashlib.sha256(raw.encode()).hexdigest()
     source_cursor = adapted_cursor = 0
     replay = []
@@ -806,6 +811,14 @@ def validate_document_adaptations(raw, adapted, edits, *, profile_version="1"):
             adapted[adapted_cursor:adapted_start] == gap
             and adapted[adapted_start:adapted_end] == edit["after"]
         ), "document adaptation unchanged gaps/replacement"
+        if current_literals is not None and kind == "literal_text":
+            # A literal token has one independently known logical extent.
+            # Insert operations retain their existing composition freedom.
+            assert any(
+                (start, end, edit["after"])
+                == (literal["start"], literal["end"], literal["after"])
+                for literal in current_literals
+            ), "document adaptation exact literal token extent"
         assert owned_replacement(raw, start, end, edit["after"], activity[kind]), (
             "document adaptation source activity kind"
         )

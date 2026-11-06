@@ -243,7 +243,17 @@ def _owned_block_view(line, owner):
     return content
 
 
-def _inline_regions(body):
+def _expanded_origins(line):
+    """Map tab-expanded view characters to original Unicode coordinates."""
+    origins, column = [], 0
+    for position, character in enumerate(line):
+        width = 4 - column % 4 if character == "\t" else 1
+        origins.extend([position] * width)
+        column = 0 if character in "\r\n" else column + width
+    return origins
+
+
+def _inline_regions(body, *, _views=None):
     """Resolve leaf block ownership before scanning any inline delimiters.
 
     CommonMark HTML-comment blocks own the complete closing line (or the rest
@@ -365,6 +375,19 @@ def _inline_regions(body):
         if protected:
             mask[match.start() : match.end()] = " " * len(line)
         elif content.strip():
+            if _views is not None:
+                expanded = line.expandtabs(4)
+                prefix = len(expanded) - len(content)
+                assert expanded[prefix:] == content, "container view source suffix"
+                origins = _expanded_origins(line)[prefix:]
+                _views.append(
+                    (
+                        match.start(),
+                        match.end(),
+                        content,
+                        [match.start() + position for position in origins],
+                    )
+                )
             if region is None:
                 region = match.start()
             if re.match(r" {0,3}#{1,6}(?:[ \t]|$)", content):
@@ -565,23 +588,41 @@ def literal_edits(body, *, allow_literal_tokens=False):
     edits = []
     digest = hashlib.sha256(body.encode()).hexdigest()
     shift = 0
-    regions, _, _ = _inline_regions(body)
+    views = [] if allow_literal_tokens else None
+    regions, _, _ = _inline_regions(body, _views=views)
     matches = []
     for start, finish in regions:
-        cursor = start
-        while cursor < finish:
+        if allow_literal_tokens:
+            lines = [view for view in views if start <= view[0] and view[1] <= finish]
+            logical = "".join(view[2] for view in lines)
+            origins = [position for view in lines for position in view[3]]
+            cursor, limit = 0, len(logical)
+        else:
+            logical, origins = body, None
+            cursor, limit = start, finish
+        while cursor < limit:
+            source_position = origins[cursor] if origins is not None else cursor
             match = (
-                token_pattern.match(body, cursor, finish)
-                if scan[cursor] == "<"
+                token_pattern.match(logical, cursor, limit)
+                if scan[source_position] == "<"
                 else None
             )
             if match:
-                matches.append(match)
+                matches.append(
+                    (
+                        origins[match.start()]
+                        if origins is not None
+                        else match.start(),
+                        origins[match.end() - 1] + 1
+                        if origins is not None
+                        else match.end(),
+                        match[0],
+                    )
+                )
                 cursor = match.end()
             else:
                 cursor += 1
-    for match in matches:
-        token = match[0]
+    for start, finish, token in matches:
         if re.fullmatch(r"<br\s*/?>", token, re.IGNORECASE):
             continue
         simple = re.fullmatch(r"<([A-Za-z][A-Za-z0-9-]*)>", token)
@@ -598,12 +639,12 @@ def literal_edits(body, *, allow_literal_tokens=False):
         edits.append(
             {
                 "kind": "literal_text",
-                "start": match.start(),
-                "end": match.end(),
-                "before": token,
-                "after": "\\" + token,
-                "adapted_start": match.start() + shift,
-                "adapted_end": match.end() + shift + 1,
+                "start": start,
+                "end": finish,
+                "before": body[start:finish],
+                "after": "\\" + body[start:finish],
+                "adapted_start": start + shift,
+                "adapted_end": finish + shift + 1,
                 "source_digest": digest,
                 "source_basis": "scoped_source_text/unicode_codepoints",
                 "adapted_basis": "document.text/unicode_codepoints",

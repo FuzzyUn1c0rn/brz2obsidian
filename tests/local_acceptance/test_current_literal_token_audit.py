@@ -8,6 +8,7 @@ from hashlib import sha256
 import pytest
 
 from brz2obsidian.application.wiring import default_workflow, local_api_workflow
+from brz2obsidian.sources.thebrain import BrzSourceModule
 from brz2obsidian.sources.thebrain.local_api import LocalApiConfig, LocalApiSourceRef
 from tests.application.test_literal_angles_workflow import literal_archive
 from tests.local_acceptance.api_baseline import prepare_controls
@@ -25,10 +26,96 @@ from tests.sources.test_local_api_bom import note_api
 from tests.support.audit_sources import SCHEMA
 from tests.support.local_api import BRAIN, KEY, api_server
 
-BRZ_RAW = b"</X>\n*kept* [Home](brain://IiIiIiIiIkKCIiIiIiIiIg/Home)\n<Y/>\n"
-API_RAW = (
-    b"\xef\xbb\xbf</X>\n*kept* [Alone](brain://MzMzMzMzM0ODMzMzMzMzMw/Alone)\n<Y/>\n"
+QUOTED_RAW = b"> <Example\n> /> tail\n"
+BRZ_RAW = (
+    b"</X>\n*kept* [Home](brain://IiIiIiIiIkKCIiIiIiIiIg/Home)\n<Y/>\n\n" + QUOTED_RAW
 )
+API_RAW = (
+    b"\xef\xbb\xbf</X>\n*kept* [Alone](brain://MzMzMzMzM0ODMzMzMzMzMw/Alone)\n<Y/>\n\n"
+    + QUOTED_RAW
+)
+
+
+def test_quoted_multiline_literal_keeps_full_public_source_and_oracle_span(tmp_path):
+    raw = QUOTED_RAW.decode()
+    expected = "> \\<Example\n> /> tail\n"
+    source = literal_archive(tmp_path / "quoted.brz", QUOTED_RAW)
+    with BrzSourceModule().open(source) as session:
+        document = session.snapshot.documents[0]
+        assert document.text == expected
+        assert [
+            (e.start, e.end, e.before, e.after, e.adapted_start, e.adapted_end)
+            for e in document.text_adaptations
+        ] == [
+            (2, 15, "<Example\n> />", "\\<Example\n> />", 2, 16),
+        ]
+        with session.open_payload(document.original_asset_id) as stream:
+            assert stream.read() == QUOTED_RAW
+    adapted, edits = literal_edits(raw, allow_literal_tokens=True)
+    assert adapted == expected
+    assert [
+        (
+            e["start"],
+            e["end"],
+            e["before"],
+            e["after"],
+            e["adapted_start"],
+            e["adapted_end"],
+        )
+        for e in edits
+    ] == [
+        (2, 15, "<Example\n> />", "\\<Example\n> />", 2, 16),
+    ]
+    with pytest.raises(AssertionError, match="unestablished active HTML"):
+        literal_edits(raw)
+
+
+@pytest.mark.parametrize(
+    "raw,start,end,before",
+    [
+        ("> - <Example\n>   /> tail\n", 4, 19, "<Example\n>   />"),
+        ("- > <Example\n  > /> tail\n", 4, 19, "<Example\n  > />"),
+        (">\t<Example\n>\t/> tail\n", 2, 15, "<Example\n>\t/>"),
+        ("> `<Example\n> />` and <Visible\n> /> tail\n", 22, 35, "<Visible\n> />"),
+    ],
+    ids=("quote-list", "list-quote", "tab-prefix", "protected-code-first"),
+)
+def test_container_literal_origins_preserve_raw_prefixes_and_code(
+    tmp_path, raw, start, end, before
+):
+    expected = raw[:start] + "\\" + raw[start:]
+    expected_span = (start, end, before, "\\" + before, start, end + 1)
+    source = literal_archive(tmp_path / "containers.brz", raw.encode())
+    with BrzSourceModule().open(source) as session:
+        document = session.snapshot.documents[0]
+        assert document.text == expected
+        assert [
+            (e.start, e.end, e.before, e.after, e.adapted_start, e.adapted_end)
+            for e in document.text_adaptations
+        ] == [expected_span]
+    adapted, edits = literal_edits(raw, allow_literal_tokens=True)
+    assert adapted == expected
+    assert [
+        (
+            e["start"],
+            e["end"],
+            e["before"],
+            e["after"],
+            e["adapted_start"],
+            e["adapted_end"],
+        )
+        for e in edits
+    ] == [expected_span]
+
+
+def test_literal_oracle_keeps_distinct_inline_blocks_separate(tmp_path):
+    raw = "<Example\n> /> tail\n\n> <Example\n\n> /> tail\n\n<Example\n- /> tail\n"
+    source = literal_archive(tmp_path / "separate.brz", raw.encode())
+    with BrzSourceModule().open(source) as session:
+        document = session.snapshot.documents[0]
+        assert document.text == raw
+        assert document.text_adaptations == ()
+    assert literal_edits(raw, allow_literal_tokens=True) == (raw, [])
 
 
 @pytest.fixture(scope="module")
@@ -68,6 +155,7 @@ def test_current_brz_workflow_and_independent_audit_preserve_literal_runs(
     assert check_vault(source, vault)["thought_references"] == 1
     note = (vault / "Home — Entry thought.md").read_text(encoding="utf-8")
     assert "\\</X>\n*kept* [[Home — Entry thought.md|Home]]\n\\<Y/>\n" in note
+    assert "> \\<Example\n> /> tail\n" in note
     assert next(vault.rglob("*.original")).read_bytes() == BRZ_RAW
 
 
@@ -81,9 +169,7 @@ def test_api4_workflow_and_complete_independent_audit_preserve_literal_runs(
         "payloads": 1,
     }
     assert next(vault.rglob("*.original")).read_bytes() == API_RAW
-    normalized = (
-        "\\</X>\n*kept* [Alone](brain://MzMzMzMzM0ODMzMzMzMzMw/Alone)\n\\<Y/>\n"
-    )
+    normalized = "\\</X>\n*kept* [Alone](brain://MzMzMzMzM0ODMzMzMzMzMw/Alone)\n\\<Y/>\n\n> \\<Example\n> /> tail\n"
     assert expected_document_text(API_RAW.decode(), profile_version="4") == normalized
     edits = literal_note_edits(API_RAW.decode(), profile_version="4")
     assert [
@@ -94,6 +180,14 @@ def test_api4_workflow_and_complete_independent_audit_preserve_literal_runs(
         ("</X>", 1, 5, 0, 5),
     ]
     assert {e["source_digest"] for e in edits} == {sha256(API_RAW).hexdigest()}
+    quoted = next(e for e in edits if e["before"].startswith("<Example"))
+    start = API_RAW.decode().index("<Example")
+    assert (quoted["start"], quoted["end"], quoted["before"], quoted["after"]) == (
+        start,
+        start + 13,
+        "<Example\n> />",
+        "\\<Example\n> />",
+    )
     escaped = "\ufeff\\</X>\n"
     for profile in ("1", "2", "3"):
         assert expected_document_text(escaped, profile_version=profile) == escaped
@@ -104,7 +198,7 @@ def test_api4_workflow_and_complete_independent_audit_preserve_literal_runs(
 
 
 @pytest.mark.parametrize("adapter", ("brz", "api"))
-@pytest.mark.parametrize("damage", ("body", "adaptation", "original"))
+@pytest.mark.parametrize("damage", ("body", "adaptation", "original", "mapped-span"))
 def test_independent_current_literal_audit_refuses_rehashed_forgery(
     literal_outputs, tmp_path, adapter, damage
 ):
@@ -133,6 +227,28 @@ def test_independent_current_literal_audit_refuses_rehashed_forgery(
             a
             for a in record["adaptations"]
             if a["kind"] == "literal_text" and a["text_edit"]["before"] == "</X>"
+        )["text_edit"] = deepcopy(edit)
+    elif damage == "mapped-span":
+        edit = next(
+            e
+            for e in document["text_adaptations"]
+            if e["kind"] == "literal_text" and e["before"] == "<Example\n> />"
+        )
+        # The old oracle stopped at the continuation marker. This forged
+        # prefix has valid raw/replacement geometry and the same net delta,
+        # so complete replay still yields the exact escaped document body.
+        prefix = "<Example\n>"
+        edit.update(
+            end=edit["start"] + len(prefix),
+            before=prefix,
+            after="\\" + prefix,
+            adapted_end=edit["adapted_start"] + len(prefix) + 1,
+        )
+        next(
+            a
+            for a in record["adaptations"]
+            if a["kind"] == "literal_text"
+            and a["text_edit"]["before"] == "<Example\n> />"
         )["text_edit"] = deepcopy(edit)
     else:
         asset = next(
@@ -167,6 +283,8 @@ def test_independent_current_literal_audit_refuses_rehashed_forgery(
         ("api", "adaptation"): "document adaptation source before",
         ("brz", "original"): "payload bytes",
         ("api", "original"): "required payload bytes",
+        ("brz", "mapped-span"): "raw-derived exact literal spans and bases",
+        ("api", "mapped-span"): "document adaptation exact literal token extent",
     }[adapter, damage]
     with pytest.raises(AssertionError) as error:
         if adapter == "brz":
