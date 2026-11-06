@@ -619,3 +619,23 @@ def test_api_notice_evidence_is_canonical_when_document_sorts_before_owner():
         with module.open(LocalApiSourceRef(BRAIN)) as session:
             assert session.snapshot.findings[0].affected == (note_id, HOME)
             session.verify_consistency()
+
+
+def test_absent_ordinary_note_cannot_use_an_unreferenced_absent_image(tmp_path):
+    source = literal_archive(
+        tmp_path / "source.brz",
+        b"Unavailable authored note.\n",
+        resources=(({"Type": 12, "Location": "lost.png", "DataLength": 17}, None),),
+    )
+
+    def absent(parts):
+        meta = json.loads(parts["meta.json"])
+        meta["AttachmentFileStates"] = {key: 3 for key in meta["AttachmentFileStates"]}
+        meta["AttachmentFileStates"]["aaaaaaaa-0000-4000-8000-000000000001"] = 3
+        parts["meta.json"] = json.dumps(meta).encode()
+        parts.pop(HOME + "/Notes.md")
+
+    rewrite(source, absent)
+    with pytest.raises(MigrationRefused) as error, BrzSourceModule().open(source):
+        pass
+    assert error.value.issues[0].code == "missing_required_payload"

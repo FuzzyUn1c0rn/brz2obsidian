@@ -587,6 +587,15 @@ def normalize_attachments(
                 "Absent ordinary note lacks usable owned note images",
                 (asset_id,),
             )
+        unavailable = tuple(
+            image.asset_id for image in images if image.availability != "present"
+        )
+        if unavailable:
+            refuse(
+                "missing_required_payload",
+                "Absent ordinary note has an unavailable unreferenced owned image",
+                (asset_id, *unavailable),
+            )
         image_facts = []
         for image in images:
             with archive.open(members[image.asset_id]) as stream:
