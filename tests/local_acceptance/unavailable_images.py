@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 from urllib.parse import unquote, urlsplit
+from uuid import UUID
 
 from .text import inline_candidates
 
@@ -16,6 +17,7 @@ def digest(text):
 
 
 def image_location(uri):
+    assert uri.startswith(".data/md-images/"), "raw exact local image prefix"
     path, separator, fragment = uri.partition("#")
     assert "?" not in uri and (
         not separator or re.fullmatch(r"\$width=([1-9]|[1-9][0-9]|100)p\$", fragment)
@@ -27,9 +29,10 @@ def image_location(uri):
     value = unquote(value, errors="strict")
     assert (
         not re.search(r"%[0-9a-fA-F]{2}", value)
-        and not any(c in value for c in "\\/:\x00")
-        and value not in {"", ".", ".."}
-    ), "raw unavailable image basename"
+        and not any(c in value for c in "\\:")
+        and not any(ord(c) < 32 or ord(c) == 127 for c in value)
+        and not any(segment in {"", ".", ".."} for segment in value.split("/"))
+    ), "raw unavailable image safe relative path"
     return value
 
 
@@ -120,6 +123,10 @@ def expectation(raw, owner, bindings, absent, *, basis, profile_version="4"):
         uri = text[left:right]
         if image and uri.startswith(".data/md-images/"):
             a, b = origins[start], origins[end - 1] + 1
+            angle = text[left - 1 : left] == "<" and text[right : right + 1] == ">"
+            destination_left, destination_right = (
+                (left - 1, right + 1) if angle else (left, right)
+            )
             source[a, b] = {
                 "start": a,
                 "end": b,
@@ -127,8 +134,8 @@ def expectation(raw, owner, bindings, absent, *, basis, profile_version="4"):
                 "source_digest": digest(raw),
                 "uri": uri,
                 "label": inline_display(label),
-                "destination_start": origins[left],
-                "destination_end": origins[right - 1] + 1,
+                "destination_start": origins[destination_left],
+                "destination_end": origins[destination_right - 1] + 1,
             }
     for transform in (tables, callouts, contents):
         options = (
@@ -167,25 +174,26 @@ def expectation(raw, owner, bindings, absent, *, basis, profile_version="4"):
         assert not owned or declared is not None, (
             "raw missing image conflicts with owned declaration"
         )
-        suffixes = (
-            {"png", "jpg", "webp", "svg"}
-            if basis.startswith("api_")
-            else {"png", "jpg", "jpeg", "webp", "gif", "bmp", "avif"}
-        )
+        suffixes = {"png", "jpg", "jpeg", "webp", "gif", "bmp", "avif", "svg"}
         assert filename.rsplit(".", 1)[-1].lower() in suffixes, (
             "raw unavailable image supported filename"
         )
-        assert not any(
-            a["asset_id"] == filename.rsplit(".", 1)[0]
-            for a in bindings.values()
-            if a["owner"] != owner
-        ), "raw unavailable image foreign identity"
+        try:
+            identity = str(UUID(filename.rsplit("/", 1)[-1].rsplit(".", 1)[0]))
+        except ValueError:
+            identity = None
+        assert identity not in {
+            a["asset_id"] for a in bindings.values() if a["owner"] != owner
+        }, "raw unavailable image foreign identity"
         pair = origins[start], origins[end - 1] + 1
         assert pair in source and all(
             value is None or pair[0] <= value < pair[1] for value in origins[start:end]
         ), "independent missing image copied source occurrence"
         reference = source[pair]
-        label = reference["label"].replace("\\<", "<").strip() or filename
+        label = (
+            reference["label"].replace("\\<", "<").strip()
+            or filename.rsplit("/", 1)[-1]
+        )
         label = " ".join(label.split())
         notice = "Image unavailable: " + "".join(
             f"&#{ord(c)};" if c.isascii() and not c.isalnum() and not c.isspace() else c

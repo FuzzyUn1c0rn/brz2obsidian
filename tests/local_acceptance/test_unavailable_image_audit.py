@@ -394,3 +394,203 @@ def test_independent_notice_proof_refuses_disconnected_flat_edit_union():
     ]
     with pytest.raises(AssertionError, match="connected source union"):
         validate(raw, final, intermediate, [forged_edit], events, observed)
+
+
+FAMILY_REFERENCES = (
+    ("PNG", ".data/md-images/generic.png", "generic.png", False),
+    ("JPG", ".data/md-images/sub/photo.JPG", "sub/photo.JPG", True),
+    (
+        "JPEG",
+        ".data/md-images/sub/deep/photo.jpeg#$width=70p$",
+        "sub/deep/photo.jpeg",
+        False,
+    ),
+    (
+        "WEBP",
+        ".data/md-images/00000000-0000-0000-0000-000000000000.WEBP",
+        "00000000-0000-0000-0000-000000000000.WEBP",
+        False,
+    ),
+    ("GIF", ".data/md-images/animated.GIF", "animated.GIF", False),
+    (
+        "BMP",
+        ".data/md-images/space%20folder/bitmap.bmp",
+        "space folder/bitmap.bmp",
+        False,
+    ),
+    ("AVIF", ".data/md-images/sub/still.avif", "sub/still.avif", True),
+    ("", ".data/md-images/sub/vector.svg", "sub/vector.svg", True),
+)
+FAMILY_RAW = (
+    "Café before.\r\n"
+    + "\r\n".join(
+        "![" + label + "](" + ("<" + uri + ">" if angle else uri) + ")"
+        for label, uri, _location, angle in FAMILY_REFERENCES
+    )
+    + "\r\nAfter *kept*.\r\n"
+).encode()
+FAMILY_BODY = (
+    "Café before.\n"
+    "Image unavailable: PNG\n"
+    "Image unavailable: JPG\n"
+    "Image unavailable: JPEG\n"
+    "Image unavailable: WEBP\n"
+    "Image unavailable: GIF\n"
+    "Image unavailable: BMP\n"
+    "Image unavailable: AVIF\n"
+    "Image unavailable: vector&#46;svg\n"
+    "After *kept*.\n"
+)
+
+
+@pytest.fixture(scope="module")
+def family_outputs(tmp_path_factory):
+    directory = tmp_path_factory.mktemp("image-reference-families")
+    source = literal_archive(directory / "source.brz", FAMILY_RAW)
+    brz_vault = directory / "brz-vault"
+    brz_result = default_workflow().convert(source, brz_vault)
+    assert brz_result.outcome == "warnings", brz_result.issues
+    api = note_api(b"\xef\xbb\xbf" + FAMILY_RAW)
+    api.overrides["/api/v1/docs.json"] = (200, SCHEMA)
+    controls = prepare_controls(directory / "controls")
+    api_vault = directory / "api-vault"
+    with api_server(api) as (_, upstream):
+        recording = ApiRecording(
+            directory / "http",
+            upstream,
+            brain_id=BRAIN,
+            credential=KEY,
+            purpose="convert",
+        )
+        with recording:
+            result = local_api_workflow(
+                LocalApiConfig(api_url=recording.api_url), credentials=lambda: KEY
+            ).convert(LocalApiSourceRef(BRAIN), api_vault)
+            assert result.outcome == "warnings", result.issues
+            recording.complete()
+        baseline = recording.seal(qualification=controls)
+    paths = [path for path, _query, _key in api.requests]
+    return source, brz_vault, baseline, api_vault, paths
+
+
+@pytest.mark.parametrize("adapter", ("brz", "api"))
+def test_complete_missing_reference_families_keep_nested_and_angle_source_evidence(
+    family_outputs, adapter
+):
+    source, brz_vault, baseline, api_vault, requests = family_outputs
+    vault = brz_vault if adapter == "brz" else api_vault
+    audit(adapter, source, baseline, vault)
+    record = json.loads((vault / "migration-record.json").read_bytes())
+    document = next(d for t in record["item_targets"] for d in t["documents"])
+    body = (vault / document["owner_target"]).read_text(encoding="utf-8")
+    assert FAMILY_BODY in body
+    assert len(record["asset_targets"]) == 1
+    assert record["asset_targets"][0]["role"] == "note_original"
+    assert record["counts"]["source_references"] == 0
+    expected_original = FAMILY_RAW if adapter == "brz" else b"\xef\xbb\xbf" + FAMILY_RAW
+    assert next(vault.rglob("*.original")).read_bytes() == expected_original
+    observations = sorted(
+        (
+            json.loads(issue["message"].split("Observed: ", 1)[1])
+            for issue in record["issues"]
+            if issue["rule_id"] == "thebrain.unavailable-image.v1"
+        ),
+        key=lambda value: value["source_reference"]["start"],
+    )
+    assert len(observations) == 8
+    source_text = expected_original.decode("utf-8")
+    for observed, (label, uri, location, angle) in zip(
+        observations, FAMILY_REFERENCES, strict=True
+    ):
+        span = observed["source_reference"]
+        authored_destination = "<" + uri + ">" if angle else uri
+        phrase = "![" + label + "](" + authored_destination + ")"
+        assert source_text[span["start"] : span["end"]] == phrase
+        assert (
+            source_text[span["destination_start"] : span["destination_end"]]
+            == authored_destination
+        )
+        assert span["uri"] == uri and observed["absence"]["location"] == location
+        expected_notice = (
+            "Image unavailable: " + label
+            if label
+            else "Image unavailable: vector&#46;svg"
+        )
+        assert observed["notice"]["text"] == expected_notice
+    if adapter == "api":
+        from tests.support.local_api_payloads import NOTE
+
+        content = [path for path in requests if path.endswith("/file-content")]
+        assert set(content) == {f"/api/attachments/{BRAIN}/{NOTE}/file-content"}
+
+
+@pytest.mark.parametrize(
+    "uri",
+    (
+        "foo.png",
+        "/.data/md-images/foo.png",
+        ".data/md-images/../lost.png",
+        ".data/md-images//lost.png",
+        ".data/md-images/sub//lost.png",
+        ".data/md-images/sub%2flost.png",
+        ".data/md-images/sub%5clost.png",
+        ".data/md-images/sub%252flost.png",
+        ".data/md-images/bad%GG.png",
+        ".data/md-images/bad%00.png",
+        ".data/md-images/bad%1f.png",
+        ".data/md-images/bad:name.png",
+        ".data/md-images/bad%3Aname.png",
+    ),
+)
+def test_independent_image_path_predicate_retains_exact_local_safety(uri):
+    from tests.local_acceptance.unavailable_images import image_location
+
+    with pytest.raises(AssertionError):
+        image_location(uri)
+
+
+def test_independent_api_audit_rejects_recorded_wrong_declared_image_suffix(tmp_path):
+    from tests.local_acceptance.api_checker import audit_baseline
+
+    api = note_api(f"![Declared](.data/md-images/{IMAGE}.jpeg)\n".encode())
+    api.attachments[IMAGE] = attachment(
+        IMAGE, HOME, 12, IMAGE + ".jpeg", length=len(PNG)
+    )
+    api.payloads[IMAGE] = PNG
+    api.overrides["/api/v1/docs.json"] = (200, SCHEMA)
+    controls = prepare_controls(tmp_path / "controls")
+    with api_server(api) as (_, upstream):
+        recording = ApiRecording(
+            tmp_path / "http",
+            upstream,
+            brain_id=BRAIN,
+            credential=KEY,
+            purpose="inspect",
+        )
+        with recording:
+            result = local_api_workflow(
+                LocalApiConfig(api_url=recording.api_url), credentials=lambda: KEY
+            ).inspect(LocalApiSourceRef(BRAIN))
+            assert result.outcome == "refused", result.issues
+            recording.complete()
+        baseline = recording.seal(qualification=controls)
+    with pytest.raises(AssertionError, match="raw image role"):
+        audit_baseline(baseline, profile_version="4")
+
+
+@pytest.mark.parametrize("stem", (IMAGE, IMAGE.upper(), IMAGE.replace("-", "")))
+def test_independent_nested_image_refuses_identified_foreign_asset(stem):
+    from tests.local_acceptance.unavailable_images import expectation
+
+    raw = "![Foreign](.data/md-images/sub/" + stem + ".png)"
+    foreign = {
+        IMAGE: {
+            "asset_id": IMAGE,
+            "owner": "33333333-3333-4333-8333-333333333333",
+            "role": "image",
+            "original_name": IMAGE + ".png",
+            "availability": "present",
+        }
+    }
+    with pytest.raises(AssertionError, match="foreign identity"):
+        expectation(raw, HOME, foreign, {}, basis="archive_undeclared_no_payload")
