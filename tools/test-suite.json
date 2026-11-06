@@ -353,7 +353,8 @@
     "tests/local_acceptance/test_internal_file_audit.py::test_raw_api_audit_rejects_rehashed_ordinary_file_forgeries",
     "tests/local_acceptance/test_internal_file_audit.py::test_independent_old_profile_file_grammar_does_not_inherit_current_admission",
     "tests/sources/test_unavailable_images.py",
-    "tests/local_acceptance/test_unavailable_image_audit.py"
+    "tests/local_acceptance/test_unavailable_image_audit.py",
+    "tests/local_acceptance/test_current_table_audit.py"
   ],
   "schema_version": 1
 }

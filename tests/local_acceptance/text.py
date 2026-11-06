@@ -253,7 +253,7 @@ def _expanded_origins(line):
     return origins
 
 
-def _inline_regions(body, *, _views=None):
+def _inline_regions(body, *, _views=None, _paragraphs=None):
     """Resolve leaf block ownership before scanning any inline delimiters.
 
     CommonMark HTML-comment blocks own the complete closing line (or the rest
@@ -369,6 +369,22 @@ def _inline_regions(body, *, _views=None):
             or listing
             or re.match(r" {0,3}#{1,6}(?:[ \t]|$)", content)
         )
+        if _paragraphs is not None:
+            setext = paragraph and re.fullmatch(
+                r" {0,3}(?:=+|-+)[ \t]*", content.rstrip("\r\n")
+            )
+            if setext and _paragraphs and _paragraphs[-1][1] == match.start():
+                _paragraphs.pop()
+            elif (
+                not protected
+                and content.strip()
+                and not container_owner
+                and not re.match(r" {0,3}#{1,6}(?:[ \t]|$)", content)
+            ):
+                if paragraph and _paragraphs and _paragraphs[-1][1] == match.start():
+                    _paragraphs[-1] = (_paragraphs[-1][0], match.end())
+                else:
+                    _paragraphs.append((match.start(), match.end()))
         if boundary and region is not None:
             regions.append((region, match.start()))
             region = None
@@ -399,6 +415,13 @@ def _inline_regions(body, *, _views=None):
     if region is not None:
         regions.append((region, len(body)))
     return regions, mask, (fence, comment)
+
+
+def paragraph_intervals(body):
+    """Top-level paragraph ownership from the shared container scan."""
+    paragraphs = []
+    _inline_regions(body, _paragraphs=paragraphs)
+    return paragraphs
 
 
 def generated_boundary(prefix):

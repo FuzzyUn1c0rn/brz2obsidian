@@ -11,7 +11,13 @@ import re
 from urllib.parse import quote
 
 from .checker import inline_display, source_references, wiki
-from .text import active_mask, inline_candidates, inline_code_spans, literal_edits
+from .text import (
+    active_mask,
+    inline_candidates,
+    inline_code_spans,
+    literal_edits,
+    paragraph_intervals,
+)
 
 KINDS = frozenset(
     [
@@ -211,8 +217,16 @@ def row_cells(line):
 
 
 def tables(
-    text, operations=None, ownership=None, origins=None, *, current_tables=False
+    text,
+    operations=None,
+    ownership=None,
+    origins=None,
+    *,
+    current_tables=False,
+    malformed=None,
 ):
+    if current_tables:
+        return current_table_text(text, operations, ownership, origins, malformed)
     lines = markdown_lines(text)
     scan = insert_activity(text)
     offsets, cursor = [], 0
@@ -379,6 +393,222 @@ def tables(
             for value in mapped.get(i, origins[offsets[i] : offsets[i] + len(line)])
         ]
     return "".join(edits.get(i, line) for i, line in enumerate(lines))
+
+
+def current_table_text(text, operations, ownership, origins, malformed):
+    """Current native table facts, independently from source adapter parsers.
+
+    Styling is an opaque source declaration. Ordinary row groups belong only
+    to top-level paragraphs; declarations instead use active inline ownership.
+    A real separator admits ragged data without inventing or discarding cells.
+    """
+    lines = markdown_lines(text)
+    offsets, cursor = [], 0
+    for line in lines:
+        offsets.append(cursor)
+        cursor += len(line)
+    scan = insert_activity(text)
+    paragraphs = paragraph_intervals(text)
+    codes = {(a, b): (c, d) for a, b, c, d in inline_code_spans(text)}
+    protected_codes = cross_container_code(text)
+    changes, mapped, declared = {}, {}, set()
+
+    def active(index):
+        return bool(scan[offsets[index] : offsets[index] + len(lines[index])].strip())
+
+    def cells(index, row=None):
+        raw = lines[index].rstrip("\r\n") if row is None else row
+        first, last = len(raw) - len(raw.lstrip()), len(raw.rstrip()) - 1
+        if (
+            last < first
+            or scan[offsets[index] + first] != "|"
+            or scan[offsets[index] + last] != "|"
+        ):
+            return None
+        if any(
+            a < offsets[index] + len(raw) and offsets[index] < b
+            for a, b in protected_codes
+        ):
+            return None
+        return row_cells(raw)
+
+    def separator(parts, width):
+        return (
+            parts is not None
+            and len(parts) == width
+            and all(re.fullmatch(r"\s*:?-{3,}:?\s*", part) for part in parts)
+        )
+
+    def native(index, row):
+        local = []
+        for (begin, end), (inside, stop) in codes.items():
+            left, right = begin - offsets[index], end - offsets[index]
+            if 0 <= left < right <= len(row) and "|" in text[inside:stop]:
+                value = text[inside:stop].replace("\r", " ").replace("\n", " ")
+                if value.startswith(" ") and value.endswith(" ") and value.strip():
+                    value = value[1:-1]
+                replacement = (
+                    "<code>"
+                    + html.escape(value, quote=False)
+                    .replace("\\", "&#92;")
+                    .replace("|", "&#124;")
+                    + "</code>"
+                )
+                local.append((left, right, replacement))
+        for match in re.finditer(re.escape("{nl}"), row):
+            if (
+                scan[offsets[index] + match.start() : offsets[index] + match.end()]
+                == "{nl}"
+            ):
+                local.append((match.start(), match.end(), "<br>"))
+        values = (
+            origins[offsets[index] : offsets[index] + len(row)]
+            if origins is not None
+            else [None] * len(row)
+        )
+        for begin, end, replacement in sorted(local, reverse=True):
+            row = row[:begin] + replacement + row[end:]
+            values[begin:end] = [None] * len(replacement)
+        return row, values
+
+    def emit(start, stop, parts, explicit, styled):
+        empty = all(not part.strip() for part in parts)
+        blank = "|" + "|".join(" " for _ in parts) + "|"
+        header = blank + "\n|" + "|".join("---" for _ in parts) + "|"
+        for index in range(start, stop):
+            raw = lines[index].rstrip("\r\n")
+            row = styled if index == start and styled is not None else raw
+            row, values = native(index, row)
+            if index == start:
+                if empty:
+                    row = blank if explicit else header
+                    values = [None] * len(row)
+                elif not explicit:
+                    row = header + "\n" + row
+                    values = [None] * (len(header) + 1) + values
+                if start and lines[start - 1].strip():
+                    row, values = "\n" + row, [None] + values
+            if index == stop - 1 and stop < len(lines) and lines[stop].strip():
+                row, values = row + "\n", values + [None]
+            ending = lines[index][len(raw) :]
+            changes[index] = row + ending
+            mapped[index] = values + (
+                origins[offsets[index] + len(raw) : offsets[index] + len(lines[index])]
+                if origins is not None
+                else [None] * len(ending)
+            )
+        if ownership is not None:
+            ownership.append((offsets[start], offsets[stop - 1] + len(lines[stop - 1])))
+
+    def warn(declaration, styled):
+        if malformed is not None:
+            malformed.append(
+                {
+                    "feature": "table",
+                    "declaration": declaration,
+                    "change": "Malformed or ambiguous table retained as source text; supply an ordinary Markdown table with "
+                    + (
+                        "a matching header separator."
+                        if styled
+                        else "matching columns and a header separator."
+                    ),
+                }
+            )
+
+    for index, line in enumerate(lines):
+        raw = line.rstrip("\r\n")
+        starts = [
+            m.start()
+            for m in re.finditer(re.escape(":(table="), raw)
+            if scan[offsets[index] + m.start() : offsets[index] + m.start() + 2] == ":("
+        ]
+        if not starts:
+            continue
+        suffix = re.search(r':\(table="(?:[^"\\\r\n]|\\.)*"\):$', raw)
+        if suffix and suffix.start() not in starts:
+            suffix = None
+        if suffix:
+            starts = [
+                position
+                for position in starts
+                if not suffix.start() < position < suffix.end()
+            ]
+        stop = index + 1
+        while (
+            stop < len(lines) and active(stop) and lines[stop].lstrip().startswith("|")
+        ):
+            stop += 1
+        declared.update(range(index, stop))
+        first = cells(index, raw[: suffix.start()]) if suffix else None
+        rows = [cells(i) for i in range(index + 1, stop)]
+        if (
+            suffix
+            and raw[: suffix.start()].strip() == "||"
+            and len(rows) == 1
+            and rows[0] is not None
+            and len(rows[0]) == 2
+        ):
+            first = ["", ""]
+        explicit = bool(first and rows and separator(rows[0], len(first)))
+        if (
+            first
+            and len(starts) == 1
+            and rows
+            and (
+                explicit
+                or all(row is not None and len(row) == len(first) for row in rows)
+            )
+        ):
+            emit(index, stop, first, explicit, raw[: suffix.start()])
+        else:
+            warn(raw[starts[0] :], True)
+
+    index = 0
+    while index < len(lines):
+        start = index
+        while (
+            index < len(lines)
+            and index not in declared
+            and active(index)
+            and lines[index].lstrip().startswith("|")
+            and any(a <= offsets[index] < b for a, b in paragraphs)
+        ):
+            index += 1
+        if index - start < 2:
+            index = max(index, start + 1)
+            continue
+        rows = [cells(i) for i in range(start, index)]
+        first = rows[0]
+        if first is None:
+            continue
+        if (
+            lines[start].strip() == "||"
+            and len(rows) == 2
+            and rows[1] is not None
+            and len(rows[1]) == 2
+        ):
+            first = ["", ""]
+        explicit = separator(rows[1], len(first))
+        if not explicit and (
+            len(first) < 2
+            or any(row is None or len(row) != len(first) for row in rows[1:])
+        ):
+            warn(lines[start].rstrip("\r\n"), False)
+            continue
+        emit(start, index, first, explicit, None)
+    if operations is not None:
+        operations.extend(
+            (offsets[i], offsets[i] + len(lines[i]), after)
+            for i, after in sorted(changes.items())
+            if after != lines[i]
+        )
+    if origins is not None:
+        origins[:] = [
+            value
+            for i, line in enumerate(lines)
+            for value in mapped.get(i, origins[offsets[i] : offsets[i] + len(line)])
+        ]
+    return "".join(changes.get(i, line) for i, line in enumerate(lines))
 
 
 def label_text(value):
@@ -673,7 +903,7 @@ def table_contexts(text):
             table_rows.add(index)
             for following in range(index + 1, len(lines)):
                 row = row_cells(lines[following])
-                if row is None or len(row) != len(cells):
+                if row is None:
                     break
                 table_rows.add(following)
     contexts = []

@@ -361,10 +361,15 @@ def formatting_observations(raw, *, profile_version="1"):
     for edit in reversed(edits):
         text = text[: edit["start"]] + edit["after"] + text[edit["end"] :]
     mask = insert_activity(text)
-    observations, offset = [], 0
+    observations, toc_observations, offset = [], [], 0
 
     def add(feature, declaration, change):
-        observations.append(
+        destination = (
+            toc_observations
+            if profile_version == "4" and feature == "table_of_contents"
+            else observations
+        )
+        destination.append(
             {
                 "feature": feature,
                 "declaration": declaration,
@@ -373,8 +378,12 @@ def formatting_observations(raw, *, profile_version="1"):
         )
 
     table_ownership = []
+    malformed_tables = []
     table_text = tables(
-        text, ownership=table_ownership, current_tables=profile_version == "4"
+        text,
+        ownership=table_ownership,
+        current_tables=profile_version == "4",
+        malformed=malformed_tables,
     )
     table_headers = {begin for begin, _ in table_ownership}
     for line in markdown_lines(text):
@@ -416,7 +425,7 @@ def formatting_observations(raw, *, profile_version="1"):
             # operation may independently convert code pipes while preserving
             # an active malformed declaration on that same source line.
             valid = offset in table_headers
-            if not valid or profile_version != "4":
+            if profile_version != "4":
                 add("table", body[starts[0] :], "01" if valid else "08")
         declaration = body.strip()
         if (
@@ -434,7 +443,7 @@ def formatting_observations(raw, *, profile_version="1"):
         declared = re.search(r"\^[A-Za-z0-9-]+$", before)
         if declared and declared[0] not in replacement:
             add("table_of_contents", declared[0], "14")
-    return observations
+    return observations + malformed_tables + toc_observations
 
 
 def check_warning_records(
@@ -887,6 +896,20 @@ def check_projection_protocol(
                 )
     findings = missing_findings(baseline, attachments, assets)
     image_findings = image_api_findings(record, baseline, scoped, profile_version)
+    format_findings = [
+        {
+            "kind": "formatting_loss",
+            "rule_id": "local-api.note-formatting.v1",
+            "affected": sorted([note.owner, key]),
+            "evidence": ["attachment:" + key],
+            "observed_json": observation,
+        }
+        for key, note in scoped.safe_notes.items()
+        if profile_version == "4"
+        for observation in formatting_observations(
+            note.scoped_text, profile_version=profile_version
+        )
+    ]
     asset_fields = {"naming_seed", "evidence", "video_presentation", "source_findings"}
     for key, asset in assets.items():
         expected = {
@@ -904,6 +927,16 @@ def check_projection_protocol(
             expected_values = ([findings[key]] if key in findings else []) + [
                 f for f in image_findings if key in f["affected"]
             ]
+            if profile_version == "4":
+                expected_values.extend(
+                    f for f in format_findings if key in f["affected"]
+                )
+                expected_values.sort(
+                    key=lambda row: canonical_json(
+                        dict(row, observed_json=canonical_json(row["observed_json"]))
+                    ).encode("utf-8")
+                )
+                expected_values.sort(key=lambda row: (row["rule_id"], row["affected"]))
             assert type(values) is list and len(values) == len(expected_values), (
                 "source-bound asset finding census"
             )

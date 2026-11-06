@@ -240,7 +240,7 @@ def check_vault(source, vault):
                     {
                         "kind": "formatting_loss",
                         "rule_id": "thebrain.markdown-inserts.v1",
-                        "affected": sorted([a["SourceId"], a["Id"]]),
+                        "affected": [a["SourceId"], a["Id"]],
                         "evidence": [
                             "attachments.json:" + str(raw["attachments.json"].index(a))
                         ],
@@ -1497,6 +1497,9 @@ def source_references(
 
 
 def adapt_body(body, owner, note_path, names, assets, *, qualified_brain=None):
+    from .api_note_text import table_contexts
+
+    contexts = table_contexts(body)
     result = body
     for ref in reversed(
         source_references(body, owner, assets, qualified_brain=qualified_brain)
@@ -1505,6 +1508,8 @@ def adapt_body(body, owner, note_path, names, assets, *, qualified_brain=None):
             assert ref["target"] in names, "source local thought target"
             replacement = wiki(names[ref["target"]], ref["label"])
             start, end = ref["start"], ref["end"]
+            if any(begin <= start < end <= stop for begin, stop in contexts):
+                replacement = replacement.replace("|", "\\|")
         else:
             start, end = ref["destination_start"], ref["destination_end"]
             replacement = quote(
@@ -2438,7 +2443,7 @@ def check_actual_files(vault, record, targets, names, raw, summary):
         text = "".join(active)
         text = re.sub(r"<code>[^<]*</code>", lambda m: " " * len(m[0]), text)
         for match in re.finditer(r"\[\[([^\]\n]+)\]\]", text):
-            destination = match[1].split("|")[0].split("#")[0]
+            destination = re.split(r"\\?\|", match[1], maxsplit=1)[0].split("#")[0]
             assert destination in reserved | actual, "actual local wikilink destination"
         for match in re.finditer(r"!\[[^\]]*\]\((<[^>]+>|[^\s)]+)", text):
             destination = unquote(match[1].strip("<>"))
