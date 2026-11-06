@@ -50,7 +50,7 @@ def test_advanced_defaults_validation_and_delayed_listing_stay_responsive(monkey
             kind.setCurrentIndex(1)
             until(app, lambda: window.snapshot.source_kind == "local-api")
             control(window, QLineEdit, "Local API address").setText(address)
-            advanced = control(window, QPushButton, "Advanced API search limits")
+            advanced = control(window, QPushButton, "Advanced API limits")
             assert not control(window, QLineEdit, "Initial result limit").isVisible()
             advanced.click()
             assert control(window, QLineEdit, "Initial result limit").text() == "5000"
@@ -77,6 +77,9 @@ def test_advanced_defaults_validation_and_delayed_listing_stay_responsive(monkey
                 ),
             )
             assert not refresh.isEnabled() and not kind.isEnabled()
+            assert not control(
+                window, QLineEdit, "Maximum total capture bytes"
+            ).isEnabled()
             heartbeat = []
             QTimer.singleShot(0, lambda: heartbeat.append(True))
             until(app, lambda: heartbeat)

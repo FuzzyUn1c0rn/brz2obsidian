@@ -334,7 +334,10 @@
     "tests/application/test_undo_metadata_only_resource.py",
     "tests/application/test_recovery_both_image_roles.py",
     "tests/application/test_update_memo_authority.py::test_first_memo_over_completed_source_result_keeps_choices_after_prior_policy_edit",
-    "tests/application/test_type_tag_updates.py::test_current_type_tag_vault_prepares_same_source_without_format_transition"
+    "tests/application/test_type_tag_updates.py::test_current_type_tag_vault_prepares_same_source_without_format_transition",
+    "tests/cli/test_api_capture_limits.py",
+    "tests/gui/test_api_capture_limits.py",
+    "tests/sources/test_api_capture_limits.py"
   ],
   "schema_version": 1
 }

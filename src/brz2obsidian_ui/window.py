@@ -409,9 +409,9 @@ class MainWindow(QMainWindow):
         self.api_status.setAccessibleName("API connection status")
         api_layout.addWidget(self.api_status)
         self.api_advanced_toggle = QPushButton(
-            "▸ Advanced search limits", objectName="diagnosticDisclosure"
+            "▸ Advanced API limits", objectName="diagnosticDisclosure"
         )
-        self.api_advanced_toggle.setAccessibleName("Advanced API search limits")
+        self.api_advanced_toggle.setAccessibleName("Advanced API limits")
         self.api_advanced_toggle.setCheckable(True)
         self.api_advanced = QWidget()
         advanced_layout = QVBoxLayout(self.api_advanced)
@@ -422,6 +422,7 @@ class MainWindow(QMainWindow):
             ("search_timeout", "Total search seconds", "300"),
             ("search_max_response_bytes", "Maximum search response bytes", "128000000"),
             ("search_max_results", "Maximum results (blank disables ceiling)", ""),
+            ("max_total_capture_bytes", "Maximum total capture bytes", "1000000000"),
         ):
             advanced_layout.addWidget(label(title))
             field = QLineEdit(default)
@@ -438,11 +439,21 @@ class MainWindow(QMainWindow):
                 "Enter 0.001–86,400 seconds, with up to three decimal places."
                 if key == "search_timeout"
                 else "Enter 1–9,223,372,036,854,775,807 bytes."
-                if key == "search_max_response_bytes"
+                if key in ("search_max_response_bytes", "max_total_capture_bytes")
                 else "Enter 1–2,147,483,647, or leave blank to disable the ceiling."
                 if key == "search_max_results"
                 else "Enter 1–2,147,483,647."
             )
+            if key == "max_total_capture_bytes":
+                advanced_layout.addWidget(
+                    label(
+                        "Default: 1,000,000,000 bytes (1 GB decimal). Choose a finite "
+                        "larger limit with headroom for API responses and stored payloads. "
+                        "Other read limits still apply. Later vault review also needs "
+                        "memory and disk space.",
+                        "muted",
+                    )
+                )
         self.api_advanced_toggle.toggled.connect(self._api_advanced_changed)
         self.api_advanced.hide()
         api_layout.addWidget(self.api_advanced_toggle)
@@ -739,7 +750,7 @@ class MainWindow(QMainWindow):
             return
         self.api_advanced.setVisible(expanded)
         self.api_advanced_toggle.setText(
-            ("▾" if expanded else "▸") + " Advanced search limits"
+            ("▾" if expanded else "▸") + " Advanced API limits"
         )
 
     def _destination_details_changed(self, expanded):

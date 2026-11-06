@@ -58,6 +58,11 @@ def main(argv=None):
             help="Post-decompression bytes per wildcard reply, 1..9223372036854775807 (default 128000000)",
         )
         command.add_argument(
+            "--api-max-total-capture-bytes",
+            type=int,
+            help="Total API capture bytes, 1..9223372036854775807 (default 1000000000 = 1 GB decimal); use finite headroom for responses and stored payloads",
+        )
+        command.add_argument(
             "--api-search-max-results",
             type=int,
             help="Optional raw result ceiling, 1..2147483647 (default disabled)",
@@ -226,6 +231,7 @@ def _execute(args):
             "search_timeout",
             "search_max_response_bytes",
             "search_max_results",
+            "max_total_capture_bytes",
         )
         if getattr(args, "api_" + name) is not None
     }

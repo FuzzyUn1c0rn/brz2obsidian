@@ -7,6 +7,10 @@ from brz2obsidian.contracts import DiagnosticSubject
 # A reason is admitted with its original code. The pair prevents a foreign rule
 # or a familiar rule on an unrelated failure from inventing an explanation.
 REASONS = {
+    ("incomplete_source", "api_total_capture_limit"): (
+        "the configured total API capture limit was reached.",
+        "Choose a finite larger limit in Advanced API limits or with --api-max-total-capture-bytes, allowing headroom for API responses and stored payloads. Per-response and per-payload limits still apply; later vault review also needs memory and disk space.",
+    ),
     ("unsupported_feature", "note_html"): (
         "the converter does not support this HTML (web-page formatting) in a thought note.",
         "Report this limitation with the diagnostic report so the converter can be improved.",
@@ -82,6 +86,8 @@ REASONS = {
 }
 
 _KNOWN_MESSAGES = {
+    "max_total_capture_bytes aggregate response bound exhausted": "api_total_capture_limit",
+    "max_total_capture_bytes storage limit exhausted": "api_total_capture_limit",
     "HTML note content is outside reviewed Markdown coverage": "note_html",
     "HTML declarations are outside reviewed Markdown coverage": "note_html",
     "HTML processing instructions are outside reviewed Markdown coverage": "note_html",

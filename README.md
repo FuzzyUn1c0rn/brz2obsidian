@@ -325,7 +325,7 @@ does not scan ports or open a Brain for you.
 In the Windows app, choose **TheBrain local API**, enter the address, select
 **Refresh Brains**, then choose the Brain by name and full ID. Duplicate names
 remain separate choices. The app reads the key from its launch environment and
-has no key field. **Advanced search limits** exposes the options below.
+has no key field. **Advanced API limits** exposes the options below.
 
 For the CLI, replace this example with the Brain's exact lowercase, hyphenated,
 nonzero UUID:
@@ -345,6 +345,25 @@ apply to both sources. Use `inspect --help` or `convert --help` for option bound
 | `--api-search-timeout` | 300 | Total wildcard search budget in seconds |
 | `--api-search-max-response-bytes` | 128000000 | Maximum decompressed bytes per wildcard reply |
 | `--api-search-max-results` | disabled | Optional positive result ceiling; saturation refuses import |
+| `--api-max-total-capture-bytes` | 1000000000 | Finite total API capture bound in bytes (1 GB decimal) |
+
+The total capture setting accepts 1–9,223,372,036,854,775,807 bytes, including
+values above 32 bits. It bounds aggregate decompressed API response bodies and
+the stored capture's payload total under the existing acquisition checks. For
+example, append `--api-max-total-capture-bytes 6000000000` to either API command
+for a finite 6 GB decimal limit, or enter `6000000000` in **Maximum total capture
+bytes** in Windows. Changing API settings retires the previous inspection; inspect
+again before converting. API options are refused for BRZ input.
+
+Choose a finite limit with headroom above the expected scoped data. TheBrain's
+aggregate internal-file metadata and BRZ archive size do not exactly predict
+current API capture bytes. Raising the total does not raise the separate
+per-response or per-payload limits (ordinary defaults 16,000,000 and 256,000,000
+bytes; wildcard-response limit shown above). The independent acceptance audit
+recorder has its own budget, configured separately by that test tool. Capture
+success also does not guarantee enough memory or disk space for later Git-backed
+vault review/history operations; qualify that capacity separately before a large
+review. No unlimited mode or automatic retry is enabled.
 
 The supported scope includes public, non-forgotten ordinary thoughts, types and
 tags, a valid ordinary Home, supported relationships, authored raw Markdown,

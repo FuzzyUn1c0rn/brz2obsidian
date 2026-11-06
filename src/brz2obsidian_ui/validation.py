@@ -31,8 +31,13 @@ def api_configuration(base, fields):
         "search_timeout",
         "search_max_response_bytes",
         "search_max_results",
+        "max_total_capture_bytes",
     ):
-        raw = fields[key]
+        raw = (
+            fields.get(key, str(values[key]))
+            if key == "max_total_capture_bytes"
+            else fields[key]
+        )
         if key == "search_timeout":
             try:
                 seconds = Decimal(raw)
@@ -46,7 +51,7 @@ def api_configuration(base, fields):
                 errors[key] = "Enter 0.001–86,400 seconds."
             continue
         optional = key == "search_max_results"
-        byte_limit = key == "search_max_response_bytes"
+        byte_limit = key in ("search_max_response_bytes", "max_total_capture_bytes")
         if optional and raw == "":
             values[key] = None
             continue
