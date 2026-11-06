@@ -393,7 +393,11 @@ def capture_owner(
             if documents:
                 refuse("Multiple authored notes have ambiguous ownership")
             text, removed = scope_text(
-                text, excluded, brain_id=brain, allow_qualified=profile_version == "4"
+                text,
+                excluded,
+                brain_id=brain,
+                allow_qualified=profile_version == "4",
+                allow_literal_tokens=profile_version == "4",
             )
             record("note_text", "note_text:" + owner, owner, {"text": text})
             if removed:
@@ -605,6 +609,7 @@ def validate_payload_binding(source, snapshot, audit):
                     preserve_table_warnings=preserve_table_warnings,
                     brain_id=source["brain"]["id"],
                     allow_qualified=profile == "4",
+                    allow_literal_tokens=profile == "4",
                     excluded=excluded_thoughts,
                 )
             except MigrationRefused:

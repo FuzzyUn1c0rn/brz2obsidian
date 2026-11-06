@@ -20,15 +20,14 @@ from .api_note_text import (
     document_references,
     expected_document_text,
     insert_activity,
+    literal_note_edits,
     markdown_lines,
-    protect_cross_container_code,
     tables,
 )
 from .api_scope import strict
 from .appearance import check_depth_warnings, source_icon
 from .checker import contender_keys, escaped, wiki
 from .support import REOPEN_GUIDANCE, check_support_content, tag_listing
-from .text import literal_edits
 
 
 def versioned_static(output_version):
@@ -220,7 +219,9 @@ def checked_generated_regions(
         key: (
             note.owner,
             document_references(
-                expected_document_text(note.scoped_text),
+                expected_document_text(
+                    note.scoped_text, profile_version=profile_version
+                ),
                 note.owner,
                 bindings,
                 qualified_brain=baseline.json(baseline.data["brain"])["id"]
@@ -240,6 +241,7 @@ def checked_generated_regions(
         assets,
         attachments,
         references,
+        profile_version=profile_version,
     )
     support_present = bool(
         set(record) & {"support_artifacts", "reserved_support_paths"}
@@ -306,7 +308,14 @@ def checked_generated_regions(
     )
     fields.add("adaptations")
     warnings, findings = check_warning_records(
-        record, baseline, scoped, targets, assets, attachments, references
+        record,
+        baseline,
+        scoped,
+        targets,
+        assets,
+        attachments,
+        references,
+        profile_version=profile_version,
     )
     fields.add("issues")
     check_complete_report(
@@ -323,6 +332,7 @@ def checked_generated_regions(
         conditional,
         warnings,
         findings,
+        profile_version=profile_version,
     )
     proved = set(support) - {"migration-record.json"}
     return fields, proved, projection_fields
@@ -332,9 +342,9 @@ def canonical_json(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def formatting_observations(raw):
+def formatting_observations(raw, *, profile_version="1"):
     """Recognize source-owned declarations with the independent note grammar."""
-    _, edits = literal_edits(protect_cross_container_code(raw))
+    edits = literal_note_edits(raw, profile_version=profile_version)
     text = raw
     for edit in reversed(edits):
         text = text[: edit["start"]] + edit["after"] + text[edit["end"] :]
@@ -413,14 +423,24 @@ def formatting_observations(raw):
 
 
 def check_warning_records(
-    record, baseline, scoped, targets, assets, attachments, references
+    record,
+    baseline,
+    scoped,
+    targets,
+    assets,
+    attachments,
+    references,
+    *,
+    profile_version="1",
 ):
     expected, findings = (
         [],
         list(missing_findings(baseline, attachments, assets).values()),
     )
     for key, note in scoped.safe_notes.items():
-        for observation in formatting_observations(note.scoped_text):
+        for observation in formatting_observations(
+            note.scoped_text, profile_version=profile_version
+        ):
             findings.append(
                 {
                     "rule_id": "local-api.note-formatting.v1",
@@ -529,6 +549,8 @@ def check_complete_report(
     conditional,
     warnings,
     findings,
+    *,
+    profile_version="1",
 ):
     constants = versioned_static(record.get("schema_version", 7))
     names = {key: row["relative_path"] for key, row in targets.items()}
@@ -552,7 +574,10 @@ def check_complete_report(
             {
                 note.owner
                 for note in scoped.safe_notes.values()
-                if expected_document_text(note.scoped_text) != note.scoped_text
+                if expected_document_text(
+                    note.scoped_text, profile_version=profile_version
+                )
+                != note.scoped_text
             }
         )
         text += (
@@ -761,6 +786,8 @@ def check_projection_protocol(
     assets,
     attachments,
     references,
+    *,
+    profile_version="1",
 ):
     tokens = tag_tokens(thoughts)
     home = baseline.json(baseline.data["brain"])["homeThoughtId"]
@@ -772,7 +799,9 @@ def check_projection_protocol(
     content = {
         note.owner
         for note in scoped.safe_notes.values()
-        if expected_document_text(note.scoped_text).strip()
+        if expected_document_text(
+            note.scoped_text, profile_version=profile_version
+        ).strip()
     }
     content.update(
         row["owner"]

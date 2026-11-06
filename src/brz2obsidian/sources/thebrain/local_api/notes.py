@@ -31,8 +31,10 @@ def _omitted_tokens(excluded):
     }
 
 
-def scope_text(text, excluded, *, brain_id=None, allow_qualified=False):
-    adapted, edits = adapt_literals(text)
+def scope_text(
+    text, excluded, *, brain_id=None, allow_qualified=False, allow_literal_tokens=False
+):
+    adapted, edits = adapt_literals(text, allow_literal_tokens=allow_literal_tokens)
     references = trace_note_references(
         adapted, excluded, allow_qualified=allow_qualified
     )
@@ -73,6 +75,7 @@ def bind_documents(
     included,
     *,
     with_findings=False,
+    allow_literal_tokens=False,
     preserve_bom=False,
     preserve_table_colors=False,
     legacy_tables=False,
@@ -95,6 +98,7 @@ def bind_documents(
         try:
             adapted, edits, losses = adapt_note(
                 document.text,
+                allow_literal_tokens=allow_literal_tokens,
                 preserve_bom=preserve_bom,
                 preserve_table_colors=preserve_table_colors,
                 legacy_tables=legacy_tables,

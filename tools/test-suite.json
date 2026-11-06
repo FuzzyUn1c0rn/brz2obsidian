@@ -337,7 +337,9 @@
     "tests/application/test_type_tag_updates.py::test_current_type_tag_vault_prepares_same_source_without_format_transition",
     "tests/cli/test_api_capture_limits.py",
     "tests/gui/test_api_capture_limit_window.py",
-    "tests/sources/test_api_capture_limit_replay.py"
+    "tests/sources/test_api_capture_limit_replay.py",
+    "tests/sources/test_current_literal_tokens.py",
+    "tests/local_acceptance/test_current_literal_token_audit.py"
   ],
   "schema_version": 1
 }

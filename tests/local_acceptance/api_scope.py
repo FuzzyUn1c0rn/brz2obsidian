@@ -11,7 +11,7 @@ from uuid import UUID
 
 from .api_manifest import audited, read_json
 from .note_links import assert_no_omitted, markdown_destination, thought_destination
-from .text import inline_candidates
+from .text import inline_candidates, literal_edits
 
 THOUGHT_REQUIRED = {
     "id",
@@ -119,11 +119,16 @@ class ScopeView:
         return thaw(self._declarations)
 
 
-def scope_note(raw, excluded, *, qualified_brain=None):
+def scope_note(raw, excluded, *, qualified_brain=None, profile_version="1"):
     """Remove whole active outer phrases before inspecting enclosed images."""
+    current = profile_version == "4"
+    offset = int(current and raw.startswith("\ufeff"))
+    source = raw[offset:]
+    if current:
+        literal_edits(source, allow_literal_tokens=True)
     removals, removed = [], set()
-    for begin, end, _image, _label, start, finish in inline_candidates(raw)[0]:
-        target = raw[start:finish]
+    for begin, end, _image, _label, start, finish in inline_candidates(source)[0]:
+        target = source[start:finish]
         if not markdown_destination(target).casefold().startswith("brain://"):
             continue
         destination = thought_destination(target, qualified_brain=qualified_brain)
@@ -133,7 +138,7 @@ def scope_note(raw, excluded, *, qualified_brain=None):
             )
         key = destination.local_id
         if key in excluded:
-            removals.append((begin, end))
+            removals.append((begin + offset, end + offset))
             removed.add(key)
     for begin, end in reversed(removals):
         raw = raw[:begin] + raw[end:]
@@ -161,9 +166,10 @@ def scope_note(raw, excluded, *, qualified_brain=None):
         # This is an expected-fact dependency, separate from production parsing.
         from .checker import inline_display
 
-        for _, _, _, label, begin, end in inline_candidates(raw)[0]:
+        source = raw[offset:]
+        for _, _, _, label, begin, end in inline_candidates(source)[0]:
             assert_no_omitted(
-                (markdown_destination(raw[begin:end]), inline_display(label)), tokens
+                (markdown_destination(source[begin:end]), inline_display(label)), tokens
             )
     return raw, frozenset(removed)
 
@@ -468,6 +474,7 @@ def qualify_scope(baseline, *, profile_version):
                 raw,
                 excluded,
                 qualified_brain=collection if profile_version == "4" else None,
+                profile_version=profile_version,
             )
             safe_notes[key] = SafeNote(row["sourceId"], text, removed)
     omitted = frozenset(

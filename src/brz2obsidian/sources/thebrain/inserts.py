@@ -246,6 +246,7 @@ def _native_table_row(
 def adapt_note(
     text,
     *,
+    allow_literal_tokens=False,
     preserve_table_colors=False,
     legacy_tables=False,
     previous_tables=False,
@@ -264,7 +265,9 @@ def adapt_note(
     )
     warn_tables = preserve_table_warnings or not separate_tables
     original = text
-    text, literal_edits = adapt_literals(text)
+    text, literal_edits = adapt_literals(
+        text, allow_literal_tokens=allow_literal_tokens
+    )
     lines = re.findall(r"[^\r\n]*(?:\r\n|\r|\n|$)", text)
     if lines and not lines[-1]:
         lines.pop()

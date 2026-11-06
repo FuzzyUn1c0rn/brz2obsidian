@@ -611,24 +611,70 @@ def render_references(text, owner, path, names, assets, *, qualified_brain=None)
     return result
 
 
-def expected_document_text(raw):
+def literal_note_edits(raw, *, profile_version="1"):
+    """API4 signature ownership and literal spans in original source coordinates."""
+    assert profile_version in {"1", "2", "3", "4"}, "supported source profile"
+    current = profile_version == "4"
+    signature = current and raw.startswith("\ufeff")
+    source = raw[1:] if signature else raw
+    _, edits = literal_edits(
+        protect_cross_container_code(source), allow_literal_tokens=current
+    )
+    if not signature:
+        return (
+            [
+                edit | {"source_digest": hashlib.sha256(raw.encode()).hexdigest()}
+                for edit in edits
+            ]
+            if current
+            else edits
+        )
+    digest = hashlib.sha256(raw.encode()).hexdigest()
+    return [
+        {
+            "kind": "literal_text",
+            "start": 0,
+            "end": 1,
+            "before": "\ufeff",
+            "after": "",
+            "adapted_start": 0,
+            "adapted_end": 0,
+            "source_digest": digest,
+            "source_basis": "scoped_source_text/unicode_codepoints",
+            "adapted_basis": "document.text/unicode_codepoints",
+        },
+        *(
+            edit
+            | {
+                "start": edit["start"] + 1,
+                "end": edit["end"] + 1,
+                "source_digest": digest,
+            }
+            for edit in edits
+        ),
+    ]
+
+
+def expected_document_text(raw, *, profile_version="1"):
     """Independent adapted document facts; untouched source EOLs stay exact."""
-    _, edits = literal_edits(protect_cross_container_code(raw))
+    edits = literal_note_edits(raw, profile_version=profile_version)
     text = raw
     for edit in reversed(edits):
         text = text[: edit["start"]] + edit["after"] + text[edit["end"] :]
     return contents(callouts(tables(text)))
 
 
-def expected_note_text(raw, owner, path, names, assets, *, qualified_brain=None):
+def expected_note_text(
+    raw, owner, path, names, assets, *, qualified_brain=None, profile_version="1"
+):
     normalized = raw.replace("\r\n", "\n").replace("\r", "\n")
-    text = expected_document_text(normalized)
+    text = expected_document_text(normalized, profile_version=profile_version)
     return render_references(
         text, owner, path, names, assets, qualified_brain=qualified_brain
     )
 
 
-def adaptation_activity(raw):
+def adaptation_activity(raw, *, profile_version="1"):
     """Raw ownership of independently recognized literal and insert operations.
 
     Origins propagate through composition. Recognized tables own their rows,
@@ -636,7 +682,7 @@ def adaptation_activity(raw):
     consumed headings even when those rows/headings need no string replacement.
     Unrelated source gaps cannot be relabeled by a large emitted edit.
     """
-    _, literal = literal_edits(protect_cross_container_code(raw))
+    literal = literal_note_edits(raw, profile_version=profile_version)
     activity = {
         "literal_text": [(e["start"], e["end"]) for e in literal],
         "markdown_insert": [],
@@ -706,7 +752,7 @@ def owned_replacement(raw, start, end, replacement, intervals):
     return cursor <= len(replacement) - len(gaps[-1])
 
 
-def validate_document_adaptations(raw, adapted, edits):
+def validate_document_adaptations(raw, adapted, edits, *, profile_version="1"):
     """Validate serialized provenance without prescribing one edit segmentation."""
     assert type(edits) is list, "document adaptation collection"
     fields = {
@@ -721,7 +767,7 @@ def validate_document_adaptations(raw, adapted, edits):
         "source_basis",
         "adapted_basis",
     }
-    activity = adaptation_activity(raw)
+    activity = adaptation_activity(raw, profile_version=profile_version)
     digest = hashlib.sha256(raw.encode()).hexdigest()
     source_cursor = adapted_cursor = 0
     replay = []

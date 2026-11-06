@@ -22,6 +22,7 @@ def prepare_note(
     scope_tokens=None,
     brain_id=None,
     allow_qualified=False,
+    allow_literal_tokens=False,
     source_refuse,
 ):
     """Return a prepared Document and its formatting-loss findings.
@@ -40,7 +41,9 @@ def prepare_note(
     scope_tokens = scope_tokens if scope_tokens is not None else ()
     findings = []
     try:
-        adapted, text_adaptations = adapt_literals(text)
+        adapted, text_adaptations = adapt_literals(
+            text, allow_literal_tokens=allow_literal_tokens
+        )
         references = trace_note_references(
             adapted, excluded, allow_qualified=allow_qualified
         )
@@ -76,7 +79,9 @@ def prepare_note(
             guidance="Review this attachment's declared role and owned archive payload.",
         )
     try:
-        adapted, text_adaptations, insert_losses = adapt_note(text)
+        adapted, text_adaptations, insert_losses = adapt_note(
+            text, allow_literal_tokens=allow_literal_tokens
+        )
         references = trace_adapted_references(
             adapted, text_adaptations, allow_qualified=allow_qualified
         )

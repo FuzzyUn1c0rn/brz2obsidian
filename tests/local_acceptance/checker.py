@@ -215,7 +215,7 @@ def check_vault(source, vault):
                     "residual excluded identity in supplied body"
                 )
                 raw.scoped_documents[a["Id"]] = body
-                body, edits = literal_edits(body)
+                body, edits = literal_edits(body, allow_literal_tokens=True)
                 raw.text_edits[a["Id"]] = edits
                 raw.documents[a["Id"]] = body
         assert (

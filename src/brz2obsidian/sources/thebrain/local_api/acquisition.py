@@ -688,6 +688,7 @@ class Acquisition:
             subjects={key: value["name"] for key, value in self.thoughts.items()},
             brain_id=b,
             allow_qualified=self.profile_version == "4",
+            allow_literal_tokens=self.profile_version == "4",
             excluded=excluded,
         )
         from .gaps import gap_projections

@@ -410,6 +410,7 @@ def normalize_attachments(
                 source_refuse=source_refuse,
                 brain_id=meta["BrainId"],
                 allow_qualified=True,
+                allow_literal_tokens=True,
             )
             documents.append(document)
             findings.extend(note_findings)

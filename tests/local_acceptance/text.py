@@ -189,6 +189,10 @@ _HTML_TOKEN = re.compile(
     + r"|<\?[\s\S]*?\?>|<![A-Za-z][^>]*>"
     + r"|<!\[CDATA\[[\s\S]*?\]\]>"
 )
+# Current qualification must notice parser-active Unicode separators before
+# rejecting them against the narrower ASCII literal policy. Recognition grants
+# no admission; the historical scanner/default remains unchanged.
+_CURRENT_HTML_TOKEN = re.compile(_HTML_TOKEN.pattern.replace(_HTML_SPACE, r"\s"))
 
 
 def _line_view(line, *, interrupt=False):
@@ -525,7 +529,29 @@ def inline_candidates(body, *, inline_only=False):
     return candidates, mask, scan
 
 
-def literal_edits(body):
+def _current_literal_name(token):
+    """Independent ASCII name/one-line-break boundary, without HTML semantics."""
+    inside = token[1:-1]
+    closing, empty = inside.startswith("/"), inside.endswith("/")
+    if closing and empty:
+        return None
+    if closing:
+        inside = inside[1:]
+    if empty:
+        inside = inside[:-1]
+    name = re.match(r"[A-Za-z][A-Za-z0-9-]*", inside)
+    if name is None:
+        return None
+    tail = inside[name.end() :].lstrip(" \t")
+    if tail.startswith("\r\n"):
+        tail = tail[2:]
+    elif tail.startswith(("\r", "\n")):
+        tail = tail[1:]
+    return name[0] if not tail.strip(" \t") else None
+
+
+def literal_edits(body, *, allow_literal_tokens=False):
+    token_pattern = _CURRENT_HTML_TOKEN if allow_literal_tokens else _HTML_TOKEN
     scan = active_mask(body)
     # Labels are active; balanced whole phrases establish destinations/titles.
     mask = list(scan)
@@ -545,7 +571,9 @@ def literal_edits(body):
         cursor = start
         while cursor < finish:
             match = (
-                _HTML_TOKEN.match(body, cursor, finish) if scan[cursor] == "<" else None
+                token_pattern.match(body, cursor, finish)
+                if scan[cursor] == "<"
+                else None
             )
             if match:
                 matches.append(match)
@@ -557,7 +585,14 @@ def literal_edits(body):
         if re.fullmatch(r"<br\s*/?>", token, re.IGNORECASE):
             continue
         simple = re.fullmatch(r"<([A-Za-z][A-Za-z0-9-]*)>", token)
-        assert simple and simple[1].casefold() not in ELEMENTS, (
+        name = (
+            _current_literal_name(token)
+            if allow_literal_tokens
+            else simple[1]
+            if simple
+            else None
+        )
+        assert name and name.casefold() not in ELEMENTS, (
             "unestablished active HTML in independent literal oracle"
         )
         edits.append(
