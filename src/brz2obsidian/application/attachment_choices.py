@@ -131,6 +131,7 @@ def selected_attachment_candidate(plan, change, alternative, references, offered
                 target_facts=tuple(states.values()),
                 inventory=document.inventory,
                 output_format=plan.facts.incoming_identity.output_format,
+                record_format=plan.facts.baseline_identity.output_format,
             )
         )
     for target_id, state in tuple(states.items()):

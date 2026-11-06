@@ -141,6 +141,33 @@ def _lease_free(root, operation_id):
     return True
 
 
+def _current_record_format(facts, path, content):
+    """Use the bound before-image role, otherwise this operation's output role."""
+    if path == "migration-record.json" and facts.link_context is not None:
+        documents = tuple(
+            row
+            for row in facts.link_context.current_documents
+            if row.source_path == path
+        )
+        subjects = tuple(
+            row
+            for row in facts.subjects
+            if row.item_id == "support:migration-record.json"
+            and row.facet == "content"
+            and row.current.path == path
+        )
+        if (
+            content is not None
+            and len(documents) == len(subjects) == 1
+            and subjects[0].current.content is not None
+            and documents[0].content.data
+            == subjects[0].current.content.data
+            == content.data
+        ):
+            return facts.baseline_identity.output_format
+    return facts.incoming_identity.output_format
+
+
 def _review_observation(
     root, observed, *, direction, authority, next_generation=None, undo_target=None
 ):
@@ -461,6 +488,9 @@ def _review_observation(
                     target_facts=tuple(target_facts),
                     inventory="complete",
                     output_format=original_facts.incoming_identity.output_format,
+                    record_format=_current_record_format(
+                        original_facts, path, observed_document.content
+                    ),
                 )
                 if parsed.status != "supported":
                     raise OSError("Operation-owned recovery note interpretation failed")
@@ -549,6 +579,9 @@ def _review_observation(
                 target_facts=tuple(target_facts) + (state,),
                 inventory="complete",
                 output_format=original_facts.incoming_identity.output_format,
+                record_format=_current_record_format(
+                    original_facts, path, observed_document.content
+                ),
             )
             # A newly authored note's link mode has no retained S1 proof.
             # Plain notes can join the complete inventory; link-bearing or
@@ -603,6 +636,11 @@ def _review_observation(
                     target_facts=lookup_states,
                     inventory="complete",
                     output_format=original_facts.incoming_identity.output_format,
+                    record_format=_current_record_format(
+                        original_facts,
+                        observed_document.path,
+                        observed_document.content,
+                    ),
                 )
             )
         documents.extend(
@@ -615,6 +653,9 @@ def _review_observation(
                 target_facts=lookup_states,
                 inventory="complete",
                 output_format=original_facts.incoming_identity.output_format,
+                record_format=_current_record_format(
+                    original_facts, document.source_path, document.content
+                ),
             )
             for document in new_documents
         )
@@ -1091,6 +1132,7 @@ def _restore_link_context(original, facts, before, affected, git):
                 target_facts=tuple(target_states),
                 inventory="complete",
                 output_format=original.facts.incoming_identity.output_format,
+                record_format=original.facts.baseline_identity.output_format,
             )
         )
     return context.model_copy(
@@ -1577,6 +1619,9 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
                         target_facts=context.current_target_facts,
                         inventory="complete",
                         output_format=original.facts.incoming_identity.output_format,
+                        record_format=_current_record_format(
+                            original.facts, document.source_path, document.content
+                        ),
                     )
                     for document in context.current_documents
                 ),

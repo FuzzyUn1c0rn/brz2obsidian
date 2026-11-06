@@ -362,3 +362,149 @@ def test_migration_record_data_dialect_keeps_note_and_legacy_guards():
             ExactContent(data=data), source_path=path, output_format=8, **options
         )
         assert rejected.status == "unsupported", (path, data)
+
+
+@pytest.mark.parametrize(
+    "recorded,current_version,renamed_player",
+    ((6, 6, False), (7, 7, False), (7, 6, False), (7, 7, True)),
+    ids=(
+        "six-to-eight",
+        "seven-to-eight",
+        "wrong-current-version",
+        "renamed-seven-player",
+    ),
+)
+def test_transition_qualifies_current_record_from_recorded_identity(
+    recorded, current_version, renamed_player
+):
+    from brz2obsidian.application.review_choices import review_plan_choice_action
+    from brz2obsidian.application.update_lifecycle import text_choice_action
+    from brz2obsidian.core import (
+        load_review,
+        prepare_review,
+        resolve_review,
+        resume_review,
+        save_review,
+    )
+    from tests.reconciliation.test_resolution import preflight
+
+    baseline = graph_payload()
+    baseline["Categories/A.md"] = note("category:A")
+    del baseline["Attachments/A.svg"]
+    if renamed_player:
+        baseline["Notes/Independent.md"] = note(
+            "entry:I",
+            category=False,
+            body="Original prose.\n[Video](<https://www.youtube.com/watch?v=SYNTHVID001>)\n"
+            + PLAYER,
+        )
+    record = json.loads(baseline["migration-record.json"])
+    record.update(schema_version=recorded, asset_targets=[])
+    record["original_evidence"] = [
+        {
+            "records": [
+                {
+                    "VideoHtml": "<iframe src='https://source.invalid/player'></iframe>",
+                    "Note": "[raw](brain://source/original)",
+                }
+            ]
+        }
+    ]
+    baseline["migration-record.json"] = json.dumps(record).encode()
+    current, incoming = dict(baseline), dict(baseline)
+    if renamed_player:
+        current["Notes/Personal media.md"] = current.pop(
+            "Notes/Independent.md"
+        ).replace(b"Original prose.", b"Local media prose.")
+    current["migration-record.json"] = json.dumps(
+        {**record, "schema_version": current_version}
+    ).encode()
+    incoming["migration-record.json"] = json.dumps(
+        {**record, "schema_version": 8}
+    ).encode()
+    facts = assemble_facts(
+        baseline, incoming, current, proposal_id="record-transition", generation=1
+    )
+    facts = facts.model_copy(
+        update={
+            "format_operation": facts.format_operation.model_copy(
+                update={
+                    "kind": "format_transition",
+                    "recorded_generation": "supported"
+                    if recorded == 7
+                    else "unavailable",
+                }
+            )
+        }
+    )
+    plan = prepare_review(facts, preflight=preflight())
+    for step in range(8):
+        if plan.ready:
+            break
+        requirement = plan.requirements[0]
+        offer = next(
+            row
+            for row in inspect_review_choices(plan)
+            if row.requirement_id == requirement.requirement_id
+        )
+        item = next(
+            c.item_id
+            for c in plan.proposal.changes
+            if c.change_id == requirement.change_id
+        )
+        selection = (
+            "keep_path"
+            if requirement.domain == "rename"
+            else "current"
+            if renamed_player and item == "entry:I"
+            else "incoming"
+        )
+        choice = review_plan_choice_action(
+            plan,
+            requirement_id=offer.requirement_id,
+            choice=selection,
+            assumptions_digest=requirement_digest(offer),
+        )
+        compiled = text_choice_action(plan, choice)
+        changed = resolve_review(plan, compiled)
+        item = next(
+            c.item_id
+            for c in plan.proposal.changes
+            if c.change_id == requirement.change_id
+        )
+        if item == "support:migration-record.json" and current_version != recorded:
+            assert changed.code == "invalid_candidate" and not changed.plan.ready
+            return
+        assert changed.code == "accepted", (item, changed.code)
+        plan = changed.plan
+    assert plan.ready
+    effects = select_review_effects(plan)
+    assert effects.status == "selected"
+    if renamed_player:
+        files = {row.path: row.content.data for row in effects.files}
+        assert files["Notes/Personal media.md"] == current["Notes/Personal media.md"]
+        assert "Notes/Independent.md" not in files
+        subject = next(row for row in facts.subjects if row.item_id == "entry:I")
+        assert subject.baseline.content.data == baseline["Notes/Independent.md"]
+        assert subject.structure.current.output_format == 7
+    assert (
+        next(
+            row.content.data
+            for row in effects.files
+            if row.path == "migration-record.json"
+        )
+        == incoming["migration-record.json"]
+    )
+    old = next(
+        doc
+        for doc in facts.link_context.current_documents
+        if doc.source_path == "migration-record.json"
+    )
+    assert old.status == "supported" and not old.occurrences
+    assert old.content.data == current["migration-record.json"]
+    saved = save_review(plan)
+    assert saved.code == "saved"
+    loaded = load_review(saved.record.model_dump_json())
+    assert loaded.code == "loaded" and not loaded.ready
+    resumed = resume_review(loaded.loaded, facts, preflight=plan.preflight)
+    assert resumed.code == "unchanged" and resumed.plan == plan

@@ -714,6 +714,7 @@ def _link_context(facts, baseline_record, incoming_record, physical_inventory):
                         if facts.baseline_identity.output_format == 6
                         else facts.baseline_identity.output_format
                     ),
+                    record_format=facts.baseline_identity.output_format,
                 )
             )
         if received is not None and actual.kind != "resource":

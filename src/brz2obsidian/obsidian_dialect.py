@@ -40,7 +40,7 @@ def canonical_player_ranges(text):
     return [(match.start(), match.end()) for match in _CANONICAL_PLAYER.finditer(text)]
 
 
-def migration_record_data(text, source_path):
+def migration_record_data(text, source_path, *, record_format=8):
     """Recognize a supported data envelope, without validating its authority."""
     if source_path != "migration-record.json":
         return False
@@ -50,7 +50,9 @@ def migration_record_data(text, source_path):
             not isinstance(value, dict)
             or value.get("schema") != "brz2obsidian.migration"
             or type(value.get("schema_version")) is not int
-            or value["schema_version"] != 8
+            or type(record_format) is not int
+            or record_format not in (6, 7, 8)
+            or value["schema_version"] != record_format
             or any(
                 not isinstance(value.get(key), str) or not value[key]
                 for key in ("profile_id", "profile_version")

@@ -236,6 +236,7 @@ def interpret_links(
     target_facts,
     inventory,
     output_format=7,
+    record_format=8,
 ):
     occurrences, issues, consumed = [], [], []
     try:
@@ -247,7 +248,9 @@ def interpret_links(
     if output_format == 8:
         if source_path == "migration-record.json":
             masked.append((0, len(text)))
-            if not migration_record_data(text, source_path):
+            if not migration_record_data(
+                text, source_path, record_format=record_format
+            ):
                 issues.append("record_data_unsupported")
         else:
             masked.extend(canonical_player_ranges(text))
