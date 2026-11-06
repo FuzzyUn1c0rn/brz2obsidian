@@ -96,12 +96,12 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
         or tuple(
             a
             for a in plan.adaptations
-            if a.kind in {"literal_text", "image_presentation"}
+            if a.kind in {"literal_text", "image_presentation", "image_unavailable", "markdown_insert_image_unavailable"}
         )
         != tuple(
             a
             for a in build_plan(checked_analysis).adaptations
-            if a.kind in {"literal_text", "image_presentation"}
+            if a.kind in {"literal_text", "image_presentation", "image_unavailable", "markdown_insert_image_unavailable"}
         )
         or tuple(i for i in plan.issues if i.code == "image_presentation_normalized")
         != tuple(

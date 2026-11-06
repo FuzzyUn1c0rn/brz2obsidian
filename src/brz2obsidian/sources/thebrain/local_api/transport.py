@@ -63,6 +63,7 @@ class LocalHttp:
         deadline=None,
         allow_tag_error=False,
         allow_missing_txt=False,
+        allow_missing_image=False,
         sink=None,
     ):
         self._check(deadline)
@@ -137,7 +138,7 @@ class LocalHttp:
                     "api_authentication_failed", "The local API denied access"
                 )
             if (
-                allow_missing_txt
+                (allow_missing_txt or allow_missing_image)
                 and operation == "attachment-content"
                 and response.status == 404
             ):
@@ -150,7 +151,7 @@ class LocalHttp:
                         "brain_id": self.brain_id,
                         "subject_id": subject_id,
                         "status": 404,
-                        "outcome": "missing_txt_404",
+                        "outcome": "missing_image_404" if allow_missing_image else "missing_txt_404",
                         "started_at": started,
                         "finished_at": timestamp(),
                         "actual_length": 0,

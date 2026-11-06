@@ -680,6 +680,9 @@ class Acquisition:
                     ],
                 }
             )
+        from .gaps import image_absence_facts
+
+        image_absences = image_absence_facts(assets, {r["value"]["id"]:r["value"] for r in records if r["domain"] == "attachment"}, self.client.requests, self.profile_version)
         documents, findings = bind_documents(
             documents,
             assets,
@@ -690,6 +693,8 @@ class Acquisition:
             allow_qualified=self.profile_version == "4",
             allow_literal_tokens=self.profile_version == "4",
             excluded=excluded,
+            profile_version=self.profile_version,
+            image_absences=image_absences,
         )
         from .gaps import gap_projections
 
@@ -700,6 +705,7 @@ class Acquisition:
                 for r in records
                 if r["domain"] == "attachment"
             },
+            profile_version=self.profile_version,
         )
         findings.extend(gap_findings)
         decisions.extend(gap_decisions)

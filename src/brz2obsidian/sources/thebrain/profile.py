@@ -19,6 +19,20 @@ BRZ_POLICY = SourcePolicy(
     format_version="5",
     finding_dispositions=(
         FindingDisposition(
+            rule_id="thebrain.unavailable-declared-image.v1", kind="unavailable_image_reference",
+            disposition="warning", issue_code="approved_source_gap", permits_absent_payload=True,
+            message="A referenced declared image has recorded state3 and no archive payload; no image bytes were recovered.",
+            guidance="Review the exact reference, image declaration and state evidence in the Migration report.",
+        ),
+        FindingDisposition(
+            rule_id="thebrain.unavailable-image.v1",
+            kind="unavailable_image_reference",
+            disposition="warning",
+            issue_code="approved_source_gap",
+            message="An inline image is unavailable; its source reference is retained and no image bytes were recovered.",
+            guidance="Review the original reference and absence evidence in the Migration report.",
+        ),
+        FindingDisposition(
             rule_id=INSERT_RULE,
             kind="formatting_loss",
             disposition="warning",

@@ -7,7 +7,7 @@ from .errors import refuse
 RULE = "local-api.missing-txt-pdf.v1"
 
 
-def gap_projections(assets, declarations):
+def gap_projections(assets, declarations, *, profile_version="1"):
     from .capture import canonical
 
     findings, decisions = [], []
@@ -15,6 +15,8 @@ def gap_projections(assets, declarations):
         if asset.availability != "absent":
             continue
         value = declarations[asset.asset_id]
+        if profile_version == "4" and asset.role == "image":
+            continue
         if (
             asset.role != "file"
             or value["type"] != 15
@@ -68,9 +70,11 @@ def gap_projections(assets, declarations):
     return findings, decisions
 
 
-def validate_gap_audit(assets, audit, decisions):
+def validate_gap_audit(assets, audit, decisions, *, profile_version="1"):
     by_id = {a.asset_id: a for a in assets}
-    absent = {a.asset_id for a in assets if a.availability == "absent"}
+    absent = {a.asset_id for a in assets if a.availability == "absent" and a.role != "image"}
+    if profile_version != "4" and any(r.outcome == "missing_image_404" for r in audit.requests):
+        refuse("Historical profiles do not admit image404")
     pdf_ids = {
         subject.removeprefix("attachment:")
         for decision in decisions
@@ -96,3 +100,27 @@ def validate_gap_audit(assets, audit, decisions):
         for r in outcomes[key]
     ):
         refuse("The qualification PDF lacks a complete measured HTTP200 retrieval")
+
+
+def image_absence_facts(assets, declarations, requests, profile):
+    """Bind declared absence to metadata200 and exactly one content404."""
+    from .resources import role
+    result = {}
+    for asset in assets:
+        if asset.role != "image" or asset.availability != "absent":
+            continue
+        value = declarations[asset.asset_id]
+        content = [r for r in requests if r["operation"] == "attachment-content" and r["subject_id"] == asset.asset_id]
+        metadata = [r for r in requests if r["operation"] == "attachments" and r["subject_id"] == asset.asset_id]
+        if (profile != "4" or role(value, profile) != "image" or asset.owner != value["sourceId"]
+            or asset.actual_length is not None or asset.actual_sha256 is not None
+            or len(content) != 1 or len(metadata) != 1
+            or metadata[0]["status"] != 200 or metadata[0]["outcome"] != "success"
+            or content[0]["status"] != 404 or content[0]["outcome"] != "missing_image_404"
+            or content[0]["actual_length"] != 0
+            or content[0]["brain_id"] != value["brainId"] or metadata[0]["brain_id"] != value["brainId"]):
+            refuse("Unavailable image lacks exact qualified metadata200/content404 binding")
+        result[asset.asset_id] = {"basis":"api_declared_content404", "request_sequence":content[0]["sequence"], "metadata_sequence":metadata[0]["sequence"], "status":404}
+    if any(r["outcome"] == "missing_image_404" and r["subject_id"] not in result for r in requests):
+        refuse("An image404 request has no qualified declared image")
+    return result

@@ -1,6 +1,7 @@
 """Qualified owned payload facts; rendered note responses are never a fallback."""
 
 import hashlib
+import json
 import warnings
 from decimal import Decimal
 from io import BytesIO
@@ -381,9 +382,10 @@ def capture_owner(
                     asset_id,
                     sink=stream,
                     allow_missing_txt=value["type"] == 15,
+                    allow_missing_image=profile_version == "4" and selected == "image",
                 )
             if status == 404:
-                assets.append(Asset(**common, role="file", availability="absent"))
+                assets.append(Asset(**common, role=selected, availability="absent"))
                 continue
             directory.verify()
             validate_bytes(value, raw, profile_version)
@@ -530,10 +532,10 @@ def validate_payload_binding(source, snapshot, audit):
             or asset.video_presentation is not None
         ):
             refuse("Normalized payload roles or source declarations disagree")
-    from .gaps import gap_projections, validate_gap_audit
+    from .gaps import gap_projections, validate_gap_audit, image_absence_facts
 
     expected_findings, expected_decisions = gap_projections(
-        snapshot.assets, attachments
+        snapshot.assets, attachments, profile_version=profile
     )
     if (
         sorted(
@@ -547,7 +549,8 @@ def validate_payload_binding(source, snapshot, audit):
         != expected_decisions
     ):
         refuse("Missing TXT scope decisions disagree with qualified payload facts")
-    validate_gap_audit(snapshot.assets, audit, expected_decisions)
+    validate_gap_audit(snapshot.assets, audit, expected_decisions, profile_version=profile)
+    image_absences = image_absence_facts(snapshot.assets, attachments, [r.model_dump(mode="json") for r in audit.requests], profile)
     owners = set()
     for document in snapshot.documents:
         if document.owner in owners or document.owner not in texts:
@@ -575,8 +578,9 @@ def validate_payload_binding(source, snapshot, audit):
         retained_findings = [
             finding
             for finding in snapshot.findings
-            if finding.rule_id == "local-api.note-formatting.v1"
-            and finding.affected == tuple(sorted((document.owner, document.key)))
+            if (finding.rule_id == "local-api.note-formatting.v1" and set(finding.affected) == {document.owner, document.key})
+            or (finding.rule_id in {"thebrain.unavailable-image.v1", "thebrain.unavailable-declared-image.v1"}
+                and json.loads(finding.observed_json).get("document") == document.key)
         ]
         expected = None
         # Compare complete interpretations, including findings when text is
@@ -616,6 +620,8 @@ def validate_payload_binding(source, snapshot, audit):
                     allow_qualified=profile == "4",
                     allow_literal_tokens=profile == "4",
                     excluded=excluded_thoughts,
+                    profile_version=profile,
+                    image_absences=image_absences,
                 )
             except MigrationRefused:
                 continue
@@ -652,6 +658,9 @@ def validate_payload_binding(source, snapshot, audit):
             )
         ):
             refuse("Normalized Markdown is not bound to qualified scoped source text")
+    admitted_images = {key for f in expected_findings if f.rule_id == "thebrain.unavailable-declared-image.v1" for key in f.affected}
+    if set(image_absences) != admitted_images:
+        refuse("An unavailable declared image has no admitted active reference")
     if sorted(snapshot.findings, key=lambda f: (f.affected, f.observed_json)) != sorted(
         expected_findings, key=lambda f: (f.affected, f.observed_json)
     ):

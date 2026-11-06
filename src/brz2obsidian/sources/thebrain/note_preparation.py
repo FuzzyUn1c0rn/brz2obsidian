@@ -132,7 +132,8 @@ def prepare_note(
 
 
 def bind_prepared_notes(
-    documents, assets, thoughts, source_refuse, *, brain_id=None, allow_qualified=False
+    documents, assets, thoughts, source_refuse, *, brain_id=None, allow_qualified=False,
+    image_context=None, findings=None
 ):
     """Bind prepared documents after all owned assets have been inventoried.
 
@@ -141,6 +142,13 @@ def bind_prepared_notes(
     bound_documents = []
     for document in documents:
         try:
+            if image_context is not None:
+                from .unavailable_images import adapt_unavailable_images
+
+                document, image_findings = adapt_unavailable_images(
+                    document, assets, **image_context
+                )
+                findings.extend(image_findings)
             bound_documents.append(
                 bind_note_references(
                     document,

@@ -52,6 +52,7 @@ def adapt_note(
     compact_tables=False,
     legacy_table_boundaries=False,
     preserve_table_warnings=False,
+    _provenance=None,
 ):
     # Frozen captures that already qualified before BOM normalization retain
     # their exact prior interpretation. This is never a live acquisition option.
@@ -65,6 +66,7 @@ def adapt_note(
             compact_tables=compact_tables,
             legacy_table_boundaries=legacy_table_boundaries,
             preserve_table_warnings=preserve_table_warnings,
+            _provenance=_provenance,
         )
     adapted, edits, losses = _adapt_note(
         text[1:],
@@ -75,5 +77,6 @@ def adapt_note(
         compact_tables=compact_tables,
         legacy_table_boundaries=legacy_table_boundaries,
         preserve_table_warnings=preserve_table_warnings,
+        _provenance=_provenance,
     )
     return adapted, _signature_edits(text, edits), losses

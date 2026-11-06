@@ -2,6 +2,7 @@
 
 import base64
 import hashlib
+from functools import partial
 from uuid import UUID
 
 from brz2obsidian.contracts import MigrationRefused, SourceFinding
@@ -87,6 +88,8 @@ def bind_documents(
     brain_id=None,
     allow_qualified=False,
     excluded=None,
+    profile_version="1",
+    image_absences=None,
 ):
     from .capture import canonical
 
@@ -136,6 +139,18 @@ def bind_documents(
                 )
             ):
                 refuse("Excluded note associations cannot be removed safely")
+            if profile_version == "4":
+                from ..unavailable_images import adapt_unavailable_images
+
+                document, image_findings = adapt_unavailable_images(
+                    document, assets, basis="api_undeclared_inventory", declared_absence=image_absences,
+                    preparation=partial(adapt_note, allow_literal_tokens=allow_literal_tokens,
+                        preserve_bom=preserve_bom,preserve_table_colors=preserve_table_colors,
+                        legacy_tables=legacy_tables,previous_tables=previous_tables,
+                        compact_tables=compact_tables,legacy_table_boundaries=legacy_table_boundaries,
+                        preserve_table_warnings=preserve_table_warnings)
+                )
+                findings.extend(image_findings)
             bound = []
             for reference in document.references:
                 if reference.kind == "item":
