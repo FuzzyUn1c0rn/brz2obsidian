@@ -37,6 +37,18 @@ from .facts import assert_acyclic
 from .images import AuditUnavailable, decode_image
 from .support import CATEGORY_VIEWS, CATEGORY_VIEWS_8
 from .text import active_mask, inline_candidates
+from .unavailable_images import (
+    api_document_text as image_api_document_text,
+)
+from .unavailable_images import (
+    api_preparation as image_api_preparation,
+)
+from .unavailable_images import (
+    findings as image_findings,
+)
+from .unavailable_images import (
+    validate as image_validate,
+)
 
 
 def identities(rows, key, label):
@@ -624,6 +636,7 @@ def check_new_image_preservation(
             "asset_id": key,
             "owner": row["sourceId"],
             "role": role,
+            "availability": availability,
             "original_name": row["location"],
             "relative_path": assets[key]["relative_path"],
         }
@@ -702,7 +715,9 @@ def check_new_image_preservation(
     }
     for key, row in authored.items():
         original = scoped_note_text(baseline, key, profile_version=profile_version)
-        body = expected_document_text(original, profile_version=profile_version)
+        body, intermediate, image_events = image_api_preparation(
+            baseline, key, original, profile_version
+        )
         digest = hashlib.sha256(body.encode()).hexdigest()
         document = documents[key]
         expected_metadata = {
@@ -717,12 +732,25 @@ def check_new_image_preservation(
         assert semantic({k: document[k] for k in expected_metadata}) == semantic(
             expected_metadata
         ), "image document source binding/evidence/copy flag"
-        validate_document_adaptations(
-            original,
-            body,
-            document["text_adaptations"],
-            profile_version=profile_version,
-        )
+        if image_events:
+            observed = image_findings(
+                record, key, image_events, api=True, evidence=["attachment:" + key]
+            )
+            image_validate(
+                original,
+                body,
+                intermediate,
+                document["text_adaptations"],
+                image_events,
+                observed,
+            )
+        else:
+            validate_document_adaptations(
+                original,
+                body,
+                document["text_adaptations"],
+                profile_version=profile_version,
+            )
         expected = document_references(
             body,
             row["sourceId"],
@@ -767,6 +795,7 @@ def check_new_image_preservation(
             if profile_version == "4"
             else None,
             profile_version=profile_version,
+            prepared=body,
         )
         authored_texts[owner].append(expected_text)
         generated = safe_path(vault, names[owner]).read_text(encoding="utf-8")
@@ -1008,7 +1037,13 @@ def expected_asset(baseline, attachment, profile_version="1", proofs=None):
     if profile_version in {"3", "4"}:
         assert type(outcome["status"]) is int, "actual HTTP payload status"
     if outcome["status"] == 404:
-        assert kind == 15 and not note, "unqualified missing payload"
+        assert (
+            kind == 15
+            and not note
+            or profile_version == "4"
+            and kind == 12
+            and not note
+        ), "unqualified missing payload"
         return role, "absent", None
     assert outcome["status"] == 200, "required payload unavailable"
     payload = baseline.bytes(outcome["path"])
@@ -1160,13 +1195,14 @@ def audit_baseline(baseline, *, profile_version="1"):
             "asset_id": attachment["id"],
             "owner": attachment["sourceId"],
             "role": role,
+            "availability": availability,
             "original_name": attachment["location"],
         }
         present += availability == "present"
         if availability == "present":
             openable.append(attachment["id"])
         absent += availability == "absent"
-        if availability == "absent":
+        if availability == "absent" and attachment["type"] != 12:
             assert has_measured_pdf(
                 baseline, attachments, attachment["sourceId"], profile_version, proofs
             ), "missing TXT lacks measured same-owner PDF"
@@ -1180,7 +1216,9 @@ def audit_baseline(baseline, *, profile_version="1"):
             )
             if profile_version in {"3", "4"}:
                 # Validate authored grammar before protecting generated code.
-                body = expected_document_text(body, profile_version=profile_version)
+                body = image_api_document_text(
+                    baseline, attachment["id"], body, profile_version
+                )
             scanner = (
                 document_references
                 if profile_version in {"3", "4"}
@@ -1346,6 +1384,9 @@ def check_reverse_navigation(
                         if profile_version == "4"
                         else None,
                         profile_version=profile_version,
+                        prepared=image_api_document_text(
+                            baseline, attachment["id"], note, profile_version
+                        ),
                     )
                 )
         for source in authored:
@@ -1452,6 +1493,9 @@ def check_external_resources(
                         if profile_version == "4"
                         else None,
                         profile_version=profile_version,
+                        prepared=image_api_document_text(
+                            baseline, attachment["id"], raw, profile_version
+                        ),
                     )
                 )
         metadata_span = None
@@ -1628,6 +1672,9 @@ def check_svg_notes(
                     if profile_version == "4"
                     else None,
                     profile_version=profile_version,
+                    prepared=image_api_document_text(
+                        baseline, row["id"], raw, profile_version
+                    ),
                 )
                 .replace("\r\n", "\n")
                 .replace("\r", "\n")
@@ -1635,7 +1682,7 @@ def check_svg_notes(
             if wanted:
                 assert wanted in body[cursor:], "SVG raw-derived authored display"
                 cursor = body.index(wanted, cursor) + len(wanted)
-            adapted = expected_document_text(raw, profile_version=profile_version)
+            adapted = image_api_document_text(baseline, row["id"], raw, profile_version)
             referenced.update(
                 r["target"]
                 for r in document_references(
@@ -1936,7 +1983,7 @@ def check_scope_records(baseline, record, scoped, attachments, raw_links):
             ["inventory:tag_ids", "statistics:end", "statistics:start"],
         )
     for key, outcome in baseline.data["payloads"].items():
-        if outcome["status"] != 404:
+        if outcome["status"] != 404 or attachments[key]["type"] == 12:
             continue
         owner = attachments[key]["sourceId"]
         pdfs = sorted(
@@ -2415,6 +2462,14 @@ def check_scoped_output_content(
                         if profile_version == "4"
                         else None,
                         profile_version=profile_version,
+                        prepared=image_api_document_text(
+                            baseline,
+                            key,
+                            scoped_note_text(
+                                baseline, key, profile_version=profile_version
+                            ),
+                            profile_version,
+                        ),
                     )
                 )
             elif row["type"] in {2, 8} or row["type"] == 3:
@@ -2612,7 +2667,7 @@ def _check_api_vault(baseline, vault, *, profile_version, complete_output):
     expected_gaps = {
         key
         for key, outcome in baseline.data["payloads"].items()
-        if outcome["status"] == 404
+        if outcome["status"] == 404 and attachments[key]["type"] != 12
     }
     warned = []
     for issue in record["issues"]:
@@ -2676,7 +2731,7 @@ def _check_api_vault(baseline, vault, *, profile_version, complete_output):
                 assert target["external_uri"] == uri, "authored external URI"
                 if attachment["type"] in {2, 8}:
                     assert target["resource_link"] == uri, "external resource link"
-            else:
+            elif attachment["type"] != 12:
                 assert has_measured_pdf(
                     baseline,
                     attachments,

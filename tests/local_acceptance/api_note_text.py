@@ -79,10 +79,11 @@ def insert_activity(text):
     return "".join(mask)
 
 
-def callouts(text, operations=None, ownership=None):
+def callouts(text, operations=None, ownership=None, origins=None):
     mask = insert_activity(text)
     output, opened, offset = [], set(), 0
     containers = []
+    mapped = []
 
     def close_container(stop):
         start, _, changed = containers.pop()
@@ -150,12 +151,36 @@ def callouts(text, operations=None, ownership=None):
             opened.clear()
         output.append(line)
         replacement = "".join(output[first:])
+        if origins is not None:
+            if line == original:
+                line_origins = origins[begin:offset]
+            else:
+                # The rebuilt marker is generated; only the trimmed authored
+                # title and original line ending are copied source pieces.
+                title_start = marker.start(5) + len(marker[5]) - len(marker[5].lstrip())
+                title_end = marker.end(5) - len(marker[5]) + len(marker[5].rstrip())
+                lead = len(line) - len(marker[6]) - len(title)
+                title_origins = [None] * len(title)
+                authored = marker[5].strip()
+                if authored:
+                    shift = len(icon) + 1 if emoji else 0
+                    title_origins[shift : shift + len(authored)] = origins[
+                        begin + title_start : begin + title_end
+                    ]
+                line_origins = (
+                    [None] * lead
+                    + title_origins
+                    + origins[begin + marker.start(6) : offset]
+                )
+            mapped.extend([None] * (len(replacement) - len(line)) + line_origins)
         if active and replacement != original:
             containers[-1][2] = True
         if operations is not None and replacement != original:
             operations.append((begin, begin + len(original), replacement))
     while containers:
         close_container(len(text))
+    if origins is not None:
+        origins[:] = mapped
     return "".join(output)
 
 
@@ -185,14 +210,16 @@ def row_cells(line):
     return cells + [stripped[start:-1]]
 
 
-def tables(text, operations=None, ownership=None):
+def tables(
+    text, operations=None, ownership=None, origins=None, *, current_tables=False
+):
     lines = markdown_lines(text)
     scan = insert_activity(text)
     offsets, cursor = [], 0
     for line in lines:
         offsets.append(cursor)
         cursor += len(line)
-    edits = {}
+    edits, mapped = {}, {}
     for index, line in enumerate(lines):
         suffix = re.search(
             r':\(table="column-widths:([-0-9,]+);justification:default"\):(?:\r\n|\r|\n|$)',
@@ -253,22 +280,62 @@ def tables(text, operations=None, ownership=None):
             re.fullmatch(r"\s*:?-{3,}:?\s*", cell) for cell in row_cells(lines[rows[0]])
         )
         ending = re.search(r"(?:\r\n|\r|\n)$", line)
+        blank_header = (
+            current_tables and not separator and any(cell.strip() for cell in cells)
+        )
+        generated_header = (
+            "|"
+            + "|".join(" " for _ in cells)
+            + "|\n|"
+            + "|".join("---" for _ in cells)
+            + "|\n"
+        )
         edits[index] = (
-            header
-            + ("" if separator else "\n|" + "|".join("---" for _ in cells) + "|")
+            (generated_header + header if blank_header else header)
+            + (
+                ""
+                if separator or blank_header
+                else "\n|" + "|".join("---" for _ in cells) + "|"
+            )
             + (ending[0] if ending else "")
         )
+        if origins is not None:
+            copied = origins[offsets[index] : offsets[index] + len(header)]
+            eol = (
+                origins[offsets[index] + ending.start() : offsets[index] + ending.end()]
+                if ending
+                else []
+            )
+            mapped[index] = (
+                [None] * len(generated_header) + copied + eol
+                if blank_header
+                else copied
+                + [None] * (len(edits[index]) - len(header) - len(eol))
+                + eol
+            )
         for following in [index, *rows]:
             original = edits.get(following, lines[following])
+            code_edits = []
 
-            def code(match, following=following):
-                position = offsets[following] + match.start()
+            def code(
+                match,
+                following=following,
+                generated_header=generated_header,
+                blank_header=blank_header,
+                index=index,
+                code_edits=code_edits,
+            ):
+
+                local_start = match.start() - (
+                    len(generated_header) if blank_header and following == index else 0
+                )
+                position = offsets[following] + local_start
                 # Comments own backticks too; code spans are not inferred there.
                 if (
-                    "<!--" in lines[following][: match.start()]
+                    "<!--" in lines[following][:local_start]
                     and "-->"
                     not in lines[following][
-                        lines[following].rfind("<!--", 0, match.start()) : match.start()
+                        lines[following].rfind("<!--", 0, local_start) : local_start
                     ]
                 ):
                     return match[0]
@@ -280,19 +347,37 @@ def tables(text, operations=None, ownership=None):
                 value = match[2].replace("\n", " ")
                 if value.startswith(" ") and value.endswith(" ") and value.strip():
                     value = value[1:-1]
-                return (
+                replacement = (
                     "<code>"
                     + html.escape(value, quote=False).replace("|", "&#124;")
                     + "</code>"
                 )
+                code_edits.append((match.start(), match.end(), replacement))
+                return replacement
 
             edits[following] = re.sub(r"(?<!`)(`+)(?!`)(.*?)\1(?!`)", code, original)
+            if origins is not None:
+                span = mapped.get(
+                    following,
+                    origins[
+                        offsets[following] : offsets[following] + len(lines[following])
+                    ],
+                )[:]
+                for begin, end, replacement in reversed(code_edits):
+                    span[begin:end] = [None] * len(replacement)
+                mapped[following] = span
     if operations is not None:
         operations.extend(
             (offsets[i], offsets[i] + len(lines[i]), replacement)
             for i, replacement in sorted(edits.items())
             if replacement != lines[i]
         )
+    if origins is not None:
+        origins[:] = [
+            value
+            for i, line in enumerate(lines)
+            for value in mapped.get(i, origins[offsets[i] : offsets[i] + len(line)])
+        ]
     return "".join(edits.get(i, line) for i, line in enumerate(lines))
 
 
@@ -374,7 +459,7 @@ def label_text(value):
     )
 
 
-def contents(text, operations=None, ownership=None):
+def contents(text, operations=None, ownership=None, origins=None):
     lines = markdown_lines(text)
     mask = insert_activity(text)
     offsets, cursor = [], 0
@@ -453,7 +538,7 @@ def contents(text, operations=None, ownership=None):
             for h in headings
         )
     used = set(re.findall(r"(?<!\S)\^([A-Za-z0-9-]+)(?=\s*$)", mask, re.MULTILINE))
-    claimed, replacements = set(), {}
+    claimed, replacements, mapped = set(), {}, {}
     for number, heading in enumerate(headings, 1):
         name = heading["name"]
         ident = (
@@ -507,6 +592,38 @@ def contents(text, operations=None, ownership=None):
             )
             for i in range(heading["start"] + 1, heading["end"] + 1):
                 replacements[i] = ""
+            if origins is not None:
+                copied = []
+                if heading["setext"]:
+                    for i in range(heading["start"], heading["end"]):
+                        part = lines[i][len(heading["prefix"]) :].strip()
+                        rest = lines[i][len(heading["prefix"]) :]
+                        left = len(heading["prefix"]) + len(rest) - len(rest.lstrip())
+                        if copied:
+                            copied.append(None)
+                        copied.extend(
+                            origins[offsets[i] + left : offsets[i] + left + len(part)]
+                        )
+                elif name:
+                    match = re.match(
+                        r"^(?: {0,3}> ?)* {0,3}#{1,6}[ \t]+", lines[heading["start"]]
+                    )
+                    copied = origins[
+                        offsets[heading["start"]] + match.end() : offsets[
+                            heading["start"]
+                        ]
+                        + match.end()
+                        + len(name)
+                    ]
+                start_generated = len(heading["prefix"]) + heading["level"] + bool(name)
+                replacement = replacements[heading["start"]]
+                mapped[heading["start"]] = (
+                    [None] * start_generated
+                    + copied
+                    + [None] * (len(replacement) - start_generated - len(copied))
+                )
+                for i in range(heading["start"] + 1, heading["end"] + 1):
+                    mapped[i] = []
     hierarchy, entries = [], []
     for heading in headings:
         while hierarchy and hierarchy[-1] >= heading["level"]:
@@ -526,12 +643,19 @@ def contents(text, operations=None, ownership=None):
             "\n".join(prefix + entry for entry in entries)
             or prefix + "No authored headings."
         ) + (ending[0] if ending else "")
+        mapped[index] = [None] * len(replacements[index])
     if operations is not None:
         operations.extend(
             (offsets[i], offsets[i] + len(lines[i]), replacement)
             for i, replacement in sorted(replacements.items())
             if replacement != lines[i]
         )
+    if origins is not None:
+        origins[:] = [
+            value
+            for i, line in enumerate(lines)
+            for value in mapped.get(i, origins[offsets[i] : offsets[i] + len(line)])
+        ]
     return "".join(replacements.get(i, line) for i, line in enumerate(lines))
 
 
@@ -661,14 +785,26 @@ def expected_document_text(raw, *, profile_version="1"):
     text = raw
     for edit in reversed(edits):
         text = text[: edit["start"]] + edit["after"] + text[edit["end"] :]
-    return contents(callouts(tables(text)))
+    return contents(callouts(tables(text, current_tables=profile_version == "4")))
 
 
 def expected_note_text(
-    raw, owner, path, names, assets, *, qualified_brain=None, profile_version="1"
+    raw,
+    owner,
+    path,
+    names,
+    assets,
+    *,
+    qualified_brain=None,
+    profile_version="1",
+    prepared=None,
 ):
     normalized = raw.replace("\r\n", "\n").replace("\r", "\n")
-    text = expected_document_text(normalized, profile_version=profile_version)
+    text = (
+        expected_document_text(normalized, profile_version=profile_version)
+        if prepared is None
+        else prepared.replace("\r\n", "\n").replace("\r", "\n")
+    )
     return render_references(
         text, owner, path, names, assets, qualified_brain=qualified_brain
     )
@@ -695,7 +831,16 @@ def adaptation_activity(raw, *, profile_version="1"):
         origins[start:end] = [(start, end)] * len(edit["after"])
     for transform in (tables, callouts, contents):
         operations, ownership = [], []
-        after = transform(text, operations, ownership)
+        after = transform(
+            text,
+            operations,
+            ownership,
+            **(
+                {"current_tables": profile_version == "4"}
+                if transform is tables
+                else {}
+            ),
+        )
         for start, end in ownership:
             owned = origins[start:end]
             activity["markdown_insert"].append(

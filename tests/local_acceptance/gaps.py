@@ -10,6 +10,7 @@ def derive_gaps(raw, archive):
     thoughts = {t["Id"]: t for t in raw["thoughts.json"]}
     states = raw["meta.json"][0]["AttachmentFileStates"]
     raw.gaps, raw.gap_warnings, raw.image_decodes = {}, {}, {}
+    raw.absent_images = {}
     for index, a in enumerate(raw["attachments.json"]):
         key, owner, kind = a["Id"], a["SourceId"], a["Type"]
         if states.get(key) != 3:
@@ -37,6 +38,28 @@ def derive_gaps(raw, archive):
                 "IsToolbarConfigFile",
             )
         ), "raw absent special role"
+        if kind == 12:
+            assert (
+                a["NoteType"] == 0
+                and a.get("IsIcon", False) is False
+                and thoughts[owner]["Kind"] in {1, 2, 4}
+            ), "raw absent image owner/role"
+            assert (
+                len(
+                    [
+                        p
+                        for p in raw["attachments.json"]
+                        if p["SourceId"] == owner and p["Location"] == a["Location"]
+                    ]
+                )
+                == 1
+            ), "raw absent image unique owned declaration"
+            raw.absent_images[key] = {
+                "basis": "archive_declared_state3_no_payload",
+                "asset_id": key,
+                "state": 3,
+            }
+            continue
         note = (
             kind == 1
             and a["NoteType"] == 4

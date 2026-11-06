@@ -49,6 +49,7 @@ def test_expected_fact_oracle_has_only_reviewed_imports():
         "images",
         "gaps",
         "text",
+        "unavailable_images",
     }
     assert {
         p.stem for p in root.glob("*.py") if not p.stem.startswith("test_")
