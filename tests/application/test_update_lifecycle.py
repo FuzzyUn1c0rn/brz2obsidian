@@ -157,10 +157,10 @@ def _seed(case_path, *, two_notes=False, capture_history=True):
     identity = OutputIdentity(
         collection_id="11111111-1111-4111-8111-111111111111",
         module_id="thebrain-brz",
-        module_version="10",
+        module_version="11",
         profile_id="thebrain-format5-reviewed",
-        profile_version="10",
-        output_format=7,
+        profile_version="11",
+        output_format=8,
         settings_digest=hashlib.sha256(b"{}").hexdigest(),
     )
     result = Operations().capture_checkpoint(
