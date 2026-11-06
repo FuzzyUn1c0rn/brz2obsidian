@@ -639,3 +639,35 @@ def test_absent_ordinary_note_cannot_use_an_unreferenced_absent_image(tmp_path):
     with pytest.raises(MigrationRefused) as error, BrzSourceModule().open(source):
         pass
     assert error.value.issues[0].code == "missing_required_payload"
+
+
+@pytest.mark.parametrize("declared", (False, True))
+def test_brz_missing_svg_is_a_notice_without_claiming_decoded_pixels(
+    tmp_path, declared
+):
+    resources = (
+        (({"Type": 12, "Location": "lost.svg", "DataLength": 17}, None),)
+        if declared
+        else ()
+    )
+    source = literal_archive(
+        tmp_path / "source.brz",
+        b"![Vector](.data/md-images/lost.svg)\n",
+        resources=resources,
+    )
+    if declared:
+
+        def absent(parts):
+            meta = json.loads(parts["meta.json"])
+            meta["AttachmentFileStates"]["aaaaaaaa-0000-4000-8000-000000000001"] = 3
+            parts["meta.json"] = json.dumps(meta).encode()
+
+        rewrite(source, absent)
+    with BrzSourceModule().open(source) as session:
+        assert session.snapshot.documents[0].text == "Image unavailable: Vector\n"
+        images = [asset for asset in session.snapshot.assets if asset.role == "image"]
+        assert len(images) == int(declared)
+        assert all(
+            asset.actual_length is None and asset.actual_sha256 is None
+            for asset in images
+        )

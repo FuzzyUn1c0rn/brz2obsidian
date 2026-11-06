@@ -100,7 +100,7 @@ def adapt_unavailable_images(
         supported = (
             {"webp", "png", "jpg", "svg"}
             if basis.startswith("api_")
-            else {"png", "jpg", "jpeg", "webp", "gif", "bmp", "avif"}
+            else {"png", "jpg", "jpeg", "webp", "gif", "bmp", "avif", "svg"}
         )
         if suffix not in supported:
             _refuse(
