@@ -239,21 +239,33 @@ def interpret_links(
     record_format=8,
 ):
     occurrences, issues, consumed = [], [], []
+
+    def document():
+        return LinkDocument(
+            schema_id="brz2obsidian.link-document",
+            schema_version=1,
+            document_id=document_id,
+            source_path=source_path,
+            content=content,
+            path_mode=path_mode,
+            inventory=inventory,
+            status="unsupported" if issues else "supported",
+            issues=tuple(issues),
+            occurrences=tuple(occurrences),
+        )
+
     try:
         text = content.data.decode("utf-8")
     except UnicodeDecodeError:
         text = ""
         issues.append("encoding_unsupported")
+    if output_format == 8 and source_path == "migration-record.json":
+        if not migration_record_data(text, source_path, record_format=record_format):
+            issues.append("record_data_unsupported")
+        return document()
     masked, code_issues = _code_ranges(text)
     if output_format == 8:
-        if source_path == "migration-record.json":
-            masked.append((0, len(text)))
-            if not migration_record_data(
-                text, source_path, record_format=record_format
-            ):
-                issues.append("record_data_unsupported")
-        else:
-            masked.extend(canonical_player_ranges(text))
+        masked.extend(canonical_player_ranges(text))
     issues.extend(code_issues)
     pattern = (
         r"!?\[\[(?P<w>[^\r\n]*?)\]\]|!?\[(?P<label>[^\[\]\r\n]*)\]\((?P<m>[^()\r\n]*)\)"
@@ -372,15 +384,4 @@ def interpret_links(
         or re.search(r"(?m)^ {0,3}\[[^\]\n]+\]:", residue)
     ):
         issues.append("link_syntax_unsupported")
-    return LinkDocument(
-        schema_id="brz2obsidian.link-document",
-        schema_version=1,
-        document_id=document_id,
-        source_path=source_path,
-        content=content,
-        path_mode=path_mode,
-        inventory=inventory,
-        status="unsupported" if issues else "supported",
-        issues=tuple(issues),
-        occurrences=tuple(occurrences),
-    )
+    return document()

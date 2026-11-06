@@ -44,8 +44,22 @@ def migration_record_data(text, source_path, *, record_format=8):
     """Recognize a supported data envelope, without validating its authority."""
     if source_path != "migration-record.json":
         return False
+
+    def unique_members(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Duplicate record-data member")
+            result[key] = value
+        return result
+
+    def non_json_constant(_):
+        raise ValueError("Non-JSON record-data constant")
+
     try:
-        value = json.loads(text)
+        value = json.loads(
+            text, object_pairs_hook=unique_members, parse_constant=non_json_constant
+        )
         if (
             not isinstance(value, dict)
             or value.get("schema") != "brz2obsidian.migration"

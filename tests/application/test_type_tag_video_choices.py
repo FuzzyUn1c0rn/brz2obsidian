@@ -508,3 +508,122 @@ def test_transition_qualifies_current_record_from_recorded_identity(
     assert loaded.code == "loaded" and not loaded.ready
     resumed = resume_review(loaded.loaded, facts, preflight=plan.preflight)
     assert resumed.code == "unchanged" and resumed.plan == plan
+
+
+@pytest.mark.parametrize(
+    "source_note",
+    (
+        "An unmatched ` is source data.",
+        "```an unclosed source fence",
+        "[raw](../missing.md)\n![[No note]]",
+    ),
+    ids=("backtick", "fence", "markdown"),
+)
+def test_metadata_choice_never_lexes_source_strings_as_markdown(source_note):
+    baseline = graph_payload()
+    baseline["Categories/A.md"] = note("category:A", icon="[[Attachments/A.svg]]")
+    incoming = dict(baseline)
+    record = json.loads(incoming["migration-record.json"])
+    record["source_identity"].update(source_sha256="e" * 64, snapshot_digest="f" * 64)
+    record["original_evidence"] = [{"records": [{"Note": source_note}]}]
+    raw = json.dumps(record).encode()
+    incoming["migration-record.json"] = raw
+    prepared = preparation(
+        assemble_facts(
+            baseline,
+            incoming,
+            baseline,
+            proposal_id="literal-source-data",
+            generation=1,
+        )
+    )
+    offer = next(
+        row for row in inspect_review_choices(prepared.review) if row.domain == "text"
+    )
+    chosen = Operations().resolve_update_choice(
+        prepared,
+        requirement_id=offer.requirement_id,
+        choice="incoming",
+        assumptions_digest=requirement_digest(offer),
+    )
+    assert chosen.code == "accepted" and chosen.ready, chosen.code
+    effects = select_review_effects(chosen.preparation.review)
+    assert effects.status == "selected"
+    assert (
+        next(
+            row.content.data
+            for row in effects.files
+            if row.path == "migration-record.json"
+        )
+        == raw
+    )
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    (
+        "duplicate-version",
+        "duplicate-float",
+        "escaped-key",
+        "nested-duplicate",
+        "nan",
+        "infinity",
+        "negative-infinity",
+    ),
+)
+def test_record_data_rejects_ambiguous_and_non_json_syntax(invalid):
+    record = json.loads(graph_payload()["migration-record.json"])
+    record["original_evidence"] = []
+    raw = json.dumps(record).encode()
+    if invalid in ("duplicate-version", "duplicate-float", "escaped-key"):
+        prior = {
+            "duplicate-version": b'"schema_version": 7',
+            "duplicate-float": b'"schema_version": 8.0',
+            "escaped-key": b'"schema\\u005fversion": 7',
+        }[invalid]
+        raw = raw.replace(b'"schema_version": 8', prior + b', "schema_version": 8')
+    elif invalid == "nested-duplicate":
+        raw = raw.replace(
+            b'"original_evidence": []',
+            b'"original_evidence": [{"records": [{"Note": "one", "Note": "two"}]}]',
+        )
+    else:
+        token = {
+            "nan": b"NaN",
+            "infinity": b"Infinity",
+            "negative-infinity": b"-Infinity",
+        }[invalid]
+        raw = raw[:-1] + b', "additional_source_value": ' + token + b"}"
+    options = {
+        "document_id": "record",
+        "source_path": "migration-record.json",
+        "path_mode": "vault",
+        "targets": (),
+        "target_facts": (),
+        "inventory": "complete",
+    }
+    parsed = interpret_links(ExactContent(data=raw), output_format=8, **options)
+    assert parsed.status == "unsupported" and parsed.issues == (
+        "record_data_unsupported",
+    )
+    assert not parsed.occurrences
+    assert interpret_links(ExactContent(data=raw), **options) == interpret_links(
+        ExactContent(data=raw), output_format=7, **options
+    )
+
+
+def test_invalid_record_data_has_no_markdown_code_ownership():
+    parsed = interpret_links(
+        ExactContent(data=b'{"Note": "``` [raw](../missing.md)"'),
+        document_id="broken-data",
+        source_path="migration-record.json",
+        path_mode="vault",
+        targets=(),
+        target_facts=(),
+        inventory="complete",
+        output_format=8,
+    )
+    assert parsed.status == "unsupported" and parsed.issues == (
+        "record_data_unsupported",
+    )
+    assert not parsed.occurrences
