@@ -1100,8 +1100,11 @@ def _restore_link_context(original, facts, before, affected, git):
                     qualify_roles=original.facts.incoming_identity.output_format == 8,
                 )
             )
-        else:
+        elif target.target_id in current_states:
             target_states.append(current_states[target.target_id])
+        # The completed recovery observation admits an unaffected ordinary
+        # physical resource without content state. Preserve that absence while
+        # retaining its exact reference target; affected paths still use BEFORE.
     candidates = {doc.source_path: doc for doc in context.current_documents}
     if original_context is not None:
         for doc in original_context.current_documents:
