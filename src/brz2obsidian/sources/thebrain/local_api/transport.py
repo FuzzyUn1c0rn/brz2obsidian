@@ -151,7 +151,9 @@ class LocalHttp:
                         "brain_id": self.brain_id,
                         "subject_id": subject_id,
                         "status": 404,
-                        "outcome": "missing_image_404" if allow_missing_image else "missing_txt_404",
+                        "outcome": "missing_image_404"
+                        if allow_missing_image
+                        else "missing_txt_404",
                         "started_at": started,
                         "finished_at": timestamp(),
                         "actual_length": 0,

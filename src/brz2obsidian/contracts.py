@@ -168,7 +168,9 @@ class TextAdaptation(Contract):
     """An exact edit from scoped source text into the document's adapted text."""
 
     kind: Literal[
-        "literal_text", "markdown_insert", "image_unavailable",
+        "literal_text",
+        "markdown_insert",
+        "image_unavailable",
         "markdown_insert_image_unavailable",
     ] = "literal_text"
     start: int

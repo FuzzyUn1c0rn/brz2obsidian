@@ -656,14 +656,36 @@ def normalize_attachments(
         source_refuse,
         brain_id=meta["BrainId"],
         allow_qualified=True,
-        image_context={"basis": "archive_undeclared_no_payload", "members": names,
-            "declared_absence": {a.asset_id: {"basis":"archive_declared_state3_no_payload", "state":3}
-                for a in assets if a.role == "image" and a.availability == "absent"}},
+        image_context={
+            "basis": "archive_undeclared_no_payload",
+            "members": names,
+            "declared_absence": {
+                asset.asset_id: {
+                    "basis": "archive_declared_state3_no_payload",
+                    "state": 3,
+                }
+                for asset in assets
+                if asset.role == "image" and asset.availability == "absent"
+            },
+        },
         findings=findings,
     )
-    admitted_images = {key for f in findings if f.rule_id == "thebrain.unavailable-declared-image.v1" for key in f.affected}
-    if any(a.role == "image" and a.availability == "absent" and a.asset_id not in admitted_images for a in assets):
-        source_refuse("missing_required_payload", "An unavailable declared image has no admitted active reference")
+    admitted_images = {
+        key
+        for finding in findings
+        if finding.rule_id == "thebrain.unavailable-declared-image.v1"
+        for key in finding.affected
+    }
+    if any(
+        asset.role == "image"
+        and asset.availability == "absent"
+        and asset.asset_id not in admitted_images
+        for asset in assets
+    ):
+        source_refuse(
+            "missing_required_payload",
+            "An unavailable declared image has no admitted active reference",
+        )
     accounting.extend(
         AccountingEntry(
             identity=f"reference:{document.key}:{index}",

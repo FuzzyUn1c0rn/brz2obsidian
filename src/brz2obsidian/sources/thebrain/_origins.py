@@ -12,19 +12,33 @@ class CopiedText(str):
         return CopiedText(value, self.origins[key]) if isinstance(key, slice) else value
 
     def __add__(self, other):
-        return CopiedText(str(self) + str(other), self.origins + getattr(other, "origins", (None,) * len(other)))
+        return CopiedText(
+            str(self) + str(other),
+            self.origins + getattr(other, "origins", (None,) * len(other)),
+        )
 
     def __radd__(self, other):
-        return CopiedText(str(other) + str(self), getattr(other, "origins", (None,) * len(other)) + self.origins)
+        return CopiedText(
+            str(other) + str(self),
+            getattr(other, "origins", (None,) * len(other)) + self.origins,
+        )
 
     def lstrip(self, chars=None):
-        return self[len(self) - len(str.lstrip(self, chars)):]
+        return self[len(self) - len(str.lstrip(self, chars)) :]
 
     def rstrip(self, chars=None):
-        return self[:len(str.rstrip(self, chars))]
+        return self[: len(str.rstrip(self, chars))]
 
     def strip(self, chars=None):
         return self.lstrip(chars).rstrip(chars)
+
+    def splitlines(self, keepends=False):
+        result, offset = [], 0
+        for line in str.splitlines(self, keepends=True):
+            content = line if keepends else line.splitlines()[0]
+            result.append(self[offset : offset + len(content)])
+            offset += len(line)
+        return result
 
 
 def copied_join(separator, pieces):

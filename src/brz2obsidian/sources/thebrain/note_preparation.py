@@ -132,8 +132,15 @@ def prepare_note(
 
 
 def bind_prepared_notes(
-    documents, assets, thoughts, source_refuse, *, brain_id=None, allow_qualified=False,
-    image_context=None, findings=None
+    documents,
+    assets,
+    thoughts,
+    source_refuse,
+    *,
+    brain_id=None,
+    allow_qualified=False,
+    image_context=None,
+    findings=None,
 ):
     """Bind prepared documents after all owned assets have been inventoried.
 

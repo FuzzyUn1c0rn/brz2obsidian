@@ -33,17 +33,28 @@ LOCAL_API_POLICY_V2 = LOCAL_API_POLICY.model_copy(update={"profile_version": "2"
 
 LOCAL_API_POLICY_V3 = LOCAL_API_POLICY.model_copy(update={"profile_version": "3"})
 
-LOCAL_API_POLICY_V4 = LOCAL_API_POLICY.model_copy(update={
-    "profile_version": "4",
-    "finding_dispositions": (*LOCAL_API_POLICY.finding_dispositions, FindingDisposition(
-        rule_id="thebrain.unavailable-declared-image.v1", kind="unavailable_image_reference",
-        disposition="warning", issue_code="approved_source_gap", permits_absent_payload=True,
-        message="A referenced declared image returned HTTP404; its declaration is retained and no pixels were recovered.",
-        guidance="Review the exact source reference and classified acquisition evidence in the Migration report.",
-    ), FindingDisposition(
-        rule_id="thebrain.unavailable-image.v1", kind="unavailable_image_reference",
-        disposition="warning", issue_code="approved_source_gap",
-        message="An inline image is unavailable in the captured source; no image bytes were recovered.",
-        guidance="Review the retained source reference and captured inventory evidence in the Migration report.",
-    )),
-})
+LOCAL_API_POLICY_V4 = LOCAL_API_POLICY.model_copy(
+    update={
+        "profile_version": "4",
+        "finding_dispositions": (
+            *LOCAL_API_POLICY.finding_dispositions,
+            FindingDisposition(
+                rule_id="thebrain.unavailable-declared-image.v1",
+                kind="unavailable_image_reference",
+                disposition="warning",
+                issue_code="approved_source_gap",
+                permits_absent_payload=True,
+                message="A referenced declared image returned HTTP404; its declaration is retained and no pixels were recovered.",
+                guidance="Review the exact source reference and classified acquisition evidence in the Migration report.",
+            ),
+            FindingDisposition(
+                rule_id="thebrain.unavailable-image.v1",
+                kind="unavailable_image_reference",
+                disposition="warning",
+                issue_code="approved_source_gap",
+                message="An inline image is unavailable in the captured source; no image bytes were recovered.",
+                guidance="Review the retained source reference and captured inventory evidence in the Migration report.",
+            ),
+        ),
+    }
+)

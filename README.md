@@ -554,6 +554,24 @@ with a notice. **Missing prose, captions and layout are not recovered.** Missing
 category text or icons are also explained in the migration report. Other missing
 required content or unsupported features can prevent conversion.
 
+Current BRZ and local API imports also retain readable notes when a valid inline
+local image reference has no available owned image. Its position shows ordinary
+text such as **Image unavailable: diagram**, while available images and surrounding
+Markdown remain intact. The Migration report retains the exact reference and
+absence evidence; safe original note backups keep their original bytes. No image
+pixels, replacement attachment or actual byte length/hash are invented. This
+includes the reviewed referenced BRZ image declaration with state3 and no archive
+member, and the current API image with agreeing metadata and a classified content
+HTTP404. Malformed references, conflicting ownership or payloads, access denial
+and transport failures retain their refusal/failure behavior. No external recovery
+or signed-image request is made.
+
+Retained API profiles1–3 keep their earlier interpretation and refusal rules.
+The current contract7/capture1/output8 extension records explicit
+`image_unavailable` and `markdown_insert_image_unavailable` edits; older tools with
+closed edit-kind lists reject those new values. Review the notices and warnings
+before accepting an import or applying a source update.
+
 For daily use, start with the generated `Vault guide.md`, whose template links
 use the vault's actual sanitized or disambiguated names.
 

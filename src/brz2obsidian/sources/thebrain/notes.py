@@ -155,9 +155,7 @@ def image_destination(document, reference):
         or "?" in raw
         or ("#" in destination and not parts.fragment)
         or re.search(r"%(?![0-9a-fA-F]{2})|%(?:2f|5c)", raw_path, re.IGNORECASE)
-        or re.search(
-            r"%(?![0-9a-fA-F]{2})|%(?:2f|5c)", parts.path, re.IGNORECASE
-        )
+        or re.search(r"%(?![0-9a-fA-F]{2})|%(?:2f|5c)", parts.path, re.IGNORECASE)
     ):
         _refuse(
             "invalid_reference",
@@ -165,9 +163,7 @@ def image_destination(document, reference):
         )
     if parts.fragment:
         if (
-            not re.fullmatch(
-                r"\$width=([1-9]|[1-9][0-9]|100)p\$", parts.fragment
-            )
+            not re.fullmatch(r"\$width=([1-9]|[1-9][0-9]|100)p\$", parts.fragment)
             or raw.rsplit("#", 1)[-1] != parts.fragment
         ):
             _refuse(
@@ -185,9 +181,7 @@ def image_destination(document, reference):
             document_digest=document.text_digest,
         )
     try:
-        location = unquote(
-            parts.path.removeprefix(".data/md-images/"), errors="strict"
-        )
+        location = unquote(parts.path.removeprefix(".data/md-images/"), errors="strict")
     except UnicodeDecodeError:
         _refuse("invalid_reference", "Invalid local image UTF-8 encoding")
     if (

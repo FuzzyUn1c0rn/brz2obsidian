@@ -143,12 +143,21 @@ def bind_documents(
                 from ..unavailable_images import adapt_unavailable_images
 
                 document, image_findings = adapt_unavailable_images(
-                    document, assets, basis="api_undeclared_inventory", declared_absence=image_absences,
-                    preparation=partial(adapt_note, allow_literal_tokens=allow_literal_tokens,
-                        preserve_bom=preserve_bom,preserve_table_colors=preserve_table_colors,
-                        legacy_tables=legacy_tables,previous_tables=previous_tables,
-                        compact_tables=compact_tables,legacy_table_boundaries=legacy_table_boundaries,
-                        preserve_table_warnings=preserve_table_warnings)
+                    document,
+                    assets,
+                    basis="api_undeclared_inventory",
+                    declared_absence=image_absences,
+                    preparation=partial(
+                        adapt_note,
+                        allow_literal_tokens=allow_literal_tokens,
+                        preserve_bom=preserve_bom,
+                        preserve_table_colors=preserve_table_colors,
+                        legacy_tables=legacy_tables,
+                        previous_tables=previous_tables,
+                        compact_tables=compact_tables,
+                        legacy_table_boundaries=legacy_table_boundaries,
+                        preserve_table_warnings=preserve_table_warnings,
+                    ),
                 )
                 findings.extend(image_findings)
             bound = []

@@ -682,7 +682,16 @@ class Acquisition:
             )
         from .gaps import image_absence_facts
 
-        image_absences = image_absence_facts(assets, {r["value"]["id"]:r["value"] for r in records if r["domain"] == "attachment"}, self.client.requests, self.profile_version)
+        image_absences = image_absence_facts(
+            assets,
+            {
+                record["value"]["id"]: record["value"]
+                for record in records
+                if record["domain"] == "attachment"
+            },
+            self.client.requests,
+            self.profile_version,
+        )
         documents, findings = bind_documents(
             documents,
             assets,

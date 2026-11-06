@@ -54,7 +54,12 @@ class AcquisitionRequest(Contract):
     brain_id: str
     subject_id: str | None
     status: int
-    outcome: Literal["success", "tag_inventory_zero_exception", "missing_txt_404", "missing_image_404"]
+    outcome: Literal[
+        "success",
+        "tag_inventory_zero_exception",
+        "missing_txt_404",
+        "missing_image_404",
+    ]
     started_at: Timestamp
     finished_at: Timestamp
     actual_length: Nonnegative

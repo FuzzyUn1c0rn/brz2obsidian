@@ -462,9 +462,9 @@ def _finding_document(finding):
     try:
         value = json.loads(finding.observed_json)
         if not isinstance(value, dict):
-            raise ValueError
+            raise TypeError
         return value.get("document")
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         refuse("Image finding has invalid structured provenance")
 
 
@@ -542,7 +542,7 @@ def validate_payload_binding(source, snapshot, audit):
             or asset.video_presentation is not None
         ):
             refuse("Normalized payload roles or source declarations disagree")
-    from .gaps import gap_projections, validate_gap_audit, image_absence_facts
+    from .gaps import gap_projections, image_absence_facts, validate_gap_audit
 
     expected_findings, expected_decisions = gap_projections(
         snapshot.assets, attachments, profile_version=profile
@@ -559,8 +559,15 @@ def validate_payload_binding(source, snapshot, audit):
         != expected_decisions
     ):
         refuse("Missing TXT scope decisions disagree with qualified payload facts")
-    validate_gap_audit(snapshot.assets, audit, expected_decisions, profile_version=profile)
-    image_absences = image_absence_facts(snapshot.assets, attachments, [r.model_dump(mode="json") for r in audit.requests], profile)
+    validate_gap_audit(
+        snapshot.assets, audit, expected_decisions, profile_version=profile
+    )
+    image_absences = image_absence_facts(
+        snapshot.assets,
+        attachments,
+        [request.model_dump(mode="json") for request in audit.requests],
+        profile,
+    )
     owners = set()
     for document in snapshot.documents:
         if document.owner in owners or document.owner not in texts:
@@ -588,9 +595,18 @@ def validate_payload_binding(source, snapshot, audit):
         retained_findings = [
             finding
             for finding in snapshot.findings
-            if (finding.rule_id == "local-api.note-formatting.v1" and set(finding.affected) == {document.owner, document.key})
-            or (finding.rule_id in {"thebrain.unavailable-image.v1", "thebrain.unavailable-declared-image.v1"}
-                and _finding_document(finding) == document.key)
+            if (
+                finding.rule_id == "local-api.note-formatting.v1"
+                and set(finding.affected) == {document.owner, document.key}
+            )
+            or (
+                finding.rule_id
+                in {
+                    "thebrain.unavailable-image.v1",
+                    "thebrain.unavailable-declared-image.v1",
+                }
+                and _finding_document(finding) == document.key
+            )
         ]
         expected = None
         # Compare complete interpretations, including findings when text is
@@ -668,7 +684,12 @@ def validate_payload_binding(source, snapshot, audit):
             )
         ):
             refuse("Normalized Markdown is not bound to qualified scoped source text")
-    admitted_images = {key for f in expected_findings if f.rule_id == "thebrain.unavailable-declared-image.v1" for key in f.affected}
+    admitted_images = {
+        key
+        for finding in expected_findings
+        if finding.rule_id == "thebrain.unavailable-declared-image.v1"
+        for key in finding.affected
+    }
     if set(image_absences) != admitted_images:
         refuse("An unavailable declared image has no admitted active reference")
     if sorted(snapshot.findings, key=lambda f: (f.affected, f.observed_json)) != sorted(
