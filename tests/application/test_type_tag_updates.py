@@ -11,14 +11,21 @@ import time
 from pathlib import Path
 
 import pytest
+import yaml
 
 from brz2obsidian.application.operations import Operations
-from brz2obsidian.application.review_choices import requirement_digest
+from brz2obsidian.application.review_choices import (
+    attachment_reference_page,
+    requirement_digest,
+)
 from brz2obsidian.application.update_contracts import UpdatePreparation
 from brz2obsidian.application.wiring import default_workflow
 from brz2obsidian.contracts import OutputIdentity
 from brz2obsidian.core import inspect_review_choices
+from brz2obsidian.vault_check import check_vault
+from tests.application.test_format_transition_native import user_git_state
 from tests.application.test_graph_workflow import graph_archive
+from tests.application.test_onboarding_completion import authored_files
 from tests.application.test_update_lifecycle import git
 from tests.reconciliation.test_resolution import action
 from tests.support.type_tag_sources import BRAIN, ICON, IDS, PNG, brz_source
@@ -57,10 +64,12 @@ def measured(root, label, call, *args, **kwargs):
     return result
 
 
-def use_incoming(operations, prepared):
+def use_incoming(operations, prepared, *, resolved_only=False):
     for _ in range(3 * len(prepared.review.proposal.changes) + 1):
         plan = prepared.review
         if plan.ready:
+            return prepared
+        if resolved_only and not plan.requirements:
             return prepared
         assert plan.requirements, plan.blockers
         requirement = plan.requirements[0]
@@ -306,6 +315,7 @@ def test_type_tag_update_inputs_preserve_qualified_reference_and_video_versions(
         vault = tmp_path / f"vault{version}"
         result = default_workflow().convert(source, vault)
         assert result.outcome == "clean", result.issues
+        assert f"Source G v{version}.".encode() in (vault / "Notes/G.md").read_bytes()
         independent = (vault / "Notes/Independent.md").read_bytes()
         assert f"- [{title}](<{uri}>)".encode() in independent
         video_id = "SYNTHVID001" if version == 1 else "SYNTHVID002"
@@ -319,6 +329,11 @@ def test_type_tag_update_inputs_preserve_qualified_reference_and_video_versions(
             in (vault / "Notes/D.md").read_bytes()
         )
         record = json.loads((vault / "migration-record.json").read_bytes())
+        assert {r["item_key"] for r in record["item_targets"] if r["created"]} == {
+            "00000000-0000-0000-0000-000000000001",
+            *(IDS[name] for name in "ABCDEFGT"),
+            INDEPENDENT,
+        }
         external = next(a for a in record["asset_targets"] if a.get("external_uri"))
         assert external["external_uri"] == external["resource_link"] == uri
         assert external["video_presentation"]["embed_uri"] == (
@@ -370,6 +385,10 @@ def exercise_partial_update(update_root, operations, vault, original):
     renamed.write_bytes(raw.replace(b"Source B v1.", b"Local B writing."))
     c = vault / "Categories/C.md"
     c.write_bytes(c.read_bytes().replace(b"Source C v1.", b"Local C writing."))
+    d = vault / "Notes/D.md"
+    d.write_bytes(d.read_bytes().replace(b"Source D v1.", b"Local D writing."))
+    g = vault / "Notes/G.md"
+    g.write_bytes(g.read_bytes().replace(b"Source G v1.", b"Local G writing."))
     independent = vault / "Notes/Independent.md"
     independent.write_bytes(
         independent.read_bytes().replace(
@@ -377,6 +396,13 @@ def exercise_partial_update(update_root, operations, vault, original):
         )
     )
     original_c, original_i = c.read_bytes(), independent.read_bytes()
+    original_d, original_g = d.read_bytes(), g.read_bytes()
+    template_path = "Templates/New note.md"
+    template = (vault / template_path).read_bytes() + b"\nLocal template prose.\n"
+    (vault / template_path).write_bytes(template)
+    configuration = b'{"user":"preserve N1 configuration"}\r\n'
+    (vault / ".obsidian/app.json").write_bytes(configuration)
+    user_before = user_git_state(vault)
     incoming = update_source(update_root / "v2.brz", version=2)
     offered = measured(
         update_root, "v2-prepare", operations.prepare_update, vault, incoming
@@ -413,6 +439,12 @@ def exercise_partial_update(update_root, operations, vault, original):
     )
     assert resumed.review.approvals == prior
     assert not resumed.review.ready
+    renamed.write_bytes(
+        renamed.read_bytes().replace(
+            b'appearance_category: "[[Categories/A.md]]"',
+            b'appearance_category: "[[Categories/E.md]]"',
+        )
+    )
     (vault / icon_path).write_bytes(YELLOW)
     refreshed = measured(
         update_root, "asset-refresh", operations.refresh_update, resumed
@@ -424,3 +456,198 @@ def exercise_partial_update(update_root, operations, vault, original):
     assert refreshed.preparation.review.approvals[0] == prior[1]
     assert (c.read_bytes(), independent.read_bytes()) == (original_c, original_i)
     assert not refreshed.ready
+    before_unready = authored_files(vault)
+    checkpoint_before = operations.read_checkpoint(vault).locator
+    refused = measured(
+        update_root, "unresolved-apply", operations.apply_update, refreshed.preparation
+    )
+    assert refused.code == "review_not_ready" and refused.application is None
+    assert authored_files(vault) == before_unready
+    assert operations.read_checkpoint(vault).locator == checkpoint_before
+    assert user_git_state(vault) == user_before
+    prepared = refreshed.preparation
+    rename = next(
+        r for r in inspect_review_choices(prepared.review) if r.domain == "rename"
+    )
+    kept_path = operations.resolve_update_choice(
+        prepared,
+        requirement_id=rename.requirement_id,
+        choice="keep_path",
+        assumptions_digest=requirement_digest(rename),
+    )
+    assert kept_path.code == "accepted", kept_path.code
+    prepared = choose_current(
+        operations, kept_path.preparation, IDS["B"], "keep-local-B"
+    )
+    prepared = choose_current(operations, prepared, IDS["G"], "keep-memory-G")
+    asset = next(
+        row
+        for row in inspect_review_choices(prepared.review)
+        if row.domain == "attachment"
+        and next(
+            change.item_id
+            for change in prepared.review.proposal.changes
+            if change.change_id == row.change_id
+        )
+        == ICON
+    )
+    references, total, following = attachment_reference_page(
+        prepared, asset.requirement_id
+    )
+    assert total == len(references) and following is None
+    kept_icon = operations.resolve_update_choice(
+        prepared,
+        requirement_id=asset.requirement_id,
+        choice="current",
+        assumptions_digest=requirement_digest(asset),
+        references=tuple(
+            {"reference_id": row.reference_id, "choice": "keep_current"}
+            for row in references
+        ),
+    )
+    assert kept_icon.code == "accepted", kept_icon.code
+    prepared = kept_icon.preparation
+    expected = {IDS["B"]: renamed.read_bytes(), IDS["G"]: original_g}
+    # These are deliberately submitted user-choice bytes, independently checked
+    # against source facts and the original/local/incoming/result boundaries.
+    old_uri = (
+        b"https://www.youtube.com/watch?index=00&list=original%2Fcontext&v=SYNTHVID001"
+    )
+    new_uri = (
+        b"https://www.youtube.com/watch?list=updated%2Bcontext&v=SYNTHVID002&index=next"
+    )
+    expected[INDEPENDENT] = (
+        original_i.replace(old_uri, new_uri)
+        .replace(b"Original video", b"Updated video")
+        .replace(b"/embed/SYNTHVID001?", b"/embed/SYNTHVID002?")
+    )
+    for item, old_paragraph, local in (
+        (IDS["C"], b"Source C v2.", b"Local C writing."),
+        (IDS["D"], b"Source D v2.", b"Local D writing."),
+    ):
+        change = next(c for c in prepared.review.proposal.changes if c.item_id == item)
+        expected[item] = change.incoming.data.replace(old_paragraph, local).replace(
+            b"[[Categories/B.md", b"[[Categories/B local.md"
+        )
+    for item in (INDEPENDENT, IDS["C"], IDS["D"]):
+        prepared = choose_edited(
+            operations, prepared, item, expected[item], "merge-v2:" + item
+        )
+    prepared = measured(
+        update_root,
+        "v2-resolve",
+        use_incoming,
+        operations,
+        prepared,
+        resolved_only=True,
+    )
+    # Related B/D/F links name selected file versions. Explicitly resubmitting
+    # these chosen texts binds their references after the other text choices.
+    prepared = choose_edited(
+        operations, prepared, IDS["B"], expected[IDS["B"]], "requalify-B"
+    )
+    f_change = next(
+        c for c in prepared.review.proposal.changes if c.item_id == IDS["F"]
+    )
+    prepared = choose_edited(
+        operations, prepared, IDS["F"], f_change.incoming.data, "requalify-F"
+    )
+    assert prepared.review.ready, prepared.review.blockers
+    memory = next(
+        a for a in prepared.review.approvals if a.decision_id == "keep-memory-G"
+    ).source_memory
+    assert memory is not None and memory.choice == "keep_vault"
+    saved_ready = measured(
+        update_root, "v2-ready-save", operations.save_update, prepared
+    )
+    assert saved_ready.code == "saved", saved_ready.code
+    (update_root / "v2-ready.json").write_text(
+        saved_ready.preparation.model_dump_json()
+    )
+    applied = measured(
+        update_root, "v2-apply", operations.apply_update, saved_ready.preparation
+    )
+    assert applied.status == "applied", applied.code
+    assert applied.application.history == "terminal"
+    assert (
+        c.read_bytes(),
+        d.read_bytes(),
+        independent.read_bytes(),
+        g.read_bytes(),
+    ) == (expected[IDS["C"]], expected[IDS["D"]], expected[INDEPENDENT], original_g)
+    assert renamed.read_bytes() == expected[IDS["B"]]
+    assert not b.exists()
+    assert (vault / icon_path).read_bytes() == YELLOW
+    assert (vault / template_path).read_bytes() == template
+    assert (vault / ".obsidian/app.json").read_bytes() == configuration
+    assert user_git_state(vault) == user_before
+    b_properties = yaml.safe_load(
+        renamed.read_text(encoding="utf-8").split("---", 2)[1]
+    )
+    c_properties = yaml.safe_load(c.read_text(encoding="utf-8").split("---", 2)[1])
+    assert b_properties["categories"] == ["[[Categories/A.md]]", "[[Categories/E.md]]"]
+    assert b_properties["appearance_category"] == "[[Categories/E.md]]"
+    assert b_properties["aliases"] == ["My B"] and b_properties["priority"] == 4
+    assert b_properties["tags"] == c_properties["tags"] == ["categories", "T"]
+    assert c_properties["categories"] == ["[[Categories/B local.md]]"]
+    assert c_properties["appearance_category"] == "[[Categories/B local.md]]"
+    record = json.loads((vault / "migration-record.json").read_bytes())
+    targets = {r["item_key"]: r for r in record["item_targets"]}
+    assert sum(r["created"] for r in targets.values()) == 10
+    assert len({r["relative_path"] for r in targets.values() if r["created"]}) == 10
+    assert targets[IDS["B"]]["relative_path"] == "Categories/B local.md"
+    assert not targets[IDS["U"]]["created"]
+    assert {
+        (r["definition_key"], r["item_key"])
+        for r in record["classification_assignments"]
+    } == {
+        (IDS[a], IDS[b])
+        for a, b in (
+            ("E", "B"),
+            ("B", "C"),
+            ("A", "E"),
+            ("C", "D"),
+            ("E", "F"),
+            ("A", "G"),
+        )
+    }
+    assert (
+        len(
+            [
+                r
+                for r in record["relationships"]
+                if r["kind"] in ("hierarchy", "related")
+            ]
+        )
+        == 6
+    )
+    assert {(r["tag_key"], r["item_key"]) for r in record["tag_memberships"]} == {
+        (IDS["T"], IDS["B"]),
+        (IDS["T"], IDS["C"]),
+        (IDS["T"], IDS["U"]),
+    }
+    assert "Nested source tag: [[Notes/U.md|U]] (#U)" in (
+        vault / "Tag memberships.md"
+    ).read_text(encoding="utf-8")
+    assert check_vault(vault).outcome == "clean"
+    # The retained preimages also specify later Undo precisely: C's new source
+    # tagT is converter-owned, while its local prose must survive the reversal.
+    (update_root / "v2-undo-preimages.json").write_text(
+        json.dumps(
+            {"C": original_c.hex(), "D": original_d.hex(), "I": original_i.hex()}
+        )
+    )
+
+
+def choose_edited(operations, prepared, item, raw, decision):
+    plan = prepared.review
+    comparison = next(
+        c for c in plan.proposal.changes if c.item_id == item and c.facet == "content"
+    )
+    result = operations.resolve_update(
+        prepared,
+        action(plan, comparison, choice="edited", decision_id=decision),
+        edited=raw,
+    )
+    assert result.code == "accepted", (item, result.code)
+    return result.preparation

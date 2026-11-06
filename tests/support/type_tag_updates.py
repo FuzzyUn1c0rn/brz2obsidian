@@ -68,6 +68,7 @@ def update_source(path, *, version=1):
         (11, "B"),
         (12, "C"),
         (13, "D"),
+        (16, "G"),
         (17, "T"),
         (19, "Independent"),
     ):
