@@ -329,6 +329,7 @@ def review_plan_choice_action(
                         targets=context.current_targets,
                         target_facts=states,
                         inventory=document.inventory,
+                        output_format=plan.facts.incoming_identity.output_format,
                     )
                 )
             documents = tuple(rewritten)

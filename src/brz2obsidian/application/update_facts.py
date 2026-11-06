@@ -707,6 +707,13 @@ def _link_context(facts, baseline_record, incoming_record, physical_inventory):
                     targets=tuple(current_targets),
                     target_facts=tuple(current_states),
                     inventory="complete",
+                    output_format=8
+                    if facts.incoming_identity.output_format == 8
+                    else (
+                        7
+                        if facts.baseline_identity.output_format == 6
+                        else facts.baseline_identity.output_format
+                    ),
                 )
             )
         if received is not None and actual.kind != "resource":
@@ -722,6 +729,7 @@ def _link_context(facts, baseline_record, incoming_record, physical_inventory):
                         targets=tuple(incoming_targets),
                         target_facts=tuple(incoming_states),
                         inventory="complete",
+                        output_format=facts.incoming_identity.output_format,
                     )
                 )
     return LinkContext(

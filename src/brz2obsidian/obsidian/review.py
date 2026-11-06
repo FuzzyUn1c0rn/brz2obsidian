@@ -167,6 +167,7 @@ def inspect_text_candidate(
             targets=link_targets,
             target_facts=link_target_facts,
             inventory=link_inventory,
+            output_format=output_format,
         ),
         link_targets=link_targets,
         link_target_facts=link_target_facts,

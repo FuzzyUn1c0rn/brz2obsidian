@@ -460,6 +460,7 @@ def _review_observation(
                     targets=tuple(current_targets),
                     target_facts=tuple(target_facts),
                     inventory="complete",
+                    output_format=original_facts.incoming_identity.output_format,
                 )
                 if parsed.status != "supported":
                     raise OSError("Operation-owned recovery note interpretation failed")
@@ -547,6 +548,7 @@ def _review_observation(
                 targets=tuple(current_targets) + (reference,),
                 target_facts=tuple(target_facts) + (state,),
                 inventory="complete",
+                output_format=original_facts.incoming_identity.output_format,
             )
             # A newly authored note's link mode has no retained S1 proof.
             # Plain notes can join the complete inventory; link-bearing or
@@ -600,6 +602,7 @@ def _review_observation(
                     targets=lookup_targets,
                     target_facts=lookup_states,
                     inventory="complete",
+                    output_format=original_facts.incoming_identity.output_format,
                 )
             )
         documents.extend(
@@ -611,6 +614,7 @@ def _review_observation(
                 targets=lookup_targets,
                 target_facts=lookup_states,
                 inventory="complete",
+                output_format=original_facts.incoming_identity.output_format,
             )
             for document in new_documents
         )
@@ -1086,6 +1090,7 @@ def _restore_link_context(original, facts, before, affected, git):
                 targets=context.current_targets,
                 target_facts=tuple(target_states),
                 inventory="complete",
+                output_format=original.facts.incoming_identity.output_format,
             )
         )
     return context.model_copy(
@@ -1571,6 +1576,7 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
                         targets=context.current_targets,
                         target_facts=context.current_target_facts,
                         inventory="complete",
+                        output_format=original.facts.incoming_identity.output_format,
                     )
                     for document in context.current_documents
                 ),

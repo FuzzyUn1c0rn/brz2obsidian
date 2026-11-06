@@ -1,5 +1,6 @@
 """Data-only native property and file-role predicates shared by readers."""
 
+import html
 import re
 from hashlib import sha256
 from pathlib import PurePosixPath
@@ -15,6 +16,26 @@ from brz2obsidian.contracts import (
 IMAGE_EXTENSIONS = frozenset(
     (".avif", ".bmp", ".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp")
 )
+
+_PLAYER_MARKUP = (
+    '<iframe src="{uri}" width="560" height="315" title="YouTube video player" '
+    'frameborder="0" allowfullscreen></iframe>'
+)
+_CANONICAL_PLAYER = re.compile(
+    re.escape(_PLAYER_MARKUP).replace(
+        re.escape("{uri}"),
+        r"https://www\.youtube\.com/embed/[A-Za-z0-9_-]{11}\?start=(?:0|[1-9][0-9]*)",
+    )
+)
+
+
+def video_player_markup(uri):
+    return _PLAYER_MARKUP.format(uri=html.escape(uri, quote=True))
+
+
+def canonical_player_ranges(text):
+    """Recognize only this closed external markup shape, never its provenance."""
+    return [(match.start(), match.end()) for match in _CANONICAL_PLAYER.finditer(text)]
 
 
 class _UniqueSafeLoader(yaml.SafeLoader):
