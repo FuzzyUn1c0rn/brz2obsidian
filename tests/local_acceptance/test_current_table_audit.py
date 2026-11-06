@@ -122,6 +122,9 @@ NATIVE_OWNER_CONTROLS = (
     + LINK
     + "\n"
 )
+NATIVE_SEPARATOR_CONTROL = "\nA|B\n- |---\n" + LINK + "\n"
+NATIVE_DOUBLE_BACKSLASH_CONTROL = "\nA\\\\|B\n---|---\n" + LINK + "\n"
+NATIVE_ESCAPED_ONLY_CONTROL = "\nA\\|B\n---\n" + LINK + "\n"
 RAW = (
     'Before.\n|||:(table="column-widths:-1,0,0"):\n|one|two|\nAfter.\n\n'
     + "|First|"
@@ -149,6 +152,9 @@ RAW = (
     + LINK
     + "\n"
     + "\n[/toc/unsupported]\n\n> [!unreviewed] Keep.\n"
+    + NATIVE_SEPARATOR_CONTROL
+    + NATIVE_DOUBLE_BACKSLASH_CONTROL
+    + NATIVE_ESCAPED_ONLY_CONTROL
 ).encode()
 EXPECTED = (
     "Before.\n\n| | |\n|---|---|\n|one|two|\n\nAfter.\n\n"
@@ -177,6 +183,9 @@ EXPECTED = (
     + LINK
     + "\n"
     + "\n[/toc/unsupported]\n\n> [!unreviewed] Keep.\n"
+    + NATIVE_SEPARATOR_CONTROL
+    + NATIVE_DOUBLE_BACKSLASH_CONTROL
+    + NATIVE_ESCAPED_ONLY_CONTROL
 )
 FORMAT_FINDINGS = (
     {
@@ -221,6 +230,9 @@ REFERENCE_FACTS = [
     (2415, 2460, True),
     (2461, 2506, True),
     (2589, 2634, False),
+    (2690, 2735, False),
+    (2751, 2796, False),
+    (2807, 2852, True),
 ]
 
 

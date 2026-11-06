@@ -263,15 +263,12 @@ def _native_table_cells(content):
     content = content.strip()
     parts, start, cursor = [], 0, 0
     while cursor < len(content):
-        if content[cursor] == "\\":
-            cursor += 2
-            continue
-        if content[cursor] == "|":
+        # Native header pipes use the immediately preceding character, even
+        # when that backslash is itself preceded by another backslash.
+        if content[cursor] == "|" and (cursor == 0 or content[cursor - 1] != "\\"):
             parts.append(content[start:cursor])
             start = cursor + 1
         cursor += 1
-    if not parts:
-        return None
     parts.append(content[start:])
     if parts[0] == "":
         parts.pop(0)
@@ -281,15 +278,19 @@ def _native_table_cells(content):
 
 
 def _native_table_header(header, separator):
-    if header.startswith("    ") or separator.startswith("    "):
+    if "|" not in header or header.startswith("    ") or separator.startswith("    "):
         return False
-    separator = separator.rstrip("\r\n")
-    if any(character not in " -:|\t" for character in separator):
+    separator = separator.rstrip("\r\n").lstrip(" \t")
+    if (
+        len(separator) < 2
+        or separator[0] not in "|-:"
+        or separator[0] == "-"
+        and separator[1] in " \t"
+        or any(character not in " -:|\t" for character in separator)
+    ):
         return False
     cells = _native_table_cells(header)
     alignment = _native_table_cells(separator)
-    if alignment is None:
-        alignment = [separator.strip()]
     return bool(
         cells
         and len(cells) == len(alignment)
