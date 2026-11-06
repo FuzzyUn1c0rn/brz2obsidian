@@ -70,6 +70,10 @@ def adapt_unavailable_images(
             and owned[0].availability == "present"
         ):
             continue
+        if ":" in location or any(
+            ord(char) < 32 or ord(char) == 127 for char in location
+        ):
+            _refuse("invalid_reference", "Unsafe unavailable local image location")
         declared = (
             owned[0]
             if len(owned) == 1
@@ -97,11 +101,7 @@ def adapt_unavailable_images(
         if filename_identity in foreign_ids:
             _refuse("invalid_reference", "Local image identifies another owner's asset")
         suffix = location.rsplit(".", 1)[-1].casefold() if "." in location else ""
-        supported = (
-            {"webp", "png", "jpg", "svg"}
-            if basis.startswith("api_")
-            else {"png", "jpg", "jpeg", "webp", "gif", "bmp", "avif", "svg"}
-        )
+        supported = {"png", "jpg", "jpeg", "webp", "gif", "bmp", "avif", "svg"}
         if suffix not in supported:
             _refuse(
                 "unsupported_feature",

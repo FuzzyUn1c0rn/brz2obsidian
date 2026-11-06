@@ -27,6 +27,8 @@ from tests.sources.test_local_api_bom import note_api
 from tests.support.local_api import BRAIN, HOME, KEY, api_server
 from tests.support.local_api_payloads import IMAGE, NOTE, PNG, attachment
 
+UNDECLARED_API_IMAGE = "bbbbbbbb-4444-4444-8444-444444444444.png"
+
 
 def test_two_missing_images_keep_four_present_controls_and_exact_original(tmp_path):
     missing = "![Lost](.data/md-images/lost.png)"
@@ -92,7 +94,12 @@ def test_current_api_unavailable_image_without_companions_replays_exact_bom(
     tmp_path, monkeypatch
 ):
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
-    raw = b"\xef\xbb\xbfBefore ![Lost](.data/md-images/lost.png) after.\r\n"
+    raw = (
+        b"\xef\xbb\xbf"
+        + (
+            f"Before ![Lost](.data/md-images/{UNDECLARED_API_IMAGE}) after.\r\n"
+        ).encode()
+    )
     api = note_api(raw)
     with api_server(api) as (_, address):
         module = LocalApiSourceModule(
@@ -147,7 +154,7 @@ def test_current_api_unavailable_image_without_companions_replays_exact_bom(
                         payloads=payloads,
                         profile_version="4",
                     )
-    assert not any("lost.png" in path for path, _, _ in api.requests)
+    assert not any(UNDECLARED_API_IMAGE in path for path, _, _ in api.requests)
 
 
 def test_two_identical_missing_images_inside_rewritten_row_keep_generated_code(
@@ -359,6 +366,9 @@ def test_core_requires_source_bound_occurrence_evidence_for_image_edits(tmp_path
         ".data/md-images/%ff.png",
         ".data/md-images/../lost.png",
         ".data/md-images/lost.unknown",
+        ".data/md-images/lost.ico",
+        ".data/md-images/a:b.png",
+        ".data/md-images/a%00.png",
     ),
 )
 def test_missing_image_keeps_strict_destination_and_kind_guards(tmp_path, destination):
@@ -533,7 +543,7 @@ def test_notice_label_entities_keep_following_real_references_visible_to_updates
 
 
 def test_current_api_bom_compound_row_and_declared_absence_bind_together():
-    missing = "![Lost *label*](.data/md-images/lost.png#$width=70p$)"
+    missing = f"![Lost *label*](.data/md-images/{UNDECLARED_API_IMAGE}#$width=70p$)"
     raw = (
         "\ufeffCafé <X/>\r\n\r\n"
         + f"|{missing}|{missing}|`![code](.data/md-images/code.png) x|y`|"
@@ -604,7 +614,7 @@ def test_declared_archive_image_inconsistent_states_do_not_become_absence(
 
 
 def test_api_notice_evidence_is_canonical_when_document_sorts_before_owner():
-    raw = b"![Lost](.data/md-images/lost.png)\n"
+    raw = f"![Lost](.data/md-images/{UNDECLARED_API_IMAGE})\n".encode()
     api = note_api(raw)
     note_id = "00000001-1111-4111-8111-111111111111"
     value = api.attachments.pop(NOTE)
@@ -671,3 +681,81 @@ def test_brz_missing_svg_is_a_notice_without_claiming_decoded_pixels(
             asset.actual_length is None and asset.actual_sha256 is None
             for asset in images
         )
+
+
+@pytest.mark.parametrize("backend", ("brz", "api"))
+def test_undeclared_known_image_families_need_no_invented_asset_or_fetch(
+    tmp_path, backend
+):
+    locations = (
+        "generic.png",
+        "sub/diagram.jpeg",
+        "UPPER.JPG",
+        "00000000-0000-0000-0000-000000000000.webp",
+        "generic.GIF",
+        "diagram.bmp",
+        "nested/path/diagram.avif",
+        "Vector.svg",
+    )
+    raw = "".join(
+        f"![Missing {index}](.data/md-images/{location})\n"
+        for index, location in enumerate(locations)
+    ).encode()
+    expected = "".join(f"Image unavailable: Missing {index}\n" for index in range(8))
+
+    def check(session):
+        assert session.snapshot.documents[0].text == expected
+        assert not any(asset.role == "image" for asset in session.snapshot.assets)
+        findings = [
+            finding
+            for finding in session.snapshot.findings
+            if finding.kind == "unavailable_image_reference"
+        ]
+        assert len(findings) == 8
+        observations = sorted(
+            (json.loads(finding.observed_json) for finding in findings),
+            key=lambda value: value["source_reference"]["start"],
+        )
+        assert [value["absence"]["location"] for value in observations] == list(
+            locations
+        )
+        original_id = session.snapshot.documents[0].original_asset_id
+        with session.open_payload(original_id) as stream:
+            assert stream.read() == raw
+
+    if backend == "brz":
+        source = literal_archive(tmp_path / "source.brz", raw)
+        with BrzSourceModule().open(source) as session:
+            check(session)
+    else:
+        api = note_api(raw)
+        with api_server(api) as (_, address):
+            module = LocalApiSourceModule(
+                LocalApiConfig(api_url=address),
+                credentials=lambda: KEY,
+                profile_version="4",
+            )
+            with module.open(LocalApiSourceRef(BRAIN)) as session:
+                check(session)
+                session.verify_consistency()
+        assert not any(
+            location in path for location in locations for path, _, _ in api.requests
+        )
+
+
+def test_actual_api_jpeg_alias_declaration_cannot_fall_through_to_undeclared_notice():
+    location = IMAGE + ".jpeg"
+    api = note_api(f"![Declared](.data/md-images/{location})\n".encode())
+    api.attachments[IMAGE] = attachment(IMAGE, HOME, 12, location, length=17)
+    api.overrides[f"/api/attachments/{BRAIN}/{IMAGE}/file-content"] = (
+        404,
+        {"error": "missing"},
+    )
+    with api_server(api) as (_, address):
+        module = LocalApiSourceModule(
+            LocalApiConfig(api_url=address),
+            credentials=lambda: KEY,
+            profile_version="4",
+        )
+        with pytest.raises(MigrationRefused), module.open(LocalApiSourceRef(BRAIN)):
+            pass
