@@ -8,8 +8,8 @@ pytest.importorskip("PySide6")
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QLineEdit, QPushButton
 
-from brz2obsidian_ui.window import MainWindow
 from brz2obsidian.application.operations import Operations
+from brz2obsidian_ui.window import MainWindow
 from tests.gui.test_local_api_source_window import control, until
 from tests.support.local_api import KEY, api_server
 
@@ -33,7 +33,7 @@ def test_total_capture_field_preserves_large_values_and_requires_correction():
             field.setText(value)
             until(
                 app,
-                lambda: (
+                lambda value=value: (
                     window.snapshot.api_config is not None
                     and window.snapshot.api_config.max_total_capture_bytes == int(value)
                 ),
