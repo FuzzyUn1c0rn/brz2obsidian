@@ -500,10 +500,6 @@ def exercise_partial_update(update_root, operations, vault, original):
         requirement_id=asset.requirement_id,
         choice="current",
         assumptions_digest=requirement_digest(asset),
-        references=tuple(
-            {"reference_id": row.reference_id, "choice": "keep_current"}
-            for row in references
-        ),
     )
     assert kept_icon.code == "accepted", kept_icon.code
     prepared = kept_icon.preparation
@@ -529,7 +525,15 @@ def exercise_partial_update(update_root, operations, vault, original):
         expected[item] = change.incoming.data.replace(old_paragraph, local).replace(
             b"[[Categories/B.md", b"[[Categories/B local.md"
         )
-    for item in (INDEPENDENT, IDS["C"], IDS["D"]):
+    # Incoming T's related link still names the source filename. The explicit
+    # rename requires a reviewed text choice for that reference as well.
+    t_change = next(
+        c for c in prepared.review.proposal.changes if c.item_id == IDS["T"]
+    )
+    expected[IDS["T"]] = t_change.incoming.data.replace(
+        b"[[Categories/B.md", b"[[Categories/B local.md"
+    )
+    for item in (INDEPENDENT, IDS["C"], IDS["D"], IDS["T"]):
         prepared = choose_edited(
             operations, prepared, item, expected[item], "merge-v2:" + item
         )

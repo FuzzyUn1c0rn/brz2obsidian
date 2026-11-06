@@ -777,17 +777,32 @@ def _text_choice(plan, change, choice, edited):
             s for s in candidate.target_facts if s.target_id in selected_ids
         )
     if plan.facts.incoming_identity.output_format == 8:
-        # A new explicit text choice observes earlier approved text versions.
-        # This does not reinterpret the references of those earlier approvals.
+        # Observe only results reconstructed from the actual producer facts and
+        # admitted actions. Unresolved peers do not imply a Current selection.
+        validated = validate_review(plan)
+        if validated.status != "accepted":
+            raise ValueError("The review plan is not canonical")
+        canonical = validated.plan
         selected = []
-        for approval in plan.approvals:
+        versions = {
+            row.change_id: (row, row.target_path, row.result)
+            for row in canonical.proposal.changes
+            if not row.requires_decision
+        }
+        for approval in canonical.approvals:
             if approval.domain not in ("text", "format", "mapping"):
                 continue
             comparison = next(
                 row
-                for row in plan.proposal.changes
+                for row in canonical.proposal.changes
                 if row.change_id == approval.change_id
             )
+            versions[comparison.change_id] = (
+                comparison,
+                approval.target_path,
+                approval.result,
+            )
+        for comparison, selected_path, chosen in versions.values():
             matches = tuple(
                 row
                 for row in targets
@@ -804,7 +819,7 @@ def _text_choice(plan, change, choice, edited):
                     row
                     for row in (*context.current_targets, *targets)
                     if row.target_id == matches[0].target_id
-                    and row.canonical_path == approval.target_path
+                    and row.canonical_path == selected_path
                 ),
                 None,
             )
@@ -813,7 +828,7 @@ def _text_choice(plan, change, choice, edited):
             targets = tuple(
                 owner if row.target_id == owner.target_id else row for row in targets
             )
-            selected.append((owner, approval.result))
+            selected.append((owner, chosen))
         for owner, chosen in selected:
             observed = link_state(
                 chosen,
