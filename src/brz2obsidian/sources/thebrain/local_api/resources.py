@@ -458,6 +458,16 @@ def capture_owner(
     return assets, documents, payloads
 
 
+def _finding_document(finding):
+    try:
+        value = json.loads(finding.observed_json)
+        if not isinstance(value, dict):
+            raise ValueError
+        return value.get("document")
+    except (ValueError, TypeError):
+        refuse("Image finding has invalid structured provenance")
+
+
 def validate_payload_binding(source, snapshot, audit):
     """Bind normalized content to closed qualified source facts, not just hashes."""
     from .notes import bind_documents
@@ -580,7 +590,7 @@ def validate_payload_binding(source, snapshot, audit):
             for finding in snapshot.findings
             if (finding.rule_id == "local-api.note-formatting.v1" and set(finding.affected) == {document.owner, document.key})
             or (finding.rule_id in {"thebrain.unavailable-image.v1", "thebrain.unavailable-declared-image.v1"}
-                and json.loads(finding.observed_json).get("document") == document.key)
+                and _finding_document(finding) == document.key)
         ]
         expected = None
         # Compare complete interpretations, including findings when text is

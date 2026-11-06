@@ -8,7 +8,9 @@ from hashlib import sha256
 import pytest
 
 from brz2obsidian.sources.thebrain import BrzSourceModule
-from brz2obsidian.contracts import MigrationRefused
+from brz2obsidian.contracts import MigrationError, MigrationRefused, ExactContent
+from brz2obsidian.core import analyze
+from brz2obsidian.sources.thebrain.profile import BRZ_POLICY
 from brz2obsidian.sources.thebrain.local_api import (
     LocalApiConfig, LocalApiSession, LocalApiSourceModule, LocalApiSourceRef,
 )
@@ -16,6 +18,11 @@ from tests.sources.test_local_api_bom import note_api
 from tests.support.local_api import BRAIN, HOME, KEY, api_server
 from tests.application.test_literal_angles_workflow import literal_archive
 from tests.application.test_forgotten_workflow import rewrite
+from tests.application.test_forgotten_workflow import forget
+from tests.application.test_graph_workflow import graph_archive, identity
+from tests.application.test_resources_workflow import thought
+from tests.sources.test_current_literal_tokens import historical_note_capture
+from brz2obsidian.obsidian import interpret_links
 from tests.support.local_api_payloads import PNG, IMAGE, attachment
 
 
@@ -164,3 +171,112 @@ def test_current_api_declared_image_content404_is_classified_and_reference_bound
             assert json.loads(finding.observed_json)["absence"]["basis"] == "api_declared_content404"
             assert session.snapshot.documents[0].text == "Image unavailable: Lost\n"
             session.verify_consistency()
+
+
+def test_core_requires_source_bound_occurrence_evidence_for_image_edits(tmp_path):
+    source = literal_archive(tmp_path / "source.brz", b"![Lost](.data/md-images/lost.png)\n")
+    with BrzSourceModule().open(source) as session:
+        snapshot = session.snapshot
+        assert analyze(snapshot, BRZ_POLICY).issues[0].severity == "warning"
+        with pytest.raises(MigrationRefused, match="notice.*evidence"):
+            analyze(snapshot.model_copy(update={"findings":()}), BRZ_POLICY)
+        finding = snapshot.findings[0]
+        evidence = json.loads(finding.observed_json)
+        evidence["notice"]["start"] += 1
+        with pytest.raises(MigrationRefused, match="notice.*evidence"):
+            analyze(snapshot.model_copy(update={"findings":(finding.model_copy(update={
+                "observed_json":json.dumps(evidence)}),)}), BRZ_POLICY)
+
+
+@pytest.mark.parametrize("destination", (
+    ".data/md-images/lost.png?query=1", ".data/md-images/lost.png#$width=0p$",
+    ".data/md-images/lost.png#", ".data/md-images/a%2fb.png",
+    ".data/md-images/%ff.png", ".data/md-images/../lost.png",
+    ".data/md-images/lost.unknown",
+))
+def test_missing_image_keeps_strict_destination_and_kind_guards(tmp_path, destination):
+    source = literal_archive(tmp_path / "source.brz", f"![Lost]({destination})\n".encode())
+    with pytest.raises(MigrationRefused), BrzSourceModule().open(source):
+        pass
+
+
+@pytest.mark.parametrize("identity_named", (False, True))
+def test_other_owner_same_basename_is_not_borrowed_but_foreign_identity_refuses(tmp_path, identity_named):
+    other = "77777777-7777-4777-8777-777777777777"
+    image_id = "aaaaaaaa-0000-4000-8000-000000000001"
+    filename = image_id + ".png" if identity_named else "diagram.png"
+    source = literal_archive(tmp_path / "source.brz", f"![Lost](.data/md-images/{filename})\n".encode(),
+        resources=(({"SourceId":other,"Type":12,"Location":filename},PNG),),
+        thoughts=(thought(other,"Other owner"),))
+    if identity_named:
+        with pytest.raises(MigrationRefused, match="another owner's asset"), BrzSourceModule().open(source):
+            pass
+    else:
+        with BrzSourceModule().open(source) as session:
+            assert session.snapshot.documents[0].text == "Image unavailable: Lost\n"
+            assert session.snapshot.documents[0].references == ()
+            image = next(a for a in session.snapshot.assets if a.role == "image")
+            assert image.owner == other
+
+
+def test_protected_images_and_unsafe_original_omission_precede_notices(tmp_path):
+    missing = "![Lost](.data/md-images/lost.png)"
+    protected = "`" + missing + "`\n<!-- " + missing + " -->\n" + missing.replace("![", "\\!\\[").replace("](", "\\](") + "\n"
+    raw = (protected + "[Private](brain://AAAAAAAAAAAAAAAAAAAAAg/Private)\n" + missing + "\n").encode()
+    source = graph_archive(tmp_path / "source.brz", {1:"Home",2:"Private"}, notes={1:(raw,4)})
+    rewrite(source, lambda parts: forget(parts, 2))
+    with BrzSourceModule().open(source) as session:
+        document = session.snapshot.documents[0]
+        assert document.original_copy_omitted and document.original_asset_id is None
+        assert document.text == protected + "\nImage unavailable: Lost\n"
+        assert len([f for f in session.snapshot.findings if f.kind == "unavailable_image_reference"]) == 1
+        assert not any(a.role == "note_original" for a in session.snapshot.assets)
+    private_label = graph_archive(tmp_path / "private.brz", {1:"Home",2:"Private"},
+        notes={1:(f"![{identity(2)}](.data/md-images/lost.png)\n".encode(),4)})
+    rewrite(private_label, lambda parts: forget(parts,2))
+    with pytest.raises(MigrationRefused), BrzSourceModule().open(private_label):
+        pass
+
+
+@pytest.mark.parametrize("failure", ("metadata404", "content403", "content500", "invalid200", "unreferenced404"))
+def test_current_api_image_errors_are_not_blanket_absence(failure):
+    raw = f"![Lost](.data/md-images/{IMAGE}.png)\n".encode() if failure != "unreferenced404" else b"Plain note.\n"
+    api = note_api(raw)
+    api.attachments[IMAGE] = attachment(IMAGE, HOME, 12, IMAGE + ".png", length=13)
+    api.payloads[IMAGE] = b"not image data"
+    route = f"/api/attachments/{BRAIN}/{IMAGE}/"
+    if failure == "metadata404":
+        api.overrides[route + "metadata"] = (404,{"error":"missing"})
+    elif failure != "invalid200":
+        status = {"content403":403,"content500":500,"unreferenced404":404}[failure]
+        api.overrides[route + "file-content"] = (status,{"error":"unavailable"})
+    with api_server(api) as (_,address):
+        module = LocalApiSourceModule(LocalApiConfig(api_url=address),credentials=lambda:KEY,profile_version="4")
+        with pytest.raises(MigrationError), module.open(LocalApiSourceRef(BRAIN)):
+            pass
+
+
+@pytest.mark.parametrize("profile", ("1", "2", "3"))
+def test_historical_constructor_rejects_coherent_notice_kind(profile):
+    raw = b"![Lost](.data/md-images/lost.png)\n"
+    notice = "Image unavailable: Lost\n"
+    arguments = historical_note_capture(profile,raw,normalized=notice,edits=({
+        "kind":"image_unavailable","start":0,"end":len(raw)-1,
+        "before":raw.decode()[:-1],"after":notice[:-1],"adapted_start":0,
+        "adapted_end":len(notice)-1,"source_digest":sha256(raw).hexdigest(),
+    },))
+    with pytest.raises(MigrationRefused):
+        LocalApiSession(**arguments)
+
+
+def test_notice_label_entities_keep_following_real_references_visible_to_updates(tmp_path):
+    raw = b"![`odd` &#96; \\|\r\nlabel](.data/md-images/lost.png)\r\n![Kept](.data/md-images/kept.png)\r\n"
+    source = literal_archive(tmp_path / "source.brz", raw,
+        resources=(({"Type":12,"Location":"kept.png"},PNG),))
+    with BrzSourceModule().open(source) as session:
+        document = session.snapshot.documents[0]
+        assert document.text.startswith("Image unavailable: odd &#96; &#124; label\r\n")
+        assert len(document.references) == 1
+        links = interpret_links(ExactContent(data=document.text.encode()),document_id="notice",
+            source_path="Home.md",path_mode="relative",targets=(),target_facts=(),inventory="partial",output_format=8)
+        assert links.status == "supported" and len(links.occurrences) == 1

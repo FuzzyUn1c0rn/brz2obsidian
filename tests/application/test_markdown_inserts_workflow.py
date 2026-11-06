@@ -939,7 +939,7 @@ def test_insert_scope_determinism_and_destination_protection(tmp_path):
     workflow = default_workflow()
     metadata = RunMetadata(
         converter_version="0.3.0",
-        renderer_version="7",
+        renderer_version="8",
         run_id="synthetic-inserts",
         run_time="2026-10-10T00:00:00+00:00",
         obsidian_version="1.14.4",
