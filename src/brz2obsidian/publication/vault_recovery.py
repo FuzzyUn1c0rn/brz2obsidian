@@ -1582,6 +1582,9 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
                     existence="missing" if current[path].content is None else "present",
                     memberships=(),
                     source_path=path,
+                    output_format=7
+                    if original.facts.incoming_identity.output_format == 6
+                    else original.facts.incoming_identity.output_format,
                 )
             )
         if reference.target_id not in {target.target_id for target in incoming_refs}:
@@ -1594,6 +1597,9 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
                     existence="missing" if target is None else "present",
                     memberships=(),
                     source_path=path,
+                    output_format=7
+                    if original.facts.incoming_identity.output_format == 6
+                    else original.facts.incoming_identity.output_format,
                 )
             )
         context = context.model_copy(
