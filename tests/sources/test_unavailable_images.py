@@ -25,7 +25,7 @@ from tests.application.test_resources_workflow import thought
 from tests.sources.test_current_literal_tokens import historical_note_capture
 from tests.sources.test_local_api_bom import note_api
 from tests.support.local_api import BRAIN, HOME, KEY, api_server
-from tests.support.local_api_payloads import IMAGE, PNG, attachment
+from tests.support.local_api_payloads import IMAGE, NOTE, PNG, attachment
 
 
 def test_two_missing_images_keep_four_present_controls_and_exact_original(tmp_path):
@@ -127,6 +127,26 @@ def test_current_api_unavailable_image_without_companions_replays_exact_bom(
             ) as replay:
                 assert replay.snapshot == session.snapshot
                 replay.verify_consistency()
+            for malformed in ("null", "{broken"):
+                finding = session.snapshot.findings[0].model_copy(
+                    update={"observed_json": malformed}
+                )
+                forged = session.snapshot.model_copy(
+                    update={
+                        "findings": (finding,),
+                        "identity": session.snapshot.identity.model_copy(
+                            update={"snapshot_digest": ""}
+                        ),
+                    }
+                )
+                with pytest.raises(MigrationError):
+                    LocalApiSession(
+                        source=source,
+                        snapshot=forged,
+                        audit=audit,
+                        payloads=payloads,
+                        profile_version="4",
+                    )
     assert not any("lost.png" in path for path, _, _ in api.requests)
 
 
@@ -299,6 +319,19 @@ def test_core_requires_source_bound_occurrence_evidence_for_image_edits(tmp_path
         with pytest.raises(MigrationRefused, match="notice.*evidence"):
             analyze(snapshot.model_copy(update={"findings": ()}), BRZ_POLICY)
         finding = snapshot.findings[0]
+        with pytest.raises(MigrationRefused, match="notice.*evidence"):
+            analyze(
+                snapshot.model_copy(
+                    update={
+                        "findings": (
+                            finding.model_copy(
+                                update={"affected": (snapshot.documents[0].key,)}
+                            ),
+                        )
+                    }
+                ),
+                BRZ_POLICY,
+            )
         evidence = json.loads(finding.observed_json)
         evidence["notice"]["start"] += 1
         with pytest.raises(MigrationRefused, match="notice.*evidence"):
@@ -443,7 +476,10 @@ def test_current_api_image_errors_are_not_blanket_absence(failure):
 
 
 @pytest.mark.parametrize("profile", ("1", "2", "3"))
-def test_historical_constructor_rejects_coherent_notice_kind(profile):
+@pytest.mark.parametrize(
+    "kind", ("image_unavailable", "markdown_insert_image_unavailable")
+)
+def test_historical_constructor_rejects_coherent_notice_kind(profile, kind):
     raw = b"![Lost](.data/md-images/lost.png)\n"
     notice = "Image unavailable: Lost\n"
     arguments = historical_note_capture(
@@ -452,7 +488,7 @@ def test_historical_constructor_rejects_coherent_notice_kind(profile):
         normalized=notice,
         edits=(
             {
-                "kind": "image_unavailable",
+                "kind": kind,
                 "start": 0,
                 "end": len(raw) - 1,
                 "before": raw.decode()[:-1],
@@ -565,3 +601,21 @@ def test_declared_archive_image_inconsistent_states_do_not_become_absence(
     rewrite(source, alter)
     with pytest.raises(MigrationRefused), BrzSourceModule().open(source):
         pass
+
+
+def test_api_notice_evidence_is_canonical_when_document_sorts_before_owner():
+    raw = b"![Lost](.data/md-images/lost.png)\n"
+    api = note_api(raw)
+    note_id = "00000001-1111-4111-8111-111111111111"
+    value = api.attachments.pop(NOTE)
+    api.attachments[note_id] = dict(value, id=note_id)
+    api.payloads[note_id] = api.payloads.pop(NOTE)
+    with api_server(api) as (_, address):
+        module = LocalApiSourceModule(
+            LocalApiConfig(api_url=address),
+            credentials=lambda: KEY,
+            profile_version="4",
+        )
+        with module.open(LocalApiSourceRef(BRAIN)) as session:
+            assert session.snapshot.findings[0].affected == (note_id, HOME)
+            session.verify_consistency()

@@ -155,7 +155,17 @@ def adapt_unavailable_images(
     for reference, location, notice in missing:
         first, last = origins[reference.start], origins[reference.end - 1]
         raw_ref = source_refs.get((first, last + 1 if last is not None else None))
-        if raw_ref is None:
+        copied = [
+            position
+            for position in origins[reference.start : reference.end]
+            if position is not None
+        ]
+        if (
+            raw_ref is None
+            or reference.target != raw_ref.target
+            or copied != sorted(copied)
+            or any(not raw_ref.start <= position < raw_ref.end for position in copied)
+        ):
             _refuse(
                 "unsupported_feature",
                 "Unavailable image has no exact copied source occurrence",
@@ -327,7 +337,7 @@ def adapt_unavailable_images(
                 affected=(
                     (absence["asset_id"],)
                     if "asset_id" in absence
-                    else (document.owner, document.key)
+                    else tuple(sorted((document.owner, document.key)))
                 ),
                 evidence=document.evidence,
                 observed_json=_observation(observation, basis),

@@ -73,12 +73,23 @@ def validate_image_notice_evidence(snapshot):
     valid = True
     try:
         documents = {document.key: document for document in snapshot.documents}
+        assets = {asset.asset_id: asset for asset in snapshot.assets}
         for finding in snapshot.findings:
             if finding.kind != "unavailable_image_reference":
                 continue
             observed = json.loads(finding.observed_json)
             document = documents[observed["document"]]
             _require(observed["owner"] == document.owner)
+            if "asset_id" in observed["absence"]:
+                asset = assets[observed["absence"]["asset_id"]]
+                _require(
+                    asset.owner == document.owner
+                    and asset.role == "image"
+                    and asset.availability == "absent"
+                    and finding.affected == (asset.asset_id,)
+                )
+            else:
+                _require(set(finding.affected) == {document.owner, document.key})
             by_document.setdefault(document.key, []).append(observed)
         for document in snapshot.documents:
             expected_indices = {
