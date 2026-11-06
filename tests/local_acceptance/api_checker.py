@@ -997,11 +997,11 @@ def expected_asset(baseline, attachment, profile_version="1", proofs=None):
         )
         assert (
             kind == 1
-            and name.lower().endswith(suffixes)
+            and (profile_version == "4" or name.lower().endswith(suffixes))
             or kind == 15
             and name.lower().endswith(".txt")
         ), "raw file role"
-        if kind == 1 and not name.lower().endswith(".pdf"):
+        if kind == 1 and profile_version != "4" and not name.lower().endswith(".pdf"):
             assert display is None, "profile2 resource explicit null name"
         role = "file"
     outcome = baseline.data["payloads"][attachment["id"]]
@@ -1063,8 +1063,10 @@ def expected_asset(baseline, attachment, profile_version="1", proofs=None):
             qualify_v2_bytes(payload, "PNG", attachment["id"], proofs)
         elif name.lower().endswith(".zip"):
             qualify_v2_bytes(payload, "ZIP", attachment["id"], proofs)
-        else:
+        elif name.lower().endswith(".pdf"):
             assert payload.startswith(b"%PDF-"), "raw PDF signature"
+        else:
+            assert profile_version == "4" and kind == 1, "opaque ordinary file profile"
     return role, "present", payload
 
 

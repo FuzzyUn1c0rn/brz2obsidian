@@ -159,6 +159,8 @@ def role(value, profile_version):
         suffix = location.rsplit(".", 1)[-1].lower() if "." in location else ""
         if (
             (kind, suffix) in {(1, "pdf"), (15, "txt")}
+            or profile_version == "4"
+            and kind == 1
             or profile_version in {"2", "3", "4"}
             and name is None
             and (kind, suffix) in {(1, "png"), (1, "zip")}
@@ -189,7 +191,8 @@ def validate_bytes(value, raw, profile_version):
         except UnicodeError:
             refuse("Required authored text is not strict UTF-8")
         return selected
-    suffix = value["location"].rsplit(".", 1)[-1].lower()
+    location = value["location"]
+    suffix = location.rsplit(".", 1)[-1].lower() if "." in location else ""
     if selected == "file" and suffix == "pdf":
         if not prefix.startswith(b"%PDF-"):
             refuse("Required PDF bytes do not match the qualified signature")
@@ -202,6 +205,8 @@ def validate_bytes(value, raw, profile_version):
                 archive.infolist()
         except BadZipFile, ValueError, OSError:
             refuse("Required ZIP bytes have no valid central directory")
+        return selected
+    if selected == "file" and profile_version == "4" and suffix != "png":
         return selected
     if selected == "image" and suffix == "svg" and profile_version in {"3", "4"}:
         validate_svg(raw)

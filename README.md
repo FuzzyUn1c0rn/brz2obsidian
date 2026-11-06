@@ -386,6 +386,14 @@ missing TXT attachment can warn when a separately preserved PDF from the same
 owner qualifies; this does not claim that the PDF replaces the missing text.
 Other unavailable required content refuses import. No partial vault is published.
 
+Current API imports preserve ordinary internal file attachments byte-for-byte
+with file links, regardless of extension, including extension-free and empty
+files. Stored Markdown, HTML and MHTML remain attachment files; their contents
+are not interpreted as authored notes or followed for embedded resources. Media
+files receive file links. Existing PDF, PNG and ZIP validation still applies;
+ordinary missing files remain required content. Older captured API profiles keep
+their original admission rules when replayed.
+
 Inspection fully acquires content and releases its capture. Conversion acquires
 again; allow for that cost. In the app, changed settings or source invalidate the
 review, and warning publication requires **Convert with warnings**. Direct CLI

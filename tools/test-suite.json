@@ -341,7 +341,17 @@
     "tests/sources/test_current_literal_tokens.py",
     "tests/local_acceptance/test_current_literal_token_audit.py",
     "tests/sources/test_brz_absent_txt_declarations.py",
-    "tests/local_acceptance/test_brz_absent_txt_audit.py"
+    "tests/local_acceptance/test_brz_absent_txt_audit.py",
+    "tests/sources/test_local_api_internal_files.py::test_current_profile_preserves_opaque_internal_file_and_replays_exact_bytes",
+    "tests/sources/test_local_api_internal_files.py::test_current_ordinary_files_are_opaque_without_note_or_media_interpretation",
+    "tests/sources/test_local_api_internal_files.py::test_known_file_formats_cannot_fall_back_to_opaque_admission",
+    "tests/sources/test_local_api_internal_files.py::test_historical_profiles_do_not_acquire_current_ordinary_file_admission",
+    "tests/sources/test_local_api_internal_files.py::test_current_capture_rejects_invalid_file_binding_before_snapshot_exposure",
+    "tests/sources/test_local_api_internal_files.py::test_excluded_owner_does_not_fetch_or_preserve_its_generic_file",
+    "tests/sources/test_local_api_internal_files.py::test_ordinary_file_failures_never_become_an_absent_txt_gap[404-MigrationFailed-api_request_failed]",
+    "tests/local_acceptance/test_internal_file_audit.py::test_complete_raw_api_audit_preserves_opaque_files_without_interpreting_them",
+    "tests/local_acceptance/test_internal_file_audit.py::test_raw_api_audit_rejects_rehashed_ordinary_file_forgeries",
+    "tests/local_acceptance/test_internal_file_audit.py::test_independent_old_profile_file_grammar_does_not_inherit_current_admission"
   ],
   "schema_version": 1
 }
