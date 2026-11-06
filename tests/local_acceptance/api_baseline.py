@@ -14,6 +14,30 @@ from .api_recording import write_json
 from .api_scope import strict
 
 
+def route_shape(path):
+    """Keep literal segments exact and erase only whole parameter-slot names."""
+    assert (
+        type(path) is str
+        and path.startswith("/")
+        and not any(ord(c) < 32 or ord(c) == 127 for c in path)
+    ), "recorded schema path template"
+    result = []
+    for segment in path[1:].split("/"):
+        assert not any(c in segment for c in "?#"), "recorded schema path template"
+        if "{" in segment or "}" in segment:
+            name = segment[1:-1]
+            assert (
+                segment.startswith("{")
+                and segment.endswith("}")
+                and name
+                and not any(c in "{}" or c.isspace() for c in name)
+            ), "recorded schema path template"
+            result.append(None)
+        else:
+            result.append(segment)
+    return tuple(result)
+
+
 def observations(directory, ledger):
     """Verify every occurrence, preserving raw and content-decoded bytes."""
     indexed = {}
@@ -93,6 +117,11 @@ def coverage(directory, ledger, *, allow_missing=False):
             schema["openapi"].startswith("3.")
             and type(schema["info"]["version"]) is str
         ), "current recorded OpenAPI evidence"
+        paths = schema["paths"]
+        assert type(paths) is dict, "recorded schema paths object"
+        shapes = {}
+        for path, item in paths.items():
+            shapes.setdefault(route_shape(path), []).append(item)
         for endpoint in (
             "/api/brains",
             "/api/brains/{brainId}",
@@ -109,7 +138,10 @@ def coverage(directory, ledger, *, allow_missing=False):
             "/api/attachments/{brainId}/{attachmentId}/file-content",
             "/api/notes/{brainId}/{thoughtId}",
         ):
-            assert "get" in schema["paths"][endpoint], (
+            candidates = shapes.get(route_shape(endpoint), [])
+            assert len(candidates) == 1, "unique recorded schema route template"
+            item = candidates[0]
+            assert type(item) is dict and type(item.get("get")) is dict, (
                 "recorded schema documents required GET"
             )
     accessible_row = required("/api/brains")

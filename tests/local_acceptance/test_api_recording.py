@@ -1,5 +1,6 @@
 """Public acquisition recording is source evidence, independent of its snapshot."""
 
+import copy
 import gzip
 import hashlib
 import json
@@ -150,7 +151,10 @@ def test_independent_audit_rechecks_recorded_required_coverage(
         audit_baseline(forged, profile_version="4")
 
 
-def test_capture_entry_audits_its_own_public_conversion(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("brain_parameter", ["brainId", "id"])
+def test_capture_entry_audits_its_own_public_conversion(
+    tmp_path, monkeypatch, capsys, brain_parameter
+):
     from tests.local_acceptance.audit_run import main
 
     monkeypatch.setenv("THE_BRAIN_LOCAL_API_KEY", "KEY")
@@ -166,7 +170,10 @@ def test_capture_entry_audits_its_own_public_conversion(tmp_path, monkeypatch, c
     )
     candidate = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     api = PayloadApi()
-    api.overrides["/api/v1/docs.json"] = (200, SCHEMA)
+    schema = copy.deepcopy(SCHEMA)
+    brain_detail = schema["paths"].pop("/api/brains/{brainId}")
+    schema["paths"]["/api/brains/{" + brain_parameter + "}"] = brain_detail
+    api.overrides["/api/v1/docs.json"] = (200, schema)
     attempt, vault = tmp_path / "command-attempt", tmp_path / "command-vault"
     with api_server(api) as (_, upstream):
         outcome = main(
@@ -201,6 +208,120 @@ def test_capture_entry_audits_its_own_public_conversion(tmp_path, monkeypatch, c
     public = capsys.readouterr().out
     assert "KEY" not in public and BRAIN not in public and upstream not in public
     assert "parent M5 acceptance remains separate" in public
+
+
+def schema_recording(directory, captured, schema):
+    """Rebind only schema bytes in an independently complete raw recording."""
+    directory.mkdir()
+    for source in captured.directory.glob("response-*.bin"):
+        shutil.copyfile(source, directory / source.name)
+    ledger = json.loads((captured.directory / "recording.json").read_bytes())
+    raw = json.dumps(schema).encode()
+    for row in ledger["occurrences"]:
+        if row["target"] != "/api/v1/docs.json":
+            continue
+        assert row["content_encoding"] == "identity"
+        for field, length, digest in (
+            ("body", "length", "sha256"),
+            ("decoded_body", "decoded_length", "decoded_sha256"),
+        ):
+            (directory / row[field]).write_bytes(raw)
+            row[length] = len(raw)
+            row[digest] = hashlib.sha256(raw).hexdigest()
+    raw = json.dumps(ledger).encode()
+    (directory / "recording.json").write_bytes(raw)
+    return hashlib.sha256(raw).hexdigest()
+
+
+def test_recorded_schema_all_parameter_aliases_preserve_concrete_source(
+    tmp_path, captured, qualification, sealed
+):
+    schema = copy.deepcopy(SCHEMA)
+    schema["paths"] = {
+        "/api/brains": {"get": {}},
+        "/api/brains/{collection}": {"get": {}, "delete": {}},
+        "/api/brains/{collection}/statistics": {"get": {}},
+        "/api/search/{collection}": {"get": {}},
+        "/api/thoughts/{collection}/types": {"get": {}},
+        "/api/thoughts/{collection}/tags": {"get": {}},
+        "/api/thoughts/{collection}/{item}": {"get": {}},
+        "/api/thoughts/{collection}/{item}/graph": {"get": {}},
+        "/api/thoughts/{collection}/{item}/attachments": {"get": {}},
+        "/api/links/{collection}/{edge}": {"get": {}},
+        "/api/links/{collection}/{edge}/attachments": {"get": {}},
+        "/api/attachments/{collection}/{resource}/metadata": {"get": {}},
+        "/api/attachments/{collection}/{resource}/file-content": {"get": {}},
+        "/api/notes/{collection}/{item}": {"get": {}},
+        "/api/search/public": {"get": {}},
+        "/api/notes/{collection}/{item}/update": {"post": {}},
+        "/": {"get": {}},
+        "/api/unrelated/": {"get": {}},
+    }
+    directory = tmp_path / "aliased-complete-source"
+    pin = schema_recording(directory, captured, schema)
+    baseline = build_baseline(directory, pin, qualification=qualification)
+    audit_baseline(baseline, profile_version="4")
+    assert baseline.json(baseline.data["qualification"][0]) == schema
+    for key in (
+        "brain",
+        "scope",
+        "graphs",
+        "payloads",
+        "attachment_metadata",
+        "relationship_metadata",
+        "statistics",
+        "scope_inputs",
+    ):
+        assert baseline.data[key] == sealed.data[key]
+    assert baseline.bytes(baseline.data["payloads"][NOTE]["path"]) == RAW_NOTE
+    original = json.loads((captured.directory / "recording.json").read_bytes())
+    rebound = json.loads((directory / "recording.json").read_bytes())
+    assert rebound["brain_id"] == original["brain_id"] == BRAIN
+    assert [row["target"] for row in rebound["occurrences"]] == [
+        row["target"] for row in original["occurrences"]
+    ]
+    assert [
+        row for row in rebound["occurrences"] if row["target"] != "/api/v1/docs.json"
+    ] == [
+        row for row in original["occurrences"] if row["target"] != "/api/v1/docs.json"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("replacement", "operation", "duplicate"),
+    [
+        (None, {"get": {}}, False),
+        ("/api/Brains/{id}", {"get": {}}, False),
+        ("/v2/brains/{id}", {"get": {}}, False),
+        ("/api/brains/current", {"get": {}}, False),
+        ("/api/brains/{id}/{extra}", {"get": {}}, False),
+        ("/api/{id}/brains", {"get": {}}, False),
+        ("/api/brains/{id}", {"post": {}}, False),
+        ("/api/brains/{id}", {"GET": {}}, False),
+        ("/api/brains/{id}", {"get": None}, False),
+        ("/api/brains/{id}", {"get": {}}, True),
+        ("/api/brains/{id}", {"post": {}}, True),
+        ("/api/brains/{}", {"get": {}}, False),
+        ("/api/brains/id{suffix}", {"get": {}}, False),
+        ("/api/brains/{{id}}", {"get": {}}, False),
+        ("/api/brains/{id}/", {"get": {}}, False),
+        ("/api/brains/{id\x00}", {"get": {}}, False),
+        ("/api/brains/{id\x7f}", {"get": {}}, False),
+    ],
+)
+def test_recorded_schema_route_conflicts_never_seal(
+    tmp_path, captured, qualification, replacement, operation, duplicate
+):
+    schema = copy.deepcopy(SCHEMA)
+    if not duplicate:
+        del schema["paths"]["/api/brains/{brainId}"]
+    if replacement is not None:
+        schema["paths"][replacement] = operation
+    directory = tmp_path / "unqualified-schema"
+    pin = schema_recording(directory, captured, schema)
+    with pytest.raises(AssertionError, match="recorded schema"):
+        build_baseline(directory, pin, qualification=qualification)
+    assert not (directory / "manifest.json").exists()
 
 
 def test_link_only_discovery_closes_disconnected_endpoints(tmp_path, qualification):
