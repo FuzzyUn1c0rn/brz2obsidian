@@ -1412,7 +1412,7 @@ def source_references(
                 continue
             kind = "item"
         elif image and decoded_url.startswith(".data/md-images/"):
-            url = quote(decoded_url, safe="/:?#[]@!$&'()*+,;=-._~%")
+            url = quote(decoded_url, safe="/:?#@!$&'()*+,;=-._~%")
             filename = image_target_location(url, authored=authored_url)
             targets = [
                 a["asset_id"]
@@ -1438,6 +1438,13 @@ def source_references(
                     "basis": "document.text/unicode_codepoints",
                     "presentation": "responsive",
                 }
+            if (
+                kind == "image"
+                and body[destination_start - 1 : destination_start] == "<"
+                and body[destination_end : destination_end + 1] == ">"
+            ):
+                destination_start -= 1
+                destination_end += 1
             label = inline_display(label_text)
             result.append(
                 {

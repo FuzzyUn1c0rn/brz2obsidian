@@ -806,3 +806,40 @@ def test_decoded_image_audit_rejects_coherent_raw_semantic_evidence_forgery(
     )
     with pytest.raises(AssertionError, match="raw-derived unavailable image"):
         audit(adapter, source, baseline, vault)
+
+
+def test_complete_bracket_image_destinations_keep_raw_and_encoded_uri(tmp_path):
+    authored = (
+        "![Escaped](.data/md-images/lost\\[1\\].png)\r\n"
+        "![Angled](<.data/md-images/lost[1].png>)\r\n"
+        "![Punctuation](.data/md-images/lost\\(1\\)'x'.png)\r\n"
+        "![Present](<.data/md-images/kept[1].png>)\r\n"
+    )
+    source = literal_archive(
+        tmp_path / "brackets.brz",
+        authored.encode(),
+        resources=(({"Type": 12, "Location": "kept[1].png"}, PNG),),
+    )
+    vault = tmp_path / "vault"
+    result = default_workflow().convert(source, vault)
+    assert result.outcome == "warnings", result.issues
+    assert check_vault(source, vault)["image_references"] == 1
+    body = (vault / "Home — Entry thought.md").read_text(encoding="utf-8")
+    assert "![Present](Attachments/22222222/kept%281%29.png)" in body
+    assert (
+        "Image unavailable: Escaped\nImage unavailable: Angled\n"
+        "Image unavailable: Punctuation\n" in body
+    )
+    record = json.loads((vault / "migration-record.json").read_bytes())
+    evidence = sorted(
+        (json.loads(i["message"].split("Observed: ", 1)[1]) for i in record["issues"]),
+        key=lambda value: value["source_reference"]["start"],
+    )
+    assert {item["source_reference"]["uri"] for item in evidence} == {
+        ".data/md-images/lost%5B1%5D.png",
+        ".data/md-images/lost(1)'x'.png",
+    }
+    assert [
+        item["source_reference"]["before"] for item in evidence
+    ] == authored.splitlines()[:3]
+    assert next(vault.rglob("*.original")).read_bytes() == authored.encode()

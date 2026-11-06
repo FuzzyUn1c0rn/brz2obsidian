@@ -130,7 +130,7 @@ def expectation(raw, owner, bindings, absent, *, basis, profile_version="4"):
     source = {}
     for start, end, image, label, left, right in inline_candidates(text)[0]:
         uri = quote(
-            markdown_destination(text[left:right]), safe="/:?#[]@!$&'()*+,;=-._~%"
+            markdown_destination(text[left:right]), safe="/:?#@!$&'()*+,;=-._~%"
         )
         if image and uri.startswith(".data/md-images/"):
             a, b = origins[start], origins[end - 1] + 1
@@ -161,7 +161,7 @@ def expectation(raw, owner, bindings, absent, *, basis, profile_version="4"):
     events = []
     for start, end, image, _label, left, right in inline_candidates(masked)[0]:
         authored_uri = text[left:right]
-        uri = quote(markdown_destination(authored_uri), safe="/:?#[]@!$&'()*+,;=-._~%")
+        uri = quote(markdown_destination(authored_uri), safe="/:?#@!$&'()*+,;=-._~%")
         if not image or not uri.startswith(".data/md-images/"):
             continue
         filename = image_location(uri, authored=authored_uri)
