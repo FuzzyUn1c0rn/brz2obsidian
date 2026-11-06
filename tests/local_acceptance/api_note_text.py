@@ -13,6 +13,7 @@ from urllib.parse import quote
 from .checker import inline_display, source_references, wiki
 from .text import (
     active_mask,
+    block_views,
     inline_candidates,
     inline_code_spans,
     literal_edits,
@@ -441,6 +442,41 @@ def current_table_text(text, operations, ownership, origins, malformed):
 
     def native(index, row):
         local = []
+        values = (
+            origins[offsets[index] : offsets[index] + len(row)]
+            if origins is not None
+            else [None] * len(row)
+        )
+        position = len(row) - len(row.lstrip()) + 1
+        for part in row_cells(row) or ():
+            linked = re.fullmatch(
+                r"(?P<space>\s*)(?P<source>`curl -[Ii] \["
+                r"(?P<url>https?://[^\s`|<>\[\]()\\]+)`)"
+                r"\]\((?P=url)\)(?P<tail>\s*)",
+                part,
+            )
+            if (
+                linked
+                and (
+                    offsets[index] + position + linked.start("source"),
+                    offsets[index] + position + linked.end("source"),
+                )
+                in codes
+            ):
+                opening = linked.start("source")
+                removed = linked.start("url") - 1
+                replacement = (
+                    part[:opening] + "[" + part[opening:removed] + part[removed + 1 :]
+                )
+                copied = values[position : position + len(part)]
+                mapped_part = (
+                    copied[:opening]
+                    + [None]
+                    + copied[opening:removed]
+                    + copied[removed + 1 :]
+                )
+                local.append((position, position + len(part), replacement, mapped_part))
+            position += len(part) + 1
         for (begin, end), (inside, stop) in codes.items():
             left, right = begin - offsets[index], end - offsets[index]
             if 0 <= left < right <= len(row) and "|" in text[inside:stop]:
@@ -454,21 +490,16 @@ def current_table_text(text, operations, ownership, origins, malformed):
                     .replace("|", "&#124;")
                     + "</code>"
                 )
-                local.append((left, right, replacement))
+                local.append((left, right, replacement, [None] * len(replacement)))
         for match in re.finditer(re.escape("{nl}"), row):
             if (
                 scan[offsets[index] + match.start() : offsets[index] + match.end()]
                 == "{nl}"
             ):
-                local.append((match.start(), match.end(), "<br>"))
-        values = (
-            origins[offsets[index] : offsets[index] + len(row)]
-            if origins is not None
-            else [None] * len(row)
-        )
-        for begin, end, replacement in sorted(local, reverse=True):
+                local.append((match.start(), match.end(), "<br>", [None] * 4))
+        for begin, end, replacement, mapped_part in sorted(local, reverse=True):
             row = row[:begin] + replacement + row[end:]
-            values[begin:end] = [None] * len(replacement)
+            values[begin:end] = mapped_part
         return row, values
 
     def emit(start, stop, parts, explicit, styled):
@@ -890,23 +921,75 @@ def contents(text, operations=None, ownership=None, origins=None):
 
 
 def table_contexts(text):
+    """Native table rows retain optional edge pipes within their own block.
+
+    Native cell splitting differs from source-table admission: edge pipes are
+    optional and body widths may differ. Blank/code/comment/heading blocks and
+    new list items or quote/list ownership terminate continuation.
+    """
     lines = markdown_lines(text)
-    table_rows, offset = set(), 0
+    views = {
+        start: (end, content, owner, listing)
+        for start, end, content, owner, listing in block_views(text)
+    }
+    offsets, offset = [], 0
+    for line in lines:
+        offsets.append(offset)
+        offset += len(line)
+
+    def native_cells(content):
+        content = content.strip()
+        parts, start, cursor = [], 0, 0
+        while cursor < len(content):
+            if content[cursor] == "\\":
+                cursor += 2
+                continue
+            if content[cursor] == "|":
+                parts.append(content[start:cursor])
+                start = cursor + 1
+            cursor += 1
+        if not parts:
+            return None
+        parts.append(content[start:])
+        if parts[0] == "":
+            parts.pop(0)
+        if parts and parts[-1] == "":
+            parts.pop()
+        return parts
+
+    table_rows = set()
     for index, line in enumerate(lines[:-1]):
-        cells, separator = row_cells(line), row_cells(lines[index + 1])
+        header, following = views.get(offsets[index]), views.get(offsets[index + 1])
+        if (
+            not header
+            or not following
+            or header[2] != following[2]
+            or following[3]
+            or header[1].startswith("    ")
+            or following[1].startswith("    ")
+        ):
+            continue
+        cells, separator = native_cells(header[1]), native_cells(following[1])
         if (
             cells
             and separator
             and len(cells) == len(separator)
-            and all(re.fullmatch(r"\s*:?-{3,}:?\s*", value) for value in separator)
+            and all(re.fullmatch(r"\s*:?-+:?\s*", value) for value in separator)
         ):
-            table_rows.add(index)
-            for following in range(index + 1, len(lines)):
-                row = row_cells(lines[following])
-                if row is None:
+            table_rows.update((index, index + 1))
+            for row_index in range(index + 2, len(lines)):
+                row = views.get(offsets[row_index])
+                if (
+                    row is None
+                    or row[2] != header[2]
+                    or row[3]
+                    or row[1].startswith("    ")
+                    or re.match(r" {0,3}#{1,6}(?:[ \t]|$)", row[1])
+                ):
                     break
-                table_rows.add(following)
+                table_rows.add(row_index)
     contexts = []
+    offset = 0
     for index, line in enumerate(lines):
         if index in table_rows:
             contexts.append((offset, offset + len(line)))

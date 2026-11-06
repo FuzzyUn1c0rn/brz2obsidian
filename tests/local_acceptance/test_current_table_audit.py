@@ -13,7 +13,7 @@ from tests.application.test_forgotten_workflow import rewrite
 from tests.application.test_literal_angles_workflow import literal_archive
 from tests.local_acceptance.api_baseline import prepare_controls
 from tests.local_acceptance.api_checker import check_api_vault
-from tests.local_acceptance.api_note_text import expected_document_text
+from tests.local_acceptance.api_note_text import expected_document_text, tables
 from tests.local_acceptance.api_recording import ApiRecording
 from tests.local_acceptance.checker import check_vault
 from tests.local_acceptance.test_checker_v2 import rewrite_record
@@ -40,6 +40,54 @@ ORDINARY_EXPECTED = (
     "| | |\n|---|---|\n|A|B|\n|<code>x&#124;y</code>|\\{nl}|\n\n"
     "|escaped\\|\n|next|\n"
 )
+CURL = "`curl -I [https://example.invalid`](https://example.invalid)"
+NATIVE_CURL = "[`curl -I https://example.invalid`](https://example.invalid)"
+CURL_NEAR_MISSES = (
+    "|`curl -I [https://example.invalid`](https://other.invalid)|Different target|\n"
+    "|`` `curl -I [https://example.invalid`](https://example.invalid) ``|Outer code|\n"
+    "|`wget [https://example.invalid`](https://example.invalid)|Other command|\n"
+    "|`curl -I [https://example.invalid`](https://example.invalid) extra|Suffix|\n"
+)
+CURL_RAW = (
+    "\n|Command|Use|\n|"
+    + CURL
+    + "|Ordinary|\n"
+    + CURL_NEAR_MISSES
+    + '\n|Command|Use|:(table="opaque:code-link"):\n|'
+    + CURL
+    + "|Styled|\n\nProse "
+    + CURL
+    + " remains literal.\n\n```md\n"
+    + "|Command|Use|\n|"
+    + CURL
+    + "|Fenced|\n```\n"
+)
+CURL_EXPECTED = (
+    "\n| | |\n|---|---|\n|Command|Use|\n|"
+    + NATIVE_CURL
+    + "|Ordinary|\n"
+    + CURL_NEAR_MISSES
+    + "\n| | |\n|---|---|\n|Command|Use|\n|"
+    + NATIVE_CURL
+    + "|Styled|\n\nProse "
+    + CURL
+    + " remains literal.\n\n```md\n"
+    + "|Command|Use|\n|"
+    + CURL
+    + "|Fenced|\n```\n"
+)
+CONTAINER_TABLES = (
+    "\n> |A|B|\n> |---|---|\n> |"
+    + LINK
+    + "\n>\n> After quote. "
+    + LINK
+    + "\n\n"
+    + "- |A|B|\n  |---|---|\n  |"
+    + LINK
+    + "\n\n  After list. "
+    + LINK
+    + "\n"
+)
 RAW = (
     'Before.\n|||:(table="column-widths:-1,0,0"):\n|one|two|\nAfter.\n\n'
     + "|First|"
@@ -50,10 +98,15 @@ RAW = (
     + '|A|B|:(table="opaque:value"):\n|one|\n\n'
     + PROTECTED
     + ORDINARY_RAW
+    + CURL_RAW
     + '\n||:(table="opaque:imported"):\n|one{nl}two|value|\n'
     + '\n|A|B|:(table="opaque:ragged"):\n|---|---|\n|'
     + LINK
     + "|\n"
+    + "|"
+    + LINK
+    + "\n"
+    + CONTAINER_TABLES
     + '\n|||:(table="opaque:origin"):\n'
     + "|![Lost](.data/md-images/lost.png)|`x|y`|\n\n"
     + "After compound. "
@@ -71,10 +124,15 @@ EXPECTED = (
     + '|A|B|:(table="opaque:value"):\n|one|\n\n'
     + PROTECTED
     + ORDINARY_EXPECTED
+    + CURL_EXPECTED
     + "\n| | |\n|---|---|\n|one<br>two|value|\n"
     + "\n|A|B|\n|---|---|\n|"
     + LINK
     + "|\n"
+    + "|"
+    + LINK
+    + "\n"
+    + CONTAINER_TABLES
     + "\n| | |\n|---|---|\n"
     + "|Image unavailable: Lost|<code>x&#124;y</code>|\n\n"
     + "After compound. "
@@ -104,6 +162,16 @@ FORMAT_FINDINGS = (
         "change": "Unsupported ToC declaration retained; use a standalone [/toc/] marker and reconvert, or author links manually.",
     },
 )
+REFERENCE_FACTS = [
+    (73, 118, True),
+    (1392, 1437, True),
+    (1440, 1485, True),
+    (1510, 1555, True),
+    (1573, 1618, False),
+    (1643, 1688, True),
+    (1704, 1749, False),
+    (1832, 1877, False),
+]
 
 
 @pytest.fixture(scope="module")
@@ -182,21 +250,21 @@ def test_current_table_complete_output_keeps_raw_rows_and_findings(
         f["affected"] == ([HOME, DOCUMENT] if adapter == "brz" else [DOCUMENT, HOME])
         for f in findings
     )
-    rendered = (
-        EXPECTED.replace(LINK, "[[Home — Entry.md\\|Target]]", 1)
-        .replace(LINK, "[[Home — Entry.md\\|Target]]", 1)
-        .replace(LINK, "[[Home — Entry.md|Target]]")
-    )
+    rendered = EXPECTED
+    for _, _, in_table in REFERENCE_FACTS:
+        rendered = rendered.replace(
+            LINK,
+            "[[Home — Entry.md\\|Target]]"
+            if in_table
+            else "[[Home — Entry.md|Target]]",
+            1,
+        )
     assert rendered.rstrip() in (vault / item["relative_path"]).read_text(
         encoding="utf-8"
     )
     assert [
         (r["start"], r["end"], r["table_cell"]) for r in document["references"]
-    ] == [
-        (73, 118, True),
-        (700, 745, True),
-        (829, 874, False),
-    ]
+    ] == REFERENCE_FACTS
     warning = next(
         i for i in record["issues"] if i["rule_id"] == "thebrain.unavailable-image.v1"
     )
@@ -207,23 +275,39 @@ def test_current_table_complete_output_keeps_raw_rows_and_findings(
         proof["source_reference"]["end"],
         proof["source_reference"]["before"],
     ) == (
-        805 + shift,
-        838 + shift,
+        1804 + shift,
+        1837 + shift,
         "![Lost](.data/md-images/lost.png)",
     )
     assert (
         proof["intermediate_reference"]["start"],
         proof["intermediate_reference"]["end"],
-    ) == (765, 798)
+    ) == (1768, 1801)
     assert (
         proof["notice"]["start"],
         proof["notice"]["end"],
         proof["notice"]["text"],
-    ) == (765, 788, "Image unavailable: Lost")
+    ) == (1768, 1791, "Image unavailable: Lost")
     if adapter == "brz":
         check_vault(source, vault)
     else:
         check_api_vault(baseline, vault, profile_version="4")
+    # The expected-fact builder's copied-origin boundary must distinguish the
+    # newly inserted opening bracket from both authored URL occurrences.
+    raw = RAW.decode()
+    origins = list(range(len(raw)))
+    intermediate = tables(raw, origins=origins, current_tables=True)
+    cursor = 0
+    for suffix in ("Ordinary", "Styled"):
+        source_start = raw.index("|" + CURL + "|" + suffix + "|") + 1
+        source_bracket = source_start + CURL.index("[")
+        adapted_start = intermediate.index(NATIVE_CURL, cursor)
+        assert origins[adapted_start : adapted_start + len(NATIVE_CURL)] == [
+            None,
+            *range(source_start, source_bracket),
+            *range(source_bracket + 1, source_start + len(CURL)),
+        ]
+        cursor = adapted_start + len(NATIVE_CURL)
 
 
 @pytest.mark.parametrize("adapter", ("brz", "api"))
@@ -275,10 +359,14 @@ def test_current_tables_refuse_rehashed_output_claims(
             else:
                 claim["affected"] = list(reversed(claim["affected"]))
     elif damage == "row-context":
-        document["references"][0]["table_cell"] = False
+        document["references"][2]["table_cell"] = False
         path = vault / document["owner_target"]
+        original_row = "|[[Home — Entry.md\\|Target]]\n".encode()
+        assert original_row in path.read_bytes()
         path.write_bytes(
-            path.read_bytes().replace(b"Entry.md\\|Target", b"Entry.md|Target", 1)
+            path.read_bytes().replace(
+                original_row, original_row.replace(b"md\\|", b"md|"), 1
+            )
         )
     elif damage == "code-origin":
         warning = next(

@@ -253,7 +253,7 @@ def _expanded_origins(line):
     return origins
 
 
-def _inline_regions(body, *, _views=None, _paragraphs=None):
+def _inline_regions(body, *, _views=None, _paragraphs=None, _block_owners=None):
     """Resolve leaf block ownership before scanning any inline delimiters.
 
     CommonMark HTML-comment blocks own the complete closing line (or the rest
@@ -391,6 +391,8 @@ def _inline_regions(body, *, _views=None, _paragraphs=None):
         if protected:
             mask[match.start() : match.end()] = " " * len(line)
         elif content.strip():
+            if _block_owners is not None:
+                _block_owners[match.start()] = (container_owner, bool(listing))
             if _views is not None:
                 expanded = line.expandtabs(4)
                 prefix = len(expanded) - len(content)
@@ -422,6 +424,15 @@ def paragraph_intervals(body):
     paragraphs = []
     _inline_regions(body, _paragraphs=paragraphs)
     return paragraphs
+
+
+def block_views(body):
+    """Active leaf lines and their established quote/list container ownership."""
+    views, owners = [], {}
+    _inline_regions(body, _views=views, _block_owners=owners)
+    return [
+        (start, end, content, *owners[start]) for start, end, content, _origins in views
+    ]
 
 
 def generated_boundary(prefix):
