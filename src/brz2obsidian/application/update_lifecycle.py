@@ -520,7 +520,7 @@ def _review_explanation(result):
         (
             "selected_provider_invalid",
             "A selected appearance-category chain reaches an invalid declaration.",
-            "Follow the selected appearance-category chain to the note with the invalid declaration. Choose a valid category membership there or leave its appearance category blank, then refresh the review. A nearer owned icon does not repair the independent declaration.",
+            "Follow the selected appearance-category chain to the note with the invalid declaration. Choose a valid category membership there or leave its appearance category blank. Repair or clear any invalid icon declaration, including a missing or unsuitable image target, then refresh the review. A nearer owned icon does not repair the independent declaration.",
         ),
     )
     selected = tuple(

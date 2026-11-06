@@ -262,7 +262,9 @@ def fresh_resume(vault, output, *, expected_code="unchanged"):
         check=True,
         capture_output=True,
         text=True,
-        timeout=120,
+        # Finite engineering bound for both real load and resume, not a product
+        # performance requirement. The retained phased run exceeded 120s total.
+        timeout=600,
     )
     summary = json.loads(process.stdout)
     assert summary == {
@@ -599,7 +601,11 @@ def exercise_partial_update(update_root, operations, vault, original):
     targets = {r["item_key"]: r for r in record["item_targets"]}
     assert sum(r["created"] for r in targets.values()) == 10
     assert len({r["relative_path"] for r in targets.values() if r["created"]}) == 10
-    assert targets[IDS["B"]]["relative_path"] == "Categories/B local.md"
+    # The exact explicitly selected Incoming DATA record retains the source
+    # inventory. The native source identity and chosen bytes bind the local path.
+    assert targets[IDS["B"]]["relative_path"] == "Categories/B.md"
+    assert b_properties["source_collection_id"] == BRAIN
+    assert b_properties["source_item_id"] == IDS["B"]
     assert not targets[IDS["U"]]["created"]
     assert {
         (r["definition_key"], r["item_key"])

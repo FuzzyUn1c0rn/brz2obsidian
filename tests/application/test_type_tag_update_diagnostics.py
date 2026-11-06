@@ -7,6 +7,7 @@ from tests.reconciliation.test_resolution import action
 from tests.reconciliation.test_type_tag_dependencies import (
     facts_for,
     invalid_provider_graph,
+    note,
     provider_cycle_graph,
     selected_candidate,
 )
@@ -93,3 +94,46 @@ def test_selected_invalid_upstream_provider_guides_repair_to_the_chain():
     assert "note with the invalid declaration" in blocked.guidance
     assert "this note" not in blocked.guidance.lower()
     assert "[[Missing]]" not in blocked.summary + blocked.guidance
+
+
+def test_invalid_upstream_icon_guidance_covers_the_actual_declaration_and_repair():
+    secret = "Bearer private-icon-fixture"
+    for repaired in (False, True):
+        baseline, incoming, current = invalid_provider_graph()
+        current["Categories/A.md"] = note(
+            "category:A", icon=None if repaired else secret
+        )
+        # Provider and memberships are already valid and blank. The independent
+        # invalid icon remains visible beyond B's nearer valid owned icon.
+        assert (
+            b"categories: []\nappearance_category: null" in current["Categories/A.md"]
+        )
+        facts = facts_for(baseline, incoming, current)
+        prospective = facts_for(
+            baseline,
+            current | {"Categories/C.md": incoming["Categories/C.md"]},
+            current,
+        )
+        prepared = preparation(facts)
+        change = next(
+            c for c in prepared.review.proposal.changes if c.item_id == "category:C"
+        )
+        result = Operations().resolve_update(
+            prepared,
+            action(
+                prepared.review,
+                change,
+                choice="incoming",
+                candidate=selected_candidate(facts, prospective, "category:C"),
+            ),
+        )
+        assert result.code == "accepted" and result.ready is repaired
+        if repaired:
+            assert not result.findings
+        else:
+            assert result.findings == ("selected_provider_invalid",)
+            assert "invalid icon declaration" in result.guidance
+            assert "image target" in result.guidance
+            assert "note with the invalid declaration" in result.guidance
+            assert "category membership" in result.guidance
+        assert secret not in result.summary + result.guidance
