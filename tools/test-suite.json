@@ -322,7 +322,19 @@
     "tests/sources/test_local_api_read_view.py::test_view_metadata_observation_is_pinned_even_after_restoration",
     "tests/sources/test_local_api_read_view.py::test_view_keeps_complete_checks_forceful_for_unrequested_same_stat_corruption",
     "tests/sources/test_local_api_read_view.py::test_session_closure_revokes_view_and_open_stream_before_cleanup",
-    "tests/sources/test_local_api_read_view.py::test_view_rejected_at_nested_admission_cannot_later_be_revived"
+    "tests/sources/test_local_api_read_view.py::test_view_rejected_at_nested_admission_cannot_later_be_revived",
+    "tests/reconciliation/test_type_tag_dependencies.py",
+    "tests/reconciliation/test_file_role_facts.py",
+    "tests/reconciliation/test_readonly_resource_origin.py",
+    "tests/application/test_type_tag_selected_appearance.py",
+    "tests/application/test_type_tag_update_diagnostics.py",
+    "tests/application/test_selected_peer_context.py",
+    "tests/application/test_type_tag_video_choices.py",
+    "tests/application/test_format_onboarding_context.py",
+    "tests/application/test_undo_metadata_only_resource.py",
+    "tests/application/test_recovery_both_image_roles.py",
+    "tests/application/test_update_memo_authority.py::test_first_memo_over_completed_source_result_keeps_choices_after_prior_policy_edit",
+    "tests/application/test_type_tag_updates.py::test_current_type_tag_vault_prepares_same_source_without_format_transition"
   ],
   "schema_version": 1
 }
