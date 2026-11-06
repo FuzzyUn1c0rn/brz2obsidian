@@ -7,8 +7,26 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from threading import get_ident
 
+from brz2obsidian.contracts import MigrationFailed, MigrationRefused
+
 from .capture import canonical
 from .errors import failure, refuse
+
+
+def with_secondary(primary, secondary):
+    """Retain the primary class and ordered safe findings during finalization.
+
+    Only source-owned typed failures are supplied as secondary errors. Caller
+    exceptions and control signals retain their identity with safe code notes;
+    arbitrary underlying exception text is never included.
+    """
+    if isinstance(primary, (MigrationFailed, MigrationRefused)):
+        return type(primary)(primary.issues + secondary.issues, primary.receipt)
+    primary.add_note(
+        "Additional captured-source failure: "
+        + ", ".join(issue.code for issue in secondary.issues)
+    )
+    return primary
 
 
 def context_bytes(session):
@@ -174,17 +192,6 @@ class CaptureReadView:
                 raw, self, path, owner, dict(self.pins.files)[key]
             )
             self.session._streams.append(stream)
-            try:
-                yield stream
-            finally:
-                try:
-                    stream.close()
-                finally:
-                    # A failed close can leave the descriptor open. Keep it
-                    # registered so session teardown can revoke/retry it.
-                    if stream.closed:
-                        self.session._streams.remove(stream)
-                    self.stream = None
         except OSError, ValueError, KeyError, TypeError:
             self.failed = True
             raise failure(
@@ -193,11 +200,30 @@ class CaptureReadView:
         except BaseException:
             self.failed = True
             raise
+        try:
+            try:
+                yield stream
+            except BaseException as primary:
+                self.failed = True
+                try:
+                    stream.close()
+                except (MigrationFailed, MigrationRefused) as secondary:
+                    raise with_secondary(primary, secondary) from None
+                raise
+            else:
+                stream.close()
+        finally:
+            # A failed close can leave the descriptor open. Keep it registered
+            # so session teardown can revoke/retry it.
+            if stream.closed:
+                self.session._streams.remove(stream)
+            self.stream = None
 
     def __exit__(self, *exc):
         if not self.entered or self.closed or self.thread != get_ident():
             self.failed = True
             refuse("The captured read view cannot close from this context")
+        primary = exc[1]
         try:
             if exc[0] is not None:
                 self.failed = True
@@ -205,10 +231,23 @@ class CaptureReadView:
                 if self.stream is not None:
                     self.failed = True
                     self.stream.close()
+            except BaseException as closing:  # noqa: BLE001 - retain the primary/control exception while forcing complete final verification.
+                primary = (
+                    with_secondary(primary, closing)
+                    if primary is not None
+                    and isinstance(closing, (MigrationFailed, MigrationRefused))
+                    else closing
+                )
+                raise primary from None
             finally:
                 # Also verify after stream-close failures; output validation
                 # cannot begin until this original complete check finishes.
-                self.session.verify_consistency()
+                try:
+                    self.session.verify_consistency()
+                except (MigrationFailed, MigrationRefused) as secondary:
+                    if primary is not None:
+                        raise with_secondary(primary, secondary) from None
+                    raise
             if self.failed and exc[0] is None:
                 refuse("The captured read view failed and cannot be reused")
         finally:
@@ -271,7 +310,7 @@ class VerifiedStream:
         try:
             # An early close still checks the consumed prefix and boundedly
             # drains the remaining bytes. A revoked/failed view cannot succeed.
-            if self.view.session.closed:
+            if self.view.session.closed or self.view.failed:
                 self.view.failed = True
             else:
                 while not self.finished:

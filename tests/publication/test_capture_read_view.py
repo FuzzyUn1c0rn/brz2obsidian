@@ -203,9 +203,23 @@ def test_publication_view_faults_cannot_publish_complete_output(
 
     monkeypatch.setattr(Path, "open", fault_open)
     try:
-        with pytest.raises((MigrationRefused, MigrationFailed)) as caught:
+        expected_error = (
+            MigrationFailed
+            if fault in {"read", "close", "close_before"}
+            else MigrationRefused
+        )
+        with pytest.raises(expected_error) as caught:
             publish(artifacts, session, destination)
         assert state["injected"]
+        if expected_error is MigrationFailed:
+            issue = caught.value.issues[0]
+            assert issue.code == "api_payload_read_failed"
+            assert issue.guidance == (
+                "An attachment in the temporary copy of the Brain could not be read completely. "
+                "Check temporary-folder access. Save the diagnostic report and report the problem if it continues."
+            )
+            if fault == "read":
+                assert issue.message == "Captured payload could not be read safely"
         assert caught.value.receipt is None
         assert "CANARY" not in str(caught.value)
         assert not destination.exists()

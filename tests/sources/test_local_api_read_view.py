@@ -415,3 +415,114 @@ def test_historical_profile_replay_view_keeps_literal_bytes_and_identity(
         session.verify_consistency()
     finally:
         session.close()
+
+
+@pytest.mark.parametrize(
+    "primary,secondary,secondary_code",
+    [
+        ("read", "close", "api_payload_read_failed"),
+        ("read", "final_io", "api_capture_read_failed"),
+        ("read", "final_integrity", "invalid_source"),
+        ("interrupt", "final_io", "api_capture_read_failed"),
+        ("escaped", "final_io", "api_capture_read_failed"),
+    ],
+)
+def test_view_retains_primary_failure_and_safe_secondary_closure_findings(
+    capture, monkeypatch, primary, secondary, secondary_code
+):
+    session, _, selected = capture
+    real_open = Path.open
+    signal = KeyboardInterrupt()
+    state = {
+        "armed": False,
+        "primary": False,
+        "secondary": False,
+        "closing": False,
+        "final_opens": 0,
+    }
+    raw_streams = []
+
+    class FaultyFile:
+        def __init__(self, raw):
+            self.raw = raw
+
+        def __getattr__(self, name):
+            return getattr(self.raw, name)
+
+        def read(self, size):
+            if not state["primary"]:
+                state["primary"] = True
+                if primary == "interrupt":
+                    raise signal
+                if primary != "escaped":
+                    raise OSError("PRIVATE_READ_CANARY")
+            return self.raw.read(size)
+
+        def close(self):
+            if primary == "escaped" and not state["closing"]:
+                state["closing"] = True
+                raise OSError("PRIVATE_ESCAPED_CLOSE_CANARY")
+            if secondary == "close" and not state["secondary"]:
+                state["secondary"] = True
+                raise OSError("PRIVATE_CLOSE_CANARY")
+            self.raw.close()
+            if secondary == "final_integrity" and not state["secondary"]:
+                state["secondary"] = True
+                selected.write_bytes(b"X\nB\n")
+
+    def fault_open(path, *args, **kwargs):
+        if state["armed"] and path == selected and args and args[0] == "rb":
+            if state["primary"]:
+                state["final_opens"] += 1
+                if secondary == "final_io" and not state["secondary"]:
+                    state["secondary"] = True
+                    raise OSError("PRIVATE_FINAL_CANARY")
+                return real_open(path, *args, **kwargs)
+            raw = real_open(path, *args, **kwargs)
+            raw_streams.append(raw)
+            return FaultyFile(raw)
+        return real_open(path, *args, **kwargs)
+
+    expected = KeyboardInterrupt if primary == "interrupt" else MigrationFailed
+    try:
+        with monkeypatch.context() as faults:
+            faults.setattr(Path, "open", fault_open)
+            with (
+                pytest.raises(expected) as caught,
+                session.payload_read_view() as reader,
+            ):
+                # Entry completes unmodified; inject only at the public selected
+                # stream and the subsequent fresh full-check descriptor.
+                state["armed"] = True
+                if primary == "escaped":
+                    context = reader.open_payload(ASSET)
+                    stream = context.__enter__()
+                    assert stream.read(1) == b"A"
+                else:
+                    with reader.open_payload(ASSET) as stream:
+                        stream.read(1)
+        assert state["primary"] and state["secondary"] and state["final_opens"]
+        if primary == "interrupt":
+            assert caught.value is signal
+            assert secondary_code in " ".join(caught.value.__notes__)
+        else:
+            assert [issue.code for issue in caught.value.issues] == [
+                "api_payload_read_failed",
+                secondary_code,
+            ]
+            assert caught.value.issues[0].message == (
+                "Captured payload stream could not close safely"
+                if primary == "escaped"
+                else "Captured payload could not be read safely"
+            )
+            assert "temporary-folder access" in caught.value.issues[0].guidance
+        assert "CANARY" not in str(caught.value)
+        assert "CANARY" not in " ".join(getattr(caught.value, "__notes__", ()))
+    finally:
+        selected.write_bytes(RAW)
+        if primary == "escaped":
+            context.__exit__(None, None, None)
+    with session.payload_read_view() as reader, reader.open_payload(ASSET) as stream:
+        assert stream.read() == RAW
+    session.close()
+    assert all(raw.closed for raw in raw_streams)
