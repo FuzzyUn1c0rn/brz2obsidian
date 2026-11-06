@@ -280,3 +280,16 @@ def test_notice_label_entities_keep_following_real_references_visible_to_updates
         links = interpret_links(ExactContent(data=document.text.encode()),document_id="notice",
             source_path="Home.md",path_mode="relative",targets=(),target_facts=(),inventory="partial",output_format=8)
         assert links.status == "supported" and len(links.occurrences) == 1
+
+
+def test_current_api_bom_compound_row_and_declared_absence_bind_together():
+    missing = "![Lost *label*](.data/md-images/lost.png#$width=70p$)"
+    raw = ("\ufeffCafé <X/>\r\n\r\n" + f'|{missing}|{missing}|`![code](.data/md-images/code.png) x|y`|:(table="column-widths:-1,0,0,0;justification:default"):\r\n|a|b|c|\r\n' + f"\r\n![Declared](.data/md-images/{IMAGE}.png)\r\n").encode()
+    api = note_api(raw)
+    api.attachments[IMAGE] = attachment(IMAGE,HOME,12,IMAGE+".png",length=17)
+    api.overrides[f"/api/attachments/{BRAIN}/{IMAGE}/file-content"] = (404,{"error":"missing"})
+    with api_server(api) as (_,address):
+        module = LocalApiSourceModule(LocalApiConfig(api_url=address),credentials=lambda:KEY,profile_version="4")
+        with module.open(LocalApiSourceRef(BRAIN)) as session:
+            assert session.snapshot.documents[0].text.count("Image unavailable:") == 3
+            session.verify_consistency()

@@ -2,6 +2,7 @@
 
 import json
 import re
+import string
 from hashlib import sha256
 
 from brz2obsidian.contracts import SourceFinding, TextAdaptation
@@ -22,8 +23,16 @@ def _notice(reference, location):
     label = " ".join(label.split())
     # Escape all ASCII punctuation with numeric entities. Decoded text is never
     # reparsed as Markdown; pipes cannot change native table cell boundaries.
-    label = re.sub(r"[^\w\s]", lambda m: f"&#{ord(m[0])};", label)
+    label = label.translate({ord(char):f"&#{ord(char)};" for char in string.punctuation})
     return "Image unavailable: " + label
+
+
+def _observation(value, basis):
+    if basis.startswith("api_"):
+        from .local_api.capture import canonical
+
+        return canonical(value).decode("utf-8")
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def adapt_unavailable_images(document, assets, *, basis, members=(), provenance=None, preparation=None, declared_absence=None):
@@ -136,7 +145,7 @@ def adapt_unavailable_images(document, assets, *, basis, members=(), provenance=
         absence = absence_facts[reference.start]
         findings.append(SourceFinding(kind="unavailable_image_reference", rule_id="thebrain.unavailable-declared-image.v1" if "asset_id" in absence else RULE,
             affected=(absence["asset_id"],) if "asset_id" in absence else (document.owner, document.key), evidence=document.evidence,
-            observed_json=json.dumps({"owner":document.owner,"document":document.key,
+            observed_json=_observation({"owner":document.owner,"document":document.key,
                 "source_reference":{"start":start,"end":end,"before":original[start:end],
                     "source_digest":_digest(original),"uri":raw_ref.target,"label":raw_ref.display_text,
                     "destination_start":source_position(raw_ref.destination_start,literal_edits),
@@ -147,7 +156,7 @@ def adapt_unavailable_images(document, assets, *, basis, members=(), provenance=
                     "text":notice,"document_digest":_digest(final)},
                 "absence":{**absence,"location":location},
                 "composition":{"flat_edit":index,"base_edits":group_proofs.get(edit.start,[])}},
-                ensure_ascii=False,sort_keys=True,separators=(",",":"))))
+                basis)))
     return document.model_copy(update={"text":final,"text_digest":_digest(final),
         "text_adaptations":tuple(edits),"references":trace_adapted_references(final,edits,
             allow_qualified=True,generated_code_ranges=code_ranges)}), tuple(findings)
