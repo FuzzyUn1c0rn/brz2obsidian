@@ -2441,12 +2441,15 @@ def check_actual_files(vault, record, targets, names, raw, summary):
         for match in re.finditer(r"!\[[^\]]*\]\((<[^>]+>|[^\s)]+)", text):
             if active[match.start() : match.start() + 2] != "![":
                 continue
-            destination = unquote(match[1].strip("<>"))
-            if not re.match(r"[a-z]+://", destination, re.IGNORECASE):
-                resolved = posixpath.normpath(
-                    posixpath.join(posixpath.dirname(name), destination)
-                )
-                assert resolved in actual, "actual inline image destination"
+            destination = match[1].strip("<>")
+            # External authority belongs to the authored spelling; decoding a
+            # relative path must not turn it into an external exemption.
+            if re.match(r"(?:[a-z]+://|[a-z]:[\\/])", destination, re.IGNORECASE):
+                continue
+            resolved = posixpath.normpath(
+                posixpath.join(posixpath.dirname(name), unquote(destination))
+            )
+            assert resolved in actual, "actual inline image destination"
     return len(actual)
 
 
