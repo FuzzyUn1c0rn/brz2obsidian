@@ -107,6 +107,21 @@ TABLE_LIST_BOUNDARIES = (
     + LINK
     + "\n"
 )
+NATIVE_OWNER_CONTROLS = (
+    "\nA|B\n---|---\n2. item\n   C|D\n   ---|---\n   |"
+    + LINK
+    + "\n"
+    + LINK
+    + "\n\nParagraph.\n2. item\n   C|D\n   ---|---\n   |"
+    + LINK
+    + "\n"
+    + LINK
+    + "\n\n2. C|D\n---|---\n|"
+    + LINK
+    + "\n"
+    + LINK
+    + "\n"
+)
 RAW = (
     'Before.\n|||:(table="column-widths:-1,0,0"):\n|one|two|\nAfter.\n\n'
     + "|First|"
@@ -127,6 +142,7 @@ RAW = (
     + "\n"
     + CONTAINER_TABLES
     + TABLE_LIST_BOUNDARIES
+    + NATIVE_OWNER_CONTROLS
     + '\n|||:(table="opaque:origin"):\n'
     + "|![Lost](.data/md-images/lost.png)|`x|y`|\n\n"
     + "After compound. "
@@ -154,6 +170,7 @@ EXPECTED = (
     + "\n"
     + CONTAINER_TABLES
     + TABLE_LIST_BOUNDARIES
+    + NATIVE_OWNER_CONTROLS
     + "\n| | |\n|---|---|\n"
     + "|Image unavailable: Lost|<code>x&#124;y</code>|\n\n"
     + "After compound. "
@@ -197,7 +214,13 @@ REFERENCE_FACTS = [
     (1941, 1986, False),
     (2002, 2047, True),
     (2083, 2128, False),
-    (2211, 2256, False),
+    (2172, 2217, True),
+    (2218, 2263, False),
+    (2306, 2351, True),
+    (2352, 2397, True),
+    (2415, 2460, True),
+    (2461, 2506, True),
+    (2589, 2634, False),
 ]
 
 
@@ -302,19 +325,19 @@ def test_current_table_complete_output_keeps_raw_rows_and_findings(
         proof["source_reference"]["end"],
         proof["source_reference"]["before"],
     ) == (
-        2183 + shift,
-        2216 + shift,
+        2561 + shift,
+        2594 + shift,
         "![Lost](.data/md-images/lost.png)",
     )
     assert (
         proof["intermediate_reference"]["start"],
         proof["intermediate_reference"]["end"],
-    ) == (2147, 2180)
+    ) == (2525, 2558)
     assert (
         proof["notice"]["start"],
         proof["notice"]["end"],
         proof["notice"]["text"],
-    ) == (2147, 2170, "Image unavailable: Lost")
+    ) == (2525, 2548, "Image unavailable: Lost")
     if adapter == "brz":
         check_vault(source, vault)
     else:

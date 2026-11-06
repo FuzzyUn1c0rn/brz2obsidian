@@ -195,14 +195,18 @@ _HTML_TOKEN = re.compile(
 _CURRENT_HTML_TOKEN = re.compile(_HTML_TOKEN.pattern.replace(_HTML_SPACE, r"\s"))
 
 
-def _line_view(line, *, interrupt=False):
+def _line_view(line, *, interrupt=False, empty_lists=False):
     """A bounded container view; slicing never alters raw source coordinates."""
     # Columns govern block indentation only. Inline syntax, authored bytes and
     # offsets still come exclusively from the untouched original body below.
     content, owner = line.expandtabs(4), []
     while content:
         quote = re.match(r"^ {0,3}> ?", content)
-        listing = re.match(r"^( {0,3}(?:[-+*]|[0-9]{1,9}[.)]))( +)", content)
+        listing = re.match(
+            r"^( {0,3}(?:[-+*]|[0-9]{1,9}[.)]))"
+            + (r"( +|(?=\r?\n?$))" if empty_lists else r"( +)"),
+            content,
+        )
         if quote:
             content = content[quote.end() :]
             owner.append(("quote", 0))
@@ -213,7 +217,8 @@ def _line_view(line, *, interrupt=False):
                 break
             # CommonMark 5.2: a wide marker gap consumes one space, leaving
             # at least four as code indentation. Never fabricate an opener.
-            indent = len(listing[1]) + (len(listing[2]) if len(listing[2]) <= 4 else 1)
+            gap = len(listing[2]) or 1
+            indent = len(listing[1]) + (gap if gap <= 4 else 1)
             content = content[indent:]
             owner.append(("indent", indent))
         else:
@@ -253,7 +258,46 @@ def _expanded_origins(line):
     return origins
 
 
-def _inline_regions(body, *, _views=None, _paragraphs=None, _block_owners=None):
+def _native_table_cells(content):
+    """Native edge pipes are optional; only escaped pipes shelter separators."""
+    content = content.strip()
+    parts, start, cursor = [], 0, 0
+    while cursor < len(content):
+        if content[cursor] == "\\":
+            cursor += 2
+            continue
+        if content[cursor] == "|":
+            parts.append(content[start:cursor])
+            start = cursor + 1
+        cursor += 1
+    if not parts:
+        return None
+    parts.append(content[start:])
+    if parts[0] == "":
+        parts.pop(0)
+    if parts and parts[-1] == "":
+        parts.pop()
+    return parts
+
+
+def _native_table_header(header, separator):
+    if header.startswith("    ") or separator.startswith("    "):
+        return False
+    separator = separator.rstrip("\r\n")
+    if any(character not in " -:|\t" for character in separator):
+        return False
+    cells = _native_table_cells(header)
+    alignment = _native_table_cells(separator)
+    if alignment is None:
+        alignment = [separator.strip()]
+    return bool(
+        cells
+        and len(cells) == len(alignment)
+        and all(re.fullmatch(r"\s*:?-+:?\s*", value) for value in alignment)
+    )
+
+
+def _inline_regions(body, *, _views=None, _paragraphs=None, _tables=None):
     """Resolve leaf block ownership before scanning any inline delimiters.
 
     CommonMark HTML-comment blocks own the complete closing line (or the rest
@@ -270,7 +314,11 @@ def _inline_regions(body, *, _views=None, _paragraphs=None, _block_owners=None):
     regions = []
     previous_quotes = 0
     list_indent = 0
-    for match in re.finditer(r"[^\r\n]*(?:\r\n|\r|\n|$)", body):
+    native_owner, native_separator, block_owner = None, None, ()
+    matches = re.finditer(r"[^\r\n]*(?:\r\n|\r|\n|$)", body)
+    if _tables is not None:
+        matches = list(matches)
+    for number, match in enumerate(matches):
         line = match[0]
         if not line:
             continue
@@ -300,20 +348,48 @@ def _inline_regions(body, *, _views=None, _paragraphs=None, _block_owners=None):
                 previous_quotes = sum(kind == "quote" for kind, _ in owner)
                 list_indent = sum(width for kind, width in owner if kind == "indent")
                 paragraph = False
+                if _tables is not None:
+                    native_owner, native_separator, block_owner = None, None, owner
                 continue
             fence = comment = None
-        continuing = _owned_block_view(line, paragraph_owner) if paragraph else None
+        prior_owner = (
+            native_owner
+            if native_owner is not None
+            else paragraph_owner
+            if paragraph
+            else block_owner
+            if _tables is not None
+            else ()
+        )
+        continuing = (
+            _owned_block_view(line, prior_owner)
+            if paragraph or native_owner is not None or prior_owner
+            else None
+        )
+        parent_owner = prior_owner if continuing is not None else ()
+        parent_content = continuing if continuing is not None else line.expandtabs(4)
+        separator_line = (
+            native_owner is not None
+            and match.start() == native_separator
+            and continuing is not None
+        )
         # The reviewed conservative owner boundary does not extend a missing
         # quote/list prefix into an ordered declaration route. This is a bounded
         # source-policy limit, not a claim about all CommonMark lazy paragraphs.
-        container_content, quotes, listing, container_owner = _line_view(
-            continuing if continuing is not None else line,
-            interrupt=continuing is not None,
-        )
-        if continuing is not None:
+        if separator_line:
+            container_content, container_owner = continuing, prior_owner
+            quotes = sum(kind == "quote" for kind, _ in prior_owner)
+            listing = 0
+        else:
+            container_content, quotes, listing, container_owner = _line_view(
+                continuing if continuing is not None else line,
+                interrupt=continuing is not None and paragraph,
+                empty_lists=_tables is not None and not paragraph,
+            )
+        if continuing is not None and not separator_line:
             # Existing prefixes precede a new marker. A non-1 ordered marker
             # cannot interrupt that paragraph within its actual quote/list.
-            container_owner = paragraph_owner + container_owner
+            container_owner = prior_owner + container_owner
             quotes = sum(kind == "quote" for kind, _ in container_owner)
         if quotes != previous_quotes:
             list_indent = 0
@@ -351,7 +427,7 @@ def _inline_regions(body, *, _views=None, _paragraphs=None, _block_owners=None):
             # unlike inline declarations, refusal needs no complete closer.
             # Existing code/comment leaves were handled before container parsing.
             raise AssertionError("raw-derived active HTML outside literal policy")
-        elif (
+        elif not separator_line and (
             content.startswith(("    ", "\t"))
             and (not paragraph or listing)
             or re.fullmatch(
@@ -362,6 +438,47 @@ def _inline_regions(body, *, _views=None, _paragraphs=None, _block_owners=None):
             and re.fullmatch(r" {0,3}(?:=+|-+)[ \t]*", content.rstrip("\r\n"))
         ):
             protected = True
+        native_line = False
+        if _tables is not None:
+            if native_owner is not None:
+                if not separator_line and (
+                    protected
+                    or not content.strip()
+                    or container_owner != native_owner
+                    or listing
+                    or re.match(r" {0,3}#{1,6}(?:[ \t]|$)", content)
+                ):
+                    native_owner, native_separator = None, None
+                else:
+                    native_line = True
+            if native_owner is None and number + 1 < len(matches):
+                following = matches[number + 1]
+                # A valid header/separator precedes fresh list/quote admission.
+                # Try the current parent first, then a newly entered container.
+                for candidate, candidate_owner in (
+                    (parent_content, parent_owner),
+                    (content, container_owner),
+                ):
+                    alignment = _owned_block_view(following[0], candidate_owner)
+                    if alignment is not None and _native_table_header(
+                        candidate, alignment
+                    ):
+                        content, container_owner = candidate, candidate_owner
+                        quotes = sum(kind == "quote" for kind, _ in container_owner)
+                        list_indent = sum(
+                            width for kind, width in container_owner if kind == "indent"
+                        )
+                        listing, protected = 0, False
+                        fence = comment = None
+                        native_owner, native_separator = (
+                            container_owner,
+                            following.start(),
+                        )
+                        native_line = True
+                        break
+            if native_line:
+                _tables.append((match.start(), match.end()))
+            block_owner = container_owner
         boundary = (
             protected
             or not content.strip()
@@ -391,8 +508,6 @@ def _inline_regions(body, *, _views=None, _paragraphs=None, _block_owners=None):
         if protected:
             mask[match.start() : match.end()] = " " * len(line)
         elif content.strip():
-            if _block_owners is not None:
-                _block_owners[match.start()] = (container_owner, bool(listing))
             if _views is not None:
                 expanded = line.expandtabs(4)
                 prefix = len(expanded) - len(content)
@@ -411,7 +526,13 @@ def _inline_regions(body, *, _views=None, _paragraphs=None, _block_owners=None):
             if re.match(r" {0,3}#{1,6}(?:[ \t]|$)", content):
                 regions.append((region, match.end()))
                 region = None
-        paragraph = not (protected or not content.strip())
+        paragraph = not (
+            protected
+            or not content.strip()
+            or native_line
+            or _tables is not None
+            and re.match(r" {0,3}#{1,6}(?:[ \t]|$)", content)
+        )
         paragraph_owner = container_owner if paragraph else ()
         previous_quotes = quotes
     if region is not None:
@@ -426,13 +547,16 @@ def paragraph_intervals(body):
     return paragraphs
 
 
-def block_views(body):
-    """Active leaf lines and their established quote/list container ownership."""
-    views, owners = [], {}
-    _inline_regions(body, _views=views, _block_owners=owners)
-    return [
-        (start, end, content, *owners[start]) for start, end, content, _origins in views
-    ]
+def native_table_intervals(body):
+    """Native table ownership, with table-specific interruption and block state.
+
+    Ordinary paragraph callers use the unchanged default scanner. Only this
+    collector recognizes native headers before fresh containers, enters table
+    state and carries subsequent list/quote ownership through outdents.
+    """
+    rows = []
+    _inline_regions(body, _tables=rows)
+    return rows
 
 
 def generated_boundary(prefix):
