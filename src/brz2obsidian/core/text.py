@@ -116,6 +116,7 @@ def validate_image_notice_evidence(snapshot):
                 if edit.kind not in kinds
             }
             actual_indices, replacements, source_spans = set(), [], []
+            claimed_base_starts = set()
             for observed in observations:
                 occurrence = observed["source_reference"]
                 intermediate = observed["intermediate_reference"]
@@ -154,6 +155,7 @@ def validate_image_notice_evidence(snapshot):
                     _require(edit.start <= prior.start < prior.end <= edit.end)
                     _require(prior.start not in base or base[prior.start] == prior)
                     base[prior.start] = prior
+                    claimed_base_starts.add(prior.start)
                     inserted |= prior.kind == "markdown_insert"
                 _require(inserted == (edit.kind == "markdown_insert_image_unavailable"))
                 source_spans.append((occurrence["start"], occurrence["end"]))
@@ -168,7 +170,24 @@ def validate_image_notice_evidence(snapshot):
                 )
             )
             intermediate_text = source
-            base_edits = tuple(base[key] for key in sorted(base))
+            base_edits, base_delta = [], 0
+            for key in sorted(base):
+                edit = base[key]
+                # Compound evidence already claims intermediate coordinates.
+                # Only standalone edits derived from final flat edits need
+                # intermediate positions; preserve claimed positions to validate.
+                base_edits.append(
+                    edit
+                    if key in claimed_base_starts
+                    else edit.model_copy(
+                        update={
+                            "adapted_start": edit.start + base_delta,
+                            "adapted_end": edit.start + base_delta + len(edit.after),
+                        }
+                    )
+                )
+                base_delta += len(edit.after) - len(edit.before)
+            base_edits = tuple(base_edits)
             for edit in reversed(base_edits):
                 intermediate_text = (
                     intermediate_text[: edit.start]

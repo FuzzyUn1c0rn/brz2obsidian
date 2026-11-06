@@ -354,7 +354,11 @@
     "tests/local_acceptance/test_internal_file_audit.py::test_independent_old_profile_file_grammar_does_not_inherit_current_admission",
     "tests/sources/test_unavailable_images.py",
     "tests/local_acceptance/test_unavailable_image_audit.py",
-    "tests/local_acceptance/test_current_table_audit.py"
+    "tests/local_acceptance/test_current_table_audit.py",
+    "tests/application/test_image_notice_composition.py::test_public_image_notice_composes_with_separate_table[imported-after-brz]",
+    "tests/application/test_image_notice_composition.py::test_public_image_notice_composes_with_separate_table[imported-after-api]",
+    "tests/application/test_image_notice_composition.py::test_public_image_notice_composes_with_separate_table[ragged-after-brz]",
+    "tests/application/test_image_notice_composition.py::test_public_image_notice_composes_with_separate_table[ragged-after-api]"
   ],
   "schema_version": 1
 }
