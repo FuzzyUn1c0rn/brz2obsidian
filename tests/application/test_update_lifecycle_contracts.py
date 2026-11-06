@@ -817,12 +817,14 @@ def recorded_history(identity=None, locator=None):
     )
 
 
-def test_module_release_change_preserves_supported_profile_route(monkeypatch):
+def test_module_release_change_preserves_supported_profile_route(tmp_path, monkeypatch):
     from dataclasses import replace
     from types import SimpleNamespace
 
     from brz2obsidian.application.wiring import default_workflow
 
+    prepared = current_source_refresh_preparation(tmp_path)
+    history = source_refresh_history(prepared)
     for release in ("10", "11"):
         workflow = default_workflow()
         workflow.binding = replace(
@@ -832,26 +834,87 @@ def test_module_release_change_preserves_supported_profile_route(monkeypatch):
             ),
         )
         operations = Operations(workflow=workflow)
-        monkeypatch.setattr(
-            operations, "inspect_history", lambda vault: recorded_history()
-        )
+        monkeypatch.setattr(operations, "inspect_history", lambda vault: history)
+        reads = []
+
+        def unavailable(*args, _reads=reads, **kwargs):
+            _reads.append(kwargs["locator"])
+            return SimpleNamespace(status="refused", code="retained_bytes_unavailable")
+
         monkeypatch.setattr(
             operations,
             "read_checkpoint_payload",
-            lambda *args, **kwargs: SimpleNamespace(
-                status="refused", code="retained_bytes_unavailable"
-            ),
+            unavailable,
         )
-        result = operations.prepare_update("unopened-vault", "unopened-source.brz")
+        result = operations.prepare_update(prepared.vault, "unopened-source.brz")
         assert (result.status, result.code) == ("refused", "preparation_unavailable")
         assert result.preparation is None and not result.ready
+        assert reads == [prepared.locator]
+
+
+def source_refresh_preparation(payload, directory):
+    """Bind the early-refusal protocol input to real versioned payload bytes."""
+    import json
+
+    from brz2obsidian.application.update_facts import assemble_facts
+
+    directory.mkdir(exist_ok=True)
+    for relative, raw in payload.items():
+        path = directory / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            assert path.read_bytes() == raw
+        else:
+            path.write_bytes(raw)
+    facts = assemble_facts(
+        payload, payload, payload, proposal_id="source-refresh", generation=1
+    )
+    prepared = preparation(facts)
+    binding = Operations().observe_reviewed_source(directory, prepared.review)
+    return UpdatePreparation.model_validate(
+        prepared.model_dump(mode="python")
+        | {
+            "vault": str(directory),
+            "payload_directory": str(directory),
+            "source_binding": binding,
+            "observed_source": SourceIdentity.model_validate(
+                json.loads(payload["migration-record.json"])["source_identity"]
+            ),
+        }
+    )
+
+
+def current_source_refresh_preparation(tmp_path):
+    from brz2obsidian.application.wiring import default_workflow
+    from tests.support.type_tag_sources import brz_source
+
+    vault = tmp_path / "current8"
+    converted = default_workflow().convert(brz_source(tmp_path / "current.brz"), vault)
+    assert converted.outcome == "clean" and converted.receipt is not None
+    payload = {
+        row.relative_path: (vault / row.relative_path).read_bytes()
+        for row in converted.receipt.manifest
+    }
+    prepared = source_refresh_preparation(payload, vault)
+    assert prepared.review.facts.baseline_identity.output_format == 8
+    assert prepared.review.facts.baseline_identity.profile_version == "11"
+    return prepared
+
+
+def source_refresh_history(prepared, *, locator=None):
+    history = recorded_history(
+        identity=prepared.review.facts.baseline_identity,
+        locator=locator or prepared.locator,
+    )
+    history.checkpoint.manifest.source = prepared.source_binding.files
+    return history
 
 
 @pytest.mark.parametrize("serialized", (False, True))
 def test_source_refresh_refuses_another_intact_association_before_source_access(
-    monkeypatch, serialized
+    tmp_path, monkeypatch, serialized
 ):
-    prepared = preparation()
+    prepared = current_source_refresh_preparation(tmp_path)
     other = prepared.locator.association.model_copy(
         update={
             "association_id": "f" * 64,
@@ -860,8 +923,11 @@ def test_source_refresh_refuses_another_intact_association_before_source_access(
     )
     locator = prepared.locator.model_copy(update={"association": other})
     operations = Operations()
+    history = source_refresh_history(prepared, locator=locator)
     monkeypatch.setattr(
-        operations, "inspect_history", lambda vault: recorded_history(locator=locator)
+        operations,
+        "inspect_history",
+        lambda vault: history,
     )
 
     def unread(*args, **kwargs):
@@ -872,6 +938,34 @@ def test_source_refresh_refuses_another_intact_association_before_source_access(
     result = operations.refresh_update(value, source="B.brz")
     assert (result.status, result.code) == ("refused", "association_mismatch")
     assert result.preparation is None and not result.ready
+    assert result.publication == "not_started"
+
+
+def test_genuine_recorded7_refresh_requires_transition_before_source_access(
+    tmp_path, monkeypatch
+):
+    from tests.support.recorded_format7 import historical_payload
+
+    payload, _ = historical_payload()
+    prepared = source_refresh_preparation(payload, tmp_path / "recorded7")
+    assert prepared.review.facts.baseline_identity.output_format == 7
+    assert prepared.review.facts.baseline_identity.profile_version == "10"
+    operations = Operations()
+    history = source_refresh_history(prepared)
+    monkeypatch.setattr(
+        operations,
+        "inspect_history",
+        lambda vault: history,
+    )
+
+    def unread(*args, **kwargs):
+        raise AssertionError("Recorded7 must transition before reading a new source")
+
+    monkeypatch.setattr(operations, "read_checkpoint_payload", unread)
+    result = operations.refresh_update(prepared, source="unread-source.brz")
+    assert (result.status, result.code) == ("refused", "format_transition_required")
+    assert result.preparation is None and not result.ready
+    assert result.publication == "not_started"
 
 
 @pytest.mark.parametrize(
