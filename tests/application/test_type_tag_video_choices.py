@@ -222,3 +222,143 @@ def test_output8_attachment_reference_choice_preserves_player_and_external_uri()
         (f"[Original resource](<{uri}>)".encode(), "external"),
         (b"![[Attachments/A.svg]]", "resolved"),
     ]
+
+
+@pytest.mark.parametrize("output_format", (7, 8))
+def test_migration_record_choice_keeps_source_markup_as_data(output_format):
+    baseline = graph_payload()
+    baseline["Categories/A.md"] = note("category:A", icon="[[Attachments/A.svg]]")
+    record = json.loads(baseline["migration-record.json"])
+    record["schema_version"] = output_format
+    baseline["migration-record.json"] = json.dumps(record).encode()
+    incoming = dict(baseline)
+    record["source_identity"].update(source_sha256="e" * 64, snapshot_digest="f" * 64)
+    record["original_evidence"] = [
+        {
+            "records": [
+                {
+                    "Note": "[Original reference](brain://api.thebrain.com/EREREREREUGBEREREREREQ/AAAAAAAAAAAAAAAAAAAAEw/version-1)",
+                    "VideoHtml": "<iframe width='100%' height='100%' src='https://www.youtube.com/embed/SYNTHVID001?start=0' frameborder='0'></iframe>",
+                }
+            ]
+        }
+    ]
+    raw = json.dumps(record).encode()
+    incoming["migration-record.json"] = raw
+    prepared = preparation(
+        assemble_facts(
+            baseline,
+            incoming,
+            baseline,
+            proposal_id="raw-evidence-record",
+            generation=1,
+        )
+    )
+    offer = next(
+        row for row in inspect_review_choices(prepared.review) if row.domain == "text"
+    )
+    selected = Operations().resolve_update_choice(
+        prepared,
+        requirement_id=offer.requirement_id,
+        choice="incoming",
+        assumptions_digest=requirement_digest(offer),
+    )
+    if output_format == 7:
+        assert selected.code == "invalid_candidate" and not selected.ready
+        return
+    assert selected.code == "accepted" and selected.ready, selected.code
+    effects = select_review_effects(selected.preparation.review)
+    assert effects.status == "selected"
+    assert (
+        next(
+            row.content.data
+            for row in effects.files
+            if row.path == "migration-record.json"
+        )
+        == raw
+    )
+    choice = next(
+        a for a in selected.preparation.review.approvals if a.domain == "text"
+    )
+    assert choice.provenance == "explicit_user" and choice.result.data == raw
+
+
+def test_migration_record_data_dialect_keeps_note_and_legacy_guards():
+    record = json.loads(graph_payload()["migration-record.json"])
+    record["original_evidence"] = [
+        {
+            "records": [
+                {
+                    "VideoHtml": "<iframe src='https://unreviewed.invalid/player'></iframe>",
+                    "Note": "[raw](brain://source/original)",
+                }
+            ]
+        }
+    ]
+    raw = json.dumps(record).encode()
+    options = {
+        "document_id": "record",
+        "path_mode": "vault",
+        "targets": (),
+        "target_facts": (),
+        "inventory": "complete",
+    }
+    parsed = interpret_links(
+        ExactContent(data=raw),
+        source_path="migration-record.json",
+        output_format=8,
+        **options,
+    )
+    assert parsed.status == "supported" and not parsed.occurrences
+    assert parsed.content.data == raw
+    legacy = interpret_links(
+        ExactContent(data=raw), source_path="migration-record.json", **options
+    )
+    assert legacy == interpret_links(
+        ExactContent(data=raw),
+        source_path="migration-record.json",
+        output_format=7,
+        **options,
+    )
+    assert legacy.status == "unsupported"
+    for path, data in (
+        ("Notes/Record.md", raw),
+        ("Nested/migration-record.json", raw),
+        ("migration-record.json", raw[:-1]),
+        ("migration-record.json", b"{"),
+        ("migration-record.json", b"{}"),
+        ("migration-record.json", b"[]"),
+        ("migration-record.json", raw.replace(b'"brz2obsidian.migration"', b'"other"')),
+        (
+            "migration-record.json",
+            raw.replace(b'"schema_version": 8', b'"schema_version": 7'),
+        ),
+        (
+            "migration-record.json",
+            raw.replace(b'"schema_version": 8', b'"schema_version": 8.0'),
+        ),
+        (
+            "migration-record.json",
+            raw.replace(b'"schema_version": 8', b'"schema_version": true'),
+        ),
+        (
+            "migration-record.json",
+            json.dumps({**record, "asset_targets": ["not a mapping"]}).encode(),
+        ),
+        ("migration-record.json", json.dumps({**record, "profile_id": None}).encode()),
+        ("migration-record.json", raw.replace(b'"source_id":', b'"unknown_id":')),
+        (
+            "migration-record.json",
+            json.dumps(
+                {
+                    "schema": "brz2obsidian.migration",
+                    "schema_version": 8,
+                    "original_evidence": record["original_evidence"],
+                }
+            ).encode(),
+        ),
+    ):
+        rejected = interpret_links(
+            ExactContent(data=data), source_path=path, output_format=8, **options
+        )
+        assert rejected.status == "unsupported", (path, data)

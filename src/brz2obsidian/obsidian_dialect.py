@@ -1,6 +1,7 @@
 """Data-only native property and file-role predicates shared by readers."""
 
 import html
+import json
 import re
 from hashlib import sha256
 from pathlib import PurePosixPath
@@ -11,6 +12,7 @@ from brz2obsidian.contracts import (
     FileRoleFacts,
     MembershipDeclarationFacts,
     ReferenceDeclarationFacts,
+    SourceIdentity,
 )
 
 IMAGE_EXTENSIONS = frozenset(
@@ -36,6 +38,34 @@ def video_player_markup(uri):
 def canonical_player_ranges(text):
     """Recognize only this closed external markup shape, never its provenance."""
     return [(match.start(), match.end()) for match in _CANONICAL_PLAYER.finditer(text)]
+
+
+def migration_record_data(text, source_path):
+    """Recognize a supported data envelope, without validating its authority."""
+    if source_path != "migration-record.json":
+        return False
+    try:
+        value = json.loads(text)
+        if (
+            not isinstance(value, dict)
+            or value.get("schema") != "brz2obsidian.migration"
+            or type(value.get("schema_version")) is not int
+            or value["schema_version"] != 8
+            or any(
+                not isinstance(value.get(key), str) or not value[key]
+                for key in ("profile_id", "profile_version")
+            )
+            or any(
+                not isinstance(value.get(key), list)
+                or not all(isinstance(row, dict) for row in value[key])
+                for key in ("item_targets", "asset_targets")
+            )
+        ):
+            return False
+        SourceIdentity.model_validate(value["source_identity"])
+    except ValueError, KeyError, TypeError:
+        return False
+    return True
 
 
 class _UniqueSafeLoader(yaml.SafeLoader):

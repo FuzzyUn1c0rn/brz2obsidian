@@ -16,7 +16,11 @@ from brz2obsidian.contracts import (
     StructureSpan,
 )
 from brz2obsidian.core.link_meanings import resolve_link_meaning
-from brz2obsidian.obsidian_dialect import canonical_player_ranges, file_roles
+from brz2obsidian.obsidian_dialect import (
+    canonical_player_ranges,
+    file_roles,
+    migration_record_data,
+)
 
 from .base_views import view_anchors
 
@@ -241,7 +245,12 @@ def interpret_links(
         issues.append("encoding_unsupported")
     masked, code_issues = _code_ranges(text)
     if output_format == 8:
-        masked.extend(canonical_player_ranges(text))
+        if source_path == "migration-record.json":
+            masked.append((0, len(text)))
+            if not migration_record_data(text, source_path):
+                issues.append("record_data_unsupported")
+        else:
+            masked.extend(canonical_player_ranges(text))
     issues.extend(code_issues)
     pattern = (
         r"!?\[\[(?P<w>[^\r\n]*?)\]\]|!?\[(?P<label>[^\[\]\r\n]*)\]\((?P<m>[^()\r\n]*)\)"
