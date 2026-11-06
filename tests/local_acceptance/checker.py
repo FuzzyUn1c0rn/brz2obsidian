@@ -1764,7 +1764,8 @@ def check_assets(raw, record, archive, vault, targets):
                 and PurePosixPath(p["Location"]).suffix.lower() == ".pdf"
                 and p["Id"] in paths
             )
-            assert pdfs, "intact same-owner PDF"
+            if a["DataLength"] == 0:
+                assert pdfs, "intact same-owner PDF"
             observed = (
                 zero_txt_observation(raw, archive, a)
                 if a["DataLength"] == 0
@@ -1776,12 +1777,26 @@ def check_assets(raw, record, archive, vault, targets):
                     "present": False,
                     "intact_same_owner_pdfs": pdfs,
                 }
+                if pdfs
+                else {
+                    "owner": owner,
+                    "filename": a["Location"],
+                    "member": member,
+                    "source_type": 2,
+                    "type": 15,
+                    "note_type": 0,
+                    "declared_length": a["DataLength"],
+                    "state": 2,
+                    "present": False,
+                }
             )
             expected_warnings[key] = (
                 "known_absent_payload",
                 "thebrain-format5/zero-length-absent-txt/v1"
                 if a["DataLength"] == 0
-                else "thebrain-format5/absent-txt/v1",
+                else "thebrain-format5/absent-txt/v1"
+                if pdfs
+                else "thebrain-format5/absent-txt-declaration/v1",
                 "approved_source_gap",
                 observed,
             )
@@ -1914,6 +1929,11 @@ def check_assets(raw, record, archive, vault, targets):
         assert issue["guidance"] and issue["message"].endswith(
             "Observed: " + targets[key]["source_findings"][0]["observed_json"]
         ), "warning issue observation"
+        if rule == "thebrain-format5/absent-txt-declaration/v1":
+            assert issue["message"].split(" Observed:", 1)[0] == (
+                "This archive declares TXT content but contains no payload; "
+                "its declaration is retained and the missing bytes were not recovered."
+            ), "unrecovered archived TXT warning meaning"
         if raw.gaps.get(key, {}).get("role") == "definition_icon":
             owner = raw.gaps[key]["owner"]
             providers = {

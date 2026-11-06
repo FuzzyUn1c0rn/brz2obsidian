@@ -339,7 +339,9 @@
     "tests/gui/test_api_capture_limit_window.py",
     "tests/sources/test_api_capture_limit_replay.py",
     "tests/sources/test_current_literal_tokens.py",
-    "tests/local_acceptance/test_current_literal_token_audit.py"
+    "tests/local_acceptance/test_current_literal_token_audit.py",
+    "tests/sources/test_brz_absent_txt_declarations.py",
+    "tests/local_acceptance/test_brz_absent_txt_audit.py"
   ],
   "schema_version": 1
 }

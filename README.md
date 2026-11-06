@@ -139,6 +139,17 @@ thoughts. A forgotten Home prevents conversion.
 
 ## Step by step: convert your archive
 
+An archive can declare a nonzero Type 15 TXT attachment without containing its
+payload. Current BRZ imports retain a validated declaration as an explicit
+warning, including when no companion document survives. The missing TXT bytes
+were not recovered: no empty file, replacement or live download is created.
+Other available notes and files are preserved separately. Review the filename
+and declared length in the migration record and Migration report. Existing
+PDF-associated and zero-length exceptions retain their separate requirements;
+other unavailable required content still refuses import. Local API imports
+preserve successfully retrieved TXT bytes and retain their existing HTTP404/PDF
+rule.
+
 Run the following commands in the same PowerShell window, in order.
 
 ### 1. Download the converter

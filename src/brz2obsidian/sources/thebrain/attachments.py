@@ -17,6 +17,7 @@ from brz2obsidian.contracts import (
 from .external_files import external_file_uri
 from .findings import (
     ABSENT_NOTE_IMAGES_RULE,
+    ABSENT_TXT_DECLARATION_RULE,
     ABSENT_TXT_RULE,
     ABSENT_TYPE_ICON_RULE,
     ABSENT_TYPE_NOTE_RULE,
@@ -529,11 +530,28 @@ def normalize_attachments(
             )
         )
         if not pdfs:
-            refuse(
-                "missing_required_payload",
-                "Absent TXT lacks an intact archived PDF under the same owner",
-                (asset_id,),
+            findings.append(
+                SourceFinding(
+                    kind="known_absent_payload",
+                    rule_id=ABSENT_TXT_DECLARATION_RULE,
+                    affected=(asset_id,),
+                    evidence=(pointer, "meta.json"),
+                    observed_json=json.dumps(
+                        {
+                            "owner": owner,
+                            "filename": location,
+                            "member": owner + "/" + location,
+                            "source_type": 2,
+                            "type": 15,
+                            "note_type": 0,
+                            "declared_length": declared,
+                            "state": 2,
+                            "present": False,
+                        }
+                    ),
+                )
             )
+            continue
         findings.append(
             SourceFinding(
                 kind="known_absent_payload",
