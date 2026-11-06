@@ -985,6 +985,12 @@ def table_contexts(text):
                     or row[3]
                     or row[1].startswith("    ")
                     or re.match(r" {0,3}#{1,6}(?:[ \t]|$)", row[1])
+                    # Paragraph ownership suppresses non-1 ordered and empty
+                    # list starts. A native table admits either as a new block.
+                    or re.match(
+                        r" {0,3}(?:[-+*]|[0-9]{1,9}[.)])(?:[ \t]|$)",
+                        row[1].rstrip("\r\n"),
+                    )
                 ):
                     break
                 table_rows.add(row_index)

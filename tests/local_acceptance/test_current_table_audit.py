@@ -79,12 +79,31 @@ CURL_EXPECTED = (
 CONTAINER_TABLES = (
     "\n> |A|B|\n> |---|---|\n> |"
     + LINK
+    + "\n> 2) "
+    + LINK
     + "\n>\n> After quote. "
     + LINK
     + "\n\n"
     + "- |A|B|\n  |---|---|\n  |"
     + LINK
     + "\n\n  After list. "
+    + LINK
+    + "\n"
+)
+TABLE_LIST_BOUNDARIES = (
+    "\nA|B\n---|---\n1. "
+    + LINK
+    + "\n\n"
+    + "A|B\n---|---\n2. "
+    + LINK
+    + "\n\n"
+    + "A|B\n---|---\n2) "
+    + LINK
+    + "\n\n"
+    + "A|B\n---|---\n2."
+    + LINK
+    + "\n\n"
+    + "A|B\n---|---\n+\nAfter empty bullet. "
     + LINK
     + "\n"
 )
@@ -107,6 +126,7 @@ RAW = (
     + LINK
     + "\n"
     + CONTAINER_TABLES
+    + TABLE_LIST_BOUNDARIES
     + '\n|||:(table="opaque:origin"):\n'
     + "|![Lost](.data/md-images/lost.png)|`x|y`|\n\n"
     + "After compound. "
@@ -133,6 +153,7 @@ EXPECTED = (
     + LINK
     + "\n"
     + CONTAINER_TABLES
+    + TABLE_LIST_BOUNDARIES
     + "\n| | |\n|---|---|\n"
     + "|Image unavailable: Lost|<code>x&#124;y</code>|\n\n"
     + "After compound. "
@@ -167,10 +188,16 @@ REFERENCE_FACTS = [
     (1392, 1437, True),
     (1440, 1485, True),
     (1510, 1555, True),
-    (1573, 1618, False),
-    (1643, 1688, True),
-    (1704, 1749, False),
-    (1832, 1877, False),
+    (1561, 1606, False),
+    (1624, 1669, False),
+    (1694, 1739, True),
+    (1755, 1800, False),
+    (1817, 1862, False),
+    (1879, 1924, False),
+    (1941, 1986, False),
+    (2002, 2047, True),
+    (2083, 2128, False),
+    (2211, 2256, False),
 ]
 
 
@@ -275,19 +302,19 @@ def test_current_table_complete_output_keeps_raw_rows_and_findings(
         proof["source_reference"]["end"],
         proof["source_reference"]["before"],
     ) == (
-        1804 + shift,
-        1837 + shift,
+        2183 + shift,
+        2216 + shift,
         "![Lost](.data/md-images/lost.png)",
     )
     assert (
         proof["intermediate_reference"]["start"],
         proof["intermediate_reference"]["end"],
-    ) == (1768, 1801)
+    ) == (2147, 2180)
     assert (
         proof["notice"]["start"],
         proof["notice"]["end"],
         proof["notice"]["text"],
-    ) == (1768, 1791, "Image unavailable: Lost")
+    ) == (2147, 2170, "Image unavailable: Lost")
     if adapter == "brz":
         check_vault(source, vault)
     else:
