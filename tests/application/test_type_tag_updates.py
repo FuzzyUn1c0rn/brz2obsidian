@@ -28,7 +28,15 @@ from tests.application.test_graph_workflow import graph_archive
 from tests.application.test_onboarding_completion import authored_files
 from tests.application.test_update_lifecycle import git
 from tests.reconciliation.test_resolution import action
-from tests.support.type_tag_sources import BRAIN, ICON, IDS, PNG, brz_source
+from tests.support.type_tag_sources import (
+    BRAIN,
+    EDGES,
+    ICON,
+    IDS,
+    PNG,
+    TYPE_FIELDS,
+    brz_source,
+)
 from tests.support.type_tag_updates import GREEN, INDEPENDENT, YELLOW, update_source
 
 
@@ -232,6 +240,45 @@ def test_current_type_tag_vault_prepares_same_source_without_format_transition(
     assert (vault / "Categories/B.md").read_bytes() == (
         original / "Categories/B.md"
     ).read_bytes()
+    # The same admitted current8 history must not publish an invalid next source.
+    # B already has type A; adding B -> A closes the independently known loop.
+    cyclic = brz_source(
+        update_root / "cyclic.brz",
+        edges=(*EDGES, (11, 10, 1, 3, -1)),
+        type_fields=TYPE_FIELDS | {10: 11},
+    )
+    inspection = default_workflow().inspect(cyclic)
+    assert inspection.outcome == "refused"
+    assert any(
+        issue.code == "source_type_cycle"
+        and IDS["A"] in issue.affected
+        and IDS["B"] in issue.affected
+        for issue in inspection.issues
+    )
+    before_files = authored_files(vault)
+    # This existing fixture has an unborn user branch; compare its actual HEAD
+    # and optional user index rather than requiring an invented user commit.
+    index = vault / ".git/index"
+
+    def current_git():
+        return (
+            (vault / ".git/HEAD").read_bytes(),
+            index.read_bytes() if index.exists() else None,
+        )
+
+    before_git = current_git()
+    before_refs = git(vault, "for-each-ref", "--format=%(refname) %(objectname)")
+    checkpoint = result.preparation.locator
+    refused = operations.prepare_update(vault, cyclic)
+    assert refused.status == "refused" and not refused.ready
+    assert refused.code == "preparation_unavailable"
+    assert refused.preparation is None and refused.publication == "not_started"
+    assert authored_files(vault) == before_files
+    assert current_git() == before_git
+    assert (
+        git(vault, "for-each-ref", "--format=%(refname) %(objectname)") == before_refs
+    )
+    assert operations.inspect_history(vault).checkpoint.locator == checkpoint
 
 
 def fresh_resume(vault, output, *, expected_code="unchanged"):
