@@ -125,6 +125,19 @@ NATIVE_OWNER_CONTROLS = (
 NATIVE_SEPARATOR_CONTROL = "\nA|B\n- |---\n" + LINK + "\n"
 NATIVE_DOUBLE_BACKSLASH_CONTROL = "\nA\\\\|B\n---|---\n" + LINK + "\n"
 NATIVE_ESCAPED_ONLY_CONTROL = "\nA\\|B\n---\n" + LINK + "\n"
+NAVIGATION_CODE = (
+    '\nInline `df[["column"]]`.\n'
+    "Double `` df[[`column`]] ``.\n"
+    '> - Code `df[["container"]]` and `![code](missing.png)`.\n'
+    '>\n> ```python\n> df[["fenced"]]\n> ```\n\n'
+    "\\[[Escaped]] stays literal.\n"
+)
+NAVIGATION_TABLE = (
+    '\n|Example|Mode|:(table="opaque:navigation"):\n|`df[["generated"]]|x`|kept|\n'
+)
+NAVIGATION_TABLE_EXPECTED = (
+    '\n| | |\n|---|---|\n|Example|Mode|\n|<code>df[["generated"]]&#124;x</code>|kept|\n'
+)
 RAW = (
     'Before.\n|||:(table="column-widths:-1,0,0"):\n|one|two|\nAfter.\n\n'
     + "|First|"
@@ -155,6 +168,8 @@ RAW = (
     + NATIVE_SEPARATOR_CONTROL
     + NATIVE_DOUBLE_BACKSLASH_CONTROL
     + NATIVE_ESCAPED_ONLY_CONTROL
+    + NAVIGATION_CODE
+    + NAVIGATION_TABLE
 ).encode()
 EXPECTED = (
     "Before.\n\n| | |\n|---|---|\n|one|two|\n\nAfter.\n\n"
@@ -186,6 +201,8 @@ EXPECTED = (
     + NATIVE_SEPARATOR_CONTROL
     + NATIVE_DOUBLE_BACKSLASH_CONTROL
     + NATIVE_ESCAPED_ONLY_CONTROL
+    + NAVIGATION_CODE
+    + NAVIGATION_TABLE_EXPECTED
 )
 FORMAT_FINDINGS = (
     {
@@ -495,3 +512,21 @@ def test_current_tables_refuse_rehashed_output_claims(
 def test_historical_table_grammar_keeps_current_generic_forms_unchanged(profile):
     source = '|||:(table="column-widths:-1,0,0"):\n|a|b|\n\n|x|\n|y|\n'
     assert expected_document_text(source, profile_version=profile) == source
+
+
+def test_active_unresolved_wikilink_still_fails_complete_public_audit(tmp_path):
+    raw = b"Before [[genuinely-unresolved.md]] after.\n"
+    source = literal_archive(tmp_path / "unresolved.brz", raw)
+    vault = tmp_path / "vault"
+    result = default_workflow().convert(source, vault)
+    assert result.outcome == "clean", result.issues
+    record = json.loads((vault / "migration-record.json").read_bytes())
+    document = next(d for item in record["item_targets"] for d in item["documents"])
+    assert document["text_digest"] == sha256(raw).hexdigest()
+    assert document["references"] == [] and document["text_adaptations"] == []
+    assert next(vault.rglob("*.original")).read_bytes() == raw
+    assert raw.decode().rstrip() in (vault / document["owner_target"]).read_text(
+        encoding="utf-8"
+    )
+    with pytest.raises(AssertionError, match="^actual local wikilink destination$"):
+        check_vault(source, vault)

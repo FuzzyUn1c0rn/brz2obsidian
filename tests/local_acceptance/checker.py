@@ -46,6 +46,7 @@ from .support import (
     tag_listing,
 )
 from .text import (
+    active_mask,
     generated_boundary,
     inline_candidates,
     inline_code_spans,
@@ -2427,25 +2428,19 @@ def check_actual_files(vault, record, targets, names, raw, summary):
         if not name.endswith(".md"):
             continue
         text = (vault / name).read_bytes().decode()
-        # Examples are documentation, not live navigation obligations. Bound
-        # Markdown fences independently rather than importing converter parsing.
-        active = []
-        fence = None
-        for line in text.splitlines(keepends=True):
-            marker = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
-            if fence:
-                if marker and marker[1][0] == fence[0] and len(marker[1]) >= len(fence):
-                    fence = None
-            elif marker:
-                fence = marker[1]
-            else:
-                active.append(line)
-        text = "".join(active)
+        # Generated code and independently protected Markdown are literal.
+        # Keep original match bytes: the activity mask also shelters escaped
+        # alias pipes inside otherwise active table links.
         text = re.sub(r"<code>[^<]*</code>", lambda m: " " * len(m[0]), text)
+        active = active_mask(text)
         for match in re.finditer(r"\[\[([^\]\n]+)\]\]", text):
+            if active[match.start() : match.start() + 2] != "[[":
+                continue
             destination = re.split(r"\\?\|", match[1], maxsplit=1)[0].split("#")[0]
             assert destination in reserved | actual, "actual local wikilink destination"
         for match in re.finditer(r"!\[[^\]]*\]\((<[^>]+>|[^\s)]+)", text):
+            if active[match.start() : match.start() + 2] != "![":
+                continue
             destination = unquote(match[1].strip("<>"))
             if not re.match(r"[a-z]+://", destination, re.IGNORECASE):
                 resolved = posixpath.normpath(
