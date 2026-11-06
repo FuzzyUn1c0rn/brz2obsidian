@@ -3,9 +3,10 @@
 import hashlib
 import json
 import re
-from urllib.parse import unquote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 from uuid import UUID
 
+from .note_links import markdown_destination
 from .text import inline_candidates
 
 IMAGE_KINDS = {"image_unavailable", "markdown_insert_image_unavailable"}
@@ -16,16 +17,24 @@ def digest(text):
     return hashlib.sha256(text.encode()).hexdigest()
 
 
-def image_location(uri):
+def image_location(uri, *, authored=None):
+    raw = uri if authored is None else authored
     assert uri.startswith(".data/md-images/"), "raw exact local image prefix"
     path, separator, fragment = uri.partition("#")
-    assert "?" not in uri and (
-        not separator or re.fullmatch(r"\$width=([1-9]|[1-9][0-9]|100)p\$", fragment)
+    assert (
+        "?" not in uri
+        and "?" not in raw
+        and (
+            not separator
+            or re.fullmatch(r"\$width=([1-9]|[1-9][0-9]|100)p\$", fragment)
+            and raw.rsplit("#", 1)[-1] == fragment
+        )
     ), "raw unavailable image destination grammar"
     value = path.removeprefix(".data/md-images/")
-    assert not re.search(r"%(?![0-9a-fA-F]{2})|%(?:2[fF]|5[cC])", value), (
-        "raw unavailable image encoding"
-    )
+    assert not any(
+        re.search(r"%(?![0-9a-fA-F]{2})|%(?:2[fF]|5[cC])", path)
+        for path in (raw.split("#", 1)[0], value)
+    ), "raw unavailable image encoding"
     value = unquote(value, errors="strict")
     assert (
         not re.search(r"%[0-9a-fA-F]{2}", value)
@@ -120,7 +129,9 @@ def expectation(raw, owner, bindings, absent, *, basis, profile_version="4"):
         origins[start:end] = copied
     source = {}
     for start, end, image, label, left, right in inline_candidates(text)[0]:
-        uri = text[left:right]
+        uri = quote(
+            markdown_destination(text[left:right]), safe="/:?#[]@!$&'()*+,;=-._~%"
+        )
         if image and uri.startswith(".data/md-images/"):
             a, b = origins[start], origins[end - 1] + 1
             angle = text[left - 1 : left] == "<" and text[right : right + 1] == ">"
@@ -149,10 +160,11 @@ def expectation(raw, owner, bindings, absent, *, basis, profile_version="4"):
     masked = re.sub(r"<code>[^<]*</code>", lambda m: " " * len(m[0]), text)
     events = []
     for start, end, image, _label, left, right in inline_candidates(masked)[0]:
-        uri = text[left:right]
+        authored_uri = text[left:right]
+        uri = quote(markdown_destination(authored_uri), safe="/:?#[]@!$&'()*+,;=-._~%")
         if not image or not uri.startswith(".data/md-images/"):
             continue
-        filename = image_location(uri)
+        filename = image_location(uri, authored=authored_uri)
         owned = [
             a
             for a in bindings.values()

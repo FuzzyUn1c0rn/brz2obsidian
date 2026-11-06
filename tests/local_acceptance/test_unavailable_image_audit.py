@@ -594,3 +594,215 @@ def test_independent_nested_image_refuses_identified_foreign_asset(stem):
     }
     with pytest.raises(AssertionError, match="foreign identity"):
         expectation(raw, HOME, foreign, {}, basis="archive_undeclared_no_payload")
+
+
+DECODED_REFERENCES = (
+    ("Plain", ".data/md-images/lost.png", ".data/md-images/lost.png", False),
+    ("Entity", ".data/md-images/lost&#46;png", ".data/md-images/lost.png", False),
+    ("Escape", r".data/md-images/lost\.png", ".data/md-images/lost.png", False),
+    (
+        "Entity prefix",
+        "&#46;data/md-images/lost.png",
+        ".data/md-images/lost.png",
+        False,
+    ),
+    ("Escape prefix", r"\.data/md-images/lost.png", ".data/md-images/lost.png", False),
+    ("Unicode", ".data/md-images/café.png", ".data/md-images/caf%C3%A9.png", True),
+    (
+        "Space",
+        ".data/md-images/lost image.png",
+        ".data/md-images/lost%20image.png",
+        True,
+    ),
+)
+DECODED_RAW = (
+    "Before.\r\n"
+    + "\r\n".join(
+        "![" + label + "](" + ("<" + authored + ">" if angle else authored) + ")"
+        for label, authored, _semantic, angle in DECODED_REFERENCES
+    )
+    + f"\r\n![Present plain](.data/md-images/{IMAGE}.png)\r\n"
+    + f"![Present entity](.data/md-images/{IMAGE}&#46;png#$width=70p$)\r\n"
+    + f"![Present escape](.data/md-images/{IMAGE}\\.png)\r\nAfter.\r\n"
+).encode()
+
+
+@pytest.fixture(scope="module")
+def decoded_destination_outputs(tmp_path_factory):
+    directory = tmp_path_factory.mktemp("decoded-image-destinations")
+    source = literal_archive(
+        directory / "source.brz",
+        DECODED_RAW,
+        resources=(({"Type": 12, "Location": IMAGE + ".png"}, PNG),),
+    )
+    brz_vault = directory / "brz-vault"
+    brz_result = default_workflow().convert(source, brz_vault)
+    assert brz_result.outcome == "warnings", brz_result.issues
+    api = note_api(b"\xef\xbb\xbf" + DECODED_RAW)
+    api.attachments[IMAGE] = attachment(
+        IMAGE, HOME, 12, IMAGE + ".png", length=len(PNG)
+    )
+    api.payloads[IMAGE] = PNG
+    api.overrides["/api/v1/docs.json"] = (200, SCHEMA)
+    controls = prepare_controls(directory / "controls")
+    api_vault = directory / "api-vault"
+    with api_server(api) as (_, upstream):
+        recording = ApiRecording(
+            directory / "http",
+            upstream,
+            brain_id=BRAIN,
+            credential=KEY,
+            purpose="convert",
+        )
+        with recording:
+            result = local_api_workflow(
+                LocalApiConfig(api_url=recording.api_url), credentials=lambda: KEY
+            ).convert(LocalApiSourceRef(BRAIN), api_vault)
+            assert result.outcome == "warnings", result.issues
+            recording.complete()
+        baseline = recording.seal(qualification=controls)
+    return source, brz_vault, baseline, api_vault
+
+
+@pytest.mark.parametrize("adapter", ("brz", "api"))
+def test_complete_image_destinations_unescape_once_and_keep_raw_evidence(
+    decoded_destination_outputs, adapter
+):
+    source, brz_vault, baseline, api_vault = decoded_destination_outputs
+    vault = brz_vault if adapter == "brz" else api_vault
+    audit(adapter, source, baseline, vault)
+    record = json.loads((vault / "migration-record.json").read_bytes())
+    document = next(d for t in record["item_targets"] for d in t["documents"])
+    body = (vault / document["owner_target"]).read_text(encoding="utf-8")
+    assert (
+        "Before.\nImage unavailable: Plain\nImage unavailable: Entity\n"
+        "Image unavailable: Escape\nImage unavailable: Entity prefix\n"
+        "Image unavailable: Escape prefix\nImage unavailable: Unicode\n"
+        "Image unavailable: Space\n" in body
+    )
+    assert len(record["asset_targets"]) == 2
+    image = next(a for a in record["asset_targets"] if a["role"] == "image")
+    assert image["availability"] == "present"
+    assert (vault / image["relative_path"]).read_bytes() == PNG
+    for label in ("Present plain", "Present entity", "Present escape"):
+        assert "![" + label + "](" + image["relative_path"] + ")" in body
+    assert record["counts"]["source_references"] == 3
+    raw = DECODED_RAW if adapter == "brz" else b"\xef\xbb\xbf" + DECODED_RAW
+    assert next(vault.rglob("*.original")).read_bytes() == raw
+    raw_text = raw.decode()
+    observations = sorted(
+        (
+            json.loads(i["message"].split("Observed: ", 1)[1])
+            for i in record["issues"]
+            if i["rule_id"] == "thebrain.unavailable-image.v1"
+        ),
+        key=lambda value: value["source_reference"]["start"],
+    )
+    assert len(observations) == len(DECODED_REFERENCES)
+    for observed, (label, authored, semantic, angle) in zip(
+        observations, DECODED_REFERENCES, strict=True
+    ):
+        ref = observed["source_reference"]
+        destination = "<" + authored + ">" if angle else authored
+        phrase = "![" + label + "](" + destination + ")"
+        assert raw_text[ref["start"] : ref["end"]] == phrase
+        assert (
+            raw_text[ref["destination_start"] : ref["destination_end"]] == destination
+        )
+        assert ref["uri"] == semantic
+    assert {r["source_target"] for r in document["references"]} == {
+        ".data/md-images/" + IMAGE + ".png",
+        ".data/md-images/" + IMAGE + ".png#$width=70p$",
+    }
+    sized = next(r for r in document["references"] if r["presentation_normalization"])
+    normalization = sized["presentation_normalization"]
+    assert normalization["declaration"] == "#$width=70p$"
+    assert normalization["start"] - sized["destination_start"] == len(
+        ".data/md-images/" + IMAGE + "&#46;png"
+    )
+    assert record["counts"]["image_presentation_normalizations"] == 1
+
+
+@pytest.mark.parametrize(
+    "authored,once",
+    (
+        (r".data/md-images/lost\\.png", r".data/md-images/lost\.png"),
+        (".data/md-images/lost&amp;#46;png", ".data/md-images/lost&#46;png"),
+        (r".data/md-images/lost\&#46;png", ".data/md-images/lost&#46;png"),
+        (".data/md-images/lost%26%2346%3Bpng", ".data/md-images/lost%26%2346%3Bpng"),
+        (".data/md-images/sub&#37;2flost.png", ".data/md-images/sub%2flost.png"),
+        (".data/md-images/lost%252epng", ".data/md-images/lost%252epng"),
+        (
+            ".data/md-images/lost.png&#35;$width=70p$",
+            ".data/md-images/lost.png#$width=70p$",
+        ),
+        (
+            r".data/md-images/lost.png#\$width=70p$",
+            ".data/md-images/lost.png#$width=70p$",
+        ),
+        (
+            r".data/md-images/lost.png#$width\=70p$",
+            ".data/md-images/lost.png#$width=70p$",
+        ),
+        (
+            ".data/md-images/lost.png#$width&#61;70p$",
+            ".data/md-images/lost.png#$width=70p$",
+        ),
+        (".data/md-images/lost.png?query=1", ".data/md-images/lost.png?query=1"),
+    ),
+)
+def test_image_destination_one_pass_does_not_relax_source_safety(authored, once):
+    from tests.local_acceptance.note_links import markdown_destination
+    from tests.local_acceptance.unavailable_images import expectation
+
+    assert markdown_destination(authored) == once
+    with pytest.raises(AssertionError):
+        expectation(
+            "![Lost](" + authored + ")",
+            HOME,
+            {},
+            {},
+            basis="archive_undeclared_no_payload",
+        )
+
+
+@pytest.mark.parametrize("adapter", ("brz", "api"))
+@pytest.mark.parametrize("damage", ("semantic-uri", "authored-span"))
+def test_decoded_image_audit_rejects_coherent_raw_semantic_evidence_forgery(
+    decoded_destination_outputs, tmp_path, adapter, damage
+):
+    from tests.local_acceptance.unavailable_images import observation_json
+
+    source, brz_vault, baseline, api_vault = decoded_destination_outputs
+    vault = tmp_path / "forged"
+    shutil.copytree(brz_vault if adapter == "brz" else api_vault, vault)
+    record = json.loads((vault / "migration-record.json").read_bytes())
+    issue = next(i for i in record["issues"] if "![Entity]" in i["message"])
+    before = json.loads(issue["message"].split("Observed: ", 1)[1])
+    forged = deepcopy(before)
+    if damage == "semantic-uri":
+        forged["source_reference"]["uri"] = ".data/md-images/lost&#46;png"
+    else:
+        forged["source_reference"]["destination_end"] -= 4
+    encoded = observation_json(forged, api=adapter == "api")
+    issue["message"] = (
+        issue["message"].split("Observed: ", 1)[0] + "Observed: " + encoded
+    )
+    for asset in record["asset_targets"]:
+        for finding in asset["source_findings"]:
+            if json.loads(finding["observed_json"]) == before:
+                finding["observed_json"] = encoded
+    actual = {
+        p.relative_to(vault).as_posix(): p.read_bytes()
+        for p in vault.rglob("*")
+        if p.is_file()
+    }
+    result = {"receipt": {}}
+    rewrite_record(vault, record, result)
+    assert all(
+        (vault / name).read_bytes() == data
+        for name, data in actual.items()
+        if name != "migration-record.json"
+    )
+    with pytest.raises(AssertionError, match="raw-derived unavailable image"):
+        audit(adapter, source, baseline, vault)

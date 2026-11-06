@@ -77,6 +77,9 @@ from .unavailable_images import (
     findings as image_findings,
 )
 from .unavailable_images import (
+    image_location as image_target_location,
+)
+from .unavailable_images import (
     validate as image_validate,
 )
 
@@ -1372,9 +1375,11 @@ def source_references(
         destination_start,
         destination_end,
     ) in candidates:
-        url = body[destination_start:destination_end]
+        authored_url = body[destination_start:destination_end]
+        decoded_url = markdown_destination(authored_url)
+        url = authored_url
         kind, target = None, None
-        if markdown_destination(url).casefold().startswith("brain://"):
+        if decoded_url.casefold().startswith("brain://"):
             destination = thought_destination(url, qualified_brain=qualified_brain)
             target = destination.local_id
             legacy_excluded = not destination.qualified and target in excluded
@@ -1406,22 +1411,9 @@ def source_references(
                 mask[begin:finish] = " " * (finish - begin)
                 continue
             kind = "item"
-        elif image and url.startswith(".data/md-images/"):
-            path, separator, fragment = url.partition("#")
-            assert "?" not in url, "independent image query refusal"
-            assert not separator or re.fullmatch(
-                r"\$width=([1-9]|[1-9][0-9]|100)p\$", fragment
-            ), "independent complete image sizing grammar"
-            encoded = path[len(".data/md-images/") :]
-            assert not re.search(r"%(?![0-9a-fA-F]{2})|%(?:2[fF]|5[cC])", encoded), (
-                "independent unambiguous path encoding"
-            )
-            filename = unquote(encoded, errors="strict")
-            assert (
-                not re.search(r"%[0-9a-fA-F]{2}", filename)
-                and "\\" not in filename
-                and not set(filename.split("/")) & {"", ".", ".."}
-            ), "independent once-decoded safe image path"
+        elif image and decoded_url.startswith(".data/md-images/"):
+            url = quote(decoded_url, safe="/:?#[]@!$&'()*+,;=-._~%")
+            filename = image_target_location(url, authored=authored_url)
             targets = [
                 a["asset_id"]
                 for a in assets.values()
@@ -1437,7 +1429,7 @@ def source_references(
         if kind:
             normalization = None
             if kind == "image" and "#" in url:
-                start = destination_start + url.index("#")
+                start = destination_start + authored_url.rindex("#")
                 normalization = {
                     "declaration": body[start:destination_end],
                     "start": start,
