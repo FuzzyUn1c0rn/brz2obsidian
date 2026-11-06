@@ -71,7 +71,9 @@ def api_configuration(base, fields):
         maximum = 9223372036854775807 if byte_limit else 2147483647
         if number > maximum:
             errors[key] = (
-                "This value exceeds the supported limit."
+                "Enter 9,223,372,036,854,775,807 bytes or less."
+                if key == "max_total_capture_bytes"
+                else "This value exceeds the supported limit."
                 if byte_limit
                 else "Enter 2,147,483,647 or less, or leave blank."
                 if optional

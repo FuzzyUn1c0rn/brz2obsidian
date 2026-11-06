@@ -45,6 +45,13 @@ def test_total_capture_field_preserves_large_values_and_requires_correction():
             until(app, lambda: window.snapshot.api_config is None)
             error = control(window, QLabel, "Maximum total capture bytes error")
             assert error.isVisible() and error.text()
+            if value == "9223372036854775808":
+                until(
+                    app,
+                    lambda error=error: (
+                        error.text() == "Enter 9,223,372,036,854,775,807 bytes or less."
+                    ),
+                )
             assert field.text() == value
             assert not control(
                 window, QPushButton, "Refresh accessible Brains"
