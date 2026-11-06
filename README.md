@@ -567,10 +567,9 @@ and transport failures retain their refusal/failure behavior. No external recove
 or signed-image request is made.
 
 Retained API profiles1–3 keep their earlier interpretation and refusal rules.
-The current contract7/capture1/output8 extension records explicit
-`image_unavailable` and `markdown_insert_image_unavailable` edits; older tools with
-closed edit-kind lists reject those new values. Review the notices and warnings
-before accepting an import or applying a source update.
+Captures containing these new image-notice adaptations require a converter version
+that understands them. Review the notices and warnings before accepting an import
+or applying a source update.
 
 For daily use, start with the generated `Vault guide.md`, whose template links
 use the vault's actual sanitized or disambiguated names.
