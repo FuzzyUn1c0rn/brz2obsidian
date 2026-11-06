@@ -67,6 +67,18 @@ ROOTS = (
     "fielddefinitions.json",
     "fieldinstances.json",
 )
+from .unavailable_images import (
+    RULES as image_RULES,
+)
+from .unavailable_images import (
+    expectation as image_expectation,
+)
+from .unavailable_images import (
+    findings as image_findings,
+)
+from .unavailable_images import (
+    validate as image_validate,
+)
 
 
 def load_json(raw):
@@ -188,6 +200,9 @@ def check_vault(source, vault):
             }
             for a in raw["attachments.json"]
         }
+        raw.formatting_findings = {}
+        raw.image_events = {}
+        raw.image_intermediates = {}
         for a in raw["attachments.json"]:
             if (
                 a["Type"] == 1
@@ -204,6 +219,7 @@ def check_vault(source, vault):
                         raw.excluded,
                         qualified_brain=raw["meta.json"][0]["BrainId"],
                         omitted_tokens=raw.tokens,
+                        allow_unavailable=True,
                     )
                     if r["kind"] == "item" and r["target"] in raw.excluded
                 ]
@@ -215,9 +231,87 @@ def check_vault(source, vault):
                     "residual excluded identity in supplied body"
                 )
                 raw.scoped_documents[a["Id"]] = body
-                body, edits = literal_edits(body, allow_literal_tokens=True)
+                from .api_generated import formatting_observations
+
+                raw.formatting_findings[a["Id"]] = [
+                    {
+                        "kind": "formatting_loss",
+                        "rule_id": "thebrain.markdown-inserts.v1",
+                        "affected": sorted([a["SourceId"], a["Id"]]),
+                        "evidence": [
+                            "attachments.json:" + str(raw["attachments.json"].index(a))
+                        ],
+                        "observed_json": json.dumps(observation, ensure_ascii=False),
+                    }
+                    for observation in formatting_observations(
+                        body, profile_version="4"
+                    )
+                ]
+                image_bindings = {
+                    key: value
+                    | {
+                        "availability": "absent"
+                        if key in raw.absent_images
+                        else "present"
+                    }
+                    for key, value in bindings.items()
+                }
+                body, intermediate, events = image_expectation(
+                    body,
+                    a["SourceId"],
+                    image_bindings,
+                    raw.absent_images,
+                    basis="archive_undeclared_no_payload",
+                )
+                raw.image_events[a["Id"]] = events
+                raw.image_intermediates[a["Id"]] = intermediate
+                emitted = next(
+                    d
+                    for t in record["item_targets"]
+                    for d in t["documents"]
+                    if d["key"] == a["Id"]
+                )
+                if events:
+                    observed = image_findings(
+                        record,
+                        a["Id"],
+                        events,
+                        api=False,
+                        evidence=[
+                            "attachments.json:" + str(raw["attachments.json"].index(a))
+                        ],
+                    )
+                    image_validate(
+                        raw.scoped_documents[a["Id"]],
+                        body,
+                        intermediate,
+                        emitted["text_adaptations"],
+                        events,
+                        observed,
+                    )
+                    edits = emitted["text_adaptations"]
+                else:
+                    literal_text, edits = literal_edits(
+                        raw.scoped_documents[a["Id"]], allow_literal_tokens=True
+                    )
+                    if intermediate != literal_text:
+                        from .api_note_text import validate_document_adaptations
+
+                        validate_document_adaptations(
+                            raw.scoped_documents[a["Id"]],
+                            intermediate,
+                            emitted["text_adaptations"],
+                            profile_version="4",
+                        )
+                        edits = emitted["text_adaptations"]
                 raw.text_edits[a["Id"]] = edits
                 raw.documents[a["Id"]] = body
+        assert set(raw.absent_images) <= {
+            event["absence"]["asset_id"]
+            for events in raw.image_events.values()
+            for event in events
+            if "asset_id" in event["absence"]
+        }, "raw unreferenced absent image"
         assert (
             record["source_identity"]["source_id"] == raw["meta.json"][0]["BrainId"]
             and record["source_identity"]["format_version"] == "5"
@@ -261,6 +355,7 @@ def check_vault(source, vault):
                 kind in {2, 3, 8, 15}
                 or attachment["Id"] in raw.unsafe_originals
                 or attachment["Id"] in raw.gaps
+                or attachment["Id"] in raw.absent_images
             ):
                 continue
             prefix = ".data/" if kind == 5 else ".data/md-images/" if kind == 12 else ""
@@ -388,6 +483,12 @@ def check_vault(source, vault):
         summary["source_warning_owners"] = summary["warning_owners"]
         summary["warning_owners"] = len(
             {targets[k]["owner"] for k in raw.expected_warnings}
+            | {e["owner"] for events in raw.image_events.values() for e in events}
+            | {
+                a["SourceId"]
+                for a in raw["attachments.json"]
+                if raw.formatting_findings.get(a["Id"])
+            }
             | {
                 next(a["SourceId"] for a in raw["attachments.json"] if a["Id"] == key)
                 for key, _, _ in sized
@@ -452,7 +553,10 @@ def check_vault(source, vault):
             for a in raw["attachments.json"]
         ),
         "url_attachments": sum(a["Type"] == 3 for a in raw["attachments.json"]),
-        "present_note_images": sum(a["Type"] == 12 for a in raw["attachments.json"]),
+        "present_note_images": sum(
+            a["Type"] == 12 and a["Id"] not in raw.absent_images
+            for a in raw["attachments.json"]
+        ),
         "present_icons": sum(
             a["Type"] == 5 and a["Id"] not in raw.gaps for a in raw["attachments.json"]
         ),
@@ -497,6 +601,7 @@ def check_vault(source, vault):
         "present_icon_discrepancies": sum(
             a["Type"] == 5
             and a["Id"] not in raw.gaps
+            and a["Id"] not in raw.absent_images
             and a["DataLength"] != targets[a["Id"]]["actual_length"]
             for a in raw["attachments.json"]
         ),
@@ -1236,14 +1341,28 @@ def inline_display(value):
 
 
 def source_references(
-    body, owner, assets, excluded=(), *, qualified_brain=None, omitted_tokens=None
+    body,
+    owner,
+    assets,
+    excluded=(),
+    *,
+    qualified_brain=None,
+    omitted_tokens=None,
+    allow_unavailable=False,
 ):
     """Separate syntax scan without converter spans or markdown-it-py.
 
     Protected regions retain source offsets. Unrecognized active local syntax
     fails the audit instead of silently passing its coverage claim.
     """
-    candidates, mask, _scan = inline_candidates(body)
+    from .api_note_text import protect_cross_container_code
+
+    masked_body = re.sub(
+        r"<code>[^<]*</code>",
+        lambda m: " " * len(m[0]),
+        protect_cross_container_code(body),
+    )
+    candidates, mask, _scan = inline_candidates(masked_body)
     result = []
     for (
         begin,
@@ -1310,6 +1429,9 @@ def source_references(
                 and a["role"] == "image"
                 and a["original_name"] == filename
             ]
+            if allow_unavailable and not targets:
+                mask[begin:finish] = " " * (finish - begin)
+                continue
             assert len(targets) == 1, "independent inline image binding"
             kind, target = "image", targets[0]
         if kind:
@@ -1418,7 +1540,7 @@ def expected_resources(raw, owner, body, assets):
             continue
         kind = source["Type"]
         assigned = assets[source["Id"]]
-        if kind == 15:
+        if kind == 15 or source["Id"] in raw.absent_images:
             filename = (
                 escaped(PurePosixPath(source["Location"]).name)
                 .replace("\r", " ")
@@ -1574,6 +1696,7 @@ def expected_asset_paths(raw):
         if a["Type"] not in {2, 3, 8, 15}
         and a["Id"] not in raw.unsafe_originals
         and a["Id"] not in raw.gaps
+        and a["Id"] not in raw.absent_images
     ]
     widths = {a["Id"]: 0 for a in present}
     while True:
@@ -1650,6 +1773,62 @@ def check_assets(raw, record, archive, vault, targets):
         if key in raw.unsafe_originals:
             continue
         target = targets[key]
+        expected_image_findings = []
+        for document_key, events in raw.image_events.items():
+            pointer = "attachments.json:" + str(
+                next(
+                    i
+                    for i, row in enumerate(raw["attachments.json"])
+                    if row["Id"] == document_key
+                )
+            )
+            for observed in image_findings(
+                record, document_key, events, api=False, evidence=[pointer]
+            ):
+                affected = (
+                    [observed["absence"]["asset_id"]]
+                    if "asset_id" in observed["absence"]
+                    else sorted([observed["owner"], document_key])
+                )
+                if key in affected:
+                    expected_image_findings.append(
+                        {
+                            "kind": "unavailable_image_reference",
+                            "rule_id": "thebrain.unavailable-declared-image.v1"
+                            if "asset_id" in observed["absence"]
+                            else "thebrain.unavailable-image.v1",
+                            "affected": affected,
+                            "evidence": [pointer],
+                            "observed_json": json.dumps(
+                                observed,
+                                ensure_ascii=False,
+                                sort_keys=True,
+                                separators=(",", ":"),
+                            ),
+                        }
+                    )
+        actual_image_findings = [
+            f for f in target["source_findings"] if f["rule_id"] in image_RULES
+        ]
+        assert actual_image_findings == expected_image_findings, (
+            "raw image asset occurrence findings"
+        )
+        expected_formatting = [
+            finding
+            for values in raw.formatting_findings.values()
+            for finding in values
+            if key in finding["affected"]
+        ]
+        assert [
+            f for f in target["source_findings"] if f["kind"] == "formatting_loss"
+        ] == expected_formatting, "raw insert formatting findings"
+        target = target | {
+            "source_findings": [
+                f
+                for f in target["source_findings"]
+                if f["rule_id"] not in image_RULES and f["kind"] != "formatting_loss"
+            ]
+        }
         role = (
             "url"
             if kind == 3
@@ -1669,7 +1848,7 @@ def check_assets(raw, record, archive, vault, targets):
             "external"
             if kind in {2, 3, 8}
             else "absent"
-            if kind == 15 or key in raw.gaps
+            if kind == 15 or key in raw.gaps or key in raw.absent_images
             else "present"
         )
         assert (
@@ -1901,6 +2080,7 @@ def check_assets(raw, record, archive, vault, targets):
         i["affected"][0]: i
         for i in record["issues"]
         if i["code"] not in {"image_presentation_normalized", "icon_lookup_depth"}
+        and i.get("rule_id") not in image_RULES | {"thebrain.markdown-inserts.v1"}
     }
     assert (
         len(issues)
@@ -1910,6 +2090,8 @@ def check_assets(raw, record, archive, vault, targets):
                 for i in record["issues"]
                 if i["code"]
                 not in {"image_presentation_normalized", "icon_lookup_depth"}
+                and i.get("rule_id")
+                not in image_RULES | {"thebrain.markdown-inserts.v1"}
             ]
         )
         and issues.keys() == expected_warnings.keys()
@@ -1963,11 +2145,46 @@ def check_assets(raw, record, archive, vault, targets):
             and rule in report
             and escaped(PurePosixPath(targets[key]["original_name"]).name) in report
         ), "report source warning"
+    formatting_issues = []
+    for values in raw.formatting_findings.values():
+        for finding in values:
+            formatting_issues.append(
+                {
+                    "code": "formatting_loss",
+                    "severity": "warning",
+                    "phase": "analysis",
+                    "message": "Included thought-note formatting uses a visible fallback or remains unsupported. Observed: "
+                    + finding["observed_json"],
+                    "guidance": "Review the declaration and affected note in the Migration report; edit the converted Markdown or repair the source and re-export.",
+                    "affected": finding["affected"],
+                    "evidence": finding["evidence"],
+                    "rule_id": finding["rule_id"],
+                    "leftover_path": None,
+                }
+            )
+    assert sorted(map(semantic, formatting_issues), key=repr) == sorted(
+        (
+            semantic(i)
+            for i in record["issues"]
+            if i["rule_id"] == "thebrain.markdown-inserts.v1"
+        ),
+        key=repr,
+    ), "raw insert formatting warning census"
     raw.expected_warnings = expected_warnings
     return {
         "backups": backups,
-        "warnings": len(expected_warnings),
-        "warning_owners": len({targets[k]["owner"] for k in expected_warnings}),
+        "warnings": len(expected_warnings)
+        + sum(map(len, raw.image_events.values()))
+        + len(formatting_issues),
+        "warning_owners": len(
+            {targets[k]["owner"] for k in expected_warnings}
+            | {e["owner"] for events in raw.image_events.values() for e in events}
+            | {
+                a["SourceId"]
+                for a in raw["attachments.json"]
+                if raw.formatting_findings.get(a["Id"])
+            }
+        ),
         "videos": sum(video(a) is not None for a in raw["attachments.json"]),
         "zero_txt_gaps": sum(
             a["Type"] == 15 and type(a["DataLength"]) is int and a["DataLength"] == 0
@@ -2015,6 +2232,7 @@ def check_accounting(raw, record, checked, references):
             a["Type"] in {2, 3, 8, 15}
             or a["Id"] in raw.unsafe_originals
             or a["Id"] in raw.gaps
+            or a["Id"] in raw.absent_images
         ):
             continue
         prefix = (
@@ -2219,6 +2437,7 @@ def check_actual_files(vault, record, targets, names, raw, summary):
             else:
                 active.append(line)
         text = "".join(active)
+        text = re.sub(r"<code>[^<]*</code>", lambda m: " " * len(m[0]), text)
         for match in re.finditer(r"\[\[([^\]\n]+)\]\]", text):
             destination = match[1].split("|")[0].split("#")[0]
             assert destination in reserved | actual, "actual local wikilink destination"
@@ -2308,8 +2527,8 @@ def check_adaptations(raw, record, documents, names, assets):
     }
     for owner, (key, body) in documents.items():
         expected |= {
-            ("literal_text", f"text:{key}:{i}")
-            for i, _ in enumerate(raw.text_edits[key])
+            (edit["kind"], f"text:{key}:{i}")
+            for i, edit in enumerate(raw.text_edits[key])
         }
         expected |= {
             ("image_presentation", f"reference:{key}:{i}")
@@ -2392,7 +2611,7 @@ def check_adaptations(raw, record, documents, names, assets):
             adaptation = next(
                 a
                 for a in record["adaptations"]
-                if (a["kind"], a["affected"]) == ("literal_text", f"text:{key}:{index}")
+                if (a["kind"], a["affected"]) == (edit["kind"], f"text:{key}:{index}")
             )
             assert (
                 adaptation["text_edit"] == edit
@@ -2452,6 +2671,32 @@ def check_report(vault, raw, record, names, assets, summary, payloads):
         f"Created {summary['notes']} thought notes; preserved {payloads} present payloads."
         in report
     ), "independent report counts"
+    thoughts = {t["Id"]: t for t in raw["thoughts.json"]}
+    created = {t["item_key"] for t in record["item_targets"] if t["created"]}
+    for issue in record["issues"]:
+        if issue["rule_id"] not in image_RULES | {"thebrain.markdown-inserts.v1"}:
+            continue
+        affected = ", ".join(
+            wiki(names[key], thoughts[key]["Name"])
+            for key in sorted(created)
+            if key in issue["affected"]
+        )
+        expected_row = (
+            "- "
+            + affected
+            + " — "
+            + issue["code"]
+            + " ("
+            + issue["rule_id"]
+            + "): "
+            + escaped(issue["message"]).replace("\r", " ").replace("\n", " ")
+            + " "
+            + issue["guidance"]
+            + "\n"
+        )
+        assert report.count(expected_row) == 1, (
+            "complete unavailable image/insert report evidence"
+        )
     literal_count = sum(map(len, raw.text_edits.values()))
     assert (
         f"Applied {literal_count} exact text adaptations for Markdown display" in report

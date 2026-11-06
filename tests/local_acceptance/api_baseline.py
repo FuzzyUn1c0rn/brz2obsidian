@@ -276,7 +276,8 @@ def coverage(directory, ledger, *, allow_missing=False):
             )
         if attachment["type"] not in {2, 3, 8}:
             required(
-                "/api/attachments" + base + "/" + key + "/file-content", (200, 404)
+                "/api/attachments" + base + "/" + key + "/file-content",
+                (200, 404) if attachment["type"] in {12, 15} else (200,),
             )
     if not allow_missing:
         assert not missing, "missing required acquisition coverage"

@@ -28,6 +28,18 @@ from .api_scope import strict
 from .appearance import check_depth_warnings, source_icon
 from .checker import contender_keys, escaped, wiki
 from .support import REOPEN_GUIDANCE, check_support_content, tag_listing
+from .unavailable_images import (
+    api_document_text as image_api_document_text,
+)
+from .unavailable_images import (
+    api_findings as image_api_findings,
+)
+from .unavailable_images import (
+    observation_json as image_observation_json,
+)
+from .unavailable_images import (
+    warning_text as image_warning_text,
+)
 
 
 def versioned_static(output_version):
@@ -219,8 +231,8 @@ def checked_generated_regions(
         key: (
             note.owner,
             document_references(
-                expected_document_text(
-                    note.scoped_text, profile_version=profile_version
+                image_api_document_text(
+                    baseline, key, note.scoped_text, profile_version
                 ),
                 note.owner,
                 bindings,
@@ -361,7 +373,9 @@ def formatting_observations(raw, *, profile_version="1"):
         )
 
     table_ownership = []
-    table_text = tables(text, ownership=table_ownership)
+    table_text = tables(
+        text, ownership=table_ownership, current_tables=profile_version == "4"
+    )
     table_headers = {begin for begin, _ in table_ownership}
     for line in markdown_lines(text):
         body = line.rstrip("\r\n")
@@ -402,7 +416,8 @@ def formatting_observations(raw, *, profile_version="1"):
             # operation may independently convert code pipes while preserving
             # an active malformed declaration on that same source line.
             valid = offset in table_headers
-            add("table", body[starts[0] :], "01" if valid else "08")
+            if not valid or profile_version != "4":
+                add("table", body[starts[0] :], "01" if valid else "08")
         declaration = body.strip()
         if (
             re.fullmatch(r"\[/toc[^\]]*\]", declaration)
@@ -473,6 +488,7 @@ def check_warning_records(
                         "leftover_path": None,
                     }
                 )
+    findings.extend(image_api_findings(record, baseline, scoped, profile_version))
     # Findings are canonical unordered source facts. Their shared rule/affected
     # order retains the separately canonical full-finding order for ties.
     findings.sort(
@@ -484,15 +500,29 @@ def check_warning_records(
     for finding in findings:
         missing = finding["kind"] == "known_absent_payload"
         message, guidance = ("00", "01") if missing else ("02", "03")
+        image = finding["kind"] == "unavailable_image_reference"
+        image_message, image_guidance = image_warning_text(
+            True, "asset_id" in finding["observed_json"].get("absence", {})
+        )
         expected.append(
             {
-                "code": "approved_source_gap" if missing else "formatting_loss",
+                "code": "approved_source_gap"
+                if missing or image
+                else "formatting_loss",
                 "severity": "warning",
                 "phase": "analysis",
-                "message": STATIC["GP05-WARNING-" + message]
+                "message": (
+                    image_message if image else STATIC["GP05-WARNING-" + message]
+                )
                 + STATIC["GP07-OBSERVED-00"]
-                + canonical_json(finding["observed_json"]),
-                "guidance": STATIC["GP05-WARNING-" + guidance],
+                + (
+                    image_observation_json(finding["observed_json"], api=True)
+                    if image
+                    else canonical_json(finding["observed_json"])
+                ),
+                "guidance": image_guidance
+                if image
+                else STATIC["GP05-WARNING-" + guidance],
                 "affected": finding["affected"],
                 "evidence": finding["evidence"],
                 "rule_id": finding["rule_id"],
@@ -573,9 +603,9 @@ def check_complete_report(
         owners = sorted(
             {
                 note.owner
-                for note in scoped.safe_notes.values()
-                if expected_document_text(
-                    note.scoped_text, profile_version=profile_version
+                for key, note in scoped.safe_notes.items()
+                if image_api_document_text(
+                    baseline, key, note.scoped_text, profile_version
                 )
                 != note.scoped_text
             }
@@ -741,7 +771,11 @@ def tag_tokens(thoughts):
 def missing_findings(baseline, attachments, assets):
     result = {}
     for key, row in attachments.items():
-        if key not in assets or assets[key]["availability"] != "absent":
+        if (
+            row["type"] == 12
+            or key not in assets
+            or assets[key]["availability"] != "absent"
+        ):
             continue
         pdfs = sorted(
             other
@@ -852,6 +886,7 @@ def check_projection_protocol(
                     "source-bound generated item projection"
                 )
     findings = missing_findings(baseline, attachments, assets)
+    image_findings = image_api_findings(record, baseline, scoped, profile_version)
     asset_fields = {"naming_seed", "evidence", "video_presentation", "source_findings"}
     for key, asset in assets.items():
         expected = {
@@ -866,15 +901,18 @@ def check_projection_protocol(
                 )
         if "source_findings" in asset:
             values = asset["source_findings"]
-            assert type(values) is list and len(values) == int(key in findings), (
+            expected_values = ([findings[key]] if key in findings else []) + [
+                f for f in image_findings if key in f["affected"]
+            ]
+            assert type(values) is list and len(values) == len(expected_values), (
                 "source-bound asset finding census"
             )
-            for value in values:
+            for value, expected_finding in zip(values, expected_values, strict=True):
                 value = dict(value)
                 value["observed_json"] = read_json(
                     value["observed_json"].encode("utf-8")
                 )
-                assert strict(value) == strict(findings[key]), (
+                assert strict(value) == strict(expected_finding), (
                     "closed source-bound asset observation"
                 )
     relation_fields = {"evidence", "target_a", "target_b", "presentation"}
@@ -1421,10 +1459,14 @@ def check_protocol(record):
         "generated bookmark timestamp"
     )
     if "source_acquisition" in run:
-        check_acquisition_protocol(run["source_acquisition"], identity["source_id"])
+        check_acquisition_protocol(
+            run["source_acquisition"],
+            identity["source_id"],
+            profile_version=record.get("profile_version", "1"),
+        )
 
 
-def check_acquisition_protocol(value, collection):
+def check_acquisition_protocol(value, collection, *, profile_version="1"):
     """Normative capture audit representation, not request-history truth.
 
     Source preservation is independently checked from the baseline; this proof
@@ -1533,11 +1575,14 @@ def check_acquisition_protocol(value, collection):
         assert type(request["status"]) is int and (
             request["status"],
             request["outcome"],
-        ) in {
-            (200, "success"),
-            (400, "tag_inventory_zero_exception"),
-            (404, "missing_txt_404"),
-        }, "acquisition HTTP/outcome protocol"
+        ) in (
+            {
+                (200, "success"),
+                (400, "tag_inventory_zero_exception"),
+                (404, "missing_txt_404"),
+            }
+            | ({(404, "missing_image_404")} if profile_version == "4" else set())
+        ), "acquisition HTTP/outcome protocol"
         if request["status"] == 400:
             assert operation == "tags", "acquisition tag400 protocol"
         elif request["status"] == 404:
