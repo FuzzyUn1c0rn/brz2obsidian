@@ -18,13 +18,13 @@ def default_workflow():
 
 def local_api_workflow(config=None, *, credentials=None):
     from brz2obsidian.sources.thebrain.local_api import (
-        LOCAL_API_POLICY_V4,
+        LOCAL_API_POLICY_V5,
         LocalApiSourceModule,
     )
 
-    module = LocalApiSourceModule(config, credentials=credentials, profile_version="4")
+    module = LocalApiSourceModule(config, credentials=credentials, profile_version="5")
     workflow = Workflow(
-        SourceModuleBinding(module, LOCAL_API_POLICY_V4),
+        SourceModuleBinding(module, LOCAL_API_POLICY_V5),
         ObsidianRenderer(),
         FilesystemPublisher(),
     )

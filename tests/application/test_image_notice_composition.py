@@ -12,7 +12,7 @@ from brz2obsidian.contracts import MigrationRefused
 from brz2obsidian.core import analyze
 from brz2obsidian.sources.thebrain import BrzSourceModule
 from brz2obsidian.sources.thebrain.local_api import (
-    LOCAL_API_POLICY_V4,
+    LOCAL_API_POLICY_V5,
     LocalApiConfig,
     LocalApiSourceModule,
     LocalApiSourceRef,
@@ -316,7 +316,7 @@ def test_public_image_notice_composes_with_separate_table(
                 module = LocalApiSourceModule(
                     LocalApiConfig(api_url=recording.api_url),
                     credentials=lambda: KEY,
-                    profile_version="4",
+                    profile_version="5",
                 )
                 with module.open(LocalApiSourceRef(BRAIN)) as session:
                     snapshot = session.snapshot
@@ -420,11 +420,11 @@ def test_public_image_notice_composes_with_separate_table(
     if adapter == "brz":
         check_vault(source, vault)
     else:
-        check_api_vault(baseline, vault, profile_version="4")
+        check_api_vault(baseline, vault, profile_version="5")
     if case.endswith("after"):
         # Reuse the independently audited public source snapshot for each
         # distinct provenance failure; no extra conversions or fake sources.
-        policy = BRZ_POLICY if adapter == "brz" else LOCAL_API_POLICY_V4
+        policy = BRZ_POLICY if adapter == "brz" else LOCAL_API_POLICY_V5
         for damage in (
             "flat-F",
             "compound-T",
@@ -505,7 +505,7 @@ def test_public_image_notice_composes_with_separate_table(
                 if adapter == "brz":
                     check_vault(source, destination)
                 else:
-                    check_api_vault(baseline, destination, profile_version="4")
+                    check_api_vault(baseline, destination, profile_version="5")
             if damage == "code-authority":
                 assert (
                     str(rejection.value)

@@ -520,7 +520,7 @@ originals containing excluded references are omitted explicitly. Present
 attachment bytes are preserved. External URLs and directory links remain
 references; the converter does not download their contents.
 
-Current BRZ11 and local API4 imports preserve unknown, attribute-free delimiters
+Current BRZ11 and local API5 imports preserve unknown, attribute-free delimiters
 such as `<Example>`, `</Example>` and `<Example/>` as visible text. Each token is
 independent: unmatched or mismatched names stay visible, while surrounding
 emphasis, links, images and code retain their normal Markdown behavior. Names
@@ -529,10 +529,16 @@ spaces/tabs and at most one CR, LF or CRLF line ending are permitted; no spaces
 are allowed before the name or after a self-closing slash. Recognized HTML
 elements and attributes, declarations and processing instructions remain outside
 this literal class. Existing code, comments, escapes, supported line breaks and
-reviewed tables retain their own handling. Retained API1/2/3 captures keep their
+reviewed tables retain their own handling. Retained API4 captures preserve this
+literal-token support. Retained API1/2/3 captures keep their
 earlier grammar even when rendered into output8. Source adaptations record exact
 token spelling and coordinates; unsafe originals containing excluded content
 are still omitted.
+
+Current local API5 imports also accept the reviewed finite ICO/DIB and 32-bit BMP
+owned-icon families. The complete original container is preserved under its
+original `Icon.png` name, including every ICO frame. This does not add those
+formats to ordinary note images or change retained profiles1–4 eligibility.
 
 Current BRZ and local API imports support inline TheBrain links of the form
 `brain://api.thebrain.com/<Brain token>/<thought token>`, with an optional
