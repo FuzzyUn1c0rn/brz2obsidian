@@ -235,6 +235,11 @@ def review_plan_choice_action(
         and requirement.domain != "rename"
         and not (requirement.domain == "reversal" and choice == "current")
         and not (
+            requirement.domain in ("configuration", "format")
+            and choice == "current"
+            and change.current is None
+        )
+        and not (
             requirement.domain == "restoration" and choice == "decline_restoration"
         )
     ):

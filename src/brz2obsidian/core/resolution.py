@@ -173,7 +173,14 @@ def _format_choice_unavailable(change, domain, choice):
     )
 
 
-def _choice_offer(change, requirement, *, source_path_safe=True):
+def _choice_offer(
+    change,
+    requirement,
+    *,
+    operation_kind,
+    source_path_safe=True,
+    current_absence_safe=False,
+):
     from brz2obsidian.contracts import ReviewChoiceAvailability, ReviewChoiceOffer
 
     alternatives = (
@@ -197,7 +204,26 @@ def _choice_offer(change, requirement, *, source_path_safe=True):
             change, requirement.domain, choice
         ):
             reasons.append("unsafe_producer_choice")
-        if choice in alternatives and not alternatives[choice].eligible:
+        if (
+            change is not None
+            and change.format_review is not None
+            and change.attachment_review is not None
+            and requirement.domain in ("configuration", "format")
+            and not (choice == "current" and current_absence_safe)
+        ):
+            if operation_kind not in ("onboarding", "format_transition"):
+                reasons.append(
+                    "review_onboarding_or_output_format_transition_before_choosing_this_attachment"
+                )
+            elif choice != "current":
+                reasons.append(
+                    "keep_vault_version_is_required_for_attachment_format_review"
+                )
+        if (
+            choice in alternatives
+            and not alternatives[choice].eligible
+            and not (choice == "current" and current_absence_safe)
+        ):
             reasons.extend(alternatives[choice].unavailable_reasons)
         if choice not in requirement.choices and not reasons:
             reasons.append("choice_not_admitted")
@@ -224,6 +250,10 @@ def inspect_review_choices(plan):
         _choice_offer(
             change,
             row,
+            operation_kind=plan.producer_facts.format_operation.kind,
+            current_absence_safe=_observed_absence(
+                plan.producer_facts, change, row.domain
+            ),
             source_path_safe=rename_source_path_safe(plan.producer_facts, change)
             if row.domain == "rename"
             else True,
@@ -251,6 +281,7 @@ def inspect_review_choices(plan):
                     choices=("keep_path", "source_path"),
                     assumptions=change.assumptions,
                 ),
+                operation_kind=plan.producer_facts.format_operation.kind,
                 source_path_safe=rename_source_path_safe(plan.producer_facts, change),
             )
             for change in plan.proposal.changes
@@ -258,7 +289,9 @@ def inspect_review_choices(plan):
             and _domain(plan.producer_facts, change) != "rename"
         )
         + tuple(
-            _choice_offer(None, row)
+            _choice_offer(
+                None, row, operation_kind=plan.producer_facts.format_operation.kind
+            )
             for row in plan.requirements
             if row.domain in ("tracking", "storage")
         )
@@ -272,6 +305,7 @@ def inspect_review_choices(plan):
                     choices=("approve",),
                     assumptions=group.assumptions,
                 ),
+                operation_kind=plan.producer_facts.format_operation.kind,
             )
             for group in plan.groups
         )
