@@ -649,6 +649,20 @@ class ReconciliationContract(Contract):
         return value
 
 
+class ContentIdentity(ReconciliationContract):
+    """Exact-value name established by co-admission, not byte availability."""
+
+    content_id: str
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    size: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def canonical_name(self):
+        if self.content_id != f"sha256:{self.sha256}:{self.size}":
+            raise ValueError("Content identity spelling is not canonical")
+        return self
+
+
 class ImmutableContentReference(ReconciliationContract):
     """An immutable locator whose supplied bytes must validate before use."""
 

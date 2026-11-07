@@ -237,6 +237,29 @@ class ContentSession:
             raise OSError("Content reference is not registered in this session")
         return value[:3]
 
+    def comparison(
+        self,
+        references,
+        *,
+        raw_work_limit,
+        metadata_limit,
+        node_limit,
+        timeout=30,
+        cancel=None,
+    ):
+        """Co-admit a fixed set of registered values for exact legacy projection."""
+        from .legacy_content import ContentComparison
+
+        return ContentComparison(
+            self,
+            references,
+            raw_work_limit=raw_work_limit,
+            metadata_limit=metadata_limit,
+            node_limit=node_limit,
+            timeout=timeout,
+            cancel=cancel,
+        )
+
     def _copy(self, reference, backing, sink, transfer):
         info, digest, _, _ = observe_file(
             self._directory,
