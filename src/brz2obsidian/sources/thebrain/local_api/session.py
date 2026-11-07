@@ -1,6 +1,7 @@
 """Private owned capture and pinned integrity behind SourceSession."""
 
 import hashlib
+import os
 import re
 import shutil
 import stat
@@ -70,6 +71,8 @@ class LocalApiSession:
     Use SourceModule.open for live acquisition. Direct construction takes already
     qualified scoped facts, normalized snapshot and measured payload bytes. Close
     revokes streams and releases only session-owned storage.
+    Optional exact-bool cancellation controls freezing only; it is not retained
+    in the capture or a claim that a decoder can be preempted.
     """
 
     def __init__(
@@ -171,16 +174,30 @@ class LocalApiSession:
                 target = self._directory / key
                 target.parent.mkdir(exist_ok=True)
                 supplied = payloads[asset_id]
-                stream = (
-                    supplied.open("rb")
-                    if isinstance(supplied, (Path, StagedPayload))
-                    else BytesIO(bytes(supplied))
-                )
-                length, measured = 0, hashlib.sha256()
                 cap = audit["limits"]["max_payload_bytes"]
                 bounded_icon = (
                     profile_version == "5" and attachment_values[asset_id]["type"] == 5
                 )
+                if bounded_icon and not isinstance(supplied, (Path, StagedPayload)):
+                    from .icons import encoded_limit
+
+                    # Bound the actual buffer before allocating and bypass
+                    # custom whole-value coercion. Older profiles keep theirs.
+                    with memoryview(supplied).cast("B") as view:
+                        cap = encoded_limit(bytes(view[:4]), cap)
+                        if view.nbytes > cap:
+                            refuse(
+                                "icon_family storage limit exhausted",
+                                "incomplete_source",
+                            )
+                        stream = BytesIO(view)
+                else:
+                    stream = (
+                        supplied.open("rb")
+                        if isinstance(supplied, (Path, StagedPayload))
+                        else BytesIO(bytes(supplied))
+                    )
+                length, measured = 0, hashlib.sha256()
                 icon_prefix = b""
                 with stream, target.open("wb") as destination:
                     while True:
@@ -198,6 +215,14 @@ class LocalApiSession:
                             icon_prefix += chunk[: 4 - len(icon_prefix)]
                             if len(icon_prefix) == 4:
                                 cap = encoded_limit(icon_prefix, cap)
+                                if (
+                                    isinstance(supplied, (Path, StagedPayload))
+                                    and os.fstat(stream.fileno()).st_size > cap
+                                ):
+                                    refuse(
+                                        "icon_family storage limit exhausted",
+                                        "incomplete_source",
+                                    )
                         length += len(chunk)
                         if length > cap:
                             refuse(

@@ -29,6 +29,8 @@ class LocalApiSourceModule:
     Reads span multiple requests and are not atomic. The yielded session verifies
     the captured copy; it cannot prove live atomicity or universal discovery.
     Closing releases the capture, so conversion after inspection reacquires it.
+    Optional caller-owned cancel returns exact bool; None supplies no signal.
+    Checks surround bounded acquisition/frame work, without preempting a decoder.
     """
 
     def __init__(

@@ -244,6 +244,7 @@ def test_bad_controls_fail_safely_before_source_or_session_seal(cancel):
         with pytest.raises(MigrationFailed) as error:
             constructor(**arguments, cancel=cancel)
         assert error.value.issues[0].code == "api_acquisition_cancelled"
+        assert "control" in error.value.issues[0].message
         assert "CONTROL_CANARY" not in str(error.value)
 
 
@@ -754,4 +755,82 @@ def test_equal_icon_bytes_keep_owner_identity_and_exclusions_precede_acquisition
         assert not any(
             path == f"/api/attachments/{BRAIN}/{other}/file-content"
             for path, _, _ in api.requests
+        )
+
+
+def test_frozen5_session_rejects_known_oversized_open_file_before_body_copy(
+    tmp_path, monkeypatch
+):
+    from types import SimpleNamespace
+
+    _vector, _files, arguments = vector_inputs()
+    icon = next(a for a in arguments["snapshot"].assets if a.role == "icon")
+    path = tmp_path / "external-icon.bin"
+    path.write_bytes(arguments["payloads"][icon.asset_id])
+    arguments["payloads"][icon.asset_id] = path
+    original_open, original_fstat = Path.open, os.fstat
+    opened_descriptors = set()
+
+    class Guard:
+        def __init__(self, stream):
+            self.stream = stream
+            opened_descriptors.add(stream.fileno())
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            opened_descriptors.remove(self.stream.fileno())
+            self.stream.close()
+
+        def fileno(self):
+            return self.stream.fileno()
+
+        def read(self, size):
+            assert 0 < size <= 4, "Known oversize must refuse before copying body bytes"
+            return self.stream.read(size)
+
+    monkeypatch.setattr(
+        Path,
+        "open",
+        lambda p, *a, **kw: (
+            Guard(original_open(p, *a, **kw))
+            if p == path
+            else original_open(p, *a, **kw)
+        ),
+    )
+    monkeypatch.setattr(
+        os,
+        "fstat",
+        lambda fd: (
+            SimpleNamespace(st_size=8_388_609)
+            if fd in opened_descriptors
+            else original_fstat(fd)
+        ),
+    )
+    with pytest.raises(MigrationRefused) as error:
+        LocalApiSession(**arguments, capture_parent=tmp_path)
+    assert error.value.issues[0].code == "incomplete_source"
+
+
+def test_frozen5_verified_caller_buffer_does_not_invoke_custom_whole_bytes_conversion(
+    tmp_path,
+):
+    class Buffer(bytearray):
+        def __bytes__(self):
+            raise AssertionError(
+                "Use the bounded verified buffer, not custom whole-value conversion"
+            )
+
+    vector, _files, arguments = vector_inputs()
+    icon = next(a for a in arguments["snapshot"].assets if a.role == "icon")
+    arguments["payloads"][icon.asset_id] = Buffer(arguments["payloads"][icon.asset_id])
+    with closing(LocalApiSession(**arguments, capture_parent=tmp_path)) as session:
+        assert session.source_identity.source_sha256 == vector["expected_source_sha256"]
+        assert (
+            session.source_identity.snapshot_digest
+            == vector["expected_snapshot_digest"]
+        )
+        assert (
+            session.acquisition.integrity_sha256 == vector["expected_integrity_sha256"]
         )
