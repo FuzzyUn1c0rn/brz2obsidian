@@ -983,8 +983,8 @@ def render_references(text, owner, path, names, assets, *, qualified_brain=None)
 
 def literal_note_edits(raw, *, profile_version="1"):
     """API4 signature ownership and literal spans in original source coordinates."""
-    assert profile_version in {"1", "2", "3", "4"}, "supported source profile"
-    current = profile_version == "4"
+    assert profile_version in {"1", "2", "3", "4", "5"}, "supported source profile"
+    current = profile_version in {"4", "5"}
     signature = current and raw.startswith("\ufeff")
     source = raw[1:] if signature else raw
     _, edits = literal_edits(
@@ -1031,7 +1031,9 @@ def expected_document_text(raw, *, profile_version="1"):
     text = raw
     for edit in reversed(edits):
         text = text[: edit["start"]] + edit["after"] + text[edit["end"] :]
-    return contents(callouts(tables(text, current_tables=profile_version == "4")))
+    return contents(
+        callouts(tables(text, current_tables=profile_version in {"4", "5"}))
+    )
 
 
 def expected_note_text(
@@ -1082,7 +1084,7 @@ def adaptation_activity(raw, *, profile_version="1"):
             operations,
             ownership,
             **(
-                {"current_tables": profile_version == "4"}
+                {"current_tables": profile_version in {"4", "5"}}
                 if transform is tables
                 else {}
             ),
@@ -1161,7 +1163,7 @@ def validate_document_adaptations(raw, adapted, edits, *, profile_version="1"):
     activity = adaptation_activity(raw, profile_version=profile_version)
     current_literals = (
         literal_note_edits(raw, profile_version=profile_version)
-        if profile_version == "4"
+        if profile_version in {"4", "5"}
         else None
     )
     digest = hashlib.sha256(raw.encode()).hexdigest()

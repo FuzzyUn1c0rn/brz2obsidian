@@ -150,7 +150,9 @@ def expectation(raw, owner, bindings, absent, *, basis, profile_version="4"):
             }
     for transform in (tables, callouts, contents):
         options = (
-            {"current_tables": profile_version == "4"} if transform is tables else {}
+            {"current_tables": profile_version in {"4", "5"}}
+            if transform is tables
+            else {}
         )
         text = transform(text, origins=origins, **options)
         assert len(origins) == len(text), "independent insert copied-origin length"
@@ -481,7 +483,7 @@ def findings(record, key, events, *, api, evidence):
 def api_preparation(baseline, key, raw, profile_version):
     from .api_note_text import expected_document_text
 
-    if profile_version != "4":
+    if profile_version not in {"4", "5"}:
         return expected_document_text(raw, profile_version=profile_version), None, []
     bindings, absent = api_images(baseline)
     return expectation(
@@ -566,7 +568,9 @@ def check_api_acquisition(record, baseline):
 
 def api_findings(record, baseline, scoped, profile_version):
     result = []
-    absent = check_api_acquisition(record, baseline) if profile_version == "4" else {}
+    absent = (
+        check_api_acquisition(record, baseline) if profile_version in {"4", "5"} else {}
+    )
     documents = {d["key"]: d for t in record["item_targets"] for d in t["documents"]}
     documents.update(
         {d["key"]: d for a in record["asset_targets"] for d in a["retained_documents"]}

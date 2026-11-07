@@ -1,0 +1,13 @@
+{
+  "actual_source_content": false,
+  "historical_zero_alpha_control": "New inert exact32/16 legacy layout; AND1/XOR0 at top-left only, all other mask bits0. No screen inversion or new-family zero-alpha admission.",
+  "large_fixture_policy": "Recipes only; at most32MiB combined inert materialization/failed artifacts; one frame expectation at a time.",
+  "legacy_fixtures": {
+    "inert-a.ico": "b44733332d8c307dabc7b11be5164d567f11f962a7b18c6b94df57be28378613",
+    "inert-b.ico": "aeb330e827efb0eb8edfb8b191dd1a5aeb45e9a7a7cd90949dfa7192b25bb6db"
+  },
+  "pixel_expectation": "Top-down straight RGBA; native alpha0 RGB-only exception reported separately; production must retain hidden RGB. BMP X ignored/alpha255.",
+  "qualification": "Only a separate exact-revision review/native comparison verdict grants qualification; this provenance file itself is not a PASS or actual-source/native acceptance.",
+  "spec_sha256": "44a60d1144e3e6c7429719b87e56cfd6d44733bc863627d0d964a76108727056",
+  "synthetic": true
+}

@@ -364,7 +364,14 @@
     "tests/local_acceptance/test_external_image_audit.py::test_complete_external_images_keep_authored_and_owned_authority",
     "tests/application/test_format_attachment_choices.py",
     "tests/gui/test_format_attachment_choices.py::test_format_attachment_controls_show_canonical_current_only_guidance",
-    "tests/reconciliation/test_legacy_content_vectors.py"
+    "tests/reconciliation/test_legacy_content_vectors.py",
+    "tests/local_acceptance/test_icon_oracle.py::test_literal_source_bytes_and_frozen_preencoding_facts",
+    "tests/local_acceptance/test_icon_oracle.py::test_new_icon_proofs_match_preencoding_pixels_and_original_extents",
+    "tests/local_acceptance/test_icon_oracle.py::test_complete_structural_mutation_catalogue_refuses_before_native",
+    "tests/local_acceptance/test_icon_oracle.py::test_exact_and_alpha0_comparison_are_distinct_and_adversarial",
+    "tests/local_acceptance/test_icon_oracle.py::test_profile5_capture_vector_is_independently_canonical_and_frozen",
+    "tests/local_acceptance/test_api_icon_audit.py::test_complete_current_format8_icon_output_is_independently_handcrafted",
+    "tests/local_acceptance/test_api_icon_audit.py::test_pinned_unrequested_artwork_and_untrusted_manifest_cannot_refresh_the_pin"
   ],
   "schema_version": 1
 }

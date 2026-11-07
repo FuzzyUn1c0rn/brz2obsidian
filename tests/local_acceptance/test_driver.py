@@ -38,6 +38,8 @@ def test_expected_fact_oracle_has_only_reviewed_imports():
         "api_manifest",
         "api_generated",
         "api_image_proofs",
+        "api_icon_inputs",
+        "resource_calibration",
         "api_note_text",
         "api_scope",
         "api_scope_inputs",

@@ -237,7 +237,7 @@ def checked_generated_regions(
                 note.owner,
                 bindings,
                 qualified_brain=baseline.json(baseline.data["brain"])["id"]
-                if profile_version == "4"
+                if profile_version in {"4", "5"}
                 else None,
             ),
         )
@@ -366,7 +366,7 @@ def formatting_observations(raw, *, profile_version="1"):
     def add(feature, declaration, change):
         destination = (
             toc_observations
-            if profile_version == "4" and feature == "table_of_contents"
+            if profile_version in {"4", "5"} and feature == "table_of_contents"
             else observations
         )
         destination.append(
@@ -382,7 +382,7 @@ def formatting_observations(raw, *, profile_version="1"):
     table_text = tables(
         text,
         ownership=table_ownership,
-        current_tables=profile_version == "4",
+        current_tables=profile_version in {"4", "5"},
         malformed=malformed_tables,
     )
     table_headers = {begin for begin, _ in table_ownership}
@@ -425,7 +425,7 @@ def formatting_observations(raw, *, profile_version="1"):
             # operation may independently convert code pipes while preserving
             # an active malformed declaration on that same source line.
             valid = offset in table_headers
-            if profile_version != "4":
+            if profile_version not in {"4", "5"}:
                 add("table", body[starts[0] :], "01" if valid else "08")
         declaration = body.strip()
         if (
@@ -905,7 +905,7 @@ def check_projection_protocol(
             "observed_json": observation,
         }
         for key, note in scoped.safe_notes.items()
-        if profile_version == "4"
+        if profile_version in {"4", "5"}
         for observation in formatting_observations(
             note.scoped_text, profile_version=profile_version
         )
@@ -927,7 +927,7 @@ def check_projection_protocol(
             expected_values = ([findings[key]] if key in findings else []) + [
                 f for f in image_findings if key in f["affected"]
             ]
-            if profile_version == "4":
+            if profile_version in {"4", "5"}:
                 expected_values.extend(
                     f for f in format_findings if key in f["affected"]
                 )
@@ -1614,7 +1614,7 @@ def check_acquisition_protocol(value, collection, *, profile_version="1"):
                 (400, "tag_inventory_zero_exception"),
                 (404, "missing_txt_404"),
             }
-            | ({(404, "missing_image_404")} if profile_version == "4" else set())
+            | ({(404, "missing_image_404")} if profile_version in {"4", "5"} else set())
         ), "acquisition HTTP/outcome protocol"
         if request["status"] == 400:
             assert operation == "tags", "acquisition tag400 protocol"

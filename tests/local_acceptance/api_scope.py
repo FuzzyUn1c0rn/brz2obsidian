@@ -121,7 +121,7 @@ class ScopeView:
 
 def scope_note(raw, excluded, *, qualified_brain=None, profile_version="1"):
     """Remove whole active outer phrases before inspecting enclosed images."""
-    current = profile_version == "4"
+    current = profile_version in {"4", "5"}
     offset = int(current and raw.startswith("\ufeff"))
     source = raw[offset:]
     if current:
@@ -177,7 +177,9 @@ def scope_note(raw, excluded, *, qualified_brain=None, profile_version="1"):
 @audited(reuse="scope")
 def qualify_scope(baseline, *, profile_version):
     """Derive scope only; no safe text/availability assertion is an input."""
-    assert profile_version in {"1", "2", "3", "4"}, "unsupported API profile version"
+    assert profile_version in {"1", "2", "3", "4", "5"}, (
+        "unsupported API profile version"
+    )
     data = baseline.data
     graphs = {
         key: read_json(baseline.bytes(path), parse_float=Decimal)
@@ -473,7 +475,7 @@ def qualify_scope(baseline, *, profile_version):
             text, removed = scope_note(
                 raw,
                 excluded,
-                qualified_brain=collection if profile_version == "4" else None,
+                qualified_brain=collection if profile_version in {"4", "5"} else None,
                 profile_version=profile_version,
             )
             safe_notes[key] = SafeNote(row["sourceId"], text, removed)
