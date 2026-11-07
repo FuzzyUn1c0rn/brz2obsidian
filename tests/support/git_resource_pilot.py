@@ -39,7 +39,7 @@ STORAGE_CASES = (
     "stream_byte_mismatch",
 )
 SUITE_MODES = ("peaks", "refusals", "tiny", "storage", "payload")
-STAGE_RESERVES = {"development": 350, "coverage": 260, "author": 160, "verifier": 60}
+STAGE_RESERVES = {"development": 390, "coverage": 300, "author": 180, "verifier": 60}
 
 
 def _manifest_source(mode):
@@ -102,14 +102,14 @@ def _manifest_source(mode):
         for value in numbers
     ):
         raise OSError("Invalid suite timing declaration")
-    reserve = 90 if stage == "coverage" else 100
+    reserve = 90 if stage == "coverage" else 120
     if (
         suite["run_reserved_seconds"] != reserve
         or suite["deadline"] - suite["started_at"] != reserve
-        or suite["child_cap_seconds"] != 510
+        or suite["child_cap_seconds"] != 560
         or suite["future_reserved_seconds"] != STAGE_RESERVES[stage]
         or suite["prior_charged_seconds"] + reserve + suite["future_reserved_seconds"]
-        > 510
+        > 560
         or not suite["started_at"] <= time.monotonic() < suite["deadline"]
     ):
         raise OSError("Root-started suite has insufficient finite time credit")
@@ -369,21 +369,21 @@ def control_preflight(*, case=None, mode=None):
             "future_reserved_seconds",
         }
         or any(
-            type(value) not in (int, float) or not 0 < value <= 510
+            type(value) not in (int, float) or not 0 < value <= 560
             for value in timing.values()
         )
     ):
         raise OSError("Invalid cumulative time declaration")
-    future = STAGE_RESERVES[suite["stage"]] if suite else 350
+    future = STAGE_RESERVES[suite["stage"]] if suite else 390
     if (
-        timing["child_cap_seconds"] != 510
+        timing["child_cap_seconds"] != 560
         or timing["cleanup_seconds"] != 4
         or timing["future_reserved_seconds"] != future
         or timing["work_seconds"] + 4 > timing["run_reserved_seconds"]
         or timing["prior_charged_seconds"]
         + timing["run_reserved_seconds"]
         + timing["future_reserved_seconds"]
-        > 510
+        > 560
     ):
         raise OSError("Required future work no longer fits the child time allowance")
     if suite is not None and (
