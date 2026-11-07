@@ -15,7 +15,7 @@ def gap_projections(assets, declarations, *, profile_version="1"):
         if asset.availability != "absent":
             continue
         value = declarations[asset.asset_id]
-        if profile_version == "4" and asset.role == "image":
+        if profile_version in {"4", "5"} and asset.role == "image":
             continue
         if (
             asset.role != "file"
@@ -77,7 +77,7 @@ def validate_gap_audit(assets, audit, decisions, *, profile_version="1"):
         for asset in assets
         if asset.availability == "absent" and asset.role != "image"
     }
-    if profile_version != "4" and any(
+    if profile_version not in {"4", "5"} and any(
         request.outcome == "missing_image_404" for request in audit.requests
     ):
         refuse("Historical profiles do not admit image404")
@@ -130,7 +130,7 @@ def image_absence_facts(assets, declarations, requests, profile):
             and request["subject_id"] == asset.asset_id
         ]
         if (
-            profile != "4"
+            profile not in {"4", "5"}
             or role(value, profile) != "image"
             or asset.owner != value["sourceId"]
             or asset.actual_length is not None

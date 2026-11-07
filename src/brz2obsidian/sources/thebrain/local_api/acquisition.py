@@ -75,7 +75,7 @@ def _candidate_shape(hit, brain_id, profile_version="1"):
     if not all(type(value) is int for value in values):
         return None
     if (
-        profile_version in {"3", "4"}
+        profile_version in {"3", "4", "5"}
         and hit["brainId"] == ZERO_UUID
         and values == (1, 3, 0)
         and hit["sourceThought"] is None
@@ -149,6 +149,8 @@ class Acquisition:
         clock,
         profile_version="1",
         capture_directory=None,
+        *,
+        cancel=None,
     ):
         self.client, self.config, self.brain_id, self.clock = (
             client,
@@ -161,6 +163,7 @@ class Acquisition:
         self.links = {}
         self.profile_version = profile_version
         self.capture_directory = capture_directory
+        self.cancel = cancel
 
     def get(self, operation, path, subject=None, deadline=None):
         return self.client.json(operation, path, subject, deadline=deadline)
@@ -208,7 +211,7 @@ class Acquisition:
                 ),
             )
         self.links[key] = value
-        if self.profile_version in {"3", "4"}:
+        if self.profile_version in {"3", "4", "5"}:
             self.queue_link(key)
         else:
             self.link_ids.add(key)
@@ -223,7 +226,7 @@ class Acquisition:
             or hit.get("isFromOtherBrain") is not False
         ):
             refuse("A wildcard candidate has foreign or invalid ownership")
-        if self.profile_version in {"3", "4"} and any(
+        if self.profile_version in {"3", "4", "5"} and any(
             node is not None
             and (not isinstance(node, dict) or node.get("brainId") != self.brain_id)
             for node in (hit.get("sourceThought"), hit.get("sourceLink"))
@@ -251,7 +254,7 @@ class Acquisition:
         if link is not None:
             if not isinstance(link, dict) or link.get("brainId") != self.brain_id:
                 refuse("A wildcard link has foreign or invalid ownership")
-            if self.profile_version in {"3", "4"}:
+            if self.profile_version in {"3", "4", "5"}:
                 self.queue_link(link.get("id"))
             else:
                 self.link_ids.add(uuid(link.get("id")))
@@ -411,10 +414,14 @@ class Acquisition:
                     if not isinstance(link, dict) or (
                         link.get("thoughtIdA") == link.get("thoughtIdB")
                         and not (
-                            self.profile_version == "4" and link.get("meaning") == 3
+                            self.profile_version in {"4", "5"}
+                            and link.get("meaning") == 3
                         )
                     ):
-                        if isinstance(link, dict) and self.profile_version == "4":
+                        if isinstance(link, dict) and self.profile_version in {
+                            "4",
+                            "5",
+                        }:
                             unsupported_shape(
                                 self.profile_version,
                                 "relationship",
@@ -699,8 +706,8 @@ class Acquisition:
             with_findings=True,
             subjects={key: value["name"] for key, value in self.thoughts.items()},
             brain_id=b,
-            allow_qualified=self.profile_version == "4",
-            allow_literal_tokens=self.profile_version == "4",
+            allow_qualified=self.profile_version in {"4", "5"},
+            allow_literal_tokens=self.profile_version in {"4", "5"},
             excluded=excluded,
             profile_version=self.profile_version,
             image_absences=image_absences,
@@ -825,4 +832,5 @@ class Acquisition:
             audit=audit,
             payloads=payloads,
             profile_version=self.profile_version,
+            cancel=self.cancel,
         )

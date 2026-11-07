@@ -11,7 +11,7 @@ from brz2obsidian.contracts import MigrationFailed, MigrationRefused
 from .acquisition import Acquisition
 from .capture import identifiers
 from .config import LocalApiConfig, LocalApiSourceRef
-from .errors import failure, refuse
+from .errors import check_cancel, failure, refuse
 from .metadata import LocalApiRunMetadata
 from .storage import acquisition_storage
 from .transport import LocalHttp
@@ -32,9 +32,17 @@ class LocalApiSourceModule:
     """
 
     def __init__(
-        self, config=None, *, credentials=None, clock=None, profile_version="1"
+        self,
+        config=None,
+        *,
+        credentials=None,
+        clock=None,
+        profile_version="1",
+        cancel=None,
     ):
         self.profile_version = identifiers(profile_version)["profile_version"]
+        check_cancel(cancel)
+        self.cancel = cancel
         self.config = config or LocalApiConfig()
         self.clock = clock or time.monotonic
         self.credentials = credentials or (
@@ -51,7 +59,7 @@ class LocalApiSourceModule:
                     "api_credentials_missing",
                     "The local API credential provider is unavailable",
                 )
-            client = LocalHttp(self.config, token, None, self.clock)
+            client = LocalHttp(self.config, token, None, self.clock, cancel=self.cancel)
             rows = client.json("brain", "/brains")
             if (
                 not isinstance(rows, list)
@@ -93,6 +101,7 @@ class LocalApiSourceModule:
     @contextmanager
     def open(self, source_ref):
         try:
+            check_cancel(self.cancel)
             if not isinstance(source_ref, LocalApiSourceRef):
                 refuse("Select a canonical local API Brain reference")
             token = self.credentials()
@@ -101,7 +110,9 @@ class LocalApiSourceModule:
                     "api_credentials_missing",
                     "The local API credential provider is unavailable",
                 )
-            client = LocalHttp(self.config, token, source_ref.brain_id, self.clock)
+            client = LocalHttp(
+                self.config, token, source_ref.brain_id, self.clock, cancel=self.cancel
+            )
             session = None
             try:
                 with acquisition_storage() as directory:
@@ -112,6 +123,7 @@ class LocalApiSourceModule:
                         self.clock,
                         self.profile_version,
                         directory,
+                        cancel=self.cancel,
                     ).acquire()
             except BaseException:
                 if session is not None:

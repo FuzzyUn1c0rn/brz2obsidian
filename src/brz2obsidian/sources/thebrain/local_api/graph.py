@@ -89,12 +89,12 @@ def normalize_relationships(
                     refuse("A relationship scalar is not qualified")
             a, b = value["thoughtIdA"], value["thoughtIdB"]
             if a == b and not (
-                profile_version == "4"
+                profile_version in {"4", "5"}
                 and value["meaning"] == 3
                 and thoughts[a]["kind"] == 2
             ):
                 refuse("An included relationship meaning is not qualified")
-            if profile_version in {"3", "4"} and value["typeId"] is not None:
+            if profile_version in {"3", "4", "5"} and value["typeId"] is not None:
                 uuid(value["typeId"])
             if value["kind"] != 1 or value["typeId"] is not None:
                 unsupported_shape(
@@ -107,7 +107,7 @@ def normalize_relationships(
             if (
                 value["meaning"] == 2
                 and pair == (1, -1)
-                or profile_version == "4"
+                or profile_version in {"4", "5"}
                 and value["meaning"] == 3
                 and pair == (1, -1)
             ):
@@ -134,13 +134,13 @@ def normalize_relationships(
             elif (
                 value["meaning"] == 5
                 and pair == (1, -1)
-                or profile_version == "4"
+                or profile_version in {"4", "5"}
                 and value["meaning"] == 7
                 and pair == (1, -1)
             ):
                 if thoughts[a]["kind"] != 4:
                     refuse("A tag association requires an inventoried source tag")
-                if profile_version == "4" and roles not in (
+                if profile_version in {"4", "5"} and roles not in (
                     {(4, 4)} if value["meaning"] == 7 else {(4, 1), (4, 2)}
                 ):
                     unsupported_shape(
@@ -152,7 +152,7 @@ def normalize_relationships(
             elif value["meaning"] == 1 and (
                 pair in {(1, -1), (1, 1)}
                 or (
-                    profile_version in {"3", "4"}
+                    profile_version in {"3", "4", "5"}
                     and pair == (1, 3)
                     and thoughts[a]["kind"] == 1
                     and thoughts[b]["kind"] == 1
@@ -167,7 +167,7 @@ def normalize_relationships(
                     "relationship",
                     "An included relationship tuple is not qualified",
                 )
-            if profile_version == "4" and (
+            if profile_version in {"4", "5"} and (
                 kind == "hierarchy"
                 and not (
                     roles == (1, 1) or roles in {(1, 2), (1, 4)} and pair == (1, -1)
@@ -250,7 +250,7 @@ def normalize_relationships(
                 refuse("Type field, graph type and assignment links disagree")
         except MigrationRefused as error:
             raise with_subject(error, "item", value["name"]) from None
-    if profile_version == "4":
+    if profile_version in {"4", "5"}:
         cycle = directed_cycle((r.item_a, r.item_b) for r in result if r.kind == "tag")
         if cycle:
             refuse(

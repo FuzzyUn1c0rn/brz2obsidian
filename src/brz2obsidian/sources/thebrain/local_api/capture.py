@@ -66,7 +66,7 @@ IDENTIFIERS = {
 
 
 def identifiers(profile_version):
-    if profile_version not in {"1", "2", "3", "4"}:
+    if profile_version not in {"1", "2", "3", "4", "5"}:
         refuse("Select an explicitly reviewed local API profile")
     return dict(IDENTIFIERS, profile_version=profile_version)
 
@@ -77,7 +77,7 @@ DESKTOP_BUILD = "15.0.640.0"
 
 def qualification_baseline(profile_version):
     """Pinned reviewed source evidence, not a runtime build/schema observation."""
-    if profile_version == "4":
+    if profile_version in {"4", "5"}:
         return {
             "schema_sha256": "02fd25ff4f6a393f85aa0eab1597fb728f9a752a517497229715d834f5b49c5f",
             "desktop_build": "15.0.647.0",
@@ -281,7 +281,7 @@ def validate_source(source):
                 or value["type"]
                 not in (
                     {1, 2, 3, 5, 8, 12, 15}
-                    if source["identifiers"]["profile_version"] in {"3", "4"}
+                    if source["identifiers"]["profile_version"] in {"3", "4", "5"}
                     else {1, 3, 5, 12, 15}
                 )
                 or value["dataLength"] is not None

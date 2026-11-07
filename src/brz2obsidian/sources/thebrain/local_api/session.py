@@ -22,7 +22,7 @@ from .capture import (
     source_projection,
     validate_binding,
 )
-from .errors import failure, refuse
+from .errors import check_cancel, failure, refuse
 from .metadata import AcquisitionAudit, SourceAcquisition
 from .read_view import CaptureReadView
 from .storage import StagedPayload
@@ -82,6 +82,7 @@ class LocalApiSession:
         capture_parent=None,
         storage_keys=None,
         profile_version="1",
+        cancel=None,
     ):
         self._identifiers = identifiers(profile_version)
         self._directory = None
@@ -91,6 +92,7 @@ class LocalApiSession:
         self._read_lock = Lock()
         self._read_view = None
         try:
+            check_cancel(cancel)
             self._audit = AcquisitionAudit.model_validate_json(canonical(audit))
             source = source_projection(source)
             if source["identifiers"] != self._identifiers:
@@ -175,12 +177,33 @@ class LocalApiSession:
                     else BytesIO(bytes(supplied))
                 )
                 length, measured = 0, hashlib.sha256()
+                cap = audit["limits"]["max_payload_bytes"]
+                bounded_icon = (
+                    profile_version == "5" and attachment_values[asset_id]["type"] == 5
+                )
+                icon_prefix = b""
                 with stream, target.open("wb") as destination:
-                    while chunk := stream.read(65536):
+                    while True:
+                        check_cancel(cancel)
+                        read_limit = min(65536, cap - length + 1)
+                        if bounded_icon and len(icon_prefix) < 4:
+                            read_limit = min(read_limit, 4 - len(icon_prefix))
+                        chunk = stream.read(read_limit)
+                        check_cancel(cancel)
+                        if not chunk:
+                            break
+                        if bounded_icon and len(icon_prefix) < 4:
+                            from .icons import encoded_limit
+
+                            icon_prefix += chunk[: 4 - len(icon_prefix)]
+                            if len(icon_prefix) == 4:
+                                cap = encoded_limit(icon_prefix, cap)
                         length += len(chunk)
-                        if length > audit["limits"]["max_payload_bytes"]:
+                        if length > cap:
                             refuse(
-                                "max_payload_bytes storage limit exhausted",
+                                "icon_family storage limit exhausted"
+                                if cap < audit["limits"]["max_payload_bytes"]
+                                else "max_payload_bytes storage limit exhausted",
                                 "incomplete_source",
                             )
                         if (
@@ -195,6 +218,7 @@ class LocalApiSession:
                             )
                         measured.update(chunk)
                         destination.write(chunk)
+                        check_cancel(cancel)
                 if (
                     length != asset.actual_length
                     or measured.hexdigest() != asset.actual_sha256
@@ -204,7 +228,9 @@ class LocalApiSession:
                     )
                 from .resources import validate_bytes
 
-                validate_bytes(attachment_values[asset_id], target, profile_version)
+                validate_bytes(
+                    attachment_values[asset_id], target, profile_version, cancel=cancel
+                )
                 payload_entries.append(
                     {
                         "role": "payload",
@@ -259,6 +285,7 @@ class LocalApiSession:
                 target.parent.mkdir(exist_ok=True)
                 target.write_bytes(raw)
             self.verify_consistency()
+            check_cancel(cancel)
         except OSError, ValueError, KeyError, TypeError:
             self.close()
             raise failure(

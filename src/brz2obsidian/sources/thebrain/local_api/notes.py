@@ -139,7 +139,7 @@ def bind_documents(
                 )
             ):
                 refuse("Excluded note associations cannot be removed safely")
-            if profile_version == "4":
+            if profile_version in {"4", "5"}:
                 from ..unavailable_images import adapt_unavailable_images
 
                 document, image_findings = adapt_unavailable_images(

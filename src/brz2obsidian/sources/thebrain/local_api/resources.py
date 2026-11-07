@@ -15,7 +15,7 @@ from brz2obsidian.contracts import Asset, Document, MigrationRefused
 
 from ..external_files import external_file_uri
 from .declarations import source_date, uuid
-from .errors import refuse, unsupported_shape
+from .errors import check_cancel, refuse, unsupported_shape
 from .ico import validate_ico
 from .jpeg import validate_jpeg
 from .notes import scope_text
@@ -119,7 +119,7 @@ def role(value, profile_version):
         if kind == 1 and location == "Notes.md" and name is None:
             return "note_original"
         refuse("The authored note declaration is not qualified")
-    if profile_version in {"3", "4"} and kind in {2, 8} and name is None:
+    if profile_version in {"3", "4", "5"} and kind in {2, 8} and name is None:
         reference_uri(location, profile_version)
         return {2: "file", 8: "directory"}[kind]
     if kind == 3:
@@ -143,9 +143,9 @@ def role(value, profile_version):
         and name is None
         and location
         in {value["id"] + ".webp"}
-        | ({value["id"] + ".png"} if profile_version in {"2", "3", "4"} else set())
-        | ({value["id"] + ".jpg"} if profile_version in {"3", "4"} else set())
-        | ({value["id"] + ".svg"} if profile_version in {"3", "4"} else set())
+        | ({value["id"] + ".png"} if profile_version in {"2", "3", "4", "5"} else set())
+        | ({value["id"] + ".jpg"} if profile_version in {"3", "4", "5"} else set())
+        | ({value["id"] + ".svg"} if profile_version in {"3", "4", "5"} else set())
     ):
         return "image"
     if kind in {1, 15}:
@@ -160,9 +160,9 @@ def role(value, profile_version):
         suffix = location.rsplit(".", 1)[-1].lower() if "." in location else ""
         if (
             (kind, suffix) in {(1, "pdf"), (15, "txt")}
-            or profile_version == "4"
+            or profile_version in {"4", "5"}
             and kind == 1
-            or profile_version in {"2", "3", "4"}
+            or profile_version in {"2", "3", "4", "5"}
             and name is None
             and (kind, suffix) in {(1, "png"), (1, "zip")}
         ):
@@ -174,7 +174,13 @@ def role(value, profile_version):
     )
 
 
-def validate_bytes(value, raw, profile_version):
+def validate_bytes(value, raw, profile_version, *, cancel=None):
+    check_cancel(cancel)
+    if profile_version == "5" and role(value, profile_version) == "icon":
+        from .icons import validate_structural_icon
+
+        if validate_structural_icon(raw, cancel=cancel):
+            return "icon"
     source = raw if isinstance(raw, Path) else BytesIO(raw)
     if isinstance(raw, Path):
         with raw.open("rb") as stream:
@@ -207,9 +213,9 @@ def validate_bytes(value, raw, profile_version):
         except BadZipFile, ValueError, OSError:
             refuse("Required ZIP bytes have no valid central directory")
         return selected
-    if selected == "file" and profile_version == "4" and suffix != "png":
+    if selected == "file" and profile_version in {"4", "5"} and suffix != "png":
         return selected
-    if selected == "image" and suffix == "svg" and profile_version in {"3", "4"}:
+    if selected == "image" and suffix == "svg" and profile_version in {"3", "4", "5"}:
         validate_svg(raw)
         return selected
     expected = None
@@ -219,9 +225,9 @@ def validate_bytes(value, raw, profile_version):
         expected = "PNG"
     elif prefix.startswith(b"\xff\xd8\xff") and (
         selected == "icon"
-        and profile_version in {"2", "3", "4"}
+        and profile_version in {"2", "3", "4", "5"}
         or selected == "image"
-        and profile_version in {"3", "4"}
+        and profile_version in {"3", "4", "5"}
         and suffix == "jpg"
     ):
         expected = "JPEG"
@@ -237,12 +243,12 @@ def validate_bytes(value, raw, profile_version):
         and profile_version in {"3", "4"}
         and prefix[:4] == b"\x00\x00\x01\x00"
     ):
-        validate_ico(raw)
+        validate_ico(raw, cancel=cancel)
         return selected
     if expected is None:
         refuse("Required image/icon bytes do not match the qualified signature")
     strict_jpeg = (
-        selected == "image" and profile_version in {"3", "4"} and suffix == "jpg"
+        selected == "image" and profile_version in {"3", "4", "5"} and suffix == "jpg"
     )
     try:
         with warnings.catch_warnings():
@@ -253,6 +259,7 @@ def validate_bytes(value, raw, profile_version):
                 if selected == "image" and suffix == "jpg" and image.format != "JPEG":
                     raise ValueError
                 image.verify()
+            check_cancel(cancel)
             with Image.open(
                 raw if isinstance(raw, Path) else BytesIO(raw), formats=(expected,)
             ) as image:
@@ -261,8 +268,10 @@ def validate_bytes(value, raw, profile_version):
                 if min(image.size) <= 0:
                     raise ValueError
                 for index in range(getattr(image, "n_frames", 1)):
+                    check_cancel(cancel)
                     image.seek(index)
                     image.load()
+                    check_cancel(cancel)
                 if strict_jpeg:
                     verified_jpeg = image.size, image.mode
     except (
@@ -372,7 +381,7 @@ def capture_owner(
                     sink=stream,
                 )
                 note_bytes = stream.getvalue()
-            validate_bytes(value, note_bytes, profile_version)
+            validate_bytes(value, note_bytes, profile_version, cancel=client.cancel)
             measured_length, measured_hash = len(note_bytes), hashlib.sha256(note_bytes)
         else:
             with directory.open(raw.name, "xb") as stream:
@@ -382,13 +391,15 @@ def capture_owner(
                     asset_id,
                     sink=stream,
                     allow_missing_txt=value["type"] == 15,
-                    allow_missing_image=profile_version == "4" and selected == "image",
+                    allow_missing_image=profile_version in {"4", "5"}
+                    and selected == "image",
+                    bounded_icon=profile_version == "5" and selected == "icon",
                 )
             if status == 404:
                 assets.append(Asset(**common, role=selected, availability="absent"))
                 continue
             directory.verify()
-            validate_bytes(value, raw, profile_version)
+            validate_bytes(value, raw, profile_version, cancel=client.cancel)
             measured_length, measured_hash = 0, hashlib.sha256()
             with directory.open(raw.name, "rb") as stream:
                 while chunk := stream.read(65536):
@@ -403,8 +414,8 @@ def capture_owner(
                 text,
                 excluded,
                 brain_id=brain,
-                allow_qualified=profile_version == "4",
-                allow_literal_tokens=profile_version == "4",
+                allow_qualified=profile_version in {"4", "5"},
+                allow_literal_tokens=profile_version in {"4", "5"},
             )
             record("note_text", "note_text:" + owner, owner, {"text": text})
             if removed:
@@ -643,8 +654,8 @@ def validate_payload_binding(source, snapshot, audit):
                     legacy_table_boundaries=legacy_table_boundaries,
                     preserve_table_warnings=preserve_table_warnings,
                     brain_id=source["brain"]["id"],
-                    allow_qualified=profile == "4",
-                    allow_literal_tokens=profile == "4",
+                    allow_qualified=profile in {"4", "5"},
+                    allow_literal_tokens=profile in {"4", "5"},
                     excluded=excluded_thoughts,
                     profile_version=profile,
                     image_absences=image_absences,

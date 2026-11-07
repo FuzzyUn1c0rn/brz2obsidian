@@ -58,3 +58,5 @@ LOCAL_API_POLICY_V4 = LOCAL_API_POLICY.model_copy(
         ),
     }
 )
+
+LOCAL_API_POLICY_V5 = LOCAL_API_POLICY_V4.model_copy(update={"profile_version": "5"})
