@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from tests.support.git_resource_pilot import control_preflight, finish_control
+from tests.support import git_resource_pilot
 from tools import update_resource_probe
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -251,3 +252,90 @@ def test_both_git_factories_and_setup_enter_measured_command_jobs():
     assert facts["original_factory_classes_restored"] is True
     assert facts["fixture_rounded_bytes"] <= manifest["fixture"]["reserve_bytes"]
     assert Path(facts["fixture_root"]) == Path(manifest["fixture"]["path"])
+
+
+@pytest.fixture(scope="module")
+def storage_results(request):
+    completed = None
+
+    def obtain():
+        nonlocal completed
+        if completed is None:
+            completed = git_resource_pilot.storage_control()
+        return completed
+
+    return obtain
+
+
+@pytest.mark.parametrize(
+    ("case", "refusal"),
+    [
+        ("whole_target_is_delta", "whole_target_type"),
+        ("delta_target_is_whole", "delta_target_type"),
+        ("reverse_direction", "delta_direction"),
+        ("ofs_instead_of_ref", "ref_delta_type"),
+        ("wrong_header_base", "header_base"),
+        ("header_overflow", "header_overflow"),
+        ("header_truncated", "header_truncated"),
+        ("pack_index_corrupt", "pack_integrity"),
+        ("loose_shadow", "loose_shadow"),
+        ("external_alternate", "external_alternate"),
+        ("stream_byte_mismatch", "stream_bytes"),
+    ],
+    ids=[
+        "whole_target_is_delta", "delta_target_is_whole", "reverse_direction",
+        "ofs_instead_of_ref", "wrong_header_base", "header_overflow",
+        "header_truncated", "pack_index_corrupt", "loose_shadow",
+        "external_alternate", "stream_byte_mismatch",
+    ],
+)
+def test_invalid_storage_shape_cannot_qualify_a_fixture(
+    case, refusal, storage_results, request
+):
+    try:
+        facts = storage_results()[case]
+        assert facts["refusal"] == refusal
+        assert facts["expected_boundary_reached"] is True
+        assert facts["fixture_bytes"] < MIB
+        assert facts["maximum_entry_bytes_read"] <= 30
+        assert facts["cleanup_complete"] is True
+        if case == "whole_target_is_delta":
+            assert facts["pack_integrity_verified"] is True
+            assert facts["target_header"]["type"] == 7
+            assert facts["target_row"]["depth"] == 1
+        elif case == "delta_target_is_whole":
+            assert facts["pack_integrity_verified"] is True
+            assert facts["target_header"]["type"] == 3
+            assert facts["target_row"]["depth"] == 0
+        elif case == "reverse_direction":
+            assert facts["pack_integrity_verified"] is True
+            assert facts["base_row"]["depth"] == 1
+            assert facts["base_row"]["base"] == facts["target_row"]["oid"]
+        elif case == "ofs_instead_of_ref":
+            assert facts["pack_integrity_verified"] is True
+            assert facts["target_header"]["type"] == 6
+            assert facts["target_row"]["depth"] == 1
+        elif case == "wrong_header_base":
+            assert facts["pack_integrity_verified"] is True
+            assert facts["target_header"]["type"] == 7
+            assert facts["target_header"]["base"] != facts["required_base_oid"]
+        elif case == "header_overflow":
+            assert facts["maximum_entry_bytes_read"] == 10
+        elif case == "header_truncated":
+            assert facts["maximum_entry_bytes_read"] == 1
+        elif case == "pack_index_corrupt":
+            assert facts["git_returncode"] != 0
+        elif case == "loose_shadow":
+            assert facts["loose_oid"] == "95490e8806e26a725a7a45825d59e0331a06e547"
+        elif case == "external_alternate":
+            assert facts["layout_path"] == "objects/info/alternates"
+        elif case == "stream_byte_mismatch":
+            assert facts["mismatch"] == {"offset": 3, "actual": 89, "expected": 90}
+            assert facts["verified_stream_bytes"] == 8
+            assert facts["cryptographic_success"] is True
+            assert facts["stream_command_finalized"] is True
+            assert facts["actual_stream_role"] == "valid R0 target with independent SHA1/SHA256"
+            assert facts["expected_pattern_role"] == "R0 invalid-control actual_raw_hex used as expected"
+    except BaseException:
+        request.session.shouldstop = "Unexpected storage outcome; Root assessment required"
+        raise
