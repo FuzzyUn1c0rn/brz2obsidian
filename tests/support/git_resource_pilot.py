@@ -10,13 +10,12 @@ import sys
 import time
 from contextlib import contextmanager
 from ctypes import wintypes as w
-from importlib import import_module
 from pathlib import Path
 
 MIB = 1024 * 1024
 
 
-def control_preflight():
+def control_preflight(*, case=None):
     """Bind one exclusive control attempt to Root's cumulative reservation."""
     from tests.support.resource_pilot import Evidence, inventory, native_identity, read_control
 
@@ -29,8 +28,10 @@ def control_preflight():
     fields = {
         "schema_version", "issue", "feature_root", "base_commit", "oracle_commit",
         "role", "mode", "checkout", "attempt_parent", "attempt", "runner_parent",
-        "runtime", "artifacts", "time", "charged_paths",
+        "runtime", "artifacts", "time", "charged_paths", "bootstrap",
     }
+    if case is not None:
+        fields |= {"cases"}
     if type(manifest) is not dict or set(manifest) != fields:
         raise OSError("Unknown Root command manifest fields")
     root = Path(__file__).resolve().parents[2]
@@ -41,7 +42,7 @@ def control_preflight():
         or manifest["base_commit"] != "5378f0b1184bfe8825d6414475adaaa136203e1e"
         or manifest["oracle_commit"] != "94b4abdf536ce396a9f7b0a0591f7627d0b9079f"
         or manifest["role"] != "author"
-        or manifest["mode"] != "peaks"
+        or manifest["mode"] != ("peaks" if case is None else "refusals")
         or Path(manifest["checkout"]).resolve() != root
     ):
         raise OSError("Root command manifest context mismatch")
@@ -51,8 +52,32 @@ def control_preflight():
             raise OSError("Unknown native owner declaration")
         if native_identity(Path(declaration["path"])) != declaration["native_identity"]:
             raise OSError("Root-bound native parent identity changed")
-    attempt = Path(manifest["attempt"])
-    if attempt.parent != Path(manifest["attempt_parent"]["path"]) or attempt.exists():
+    batch = Path(manifest["attempt"])
+    batch_started = None
+    bootstrap = manifest["bootstrap"]
+    if type(bootstrap) is not dict or set(bootstrap) != {"lifetimes", "images"} or bootstrap["lifetimes"] != 2 or bootstrap["images"] != [manifest["runtime"]["native_executable"], "C:/Windows/System32/conhost.exe"]:
+        raise OSError("Bootstrap differs from the frozen native control")
+    if batch.parent != Path(manifest["attempt_parent"]["path"]):
+        raise OSError("Command attempt is outside its assigned parent")
+    if case is not None:
+        expected_cases = [
+            "constructor_partial", "measurement_assign", "product_assign",
+            "duplicate_measurement", "duplicate_creation", "registration_ack_lost",
+            "family_counter_unavailable", "driver_killed_after_registration",
+            "outer_deadline", "duplicate_return", "command_census_bypass",
+            "terminal_reserve_exhausted",
+        ]
+        if manifest["cases"] != expected_cases or case not in expected_cases:
+            raise OSError("Unknown refusal batch declaration")
+        if batch.exists():
+            owner = json.loads(read_control(batch / "batch-owner.json"))
+            if set(owner) != {"context", "native_identity", "started_at"} or owner["context"] != digest or owner["native_identity"] != native_identity(batch) or type(owner["started_at"]) not in (int, float):
+                raise OSError("Refusal batch native ownership changed")
+            batch_started = owner["started_at"]
+        attempt = batch / case
+    else:
+        attempt = batch
+    if attempt.exists():
         raise OSError("Command attempt is not an exclusive fresh destination")
     runner = Path(os.environ["BRZ_CHECK_COUNTS"]).parent
     if runner.parent != Path(manifest["runner_parent"]["path"]):
@@ -97,20 +122,30 @@ def control_preflight():
             charged += max(unit, ((path.stat().st_size + unit - 1) // unit) * unit)
     if charged > artifacts["prior_charged_bytes"]:
         raise OSError("Retained artifact growth exceeded Root's charged block")
+    retained_batch = inventory(batch, unit=unit)[0] if batch.exists() else 0
+    if artifacts["prior_charged_bytes"] + retained_batch + artifacts["run_reserved_bytes"] > artifacts["child_cap_bytes"]:
+        raise OSError("Retained refusal attempts exhausted cumulative artifact credit")
     if inventory(runner, unit=unit)[0] > artifacts["runner_bytes"]:
         raise OSError("Active runner artifact reserve exhausted")
     timing = manifest["time"]
-    if type(timing) is not dict or set(timing) != {"child_cap_seconds", "prior_charged_seconds", "run_reserved_seconds", "work_seconds", "cleanup_seconds", "future_reserved_seconds"} or any(type(value) not in (int, float) or not 0 < value <= 400 for value in timing.values()):
+    if type(timing) is not dict or set(timing) != {"child_cap_seconds", "prior_charged_seconds", "run_reserved_seconds", "work_seconds", "cleanup_seconds", "future_reserved_seconds"} or any(type(value) not in (int, float) or not 0 < value <= 450 for value in timing.values()):
         raise OSError("Invalid cumulative time declaration")
-    if timing["child_cap_seconds"] != 400 or timing["cleanup_seconds"] != 4 or timing["future_reserved_seconds"] < 320 or timing["work_seconds"] + 4 > timing["run_reserved_seconds"] or timing["prior_charged_seconds"] + timing["run_reserved_seconds"] + timing["future_reserved_seconds"] > 400:
+    if timing["child_cap_seconds"] != 450 or timing["cleanup_seconds"] != 4 or timing["future_reserved_seconds"] < 320 or timing["work_seconds"] + 4 > timing["run_reserved_seconds"] or timing["prior_charged_seconds"] + timing["run_reserved_seconds"] + timing["future_reserved_seconds"] > 450:
         raise OSError("Required future work no longer fits the child time allowance")
-    for path in (attempt.parent, runner):
+    if batch_started is not None and time.monotonic() - batch_started + timing["work_seconds"] + timing["cleanup_seconds"] + 4 > timing["run_reserved_seconds"]:
+        raise OSError("Refusal batch lacks the complete next-work and cleanup reservation")
+    for path in (batch.parent, runner):
         if shutil.disk_usage(path).free < artifacts["minimum_free_bytes"]:
             raise OSError("Insufficient physical volume headroom before control")
+    if case is not None and not batch.exists():
+        batch.mkdir()
+        Evidence(limit=65536, terminal_reserve=65536).write(batch / "batch-owner.json", {"context": digest, "native_identity": native_identity(batch), "started_at": time.monotonic()}, terminal=True)
     attempt.mkdir()
     writer = Evidence(limit=MIB, terminal_reserve=65536)
     writer.write(attempt / "owner.json", {"root": str(attempt), "native_identity": native_identity(attempt), "context": digest, "runner": str(runner), "runner_native_identity": native_identity(runner)})
-    writer.write(attempt / "disk-before.json", {"charged_bytes": charged, "prior_reserved_bytes": artifacts["prior_charged_bytes"], "run_reserved_bytes": artifacts["run_reserved_bytes"], "free_bytes": shutil.disk_usage(attempt).free, "allocation_unit_bytes": unit})
+    writer.write(attempt / "disk-before.json", {"charged_bytes": charged, "prior_reserved_bytes": artifacts["prior_charged_bytes"], "retained_batch_bytes": retained_batch, "run_reserved_bytes": artifacts["run_reserved_bytes"], "free_bytes": shutil.disk_usage(attempt).free, "allocation_unit_bytes": unit})
+    if case is not None:
+        (attempt / "resume-trace.jsonl").open("xb").close()
     return attempt, manifest
 
 
@@ -143,10 +178,139 @@ def _exchange(event, expected):
 class CommandCalls:
     """Only the actual returned call releases command finalization."""
 
-    def __init__(self):
+    def __init__(self, fault=None, attempt=None):
         self.seq = 0
         self.current = None
         self.deadline = float(os.environ["BRZ_COMMAND_DEADLINE"])
+        self.fault = fault
+        self.attempt = attempt
+        self.trace_bytes = 0
+        self.product_handles = {}
+        self.product_closed = 0
+        self.product_close_duplicates = 0
+        self.measurement_opened = 0
+        self.measurement_closed = 0
+
+    def witness(self, boundary, **details):
+        if self.attempt is None:
+            raise OSError("Native fault witness has no exclusive owner")
+        data = (json.dumps({"boundary": boundary, "seq": self.seq, **details}) + "\n").encode()
+        if len(data) > 4096:
+            raise OSError("Native fault witness exceeds its reserved bytes")
+        with (self.attempt / "fault-witness.json").open("xb") as stream:
+            if stream.write(data) != len(data):
+                raise OSError("Native fault witness was incomplete")
+            stream.flush()
+            os.fsync(stream.fileno())
+
+    def resume_witness(self):
+        if self.attempt is None:
+            return
+        data = (json.dumps({"event": "native_resume_attempt", "seq": self.seq}, separators=(",", ":")) + "\n").encode()
+        if self.trace_bytes + len(data) > 65536:
+            raise OSError("Native resume witness reservation exhausted")
+        self.trace_bytes += len(data)
+        with (self.attempt / "resume-trace.jsonl").open("ab") as stream:
+            if stream.write(data) != len(data):
+                raise OSError("Native resume write-ahead trace was incomplete")
+            stream.flush()
+            os.fsync(stream.fileno())
+
+    def ownership_witness(self):
+        if self.attempt is None:
+            return
+        data = {
+            "measurement_opened": self.measurement_opened,
+            "measurement_closed": self.measurement_closed,
+            "product_opened": len(self.product_handles),
+            "product_closed": self.product_closed,
+            "product_close_duplicates": self.product_close_duplicates,
+        }
+        raw = (json.dumps(data) + "\n").encode()
+        with (self.attempt / "driver-ownership.json").open("xb") as stream:
+            if stream.write(raw) != len(raw):
+                raise OSError("Native ownership witness was incomplete")
+            stream.flush()
+            os.fsync(stream.fileno())
+
+    def exception_witness(self, error):
+        if self.attempt is None:
+            return
+        raw = (json.dumps({"type": type(error).__name__, "message": str(error)}) + "\n").encode()
+        if len(raw) > 4096:
+            raise OSError("Original exception exceeds its witness reservation")
+        with (self.attempt / "original-exception.json").open("xb") as stream:
+            if stream.write(raw) != len(raw):
+                raise OSError("Original exception witness was incomplete")
+            stream.flush()
+            os.fsync(stream.fileno())
+
+    @contextmanager
+    def native_boundary(self, *, constructor=False):
+        calls = self
+        original = ctypes.WinDLL
+
+        class NativeFunction:
+            def __init__(self, function, name):
+                self.function = function
+                self.name = name
+
+            @property
+            def argtypes(self):
+                return self.function.argtypes
+
+            @argtypes.setter
+            def argtypes(self, value):
+                self.function.argtypes = value
+
+            @property
+            def restype(self):
+                return self.function.restype
+
+            @restype.setter
+            def restype(self, value):
+                self.function.restype = value
+
+            def __call__(self, *args):
+                if self.name == "ResumeThread":
+                    calls.resume_witness()
+                if self.name == "SetInformationJobObject" and constructor and calls.fault == "constructor_partial":
+                    result = self.function(args[0], -1, *args[2:])
+                    error = ctypes.get_last_error()
+                    calls.witness("constructor_partial", native_error=error, native_result=bool(result))
+                    ctypes.set_last_error(error)
+                    return result
+                if self.name == "AssignProcessToJobObject" and calls.fault == "product_assign":
+                    result = self.function(0, args[1])
+                    error = ctypes.get_last_error()
+                    calls.witness("product_assign", native_error=error, native_result=bool(result))
+                    ctypes.set_last_error(error)
+                    return result
+                result = self.function(*args)
+                if self.name == "CreateJobObjectW" and result:
+                    calls.product_handles[int(result)] = False
+                elif self.name == "CloseHandle" and int(args[0]) in calls.product_handles:
+                    handle = int(args[0])
+                    if calls.product_handles[handle]:
+                        calls.product_close_duplicates += 1
+                    if result:
+                        calls.product_handles[handle] = True
+                        calls.product_closed += 1
+                return result
+
+        class WitnessDLL(original):
+            def __getattr__(self, name):
+                function = super().__getattr__(name)
+                if name in ("ResumeThread", "CreateJobObjectW", "CloseHandle", "SetInformationJobObject", "AssignProcessToJobObject"):
+                    function = NativeFunction(function, name)
+                    setattr(self, name, function)
+                return function
+
+        ctypes.WinDLL = WitnessDLL
+        try:
+            yield
+        finally:
+            ctypes.WinDLL = original
 
     def call(self, kind, function, argv, **kwargs):
         if self.current is not None or self.seq >= 512:
@@ -168,12 +332,18 @@ class CommandCalls:
                     except OSError as error:
                         original.add_note(f"Measurement handle cleanup also failed: {error}")
                 try:
+                    self.ownership_witness()
+                    self.exception_witness(original)
+                except OSError as error:
+                    original.add_note(f"Ownership witness also failed: {error}")
+                try:
                     _exchange({"event": "command_return", "seq": seq, "status": "raised" if self.current["created"] else "not_created"}, f"finalized {seq}")
                 except (OSError, ValueError):
                     pass
                 raise
             for job in self.current["jobs"]:
                 job.close_measurement()
+            self.ownership_witness()
             _exchange({"event": "command_return", "seq": seq, "status": "returned"}, f"finalized {seq}")
             return result
         finally:
@@ -181,13 +351,13 @@ class CommandCalls:
 
 
 @contextmanager
-def measured_calls():
+def measured_calls(*, fault=None, attempt=None):
     """Adapt fixed identities and factories without changing product cleanup."""
     from brz2obsidian.publication import git_payload, git_read
-    from tests.support import resource_pilot
     from tools.update_resource_probe import _Windows
 
-    calls = CommandCalls()
+    resource_pilot = sys.modules.get("tests.support.resource_pilot")
+    calls = CommandCalls(fault, attempt)
     api = _Windows()
     original_read, original_verify = git_read.read_git, git_payload.verify_blobs
     original_job, original_popen = git_read._WindowsJob, git_read._SuspendedPopen
@@ -204,9 +374,11 @@ def measured_calls():
                 raise OSError("Process constructor bypassed command begin")
             self.measurement = api.kernel.CreateJobObjectW(None, None)
             api.require(self.measurement)
+            calls.measurement_opened += 1
             calls.current["jobs"].append(self)
             try:
-                super().__init__()
+                with calls.native_boundary(constructor=True):
+                    super().__init__()
             except BaseException:
                 self.close_measurement()
                 raise
@@ -215,9 +387,16 @@ def measured_calls():
             if self.measurement is not None:
                 handle, self.measurement = self.measurement, None
                 api.require(api.kernel.CloseHandle(handle))
+                calls.measurement_closed += 1
 
         def attach_handle(self, handle):
             calls.current["created"] = True
+            if calls.fault == "measurement_assign":
+                result = api.kernel.AssignProcessToJobObject(0, handle)
+                error = ctypes.get_last_error()
+                calls.witness("measurement_assign", native_error=error, native_result=bool(result))
+                ctypes.set_last_error(error)
+                api.require(result)
             api.require(api.kernel.AssignProcessToJobObject(self.measurement, handle))
             super().attach_handle(handle)
             seq = calls.current["seq"]
@@ -225,9 +404,14 @@ def measured_calls():
             # The observer now owns a duplicate. Closing this original does not
             # retain or alter the independently owned product cleanup job.
             self.close_measurement()
+            if calls.fault == "outer_deadline":
+                calls.witness("outer_deadline", registration_acknowledged=True)
+                time.sleep(60)
 
     class MeasuredPopen(original_popen):
-        pass
+        def _execute_child(self, *args, **kwargs):
+            with calls.native_boundary():
+                return super()._execute_child(*args, **kwargs)
 
     def read(argv, **kwargs):
         return calls.call("read", original_read, argv, **kwargs)
@@ -263,13 +447,16 @@ def measured_calls():
             (("checkpoint_payload", "vault_history", "vault_repair", "attachment_ownership", "vault_recovery", "vault_apply"), "verify_blobs", original_verify, verify),
         ):
             for name in names:
-                module = import_module("brz2obsidian.publication." + name)
+                module = sys.modules.get("brz2obsidian.publication." + name)
+                if module is None:
+                    continue
                 if getattr(module, attribute, None) is not original:
                     raise OSError("Unrecognized imported Git consumer identity")
                 bind(module, attribute, replacement)
         bind(git_read, "read_git", read)
         bind(git_payload, "verify_blobs", verify)
-        bind(resource_pilot, "git", fixture)
+        if resource_pilot is not None:
+            bind(resource_pilot, "git", fixture)
         yield calls
     finally:
         for module, name, value in reversed(changes):
@@ -357,6 +544,31 @@ def _peaks(attempt):
     Evidence(limit=MIB - 65536, terminal_reserve=65536).write(attempt / "peaks.json", witnesses)
 
 
+def _refusal(case, attempt):
+    from brz2obsidian.publication import git_read
+
+    with measured_calls(fault=case, attempt=attempt) as calls:
+        result = git_read.read_git(
+            [sys._base_executable, "-c", "pass"],
+            env=os.environ.copy(),
+            timeout=0.25,
+        )
+        if result.returncode:
+            raise OSError("Fixed refusal command unexpectedly failed")
+        if case == "duplicate_return":
+            _exchange({"event": "command_return", "seq": calls.seq, "status": "returned"}, f"finalized {calls.seq}")
+        if case == "command_census_bypass":
+            subprocess.run(
+                [sys._base_executable, "-c", "pass"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=0.25,
+                check=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+
+
 def main():
     mode = sys.argv[1]
     if mode == "allocate":
@@ -368,9 +580,12 @@ def main():
     from tools.update_resource_probe import _runtime_binding
 
     _exchange({"event": "hello", "pid": os.getpid(), **_runtime_binding()}, "ready")
-    if mode != "peaks":
+    if mode == "peaks":
+        _peaks(Path(sys.argv[2]))
+    elif mode == "refusal":
+        _refusal(sys.argv[2], Path(sys.argv[3]))
+    else:
         raise OSError("Unknown fixed command pilot")
-    _peaks(Path(sys.argv[2]))
     _exchange({"event": "done", "pid": os.getpid(), "ok": True}, "continue")
 
 

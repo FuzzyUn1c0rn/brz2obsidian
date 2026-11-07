@@ -1,9 +1,10 @@
-"""Observe an explicitly owned, trusted, stdio-only Windows calibration family.
+"""Observe trusted Windows calibration and registered command families.
 
-This proof tool does not admit product work or qualify Git attribution. Commands
-must implement the finite calibration barrier protocol and check allocation
-failures. It bounds its own artifacts, not arbitrary filesystem writes by a
-hostile executable. All memory counters are bytes unless named *_pages.
+Drivers implement finite stdio protocols and check their allocation failures.
+The command policy retains OS family peaks; individually missed helper identities
+and peaks remain explicit gaps. This tool does not change product admission.
+It bounds its own artifacts, not arbitrary writes by a hostile executable.
+All memory counters are bytes unless named *_pages.
 """
 
 import ctypes
@@ -241,7 +242,7 @@ class _Windows:
             "image": image.value,
         }
 
-    def duplicate(self, source, handle):
+    def duplicate(self, source, handle, *, access=None):
         duplicate = w.HANDLE()
         self.require(
             self.kernel.DuplicateHandle(
@@ -249,9 +250,9 @@ class _Windows:
                 handle,
                 self.kernel.GetCurrentProcess(),
                 ctypes.byref(duplicate),
-                0,
+                0 if access is None else access,
                 False,
-                2,
+                2 if access is None else 0,
             )
         )
         return duplicate.value
@@ -481,7 +482,10 @@ class _CommandJob(_Job):
     def __init__(self, api, ceiling, policy):
         self.policy = policy
         self.borrowed = set()
+        self.initializing = True
         super().__init__(api, ceiling, lifetime_limit=512)
+        self.policy.retain(self.handle)
+        self.initializing = False
 
     def attach_handle(self, handle):
         self.api.require(
@@ -500,30 +504,40 @@ class _CommandJob(_Job):
         self.policy.inventory.append(row)
         self.handles[identity["pid"]] = handle
         self.borrowed.add(handle)
+        self.policy.retain(handle)
 
     def track(self, pid, origin):
         if pid in self.handles:
             return
         self.policy.reserve_row()
         super().track(pid, origin)
+        self.policy.retain(self.handles[pid])
         row = self.attribution.pop()
         row["kind"] = "process"
         self.policy.check_row(row)
         self.policy.inventory.append(row)
 
     def close(self):
-        self.handles = {
-            pid: handle
-            for pid, handle in self.handles.items()
-            if handle not in self.borrowed
-        }
-        return super().close()
+        errors = []
+        handles = [handle for handle in self.handles.values() if handle not in self.borrowed]
+        if self.handle:
+            if self.initializing and self.handle not in self.policy.owned:
+                self.policy.retain(self.handle)
+            handles.append(self.handle)
+        for handle in handles:
+            try:
+                self.policy.close(self.api, handle)
+            except OSError as error:
+                errors.append(str(error))
+        self.handle = None
+        self.handles.clear()
+        return errors
 
 
 class _Commands:
     """Synchronous, fail-closed ownership state for one declared driver."""
 
-    def __init__(self, phases, individual_samples):
+    def __init__(self, phases, individual_samples, fault, bootstrap):
         self.phases = phases
         self.individual_samples = individual_samples
         self.inventory = []
@@ -536,6 +550,31 @@ class _Commands:
         self.bootstrap = None
         self.expected_runtime = _runtime_binding()
         self.active = None
+        self.fault = fault
+        self.bootstrap_expected = bootstrap
+        self.fault_reached = False
+        self.owned = set()
+        self.close_duplicates = 0
+        self.closed_count = 0
+        self.terminal_credit = 4 * MIB
+
+    def retain(self, handle):
+        handle = int(handle)
+        if handle in self.owned or len(self.owned) >= 1036:
+            raise OSError("Proof handle ownership reservation exhausted or duplicate")
+        self.owned.add(handle)
+
+    def close(self, api, handle, closer=None):
+        handle = int(handle)
+        if handle not in self.owned:
+            self.close_duplicates += 1
+            raise OSError("Proof handle close requested more than once")
+        if closer is None:
+            api.require(api.kernel.CloseHandle(handle))
+        else:
+            closer()
+        self.owned.remove(handle)
+        self.closed_count += 1
 
     def reserve_row(self):
         if len(self.inventory) >= 512:
@@ -558,7 +597,7 @@ class _Commands:
                 ).encode()
             )
             + 65536
-            > 4 * MIB
+            > self.terminal_credit
         ):
             raise OSError("Aggregate terminal inventory reservation exhausted")
 
@@ -573,12 +612,21 @@ class _Commands:
         process.stdin.flush()
 
     def event(self, event, raw, job, process, write, phases):
-        if type(event) is not dict or self.terminal or self.events >= 1553 or len(raw) > 12 * 1024:
+        if (
+            type(event) is not dict
+            or self.terminal
+            or self.events >= 1553
+            or len(raw) > 12 * 1024
+        ):
             raise ValueError("Malformed or excessive command protocol event")
         self.events += 1
         name = event.get("event")
         if not self.hello:
-            expected = {"event": "hello", "pid": job.api.kernel.GetProcessId(process._handle), **self.expected_runtime}
+            expected = {
+                "event": "hello",
+                "pid": job.api.kernel.GetProcessId(process._handle),
+                **self.expected_runtime,
+            }
             if event != expected:
                 raise ValueError("Driver runtime or actual creation identity mismatch")
             job.api.member(process._handle, job.handle)
@@ -587,19 +635,45 @@ class _Commands:
             # bootstrap shape; the exact observed count is retained per run.
             if self.bootstrap not in (1, 2):
                 raise ValueError("Unexpected direct-driver bootstrap family")
+            if self.bootstrap_expected is not None:
+                members = job.api.query(job.handle, 3, _Pids())
+                if members.assigned != 2 or members.count != 2:
+                    raise ValueError("Frozen bootstrap processes are not both present")
+                for pid in members.pids[: members.count]:
+                    job.track(pid, "bootstrap-census")
+                images = sorted(os.path.normcase(os.path.normpath(row["image"])) for row in self.inventory)
+                wanted = sorted(os.path.normcase(os.path.normpath(value)) for value in self.bootstrap_expected["images"])
+                if self.bootstrap != self.bootstrap_expected["lifetimes"] or images != wanted:
+                    raise ValueError("Native bootstrap differs from the frozen control")
             self.hello = True
             write("events.jsonl", event)
             self.ack(process, "ready", write)
             return
         if name == "phase":
-            if set(event) != {"event", "pid", "name"} or event["pid"] != job.api.kernel.GetProcessId(process._handle) or len(phases) >= len(self.phases) or event["name"] != self.phases[len(phases)] or self.active is not None:
+            if (
+                set(event) != {"event", "pid", "name"}
+                or event["pid"] != job.api.kernel.GetProcessId(process._handle)
+                or len(phases) >= len(self.phases)
+                or event["name"] != self.phases[len(phases)]
+                or self.active is not None
+            ):
                 raise ValueError("Unexpected command-driver phase")
             phases.append(event["name"])
             write("events.jsonl", event)
             self.ack(process, "continue", write)
             return
         if name == "done":
-            if event != {"event": "done", "pid": job.api.kernel.GetProcessId(process._handle), "ok": True} or len(phases) != len(self.phases) or self.active is not None or any(row["state"] != "finalized" for row in self.commands.values()):
+            if (
+                event
+                != {
+                    "event": "done",
+                    "pid": job.api.kernel.GetProcessId(process._handle),
+                    "ok": True,
+                }
+                or len(phases) != len(self.phases)
+                or self.active is not None
+                or any(row["state"] != "finalized" for row in self.commands.values())
+            ):
                 raise ValueError("Incomplete command-driver terminal outcome")
             self.reconcile(job)
             write("events.jsonl", event)
@@ -612,15 +686,36 @@ class _Commands:
         if name == "command_begin":
             if self.events + 3 > 1553 or self.acks + 4 > 1553:
                 raise OSError("Command lifecycle cannot fit remaining protocol credit")
-            if set(event) != {"event", "seq", "kind", "argv"} or seq != len(self.commands) + 1 or self.active is not None or event["kind"] not in ("read", "payload", "fixture"):
+            if (
+                set(event) != {"event", "seq", "kind", "argv"}
+                or seq != len(self.commands) + 1
+                or self.active is not None
+                or event["kind"] not in ("read", "payload", "fixture")
+            ):
                 raise ValueError("Unexpected command begin")
             argv = event["argv"]
-            encoded = json.dumps(argv, ensure_ascii=False, separators=(",", ":")).encode()
-            if type(argv) is not list or not 1 <= len(argv) <= 128 or any(type(arg) is not str or "\0" in arg for arg in argv) or len(encoded) > 6144:
+            encoded = json.dumps(
+                argv, ensure_ascii=False, separators=(",", ":")
+            ).encode()
+            if (
+                type(argv) is not list
+                or not 1 <= len(argv) <= 128
+                or any(type(arg) is not str or "\0" in arg for arg in argv)
+                or len(encoded) > 6144
+            ):
                 raise ValueError("Command argv exceeds its declaration")
             self.reserve_row()
             offset = write("events.jsonl", event)
-            row = {"kind": "command", "seq": seq, "call_kind": event["kind"], "state": "begun", "begin_event": offset, "argv_sha256": hashlib.sha256(encoded).hexdigest(), "begun_at": time.monotonic(), "outer_lifetimes_at_begin": job.census()["TotalProcesses"]}
+            row = {
+                "kind": "command",
+                "seq": seq,
+                "call_kind": event["kind"],
+                "state": "begun",
+                "begin_event": offset,
+                "argv_sha256": hashlib.sha256(encoded).hexdigest(),
+                "begun_at": time.monotonic(),
+                "outer_lifetimes_at_begin": job.census()["TotalProcesses"],
+            }
             self.check_row(row)
             self.inventory.append(row)
             self.commands[seq] = row
@@ -628,32 +723,76 @@ class _Commands:
             self.ack(process, f"begin {seq}", write)
             return
         if seq != self.active or seq not in self.commands:
+            if self.fault == "duplicate_return" and name == "command_return" and seq in self.commands and self.commands[seq]["state"] == "finalized":
+                self.fault_reached = True
             raise ValueError("Unknown or repeated command sequence")
         row = self.commands[seq]
         if name == "command_register":
-            if set(event) != {"event", "seq", "measurement_handle", "creation_process_handle"} or row["state"] != "begun" or any(type(event[key]) is not int or not 0 < event[key] < 1 << 64 for key in ("measurement_handle", "creation_process_handle")):
+            if (
+                set(event)
+                != {"event", "seq", "measurement_handle", "creation_process_handle"}
+                or row["state"] != "begun"
+                or any(
+                    type(event[key]) is not int or not 0 < event[key] < 1 << 64
+                    for key in ("measurement_handle", "creation_process_handle")
+                )
+            ):
                 raise ValueError("Invalid command registration")
             measurement = creation = None
             try:
-                measurement = job.api.duplicate(process._handle, event["measurement_handle"])
-                creation = job.api.duplicate(process._handle, event["creation_process_handle"])
+                measurement = job.api.duplicate(
+                    process._handle,
+                    0x7FFFFFFC if self.fault == "duplicate_measurement" else event["measurement_handle"],
+                )
+                self.retain(measurement)
+                creation = job.api.duplicate(
+                    process._handle,
+                    0x7FFFFFFC if self.fault == "duplicate_creation" else event["creation_process_handle"],
+                )
+                self.retain(creation)
                 identity = job.api.identity(creation)
                 job.api.member(creation, job.handle)
                 job.api.member(creation, measurement)
                 initial = job.api.accounting(measurement)
                 if initial["TotalProcesses"] != 1 or initial["ActiveProcesses"] != 1:
-                    raise ValueError("Command registration is not a fresh suspended family")
-                prior = next((item for item in self.inventory if item.get("pid") == identity["pid"]), None)
-                if prior is not None and (prior["kind"] != "process" or any(prior[key] != value for key, value in identity.items())):
+                    raise ValueError(
+                        "Command registration is not a fresh suspended family"
+                    )
+                prior = next(
+                    (
+                        item
+                        for item in self.inventory
+                        if item.get("pid") == identity["pid"]
+                    ),
+                    None,
+                )
+                if prior is not None and (
+                    prior["kind"] != "process"
+                    or any(prior[key] != value for key, value in identity.items())
+                ):
                     raise ValueError("Creation identity conflicts with prior census")
-                updated = {**row, **identity, "state": "registered", "registered_at": time.monotonic(), "origin": "creation-handle", "handle_retained": True, "initial_job": initial, "initial_process": job.api.memory(creation)}
+                updated = {
+                    **row,
+                    **identity,
+                    "state": "registered",
+                    "registered_at": time.monotonic(),
+                    "origin": "creation-handle",
+                    "handle_retained": True,
+                    "initial_job": initial,
+                    "initial_process": job.api.memory(creation),
+                }
                 if prior is not None:
-                    updated["prior_discovery"] = {key: prior[key] for key in ("origin", "observed_at")}
+                    updated["prior_discovery"] = {
+                        key: prior[key] for key in ("origin", "observed_at")
+                    }
                 self.check_row(updated)
+                if self.fault == "terminal_reserve_exhausted":
+                    self.fault_reached = True
+                    self.terminal_credit = 65536
                 self.check_terminal()
                 old = job.handles.get(identity["pid"])
                 if old is not None:
-                    job.api.require(job.api.kernel.CloseHandle(old))
+                    self.close(job.api, old)
                 job.handles[identity["pid"]] = creation
                 creation = None
                 if prior is not None:
@@ -663,20 +802,61 @@ class _Commands:
                 self.measurements[seq] = measurement
                 measurement = None
                 write("events.jsonl", {**event, "accepted_identity": identity})
+                if self.fault == "registration_ack_lost":
+                    self.fault_reached = True
+                    process.stdin.close()
+                    raise OSError("Injected registration acknowledgment loss")
+                if self.fault == "driver_killed_after_registration":
+                    import _winapi
+
+                    _winapi.TerminateProcess(process._handle, 1)
+                    self.fault_reached = True
+                    raise OSError("Actual registered driver was killed by control")
+                if self.fault == "family_counter_unavailable":
+                    # Retain a real duplicate of this same measurement job with
+                    # terminate-only rights. Querying that owned handle must
+                    # now fail natively; no fabricated counter is substituted.
+                    limited = job.api.duplicate(
+                        job.api.kernel.GetCurrentProcess(),
+                        self.measurements[seq],
+                        access=0x0008,
+                    )
+                    self.retain(limited)
+                    try:
+                        self.close(job.api, self.measurements[seq])
+                    except OSError:
+                        self.close(job.api, limited)
+                        raise
+                    self.measurements[seq] = limited
+                    self.fault_reached = True
+                    job.api.accounting(limited)
                 self.ack(process, f"registered {seq}", write)
+            except OSError:
+                if self.fault in ("duplicate_measurement", "duplicate_creation"):
+                    self.fault_reached = True
+                raise
             finally:
                 for handle in (measurement, creation):
                     if handle is not None:
-                        job.api.require(job.api.kernel.CloseHandle(handle))
+                        self.close(job.api, handle)
             return
-        if name != "command_return" or set(event) != {"event", "seq", "status"} or event["status"] not in ("returned", "raised", "not_created"):
+        if (
+            name != "command_return"
+            or set(event) != {"event", "seq", "status"}
+            or event["status"] not in ("returned", "raised", "not_created")
+        ):
             raise ValueError("Invalid command return")
         if row["state"] == "begun":
             if event["status"] != "not_created":
                 raise ValueError("Created command lacks registered ownership")
             if job.census()["TotalProcesses"] != row["outer_lifetimes_at_begin"]:
                 raise ValueError("Unregistered lifetime during failed constructor")
-            row.update(kind="failed_intent", state="finalized", return_status="not_created", normal_cleanup_complete=True)
+            row.update(
+                kind="failed_intent",
+                state="finalized",
+                return_status="not_created",
+                normal_cleanup_complete=True,
+            )
         else:
             self.finalize(seq, job, aborted=False, status=event["status"])
             if row["final_job"]["ActiveProcesses"]:
@@ -710,7 +890,7 @@ class _Commands:
             raise
         finally:
             del self.measurements[seq]
-            job.api.require(job.api.kernel.CloseHandle(handle))
+            self.close(job.api, handle)
             row["measurement_handle_closed"] = True
 
     def reconcile(self, job):
@@ -718,11 +898,14 @@ class _Commands:
         commands = sum(row.get("final_job", {}).get("TotalProcesses", 0) for row in self.commands.values())
         value = {"bootstrap_lifetimes": self.bootstrap, "command_lifetimes": commands, "outer_lifetimes": total, "unaccounted_lifetimes": total - self.bootstrap - commands}
         if value["unaccounted_lifetimes"] != 0:
+            self.census_failure = value
+            if self.fault == "command_census_bypass":
+                self.fault_reached = True
             raise OSError("Unregistered command-family lifetime in final census")
         return value
 
 
-def observe_commands(command, output, *, artifact_limit, phases=(), work_timeout=116, individual_samples="regular"):
+def observe_commands(command, output, *, artifact_limit, bootstrap, phases=(), work_timeout=116, individual_samples="regular", fault=None):
     """Observe actual command creation handles and disjoint nested job peaks."""
     if type(phases) is not tuple or len(phases) > 16 or len(set(phases)) != len(phases) or any(type(name) is not str or not 1 <= len(name) <= 32 or not name.isascii() for name in phases):
         raise ValueError("Invalid bounded command phase declaration")
@@ -734,7 +917,20 @@ def observe_commands(command, output, *, artifact_limit, phases=(), work_timeout
         raise ValueError("Sampling omission is restricted to the fixed peak control")
     if not command or os.path.normcase(command[0]) != os.path.normcase(sys.executable):
         raise ValueError("Command driver must use the qualified current interpreter")
-    policy = _Commands(phases, individual_samples)
+    if fault is not None and (
+        fault not in (
+            "constructor_partial", "measurement_assign", "product_assign",
+            "duplicate_measurement", "duplicate_creation", "registration_ack_lost",
+            "family_counter_unavailable", "driver_killed_after_registration",
+            "outer_deadline", "duplicate_return", "command_census_bypass",
+            "terminal_reserve_exhausted",
+        )
+        or command[1:5] != ["-m", "tests.support.git_resource_pilot", "refusal", fault]
+    ):
+        raise ValueError("Fault injection is restricted to declared refusal controls")
+    if type(bootstrap) is not dict or set(bootstrap) != {"lifetimes", "images"} or bootstrap["lifetimes"] != 2 or type(bootstrap["images"]) is not list or len(bootstrap["images"]) != 2 or any(type(value) is not str for value in bootstrap["images"]):
+        raise ValueError("Invalid frozen native bootstrap declaration")
+    policy = _Commands(phases, individual_samples, fault, bootstrap)
     return _observe(command, output, timeout=work_timeout, memory_limit=2048 * MIB, artifact_limit=artifact_limit, phase_names=phases, command_policy=policy)
 
 
@@ -920,6 +1116,8 @@ def _observe(
         api = _Windows()
         observer = api.kernel.OpenProcess(0x0410, False, os.getpid())
         api.require(observer)
+        if command_policy:
+            command_policy.retain(observer)
         job = _CommandJob(api, memory_limit, command_policy) if command_policy else _Job(api, memory_limit, lifetime_limit=lifetime_limit)
         member = w.BOOL()
         api.require(
@@ -1134,12 +1332,16 @@ def _observe(
     ) as error:
         report["error"] = str(error)
         report["status"] = "timeout" if isinstance(error, TimeoutError) else "failed"
+        if command_policy and command_policy.fault == "outer_deadline" and isinstance(error, TimeoutError) and command_policy.measurements:
+            command_policy.fault_reached = True
     finally:
         cleanup_errors = []
-        cleanup_deadline = time.monotonic() + 4
+        termination_calls = 0
+        cleanup_deadline = min(time.monotonic() + 4, started + timeout + 4) if command_policy else time.monotonic() + 4
         if job is not None:
             try:
                 if job.census()["ActiveProcesses"]:
+                    termination_calls += 1
                     api.require(api.kernel.TerminateJobObject(job.handle, 1))
                 deadline = cleanup_deadline if command_policy else time.monotonic() + 2
                 while job.census()["ActiveProcesses"] and time.monotonic() < deadline:
@@ -1184,11 +1386,32 @@ def _observe(
                     except OSError as error:
                         cleanup_errors.append(str(error))
                 try:
-                    process._handle.Close()
+                    if command_policy:
+                        command_policy.close(api, process._handle, process._handle.Close)
+                    else:
+                        process._handle.Close()
                 except OSError as error:
                     cleanup_errors.append(str(error))
-        if observer and not api.kernel.CloseHandle(observer):
-            cleanup_errors.append("Observer process handle closure failed")
+        if observer:
+            try:
+                if command_policy:
+                    command_policy.close(api, observer)
+                elif not api.kernel.CloseHandle(observer):
+                    cleanup_errors.append("Observer process handle closure failed")
+            except OSError as error:
+                cleanup_errors.append(str(error))
+        if command_policy:
+            report.update(
+                fault=command_policy.fault,
+                fault_reached=command_policy.fault_reached,
+                outer_termination_calls=termination_calls,
+                handle_close_duplicates=command_policy.close_duplicates,
+                proof_handles_closed=command_policy.closed_count,
+                proof_handles_remaining=len(command_policy.owned),
+                measurement_handles_remaining=len(command_policy.measurements),
+            )
+            if hasattr(command_policy, "census_failure"):
+                report["census"] = command_policy.census_failure
         report["cleanup_errors"] = cleanup_errors
         if cleanup_errors:
             report["status"] = "failed"
