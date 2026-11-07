@@ -219,8 +219,9 @@ class _Windows:
 
 
 class _Job:
-    def __init__(self, api, ceiling):
+    def __init__(self, api, ceiling, *, lifetime_limit=16):
         self.api, self.handles, self.attribution = api, {}, []
+        self.lifetime_limit = lifetime_limit
         self.handle = api.kernel.CreateJobObjectW(None, None)
         api.require(self.handle)
         try:
@@ -245,7 +246,7 @@ class _Job:
     def track(self, pid, origin):
         if pid in self.handles:
             return
-        if len(self.handles) >= 16:
+        if len(self.handles) >= self.lifetime_limit:
             raise OSError("Lifetime process attribution budget exhausted")
         api = self.api
         handle = api.kernel.OpenProcess(0x0410, False, pid)
@@ -308,7 +309,7 @@ class _Job:
             "ActiveProcessLimit": limits.BasicLimitInformation.ActiveProcessLimit,
         }
 
-    def sample(self, phase, observer):
+    def sample(self, phase, observer, *, allow_exited_gaps=False):
         started = time.monotonic()
         pids = self.api.query(self.handle, 3, _Pids())
         if pids.assigned > 16 or pids.count > 16:
@@ -325,7 +326,20 @@ class _Job:
                     }
                 )
             except OSError as error:
-                missing.append({"pid": pid, "error": str(error)})
+                exited = False
+                if allow_exited_gaps:
+                    if pid in self.handles:
+                        code = w.DWORD()
+                        self.api.require(
+                            self.api.kernel.GetExitCodeProcess(
+                                self.handles[pid], ctypes.byref(code)
+                            )
+                        )
+                        exited = code.value != 259
+                    elif getattr(error, "winerror", None) == 87:
+                        current = self.api.query(self.handle, 3, _Pids())
+                        exited = pid not in current.pids[: current.count]
+                missing.append({"pid": pid, "error": str(error), "exited": exited})
         frame = {
             "sample_started": started,
             "phase": phase,
@@ -371,14 +385,60 @@ def observe(
     Events have fixed shallow fields; unsupported metadata fails qualification.
     The aggregate artifact budget includes the terminal report serialization.
     """
+    return _observe(
+        command,
+        output,
+        timeout=timeout,
+        memory_limit=memory_limit,
+        artifact_limit=artifact_limit,
+    )
+
+
+def observe_phases(command, output, *, phases, work_timeout=116):
+    """Record declared phase barriers under the fixed one-point pilot limits.
+
+    Names are unique ordered ASCII strings, at most sixteen of length 1..32.
+    This records whole-job peaks and sampled intervals; it supplies no allocation
+    oracle, isolated phase OS peaks, scaling or per-Git lifetime qualification.
+    Observer artifacts are capped at 60 MiB, leaving 4 MiB for the pilot driver's
+    separately charged control evidence within the 64 MiB attempt ceiling.
+    """
+    if (
+        type(phases) is not tuple
+        or not 1 <= len(phases) <= 16
+        or not all(
+            type(name) is str and 1 <= len(name) <= 32 and name.isascii()
+            for name in phases
+        )
+        or len(set(phases)) != len(phases)
+    ):
+        raise ValueError("Invalid bounded phase declaration")
+    return _observe(
+        command,
+        output,
+        timeout=work_timeout,
+        memory_limit=2048 * MIB,
+        artifact_limit=60 * MIB,
+        phase_names=phases,
+    )
+
+
+def _observe(
+    command, output, *, timeout, memory_limit, artifact_limit, phase_names=None
+):
+    phase_mode = phase_names is not None
+    work_limit = 116 if phase_mode else 26
+    commit_limit = 2048 * MIB if phase_mode else 512 * MIB
+    lifetime_limit = 512 if phase_mode else 16
+    terminal_reserve = 4 * MIB if phase_mode else 128 * 1024
     if os.name != "nt":
         raise OSError("Windows resource observation is unavailable")
     if (
         type(timeout) not in (int, float)
         or type(memory_limit) is not int
         or type(artifact_limit) is not int
-        or not 0 < timeout <= 26
-        or not 0 < memory_limit <= 512 * MIB
+        or not 0 < timeout <= work_limit
+        or not 0 < memory_limit <= commit_limit
         or not 256 * 1024 <= artifact_limit <= 64 * MIB
     ):
         raise ValueError("Calibration limits exceed the approved finite bounds")
@@ -408,6 +468,7 @@ def observe(
             "No Git or payload-scaling qualification",
         ],
         "calibration": {},
+        "job_peak_scope": "whole owned job since launch; not phase-local",
         "final_job": None,
         "limits": {
             "family_commit_bytes": memory_limit,
@@ -415,11 +476,16 @@ def observe(
             "work_seconds": timeout,
             "family_seconds": timeout + 4,
             "cleanup_seconds": 4,
+            "lifetime_processes": lifetime_limit,
+            "terminal_reserve_bytes": terminal_reserve,
         },
     }
     api = job = process = observer = None
     frames, phases, used = [], [], 0
     baseline = held_frame = None
+    driver_pid = None
+    terminal_received = False
+    exited_counter_gaps = 0
 
     def write(name, value, *, terminal=False):
         nonlocal used
@@ -430,7 +496,7 @@ def observe(
                 json.dumps(value, ensure_ascii=False, separators=(",", ":")) + "\n"
             ).encode()
         )
-        limit = artifact_limit if terminal else artifact_limit - 128 * 1024
+        limit = artifact_limit if terminal else artifact_limit - terminal_reserve
         if used + len(data) > limit:
             raise OSError("Calibration artifact budget exhausted")
         # Charge before I/O, including any partial write followed by failure.
@@ -439,12 +505,14 @@ def observe(
             stream.write(data)
 
     def sample(phase):
-        frame = job.sample(phase, observer)
+        nonlocal exited_counter_gaps
+        frame = job.sample(phase, observer, allow_exited_gaps=phase_mode)
         write("frames.jsonl", frame)
         frames.append(frame["sample_started"])
-        if frame["missing_processes"]:
+        exited_counter_gaps += sum(row["exited"] for row in frame["missing_processes"])
+        if any(not row["exited"] for row in frame["missing_processes"]):
             raise OSError("Owned process counters unavailable; frame is incomplete")
-        if frame["job"]["TotalProcesses"] > 16:
+        if frame["job"]["TotalProcesses"] > lifetime_limit:
             raise OSError("Lifetime process census budget exhausted")
         return frame
 
@@ -452,7 +520,7 @@ def observe(
         api = _Windows()
         observer = api.kernel.OpenProcess(0x0410, False, os.getpid())
         api.require(observer)
-        job = _Job(api, memory_limit)
+        job = _Job(api, memory_limit, lifetime_limit=lifetime_limit)
         member = w.BOOL()
         api.require(
             api.kernel.IsProcessInJob(observer, job.handle, ctypes.byref(member))
@@ -491,6 +559,41 @@ def observe(
             while b"\n" in pending:
                 line, pending = pending.split(b"\n", 1)
                 event = json.loads(line)
+                if phase_mode:
+                    if not isinstance(event, dict) or terminal_received:
+                        raise ValueError("Malformed phase event")
+                    terminal = event.get("event") == "done"
+                    fields = {"event", "pid", "ok" if terminal else "name"}
+                    if set(event) != fields or type(event["pid"]) is not int:
+                        raise ValueError("Unsupported phase event fields or identity")
+                    if terminal:
+                        if len(phases) != len(phase_names) or event["ok"] is not True:
+                            raise ValueError("Incomplete phase terminal outcome")
+                        phase = "terminal"
+                    else:
+                        if (
+                            event["event"] != "phase"
+                            or len(phases) >= len(phase_names)
+                            or event["name"] != phase_names[len(phases)]
+                        ):
+                            raise ValueError("Unexpected phase sequence")
+                        phase = event["name"]
+                    frame = sample(phase)
+                    if (
+                        event["pid"] not in {row["pid"] for row in frame["processes"]}
+                        or driver_pid is not None
+                        and driver_pid != event["pid"]
+                    ):
+                        raise ValueError("Phase driver is not the same owned process")
+                    driver_pid = event["pid"]
+                    write("events.jsonl", {"observed_at": time.monotonic(), **event})
+                    if terminal:
+                        terminal_received = True
+                    else:
+                        phases.append(phase)
+                    process.stdin.write(b"continue\n")
+                    process.stdin.flush()
+                    continue
                 expected = ("baseline", "held", "done")
                 if (
                     not isinstance(event, dict)
@@ -577,14 +680,18 @@ def observe(
                     report["calibration"] = event
                 process.stdin.write(b"continue\n")
                 process.stdin.flush()
-            frame = sample("sampling")
+            frame = sample(phases[-1] if phase_mode and phases else "sampling")
             if frame["job"]["PeakJobMemoryUsed"] >= memory_limit:
                 raise OSError("Calibration reached the family commit ceiling")
             if process.poll() is not None and frame["job"]["ActiveProcesses"] == 0:
                 if (
                     process.returncode != 0
                     or pending
-                    or phases != ["baseline", "held", "done"]
+                    or (
+                        not terminal_received
+                        if phase_mode
+                        else phases != ["baseline", "held", "done"]
+                    )
                 ):
                     raise ValueError(
                         "Calibration output or terminal outcome is incomplete"
@@ -618,6 +725,10 @@ def observe(
             finally:
                 report["attribution"] = job.attribution
                 report["observed_pids"] = sorted(job.handles)
+                if report["final_job"] is not None:
+                    report["unattributed_process_count"] = max(
+                        0, report["final_job"]["TotalProcesses"] - len(job.handles)
+                    )
                 cleanup_errors.extend(job.close())
         if process is not None:
             try:
@@ -645,6 +756,7 @@ def observe(
             (later - earlier for earlier, later in pairwise(frames)), default=0
         ),
         phases=phases,
+        exited_counter_gap_observations=exited_counter_gaps,
     )
     try:
         write("report.json", report, terminal=True)

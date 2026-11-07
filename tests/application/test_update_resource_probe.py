@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import pytest
 
-from tools.update_resource_probe import observe
+from tools.update_resource_probe import observe, observe_phases
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -310,3 +310,113 @@ def test_nested_terminal_metadata_cannot_escape_aggregate_artifact_budget():
     assert result["final_job"]["ActiveProcesses"] == 0
     assert b'"extra": [' in (output / "protocol.bin").read_bytes()
     assert json.loads((output / "report.json").read_text()) == result
+
+
+def test_phase_observer_records_more_than_sixteen_lifetime_children():
+    output = ROOT / "tmp" / "resource-probe" / uuid4().hex
+    driver = """import json,os,subprocess,sys
+def event(**value):
+ print(json.dumps(dict(pid=os.getpid(),**value)),flush=True)
+ assert sys.stdin.readline()=='continue\\n'
+event(event='phase',name='ready')
+for _ in range(17):
+ subprocess.run([sys.executable,'-c','pass'],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,creationflags=subprocess.CREATE_NO_WINDOW)
+event(event='phase',name='work')
+event(event='done',ok=True)
+"""
+    result = observe_phases(
+        [sys.executable, "-c", driver],
+        output,
+        phases=("ready", "work"),
+        work_timeout=10,
+    )
+
+    assert result["status"] == "completed", result
+    assert result["phases"] == ["ready", "work"]
+    assert result["final_job"]["TotalProcesses"] > 17
+    assert result["final_job"]["ActiveProcesses"] == 0
+    assert result["final_job"]["ActiveProcessLimit"] == 16
+    assert result["final_job"]["JobMemoryLimit"] == 2 * 1024 * 1024 * 1024
+    assert result["limits"]["lifetime_processes"] == 512
+    assert result["per_git_lifetime_attribution"] == "unqualified"
+    assert json.loads((output / "report.json").read_text()) == result
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "order",
+        "extra",
+        "nested",
+        "foreign",
+        "incomplete",
+        "early-done",
+        "nontrue-done",
+        "duplicate-done",
+    ],
+)
+def test_phase_protocol_refuses_untrusted_or_incomplete_boundaries(fault):
+    output = ROOT / "tmp" / "resource-probe" / uuid4().hex
+    event = {"event": "phase", "name": "ready"}
+    if fault == "order":
+        event["name"] = "later"
+    elif fault == "extra":
+        event["extra"] = ["unsupported"]
+    elif fault == "nested":
+        event["name"] = {"nested": "ready"}
+    elif fault == "early-done":
+        event = {"event": "done", "ok": True}
+    driver = (
+        "import json,os,sys\n"
+        f"event=json.loads({json.dumps(event)!r})\n"
+        f"event['pid']={os.getpid() if fault == 'foreign' else 'os.getpid()'}\n"
+        "print(json.dumps(event),flush=True)\n"
+        "sys.stdin.readline()\n"
+    )
+    if fault in {"nontrue-done", "duplicate-done"}:
+        done_ok = "1" if fault == "nontrue-done" else "True"
+        driver += (
+            f"done=dict(event='done',pid=os.getpid(),ok={done_ok})\n"
+            "print(json.dumps(done),flush=True)\n"
+            "sys.stdin.readline()\n"
+        )
+        if fault == "duplicate-done":
+            driver += "print(json.dumps(done),flush=True)\nsys.stdin.readline()\n"
+    result = observe_phases(
+        [sys.executable, "-c", driver], output, phases=("ready",), work_timeout=5
+    )
+
+    assert result["status"] == "failed", result
+    assert result["final_job"]["ActiveProcesses"] == 0
+    assert (output / "protocol.bin").stat().st_size > 0
+    if fault in {"early-done", "nontrue-done"}:
+        assert result["error"] == "Incomplete phase terminal outcome"
+    elif fault == "duplicate-done":
+        assert result["error"] == "Malformed phase event"
+
+
+def test_phase_timeout_cleans_the_owned_family():
+    output = ROOT / "tmp" / "resource-probe" / uuid4().hex
+    driver = """import json,os,sys,time
+print(json.dumps(dict(event='phase',name='ready',pid=os.getpid())),flush=True)
+sys.stdin.readline()
+time.sleep(30)
+"""
+    result = observe_phases(
+        [sys.executable, "-c", driver], output, phases=("ready",), work_timeout=1
+    )
+
+    assert result["status"] == "timeout"
+    assert result["final_job"]["ActiveProcesses"] == 0
+    assert result["elapsed_seconds"] < 5
+
+
+@pytest.mark.parametrize(
+    "phases",
+    [[], (), ("same", "same"), ("é",), ("x" * 33,), tuple(str(i) for i in range(17))],
+)
+def test_invalid_phase_declarations_refuse_before_artifacts(phases):
+    output = ROOT / "tmp" / "resource-probe" / uuid4().hex
+    with pytest.raises(ValueError, match="phase declaration"):
+        observe_phases([sys.executable], output, phases=phases)
+    assert not output.exists()
