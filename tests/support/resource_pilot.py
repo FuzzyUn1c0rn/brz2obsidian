@@ -254,7 +254,11 @@ def preflight(evidence, ledger_path, expected_sha, writer):
 
 
 def git(vault, *args):
-    result = subprocess.run(
+    return _git_with_runner(vault, args, subprocess.run)
+
+
+def _git_with_runner(vault, args, runner):
+    result = runner(
         [
             "git",
             "--no-pager",
@@ -275,6 +279,8 @@ def git(vault, *args):
         timeout=20,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
+    if result.returncode:
+        raise subprocess.CalledProcessError(result.returncode, result.args, result.stdout, result.stderr)
     if len(result.stdout) + len(result.stderr) > 65536:
         raise OSError("Synthetic Git control output exceeded 64 KiB")
     return result.stdout
