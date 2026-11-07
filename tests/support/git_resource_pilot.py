@@ -2,20 +2,27 @@
 
 import ctypes
 import hashlib
+import importlib
 import json
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from contextlib import contextmanager
 from ctypes import wintypes as w
 from pathlib import Path
 
 MIB = 1024 * 1024
+READ_CONSUMERS = ("vault_admission", "vault_attributes", "vault_history")
+PAYLOAD_CONSUMERS = (
+    "checkpoint_payload", "vault_history", "vault_repair",
+    "attachment_ownership", "vault_recovery", "vault_apply",
+)
 
 
-def control_preflight(*, case=None):
+def control_preflight(*, case=None, mode=None):
     """Bind one exclusive control attempt to Root's cumulative reservation."""
     from tests.support.resource_pilot import Evidence, inventory, native_identity, read_control
 
@@ -32,6 +39,10 @@ def control_preflight(*, case=None):
     }
     if case is not None:
         fields |= {"cases"}
+    if mode == "tiny":
+        fields |= {"fixture"}
+    if mode not in (None, "tiny") or mode is not None and case is not None:
+        raise OSError("Unknown bounded control mode")
     if type(manifest) is not dict or set(manifest) != fields:
         raise OSError("Unknown Root command manifest fields")
     root = Path(__file__).resolve().parents[2]
@@ -42,7 +53,7 @@ def control_preflight(*, case=None):
         or manifest["base_commit"] != "5378f0b1184bfe8825d6414475adaaa136203e1e"
         or manifest["oracle_commit"] != "94b4abdf536ce396a9f7b0a0591f7627d0b9079f"
         or manifest["role"] != "author"
-        or manifest["mode"] != ("peaks" if case is None else "refusals")
+        or manifest["mode"] != (mode or ("peaks" if case is None else "refusals"))
         or Path(manifest["checkout"]).resolve() != root
     ):
         raise OSError("Root command manifest context mismatch")
@@ -128,15 +139,38 @@ def control_preflight(*, case=None):
     if inventory(runner, unit=unit)[0] > artifacts["runner_bytes"]:
         raise OSError("Active runner artifact reserve exhausted")
     timing = manifest["time"]
-    if type(timing) is not dict or set(timing) != {"child_cap_seconds", "prior_charged_seconds", "run_reserved_seconds", "work_seconds", "cleanup_seconds", "future_reserved_seconds"} or any(type(value) not in (int, float) or not 0 < value <= 450 for value in timing.values()):
+    if type(timing) is not dict or set(timing) != {"child_cap_seconds", "prior_charged_seconds", "run_reserved_seconds", "work_seconds", "cleanup_seconds", "future_reserved_seconds"} or any(type(value) not in (int, float) or not 0 < value <= 460 for value in timing.values()):
         raise OSError("Invalid cumulative time declaration")
-    if timing["child_cap_seconds"] != 450 or timing["cleanup_seconds"] != 4 or timing["future_reserved_seconds"] < 320 or timing["work_seconds"] + 4 > timing["run_reserved_seconds"] or timing["prior_charged_seconds"] + timing["run_reserved_seconds"] + timing["future_reserved_seconds"] > 450:
+    if timing["child_cap_seconds"] != 460 or timing["cleanup_seconds"] != 4 or timing["future_reserved_seconds"] < 320 or timing["work_seconds"] + 4 > timing["run_reserved_seconds"] or timing["prior_charged_seconds"] + timing["run_reserved_seconds"] + timing["future_reserved_seconds"] > 460:
         raise OSError("Required future work no longer fits the child time allowance")
     if batch_started is not None and time.monotonic() - batch_started + timing["work_seconds"] + timing["cleanup_seconds"] + 4 > timing["run_reserved_seconds"]:
         raise OSError("Refusal batch lacks the complete next-work and cleanup reservation")
     for path in (batch.parent, runner):
         if shutil.disk_usage(path).free < artifacts["minimum_free_bytes"]:
             raise OSError("Insufficient physical volume headroom before control")
+    if mode == "tiny":
+        fixture = manifest["fixture"]
+        if type(fixture) is not dict or set(fixture) != {"path", "parent", "owner", "reserve_bytes", "allocation_unit_bytes", "git_executable"}:
+            raise OSError("Unknown tiny fixture declaration")
+        parent = fixture["parent"]
+        if type(parent) is not dict or set(parent) != {"path", "native_identity"}:
+            raise OSError("Unknown tiny fixture parent declaration")
+        base = Path(parent["path"])
+        destination = Path(fixture["path"])
+        if base.resolve() != Path(tempfile.gettempdir()).resolve() or native_identity(base) != parent["native_identity"] or destination.parent != base or destination.exists():
+            raise OSError("Tiny fixture destination is not fresh in its owned OS-temp parent")
+        if type(fixture["owner"]) is not str or not 1 <= len(fixture["owner"]) <= 64 or any(char not in "abcdefghijklmnopqrstuvwxyz0123456789-" for char in fixture["owner"]) or destination.name != "brz2obsidian-358-" + fixture["owner"]:
+            raise OSError("Tiny fixture owner declaration is invalid")
+        if fixture["reserve_bytes"] != 32 * MIB or fixture["allocation_unit_bytes"] != unit:
+            raise OSError("Tiny fixture exceeds the controls partition")
+        if any((ancestor / ".git").exists() for ancestor in (base, *base.parents)):
+            raise OSError("OS-temp control is inside an enclosing repository")
+        if shutil.disk_usage(base).free < fixture["reserve_bytes"] + artifacts["run_reserved_bytes"]:
+            raise OSError("Tiny fixture and artifacts lack actual-volume headroom")
+        if Path(shutil.which("git") or "").resolve() != Path(fixture["git_executable"]).resolve():
+            raise OSError("Installed Git selection differs from Root's declaration")
+        if any(os.environ.get(name) for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES")):
+            raise OSError("Ambient Git routing conflicts with the exclusively owned fixture")
     if case is not None and not batch.exists():
         batch.mkdir()
         Evidence(limit=65536, terminal_reserve=65536).write(batch / "batch-owner.json", {"context": digest, "native_identity": native_identity(batch), "started_at": time.monotonic()}, terminal=True)
@@ -144,6 +178,8 @@ def control_preflight(*, case=None):
     writer = Evidence(limit=MIB, terminal_reserve=65536)
     writer.write(attempt / "owner.json", {"root": str(attempt), "native_identity": native_identity(attempt), "context": digest, "runner": str(runner), "runner_native_identity": native_identity(runner)})
     writer.write(attempt / "disk-before.json", {"charged_bytes": charged, "prior_reserved_bytes": artifacts["prior_charged_bytes"], "retained_batch_bytes": retained_batch, "run_reserved_bytes": artifacts["run_reserved_bytes"], "free_bytes": shutil.disk_usage(attempt).free, "allocation_unit_bytes": unit})
+    if mode == "tiny":
+        writer.write(attempt / "fixture-request.json", {"context": digest, **manifest["fixture"]})
     if case is not None:
         (attempt / "resume-trace.jsonl").open("xb").close()
     return attempt, manifest
@@ -443,8 +479,8 @@ def measured_calls(*, fault=None, attempt=None):
             bind(module, "_WindowsJob", MeasuredJob)
             bind(module, "_SuspendedPopen", MeasuredPopen)
         for names, attribute, original, replacement in (
-            (("vault_admission", "vault_attributes", "vault_history"), "read_git", original_read, read),
-            (("checkpoint_payload", "vault_history", "vault_repair", "attachment_ownership", "vault_recovery", "vault_apply"), "verify_blobs", original_verify, verify),
+            (READ_CONSUMERS, "read_git", original_read, read),
+            (PAYLOAD_CONSUMERS, "verify_blobs", original_verify, verify),
         ):
             for name in names:
                 module = sys.modules.get("brz2obsidian.publication." + name)
@@ -461,6 +497,16 @@ def measured_calls(*, fault=None, attempt=None):
     finally:
         for module, name, value in reversed(changes):
             setattr(module, name, value)
+        # A fixed consumer imported inside the context inherits the wrapped
+        # core function. Restore only this context's known function identities.
+        for names, attribute, original, replacement in (
+            (READ_CONSUMERS, "read_git", original_read, read),
+            (PAYLOAD_CONSUMERS, "verify_blobs", original_verify, verify),
+        ):
+            for name in names:
+                module = sys.modules.get("brz2obsidian.publication." + name)
+                if module is not None and getattr(module, attribute, None) is replacement:
+                    setattr(module, attribute, original)
 
 
 class _Memory(ctypes.Structure):
@@ -569,6 +615,138 @@ def _refusal(case, attempt):
             )
 
 
+def _tiny(attempt):
+    from brz2obsidian.publication import git_payload, git_read
+    from tests.support import resource_pilot
+
+    request = json.loads(resource_pilot.read_control(attempt / "fixture-request.json"))
+    raw_manifest = resource_pilot.read_control(Path(os.environ["BRZ_COMMAND_GIT_MANIFEST"]))
+    digest = hashlib.sha256(raw_manifest).hexdigest()
+    manifest = json.loads(raw_manifest)
+    if (
+        digest != os.environ["BRZ_COMMAND_GIT_MANIFEST_SHA256"]
+        or request != {"context": digest, **manifest["fixture"]}
+        or Path(manifest["attempt"]) != attempt
+    ):
+        raise OSError("Tiny driver request lost its Root binding")
+    root = Path(request["path"])
+    parent = Path(request["parent"]["path"])
+    if (
+        root.parent != parent
+        or root.exists()
+        or resource_pilot.native_identity(parent) != request["parent"]["native_identity"]
+        or Path(shutil.which("git") or "").resolve() != Path(request["git_executable"]).resolve()
+        or shutil.disk_usage(parent).free < request["reserve_bytes"] + 8 * MIB
+    ):
+        raise OSError("Tiny driver physical ownership preflight changed")
+    oracle_path = Path(__file__).resolve().parents[1] / "fixtures/resource_git/command16-oracles.json"
+    raw_oracle = resource_pilot.read_control(oracle_path)
+    if hashlib.sha256(raw_oracle).hexdigest() != "8f3cd763911e889f0265e8c046e8375dc136ea3d4b20e3356a3609f5b8e2a850":
+        raise OSError("Independent command oracle differs from accepted bytes")
+    oracle = json.loads(raw_oracle)["miniatures"]["objects"]["base"]
+    raw = bytes.fromhex(oracle["raw_hex"])
+    if len(raw) != oracle["size"] or hashlib.sha256(raw).hexdigest() != oracle["sha256"]:
+        raise OSError("Independent miniature byte declaration is inconsistent")
+
+    writer = resource_pilot.Evidence(limit=MIB - 65536, terminal_reserve=65536)
+    root.mkdir()
+    identity = resource_pilot.native_identity(root)
+    writer.write(root / "owner.json", {"context": digest, "owner": request["owner"], "native_identity": identity})
+    vault = root / "vault"
+    template = root / "empty-template"
+    for directory in (vault, template, root / "hooks"):
+        directory.mkdir()
+    with (vault / "tiny.bin").open("xb") as stream:
+        if stream.write(raw) != len(raw):
+            raise OSError("Tiny fixture byte write was incomplete")
+
+    original_read, original_verify = git_read.read_git, git_payload.verify_blobs
+    original_fixture = resource_pilot.git
+    factory_modules = (git_read, git_payload)
+    originals = [
+        (module, module._WindowsJob, module._SuspendedPopen)
+        for module in factory_modules
+    ]
+    original_subprocess = subprocess.Popen
+    common = [
+        "git", "--no-pager", "-c", "core.bigFileThreshold=1m",
+        "-c", "gc.auto=0", "-c", "maintenance.auto=false", "-C", str(vault),
+    ]
+    settings = ("-c", "core.bigFileThreshold=1m", "-c", "gc.auto=0", "-c", "maintenance.auto=false")
+    facts = {"fixture_root": str(root), "fixture_native_identity": identity}
+    read_names = ("git_read", *READ_CONSUMERS)
+    payload_names = ("git_payload", *PAYLOAD_CONSUMERS)
+
+    class PositionSink:
+        def __init__(self):
+            self.position = 0
+
+        def write(self, block):
+            end = self.position + len(block)
+            if end > len(raw) or block != raw[self.position:end]:
+                raise OSError("Tiny stream differs from independent positional bytes")
+            self.position = end
+            return len(block)
+
+    with measured_calls():
+        facts["git_version"] = resource_pilot.git(vault, *settings, "--version").decode("ascii").strip()
+        resource_pilot.git(
+            vault, *settings, "init", "--object-format=sha1", "--ref-format=files",
+            "--template=" + str(template),
+        )
+        oid = resource_pilot.git(vault, *settings, "hash-object", "-w", "tiny.bin").decode("ascii").strip()
+        if oid != oracle["git_blob_sha1"]:
+            raise OSError("Installed Git miniature differs from independent object ID")
+        facts["blob_oid"] = oid
+        read_requests = (
+            ("object_format", ["rev-parse", "--show-object-format"], "sha1"),
+            ("ref_format", ["rev-parse", "--show-ref-format"], "files"),
+            ("big_file_threshold", ["config", "--get", "core.bigFileThreshold"], "1m"),
+            ("blob_size", ["cat-file", "-s", oid], "8"),
+        )
+        for name, (key, arguments, expected) in zip(read_names, read_requests, strict=True):
+            module = importlib.import_module("brz2obsidian.publication." + name)
+            result = module.read_git(common + arguments, env=os.environ.copy())
+            value = result.stdout.decode("ascii").strip()
+            if result.returncode or value != expected:
+                raise OSError("Actual fixed Git read consumer returned unexpected evidence")
+            facts[key] = int(value) if key == "blob_size" else value
+        verified = []
+        for name in payload_names:
+            module = importlib.import_module("brz2obsidian.publication." + name)
+            sink = PositionSink()
+            module.verify_blobs(
+                common + ["cat-file", "--batch"], env=os.environ.copy(),
+                objects=((oid, oracle["size"], oracle["sha256"], sink),),
+            )
+            if sink.position != oracle["size"]:
+                raise OSError("Actual fixed Git payload consumer did not finish its stream")
+            verified.append(sink.position)
+    aliases_restored = (
+        resource_pilot.git is original_fixture
+        and all(sys.modules["brz2obsidian.publication." + name].read_git is original_read for name in read_names)
+        and all(sys.modules["brz2obsidian.publication." + name].verify_blobs is original_verify for name in payload_names)
+    )
+    factories_restored = subprocess.Popen is original_subprocess and all(
+        module._WindowsJob is job and module._SuspendedPopen is popen
+        for module, job, popen in originals
+    )
+    if not aliases_restored or not factories_restored:
+        raise OSError("Fixed Git adapters did not restore their original identities")
+    if resource_pilot.native_identity(root) != identity:
+        raise OSError("Tiny fixture native ownership changed during Git calls")
+    allocated, rows = resource_pilot.inventory(root, unit=request["allocation_unit_bytes"])
+    if allocated > request["reserve_bytes"] or any(row.get("link_not_followed") for row in rows):
+        raise OSError("Tiny fixture exceeded its reserved physical inventory")
+    facts.update(
+        read_consumers=read_names, payload_consumers=payload_names,
+        verified_stream_bytes=verified, original_aliases_restored=aliases_restored,
+        original_factory_classes_restored=factories_restored,
+        fixture_rounded_bytes=allocated, fixture_inventory=rows,
+    )
+    writer.write(attempt / "tiny.json", facts)
+
+
 def main():
     mode = sys.argv[1]
     if mode == "allocate":
@@ -584,6 +762,8 @@ def main():
         _peaks(Path(sys.argv[2]))
     elif mode == "refusal":
         _refusal(sys.argv[2], Path(sys.argv[3]))
+    elif mode == "tiny":
+        _tiny(Path(sys.argv[2]))
     else:
         raise OSError("Unknown fixed command pilot")
     _exchange({"event": "done", "pid": os.getpid(), "ok": True}, "continue")

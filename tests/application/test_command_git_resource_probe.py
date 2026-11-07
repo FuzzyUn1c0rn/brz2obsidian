@@ -1,6 +1,7 @@
 """Qualify fresh command-family counters through the bounded observer API."""
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -189,3 +190,64 @@ def test_command_job_refusals_preserve_cleanup_and_failure_evidence(case, reques
     except BaseException:
         request.session.shouldstop = "Unexpected command refusal outcome; Root assessment required"
         raise
+
+
+def test_both_git_factories_and_setup_enter_measured_command_jobs():
+    attempt, manifest = control_preflight(mode="tiny")
+    result = update_resource_probe.observe_commands(
+        [
+            sys.executable,
+            "-m",
+            "tests.support.git_resource_pilot",
+            "tiny",
+            str(attempt),
+        ],
+        attempt / "observer",
+        phases=(),
+        work_timeout=manifest["time"]["work_seconds"],
+        artifact_limit=manifest["artifacts"]["observer_bytes"] - 65536,
+        bootstrap=manifest["bootstrap"],
+    )
+    finish_control(attempt, manifest)
+    assert result["status"] == "completed", result
+    assert result["command_family_coverage"] == "complete"
+    assert result["census"]["bootstrap_lifetimes"] == 2
+    assert result["census"]["unaccounted_lifetimes"] == 0
+    assert result["final_job"]["ActiveProcesses"] == 0
+    assert result["cleanup_errors"] == []
+    assert result["proof_handles_remaining"] == 0
+    assert result["handle_close_duplicates"] == 0
+    commands = [row for row in result["inventory"] if row["kind"] == "command"]
+    assert len(commands) == 14
+    assert [row["call_kind"] for row in commands] == (
+        ["fixture"] * 3 + ["read"] * 4 + ["payload"] * 7
+    )
+    for row in commands:
+        assert row["state"] == "finalized"
+        assert row["normal_cleanup_complete"] is True
+        assert row["final_job"]["ActiveProcesses"] == 0
+        assert row["final_job"]["TotalProcesses"] >= 1
+        assert row["final_job"]["PeakJobMemoryUsed"] > 0
+        assert row["final_job"]["PeakProcessMemoryUsed"] > 0
+        assert os.path.normcase(row["image"]) == os.path.normcase(
+            str(Path(manifest["fixture"]["git_executable"]))
+        )
+    facts = json.loads((attempt / "tiny.json").read_text())
+    assert facts["git_version"].startswith("git version ")
+    assert facts["object_format"] == "sha1"
+    assert facts["ref_format"] == "files"
+    assert facts["big_file_threshold"] == "1m"
+    assert facts["blob_size"] == 8
+    assert facts["blob_oid"] == "1656f9233d999f61ef23ef390b9c71d75399f435"
+    assert facts["read_consumers"] == [
+        "git_read", "vault_admission", "vault_attributes", "vault_history"
+    ]
+    assert facts["payload_consumers"] == [
+        "git_payload", "checkpoint_payload", "vault_history", "vault_repair",
+        "attachment_ownership", "vault_recovery", "vault_apply",
+    ]
+    assert facts["verified_stream_bytes"] == [8] * 7
+    assert facts["original_aliases_restored"] is True
+    assert facts["original_factory_classes_restored"] is True
+    assert facts["fixture_rounded_bytes"] <= manifest["fixture"]["reserve_bytes"]
+    assert Path(facts["fixture_root"]) == Path(manifest["fixture"]["path"])
