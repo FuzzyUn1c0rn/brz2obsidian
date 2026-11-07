@@ -371,7 +371,27 @@
     "tests/local_acceptance/test_icon_oracle.py::test_exact_and_alpha0_comparison_are_distinct_and_adversarial",
     "tests/local_acceptance/test_icon_oracle.py::test_profile5_capture_vector_is_independently_canonical_and_frozen",
     "tests/local_acceptance/test_api_icon_audit.py::test_complete_current_format8_icon_output_is_independently_handcrafted",
-    "tests/local_acceptance/test_api_icon_audit.py::test_pinned_unrequested_artwork_and_untrusted_manifest_cannot_refresh_the_pin"
+    "tests/local_acceptance/test_api_icon_audit.py::test_pinned_unrequested_artwork_and_untrusted_manifest_cannot_refresh_the_pin",
+    "tests/sources/test_local_api_icons_v5.py::test_frozen5_session_matches_all_independent_canonical_digests",
+    "tests/sources/test_local_api_icons_v5.py::test_independent_new_icon_family_and_structural_refusals",
+    "tests/sources/test_local_api_icons_v5.py::test_real_event_after_decoded_frame_prevents_source_yield",
+    "tests/sources/test_local_api_icons_v5.py::test_live_family_ceiling_stops_plain_and_gzip_before_seal",
+    "tests/sources/test_local_api_icons_v5.py::test_historical_union_and_role_boundaries_remain_explicit",
+    "tests/sources/test_local_api_icons_v5.py::test_bad_controls_fail_safely_before_source_or_session_seal",
+    "tests/sources/test_local_api_icons_v5.py::test_profile5_inherits_graph_literal_links_opaque_files_and_both_gap_kinds",
+    "tests/sources/test_local_api_icons_v5.py::test_explicit5_workflow_preserves_whole_container_and_refuses_bad_icon_without_output",
+    "tests/sources/test_local_api_icons_v5.py::test_path_oversize_checks_bound_all_reads_before_decoding",
+    "tests/sources/test_local_api_icons_v5.py::test_pinned5_capture_checks_unrequested_same_stat_icon_and_untrusted_manifest",
+    "tests/sources/test_local_api_icons_v5.py::test_frozen5_session_copy_observes_real_event_and_configured_limit",
+    "tests/sources/test_local_api_icons_v5.py::test_genuine_maximum_through_source_and_seal_records_bounded_work",
+    "tests/sources/test_local_api_icons_v5.py::test_frozen5_oversized_caller_icon_is_rejected_before_buffer_conversion",
+    "tests/sources/test_local_api_icons_v5.py::test_decoder_failure_on_historical_overlap_does_not_retry_another_alternative",
+    "tests/sources/test_local_api_icons_v5.py::test_frozen5_session_rejects_known_oversized_open_file_before_body_copy",
+    "tests/sources/test_local_api_icons_v5.py::test_frozen5_verified_caller_buffer_does_not_invoke_custom_whole_bytes_conversion",
+    "tests/sources/test_local_api_icons_v5.py::test_profile5_refuses_an_altered_historical_zero_tail",
+    "tests/sources/test_local_api_icons_v5.py::test_external_decoder_must_preserve_hidden_rgb_and_validate_nonpreferred_frame",
+    "tests/sources/test_local_api_icons_v5.py::test_equal_icon_bytes_keep_owner_identity_and_exclusions_precede_acquisition",
+    "tests/sources/test_local_api_icons_v5.py::test_frozen5_direct_session_rejects_profile_owner_and_role_mismatches"
   ],
   "schema_version": 1
 }

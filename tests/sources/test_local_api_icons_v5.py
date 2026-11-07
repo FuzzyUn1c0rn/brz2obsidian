@@ -834,3 +834,51 @@ def test_frozen5_verified_caller_buffer_does_not_invoke_custom_whole_bytes_conve
         assert (
             session.acquisition.integrity_sha256 == vector["expected_integrity_sha256"]
         )
+
+
+def test_profile5_refuses_an_altered_historical_zero_tail():
+    directory = Path(__file__).parents[1] / "fixtures/local_api_images_v3"
+    facts = json.loads((directory / "source-facts.json").read_bytes())
+    fact = next(row for row in facts["payloads"] if row["file"] == "inert-b.ico")
+    frame = next(
+        row for row in fact["directory_order"] if row["extra_zero_tail_length"] > 0
+    )
+    raw = bytearray((directory / fact["file"]).read_bytes())
+    position = frame["offset"] + frame["body_length"] - 1
+    assert raw[position] == 0
+    raw[position] = 1
+    with pytest.raises(MigrationRefused):
+        validate_bytes(DECLARATION, raw, "5")
+
+
+@pytest.mark.parametrize("fault", ["hidden_rgb", "nonpreferred_frame"])
+def test_external_decoder_must_preserve_hidden_rgb_and_validate_nonpreferred_frame(
+    monkeypatch, fault
+):
+    from PIL import Image
+
+    observed = False
+    # Largest/preferred3 is intact in the nonpreferred case; fail entry2 only.
+    fixture = ico() if fault == "hidden_rgb" else ico((3, 2), physical=(1, 0))
+    original = Image.open
+
+    def opened(*args, **kwargs):
+        nonlocal observed
+        image = original(*args, **kwargs)
+        if image.format == "ICO" and image.size == (2, 2):
+            observed = True
+            if fault == "hidden_rgb":
+                image.load()
+                assert image.getpixel((0, 1))[3] == 0
+                # Change only final invisible RGB, after ICO has applied alpha.
+                # The native oracle's alpha0 exception is not production policy.
+                image.putpixel((0, 1), (0x91, 0x82, 0x73, 0))
+            else:
+                image.close()
+                raise OSError("DECODER_DETAIL_CANARY")
+        return image
+
+    monkeypatch.setattr(Image, "open", opened)
+    with pytest.raises(MigrationRefused) as error:
+        validate_bytes(DECLARATION, fixture["raw"], "5")
+    assert observed and "DECODER_DETAIL_CANARY" not in str(error.value)
