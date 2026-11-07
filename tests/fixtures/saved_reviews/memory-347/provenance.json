@@ -1,0 +1,191 @@
+{
+  "writer_commit": "02b2c9f94baf671c39b0cde41f3d3683a1e6c313",
+  "writer_tree": "baseline production unchanged; test-only recipe added",
+  "python": "3.14.8",
+  "pydantic": "2.13.5",
+  "pydantic_core": "2.46.5",
+  "files": {
+    "attachment.inline.json": {
+      "size": 106379,
+      "sha256": "0afa516f63254fe773646ec2fbdd478f7b912f2446c26c01d1faa0e25ff2220a"
+    },
+    "attachment.original.bin": {
+      "size": 9,
+      "sha256": "e64f8f692de23ebc252cf9d55af496c4a66db481613b1a7b185bc4928dc90ce2"
+    },
+    "attachment.current.bin": {
+      "size": 9,
+      "sha256": "042bbcb02cbd238c2cffa2ad6f57d9c179c9f1f8bd8c94eb7a2a4682dadcebd3"
+    },
+    "attachment.incoming.bin": {
+      "size": 3,
+      "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    },
+    "unknown.inline.json": {
+      "size": 28210,
+      "sha256": "7b4e73fbfbc91f46960810aeb2dd7535fa7d591a2c635b5bffdec3986883059c"
+    },
+    "unknown.current.bin": {
+      "size": 9,
+      "sha256": "4f0108fa11673fa69e2c7060342fe871e3b63a5ef8129e89a3c5eee913a4b95c"
+    },
+    "unknown.incoming.bin": {
+      "size": 16,
+      "sha256": "f7a14f2a62073846c9f5fc621a5ebcfa51508351d30ec1fe3cc335ac3f6d7452"
+    },
+    "checkpoint.inline.json": {
+      "size": 42968,
+      "sha256": "0e8491af629fdcd22ca73495b76522ea34e17dd3d9141d05fe25d607e8c16b12"
+    },
+    "checkpoint.original.bin": {
+      "size": 14,
+      "sha256": "ea9d37a10d727f12e46633eab31204cddfd0f49defd5ac488c14edb66c50d1f1"
+    },
+    "checkpoint.current.bin": {
+      "size": 18,
+      "sha256": "3865373e96532774b06c932aaff5455a7cb11ac78d96218c27b9a992e2078043"
+    },
+    "checkpoint.incoming.bin": {
+      "size": 14,
+      "sha256": "1506e208b45df957c1ee11b798b012db770c64462a04c68c77a34f6bcc97f7a0"
+    },
+    "checkpoint.review.json": {
+      "size": 45974,
+      "sha256": "63b3735226e086116f438e8e24776a4df09dda4ae8e2619140bdb58566a3ecc0"
+    },
+    "checkpoint.manifest.json": {
+      "size": 1745,
+      "sha256": "1b2d8ecf088357fc45eaa34259355b89eeb7b0064e85e38d111985704f844c4f"
+    },
+    "checkpoint.locator.json": {
+      "size": 763,
+      "sha256": "82439c1b8d49c116e8e392be5445a8630cc0ca0659b841f7e8cd8ba647577dab"
+    },
+    "encoding-vectors.json": {
+      "size": 6468,
+      "sha256": "de9e3b670a4049f90be4d5843c7612ebe789498aac5a7c8128caa3387cad64d6"
+    },
+    "proof-vectors.json": {
+      "size": 9184,
+      "sha256": "b749d3362cc5b79ab5b5ffea251fbc2ceb542e4b481f39aa10294e14b7b5de38"
+    }
+  },
+  "families": {
+    "attachment": {
+      "proposal_id": "review:one",
+      "generation": 2,
+      "ready": true,
+      "decisions": [
+        {
+          "decision_id": "legacy:both",
+          "domain": "attachment",
+          "choice": "both",
+          "expected_generation": 1
+        },
+        {
+          "decision_id": "legacy:consent",
+          "domain": "storage",
+          "choice": "accept",
+          "expected_generation": 1
+        }
+      ],
+      "effects": {
+        "schema_id": "brz2obsidian.selected-review-effects",
+        "schema_version": 1,
+        "status": "selected",
+        "code": "selected",
+        "proposal_id": "review:one",
+        "generation": 2,
+        "files": [
+          {
+            "path": "Assets/data (incoming-ba7816bf).bin",
+            "subject_id": "ba1c4d1118161042cdba372561029f4e57204cdca8aa4a8645dc8d2e382b39cd",
+            "content": {
+              "data": "YWJj",
+              "reference": null
+            }
+          },
+          {
+            "path": "Assets/data.bin",
+            "subject_id": "ba1c4d1118161042cdba372561029f4e57204cdca8aa4a8645dc8d2e382b39cd",
+            "content": {
+              "data": "AGF1dGhvcmVk",
+              "reference": null
+            }
+          }
+        ],
+        "remove_paths": []
+      }
+    },
+    "unknown": {
+      "proposal_id": "review:one",
+      "generation": 1,
+      "ready": false,
+      "decisions": [],
+      "effects": {
+        "schema_id": "brz2obsidian.selected-review-effects",
+        "schema_version": 1,
+        "status": "refused",
+        "code": "review_not_ready",
+        "proposal_id": null,
+        "generation": null,
+        "files": [],
+        "remove_paths": []
+      }
+    },
+    "checkpoint": {
+      "proposal_id": "review:one",
+      "generation": 3,
+      "ready": true,
+      "decisions": [
+        {
+          "decision_id": "legacy:keep-current",
+          "domain": "text",
+          "choice": "current",
+          "expected_generation": 3
+        }
+      ],
+      "effects": {
+        "schema_id": "brz2obsidian.selected-review-effects",
+        "schema_version": 1,
+        "status": "selected",
+        "code": "selected",
+        "proposal_id": "review:one",
+        "generation": 3,
+        "files": [
+          {
+            "path": "Notes/Opening.md",
+            "subject_id": "20d73125748080b88350a0def853caf4a625b0f1a4912152c4bb666d42ce8630",
+            "content": {
+              "data": "YXV0aG9yZWQgY3VycmVudA0K",
+              "reference": null
+            }
+          }
+        ],
+        "remove_paths": []
+      }
+    }
+  },
+  "native_capture": {
+    "commit": "3e43f6915e4e677f5be600f7f74e3332b2c993a3",
+    "ref": "refs/brz2obsidian/imports/f1c1eba7d2a609d2ec70e78ae3dcf11121ee9f50b255374dc0546f0c27191c75/checkpoints",
+    "git_version": "git version 2.55.0.windows.5",
+    "note": "Original native anchors, parent Git and commit timestamps are retained verbatim. Fresh captures assert deterministic review wire and role closure only, never replace association authority."
+  },
+  "manual_authority": {
+    "source_recipes": [
+      "tests/reconciliation/test_attachments.py: attachment_request, attachment_candidate (helpers only)",
+      "tests/reconciliation/test_refresh.py: binary retention test read only",
+      "tests/reconciliation/test_resume.py: unknown-original format transition read only",
+      "tests/application/test_vault_checkpoint_review_integrity.py: compact recipe read only; independent public builder extracted"
+    ],
+    "generation_recipe": "tests/reconciliation/legacy_content_builder.py public helpers and core.save_review; no test bodies executed; generation scripts and native attempt evidence are preserved in author tmp/r350-vectors",
+    "proof_derivation": "Raw baseline preimage hand-stated. Direct candidate preimage independently assembled from the closed synthetic choice with no changed documents; no private production encoder imported. Recorded hashes are frozen secondary calculator evidence, while preimages and manual effects are the primary oracle.",
+    "attachment": "Known original hex 006f726967696e616c; current hex 00617574686f726564; incoming hex 616263. Explicit user both/legacy:both at generation1 and one explicit ordinary storage consent scoped to the sole subject. Unchanged refresh generation2 must retain both original decisions and approval/selection epoch1. Exactly two owned file effects, original path current and digest-suffixed incoming; no removal. The one consent provides a scope negative without duplicating lifecycle setup.",
+    "unknown": "Unknown original remains absent with older:unavailable; current authored ff is not a substituted original. Format6 to7 onboarding remains unresolved, no decisions, no established baseline, no selected effects. Load cannot authorize readiness.",
+    "checkpoint": "Explicit user current/legacy:keep-current at generation3; one exact authored-current owned effect, no removals. Public checkpoint stores baseline-only bytes in review-content because current/incoming close over other owned roles. Envelope is separate from inline ingress. Historical effects never authorize current writes.",
+    "native_limits": "Original locator has actual volume/file anchors and commit identity, retained verbatim. Native anchors cannot be portably recreated. Fresh captures use their own admission and compare deterministic review bytes and review-content role only. Frozen manifest is original, not normalized.",
+    "negative_oracles": "At inline load: changed choice/dependency/retention/consent scope/effect owner/duplicate approval -> invalid_review; changed output byte inconsistent with its target-state identity, added caller removal list and duplicate JSON member -> invalid_record. At Git read: duplicate envelope member, absent owned review-content edge despite retained blob, and inline record offered as envelope -> refused. These orthogonal controls are deliberately not multiplied across families.",
+    "remaining_gates": "Baseline characterization does not prove descriptor projection, per-event old/new correspondence, bounded cold ingestion or legacy descriptor loading. Future current writer need not retain legacy wire formatting after separately approved schema changes."
+  }
+}

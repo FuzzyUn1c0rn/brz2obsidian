@@ -363,7 +363,8 @@
     "tests/application/test_image_notice_composition.py::test_public_image_notice_composes_with_separate_table[ragged-after-api]",
     "tests/local_acceptance/test_external_image_audit.py::test_complete_external_images_keep_authored_and_owned_authority",
     "tests/application/test_format_attachment_choices.py",
-    "tests/gui/test_format_attachment_choices.py::test_format_attachment_controls_show_canonical_current_only_guidance"
+    "tests/gui/test_format_attachment_choices.py::test_format_attachment_controls_show_canonical_current_only_guidance",
+    "tests/reconciliation/test_legacy_content_vectors.py"
   ],
   "schema_version": 1
 }

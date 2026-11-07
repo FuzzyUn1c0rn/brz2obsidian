@@ -1,0 +1,2 @@
+# Frozen old wire and payloads retain their exact bytes on every platform.
+* -text
