@@ -280,7 +280,9 @@ def _git_with_runner(vault, args, runner):
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
     if result.returncode:
-        raise subprocess.CalledProcessError(result.returncode, result.args, result.stdout, result.stderr)
+        raise subprocess.CalledProcessError(
+            result.returncode, result.args, result.stdout, result.stderr
+        )
     if len(result.stdout) + len(result.stderr) > 65536:
         raise OSError("Synthetic Git control output exceeded 64 KiB")
     return result.stdout
@@ -339,13 +341,24 @@ def verify_positions(path):
         raise OSError("Staged length/hash differs from the independently pinned value")
 
 
-def run(evidence, ledger_path, expected_sha):
+def run(
+    evidence,
+    ledger_path,
+    expected_sha,
+    *,
+    admit=None,
+    evidence_writer=None,
+    init_arguments=(),
+    terminal=True,
+    allocation_limit=512 * MIB,
+):
     facts = {"status": "failed"}
-    writer = Evidence()
+    writer = Evidence() if evidence_writer is None else evidence_writer
     write_evidence = writer.write
     try:
         boundary("setup")
-        root, base, reserved = preflight(evidence, ledger_path, expected_sha, writer)
+        admission = preflight if admit is None else admit
+        root, base, reserved = admission(evidence, ledger_path, expected_sha, writer)
         facts.update(root=str(root), temp_base=str(base), reserved_total=reserved)
         vault, source, scratch = (
             root / name for name in ("vault", "source", "scratch")
@@ -355,7 +368,7 @@ def run(evidence, ledger_path, expected_sha):
         note = b"Resource pilot note.\n"
         (vault / "note.md").write_bytes(note)
         (source / "note.md").write_bytes(note)
-        git(vault, "init", "-q", "--initial-branch=main")
+        git(vault, "init", "-q", "--initial-branch=main", *init_arguments)
         git(vault, "add", "note.md")
         git(vault, "commit", "-qm", "Synthetic user baseline")
         block = bytes(range(256)) * 256
@@ -453,8 +466,12 @@ def run(evidence, ledger_path, expected_sha):
         if facts["converter_refs_after_capture"] != facts["after"]["converter_refs"]:
             raise OSError("Content observation changed converter refs")
         allocated, files = inventory(root)
-        if allocated > 512 * MIB:
-            raise OSError("Pilot exceeded its 512 MiB disk envelope")
+        if allocated > allocation_limit:
+            raise OSError(
+                "Pilot exceeded its 512 MiB disk envelope"
+                if allocation_limit == 512 * MIB
+                else "Pilot exceeded its reserved disk envelope"
+            )
         write_evidence(
             evidence / "disk-after.json",
             {"root": str(root), "allocated": allocated, "files": files},
@@ -473,9 +490,12 @@ def run(evidence, ledger_path, expected_sha):
         raise
     finally:
         write_evidence(evidence / "pilot.json", facts, terminal=True)
-    print(json.dumps({"event": "done", "pid": os.getpid(), "ok": True}), flush=True)
-    if sys.stdin.readline() != "continue\n":
-        raise OSError("Pilot terminal outcome was not acknowledged")
+    if terminal:
+        print(json.dumps({"event": "done", "pid": os.getpid(), "ok": True}), flush=True)
+        if sys.stdin.readline() != "continue\n":
+            raise OSError("Pilot terminal outcome was not acknowledged")
+    else:
+        return facts
 
 
 if __name__ == "__main__":

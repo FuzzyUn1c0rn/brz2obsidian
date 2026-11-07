@@ -223,9 +223,7 @@ class _Windows:
         self.require(pid)
         times = [ctypes.c_uint64() for _ in range(4)]
         self.require(
-            self.kernel.GetProcessTimes(
-                handle, *(ctypes.byref(item) for item in times)
-            )
+            self.kernel.GetProcessTimes(handle, *(ctypes.byref(item) for item in times))
         )
         length = w.DWORD(1024)
         image = ctypes.create_unicode_buffer(length.value)
@@ -259,9 +257,7 @@ class _Windows:
 
     def member(self, process, job):
         member = w.BOOL()
-        self.require(
-            self.kernel.IsProcessInJob(process, job, ctypes.byref(member))
-        )
+        self.require(self.kernel.IsProcessInJob(process, job, ctypes.byref(member)))
         if not member.value:
             raise OSError("Creation process is outside a required owned job")
 
@@ -488,9 +484,7 @@ class _CommandJob(_Job):
         self.initializing = False
 
     def attach_handle(self, handle):
-        self.api.require(
-            self.api.kernel.AssignProcessToJobObject(self.handle, handle)
-        )
+        self.api.require(self.api.kernel.AssignProcessToJobObject(self.handle, handle))
         identity = self.api.identity(handle)
         self.policy.reserve_row()
         row = {
@@ -519,7 +513,9 @@ class _CommandJob(_Job):
 
     def close(self):
         errors = []
-        handles = [handle for handle in self.handles.values() if handle not in self.borrowed]
+        handles = [
+            handle for handle in self.handles.values() if handle not in self.borrowed
+        ]
         if self.handle:
             if self.initializing and self.handle not in self.policy.owned:
                 self.policy.retain(self.handle)
@@ -641,9 +637,18 @@ class _Commands:
                     raise ValueError("Frozen bootstrap processes are not both present")
                 for pid in members.pids[: members.count]:
                     job.track(pid, "bootstrap-census")
-                images = sorted(os.path.normcase(os.path.normpath(row["image"])) for row in self.inventory)
-                wanted = sorted(os.path.normcase(os.path.normpath(value)) for value in self.bootstrap_expected["images"])
-                if self.bootstrap != self.bootstrap_expected["lifetimes"] or images != wanted:
+                images = sorted(
+                    os.path.normcase(os.path.normpath(row["image"]))
+                    for row in self.inventory
+                )
+                wanted = sorted(
+                    os.path.normcase(os.path.normpath(value))
+                    for value in self.bootstrap_expected["images"]
+                )
+                if (
+                    self.bootstrap != self.bootstrap_expected["lifetimes"]
+                    or images != wanted
+                ):
                     raise ValueError("Native bootstrap differs from the frozen control")
             self.hello = True
             write("events.jsonl", event)
@@ -723,7 +728,12 @@ class _Commands:
             self.ack(process, f"begin {seq}", write)
             return
         if seq != self.active or seq not in self.commands:
-            if self.fault == "duplicate_return" and name == "command_return" and seq in self.commands and self.commands[seq]["state"] == "finalized":
+            if (
+                self.fault == "duplicate_return"
+                and name == "command_return"
+                and seq in self.commands
+                and self.commands[seq]["state"] == "finalized"
+            ):
                 self.fault_reached = True
             raise ValueError("Unknown or repeated command sequence")
         row = self.commands[seq]
@@ -742,12 +752,16 @@ class _Commands:
             try:
                 measurement = job.api.duplicate(
                     process._handle,
-                    0x7FFFFFFC if self.fault == "duplicate_measurement" else event["measurement_handle"],
+                    0x7FFFFFFC
+                    if self.fault == "duplicate_measurement"
+                    else event["measurement_handle"],
                 )
                 self.retain(measurement)
                 creation = job.api.duplicate(
                     process._handle,
-                    0x7FFFFFFC if self.fault == "duplicate_creation" else event["creation_process_handle"],
+                    0x7FFFFFFC
+                    if self.fault == "duplicate_creation"
+                    else event["creation_process_handle"],
                 )
                 self.retain(creation)
                 identity = job.api.identity(creation)
@@ -873,20 +887,35 @@ class _Commands:
         handle = self.measurements.get(seq)
         if handle is None:
             return
-        if not aborted:
-            # An unfinished family remains observer-owned through the single
-            # outer abort, allowing its final zero-active counters to survive.
-            if job.api.accounting(handle)["ActiveProcesses"]:
-                raise OSError("Returned product call left an active command family")
+        # An unfinished family remains observer-owned through the single
+        # outer abort, allowing its final zero-active counters to survive.
+        if not aborted and job.api.accounting(handle)["ActiveProcesses"]:
+            raise OSError("Returned product call left an active command family")
         try:
             final = job.api.accounting(handle)
-            row.update(final_job=final, outer_at_return=job.census(), state="aborted" if aborted else "finalized", return_status=status, normal_cleanup_complete=not aborted, individual_sampling={"mode": self.individual_samples, "omitted_interval_seconds": time.monotonic() - row["registered_at"] if self.individual_samples == "command-boundaries" else 0})
+            row.update(
+                final_job=final,
+                outer_at_return=job.census(),
+                state="aborted" if aborted else "finalized",
+                return_status=status,
+                normal_cleanup_complete=not aborted,
+                individual_sampling={
+                    "mode": self.individual_samples,
+                    "omitted_interval_seconds": time.monotonic() - row["registered_at"]
+                    if self.individual_samples == "command-boundaries"
+                    else 0,
+                },
+            )
             try:
                 row["final_process"] = job.api.memory(job.handles[row["pid"]])
             except OSError as error:
                 row["final_process_unavailable"] = str(error)
         except OSError as error:
-            row.update(state="incomplete", counter_error=str(error), normal_cleanup_complete=False)
+            row.update(
+                state="incomplete",
+                counter_error=str(error),
+                normal_cleanup_complete=False,
+            )
             raise
         finally:
             del self.measurements[seq]
@@ -895,8 +924,16 @@ class _Commands:
 
     def reconcile(self, job):
         total = job.census()["TotalProcesses"]
-        commands = sum(row.get("final_job", {}).get("TotalProcesses", 0) for row in self.commands.values())
-        value = {"bootstrap_lifetimes": self.bootstrap, "command_lifetimes": commands, "outer_lifetimes": total, "unaccounted_lifetimes": total - self.bootstrap - commands}
+        commands = sum(
+            row.get("final_job", {}).get("TotalProcesses", 0)
+            for row in self.commands.values()
+        )
+        value = {
+            "bootstrap_lifetimes": self.bootstrap,
+            "command_lifetimes": commands,
+            "outer_lifetimes": total,
+            "unaccounted_lifetimes": total - self.bootstrap - commands,
+        }
         if value["unaccounted_lifetimes"] != 0:
             self.census_failure = value
             if self.fault == "command_census_bypass":
@@ -905,33 +942,77 @@ class _Commands:
         return value
 
 
-def observe_commands(command, output, *, artifact_limit, bootstrap, phases=(), work_timeout=116, individual_samples="regular", fault=None):
+def observe_commands(
+    command,
+    output,
+    *,
+    artifact_limit,
+    bootstrap,
+    phases=(),
+    work_timeout=116,
+    individual_samples="regular",
+    fault=None,
+):
     """Observe actual command creation handles and disjoint nested job peaks."""
-    if type(phases) is not tuple or len(phases) > 16 or len(set(phases)) != len(phases) or any(type(name) is not str or not 1 <= len(name) <= 32 or not name.isascii() for name in phases):
+    if (
+        type(phases) is not tuple
+        or len(phases) > 16
+        or len(set(phases)) != len(phases)
+        or any(
+            type(name) is not str or not 1 <= len(name) <= 32 or not name.isascii()
+            for name in phases
+        )
+    ):
         raise ValueError("Invalid bounded command phase declaration")
     if individual_samples not in ("regular", "command-boundaries"):
         raise ValueError("Unknown individual sampling policy")
     if type(artifact_limit) is not int or not 4 * MIB < artifact_limit <= 60 * MIB:
         raise ValueError("Command artifact credit lacks its complete terminal reserve")
-    if individual_samples == "command-boundaries" and (len(command) < 5 or command[1:4] != ["-m", "tests.support.git_resource_pilot", "peaks"]):
+    if individual_samples == "command-boundaries" and (
+        len(command) < 5
+        or command[1:4] != ["-m", "tests.support.git_resource_pilot", "peaks"]
+    ):
         raise ValueError("Sampling omission is restricted to the fixed peak control")
     if not command or os.path.normcase(command[0]) != os.path.normcase(sys.executable):
         raise ValueError("Command driver must use the qualified current interpreter")
     if fault is not None and (
-        fault not in (
-            "constructor_partial", "measurement_assign", "product_assign",
-            "duplicate_measurement", "duplicate_creation", "registration_ack_lost",
-            "family_counter_unavailable", "driver_killed_after_registration",
-            "outer_deadline", "duplicate_return", "command_census_bypass",
+        fault
+        not in (
+            "constructor_partial",
+            "measurement_assign",
+            "product_assign",
+            "duplicate_measurement",
+            "duplicate_creation",
+            "registration_ack_lost",
+            "family_counter_unavailable",
+            "driver_killed_after_registration",
+            "outer_deadline",
+            "duplicate_return",
+            "command_census_bypass",
             "terminal_reserve_exhausted",
         )
         or command[1:5] != ["-m", "tests.support.git_resource_pilot", "refusal", fault]
     ):
         raise ValueError("Fault injection is restricted to declared refusal controls")
-    if type(bootstrap) is not dict or set(bootstrap) != {"lifetimes", "images"} or bootstrap["lifetimes"] != 2 or type(bootstrap["images"]) is not list or len(bootstrap["images"]) != 2 or any(type(value) is not str for value in bootstrap["images"]):
+    if (
+        type(bootstrap) is not dict
+        or set(bootstrap) != {"lifetimes", "images"}
+        or bootstrap["lifetimes"] != 2
+        or type(bootstrap["images"]) is not list
+        or len(bootstrap["images"]) != 2
+        or any(type(value) is not str for value in bootstrap["images"])
+    ):
         raise ValueError("Invalid frozen native bootstrap declaration")
     policy = _Commands(phases, individual_samples, fault, bootstrap)
-    return _observe(command, output, timeout=work_timeout, memory_limit=2048 * MIB, artifact_limit=artifact_limit, phase_names=phases, command_policy=policy)
+    return _observe(
+        command,
+        output,
+        timeout=work_timeout,
+        memory_limit=2048 * MIB,
+        artifact_limit=artifact_limit,
+        phase_names=phases,
+        command_policy=policy,
+    )
 
 
 def observe(
@@ -989,7 +1070,14 @@ def observe_phases(command, output, *, phases, work_timeout=116):
 
 
 def _observe(
-    command, output, *, timeout, memory_limit, artifact_limit, phase_names=None, command_policy=None
+    command,
+    output,
+    *,
+    timeout,
+    memory_limit,
+    artifact_limit,
+    phase_names=None,
+    command_policy=None,
 ):
     phase_mode = phase_names is not None
     work_limit = 116 if phase_mode else 26
@@ -1080,8 +1168,10 @@ def _observe(
         )
         limit = artifact_limit if terminal else artifact_limit - terminal_reserve
         if command_policy and (
-            terminal and len(data) > terminal_reserve
-            or name == "frames.jsonl" and len(data) > 12 * 1024
+            terminal
+            and len(data) > terminal_reserve
+            or name == "frames.jsonl"
+            and len(data) > 12 * 1024
         ):
             raise OSError("Encoded command evidence exceeds its reserved record")
         if used + len(data) > limit:
@@ -1097,10 +1187,24 @@ def _observe(
 
     def sample(phase):
         nonlocal exited_counter_gaps
-        omitted = command_policy is not None and command_policy.individual_samples == "command-boundaries" and command_policy.active is not None
+        omitted = (
+            command_policy is not None
+            and command_policy.individual_samples == "command-boundaries"
+            and command_policy.active is not None
+        )
         if omitted:
             now = time.monotonic()
-            frame = {"sample_started": now, "sample_finished": now, "phase": phase, "job": job.census(), "processes": [], "missing_processes": [], "individual_samples_omitted": True, "system": api.system(), "observer": api.memory(observer)}
+            frame = {
+                "sample_started": now,
+                "sample_finished": now,
+                "phase": phase,
+                "job": job.census(),
+                "processes": [],
+                "missing_processes": [],
+                "individual_samples_omitted": True,
+                "system": api.system(),
+                "observer": api.memory(observer),
+            }
         else:
             frame = job.sample(phase, observer, allow_exited_gaps=phase_mode)
         write("frames.jsonl", frame)
@@ -1118,7 +1222,11 @@ def _observe(
         api.require(observer)
         if command_policy:
             command_policy.retain(observer)
-        job = _CommandJob(api, memory_limit, command_policy) if command_policy else _Job(api, memory_limit, lifetime_limit=lifetime_limit)
+        job = (
+            _CommandJob(api, memory_limit, command_policy)
+            if command_policy
+            else _Job(api, memory_limit, lifetime_limit=lifetime_limit)
+        )
         member = w.BOOL()
         api.require(
             api.kernel.IsProcessInJob(observer, job.handle, ctypes.byref(member))
@@ -1130,7 +1238,11 @@ def _observe(
         environment = None
         if command_policy:
             launch = [sys._base_executable, *command[1:]]
-            environment = {**os.environ, "__PYVENV_LAUNCHER__": sys.executable, "BRZ_COMMAND_DEADLINE": str(started + timeout)}
+            environment = {
+                **os.environ,
+                "__PYVENV_LAUNCHER__": sys.executable,
+                "BRZ_COMMAND_DEADLINE": str(started + timeout),
+            }
             report["native_driver_command"] = launch
         process = _SuspendedPopen(
             launch,
@@ -1163,7 +1275,10 @@ def _observe(
                     raise OSError("Command protocol line exceeds its finite bound")
                 received += len(block)
                 pending += block
-                if received > (1553 * 12 * 1024 if command_policy else 65536) or len(pending) > 16384:
+                if (
+                    received > (1553 * 12 * 1024 if command_policy else 65536)
+                    or len(pending) > 16384
+                ):
                     raise OSError("Calibration protocol output budget exhausted")
             while b"\n" in pending:
                 line, pending = pending.split(b"\n", 1)
@@ -1332,12 +1447,21 @@ def _observe(
     ) as error:
         report["error"] = str(error)
         report["status"] = "timeout" if isinstance(error, TimeoutError) else "failed"
-        if command_policy and command_policy.fault == "outer_deadline" and isinstance(error, TimeoutError) and command_policy.measurements:
+        if (
+            command_policy
+            and command_policy.fault == "outer_deadline"
+            and isinstance(error, TimeoutError)
+            and command_policy.measurements
+        ):
             command_policy.fault_reached = True
     finally:
         cleanup_errors = []
         termination_calls = 0
-        cleanup_deadline = min(time.monotonic() + 4, started + timeout + 4) if command_policy else time.monotonic() + 4
+        cleanup_deadline = (
+            min(time.monotonic() + 4, started + timeout + 4)
+            if command_policy
+            else time.monotonic() + 4
+        )
         if job is not None:
             try:
                 if job.census()["ActiveProcesses"]:
@@ -1355,12 +1479,16 @@ def _observe(
                 if command_policy:
                     for seq in tuple(command_policy.measurements):
                         try:
-                            command_policy.finalize(seq, job, aborted=True, status="observer_abort")
+                            command_policy.finalize(
+                                seq, job, aborted=True, status="observer_abort"
+                            )
                         except OSError as error:
                             cleanup_errors.append(str(error))
                     for row in command_policy.commands.values():
                         if row["state"] == "begun":
-                            row.update(state="incomplete", normal_cleanup_complete=False)
+                            row.update(
+                                state="incomplete", normal_cleanup_complete=False
+                            )
                     report["inventory"] = command_policy.inventory
                     report["protocol_events"] = command_policy.events
                     report["protocol_acks"] = command_policy.acks
@@ -1376,7 +1504,11 @@ def _observe(
                 cleanup_errors.extend(job.close())
         if process is not None:
             try:
-                process.wait(timeout=max(0, cleanup_deadline - time.monotonic()) if command_policy else 2)
+                process.wait(
+                    timeout=max(0, cleanup_deadline - time.monotonic())
+                    if command_policy
+                    else 2
+                )
             except (OSError, subprocess.TimeoutExpired) as error:
                 cleanup_errors.append(str(error))
             finally:
@@ -1387,7 +1519,9 @@ def _observe(
                         cleanup_errors.append(str(error))
                 try:
                     if command_policy:
-                        command_policy.close(api, process._handle, process._handle.Close)
+                        command_policy.close(
+                            api, process._handle, process._handle.Close
+                        )
                     else:
                         process._handle.Close()
                 except OSError as error:

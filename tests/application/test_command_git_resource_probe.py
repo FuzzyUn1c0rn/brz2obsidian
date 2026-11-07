@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.support.git_resource_pilot import control_preflight, finish_control
 from tests.support import git_resource_pilot
+from tests.support.git_resource_pilot import control_preflight, finish_control
 from tools import update_resource_probe
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -27,6 +27,30 @@ REFUSALS = (
     "command_census_bypass",
     "terminal_reserve_exhausted",
 )
+
+
+def test_public_and_packed_sixteen_mib_resource_proof():
+    proof = git_resource_pilot.payload_control()
+    assert tuple(proof["cells"]) == ("public_loose", "packed_whole", "packed_ref_delta")
+    for cell in proof["cells"].values():
+        assert cell["status"] == "completed"
+        assert cell["verified_bytes"] == 16 * MIB
+        assert cell["commands_finalized"] is True
+    public = proof["cells"]["public_loose"]
+    assert public["saved_review_present"] is False
+    assert public["stages_verified"] == 2
+    assert public["stages_removed"] is True
+    assert public["storage"] == "loose"
+    assert proof["cells"]["packed_whole"]["target_type"] == 3
+    delta = proof["cells"]["packed_ref_delta"]
+    assert delta["target_type"] == 7
+    assert delta["base_type"] == 3
+    assert delta["depth"] == 1
+    assert delta["base_oid"] == "4991af53b4f0ae2141b2a0ba4011ecbd02d61bb4"
+    assert delta["target_oid"] == "e5b137c18573c2704bebbae32fd6bb4afdc9057d"
+    assert proof["unaccounted_lifetimes"] == 0
+    assert proof["active_processes"] == 0
+    assert proof["cleanup_errors"] == ()
 
 
 def test_command_jobs_retain_short_descendant_peaks_after_exit():
@@ -71,17 +95,19 @@ def test_command_jobs_retain_short_descendant_peaks_after_exit():
         assert row["final_job"]["PeakJobMemoryUsed"] >= (
             proof["child_held_private_bytes"] + proof["parent_private_bytes"]
         )
-        assert row["final_job"]["PeakProcessMemoryUsed"] >= proof[
-            "child_held_private_bytes"
-        ]
+        assert (
+            row["final_job"]["PeakProcessMemoryUsed"]
+            >= proof["child_held_private_bytes"]
+        )
         assert row["individual_sampling"]["mode"] == "command-boundaries"
         assert row["individual_sampling"]["omitted_interval_seconds"] > 0
     for counter in ("PeakJobMemoryUsed", "PeakProcessMemoryUsed"):
         assert commands[1]["final_job"][counter] < commands[0]["final_job"][counter]
         assert result["final_job"][counter] >= commands[0]["outer_at_return"][counter]
-        assert commands[1]["outer_at_return"][counter] >= commands[0][
-            "outer_at_return"
-        ][counter]
+        assert (
+            commands[1]["outer_at_return"][counter]
+            >= commands[0]["outer_at_return"][counter]
+        )
     assert result["census"]["unaccounted_lifetimes"] == 0
     assert json.loads((attempt / "observer" / "report.json").read_text()) == result
 
@@ -189,7 +215,9 @@ def test_command_job_refusals_preserve_cleanup_and_failure_evidence(case, reques
             assert result["census"]["unaccounted_lifetimes"] > 0
         assert json.loads((attempt / "observer" / "report.json").read_text()) == result
     except BaseException:
-        request.session.shouldstop = "Unexpected command refusal outcome; Root assessment required"
+        request.session.shouldstop = (
+            "Unexpected command refusal outcome; Root assessment required"
+        )
         raise
 
 
@@ -241,11 +269,19 @@ def test_both_git_factories_and_setup_enter_measured_command_jobs():
     assert facts["blob_size"] == 8
     assert facts["blob_oid"] == "1656f9233d999f61ef23ef390b9c71d75399f435"
     assert facts["read_consumers"] == [
-        "git_read", "vault_admission", "vault_attributes", "vault_history"
+        "git_read",
+        "vault_admission",
+        "vault_attributes",
+        "vault_history",
     ]
     assert facts["payload_consumers"] == [
-        "git_payload", "checkpoint_payload", "vault_history", "vault_repair",
-        "attachment_ownership", "vault_recovery", "vault_apply",
+        "git_payload",
+        "checkpoint_payload",
+        "vault_history",
+        "vault_repair",
+        "attachment_ownership",
+        "vault_recovery",
+        "vault_apply",
     ]
     assert facts["verified_stream_bytes"] == [8] * 7
     assert facts["original_aliases_restored"] is True
@@ -283,10 +319,17 @@ def storage_results(request):
         ("stream_byte_mismatch", "stream_bytes"),
     ],
     ids=[
-        "whole_target_is_delta", "delta_target_is_whole", "reverse_direction",
-        "ofs_instead_of_ref", "wrong_header_base", "header_overflow",
-        "header_truncated", "pack_index_corrupt", "loose_shadow",
-        "external_alternate", "stream_byte_mismatch",
+        "whole_target_is_delta",
+        "delta_target_is_whole",
+        "reverse_direction",
+        "ofs_instead_of_ref",
+        "wrong_header_base",
+        "header_overflow",
+        "header_truncated",
+        "pack_index_corrupt",
+        "loose_shadow",
+        "external_alternate",
+        "stream_byte_mismatch",
     ],
 )
 def test_invalid_storage_shape_cannot_qualify_a_fixture(
@@ -334,8 +377,16 @@ def test_invalid_storage_shape_cannot_qualify_a_fixture(
             assert facts["verified_stream_bytes"] == 8
             assert facts["cryptographic_success"] is True
             assert facts["stream_command_finalized"] is True
-            assert facts["actual_stream_role"] == "valid R0 target with independent SHA1/SHA256"
-            assert facts["expected_pattern_role"] == "R0 invalid-control actual_raw_hex used as expected"
+            assert (
+                facts["actual_stream_role"]
+                == "valid R0 target with independent SHA1/SHA256"
+            )
+            assert (
+                facts["expected_pattern_role"]
+                == "R0 invalid-control actual_raw_hex used as expected"
+            )
     except BaseException:
-        request.session.shouldstop = "Unexpected storage outcome; Root assessment required"
+        request.session.shouldstop = (
+            "Unexpected storage outcome; Root assessment required"
+        )
         raise
