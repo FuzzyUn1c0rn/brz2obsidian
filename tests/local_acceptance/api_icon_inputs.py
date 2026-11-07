@@ -579,9 +579,9 @@ def profile5_capture_vector():
         )
         for row in seed["retained_files"]
     }
-    source, snapshot, metadata = (
+    source, snapshot, metadata, audit = (
         json.loads(files[key])
-        for key in ("source.json", "snapshot.json", "metadata.json")
+        for key in ("source.json", "snapshot.json", "metadata.json", "audit.json")
     )
     assert capture_digest("source", source) == seed["expected_source_sha256"], (
         "independent seed source equation"
@@ -615,6 +615,34 @@ def profile5_capture_vector():
         position={"decimal": "2"},
         dataLength=len(artwork),
     )
+    # Literal modeled API reply: position is a wire scalar, not its normalized
+    # decimal wrapper. This is synthetic known artwork/metadata, never HTTP proof.
+    icon_metadata_reply = (
+        b'{"id":"00000000-0000-4000-8000-000000000005",'
+        b'"brainId":"00000000-0000-4000-8000-000000000001",'
+        b'"sourceId":"00000000-0000-4000-8000-000000000002",'
+        b'"sourceType":2,"type":5,"isNotes":false,"name":null,'
+        b'"location":"Icon.png","position":2,"dataLength":86}'
+    )
+    assert len(icon_metadata_reply) == 247
+    assert json.loads(icon_metadata_reply) == dict(declaration, position=2)
+    note_content_request = audit["requests"][10]
+    audit["requests"].insert(
+        10,
+        dict(
+            note_content_request,
+            operation="attachments",
+            subject_id=key,
+            actual_length=len(icon_metadata_reply),
+        ),
+    )
+    audit["requests"].insert(
+        12, dict(note_content_request, subject_id=key, actual_length=len(artwork))
+    )
+    for index, request in enumerate(audit["requests"]):
+        request["sequence"] = index + 1
+        request["started_at"] = f"2026-10-14T12:00:00.{index * 50000:06d}Z"
+        request["finished_at"] = f"2026-10-14T12:00:00.{index * 50000 + 25000:06d}Z"
     source["identifiers"]["profile_version"] = "5"
     source["records"].append(
         {"domain": "attachment", "key": pointer, "owner_id": home, "value": declaration}
@@ -650,6 +678,7 @@ def profile5_capture_vector():
         }
     )
     snapshot["assets"].sort(key=lambda row: row["asset_id"])
+    snapshot["items"][0]["resource_ids"].append(key)
     snapshot["items"][0]["declared_appearance"]["icon_asset_id"] = key
     snapshot["accounting"]["entries"].append(
         {"identity": pointer, "disposition": "normalized", "references": [key]}
@@ -684,6 +713,7 @@ def profile5_capture_vector():
             "source.json": capture_json(source),
             "snapshot.json": capture_json(snapshot),
             "metadata.json": capture_json(metadata),
+            "audit.json": capture_json(audit),
             "payload/0000000000000002.bin": artwork,
         }
     )
@@ -720,7 +750,7 @@ def profile5_capture_vector():
         "synthetic": True,
         "seed_sha256": digest(seed_raw),
         "spec_sha256": SPEC_SHA256,
-        "qualification_metadata": "Inherited4 synthetic literals; no live source/schema/build or production seal is claimed.",
+        "qualification_metadata": "Valid synthetic source-bound capture model. Inherited4 qualification literals and historical nonpayload counts are assumptions; the new icon metadata reply is247 literal bytes. No live source/schema/build or production seal is claimed.",
         "expected_source_sha256": source_hash,
         "expected_snapshot_digest": snapshot_hash,
         "expected_integrity_sha256": integrity,
