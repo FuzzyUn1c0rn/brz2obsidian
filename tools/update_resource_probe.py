@@ -372,7 +372,10 @@ def observe(
     if os.name != "nt":
         raise OSError("Windows resource observation is unavailable")
     if (
-        not 0 < timeout <= 26
+        type(timeout) not in (int, float)
+        or type(memory_limit) is not int
+        or type(artifact_limit) is not int
+        or not 0 < timeout <= 26
         or not 0 < memory_limit <= 512 * MIB
         or not 256 * 1024 <= artifact_limit <= 64 * MIB
     ):

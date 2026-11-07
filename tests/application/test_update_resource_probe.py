@@ -165,6 +165,11 @@ def test_missing_executable_fails_before_any_process_enters_owned_job():
         {"timeout": 27},
         {"memory_limit": 513 * 1024 * 1024},
         {"artifact_limit": 65 * 1024 * 1024},
+        {"timeout": True},
+        {"timeout": "1"},
+        {"timeout": float("nan")},
+        {"memory_limit": float(512 * 1024 * 1024)},
+        {"artifact_limit": True},
     ],
 )
 def test_unapproved_limit_is_refused_without_creating_artifacts(limits):
