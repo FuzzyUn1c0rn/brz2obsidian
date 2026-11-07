@@ -1735,6 +1735,13 @@ class _UpdateRead:
         self._check()
         return self._bound_history
 
+    def content_session(self, *, scratch_parent):
+        """Own disposable exact content after this observation's full admission."""
+        from .content_session import ContentSession
+
+        self._check()
+        return ContentSession(self, scratch_parent=scratch_parent)
+
     def read_payload(self, *, locator, requests, byte_limit, role="source"):
         from .checkpoint_payload import _read_checkpoint_payload
 

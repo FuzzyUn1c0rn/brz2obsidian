@@ -149,6 +149,7 @@
     "tests/application/test_vault_checkpoints.py::test_actual_partial_history_failures_report_retained_objects_and_roots_truthfully",
     "tests/application/test_vault_checkpoint_review_integrity.py::test_compact_byte_references_close_over_owned_roles",
     "tests/application/test_git_payload_stream.py",
+    "tests/application/test_content_session.py",
     "tests/application/test_vault_checkpoints.py::test_reviewed_initialization_rediscovery_cannot_capture_newly_applicable_policy",
     "tests/application/test_vault_checkpoints.py::test_invalid_initialization_decisions_cannot_claim_preexisting_repository_creation",
     "tests/application/test_vault_checkpoints.py::test_failed_init_after_actual_repository_creation_reports_partial_change",
