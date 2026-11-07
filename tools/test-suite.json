@@ -391,7 +391,12 @@
     "tests/sources/test_local_api_icons_v5.py::test_profile5_refuses_an_altered_historical_zero_tail",
     "tests/sources/test_local_api_icons_v5.py::test_external_decoder_must_preserve_hidden_rgb_and_validate_nonpreferred_frame",
     "tests/sources/test_local_api_icons_v5.py::test_equal_icon_bytes_keep_owner_identity_and_exclusions_precede_acquisition",
-    "tests/sources/test_local_api_icons_v5.py::test_frozen5_direct_session_rejects_profile_owner_and_role_mismatches"
+    "tests/sources/test_local_api_icons_v5.py::test_frozen5_direct_session_rejects_profile_owner_and_role_mismatches",
+    "tests/application/test_api_profile5_composition.py::test_standard5_output_matches_independent_icon_baseline",
+    "tests/application/test_api_profile5_composition.py::test_standard5_full_chain_preserves_owned_icons_and_accounting",
+    "tests/application/test_api_profile5_composition.py::test_standard5_refuses_profile4_review",
+    "tests/application/test_api_profile5_composition.py::test_standard5_required_icon_refusal_leaves_no_output",
+    "tests/cli/test_api_profile5_composition.py::test_cli_standard5_inspect_convert_preserves_original_icon"
   ],
   "schema_version": 1
 }
