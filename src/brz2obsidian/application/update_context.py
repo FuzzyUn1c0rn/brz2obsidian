@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from brz2obsidian.core import inspect_review_choices
 
+from .attachment_choices import REFERENCE_CHOICES_GUIDANCE, ReferenceChoicesRequired
 from .contracts import request_identity
 from .review_choices import (
     requirement_digest,
@@ -203,6 +204,8 @@ class UpdateContext:
             else values["references"]
         )
         result = self._history.choose(binding, **values, edited=edited)
+        if result.code == "reference_choices_required":
+            result = result.model_copy(update={"draft_pending": self.draft_pending})
         if (
             result.status == "prepared_review"
             and result.binding != binding
@@ -383,6 +386,15 @@ class UpdateContext:
                 selected_entry_id=selected_entry_id,
                 disassociate_entry_ids=disassociate_entry_ids,
             )
+        except ReferenceChoicesRequired:
+            return self._content_result(
+                status="refused",
+                code="reference_choices_required",
+                binding=self._binding,
+                changes=len(self._preparation.review.proposal.changes),
+                unresolved=len(self._preparation.review.requirements),
+                draft_pending=self.draft_pending,
+            ).model_copy(update={"summary": REFERENCE_CHOICES_GUIDANCE})
         except ValueError, StopIteration:
             # This binding still owns the retained plan; refusal retires no
             # decisions and grants no readiness. Refresh reobserves its inputs.

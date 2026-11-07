@@ -183,6 +183,7 @@
     "tests/application/test_update_context.py::test_unsaved_context_retains_proposal_and_refuses_foreign_or_stale_page",
     "tests/application/test_update_context.py::test_small_current_choice_uses_offered_attachment_without_candidate_on_wire",
     "tests/application/test_update_context.py::test_remove_choice_uses_bounded_offered_references_and_preserves_other_spans",
+    "tests/application/test_update_context.py::test_attachment_versions_require_complete_valid_staged_references",
     "tests/application/test_update_context.py::test_explicit_save_load_unready_and_resume_rebind_the_native_checkpoint",
     "tests/application/test_update_context.py::test_refused_unresolved_apply_retains_unsaved_review_for_explicit_save",
     "tests/application/test_update_context.py::test_lost_native_reply_retires_context_and_requires_history_inspection",

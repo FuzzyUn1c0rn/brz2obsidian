@@ -256,19 +256,9 @@ def review_plan_choice_action(
             (),
         )
         if choice == "remove":
-            from .update_context_contracts import UpdateReferenceChoice
+            from .attachment_choices import validated_reference_choices
 
-            supplied = tuple(
-                UpdateReferenceChoice.model_validate(row) for row in references
-            )
             offered_refs = review_plan_attachment_references(plan, requirement_id)
-            if (
-                any(row.choice != "drop" for row in supplied)
-                or len({row.reference_id for row in supplied}) != len(supplied)
-                or {row.reference_id for row in supplied}
-                != {row[0] for row in offered_refs}
-            ):
-                raise ValueError("Reference offer changed")
             subject = next(
                 row
                 for row in plan.facts.subjects
@@ -280,6 +270,9 @@ def review_plan_choice_action(
                 for _, _, occurrence in offered_refs
             ):
                 raise ValueError("Reference choice is unavailable")
+            validated_reference_choices(
+                references, {token: ("drop",) for token, _, _ in offered_refs}
+            )
             states = tuple(
                 interpret_link_target(
                     None,

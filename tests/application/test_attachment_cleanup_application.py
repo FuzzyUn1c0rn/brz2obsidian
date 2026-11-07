@@ -173,7 +173,9 @@ def test_cleanup_preparation_keeps_recovery_and_uncertain_references_out_of_read
     assert result.recovery_gaps == history.admission.recovery_gaps
 
 
-def literal_cleanup_case(tmp_path, *, unchanged_note=False, independent_keep=False):
+def literal_cleanup_case(
+    tmp_path, *, unchanged_note=False, independent_keep=False, output_format=7
+):
     vault = tmp_path / "vault"
     vault.mkdir()
     retained = payload(
@@ -181,6 +183,7 @@ def literal_cleanup_case(tmp_path, *, unchanged_note=False, independent_keep=Fal
         "Generated ![[Assets/remove.bin]]."
         if independent_keep
         else "Generated ![[Assets/remove.bin]] and [[Assets/keep.bin]].",
+        output_format=output_format,
     )
     asset_bytes = {
         "Assets/remove.bin": b"\x00remove-original",

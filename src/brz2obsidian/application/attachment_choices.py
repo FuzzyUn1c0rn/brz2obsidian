@@ -11,16 +11,30 @@ from brz2obsidian.obsidian import (
     render_link_replacement,
 )
 
+REFERENCE_CHOICES_GUIDANCE = "Review references and stage a choice for every occurrence before choosing this version."
 
-def selected_attachment_candidate(plan, change, alternative, references, offered_refs):
+
+class ReferenceChoicesRequired(ValueError):
+    """The current offer has valid but incomplete explicit reference decisions."""
+
+
+def validated_reference_choices(references, offered):
     from .update_context_contracts import UpdateReferenceChoice
 
     supplied = tuple(UpdateReferenceChoice.model_validate(row) for row in references)
     choices = {row.reference_id: row.choice for row in supplied}
-    if len(choices) != len(supplied) or set(choices) != {
-        row[0] for row in offered_refs
-    }:
+    if (
+        len(choices) != len(supplied)
+        or not choices.keys() <= offered.keys()
+        or any(choice not in offered[token] for token, choice in choices.items())
+    ):
         raise ValueError("Reference offer changed")
+    if choices.keys() != offered.keys():
+        raise ReferenceChoicesRequired
+    return choices
+
+
+def selected_attachment_candidate(plan, change, alternative, references, offered_refs):
     context = plan.facts.link_context
     subject = next(
         row
@@ -78,6 +92,22 @@ def selected_attachment_candidate(plan, change, alternative, references, offered
         (row.document_id, row.occurrence_id): row
         for row in change.attachment_review.links
     }
+    output_ids = {row.target_id for row in alternative.outputs}
+    available = {}
+    for token, document, occurrence in offered_refs:
+        review = offered[(document.document_id, occurrence.occurrence_id)]
+        available[token] = tuple(
+            choice
+            for choice, meaning in (
+                ("keep_current", review.old),
+                ("use_incoming", review.incoming),
+                ("use_secondary", review.secondary),
+            )
+            if choice in review.choices
+            and meaning is not None
+            and meaning.target_id in output_ids
+        )
+    choices = validated_reference_choices(references, available)
     links, replacements = [], {}
     for token, document, occurrence in offered_refs:
         review = offered[(document.document_id, occurrence.occurrence_id)]

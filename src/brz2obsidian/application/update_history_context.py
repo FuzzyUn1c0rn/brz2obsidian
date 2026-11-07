@@ -4,6 +4,7 @@ from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
 
+from .attachment_choices import REFERENCE_CHOICES_GUIDANCE, ReferenceChoicesRequired
 from .checkpoint_contracts import VaultHistoryInspection, VaultInitializationDecision
 from .contract_values import request_identity
 from .update_history_contracts import (
@@ -431,6 +432,10 @@ class HistoryContext:
             )
             action = text_choice_action(
                 self.preparation.native.review, action, edited=edited
+            )
+        except ReferenceChoicesRequired:
+            return self.blocked("reference_choices_required").model_copy(
+                update={"summary": REFERENCE_CHOICES_GUIDANCE, "next_actions": ()}
             )
         except ValueError, TypeError, StopIteration:
             return self.blocked("offer_changed")

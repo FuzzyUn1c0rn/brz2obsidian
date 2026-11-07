@@ -32,6 +32,94 @@ from tests.gui.update_worker_fixture import ReviewWorkerTransport
 pytestmark = pytest.mark.gui
 
 
+def test_missing_references_explain_staging_without_refresh_or_automatic_targets(
+    tmp_path,
+):
+    from brz2obsidian_ui.window import MainWindow
+    from tests.application.test_update_context import replacement_context_case
+
+    app = QApplication.instance() or QApplication([])
+    _, operations, current = replacement_context_case(tmp_path)
+    source = tmp_path / "incoming.brz"
+    source.write_bytes(b"controlled native-input port")
+    transport = ReviewWorkerTransport(operations)
+    window = MainWindow(supervisor=transport, dialogs=ReviewDialogs(source, tmp_path))
+    window.show()
+    controls = ReviewControls(window, app)
+    try:
+        controls.click("Choose incoming BRZ")
+        controls.click("Choose update vault")
+        controls.click("Prepare update review")
+        until(
+            app,
+            lambda: (
+                window.workbench.snapshot is not None
+                and window.workbench.snapshot.binding is not None
+            ),
+        )
+        controls.select("Other choices")
+        until(
+            app,
+            lambda: (
+                controls.button("Use incoming version for attachment choice 1")
+                is not None
+            ),
+        )
+        binding = window.workbench.snapshot.binding
+        controls.click("Use incoming version for attachment choice 1")
+        until(
+            app,
+            lambda: any(
+                r.code == "reference_choices_required" for r in transport.replies
+            ),
+        )
+        until(
+            app,
+            lambda: (
+                "Review references and stage a choice for every occurrence before choosing this version."
+                in window_text(window)
+            ),
+        )
+        assert window.workbench.snapshot.binding == binding
+        assert not window.workbench.snapshot.ready
+        assert "This choice changed" not in window_text(window)
+        assert "File publication: not started" in window_text(window)
+        assert "Saved converter history: retained" in window_text(window)
+        controls.click("Review references for attachment choice 1")
+        until(
+            app,
+            lambda: (
+                len(
+                    [
+                        w
+                        for w in window.findChildren(QComboBox)
+                        if w.isVisible()
+                        and w.accessibleName().startswith("Reference target for ")
+                    ]
+                )
+                == 2
+            ),
+        )
+        targets = [
+            w
+            for w in window.findChildren(QComboBox)
+            if w.isVisible() and w.accessibleName().startswith("Reference target for ")
+        ]
+        assert all(w.currentData() is None for w in targets)
+        assert not controls.button("Stage reference choices").isEnabled()
+        assert not any(
+            c.command in ("refresh", "stage_references", "apply")
+            for c in transport.commands
+        )
+        assert {name: (tmp_path / name).read_bytes() for name in current} == current
+    finally:
+        window.shutdown()
+        transport.close()
+        window.hide()
+        window.deleteLater()
+        app.processEvents()
+
+
 @pytest.mark.parametrize("failure", ("source", "storage", "transport"))
 def test_review_feedback_explains_safe_reason_and_actual_history_publication_limits(
     tmp_path, failure
