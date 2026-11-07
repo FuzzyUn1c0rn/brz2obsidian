@@ -236,21 +236,195 @@ def test_profile5_capture_vector_is_independently_canonical_and_frozen():
         / "fixtures/local_api_capture/profile5-capture-vector.json"
     )
     frozen = json.loads(path.read_bytes())
+    files = {
+        r["storage_key"]: bytes.fromhex(r["hex"]) for r in frozen["retained_files"]
+    }
+    source = json.loads(files["source.json"])
+    snapshot = json.loads(files["snapshot.json"])
+    audit = json.loads(files["audit.json"])
+    manifest = json.loads(files["manifest.json"])
+    metadata = json.loads(files["metadata.json"])
+    assert sorted(files) == [
+        "audit.json",
+        "manifest.json",
+        "metadata.json",
+        "payload/0000000000000001.bin",
+        "payload/0000000000000002.bin",
+        "snapshot.json",
+        "source.json",
+    ]
+    # Literal expected joins precede recipe/hash agreement: an internally
+    # canonical but semantically incomplete fixture must fail here first.
+    brain = "00000000-0000-4000-8000-000000000001"
+    owner = "00000000-0000-4000-8000-000000000002"
+    note = "00000000-0000-4000-8000-000000000003"
+    url = "00000000-0000-4000-8000-000000000004"
+    icon = "00000000-0000-4000-8000-000000000005"
+    document = "document:00000000-0000-4000-8000-000000000002"
+    assert [
+        (r["key"], r["document_ids"], r["resource_ids"], r["declared_appearance"])
+        for r in snapshot["items"]
+    ] == [
+        (
+            owner,
+            [document],
+            [url, icon],
+            {"icon_asset_id": icon, "foreground_color": None, "background_color": None},
+        )
+    ], "literal item document/resource/icon ownership"
+    assert [
+        (r["asset_id"], r["owner"], r["role"], r["availability"])
+        for r in snapshot["assets"]
+    ] == [
+        (note, owner, "note_original", "present"),
+        (url, owner, "url", "external"),
+        (icon, owner, "icon", "present"),
+    ]
+    assert [
+        (r["key"], r["owner"], r["original_asset_id"], r["text"], r["references"])
+        for r in snapshot["documents"]
+    ] == [(document, owner, note, "A\nB\n", [])]
+    assert [
+        (r["asset_id"], r["owner_id"], r["availability"], r["actual_length"])
+        for r in source["payloads"]
+    ] == [
+        (note, owner, "present", 4),
+        (url, owner, "external", None),
+        (icon, owner, "present", 86),
+    ]
+    records = {r["key"]: r for r in source["records"]}
+    assert records["graph:" + owner]["value"]["attachment_ids"] == [note, url, icon]
+    assert [
+        (
+            r["owner_id"],
+            r["value"]["id"],
+            r["value"]["sourceId"],
+            r["value"]["sourceType"],
+            r["value"]["type"],
+            r["value"]["isNotes"],
+            r["value"]["dataLength"],
+            r["value"]["position"],
+        )
+        for r in source["records"]
+        if r["domain"] == "attachment"
+    ] == [
+        (owner, note, owner, 2, 1, True, 4, {"decimal": "0"}),
+        (owner, url, owner, 2, 3, False, 0, {"decimal": "1.25"}),
+        (owner, icon, owner, 2, 5, False, 86, {"decimal": "2"}),
+    ]
+    evidence = {r["key"]: r for r in snapshot["original_evidence"]}
+    accounting = {r["identity"]: r for r in snapshot["accounting"]["entries"]}
+    for asset_id in (note, url, icon):
+        pointer = "attachment:" + asset_id
+        assert (
+            json.loads(evidence[pointer]["original_json"]) == records[pointer]["value"]
+        )
+        assert accounting[pointer] == {
+            "identity": pointer,
+            "disposition": "normalized",
+            "references": [asset_id],
+        }
+    assert (
+        json.loads(evidence["graph:" + owner]["original_json"])
+        == records["graph:" + owner]["value"]
+    )
+    assert [
+        (r["asset_id"], r["owner_id"], r["storage_key"])
+        for r in manifest["payload_bindings"]
+    ] == [
+        (note, owner, "payload/0000000000000001.bin"),
+        (icon, owner, "payload/0000000000000002.bin"),
+    ]
+    requests = audit["requests"]
+    assert [
+        (r["sequence"], r["operation"], r["subject_id"], r["actual_length"])
+        for r in requests
+    ] == [
+        (1, "brain", brain, 160),
+        (2, "statistics", None, 70),
+        (3, "types", None, 2),
+        (4, "tags", None, 2),
+        (5, "search", None, 100),
+        (6, "thought", owner, 400),
+        (7, "graph", owner, 250),
+        (8, "attachments", owner, 500),
+        (9, "attachments", note, 240),
+        (10, "attachments", url, 260),
+        (11, "attachments", icon, 247),
+        (12, "attachment-content", note, 4),
+        (13, "attachment-content", icon, 86),
+        (14, "statistics", None, 70),
+    ], "literal complete synthetic acquisition trace"
+    assert [
+        (r["subject_id"], r["actual_length"])
+        for r in requests
+        if r["operation"] == "attachment-content"
+    ] == [(note, 4), (icon, 86)]
+    assert sum(r["actual_length"] for r in requests) == 2391
+    for index, request in enumerate(requests):
+        assert (request["brain_id"], request["status"], request["outcome"]) == (
+            brain,
+            200,
+            "success",
+        )
+        assert request["started_at"] == f"2026-10-14T12:00:00.{index * 50000:06d}Z"
+        assert (
+            request["finished_at"]
+            == f"2026-10-14T12:00:00.{index * 50000 + 25000:06d}Z"
+        )
+    assert (audit["started_at"], audit["finished_at"]) == (
+        "2026-10-14T12:00:00.000000Z",
+        "2026-10-14T12:00:01.000000Z",
+    )
+    assert metadata["identifiers"] == source["identifiers"]
+    assert metadata["identity"] == snapshot["identity"]
+    assert (
+        frozen["expected_source_sha256"]
+        == "d83972938e0e8267575a5ce39c89275d5b3ae46b24fbfb113469e63e0063572e"
+    )
+    assert [r["storage_key"] for r in manifest["files"]] == [
+        key for key in sorted(files) if key != "manifest.json"
+    ]
+    assert (
+        manifest["source_sha256"]
+        == snapshot["identity"]["source_sha256"]
+        == frozen["expected_source_sha256"]
+    )
+    assert (
+        manifest["snapshot_digest"]
+        == snapshot["identity"]["snapshot_digest"]
+        == frozen["expected_snapshot_digest"]
+    )
+    assert (
+        capture_digest(
+            "snapshot",
+            dict(
+                snapshot,
+                identity={
+                    k: v
+                    for k, v in snapshot["identity"].items()
+                    if k != "snapshot_digest"
+                },
+            ),
+        )
+        == frozen["expected_snapshot_digest"]
+    )
+    assert (
+        capture_digest(
+            "integrity", {k: v for k, v in manifest.items() if k != "integrity_sha256"}
+        )
+        == frozen["expected_integrity_sha256"]
+    )
     assert profile5_capture_vector() == frozen
     assert (
         capture_json({"b": [False, 1], "a": "x\nΩ"})
         == b'{"a":"x\\u000a\xce\xa9","b":[false,1]}'
     )
-    files = {
-        r["storage_key"]: bytes.fromhex(r["hex"]) for r in frozen["retained_files"]
-    }
-    source = json.loads(files["source.json"])
     assert source["identifiers"]["profile_version"] == "5"
     assert capture_digest("source", source) == frozen["expected_source_sha256"]
     changed = json.loads(files["source.json"])
     changed["identifiers"]["profile_version"] = "4"
     assert capture_digest("source", changed) != frozen["expected_source_sha256"]
-    manifest = json.loads(files["manifest.json"])
     for row in manifest["files"]:
         assert row["actual_length"] == len(files[row["storage_key"]])
         assert (
