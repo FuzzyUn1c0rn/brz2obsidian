@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import struct
 from shutil import copytree
 
 import pytest
@@ -91,12 +92,32 @@ def test_standard5_output_matches_independent_icon_baseline(tmp_path, kind):
             elif damage == "missing_copy":
                 copied.unlink()  # Exclusive fresh test copy; pristine is retained.
             elif damage in {"dropped_frame", "changed_artwork"}:
-                replacement = (
-                    ico((3,))  # Keep preferred3; omit the nonpreferred2 frame.
-                    if damage == "dropped_frame"
-                    else ico((2, 3), physical=(1, 0), opaque=True)
-                )
-                if damage == "changed_artwork":
+                if damage == "dropped_frame":
+                    original = fixture["raw"]
+                    assert struct.unpack_from("<HHH", original) == (0, 1, 2)
+                    preferred = fixture["frames"][1]
+                    assert (preferred["width"], preferred["height"]) == (3, 3)
+                    entry = original[22:38]
+                    assert entry[:2] == b"\x03\x03"
+                    length, offset = struct.unpack_from("<II", entry, 8)
+                    assert (length, offset) == (
+                        preferred["body_length"],
+                        preferred["offset"],
+                    )
+                    body = original[offset : offset + length]
+                    assert hashlib.sha256(body).hexdigest() == preferred["body_sha256"]
+                    raw = original[:4] + struct.pack("<H", 1)
+                    raw += entry[:12] + struct.pack("<I", 22) + body
+                    assert struct.unpack_from("<HHH", raw) == (0, 1, 1)
+                    assert raw[6:8] == b"\x03\x03" and raw[22:] == body
+                    assert len(raw) == 22 + preferred["body_length"]
+                    replacement = {
+                        "raw": raw,
+                        "length": len(raw),
+                        "sha256": hashlib.sha256(raw).hexdigest(),
+                    }
+                else:
+                    replacement = ico((2, 3), physical=(1, 0), opaque=True)
                     assert replacement["length"] == fixture["length"]
                 copied.write_bytes(replacement["raw"])
                 row.update(
