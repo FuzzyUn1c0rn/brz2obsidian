@@ -290,3 +290,23 @@ def test_job_assignment_refusal_never_resumes_the_synthetic_command(monkeypatch)
     assert result["final_job"]["ActiveProcesses"] == 0
     assert result["observed_pids"] == []
     assert not (output / "protocol.bin").exists()
+
+
+def test_nested_terminal_metadata_cannot_escape_aggregate_artifact_budget():
+    output = ROOT / "tmp" / "resource-probe" / uuid4().hex
+    result = observe(
+        [
+            sys.executable,
+            str(ROOT / "tests/local_acceptance/resource_calibration.py"),
+            "nested-done",
+        ],
+        output,
+        artifact_limit=262144,
+    )
+
+    assert sum(path.stat().st_size for path in output.iterdir()) <= 262144
+    assert result["status"] == "failed"
+    assert result["error"] == "Unsupported calibration event fields"
+    assert result["final_job"]["ActiveProcesses"] == 0
+    assert b'"extra": [' in (output / "protocol.bin").read_bytes()
+    assert json.loads((output / "report.json").read_text()) == result

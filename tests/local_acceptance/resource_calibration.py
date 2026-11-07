@@ -99,10 +99,17 @@ def main(mode):
             raise RuntimeError("Calibration descendant failed")
     if not fake:
         held.release()
+    extras = {}
+    if mode == "nested-done":
+        nested = []
+        for _ in range(400):
+            nested = [nested]
+        extras["extra"] = nested
     emit(
         "done",
         requested_bytes=0 if mode == "invalid-done" else 56 * MIB,
         short_allocation_released=released["short_allocation_released"],
+        **extras,
     )
     barrier()
 

@@ -368,6 +368,8 @@ def observe(
     Polling cannot establish every descendant lifetime peak. Sampled sums cover
     a frame interval rather than an atomic instant; raw OS job peaks supplement
     them. A report status of completed means protocol completion only.
+    Events have fixed shallow fields; unsupported metadata fails qualification.
+    The aggregate artifact budget includes the terminal report serialization.
     """
     if os.name != "nt":
         raise OSError("Windows resource observation is unavailable")
@@ -419,16 +421,22 @@ def observe(
     frames, phases, used = [], [], 0
     baseline = held_frame = None
 
-    def write(name, value):
+    def write(name, value, *, terminal=False):
         nonlocal used
         data = (
-            value if isinstance(value, bytes) else (json.dumps(value) + "\n").encode()
+            value
+            if isinstance(value, bytes)
+            else (
+                json.dumps(value, ensure_ascii=False, separators=(",", ":")) + "\n"
+            ).encode()
         )
-        if used + len(data) > artifact_limit - 128 * 1024:
+        limit = artifact_limit if terminal else artifact_limit - 128 * 1024
+        if used + len(data) > limit:
             raise OSError("Calibration artifact budget exhausted")
-        with (output / name).open("ab") as stream:
-            stream.write(data)
+        # Charge before I/O, including any partial write followed by failure.
         used += len(data)
+        with (output / name).open("xb" if terminal else "ab") as stream:
+            stream.write(data)
 
     def sample(phase):
         frame = job.sample(phase, observer)
@@ -491,6 +499,19 @@ def observe(
                 ):
                     raise ValueError("Malformed calibration phase sequence")
                 phase = event["phase"]
+                fields = {"phase", "pid"} | {
+                    "baseline": {"descendant_pid"},
+                    "held": {"descendant_pid", "requested_bytes"},
+                    "done": {"requested_bytes", "short_allocation_released"},
+                }[phase]
+                if set(event) != fields:
+                    raise ValueError("Unsupported calibration event fields")
+                for field in fields & {"pid", "descendant_pid"}:
+                    if (
+                        type(event[field]) is not int
+                        or not 0 < event[field] <= 0xFFFFFFFF
+                    ):
+                        raise ValueError("Invalid calibration process identity")
                 if phase != "baseline" and (
                     type(event.get("requested_bytes")) is not int
                     or event["requested_bytes"]
@@ -574,6 +595,7 @@ def observe(
     except (
         OSError,
         ValueError,
+        RecursionError,
         subprocess.SubprocessError,
         KeyboardInterrupt,
     ) as error:
@@ -624,7 +646,22 @@ def observe(
         ),
         phases=phases,
     )
-    (output / "report.json").write_text(
-        json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    try:
+        write("report.json", report, terminal=True)
+    except OSError:
+        if (output / "report.json").exists():
+            # A filesystem write failure cannot establish complete evidence.
+            raise
+        report = {
+            "status": "failed",
+            "error": "Terminal report could not fit or be written; details omitted",
+            "final_job": report["final_job"],
+            "cleanup_errors": report["cleanup_errors"],
+            "per_git_lifetime_attribution": "unqualified",
+            "elapsed_seconds": report["elapsed_seconds"],
+            "artifact_limit": artifact_limit,
+        }
+        # Observations reserve 128 KiB, but both full and fallback reports still
+        # pass the same aggregate byte check. No overwrite or clipped PASS.
+        write("report.json", report, terminal=True)
     return report
