@@ -412,6 +412,11 @@ discard edited text and reference drafts explicitly. **Apply update** requires t
 whole review to be resolved. Inputs stay locked to the reviewed target while that
 review is open.
 
+For file choices that require reference decisions, open **Review references**,
+choose an offered option for every occurrence, then select **Stage reference
+choices** before choosing the file version. Missing staging alone does not
+require **Refresh review**.
+
 Use **Save review** to retain decisions. **Reopen saved review** loads them without
 granting apply readiness; **Resume saved review** rechecks current inputs.
 **Refresh review** reviews changes made between operations and retains unaffected
@@ -428,6 +433,12 @@ changed BRZ as a separate source update. If supported history is missing, review
 onboarding and save the preservation choices first. Local notes, aliases,
 category memberships, appearance providers, templates and configuration remain
 subject to the explicit review choices.
+
+Attachment rows in onboarding or output-format reviews support **Keep vault
+version** when safe; **Use incoming version** and **Keep both versions** are
+unavailable. During an ordinary source update, such a row can require the separate
+onboarding or output-format review. Ordinary attachment-update rows retain their
+offered alternatives and reference-choice requirements.
 
 Saved output 7 reviews retain their recorded interpretation and original-byte
 evidence. Missing originals stay unknown: current vault notes and a new output 8
@@ -663,7 +674,7 @@ in Obsidian or your editor, then run it again.
 | `missing_base` / `missing_image` / `invalid_base` | Required files exist; images are nonempty and Base YAML is valid data |
 | `ambiguous_reference` | Use a qualified vault path to distinguish colliding names |
 | `provider_cycle` | Review the full selected provider chain and remove the repeated category; a nearer owned icon does not repair the cycle |
-| `icon_lookup_depth` | Icon lookup exceeds 8 links. Assign a nearer valid icon or change a selected provider; this warning does not block import or checking |
+| `icon_lookup_depth` | Icon lookup exceeds 8 links. Assign a nearer valid icon or change a selected provider; this warning alone does not block import, update or checking. Other review safety requirements still apply |
 | `duplicate_source_identity` | Multiple notes carry the same imported identity pair |
 | `unsafe_reference` | A required reference or filesystem entry cannot be read safely inside the vault |
 | `read_failure` | Access permissions, text encoding or file/directory availability |
@@ -697,6 +708,7 @@ its exit code.
 | An output path is too long | Choose a shorter destination, such as `C:\v\Brain`. |
 | Home is missing or forgotten | Set an included Home thought in TheBrain, export again and inspect the new archive. |
 | Source content or features are refused | Follow the [inspection guidance](#4-inspect-the-archive) and the printed diagnostic. Follow the stated action: converter limitations need a report; source or access problems have their own guidance. |
+| `source_type_cycle` | Cyclic source type assignments, including self-assignment, refuse import and update. Review the reported chain, correct the assignments in TheBrain, export again for BRZ, then inspect again. Editable vault icon-provider cycles are checked separately as `provider_cycle`. |
 | Conversion succeeds with warnings | Review `MIGRATION REPORT.md`, including any optional source-repair steps. |
 | The checker reports issues | Follow its diagnostics and [checker guidance](#checker-diagnostics). It does not modify the vault. |
 
