@@ -307,13 +307,16 @@ def control_preflight(*, case=None, mode=None):
         if key != "prior_charge_note"
     ):
         raise OSError("Invalid cumulative artifact reservation")
+    artifact_layout = (artifacts["observer_bytes"], artifacts["run_reserved_bytes"])
+    allowed_layouts = {(5 * MIB, 8 * MIB)}
+    if mode == "payload" and artifacts["child_cap_bytes"] == 512 * MIB:
+        allowed_layouts.add((64 * MIB, 67 * MIB))
     if (
         artifacts["child_cap_bytes"] not in (64 * MIB, 96 * MIB, 512 * MIB)
-        or artifacts["observer_bytes"] != 5 * MIB
+        or artifact_layout not in allowed_layouts
         or artifacts["terminal_bytes"] != 4 * MIB
         or artifacts["driver_bytes"] != MIB
         or artifacts["runner_bytes"] != 2 * MIB
-        or artifacts["run_reserved_bytes"] != 8 * MIB
         or artifacts["prior_charged_bytes"] + artifacts["run_reserved_bytes"]
         > artifacts["child_cap_bytes"]
         or artifacts["minimum_free_bytes"] < artifacts["run_reserved_bytes"]
@@ -2433,7 +2436,7 @@ def payload_control():
         attempt / "observer",
         phases=PHASES,
         work_timeout=manifest["time"]["work_seconds"],
-        artifact_limit=manifest["artifacts"]["observer_bytes"] - 65536,
+        artifact_limit=min(manifest["artifacts"]["observer_bytes"] - 65536, 60 * MIB),
         bootstrap=manifest["bootstrap"],
     )
     finish_control(attempt, manifest)
