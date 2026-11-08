@@ -319,14 +319,27 @@ class _Job:
         self.api.require(self.api.kernel.AssignProcessToJobObject(self.handle, handle))
         self.track(self.api.kernel.GetProcessId(handle), "direct-before-resume")
 
-    def track(self, pid, origin):
+    def track(self, pid, origin, *, allow_open_gap=False):
         if pid in self.handles:
             return
         if len(self.handles) >= self.lifetime_limit:
             raise OSError("Lifetime process attribution budget exhausted")
         api = self.api
         handle = api.kernel.OpenProcess(0x0410, False, pid)
-        api.require(handle)
+        try:
+            api.require(handle)
+        except OSError as error:
+            if not allow_open_gap:
+                raise
+            return {
+                "pid": pid,
+                "operation": "OpenProcess",
+                "native_error": getattr(error, "winerror", None),
+                "error": str(error),
+                "observed_at": time.monotonic(),
+                "exited": None,
+                "identity_unavailable": True,
+            }
         try:
             member = w.BOOL()
             api.require(
@@ -335,18 +348,52 @@ class _Job:
             if not member.value:
                 raise OSError("Process is not in the owned job")
             times = [ctypes.c_uint64() for _ in range(4)]
-            api.require(
-                api.kernel.GetProcessTimes(
-                    handle, *(ctypes.byref(item) for item in times)
+            try:
+                api.require(
+                    api.kernel.GetProcessTimes(
+                        handle, *(ctypes.byref(item) for item in times)
+                    )
                 )
-            )
+            except OSError as error:
+                if not allow_open_gap:
+                    raise
+                gap = {
+                    "pid": pid,
+                    "operation": "GetProcessTimes",
+                    "native_error": getattr(error, "winerror", None),
+                    "error": str(error),
+                    "observed_at": time.monotonic(),
+                    "exited": None,
+                    "identity_unavailable": True,
+                }
+                # This is the sole close attempt even when native closure fails.
+                closing, handle = handle, None
+                api.require(api.kernel.CloseHandle(closing))
+                return gap
             length = w.DWORD(32768)
             image = ctypes.create_unicode_buffer(length.value)
-            api.require(
-                api.kernel.QueryFullProcessImageNameW(
-                    handle, 0, image, ctypes.byref(length)
+            try:
+                api.require(
+                    api.kernel.QueryFullProcessImageNameW(
+                        handle, 0, image, ctypes.byref(length)
+                    )
                 )
-            )
+            except OSError as error:
+                if not allow_open_gap:
+                    raise
+                gap = {
+                    "pid": pid,
+                    "operation": "QueryFullProcessImageNameW",
+                    "native_error": getattr(error, "winerror", None),
+                    "error": str(error),
+                    "observed_at": time.monotonic(),
+                    "exited": None,
+                    "identity_unavailable": True,
+                }
+                # This is the sole close attempt even when native closure fails.
+                closing, handle = handle, None
+                api.require(api.kernel.CloseHandle(closing))
+                return gap
             if len(image.value.encode("utf-8")) > 2048:
                 raise OSError("Process image attribution exceeds its finite budget")
             self.attribution.append(
@@ -361,7 +408,8 @@ class _Job:
             )
             self.handles[pid] = handle
         except BaseException:
-            api.kernel.CloseHandle(handle)
+            if handle is not None:
+                api.kernel.CloseHandle(handle)
             raise
 
     def census(self):
@@ -385,13 +433,60 @@ class _Job:
             "ActiveProcessLimit": limits.BasicLimitInformation.ActiveProcessLimit,
         }
 
-    def sample(self, phase, observer, *, allow_exited_gaps=False):
+    def sample(
+        self, phase, observer, *, allow_exited_gaps=False, allow_memory_gaps=False
+    ):
         started = time.monotonic()
         pids = self.api.query(self.handle, 3, _Pids())
         if pids.assigned > 16 or pids.count > 16:
             raise OSError("Process census exceeded its finite capacity")
         rows, missing = [], []
         for pid in pids.pids[: pids.count]:
+            if allow_memory_gaps:
+                # Only unavailable optional census identity reads may be gaps.
+                # Membership, budgets and identity contradictions remain fatal.
+                gap = self.track(pid, "job-census", allow_open_gap=True)
+                if gap is not None:
+                    missing.append(gap)
+                    continue
+                try:
+                    counters = self.api.memory(self.handles[pid])
+                except OSError as error:
+                    observed_at = time.monotonic()
+                    gap = {
+                        "pid": pid,
+                        "error": str(error),
+                        "operation": "GetProcessMemoryInfo",
+                        "native_error": getattr(error, "winerror", None),
+                        "observed_at": observed_at,
+                        "exited": None,
+                    }
+                    code = w.DWORD()
+                    try:
+                        self.api.require(
+                            self.api.kernel.GetExitCodeProcess(
+                                self.handles[pid], ctypes.byref(code)
+                            )
+                        )
+                    except OSError as exit_error:
+                        gap["exit_error"] = {
+                            "operation": "GetExitCodeProcess",
+                            "native_error": getattr(exit_error, "winerror", None),
+                            "error": str(exit_error),
+                            "observed_at": time.monotonic(),
+                        }
+                    else:
+                        gap["exited"] = code.value != 259
+                    missing.append(gap)
+                else:
+                    rows.append(
+                        {
+                            "pid": pid,
+                            **counters,
+                            "sampled_at": time.monotonic(),
+                        }
+                    )
+                continue
             try:
                 self.track(pid, "job-census")
                 rows.append(
@@ -429,6 +524,9 @@ class _Job:
             "system": self.api.system(),
             "observer": self.api.memory(observer),
         }
+        if allow_memory_gaps:
+            frame["sampled_family_private_bytes_complete"] = not missing
+            frame["sampled_family_working_set_bytes_complete"] = not missing
         frame["sample_finished"] = time.monotonic()
         return frame
 
@@ -500,11 +598,13 @@ class _CommandJob(_Job):
         self.borrowed.add(handle)
         self.policy.retain(handle)
 
-    def track(self, pid, origin):
+    def track(self, pid, origin, *, allow_open_gap=False):
         if pid in self.handles:
             return
         self.policy.reserve_row()
-        super().track(pid, origin)
+        gap = super().track(pid, origin, allow_open_gap=allow_open_gap)
+        if gap is not None:
+            return gap
         self.policy.retain(self.handles[pid])
         row = self.attribution.pop()
         row["kind"] = "process"
@@ -1206,11 +1306,31 @@ def _observe(
                 "observer": api.memory(observer),
             }
         else:
-            frame = job.sample(phase, observer, allow_exited_gaps=phase_mode)
+            frame = job.sample(
+                phase,
+                observer,
+                allow_exited_gaps=phase_mode,
+                allow_memory_gaps=command_policy is not None,
+            )
         write("frames.jsonl", frame)
         frames.append(frame["sample_started"])
-        exited_counter_gaps += sum(row["exited"] for row in frame["missing_processes"])
-        if any(not row["exited"] for row in frame["missing_processes"]):
+        exited_counter_gaps += sum(
+            row["exited"] is True for row in frame["missing_processes"]
+        )
+        if any(
+            not row["exited"]
+            and not (
+                command_policy is not None
+                and row.get("operation")
+                in (
+                    "GetProcessMemoryInfo",
+                    "OpenProcess",
+                    "GetProcessTimes",
+                    "QueryFullProcessImageNameW",
+                )
+            )
+            for row in frame["missing_processes"]
+        ):
             raise OSError("Owned process counters unavailable; frame is incomplete")
         if frame["job"]["TotalProcesses"] > lifetime_limit:
             raise OSError("Lifetime process census budget exhausted")
