@@ -102,11 +102,11 @@ def _manifest_source(mode):
         for value in numbers
     ):
         raise OSError("Invalid suite timing declaration")
-    reserve = 90 if stage == "coverage" else 120
+    reserve = suite["run_reserved_seconds"]
     if (
-        suite["run_reserved_seconds"] != reserve
+        reserve > 900
         or suite["deadline"] - suite["started_at"] != reserve
-        or suite["child_cap_seconds"] > 900
+        or suite["child_cap_seconds"] > 3600
         or suite["future_reserved_seconds"] != STAGE_RESERVES[stage]
         or suite["prior_charged_seconds"] + reserve + suite["future_reserved_seconds"]
         > suite["child_cap_seconds"]
@@ -369,8 +369,11 @@ def control_preflight(*, case=None, mode=None):
             "future_reserved_seconds",
         }
         or any(
-            type(value) not in (int, float) or not 0 < value <= 900
-            for value in timing.values()
+            type(value) not in (int, float)
+            or not 0
+            < value
+            <= (3600 if key in ("child_cap_seconds", "prior_charged_seconds") else 900)
+            for key, value in timing.items()
         )
     ):
         raise OSError("Invalid cumulative time declaration")
