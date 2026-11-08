@@ -308,7 +308,7 @@ def control_preflight(*, case=None, mode=None):
     ):
         raise OSError("Invalid cumulative artifact reservation")
     if (
-        artifacts["child_cap_bytes"] not in (64 * MIB, 96 * MIB)
+        artifacts["child_cap_bytes"] not in (64 * MIB, 96 * MIB, 512 * MIB)
         or artifacts["observer_bytes"] != 5 * MIB
         or artifacts["terminal_bytes"] != 4 * MIB
         or artifacts["driver_bytes"] != MIB
@@ -528,16 +528,28 @@ def control_preflight(*, case=None, mode=None):
         if type(material) is not dict or set(material) != material_fields:
             raise OSError("Unknown payload material declaration")
         artifact_cap = artifacts["child_cap_bytes"]
-        partitions = (
-            {
+        if artifact_cap == 64 * MIB:
+            partitions = {
                 "author": 192 * MIB,
                 "verifier": 192 * MIB,
                 "controls": 32 * MIB,
                 "artifacts": 64 * MIB,
             }
-            if artifact_cap == 64 * MIB
-            else {"material": 352 * MIB, "controls": 32 * MIB, "artifacts": 96 * MIB}
-        )
+        elif artifact_cap == 96 * MIB:
+            partitions = {
+                "material": 352 * MIB,
+                "controls": 32 * MIB,
+                "artifacts": 96 * MIB,
+            }
+        else:
+            partitions = {
+                "author": 192 * MIB,
+                "verifier": 192 * MIB,
+                "controls": 64 * MIB,
+                "artifacts": 512 * MIB,
+            }
+        phase_cap = (960 if artifact_cap == 512 * MIB else 480) * MIB
+        controls_cap = (64 if artifact_cap == 512 * MIB else 32) * MIB
         if (
             type(material["partition_bytes"]) is not dict
             or material["partition_bytes"] != partitions
@@ -545,19 +557,22 @@ def control_preflight(*, case=None, mode=None):
                 type(value) is not int for value in material["partition_bytes"].values()
             )
             or type(material["phase_cap_bytes"]) is not int
-            or material["phase_cap_bytes"] != 480 * MIB
+            or material["phase_cap_bytes"] != phase_cap
             or type(material["reserve_bytes"]) is not int
             or material["reserve_bytes"] != 192 * MIB
             or type(material["global_reserved_bytes"]) is not int
-            or not 480 * MIB <= material["global_reserved_bytes"] <= 4096 * MIB
+            or not phase_cap <= material["global_reserved_bytes"] <= 4096 * MIB
         ):
             raise OSError(
                 "Payload partitions differ from the fixed phase/global envelope"
             )
         for name, cap in (
-            ("controls_charged_bytes", 32 * MIB),
+            ("controls_charged_bytes", controls_cap),
             ("artifacts_charged_bytes", artifact_cap),
-            ("prior_retained_bytes", 160 * MIB),
+            (
+                "prior_retained_bytes",
+                phase_cap if artifact_cap == 512 * MIB else 160 * MIB,
+            ),
         ):
             if type(material[name]) is not int or not 0 <= material[name] <= cap:
                 raise OSError("Payload prior material charge is invalid")
@@ -565,14 +580,15 @@ def control_preflight(*, case=None, mode=None):
         if (
             type(material["retained_reserved_bytes"]) is not int
             or material["retained_reserved_bytes"] != retained
-            or material["prior_retained_bytes"] + retained > 160 * MIB
+            or artifact_cap != 512 * MIB
+            and material["prior_retained_bytes"] + retained > 160 * MIB
         ):
             raise OSError("Payload retention cannot fit the conditional 160 MiB target")
         # Root serializes payload roles, so only one full material reserve is active.
         if (
             material["prior_retained_bytes"]
             + material["reserve_bytes"]
-            + 32 * MIB
+            + controls_cap
             + artifact_cap
             > material["phase_cap_bytes"]
             or artifact_cap == 96 * MIB
