@@ -2208,6 +2208,7 @@ def _payload(attempt):
             ),
             terminal=False,
             allocation_limit=40 * MIB,
+            loose_payload_oid=declarations["public16"]["git_blob_sha1"],
         )
         vault = public_root / "vault"
         if (

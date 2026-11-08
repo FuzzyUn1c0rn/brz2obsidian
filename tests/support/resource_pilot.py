@@ -351,6 +351,7 @@ def run(
     init_arguments=(),
     terminal=True,
     allocation_limit=512 * MIB,
+    loose_payload_oid=None,
 ):
     facts = {"status": "failed"}
     writer = Evidence() if evidence_writer is None else evidence_writer
@@ -376,6 +377,32 @@ def run(
             for _ in range(256):
                 stream.write(block)
         del block
+        if loose_payload_oid is not None:
+            if not isinstance(loose_payload_oid, str):
+                raise TypeError("Loose payload identity must be text")
+            if len(loose_payload_oid) != 40 or any(
+                char not in "0123456789abcdef" for char in loose_payload_oid
+            ):
+                raise ValueError("Loose payload identity is invalid")
+            seeded = (
+                git(
+                    vault,
+                    "-c",
+                    "core.bigFileThreshold=32m",
+                    "hash-object",
+                    "-w",
+                    "--no-filters",
+                    "payload.bin",
+                )
+                .decode("ascii")
+                .strip()
+            )
+            loose = vault / ".git" / "objects" / seeded[:2] / seeded[2:]
+            if seeded != loose_payload_oid or not loose.is_file():
+                raise OSError(
+                    "Synthetic payload preseed is not the expected loose object"
+                )
+            facts["preseed_loose_oid"] = seeded
         facts["before"] = snapshot(vault, source)
         if facts["before"]["authored"]["vault/payload.bin"]["sha256"] != EXPECTED_SHA:
             raise OSError("Generated input differs from frozen SHA256")
