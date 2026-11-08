@@ -2,6 +2,7 @@
 
 from pydantic import ValidationError
 
+from brz2obsidian.content_values import require_inline
 from brz2obsidian.contracts import (
     AttachmentCandidate,
     AttachmentCandidateValidation,
@@ -49,6 +50,7 @@ def validate_attachment_candidate(
         facts = ReconciliationInput.model_validate(facts)
         selection = AttachmentSelection.model_validate(selection)
         candidate = AttachmentCandidate.model_validate(candidate)
+        require_inline((facts, selection, candidate))
     except ValueError, TypeError, ValidationError:
         add("attachment_facts_invalid")
         return result()

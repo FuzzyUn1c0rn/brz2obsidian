@@ -1,5 +1,6 @@
 """Dependency-scoped immutable refresh; no observation, parsing or new consent."""
 
+from brz2obsidian.content_values import require_inline
 from brz2obsidian.contracts import (
     ReconciliationInput,
     ReviewAction,
@@ -387,8 +388,7 @@ def refresh_review(plan, facts, *, preflight):
     validated = validate_review(plan)
     if validated.status != "accepted":
         return validated
-    return _refresh(
-        validated.plan,
-        ReconciliationInput.model_validate(facts),
-        ReviewPreflight.model_validate(preflight),
-    )
+    facts = ReconciliationInput.model_validate(facts)
+    preflight = ReviewPreflight.model_validate(preflight)
+    require_inline((facts, preflight))
+    return _refresh(validated.plan, facts, preflight)

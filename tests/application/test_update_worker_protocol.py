@@ -219,6 +219,115 @@ def test_update_commands_roundtrip_without_canonical_preparation(tmp_path):
         )
 
 
+def test_worker_roundtrips_bounded_edit_and_review_page_bytes(tmp_path):
+    from pydantic import ValidationError
+
+    from brz2obsidian.application.update_context_contracts import (
+        UpdateContextBinding,
+        UpdateContextResult,
+        UpdateEditHandle,
+    )
+    from brz2obsidian.application.update_contracts import (
+        UpdateComparison,
+        UpdateReviewPage,
+    )
+    from brz2obsidian.contracts import ContentIdentity, OpaqueContent
+
+    identity = "11111111-1111-4111-8111-111111111111"
+    binding = UpdateContextBinding(
+        context_id=identity,
+        selection_id="22222222-2222-4222-8222-222222222222",
+        vault=str(tmp_path),
+        association_id=None,
+        proposal_id="review:one",
+        generation=1,
+        revision=1,
+    )
+    digest = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    handle = UpdateEditHandle(
+        edit_id="33333333-3333-4333-8333-333333333333",
+        binding=binding,
+        requirement_id="text:one",
+        assumptions_digest="a" * 64,
+        size=3,
+        sha256=digest,
+    )
+    arguments = {"command": "write_edit", "handle": handle, "offset": 0, "data": b"abc"}
+    request = WorkerRequest(
+        request_id=identity, operation="update", sequence=1, arguments=arguments
+    )
+    comparison = UpdateComparison(
+        change_id="change:one",
+        item_id="entry:opening",
+        facet="content",
+        current_path="Notes/Opening.md",
+        incoming_path="Notes/Opening.md",
+        disposition="source_only",
+        original=b"\xfb\xff",
+        current=b"\xfb\xff",
+        incoming=b"abc",
+        result=b"abc",
+        offset=0,
+        omitted=False,
+    )
+    page = UpdateReviewPage(
+        status="available",
+        code="page",
+        proposal_id="review:one",
+        generation=1,
+        total=1,
+        offset=0,
+        next_offset=None,
+        items=(comparison,),
+        omitted=False,
+    )
+    response = WorkerResponse(
+        request_id=identity,
+        operation="update",
+        sequence=1,
+        result=UpdateContextResult(
+            status="available",
+            code="page",
+            kind="source_update",
+            binding=binding,
+            page=page,
+        ),
+    )
+    request_wire = encode_request(request)
+    response_wire = encode_response(response)
+    assert request_wire.endswith(b"\n") and request_wire.count(b"\n") == 1
+    assert response_wire.endswith(b"\n") and response_wire.count(b"\n") == 1
+    request_json = json.loads(request_wire)
+    response_json = json.loads(response_wire)
+    assert request_json["schema"] == "brz2obsidian.worker-request"
+    assert response_json["schema"] == "brz2obsidian.worker-response"
+    assert request_json["schema_version"] == response_json["schema_version"] == 4
+    assert request_json["arguments"]["data"] == "YWJj"
+    assert "protocol_error" not in response_json
+    page_json = response_json["result"]["page"]
+    assert page_json["schema_id"] == "brz2obsidian.update-review-page"
+    assert page_json["schema_version"] == 1
+    assert page_json["items"][0]["original"] == "-_8="
+    assert page_json["items"][0]["result"] == "YWJj"
+    assert decode_request(request_wire) == request
+    assert decode_response(response_wire, request) == response
+    with pytest.raises(ProtocolFailure):
+        decode_response(response_wire, request.model_copy(update={"sequence": 2}))
+
+    opaque = OpaqueContent(
+        identity=ContentIdentity(content_id=f"sha256:{digest}:3", sha256=digest, size=3)
+    )
+    with pytest.raises(ValidationError):
+        WorkerRequest(
+            request_id=identity,
+            operation="update",
+            sequence=1,
+            arguments=arguments | {"data": opaque},
+        )
+    with pytest.raises(ValidationError):
+        UpdateComparison.model_validate(comparison.model_dump() | {"result": opaque})
+
+
 def test_sealed_history_reply_requires_consistent_readiness_and_native_outcome(
     tmp_path,
 ):

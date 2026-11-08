@@ -25,10 +25,12 @@ from brz2obsidian.application.checkpoint_contracts import (
 from brz2obsidian.application.vault_contracts import VaultSubject
 from brz2obsidian.contracts import (
     ExactContent,
+    OpaqueContent,
     OutputIdentity,
     SafetyFact,
     SavedReview,
     SourceMemoryProvenance,
+    legacy_content_fields,
     reconciliation_subject_id,
 )
 from brz2obsidian.core import (
@@ -549,6 +551,10 @@ _REVIEW_BYTES_KEY = "__brz2obsidian_review_blob__"
 
 def _stored_model_fields(value):
     """Mirror intentional field omission without copying large review payloads."""
+    if isinstance(value, (ExactContent, OpaqueContent)):
+        for name, _ in legacy_content_fields(value):
+            yield name
+        return
     for name, field in type(value).model_fields.items():
         if field.exclude_if is None or not field.exclude_if(getattr(value, name)):
             yield name

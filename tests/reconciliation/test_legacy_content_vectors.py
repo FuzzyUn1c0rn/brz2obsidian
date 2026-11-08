@@ -325,6 +325,51 @@ def test_refs_envelope_uses_actual_storage_and_baseline_only_role_closure(
         (source / "Notes/Opening.md").read_bytes(),
     )
 
+    # A valid typed declaration still cannot authorize an inline checkpoint.
+    from brz2obsidian.contracts import ContentIdentity, OpaqueContent, ReviewPlan
+
+    original = loaded.saved.plan
+    assert original.facts.subjects[0].baseline.content.data == b"baseline-only\n"
+    opaque = OpaqueContent(
+        identity=ContentIdentity(
+            content_id="sha256:ea9d37a10d727f12e46633eab31204cddfd0f49defd5ac488c14edb66c50d1f1:14",
+            sha256="ea9d37a10d727f12e46633eab31204cddfd0f49defd5ac488c14edb66c50d1f1",
+            size=14,
+        )
+    )
+    fields = original.model_dump()
+    fields["facts"]["subjects"][0]["baseline"]["content"] = opaque
+    declared = ReviewPlan.model_validate(fields)
+    assert declared.facts.subjects[0].baseline.content == opaque
+
+    def retained_bytes(root):
+        return {
+            path.relative_to(root).as_posix(): path.read_bytes()
+            for path in root.rglob("*")
+            if path.is_file()
+        }
+
+    retained = retained_bytes(vault), retained_bytes(source)
+    refs = git(vault, "for-each-ref", "--format=%(refname) %(objectname)")
+    head = git(vault, "rev-parse", "HEAD")
+    refused = operations.capture_checkpoint(
+        vault,
+        source,
+        vault_id="legacy-vault",
+        import_id="legacy-import",
+        identity=original.facts.incoming_identity,
+        admission=operations.inspect_vault(vault),
+        review=declared,
+    )
+    assert (refused.status, refused.code) == ("refused", "invalid_current_review")
+    assert refused.commit is None and refused.ref is None
+    assert not refused.objects_written and refused.object_storage == "not_started"
+    assert not refused.history_retained and not refused.authored_files_changed
+    assert (retained_bytes(vault), retained_bytes(source)) == retained
+    assert git(vault, "for-each-ref", "--format=%(refname) %(objectname)") == refs
+    assert git(vault, "rev-parse", "HEAD") == head
+    assert git(vault, "cat-file", "blob", captured.commit + ":review.json") == raw
+
 
 @pytest.mark.parametrize("kind", ("duplicate", "missing_role", "inline_envelope"))
 def test_git_ingress_refuses_corrupt_envelope_or_missing_owned_role(

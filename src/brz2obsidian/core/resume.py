@@ -2,6 +2,7 @@
 
 from pydantic import ValidationError
 
+from brz2obsidian.content_values import require_inline
 from brz2obsidian.contracts import (
     LoadedReview,
     ReconciliationInput,
@@ -75,6 +76,7 @@ def load_review(raw: str | bytes | SavedReview) -> ReviewLoadResult:
             saved = SavedReview.model_validate_json(raw)
         else:
             return _load_result("invalid_record")
+        require_inline(saved)
     except ValidationError as error:
         for problem in error.errors():
             if problem["type"] == "literal_error":
@@ -161,6 +163,7 @@ def resume_review(
 ) -> ReviewResumeResult:
     try:
         loaded = LoadedReview.model_validate(loaded)
+        require_inline(loaded)
     except ValueError:
         return _resume_result("refused", "invalid_loaded")
     try:
@@ -172,6 +175,7 @@ def resume_review(
     try:
         facts = ReconciliationInput.model_validate(facts)
         preflight = ReviewPreflight.model_validate(preflight)
+        require_inline((facts, preflight))
     except ValueError:
         return _resume_result("refused", "invalid_current_facts", loaded)
     if facts == historical.plan.facts and preflight == historical.plan.preflight:

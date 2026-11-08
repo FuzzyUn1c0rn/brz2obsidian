@@ -251,7 +251,7 @@ def test_first_local_memo_keeps_proved_result_parent_and_original_remove_decisio
     owned = Path(tempfile.mkdtemp(prefix="brz2obsidian-285-memo-"))
     marker = {"owner": uuid4().hex, "root": str(owned.resolve())}
     (owned / ".fixture-owner.json").write_text(json.dumps(marker))
-    case = literal_cleanup_case(owned, independent_keep=True)
+    case = literal_cleanup_case(owned, independent_keep=True, output_format=8)
     vault = case.vault
     git(vault, "init", "-q")
     git(vault, "add", "--all")
@@ -342,7 +342,10 @@ def test_first_local_memo_keeps_proved_result_parent_and_original_remove_decisio
     assert before.status == "supported" and before.preflight.operation_status == "idle"
     case.history.admission.preflight = before.preflight
     case.history.checkpoint.locator = parent
-    prepared = case.operations.prepare_attachment_cleanup(vault).preparation
+    cleanup_result = case.operations.prepare_attachment_cleanup(vault)
+    assert cleanup_result.status == "prepared_review", cleanup_result
+    assert cleanup_result.preparation is not None, cleanup_result
+    prepared = cleanup_result.preparation
     for item, choice in (("keep-asset", "current"), ("remove-asset", "remove")):
         selected = case.operations.resolve_update(
             prepared,

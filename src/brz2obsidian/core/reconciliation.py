@@ -3,6 +3,7 @@
 import json
 from hashlib import sha256
 
+from brz2obsidian.content_values import require_inline
 from brz2obsidian.contracts import (
     ChangeProvenance,
     ProposalAssumption,
@@ -184,6 +185,7 @@ def _reconcile(facts: ReconciliationInput, *, _applicability=()) -> UpdatePropos
     changes. No current or incoming content is decoded or parsed.
     """
     facts = ReconciliationInput.model_validate(facts)
+    require_inline(facts)
     changes, findings, local_changes = [], [], []
     memory = list(facts.source_version_memory)
     if not facts.subjects:
