@@ -308,7 +308,7 @@ def control_preflight(*, case=None, mode=None):
     ):
         raise OSError("Invalid cumulative artifact reservation")
     if (
-        artifacts["child_cap_bytes"] != 64 * MIB
+        artifacts["child_cap_bytes"] not in (64 * MIB, 96 * MIB)
         or artifacts["observer_bytes"] != 5 * MIB
         or artifacts["terminal_bytes"] != 4 * MIB
         or artifacts["driver_bytes"] != MIB
@@ -527,15 +527,26 @@ def control_preflight(*, case=None, mode=None):
         }
         if type(material) is not dict or set(material) != material_fields:
             raise OSError("Unknown payload material declaration")
-        partitions = {
-            "author": 192 * MIB,
-            "verifier": 192 * MIB,
-            "controls": 32 * MIB,
-            "artifacts": 64 * MIB,
-        }
+        artifact_cap = artifacts["child_cap_bytes"]
+        partitions = (
+            {
+                "author": 192 * MIB,
+                "verifier": 192 * MIB,
+                "controls": 32 * MIB,
+                "artifacts": 64 * MIB,
+            }
+            if artifact_cap == 64 * MIB
+            else {"material": 352 * MIB, "controls": 32 * MIB, "artifacts": 96 * MIB}
+        )
         if (
-            material["partition_bytes"] != partitions
+            type(material["partition_bytes"]) is not dict
+            or material["partition_bytes"] != partitions
+            or any(
+                type(value) is not int for value in material["partition_bytes"].values()
+            )
+            or type(material["phase_cap_bytes"]) is not int
             or material["phase_cap_bytes"] != 480 * MIB
+            or type(material["reserve_bytes"]) is not int
             or material["reserve_bytes"] != 192 * MIB
             or type(material["global_reserved_bytes"]) is not int
             or not 480 * MIB <= material["global_reserved_bytes"] <= 4096 * MIB
@@ -545,17 +556,29 @@ def control_preflight(*, case=None, mode=None):
             )
         for name, cap in (
             ("controls_charged_bytes", 32 * MIB),
-            ("artifacts_charged_bytes", 64 * MIB),
+            ("artifacts_charged_bytes", artifact_cap),
             ("prior_retained_bytes", 160 * MIB),
         ):
             if type(material[name]) is not int or not 0 <= material[name] <= cap:
                 raise OSError("Payload prior material charge is invalid")
         retained = (112 if manifest["role"] == "author" else 48) * MIB
         if (
-            material["retained_reserved_bytes"] != retained
+            type(material["retained_reserved_bytes"]) is not int
+            or material["retained_reserved_bytes"] != retained
             or material["prior_retained_bytes"] + retained > 160 * MIB
         ):
             raise OSError("Payload retention cannot fit the conditional 160 MiB target")
+        # Root serializes payload roles, so only one full material reserve is active.
+        if (
+            material["prior_retained_bytes"]
+            + material["reserve_bytes"]
+            + 32 * MIB
+            + artifact_cap
+            > material["phase_cap_bytes"]
+            or artifact_cap == 96 * MIB
+            and material["prior_retained_bytes"] + material["reserve_bytes"] > 352 * MIB
+        ):
+            raise OSError("Payload material cannot fit the serialized phase envelope")
         parent = material["parent"]
         if type(parent) is not dict or set(parent) != {"path", "native_identity"}:
             raise OSError("Unknown payload native parent declaration")
