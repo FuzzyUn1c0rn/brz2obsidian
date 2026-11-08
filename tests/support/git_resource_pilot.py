@@ -2288,6 +2288,8 @@ def _payload(attempt):
             prefix = whole / ".git" / "objects" / "pack" / "pack"
             pack_hash = checked_read(
                 vault,
+                "-c",
+                "pack.writeReverseIndex=false",
                 *recipe["arguments"],
                 str(prefix),
                 input=recipe["stdin_ascii"].encode("ascii"),
@@ -2342,6 +2344,8 @@ def _payload(attempt):
             prefix = delta / ".git" / "objects" / "pack" / "pack"
             pack_hash = checked_read(
                 builder,
+                "-c",
+                "pack.writeReverseIndex=false",
                 *recipe["arguments"],
                 str(prefix),
                 input=recipe["stdin_ascii"].encode("ascii"),
