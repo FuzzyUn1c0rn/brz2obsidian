@@ -412,6 +412,34 @@ def run(
         boundary("admission")
         with operations.inspect_update_inputs(vault) as observed:
             history = observed.history
+            facts["update_input_observation"] = {
+                "history_status": history.status,
+                "admission_status": history.admission.status,
+                "inventory_complete": history.admission.inventory_complete,
+                "finding_count": len(history.admission.findings),
+                "findings": [
+                    {
+                        "code": row.code,
+                        "policy": row.policy,
+                        "message": row.message[:240],
+                        "paths": [path[:160] for path in row.paths[:4]],
+                        "path_count": len(row.paths),
+                    }
+                    for row in history.admission.findings[:12]
+                ],
+                "recovery_gap_count": len(history.admission.recovery_gaps),
+                "recovery_gaps": [
+                    gap[:240] for gap in history.admission.recovery_gaps[:12]
+                ],
+                "checkpoint_status": (
+                    history.checkpoint.status
+                    if history.checkpoint is not None
+                    else None
+                ),
+                "checkpoint_code": (
+                    history.checkpoint.code if history.checkpoint is not None else None
+                ),
+            }
             if (
                 history.status != "intact"
                 or history.admission.status != "supported"
