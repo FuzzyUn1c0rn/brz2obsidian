@@ -240,6 +240,32 @@ def remembered(facts, choice="keep_vault", decision_id="keep:abc"):
     ).source_version_memory[0]
 
 
+def test_reviewed_source_memory_accepts_exact_opaque_identity_only():
+    from brz2obsidian.contracts import (
+        ContentIdentity,
+        OpaqueContent,
+        SourceVersionMemory,
+    )
+
+    memory = remembered(facts_for(current=b"authored", incoming=b"abc"))
+    digest = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    assert memory.source_version == digest
+    assert memory.reviewed_incoming.data == b"abc"
+    opaque = OpaqueContent(
+        identity=ContentIdentity(content_id=f"sha256:{digest}:3", sha256=digest, size=3)
+    )
+    raw = memory.model_dump()
+    inline = SourceVersionMemory.model_validate(raw)
+    declared = SourceVersionMemory.model_validate(raw | {"reviewed_incoming": opaque})
+    assert declared.reviewed_incoming.identity == inline.reviewed_incoming.identity
+    assert declared.source_version == digest
+    assert declared.provenance == memory.provenance
+    with pytest.raises(ValueError, match="Remembered source version"):
+        SourceVersionMemory.model_validate(
+            raw | {"reviewed_incoming": opaque, "source_version": "0" * 64}
+        )
+
+
 def test_memory_history_is_scoped_to_source_facet_and_relevant_version_without_chronology():
     from brz2obsidian.contracts import SourceVersionMemory
 

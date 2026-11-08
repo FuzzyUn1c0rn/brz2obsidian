@@ -3,6 +3,7 @@
 import json
 from hashlib import sha256
 
+from brz2obsidian.content_values import require_inline
 from brz2obsidian.contracts import (
     CompatibleReviewGroup,
     IdentityAssociationDecision,
@@ -455,7 +456,10 @@ def _plan(
 def prepare_review(
     facts: ReconciliationInput, *, preflight: ReviewPreflight
 ) -> ReviewPlan:
-    return _plan(facts, ReviewPreflight.model_validate(preflight))
+    facts = ReconciliationInput.model_validate(facts)
+    preflight = ReviewPreflight.model_validate(preflight)
+    require_inline((facts, preflight))
+    return _plan(facts, preflight)
 
 
 def _transition(plan, status, code):
@@ -1206,6 +1210,7 @@ def _reconstruct_review(plan: ReviewPlan) -> ReviewTransition:
 def validate_review(plan: ReviewPlan) -> ReviewTransition:
     """Reconstruct original actions and require the entire canonical plan exactly."""
     plan = ReviewPlan.model_validate(plan)
+    require_inline(plan)
     reconstructed = _reconstruct_review(plan)
     if reconstructed.status != "accepted":
         return reconstructed
@@ -1218,8 +1223,8 @@ def validate_review(plan: ReviewPlan) -> ReviewTransition:
 def resolve_review(plan: ReviewPlan, action: ReviewAction) -> ReviewTransition:
     """Reconstruct prior authority, then admit exactly one current-generation action."""
     validated = validate_review(plan)
-    return (
-        validated
-        if validated.status != "accepted"
-        else _resolve(validated.plan, action)
-    )
+    if validated.status != "accepted":
+        return validated
+    action = ReviewAction.model_validate(action)
+    require_inline(action)
+    return _resolve(validated.plan, action)

@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import ValidationError
 
+from brz2obsidian.content_values import require_inline
 from brz2obsidian.contracts import (
     ExactContent,
     LinkDocument,
@@ -191,6 +192,7 @@ def validate_link_document(
         target_facts = tuple(LinkTargetFacts.model_validate(t) for t in target_facts)
         if baseline is not None:
             baseline = LinkValidationBaseline.model_validate(baseline)
+        require_inline((document, expected_content, targets, target_facts, baseline))
     except ValidationError, TypeError, ValueError:
         add("link_facts_invalid")
         return result()
