@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass
 from hashlib import sha256
 
+from brz2obsidian.content_values import content_key, content_sha
 from brz2obsidian.contracts import (
     ConfigurationMemoryContext,
     PreservationReview,
@@ -25,7 +26,7 @@ class PreservationPolicy:
 
 
 def _version(content):
-    return None if content is None else sha256(content.data).hexdigest()
+    return None if content is None else content_sha(content)
 
 
 def _scope(facts, subject):
@@ -106,7 +107,7 @@ def preservation_policy(facts, subject, subject_id, allowed):
     elif deleted:
         unchanged = subject.incoming is None or (
             subject.baseline.content is not None
-            and subject.incoming.data == subject.baseline.content.data
+            and content_key(subject.incoming) == content_key(subject.baseline.content)
         )
         suppressed = unchanged or bool(matches)
         proposal = (
@@ -135,10 +136,11 @@ def preservation_policy(facts, subject, subject_id, allowed):
         kind = "keep_vault"
         choices = (
             ("keep_vault",)
-            if subject.current.content.data != subject.incoming.data
+            if content_key(subject.current.content) != content_key(subject.incoming)
             and (
                 subject.baseline.content is None
-                or subject.baseline.content.data != subject.incoming.data
+                or content_key(subject.baseline.content)
+                != content_key(subject.incoming)
             )
             else ()
         )

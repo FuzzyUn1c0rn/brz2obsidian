@@ -1662,6 +1662,7 @@ class _UpdateRead:
         self._inspection = None
         self._idle = None
         self._terminal = None
+        self._fresh_scope = None
 
     def __enter__(self):
         from .vault_admission import _IdleCheckpointObservation
@@ -1716,6 +1717,7 @@ class _UpdateRead:
         self._inspection = None
         self._idle = None
         self._terminal = None
+        self._fresh_scope = None
 
     @property
     def history(self):
@@ -1728,14 +1730,88 @@ class _UpdateRead:
         from .vault_admission import _check_read_snapshot
 
         if not self._open or self._inspection is None:
+            self._fresh_scope = None
             raise OSError("Completed current input observation required")
-        _check_read_snapshot(
-            self._root,
-            _Git(self._root, self._inspection.executable),
-            self._inspection.history,
-            self._inspection.current_refs,
-            terminal=self._terminal,
+        try:
+            _check_read_snapshot(
+                self._root,
+                _Git(self._root, self._inspection.executable),
+                self._inspection.history,
+                self._inspection.current_refs,
+                terminal=self._terminal,
+            )
+        except BaseException:
+            self._fresh_scope = None
+            raise
+
+    @staticmethod
+    def _physical_scope_value(value):
+        """Named payload-free fields only: never traverse checkpoint.review."""
+        from brz2obsidian.application.vault_contracts import VaultAdmission
+
+        if (
+            type(value) is not VaultHistoryInspection
+            or type(value.admission) is not VaultAdmission
+            or type(value.checkpoint) is not CheckpointRead
+        ):
+            raise OSError("Completed physical scoped admission required")
+        checkpoint = value.checkpoint
+        return (
+            value.schema_id,
+            value.schema_version,
+            value.status,
+            value.admission,
+            checkpoint.schema_id,
+            checkpoint.schema_version,
+            checkpoint.status,
+            checkpoint.code,
+            checkpoint.locator,
+            checkpoint.manifest,
         )
+
+    def _scope_context(self):
+        terminal = self._terminal
+        lease = (
+            ("idle",)
+            if terminal is None
+            else (
+                "terminal",
+                terminal.graph.intent.operation_id,
+                terminal.graph.intent.kind,
+                terminal.graph.intent.generation,
+                terminal.graph.intent_commit,
+            )
+        )
+        return (
+            str(self._root),
+            self._inspection.executable,
+            self._inspection.current_refs,
+            self._inspection.history.locator,
+            lease,
+        )
+
+    def _consume_fresh_scope(self, value, *, purpose, ledger):
+        """Consume an actual latest local inspection, even on mismatched input."""
+        from brz2obsidian.content_fingerprints import canonical_equal
+
+        pending, self._fresh_scope = self._fresh_scope, None
+        self._check()
+        if pending is None:
+            raise OSError("A new completed scoped inspection is required")
+        physical, subjects, actual_purpose, context = pending
+        ledger.retain_metadata(64 + 16 * 10)
+        candidate = self._physical_scope_value(value)
+        ledger.admit_metadata((physical, subjects, context, candidate))
+        if (
+            purpose != actual_purpose
+            or context != self._scope_context()
+            or not canonical_equal(physical, candidate)
+        ):
+            raise OSError("Scoped admission is not the latest completed input")
+        return physical[3], subjects
+
+    def _discard_fresh_scope(self):
+        self._fresh_scope = None
 
     def _current_history(self):
         self._check()
@@ -1793,6 +1869,7 @@ class _UpdateRead:
     def inspect(self, *, subjects, new_operation=None):
         from .vault_admission import _same_current_domain
 
+        self._fresh_scope = None
         self._check()
         captured = []
         scoped = _inspect_history(
@@ -1814,6 +1891,13 @@ class _UpdateRead:
             or not _same_current_domain(self._inspection, captured[0][0])
         ):
             raise OSError("Current scoped admission changed or is incomplete")
+        actual = captured[0][0]
+        self._fresh_scope = (
+            self._physical_scope_value(scoped),
+            actual.subjects,
+            actual.new_operation,
+            self._scope_context(),
+        )
         return scoped
 
 

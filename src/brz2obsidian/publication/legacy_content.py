@@ -17,6 +17,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from itertools import zip_longest
 
+from brz2obsidian.content_fingerprints import LegacyObject
 from brz2obsidian.contracts import ContentIdentity, ImmutableContentReference
 from brz2obsidian.publication.content_session import ContentSession, _Transfer
 from brz2obsidian.publication.vault_native import _observed_chunks
@@ -29,11 +30,6 @@ def _limit(value, name, *, minimum=0, maximum=_MAX):
     if type(value) is not int or not minimum <= value <= maximum:
         raise OSError(f"Invalid {name} budget")
     return value
-
-
-@dataclass(frozen=True)
-class LegacyObject:
-    fields: tuple
 
 
 @dataclass(frozen=True)
@@ -51,12 +47,15 @@ class LegacyProjectionEvidence:
 
 
 class _RawWork:
-    def __init__(self, limit):
+    def __init__(self, limit, ledger=None):
+        self.ledger = ledger
         self.remaining = _limit(limit, "raw work")
 
     def reserve(self, size):
         if size + 1 > self.remaining:
             raise OSError("Raw work budget exhausted")
+        if self.ledger is not None:
+            self.ledger.raw_pass(size)
         self.remaining -= size + 1
 
 
@@ -92,7 +91,9 @@ class _Projection:
         node_limit,
         depth_limit,
         dialect="Jc",
+        ledger=None,
     ):
+        self.ledger = ledger
         self.maximum = _limit(metadata_limit, "metadata")
         self.nodes_left = _limit(node_limit, "node", minimum=1)
         self.depth = _limit(depth_limit, "depth", minimum=1, maximum=256)
@@ -110,6 +111,8 @@ class _Projection:
         self.transfer.check()
         if self.metadata + len(data) > self.maximum:
             raise OSError("Metadata budget exhausted")
+        if self.ledger is not None:
+            self.ledger.retain_metadata(len(data) + 16)
         self.metadata += len(data)
         self.tokens.append(data)
 
@@ -130,6 +133,8 @@ class _Projection:
         if depth > self.depth or self.nodes_left == 0:
             raise OSError("Node or depth budget exhausted")
         self.nodes_left -= 1
+        if self.ledger is not None:
+            self.ledger.node(depth)
         kind = type(value)
         if value is None:
             self.emit(b"null")
@@ -229,12 +234,18 @@ class ContentComparison:
         node_limit,
         timeout=30,
         cancel=None,
+        _ledger=None,
+        _scope=None,
     ):
         if type(session) is not ContentSession:
             raise OSError("Live content session required")
         self._session = session
+        self._ledger = _ledger
+        self._scope = _scope
+        if _scope is not None:
+            _scope.check(session)
         transfer = _Transfer(timeout=timeout, cancel=cancel)
-        work = _RawWork(raw_work_limit)
+        work = _RawWork(raw_work_limit, _ledger)
         _limit(node_limit, "node", minimum=1)
         if type(references) is not tuple or 1 + 4 * len(references) > node_limit:
             raise OSError("Invalid bounded comparison references")
@@ -260,7 +271,7 @@ class ContentComparison:
             )
             remaining_metadata -= fragment.metadata
             admitted.append(value)
-        resolved = [session._resolve(value) for value in admitted]
+        resolved = [self._resolve(value) for value in admitted]
         self._members = {value.content_id: value for value, _, _ in resolved}
         self._backings = {value.content_id: backing for value, backing, _ in resolved}
         self._identities = {}
@@ -289,14 +300,27 @@ class ContentComparison:
                 sha256=reference.sha256,
                 size=reference.size,
             )
-        session._check()
+        self._check()
         transfer.check()
+
+    def _check(self):
+        if self._scope is None:
+            self._session._check()
+        else:
+            self._scope.check(self._session)
+
+    def _resolve(self, reference):
+        return (
+            self._session._resolve(reference)
+            if self._scope is None
+            else self._scope.resolve(reference)
+        )
 
     def _member(self, reference):
         reference = _reference(reference)
         if self._members.get(reference.content_id) != reference:
             raise OSError("Content is outside this comparison closure")
-        self._session._resolve(reference)
+        self._resolve(reference)
         return reference
 
     def identity(self, reference):
@@ -305,36 +329,44 @@ class ContentComparison:
 
     def _read(self, reference, work, transfer):
         transfer.check()
-        self._session._check()
+        self._check()
         work.reserve(reference.size)
-        backing = self._backings[reference.content_id]
-        expected = self._session._files.get(backing)
-        before = backing.lstat()
-        if (before.st_dev, before.st_ino) != expected:
-            raise OSError("Owned backing identity changed")
-        with closing(
-            _observed_chunks(
-                self._session._directory,
-                backing,
-                expected_size=reference.size,
-                read_chunk_limit=_CHUNK,
-            )
-        ) as chunks:
-            while True:
-                transfer.check()
-                try:
-                    block = next(chunks)
-                except StopIteration as complete:
-                    info, digest, _ = complete.value
-                    if (
-                        info.st_dev,
-                        info.st_ino,
-                    ) != expected or digest != reference.sha256:
-                        raise OSError("Registered content integrity failed")
-                    break
-                yield block
-        self._session._check()
-        transfer.check()
+
+        def chunks():
+            transfer.check()
+            self._check()
+            backing = self._backings[reference.content_id]
+            expected = self._session._files.get(backing)
+            before = backing.lstat()
+            if (before.st_dev, before.st_ino) != expected:
+                raise OSError("Owned backing identity changed")
+            with closing(
+                _observed_chunks(
+                    self._session._directory,
+                    backing,
+                    expected_size=reference.size,
+                    read_chunk_limit=_CHUNK,
+                )
+            ) as observed:
+                while True:
+                    transfer.check()
+                    try:
+                        block = next(observed)
+                    except StopIteration as complete:
+                        info, digest, _ = complete.value
+                        if (
+                            info.st_dev,
+                            info.st_ino,
+                        ) != expected or digest != reference.sha256:
+                            raise OSError("Registered content integrity failed")
+                        break
+                    yield block
+            self._check()
+            transfer.check()
+
+        # Eager reservation lets paired comparisons fund both full reads before
+        # either iterator performs native IO; closing an unstarted one is safe.
+        return chunks()
 
     def project_legacy(
         self,
@@ -349,14 +381,15 @@ class ContentComparison:
         preview_limit=0,
         timeout=30,
         cancel=None,
+        _ledger=None,
     ):
         transfer = _Transfer(timeout=timeout, cancel=cancel)
-        work = _RawWork(raw_work_limit)
+        work = _RawWork(raw_work_limit, _ledger)
         maximum = _limit(encoded_byte_limit, "encoded output")
         preview_limit = _limit(preview_limit, "preview", maximum=65536)
         if type(dialect) is not str or dialect not in ("Jc", "Js", "Ju"):
             raise OSError("Unsupported legacy dialect")
-        self._session._check()
+        self._check()
         plan = _Projection(
             root,
             self._member,
@@ -365,10 +398,13 @@ class ContentComparison:
             node_limit=node_limit,
             depth_limit=depth_limit,
             dialect=dialect,
+            ledger=_ledger,
         )
         expected_size = plan.metadata + plan.payload
         if expected_size > maximum:
             raise OSError("Encoded output budget exhausted")
+        if _ledger is not None:
+            _ledger.take("encoded", expected_size)
         digest, preview, count = hashlib.sha256(), bytearray(), 0
 
         def emit(data):
@@ -395,7 +431,7 @@ class ContentComparison:
                     emit(base64.urlsafe_b64encode(residual))
         if count != expected_size:
             raise OSError("Projection encoded length differs from preflight")
-        self._session._check()
+        self._check()
         transfer.check()
         return LegacyProjectionEvidence(
             dialect, digest.hexdigest(), count, bytes(preview)

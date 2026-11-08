@@ -3,6 +3,7 @@
 import json
 from hashlib import sha256
 
+from brz2obsidian.content_values import content_sha
 from brz2obsidian.contracts import ProposalAssumption, ReviewRequirement
 
 
@@ -80,7 +81,7 @@ def consent_requirements(preflight, proposal, approvals):
                         change.target_path
                         if approved is None
                         else approved.target_path,
-                        None if content is None else sha256(content.data).hexdigest(),
+                        None if content is None else content_sha(content),
                         []
                         if approved is None
                         else [

@@ -3,11 +3,13 @@
 import json
 from hashlib import sha256
 
+from brz2obsidian.content_fingerprints import canonical_equal
+from brz2obsidian.content_values import content_key, content_sha, same_content
 from brz2obsidian.contracts import LinkValidationBaseline, ProposalAssumption
 
 from .identity import _paths_collide, _target_context, _target_safe
 from .link_meanings import _semantic, resolve_link_meaning, resolve_occurrence
-from .link_validation import validate_link_document
+from .link_validation import _validate_link_document
 from .reference_targets import validate_targets
 
 
@@ -46,7 +48,7 @@ def consumed_context(
     by_id = {target.target_id: target for target in targets}
     icon_documents = (
         {
-            (doc.source_path, doc.content.data): doc
+            (doc.source_path, content_key(doc.content)): doc
             for doc in appearance_documents + documents
         }
         if appearance_documents
@@ -92,7 +94,7 @@ def consumed_context(
                     continue
                 expanded.add(state.target_id)
                 document = icon_documents.get(
-                    (owner.canonical_path, state.content.data)
+                    (owner.canonical_path, content_key(state.content))
                 )
                 if document is None:
                     continue
@@ -129,7 +131,7 @@ def consumed_context(
                 key=lambda d: (
                     d.document_id,
                     d.source_path,
-                    sha256(d.content.data).hexdigest(),
+                    content_sha(d.content),
                 ),
             )
         ),
@@ -170,7 +172,7 @@ def text_link_assumptions(facts, subject, subject_id, target_path):
             for d in documents
             if d.source_path in (path, subject.current.path, target_path)
             and content is not None
-            and d.content.data == content.data
+            and same_content(d.content, content)
         )
         portions.append(
             consumed_context(
@@ -237,8 +239,8 @@ def known_result_document(facts, change):
         for document in documents:
             if (
                 document.source_path == change.target_path
-                and document.content.data == change.result.data
-                and validate_link_document(
+                and same_content(document.content, change.result)
+                and _validate_link_document(
                     document,
                     expected_content=change.result,
                     expected_path=change.target_path,
@@ -288,7 +290,7 @@ def current_observation_problem(facts):
         if (
             len(entries) != 1
             or entries[0].current.existence != "present"
-            or entries[0].current.content != document.content
+            or not canonical_equal(entries[0].current.content, document.content)
         ):
             return "current_link_context_unbound"
         if any(
@@ -340,7 +342,7 @@ def current_observation_problem(facts):
         entry = entries[0]
         if (
             target.identity is not None and target.identity != entry.identity
-        ) or state.content != entry.current.content:
+        ) or not canonical_equal(state.content, entry.current.content):
             return "current_link_context_unbound"
         expected = (
             ("missing", "intentionally_uncreated")
@@ -479,7 +481,7 @@ def onboarding_current_context(facts):
         )
         if (
             len(documents) != 1
-            or documents[0].content != entry.current.content
+            or not canonical_equal(documents[0].content, entry.current.content)
             or documents[0].inventory != "complete"
         ):
             return False
@@ -505,7 +507,7 @@ def _relocated_current_states(facts, candidate, owner, selected_path):
             or qualified is None
             or qualified.path != selected_path
             or selected.content is None
-            or qualified.content_sha256 != sha256(selected.content.data).hexdigest()
+            or qualified.content_sha256 != content_sha(selected.content)
             or qualified
             != roles.model_copy(
                 update={
@@ -544,7 +546,7 @@ def selected_current_links_safe(facts, change, *, candidate=None):
     documents = tuple(
         d
         for d in context.current_documents
-        if d.source_path == observed_path and d.content == change.current
+        if d.source_path == observed_path and canonical_equal(d.content, change.current)
     )
     if len(documents) != 1:
         return False
@@ -564,7 +566,7 @@ def selected_current_links_safe(facts, change, *, candidate=None):
         )
         for o in document.occurrences
     )
-    valid = validate_link_document(
+    valid = _validate_link_document(
         document,
         expected_content=change.current,
         expected_path=observed_path,
@@ -591,7 +593,7 @@ def selected_current_links_safe(facts, change, *, candidate=None):
         or rename.source_path != change.target_path
         or rename.current_path != observed_path
         or not current_lookup_coverage(facts)
-        or candidate.content != change.current
+        or not canonical_equal(candidate.content, change.current)
         or candidate.target != subject.source_target
         or candidate.links.document_id != document.document_id
         or candidate.links.path_mode != document.path_mode
@@ -629,7 +631,7 @@ def current_keep_needs_proof(facts, change):
         subject.baseline.status == "known"
         and subject.incoming is not None
         and subject.baseline.content is not None
-        and subject.incoming.data == subject.baseline.content.data
+        and same_content(subject.incoming, subject.baseline.content)
     )
 
 
@@ -661,7 +663,7 @@ def current_lookup_coverage(facts):
         if (
             len(states) != 1
             or states[0].existence != "present"
-            or states[0].content != entry.current.content
+            or not canonical_equal(states[0].content, entry.current.content)
         ):
             return False
         if records[0].kind == "resource":
@@ -687,7 +689,7 @@ def bound_resource_record(facts, entry, target, state):
         and facts.incoming_identity.collection_id == entry.identity.collection_id
         and facts.incoming_identity.module_id == entry.identity.module_id
         and sub.current.existence == entry.current.existence
-        and sub.current.content == entry.current.content
+        and canonical_equal(sub.current.content, entry.current.content)
         for sub in facts.subjects
     )
     origin = state.resource_origin
@@ -748,5 +750,5 @@ def bound_resource_record(facts, entry, target, state):
             ),
         )
         and state.existence == "present"
-        and state.content == entry.current.content
+        and canonical_equal(state.content, entry.current.content)
     )

@@ -12,7 +12,9 @@ from brz2obsidian.contracts import (
     LinkTargetFacts,
     LinkValidationBaseline,
     LinkValidationFinding,
+    OpaqueContent,
     ReferenceTarget,
+    same_content,
 )
 
 from .link_meanings import SAFE_LINK_STATUSES, resolve_occurrence
@@ -95,8 +97,9 @@ def _validated_baseline(baseline, document, expected_path):
         )
         if (
             len(states) != 1
-            or states[0].content is None
-            or states[0].content.data != prior.content.data
+            # Public calls require_inline the complete graph; the private owned
+            # route has coadmitted exact bytes before this bytes-only binding.
+            or not same_content(states[0].content, prior.content)
         ):
             raise ValueError("link_unbound")
     for occurrence in prior.occurrences:
@@ -167,6 +170,31 @@ def validate_link_document(
     Facts must come from a complete bounded outer interpretation. This proves
     their exact binding and semantic consistency, never parsing or write consent.
     """
+    return _validate_link_document(
+        document,
+        expected_content=expected_content,
+        expected_path=expected_path,
+        targets=targets,
+        target_facts=target_facts,
+        inventory=inventory,
+        baseline=baseline,
+        affected_target_ids=affected_target_ids,
+        _inline_only=True,
+    )
+
+
+def _validate_link_document(
+    document: LinkDocument,
+    *,
+    expected_content,
+    expected_path: str,
+    targets: tuple[ReferenceTarget, ...],
+    target_facts: tuple[LinkTargetFacts, ...],
+    inventory: Literal["complete", "partial", "unreadable"],
+    baseline: LinkValidationBaseline | None = None,
+    affected_target_ids: tuple[str, ...] = (),
+    _inline_only: bool = False,
+) -> LinkDocumentValidation:
     findings = []
     document_id = getattr(document, "document_id", "unknown")
 
@@ -187,17 +215,24 @@ def validate_link_document(
 
     try:
         document = LinkDocument.model_validate(document)
-        expected_content = ExactContent.model_validate(expected_content)
+        expected_content = (
+            OpaqueContent.model_validate(expected_content)
+            if not _inline_only and type(expected_content) is OpaqueContent
+            else ExactContent.model_validate(expected_content)
+        )
         targets = tuple(ReferenceTarget.model_validate(t) for t in targets)
         target_facts = tuple(LinkTargetFacts.model_validate(t) for t in target_facts)
         if baseline is not None:
             baseline = LinkValidationBaseline.model_validate(baseline)
-        require_inline((document, expected_content, targets, target_facts, baseline))
+        if _inline_only:
+            require_inline(
+                (document, expected_content, targets, target_facts, baseline)
+            )
     except ValidationError, TypeError, ValueError:
         add("link_facts_invalid")
         return result()
     if (
-        document.content.data != expected_content.data
+        not same_content(document.content, expected_content)
         or document.source_path != expected_path
     ):
         add("link_unbound")

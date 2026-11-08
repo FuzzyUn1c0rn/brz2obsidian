@@ -1,8 +1,34 @@
 """Inward value boundaries; declarations do not grant access to bytes."""
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 
-from .contracts import OpaqueContent, ReconciliationContract
+from .contracts import OpaqueContent, ReconciliationContract, same_content
+
+
+@dataclass(frozen=True, eq=False)
+class _ExactKey:
+    content: object
+
+    def __eq__(self, other):
+        if type(other) is not _ExactKey:
+            return NotImplemented
+        return same_content(self.content, other.content)
+
+    def __hash__(self):
+        return hash(self.content.identity)
+
+
+def content_key(value):
+    return None if value is None else _ExactKey(value)
+
+
+def content_sha(value):
+    return None if value is None else value.identity.sha256
+
+
+def content_size(value):
+    return value.identity.size
 
 
 def require_inline(value):

@@ -1,12 +1,16 @@
 """Pure exact-file projection from a canonical whole S1 review."""
 
+from dataclasses import dataclass, replace
+
+from brz2obsidian.content_fingerprints import ChildWork, CompletedWork, drive_inline
+from brz2obsidian.content_values import same_content
 from brz2obsidian.contracts import ReviewPlan, SelectedReviewEffects, SelectedReviewFile
 from brz2obsidian.core.resolution import validate_review
 from brz2obsidian.core.reversals import reversal_subject, selected_reversal_outputs
 from brz2obsidian.core.review_attachments import applicable_approvals
 from brz2obsidian.core.review_composition import (
+    CompositionWork,
     automatic_reference_document,
-    composed_text_documents,
 )
 
 
@@ -37,19 +41,41 @@ def select_review_effects(plan: ReviewPlan) -> SelectedReviewEffects:
 
 def _project_review_effects(plan: ReviewPlan) -> SelectedReviewEffects:
     """Project a canonical plan already validated in this synchronous call."""
+    return drive_inline(SelectedEffectsWork(plan))
+
+
+@dataclass(frozen=True)
+class SelectedEffectsWork:
+    plan: ReviewPlan
+    phase: str = "compose"
+    approvals: tuple = ()
+
+
+def advance_selected_effects(work, returned=None):
+    plan = work.plan
+    if work.phase == "compose":
+        if not plan.ready or plan.requirements or plan.blockers:
+            return CompletedWork(_refused("review_not_ready"))
+        approvals = applicable_approvals(plan.approvals, plan.attachment_applicability)
+        return ChildWork(
+            CompositionWork(plan.producer_facts, plan.actions, approvals),
+            replace(work, phase="finish", approvals=approvals),
+        )
+    if work.phase == "finish":
+        return CompletedWork(
+            _project_review_effects_body(work.plan, work.approvals, returned)
+        )
+    raise ValueError("Invalid selected effects phase")
+
+
+def _project_review_effects_body(plan, effective_approvals, composition):
     if not plan.ready or plan.requirements or plan.blockers:
         return _refused("review_not_ready")
 
-    approvals = {
-        approval.change_id: approval
-        for approval in applicable_approvals(
-            plan.approvals, plan.attachment_applicability
-        )
-    }
-    composed_documents, conflict = composed_text_documents(
-        plan.producer_facts, plan.actions, tuple(approvals.values())
-    )
-    if conflict:
+    approvals = {approval.change_id: approval for approval in effective_approvals}
+    composed_documents = dict(composition.documents)
+    composed_contents = dict(composition.contents)
+    if composition.conflict:
         return _refused("effect_conflict")
     actions = {action.decision_id: action for action in plan.actions}
     current_documents = (
@@ -83,7 +109,7 @@ def _project_review_effects(plan: ReviewPlan) -> SelectedReviewEffects:
 
     def add(path, content, subject_id):
         previous = files.get(path)
-        if previous is not None and previous[0].data != content.data:
+        if previous is not None and not same_content(previous[0], content):
             raise ValueError("Conflicting selected file bytes")
         files[path] = content, min(previous[1], subject_id) if previous else subject_id
 
@@ -124,7 +150,9 @@ def _project_review_effects(plan: ReviewPlan) -> SelectedReviewEffects:
                             )
                         add(
                             document.source_path,
-                            document.content,
+                            composed_contents.get(
+                                document.document_id, document.content
+                            ),
                             change.subject_id,
                         )
                 continue
@@ -147,7 +175,7 @@ def _project_review_effects(plan: ReviewPlan) -> SelectedReviewEffects:
             if action is not None and action.candidate is not None:
                 composed = composed_documents.get(action.candidate.links.document_id)
                 if composed is not None:
-                    content = composed[0].content
+                    content = composed_contents[action.candidate.links.document_id]
             if (
                 approval is None
                 and not change.requires_decision

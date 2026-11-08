@@ -1139,11 +1139,24 @@ class OwnedSection(ReconciliationContract):
     targets: tuple[ReferenceTarget, ...]
 
 
+def _structure_requires_inline(
+    status, fields, memberships, appearance, sections, body_start
+):
+    return (
+        status == "supported"
+        or bool(fields)
+        or bool(memberships)
+        or appearance is not None
+        or bool(sections)
+        or body_start != 0
+    )
+
+
 class StructuredDocument(ReconciliationContract):
     schema_id: Literal["brz2obsidian.structured-document"]
     schema_version: Literal[1]
     output_format: int = Field(ge=1)
-    content: ExactContent
+    content: ContentValue
     status: Literal["supported", "unsupported", "opaque"]
     issues: tuple[str, ...]
     fields: tuple[StructureField, ...]
@@ -1154,7 +1167,18 @@ class StructuredDocument(ReconciliationContract):
 
     @model_validator(mode="after")
     def bounded_distinct_fields(self):
-        if self.body.end != len(self.content.data):
+        if _structure_requires_inline(
+            self.status,
+            self.fields,
+            self.memberships,
+            self.appearance_field,
+            self.owned_sections,
+            self.body.start,
+        ) and not isinstance(self.content, InlineExactContent):
+            raise ValueError(
+                "Semantic structure evidence requires available inline content"
+            )
+        if self.body.end != self.content.identity.size:
             raise ValueError("Structure body must end at available content boundary")
         keys = [f.key for f in self.fields]
         if len(set(keys)) != len(keys):

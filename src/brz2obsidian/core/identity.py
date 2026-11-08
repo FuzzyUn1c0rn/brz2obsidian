@@ -5,6 +5,7 @@ import unicodedata
 from dataclasses import dataclass
 from hashlib import sha256
 
+from brz2obsidian.content_values import content_key, content_sha
 from brz2obsidian.contracts import (
     IdentityCandidate,
     IdentityReview,
@@ -65,7 +66,7 @@ def _entry_fact(item):
         "current": (
             item.current.existence,
             item.current.path,
-            None if content is None else sha256(content.data).hexdigest(),
+            None if content is None else content_sha(content),
         ),
         "target": item.target.model_dump(),
     }
@@ -497,10 +498,10 @@ def bind_identity(facts, subject, subject_id, *, applicability=()):
             finding("unsafe_identity_target", True, unsafe)
         elif decision is None and (
             subject.current.existence,
-            None if subject.current.content is None else subject.current.content.data,
+            content_key(subject.current.content),
         ) != (
             selected.current.existence,
-            None if selected.current.content is None else selected.current.content.data,
+            content_key(selected.current.content),
         ):
             status, reason = "refused", "current_mismatch"
             finding("current_inventory_mismatch", True)
