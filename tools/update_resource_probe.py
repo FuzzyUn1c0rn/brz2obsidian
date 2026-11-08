@@ -1180,7 +1180,7 @@ def _observe(
     command_policy=None,
 ):
     phase_mode = phase_names is not None
-    work_limit = 116 if phase_mode else 26
+    work_limit = 240 if command_policy is not None else 116 if phase_mode else 26
     commit_limit = 2048 * MIB if phase_mode else 512 * MIB
     lifetime_limit = 512 if phase_mode else 16
     terminal_reserve = 4 * MIB if phase_mode else 128 * 1024
