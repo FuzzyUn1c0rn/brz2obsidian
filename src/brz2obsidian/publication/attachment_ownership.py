@@ -186,11 +186,7 @@ def removal_continuation_bindings(original, intent, origin_commit, *, effects):
 
 
 def _incoming_signature(content):
-    return (
-        None
-        if content is None
-        else (len(content.data), hashlib.sha256(content.data).hexdigest())
-    )
+    return None if content is None else (content.identity.size, content.identity.sha256)
 
 
 def interpret_attachment_disposition(owners, *, original, final, receipt, plan):

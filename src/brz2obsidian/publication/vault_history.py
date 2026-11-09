@@ -113,10 +113,10 @@ def _review_meaning(saved):
                 for name in _stored_model_fields(value)
                 if name != "fingerprint"
             }
-        if isinstance(value, ExactContent):
+        if isinstance(value, (ExactContent, OpaqueContent)):
             return {
-                "sha256": hashlib.sha256(value.data).hexdigest(),
-                "size": len(value.data),
+                "sha256": value.identity.sha256,
+                "size": value.identity.size,
             }
         if isinstance(value, SourceMemoryProvenance):
             return None
@@ -142,7 +142,7 @@ def _review_source_signature(saved):
     facts = saved.plan.facts
     rows = tuple(
         sorted(
-            (s.path, len(s.incoming.data), hashlib.sha256(s.incoming.data).hexdigest())
+            (s.path, s.incoming.identity.size, s.incoming.identity.sha256)
             for s in facts.subjects
             if s.incoming is not None
         )
@@ -676,29 +676,25 @@ class CheckpointReviewMemo:
         self._tip_key = None
         self._tip_review = None
 
-    def read(self, git, manifest, verified, *, include_review=False):
+    def read(self, git, manifest, verified, *, include_review=False, commit=None):
         key = (
             manifest.review_object,
             manifest.boundary == "local" and not manifest.proposed,
         )
         review = None
         if key not in self._entries:
-            review, references = read_checkpoint_review(git, manifest, verified)
-            from .attachment_ownership import review_ownership_claims
-
-            self._entries[key] = (
-                manifest.review_size,
-                manifest.review_sha256,
-                _review_meaning(review.saved),
-                references,
-                _review_parent_fingerprint(review),
-                _review_source_signature(review.saved),
-                review.saved.plan.facts.baseline_identity,
-                _onboarding_absence_review(review),
-                review_ownership_claims(review.saved.plan, review.historical_effects),
-                _review_queries(review),
-                review.saved.plan.facts.format_operation.kind,
-            )
+            if include_review or commit is None:
+                review, references = read_checkpoint_review(git, manifest, verified)
+                self._entries[key] = _checkpoint_review_metadata(
+                    manifest, review, references
+                )
+            else:
+                self._entries[key] = _read_checkpoint_review_metadata(
+                    git,
+                    manifest,
+                    verified,
+                    commit=commit,
+                )
         else:
             metadata = self._entries[key]
             if metadata[:2] != (manifest.review_size, manifest.review_sha256):
@@ -729,15 +725,48 @@ class CheckpointReviewMemo:
         return self._entries[key], review if include_review else None
 
 
-def read_checkpoint_review(git, manifest, verified):
-    """Read exact review payloads within caller-owned checkpoint admission.
+def _checkpoint_review_metadata(manifest, review, references):
+    from .attachment_ownership import review_ownership_claims
 
-    The caller must complete graph, association and lineage admission before
-    exposing a valid checkpoint. A typed manifest or this result alone does not
-    establish it. This reader verifies the review object/size/digest, envelope,
-    five-role reference closure and every blob.
-    ``verified`` only accumulates checked object IDs; it confers no authority.
-    """
+    return (
+        manifest.review_size,
+        manifest.review_sha256,
+        _review_meaning(review.saved),
+        references,
+        _review_parent_fingerprint(review),
+        _review_source_signature(review.saved),
+        review.saved.plan.facts.baseline_identity,
+        _onboarding_absence_review(review),
+        review_ownership_claims(review.saved.plan, review.historical_effects),
+        _review_queries(review),
+        review.saved.plan.facts.format_operation.kind,
+    )
+
+
+def _read_checkpoint_review_metadata(git, manifest, verified, *, commit):
+    from brz2obsidian.application.review_session import ReviewSession
+
+    record, references, available = _review_reference_graph(git, manifest)
+    with ReviewSession._retained_review(
+        git,
+        manifest,
+        commit,
+        capacity=available_memory(),
+    ) as session:
+        review = session._load_retained(
+            record,
+            available,
+            references,
+            local=manifest.boundary == "local" and not manifest.proposed,
+        )
+        metadata = _checkpoint_review_metadata(manifest, review, references)
+        verified.update(available[sha][0] for sha in references)
+        # No LoadedReview/content value/owner is retained by these eleven
+        # scalar/identity/query/claim projections after the files close.
+        return metadata
+
+
+def _review_reference_graph(git, manifest):
     size = manifest.review_size
     if available_memory() < 4 * size + 64 * 1024 * 1024:
         raise OSError("Insufficient current memory for the saved review envelope")
@@ -783,6 +812,17 @@ def read_checkpoint_review(git, manifest, verified):
         )
     }:
         raise OSError("Saved review references are not closed over the owned graph")
+    return record, references, available
+
+
+def read_checkpoint_review(git, manifest, verified):
+    """Return an inline review only within caller-owned full history admission.
+
+    This result alone is not authority. The unchanged returned-tip/explicit
+    target path verifies its envelope, five-role closure and all payloads.
+    """
+    record, references, available = _review_reference_graph(git, manifest)
+    size = manifest.review_size
     # The actual 36 MiB distinct-byte review reached roughly 294 MiB peak
     # commit while core replay rebuilt its immutable graph. Budget that demand
     # from unique bytes, rather than the compact envelope's few KiB.
@@ -1247,6 +1287,7 @@ def _read(
                 verified,
                 include_review=tip_manifest is None
                 or (targets is not None and current in targets),
+                commit=current,
             )
         meaning = review_metadata[2] if manifest.review_object is not None else None
         if manifest.review_object is not None:

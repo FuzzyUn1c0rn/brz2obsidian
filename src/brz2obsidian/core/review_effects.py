@@ -391,7 +391,8 @@ def selected_effect_blockers(facts, proposal, actions, approvals, *, composition
             matching = tuple(
                 d
                 for d in context.current_documents
-                if d.content == content and d.source_path == selected_path
+                if canonical_equal(d.content, content)
+                and d.source_path == selected_path
             )
             document = matching[0] if len(matching) == 1 else None
             source_targets = context.current_targets
@@ -425,7 +426,8 @@ def selected_effect_blockers(facts, proposal, actions, approvals, *, composition
                 (
                     s
                     for s in source_states
-                    if s.target_id == target.target_id and s.content == content
+                    if s.target_id == target.target_id
+                    and canonical_equal(s.content, content)
                 ),
                 None,
             )
@@ -436,7 +438,8 @@ def selected_effect_blockers(facts, proposal, actions, approvals, *, composition
                         s
                         for s in context.current_target_facts
                         + context.incoming_target_facts
-                        if s.target_id == target.target_id and s.content == content
+                        if s.target_id == target.target_id
+                        and canonical_equal(s.content, content)
                     ),
                     None,
                 )
@@ -451,7 +454,9 @@ def selected_effect_blockers(facts, proposal, actions, approvals, *, composition
             ):
                 add("selected_link_context_conflict")
             continue
-        if document.source_path != selected_path or document.content != content:
+        if document.source_path != selected_path or not canonical_equal(
+            document.content, content
+        ):
             add("selected_link_context_conflict")
             continue
         existing = documents.get(document.document_id)

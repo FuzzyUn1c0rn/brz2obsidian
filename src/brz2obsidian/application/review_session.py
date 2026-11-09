@@ -1,10 +1,11 @@
 """Lexical owned admission and explicitly driven pure legacy review work."""
 
 import math
+import sys
 import time
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
-from threading import Event
+from threading import TIMEOUT_MAX, Event
 from types import MappingProxyType
 from uuid import uuid4
 
@@ -105,15 +106,18 @@ class ReviewBudget:
     cancel: Event
 
     def __post_init__(self):
+        # Qualification callers choose their own smaller limits. Production
+        # retained reads use finite native-domain credit and current capacity.
+        maximum_work = (1 << 63) - 1
         for name, maximum, minimum in (
-            ("metadata_limit", 64 << 20, 0),
-            ("node_limit", 1048576, 1),
-            ("depth_limit", 256, 1),
-            ("decoded_limit", 64 << 20, 0),
-            ("raw_work_limit", 128 << 20, 0),
-            ("encoded_limit", 128 << 20, 0),
-            ("request_limit", 4096, 0),
-            ("step_limit", 2000000, 0),
+            ("metadata_limit", maximum_work, 0),
+            ("node_limit", maximum_work, 1),
+            ("depth_limit", maximum_work, 1),
+            ("decoded_limit", maximum_work, 0),
+            ("raw_work_limit", maximum_work, 0),
+            ("encoded_limit", maximum_work, 0),
+            ("request_limit", maximum_work, 0),
+            ("step_limit", maximum_work, 0),
         ):
             value = getattr(self, name)
             if type(value) is not int or not minimum <= value <= maximum:
@@ -121,7 +125,7 @@ class ReviewBudget:
         if (
             type(self.timeout) not in (int, float)
             or not math.isfinite(self.timeout)
-            or not 0 < self.timeout <= 120
+            or not 0 < self.timeout <= TIMEOUT_MAX
         ):
             raise ValueError("Invalid review timeout")
         if not isinstance(self.cancel, Event):
@@ -294,6 +298,9 @@ class ReviewSession:
         self._ledger = _Ledger(budget)
         self._ledger.retain_metadata(2048)
         self._content = ContentSession(observed, scratch_parent=scratch_parent)
+        self._initialize_state()
+
+    def _initialize_state(self):
         self._closure = _ClosureState(
             MappingProxyType({}), MappingProxyType({}), None, None, 0
         )
@@ -307,6 +314,36 @@ class ReviewSession:
         self._operation_ordinal = self._next_ordinal = self._input_ordinal = 0
         self._outstanding = None
 
+    @classmethod
+    def _retained_review(cls, git, manifest, commit, *, capacity):
+        maximum = (1 << 63) - 1
+        budget = ReviewBudget(
+            metadata_limit=max(
+                0, capacity - 4 * manifest.review_size - 64 * 1024 * 1024
+            ),
+            node_limit=maximum,
+            depth_limit=sys.getrecursionlimit(),
+            decoded_limit=maximum,
+            raw_work_limit=maximum,
+            encoded_limit=maximum,
+            request_limit=maximum,
+            step_limit=maximum,
+            timeout=TIMEOUT_MAX,
+            cancel=Event(),
+        )
+        result = cls.__new__(cls)
+        result._ledger = _Ledger(budget)
+        result._ledger.retain_metadata(2048)
+        result._content = ContentSession._retained_review(
+            git,
+            manifest,
+            commit,
+            capacity=capacity,
+            envelope_size=manifest.review_size,
+        )
+        result._initialize_state()
+        return result
+
     @property
     def _epoch(self):
         return self._closure.epoch
@@ -317,6 +354,7 @@ class ReviewSession:
 
     def _invalidate(self):
         self._operation_key = self._outstanding = self._selected = None
+        self._content._clear_retained_semantic()
 
     def __enter__(self):
         self._check()
@@ -429,20 +467,31 @@ class ReviewSession:
 
     def _semantic_value(self, binding):
         reference = binding.registration.reference
-        self._ledger.text += reference.size
-        raw = bytearray()
-        with closing(
-            self._content._read_owned(
-                binding.registration.backing,
-                reference,
-                self._ledger,
-                self._scope,
-            )
-        ) as chunks:
-            for block in chunks:
-                raw.extend(block)
+        retained = self._content._retained_semantic_bytes(
+            binding.registration,
+            self._ledger,
+            self._scope,
+        )
+        if retained is None:
+            self._ledger.text += reference.size
+            raw = bytearray()
+            with closing(
+                self._content._read_owned(
+                    binding.registration.backing,
+                    reference,
+                    self._ledger,
+                    self._scope,
+                )
+            ) as chunks:
+                for block in chunks:
+                    raw.extend(block)
+            data = bytes(raw)
+        else:
+            data, created = retained
+            if created:
+                self._ledger.text += reference.size
         return InlineExactContent(
-            data=bytes(raw),
+            data=data,
             identity=binding.identity,
             reference=binding.historical,
             occurrence=binding.occurrence,
@@ -632,7 +681,9 @@ class ReviewSession:
             raw_work_limit=self._ledger.remaining("raw_work"),
             metadata_limit=self._ledger.budget.metadata_limit - self._ledger.metadata,
             node_limit=self._ledger.remaining("node"),
-            timeout=max(0.001, self._ledger.deadline - time.monotonic()),
+            timeout=min(
+                TIMEOUT_MAX, max(0.001, self._ledger.deadline - time.monotonic())
+            ),
             cancel=self._ledger.budget.cancel,
             _ledger=self._ledger,
             _scope=view,
@@ -695,7 +746,9 @@ class ReviewSession:
             metadata_limit=self._ledger.budget.metadata_limit - self._ledger.metadata,
             node_limit=self._ledger.remaining("node"),
             depth_limit=self._ledger.budget.depth_limit,
-            timeout=max(0.001, self._ledger.deadline - time.monotonic()),
+            timeout=min(
+                TIMEOUT_MAX, max(0.001, self._ledger.deadline - time.monotonic())
+            ),
             cancel=self._ledger.budget.cancel,
             _ledger=self._ledger,
         )
@@ -864,7 +917,7 @@ class ReviewSession:
             else:
                 work = result
 
-    def _replay(self, plan):
+    def _canonical_replay(self, plan):
         history = plan.history
         canonical = self._drive(
             PlanWork(history.initial_facts, history.initial_preflight)
@@ -879,7 +932,95 @@ class ReviewSession:
             if transition.status != "accepted":
                 return None
             canonical = transition.plan
-        return canonical if canonical_equal(canonical, plan) else None
+        return canonical
+
+    def _replay(self, plan):
+        canonical = self._canonical_replay(plan)
+        return (
+            canonical
+            if canonical is not None and canonical_equal(canonical, plan)
+            else None
+        )
+
+    def _retained_value(self, registration, historical, path, *, inline):
+        self._content._check_prepared(registration, self._scope)
+        reference = registration.reference
+        if historical is not None and (
+            historical.size != reference.size or historical.sha256 != reference.sha256
+        ):
+            raise OSError("Historical reference differs from retained Git bytes")
+        self._ledger.retain_metadata(768 + 16 * len(path))
+        self._input_ordinal += 1
+        occurrence = (self._record, "retained", self._input_ordinal) + path
+        identity = ContentIdentity(
+            content_id=f"sha256:{reference.sha256}:{reference.size}",
+            sha256=reference.sha256,
+            size=reference.size,
+        )
+        binding = _OccurrenceBinding(
+            occurrence, registration, identity, historical, registration.origin
+        )
+        self._staged_bindings[occurrence] = binding
+        value = OpaqueContent(
+            identity=identity, reference=historical, occurrence=occurrence
+        )
+        return self._text(value) if inline else value
+
+    def _load_retained(self, record, available, references, *, local):
+        from brz2obsidian.review_codec import _RetainedDecoder
+
+        with self._operation():
+            self._record = uuid4().hex
+            registrations = self._content._prepare_retained(
+                available,
+                references,
+                self._ledger,
+                self._scope,
+            )
+            decoded = _RetainedDecoder(record, registrations, self).decode()
+            saved = self._ledger.construct(SavedReview, decoded)
+            self._coadmit()
+            old = saved.plan
+            canonical = self._canonical_replay(old)
+            if canonical is None:
+                raise OSError("Saved S1 review is unavailable or invalid")
+            effects = self._drive(SelectedEffectsWork(canonical))
+            if not canonical_equal(canonical, old):
+                # Exactly the existing verified-local memo normalization; no
+                # authority-bearing field can differ from canonical replay.
+                if not (
+                    local
+                    and old.facts.format_operation.kind == "source_update"
+                    and not old.requirements
+                    and old.blockers == ("selected_link_context_conflict",)
+                    and old.readiness == "refused"
+                    and old.ready is False
+                    and not canonical.requirements
+                    and not canonical.blockers
+                    and canonical.readiness == "ready"
+                    and canonical.ready is True
+                    and effects.status == "selected"
+                    and canonical_equal(
+                        old.model_copy(
+                            update={
+                                "blockers": canonical.blockers,
+                                "readiness": canonical.readiness,
+                                "ready": canonical.ready,
+                            }
+                        ),
+                        canonical,
+                    )
+                ):
+                    raise OSError("Saved S1 review differs from canonical replay")
+                saved = self._ledger.construct(
+                    SavedReview,
+                    {
+                        "schema_id": "brz2obsidian.saved-review",
+                        "schema_version": 1,
+                        "plan": canonical,
+                    },
+                )
+            return _load_result("loaded", saved, effects).loaded
 
     def load_review(self, raw):
         with self._operation():
@@ -980,12 +1121,13 @@ class ReviewSession:
         outside this facade's bounded decoding/proof claim. Its physical facts
         do not replace the caller's separately trusted source/risk context.
         """
+        self._content._require_current_observation()
         try:
             return self._resume_review(
                 loaded, facts, preflight=preflight, admission=admission
             )
         finally:
-            self._content._observation._discard_fresh_scope()
+            self._content._discard_fresh_scope()
 
     def _resume_review(self, loaded, facts, *, preflight, admission):
         with self._operation():
@@ -1088,7 +1230,7 @@ class ReviewSession:
         self._invalidate()
         self._staged_bindings = None
         self._physical.clear()
-        self._content._observation._discard_fresh_scope()
+        self._content._discard_fresh_scope()
         try:
             self._content.close()
         finally:

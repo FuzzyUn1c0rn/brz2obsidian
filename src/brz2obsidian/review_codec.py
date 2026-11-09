@@ -314,3 +314,69 @@ class LegacyDecoder:
             return value
         finally:
             self.ledger.release_metadata(self.workspace)
+
+
+class _RetainedDecoder:
+    """Adapt the unchanged refs envelope to actual owned Git registrations."""
+
+    def __init__(self, record, registrations, owner):
+        self.record, self.registrations, self.owner = record, registrations, owner
+        self.ledger = owner._ledger
+
+    def _content(self, marker, historical, path, *, inline):
+        if (
+            type(marker) is not dict
+            or set(marker) != {"__brz2obsidian_review_blob__"}
+            or type(marker["__brz2obsidian_review_blob__"]) is not str
+        ):
+            raise ValueError("Invalid saved-review byte reference")
+        registration = self.registrations.get(marker["__brz2obsidian_review_blob__"])
+        if registration is None:
+            raise ValueError("Saved review bytes are outside the owned role closure")
+        historical = (
+            None
+            if historical is None
+            else ImmutableContentReference.model_validate(historical)
+        )
+        return self.owner._retained_value(registration, historical, path, inline=inline)
+
+    def value(self, value, annotation, path=(), depth=1):
+        self.ledger.check()
+        self.ledger.node(depth)
+        if type(value) is dict:
+            self.ledger.retain_metadata(256 + 64 * len(value))
+            models = _models(annotation)
+            if InlineExactContent in models or OpaqueContent in models:
+                if set(value) - {"data", "reference"} or "data" not in value:
+                    raise ValueError("Invalid legacy content fields")
+                return self._content(
+                    value["data"],
+                    value.get("reference"),
+                    path,
+                    inline=OpaqueContent not in models,
+                )
+            if set(value) == {"__brz2obsidian_review_blob__"}:
+                # Non-content byte fields are semantic evidence in the old
+                # contract; they retain actual bytes rather than a descriptor.
+                return self._content(value, None, path, inline=True).data
+            fields = {
+                key: self.value(
+                    child, _field(annotation, key), path + (key,), depth + 1
+                )
+                for key, child in value.items()
+            }
+            return self.owner._semantic_input(models, fields)
+        if type(value) is list:
+            self.ledger.retain_metadata(64 + 16 * len(value))
+            return tuple(
+                self.value(child, _array_item(annotation), path + (index,), depth + 1)
+                for index, child in enumerate(value)
+            )
+        if type(value) is str:
+            self.ledger.retain_metadata(64 + 4 * len(value))
+        elif value is not None and type(value) not in (bool, int, float):
+            raise ValueError("Invalid saved-review scalar")
+        return value
+
+    def decode(self):
+        return self.value(self.record, SavedReview)

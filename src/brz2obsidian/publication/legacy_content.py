@@ -96,7 +96,7 @@ class _Projection:
         self.ledger = ledger
         self.maximum = _limit(metadata_limit, "metadata")
         self.nodes_left = _limit(node_limit, "node", minimum=1)
-        self.depth = _limit(depth_limit, "depth", minimum=1, maximum=256)
+        self.depth = _limit(depth_limit, "depth", minimum=1)
         self.metadata = self.payload = 0
         self.tokens = []
         self.active = set()
@@ -244,7 +244,11 @@ class ContentComparison:
         self._scope = _scope
         if _scope is not None:
             _scope.check(session)
-        transfer = _Transfer(timeout=timeout, cancel=cancel)
+        transfer = _Transfer(
+            timeout=timeout,
+            cancel=cancel,
+            _native=_ledger is not None and _scope is not None,
+        )
         work = _RawWork(raw_work_limit, _ledger)
         _limit(node_limit, "node", minimum=1)
         if type(references) is not tuple or 1 + 4 * len(references) > node_limit:
@@ -383,7 +387,11 @@ class ContentComparison:
         cancel=None,
         _ledger=None,
     ):
-        transfer = _Transfer(timeout=timeout, cancel=cancel)
+        transfer = _Transfer(
+            timeout=timeout,
+            cancel=cancel,
+            _native=_ledger is not None and self._scope is not None,
+        )
         work = _RawWork(raw_work_limit, _ledger)
         maximum = _limit(encoded_byte_limit, "encoded output")
         preview_limit = _limit(preview_limit, "preview", maximum=65536)

@@ -10,11 +10,11 @@ import shutil
 import stat
 import tempfile
 import time
-from contextlib import closing
+from contextlib import ExitStack, closing
 from dataclasses import dataclass
 from itertools import zip_longest
 from pathlib import Path
-from threading import Event
+from threading import TIMEOUT_MAX, Event
 from types import MappingProxyType
 from uuid import uuid4
 
@@ -30,9 +30,12 @@ from brz2obsidian.publication.vault_native import (
 class _Transfer:
     """Finite cooperative chunk budget; no unbounded caller callbacks."""
 
-    def __init__(self, *, timeout, cancel):
-        if type(timeout) not in (int, float) or not 0 < timeout <= 120:
-            raise OSError("Content time budget must be finite and at most 120 seconds")
+    def __init__(self, *, timeout, cancel, _native=False):
+        maximum = TIMEOUT_MAX if _native else 120
+        if type(timeout) not in (int, float) or not 0 < timeout <= maximum:
+            raise OSError(
+                f"Content time budget must be finite and at most {maximum} seconds"
+            )
         if cancel is not None and not isinstance(cancel, Event):
             raise OSError("Content cancellation requires an event")
         self.deadline = time.monotonic() + timeout
@@ -125,6 +128,50 @@ class _RegistrationView:
         return record.reference, record.backing, record.mode
 
 
+class _RetainedReviewRead:
+    """Owned retained bytes during admission, never current-vault authority."""
+
+    def __init__(self, git, manifest, commit, *, capacity, envelope_size):
+        from brz2obsidian.application.checkpoint_contracts import CheckpointManifest
+
+        from .vault_history import _Git
+
+        if (
+            type(git) is not _Git
+            or type(manifest) is not CheckpointManifest
+            or type(commit) is not str
+            or len(commit) != 40
+            or set(commit) - set("0123456789abcdef")
+            or type(capacity) is not int
+            or capacity < 0
+        ):
+            raise OSError("Actual retained Git reader required")
+        self._root = git.root
+        self._anchors = (
+            verify_directory(self._root),
+            verify_directory(self._root / ".git"),
+        )
+        self.git, self.manifest, self.commit = git, manifest, commit
+        self.capacity, self.envelope_size = capacity, envelope_size
+        self.semantic_size = 0
+        self._open = True
+
+    def _check(self):
+        if not self._open or self._anchors != (
+            verify_directory(self._root),
+            verify_directory(self._root / ".git"),
+        ):
+            raise OSError("Retained review byte owner is no longer live")
+
+    def reserve_semantic(self, size):
+        if (
+            4 * self.envelope_size + 9 * (self.semantic_size + size) + 64 * 1024 * 1024
+            > self.capacity
+        ):
+            raise OSError("Insufficient current memory for retained semantic bytes")
+        self.semantic_size += size
+
+
 class ContentSession:
     """Lexical snapshots obtained from a live ``inspect_update_inputs`` reader.
 
@@ -141,6 +188,9 @@ class ContentSession:
 
         if type(observation) is not _UpdateRead:
             raise OSError("Live input observation required")
+        self._initialize(observation, scratch_parent)
+
+    def _initialize(self, observation, scratch_parent):
         observation._check()
         parent = Path(scratch_parent).absolute()
         verify_directory(parent)
@@ -157,6 +207,151 @@ class ContentSession:
         self._private_operation = None
         self._prepared = {}
         self._prepared_digests = {}
+        self._retained_semantic = {}
+
+    @classmethod
+    def _retained_review(cls, git, manifest, commit, *, capacity, envelope_size):
+        observation = _RetainedReviewRead(
+            git,
+            manifest,
+            commit,
+            capacity=capacity,
+            envelope_size=envelope_size,
+        )
+        parent = git.inspection.temporary_base()
+        if parent is None:
+            raise OSError("Retained review temporary storage unavailable")
+        result = cls.__new__(cls)
+        result._initialize(observation, parent)
+        return result
+
+    def _prepare_retained(self, available, references, ledger, scope):
+        """Mint records only after real Git has streamed and verified every file."""
+        from .git_payload import verify_blobs
+
+        self._require_private_scope(scope, ledger)
+        source = self._observation
+        if type(source) is not _RetainedReviewRead:
+            raise OSError("Retained review byte owner required")
+        self._budget(sum(available[sha][1] for sha in references), (1 << 63) - 1)
+
+        class Sink:
+            def __init__(self, output):
+                self.output = output
+
+            def write(self, block):
+                ledger.check()
+                written = self.output.write(block)
+                ledger.check()
+                return written
+
+        paths = {}
+        ordered = sorted(references)
+        for offset in range(0, len(ordered), 32):
+            batch, outputs = ordered[offset : offset + 32], {}
+            with ExitStack() as streams:
+                for sha in batch:
+                    ledger.reserve_file_cleanup()
+                    ledger.retain_metadata(848)
+                    ledger.raw_pass(available[sha][1])
+                    paths[sha], outputs[sha] = self._new_file()
+                    streams.callback(outputs[sha].close)
+                verify_blobs(
+                    [*source.git.prefix, "cat-file", "--batch"],
+                    env=source.git.env,
+                    objects=tuple(
+                        (available[sha][0], available[sha][1], sha, Sink(outputs[sha]))
+                        for sha in batch
+                    ),
+                    timeout=min(120, max(0.001, ledger.deadline - time.monotonic())),
+                )
+                for output in outputs.values():
+                    ledger.check()
+                    output.flush()
+                    os.fsync(output.fileno())
+        records = {}
+        for sha in sorted(references):
+            oid, size = available[sha]
+            reference = ImmutableContentReference(
+                content_id=self._namespace + ":" + uuid4().hex,
+                sha256=sha,
+                size=size,
+            )
+            roles = tuple(
+                (role, row.path)
+                for role in (
+                    "source",
+                    "vault",
+                    "preimage",
+                    "proposed",
+                    "review_content",
+                )
+                for row in getattr(source.manifest, role)
+                if row.object_id == oid
+            )
+            origin = (
+                "retained_git_review",
+                source.manifest.association_id,
+                source.commit,
+                roles,
+                oid,
+            )
+            record = _PreparedRegistration(
+                self, reference, paths[sha], "100644", origin
+            )
+            self._prepared[reference.content_id] = record
+            records[sha] = record
+        return records
+
+    def _retained_semantic_bytes(self, registration, ledger, scope):
+        if type(self._observation) is not _RetainedReviewRead:
+            return None
+        try:
+            self._check_prepared(registration, scope)
+            backing, reference = registration.backing, registration.reference
+            if backing in self._retained_semantic:
+                # A cached value is available only after another complete read
+                # proves its correspondence with this exact owned backing.
+                data = self._retained_semantic[backing]
+                position, equal = 0, True
+                with closing(
+                    self._read_owned(backing, reference, ledger, scope)
+                ) as chunks:
+                    for block in chunks:
+                        equal = (
+                            data[position : position + len(block)] == block
+                        ) and equal
+                        position += len(block)
+                if not equal or position != len(data):
+                    raise OSError("Cached semantic bytes differ from owned backing")
+                return data, False
+            self._observation.reserve_semantic(reference.size)
+            raw = bytearray()
+            with closing(self._read_owned(backing, reference, ledger, scope)) as chunks:
+                for block in chunks:
+                    raw.extend(block)
+            data = bytes(raw)
+            self._retained_semantic[backing] = data
+            return data, True
+        except BaseException:
+            self._retained_semantic.clear()
+            raise
+
+    def _clear_retained_semantic(self):
+        self._retained_semantic.clear()
+
+    def _discard_fresh_scope(self):
+        if type(self._observation) is not _RetainedReviewRead:
+            self._observation._discard_fresh_scope()
+
+    def _require_current_observation(self):
+        from .vault_history import _UpdateRead
+
+        if type(self._observation) is not _UpdateRead:
+            raise OSError(
+                "Retained review bytes confer no current observation authority"
+            )
+        return self._observation
 
     def __enter__(self):
         self._check()
@@ -338,7 +533,7 @@ class ContentSession:
             path,
             byte_limit=ledger.remaining("raw_work"),
             role="current",
-            timeout=max(0.001, ledger.deadline - time.monotonic()),
+            timeout=min(120, max(0.001, ledger.deadline - time.monotonic())),
             cancel=ledger.budget.cancel,
             ledger=ledger,
             scope=scope,
@@ -356,6 +551,10 @@ class ContentSession:
         ledger=None,
         scope=None,
     ):
+        if type(self._observation) is _RetainedReviewRead:
+            raise OSError(
+                "Retained review bytes confer no current acquisition authority"
+            )
         transfer = _Transfer(timeout=timeout, cancel=cancel)
         self._check()
         transfer.check()
@@ -420,7 +619,7 @@ class ContentSession:
                     [*git.prefix, "cat-file", "--batch"],
                     env=git.env,
                     objects=((row.object_id, row.size, row.sha256, sink),),
-                    timeout=max(0.001, transfer.deadline - time.monotonic()),
+                    timeout=min(120, max(0.001, transfer.deadline - time.monotonic())),
                 )
             output.flush()
             os.fsync(output.fileno())
@@ -579,6 +778,9 @@ class ContentSession:
     def close(self):
         """Invalidate availability and retire only owned disposable files."""
         self._closed = True
+        self._clear_retained_semantic()
+        if type(self._observation) is _RetainedReviewRead:
+            self._observation._open = False
         if self._private_operation is not None:
             self._private_operation.active = False
             self._private_operation = None
