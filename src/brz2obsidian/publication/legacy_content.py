@@ -92,11 +92,14 @@ class _Projection:
         depth_limit,
         dialect="Jc",
         ledger=None,
+        _native=False,
     ):
         self.ledger = ledger
         self.maximum = _limit(metadata_limit, "metadata")
         self.nodes_left = _limit(node_limit, "node", minimum=1)
-        self.depth = _limit(depth_limit, "depth", minimum=1)
+        self.depth = _limit(
+            depth_limit, "depth", minimum=1, maximum=_MAX if _native else 256
+        )
         self.metadata = self.payload = 0
         self.tokens = []
         self.active = set()
@@ -407,6 +410,7 @@ class ContentComparison:
             depth_limit=depth_limit,
             dialect=dialect,
             ledger=_ledger,
+            _native=_ledger is not None and self._scope is not None,
         )
         expected_size = plan.metadata + plan.payload
         if expected_size > maximum:
