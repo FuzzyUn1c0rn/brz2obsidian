@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
+from brz2obsidian.content_fingerprints import canonical_equal
 from brz2obsidian.contracts import (
     ExactContent,
     ImportedItemIdentity,
@@ -26,6 +27,7 @@ from brz2obsidian.core import (
     select_review_effects,
     validate_review,
 )
+from brz2obsidian.core.selected_effects import SelectedEffectsWork
 from brz2obsidian.obsidian import inspect_text_candidate
 from brz2obsidian.publication.vault_native import available_memory, observe_file
 
@@ -108,20 +110,25 @@ def _history(
     # and current admission above still have to be fully valid.
     if maintenance:
         return history, None
+    from brz2obsidian.publication.vault_history import _MetadataCheckpoint
+
+    checkpoint = history.checkpoint
+    review_kind = (
+        checkpoint.review.saved.plan.facts.format_operation.kind
+        if checkpoint.review is not None
+        else checkpoint.metadata[10]
+        if type(checkpoint) is _MetadataCheckpoint and checkpoint.metadata is not None
+        else None
+    )
     if (
-        history.checkpoint.review is not None
-        and history.checkpoint.manifest.boundary != "result"
-        and history.checkpoint.review.saved.plan.facts.format_operation.kind
-        == "format_transition"
+        history.checkpoint.manifest.boundary != "result"
+        and review_kind == "format_transition"
     ):
         return history, _refused(
             "format_transition_review_required", history, action="resume_update"
         )
     onboarding_pending = (
-        history.checkpoint.review is not None
-        and history.checkpoint.manifest.boundary != "result"
-        and history.checkpoint.review.saved.plan.facts.format_operation.kind
-        == "onboarding"
+        history.checkpoint.manifest.boundary != "result" and review_kind == "onboarding"
     )
     if onboarding and onboarding_pending:
         return history, None
@@ -154,12 +161,14 @@ def _history(
     return history, None
 
 
-def _read_physical(root, rows):
+def _read_physical(root, rows, *, _owner=None):
     rows = tuple(
         row
         for row in rows
         if getattr(row, "exclusion", None) not in ("cache", "temporary")
     )
+    if _owner is not None:
+        return _owner._physical_payload(root, rows)
     if sum(row.size for row in rows) > available_memory() // 4:
         raise ValueError("comparison_resources_unavailable")
     result = {}
@@ -180,11 +189,13 @@ def _read_physical(root, rows):
     return result
 
 
-def _read_source(operations, vault, checkpoint, observed=None):
+def _read_source(operations, vault, checkpoint, observed=None, *, _owner=None):
     # One finite request verifies the current complete owned manifest once.
     from .checkpoint_payload_contracts import CheckpointPayloadRequest
 
     rows = checkpoint.manifest.source
+    if _owner is not None:
+        return _owner._source_payload(checkpoint)
     budget = sum(row.size for row in rows)
     if budget > available_memory() // 4:
         raise ValueError("comparison_resources_unavailable")
@@ -212,7 +223,7 @@ class _ExcludedDependency(ValueError):
 
 
 def _observed_facts(
-    history, baseline, incoming, *, retained_ownership=None, **identity
+    history, baseline, incoming, *, retained_ownership=None, _owner=None, **identity
 ):
     inventory = history.admission.inventory
     managed = set(baseline) | set(incoming)
@@ -235,6 +246,7 @@ def _observed_facts(
             for row in inventory
             if row.path in managed or row.path.lower().endswith(".md")
         ),
+        _owner=_owner,
     )
 
     def assembled():
@@ -244,6 +256,7 @@ def _observed_facts(
             current,
             current_inventory=inventory,
             retained_ownership=retained_ownership,
+            _owner=_owner._session if _owner is not None else None,
             **identity,
         )
 
@@ -268,7 +281,8 @@ def _observed_facts(
         row.excluded and row.path not in managed and row.path.lower().endswith(".md")
         for row in inventory
     ):
-        for change in reconcile(facts).changes:
+        reconciled = reconcile(facts) if _owner is None else _owner._reconcile(facts)
+        for change in reconciled.changes:
             related.update(
                 by_path[candidate.current.path]
                 for candidate in change.identity_review.candidates
@@ -314,7 +328,9 @@ def _observed_facts(
         elif row.path in needed and row.path not in current:
             additional.append(row)
     if additional:
-        current.update(_read_physical(history.admission.vault, additional))
+        current.update(
+            _read_physical(history.admission.vault, additional, _owner=_owner)
+        )
     return assembled() if removed or additional else facts
 
 
@@ -366,9 +382,10 @@ def _baseline(checkpoint, source):
 class _UpdateRenderer:
     """Retain the creation time of the same established Home bookmark."""
 
-    def __init__(self, delegate, baseline):
+    def __init__(self, delegate, baseline, *, _owner=None):
         self.delegate = delegate
         self.baseline = baseline
+        self._owner = _owner
 
     def render(self, plan, metadata):
         if ".obsidian/bookmarks.json" not in self.baseline:
@@ -381,7 +398,10 @@ class _UpdateRenderer:
             ),
             None,
         )
-        bookmarks = json.loads(self.baseline[".obsidian/bookmarks.json"])
+        bookmarks_raw = self.baseline[".obsidian/bookmarks.json"]
+        if self._owner is not None:
+            bookmarks_raw = self._owner._session._text(bookmarks_raw).data
+        bookmarks = json.loads(bookmarks_raw)
         items = bookmarks.get("items", ())
         if len(items) == 1 and set(items[0]) == {"type", "ctime", "path", "title"}:
             old = items[0]
@@ -398,7 +418,9 @@ class _UpdateRenderer:
         return self.delegate.render(plan, metadata)
 
 
-def _render(operations, source, baseline, *, metadata=None, directory=None):
+def _render(
+    operations, source, baseline, *, metadata=None, directory=None, _owner=None
+):
     from .contracts import BrzSourceSelection
 
     workflow, reference = operations._selected_workflow(
@@ -407,7 +429,7 @@ def _render(operations, source, baseline, *, metadata=None, directory=None):
     metadata = workflow.metadata_factory() if metadata is None else metadata
     renderer = Workflow(
         workflow.binding,
-        _UpdateRenderer(workflow.renderer, baseline),
+        _UpdateRenderer(workflow.renderer, baseline, _owner=_owner),
         workflow.publisher,
         metadata_factory=lambda: metadata,
     )
@@ -421,11 +443,17 @@ def _render(operations, source, baseline, *, metadata=None, directory=None):
             SimpleNamespace(path=row.relative_path, size=row.length, sha256=row.sha256)
             for row in result.receipt.manifest
         ),
+        _owner=_owner,
     )
+    if _owner is not None:
+        _owner._session._coadmit()
     equivalent = _equivalent_payload(baseline, payload)
     if equivalent:
         for path, raw in baseline.items():
-            (directory / path).write_bytes(raw)
+            if _owner is None:
+                (directory / path).write_bytes(raw)
+            else:
+                _owner._write_content(raw, directory / path)
         payload = baseline
     return directory, payload, result.source_identity, equivalent
 
@@ -459,12 +487,19 @@ def _equivalent_payload(baseline, incoming):
                 + new["source_identity"]["snapshot_digest"]
                 + "; collection: "
             )
-            raw = raw.replace(
+            raw = (raw.data if hasattr(raw, "identity") else raw).replace(
                 ("Source fingerprint: " + new_sha + suffix).encode(),
                 ("Source fingerprint: " + old_sha + suffix).encode(),
                 1,
             )
-        if raw != baseline[path]:
+        old_raw = baseline[path]
+        if hasattr(old_raw, "identity") and type(raw) is bytes:
+            old_raw = old_raw.data
+        if (
+            not canonical_equal(raw, old_raw)
+            if hasattr(raw, "identity") and hasattr(old_raw, "identity")
+            else raw != old_raw
+        ):
             return False
     return True
 
@@ -555,6 +590,7 @@ def _prepared(
     status="prepared_review",
     code="prepared",
     stale=0,
+    _owner=None,
 ):
     source_record = json.loads(
         next(
@@ -618,7 +654,7 @@ def _prepared(
         if preparation.kind == "onboarding"
         else (),
     )
-    return _review_explanation(_configuration_route(result))
+    return _review_explanation(_configuration_route(result, _owner=_owner))
 
 
 def _scoped(operations, history, facts, review=None, observed=None):
@@ -697,7 +733,7 @@ def _producer_memory(checkpoint, proposal_id=None):
     return _memory(saved)
 
 
-def _configuration_route(result):
+def _configuration_route(result, *, _owner=None):
     if result.kind == "onboarding":
         from .onboarding import route_onboarding
 
@@ -709,7 +745,11 @@ def _configuration_route(result):
         or result.status in ("refused", "stale_review", "failed")
     ):
         return result
-    selected = select_review_effects(prepared.review)
+    selected = (
+        select_review_effects(prepared.review)
+        if _owner is None
+        else _owner._session._drive(SelectedEffectsWork(prepared.review))
+    )
     if selected.status != "selected":
         return result
     current = prepared.review.producer_facts.identity_inventory
@@ -1422,6 +1462,7 @@ def review_plan_page(
     limit=100,
     byte_offset=0,
     byte_limit=65536,
+    _owner=None,
 ):
     def refused(code):
         return UpdateReviewPage(
@@ -1449,7 +1490,11 @@ def review_plan_page(
             )
             or not 1 <= limit <= 100
             or byte_limit > available_memory() // 16
-            or validate_review(plan).status != "accepted"
+            or (
+                validate_review(plan).status != "accepted"
+                if _owner is None
+                else _owner._session._replay(plan) is None
+            )
         ):
             return refused("invalid_page")
         items = []
@@ -1468,7 +1513,7 @@ def review_plan_page(
             )
             versions = change.original, change.current, change.incoming, reviewed_result
             unread = sum(
-                content is not None and len(content.data) > byte_offset
+                content is not None and content.identity.size > byte_offset
                 for content in versions
             )
             if byte_limit and unread > remaining:
@@ -1481,9 +1526,13 @@ def review_plan_page(
                 if content is None:
                     parts.append(None)
                     continue
-                raw = content.data[byte_offset : byte_offset + quota]
+                raw = (
+                    content.data[byte_offset : byte_offset + quota]
+                    if _owner is None
+                    else _owner._byteslice(content, byte_offset, quota)
+                )
                 remaining -= len(raw)
-                omitted |= byte_offset != 0 or len(raw) != len(content.data)
+                omitted |= byte_offset != 0 or len(raw) != content.identity.size
                 parts.append(raw)
             following_byte = byte_offset + max(
                 (len(raw) for raw in parts if raw is not None), default=0
@@ -1503,7 +1552,7 @@ def review_plan_page(
                     offset=byte_offset,
                     next_byte_offset=following_byte
                     if any(
-                        content is not None and len(content.data) > following_byte
+                        content is not None and content.identity.size > following_byte
                         for content in versions
                     )
                     else None,

@@ -16,7 +16,9 @@ from brz2obsidian.contracts import (
     IdentityInventoryItem,
     IdentityTargetFacts,
     ImportedItemIdentity,
+    InlineExactContent,
     LinkContext,
+    OpaqueContent,
     OutputIdentity,
     ReconciliationInput,
     ReconciliationSubject,
@@ -51,7 +53,8 @@ def target(path):
 
 
 def record(payload):
-    value = json.loads(payload["migration-record.json"])
+    raw = payload["migration-record.json"]
+    value = json.loads(raw.data if isinstance(raw, InlineExactContent) else raw)
     if value.get("schema") != "brz2obsidian.migration":
         raise ValueError("association_record_invalid")
     return value
@@ -197,7 +200,18 @@ def link_state(
     source_path=None,
     output_format=7,
     qualify_roles=False,
+    _owner=None,
 ):
+    if _owner is not None:
+        return _owner._assembly_link_state(
+            content,
+            target_id=target_id,
+            existence=existence,
+            membership_targets=membership_targets,
+            source_path=source_path,
+            output_format=output_format,
+            qualify_roles=qualify_roles,
+        )
     document = (
         interpret_structure(
             content, output_format=output_format, membership_targets=membership_targets
@@ -290,7 +304,20 @@ def assemble_facts(
     originals_known=True,
     onboarding=False,
     retained_ownership=None,
+    _owner=None,
 ):
+    def content(raw, *, semantic):
+        value = (
+            raw
+            if isinstance(raw, (InlineExactContent, OpaqueContent))
+            else ExactContent(data=raw)
+        )
+        return (
+            _owner._assembly_content(value, semantic=semantic)
+            if _owner is not None
+            else value
+        )
+
     old_record, new_record = record(baseline), record(incoming)
     old_identity, identity = output_identity(old_record), output_identity(new_record)
     old, new = _outputs(old_record, baseline), _outputs(new_record, incoming)
@@ -338,10 +365,12 @@ def assemble_facts(
         established[path] = item, role, facet
     inventory = []
     for path, raw in sorted(current.items()):
-        content = ExactContent(data=raw)
+        current_content = content(
+            raw, semantic=established.get(path, (None, None, None))[2] != "asset"
+        )
         state, claim, facet = _observed_identity(
             path,
-            content,
+            current_content,
             old_identity,
             established,
             # A new format8 operation qualifies edited native metadata while
@@ -356,7 +385,9 @@ def assemble_facts(
                 identity=claim,
                 raw_identity=None,
                 title=PurePosixPath(path).stem,
-                current=CurrentContent(existence="present", path=path, content=content),
+                current=CurrentContent(
+                    existence="present", path=path, content=current_content
+                ),
                 target=target(path),
             )
         )
@@ -372,13 +403,15 @@ def assemble_facts(
         path, role, title = new.get(key, old.get(key, historical.get(key)))
         old_path = old.get(key, (path, role, title))[0]
         original = (
-            ExactContent(data=baseline[old_path])
+            content(baseline[old_path], semantic=facet != "asset")
             if originals_known
             and (retained_ownership is None or key in old)
             and old_path in baseline
             else None
         )
-        received = ExactContent(data=incoming[path]) if key in new else None
+        received = (
+            content(incoming[path], semantic=facet != "asset") if key in new else None
+        )
         matches = [
             row
             for row in inventory
@@ -394,7 +427,7 @@ def assemble_facts(
                 if old_path in observed_paths
                 else "absent",
                 path=old_path,
-                content=ExactContent(data=current[old_path])
+                content=content(current[old_path], semantic=facet != "asset")
                 if old_path in current
                 else None,
             )
@@ -444,7 +477,7 @@ def assemble_facts(
                 name = (
                     parent.stem
                     + " (incoming-"
-                    + hashlib.sha256(received.data).hexdigest()[:8]
+                    + received.identity.sha256[:8]
                     + ")"
                     + suffix
                 )
@@ -527,7 +560,7 @@ def assemble_facts(
     return facts.model_copy(
         update={
             "link_context": _link_context(
-                facts, old_record, new_record, current_inventory
+                facts, old_record, new_record, current_inventory, _owner=_owner
             )
         }
     )
@@ -549,7 +582,9 @@ def _physical_target(path, current_path, inventory):
     return value.model_copy(update={"status": "unsafe"}) if collisions else value
 
 
-def _link_context(facts, baseline_record, incoming_record, physical_inventory):
+def _link_context(
+    facts, baseline_record, incoming_record, physical_inventory, *, _owner=None
+):
     subjects = {
         (_identity(facts.incoming_identity, s.item_id), s.facet): s
         for s in facts.subjects
@@ -637,6 +672,7 @@ def _link_context(facts, baseline_record, incoming_record, physical_inventory):
                     if facts.baseline_identity.output_format == 6
                     else facts.baseline_identity.output_format
                 ),
+                _owner=_owner,
             )
         )
         incoming_states.append(
@@ -647,6 +683,7 @@ def _link_context(facts, baseline_record, incoming_record, physical_inventory):
                 membership_targets=incoming_memberships,
                 source_path=future.canonical_path,
                 output_format=facts.incoming_identity.output_format,
+                _owner=_owner,
             )
         )
         paths.append((row, subject, actual, received))

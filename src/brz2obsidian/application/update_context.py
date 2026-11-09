@@ -20,7 +20,7 @@ from .update_context_contracts import (
     UpdateEditHandle,
     UpdateReferenceChoice,
 )
-from .update_contracts import UpdatePreparation
+from .update_contracts import UpdatePreparation, UpdateResult
 from .update_edits import EditFailure, EditLease
 
 
@@ -42,7 +42,13 @@ class UpdateContext:
         self._kind = "source_update"
         self._reference_drafts = {}
         self._edit = None
+        self._owner = None
         self._reset_history()
+
+    def _retire_owner(self):
+        owner, self._owner = self._owner, None
+        if owner is not None:
+            owner.close()
 
     @property
     def kind(self):
@@ -100,7 +106,15 @@ class UpdateContext:
         elif kind == "format_transition":
             result = self._operations.prepare_format_transition(vault, source)
         elif kind == "source_update":
-            result = self._operations.prepare_update(vault, source)
+            from .operations import Operations
+
+            if type(self._operations) is Operations:
+                self._owner = self._operations._new_owned_preparation()
+                result = self._owner.prepare(vault, source, cancel=cancel)
+                if result.preparation is None:
+                    self._retire_owner()
+            else:
+                result = self._operations.prepare_update(vault, source)
         else:
             raise ValueError("Unsupported update role")
         if result.preparation is not None:
@@ -246,7 +260,12 @@ class UpdateContext:
             or byte_limit > 65536
         ):
             return refused("invalid_page")
-        page = self._operations.inspect_update_review(
+        page_reader = (
+            self._operations.inspect_update_review
+            if self._owner is None
+            else self._owner.page
+        )
+        page = page_reader(
             self._preparation,
             proposal_id=expected.proposal_id,
             generation=expected.generation,
@@ -256,6 +275,7 @@ class UpdateContext:
             byte_limit=byte_limit,
         )
         if page.status == "refused" and page.code == "association_or_history_changed":
+            self._retire_owner()
             self._preparation = self._binding = None
             self._requires_source_refresh = False
             result = UpdateContextResult(
@@ -284,7 +304,11 @@ class UpdateContext:
             offers=tuple(
                 row
                 for row in (
-                    review_plan_choice_offers(self._preparation.review)
+                    (
+                        review_plan_choice_offers(self._preparation.review)
+                        if self._owner is None
+                        else self._owner.offers(self._preparation.review)
+                    )
                     if page.status == "available"
                     else ()
                 )
@@ -312,8 +336,9 @@ class UpdateContext:
                 offset=offset,
                 limit=limit,
                 drop_only=self._kind == "attachment_cleanup",
+                _choices=None if self._owner is None else self._owner.choices(plan),
             )
-        except ValueError, StopIteration:
+        except ValueError, StopIteration, OSError:
             return self._edit_refusal("offer_changed")
         return self._content_result(
             status="available",
@@ -372,7 +397,12 @@ class UpdateContext:
         elif choice == "edited":
             return self._edit_refusal("edit_changed")
         try:
-            result = self._operations.resolve_update_choice(
+            chooser = (
+                self._operations.resolve_update_choice
+                if self._owner is None
+                else self._owner.choose
+            )
+            result = chooser(
                 self._preparation,
                 requirement_id=requirement_id,
                 choice=choice,
@@ -438,6 +468,28 @@ class UpdateContext:
         )
 
     def choice_page(self, binding, *, offset=0, limit=100):
+        if self._owner is not None:
+            try:
+                plan = self._live_review(binding)
+                if (
+                    type(offset) is not int
+                    or type(limit) is not int
+                    or offset < 0
+                    or not 1 <= limit <= 100
+                ):
+                    raise ValueError("Invalid choice page")
+                offers = self._owner.offers(plan)
+                end = offset + limit
+                return self._content_result(
+                    status="available",
+                    code="available",
+                    binding=self._binding,
+                    offers=offers[offset:end],
+                    total_choices=len(offers),
+                    next_choice_offset=end if end < len(offers) else None,
+                )
+            except ValueError, OSError, EditFailure:
+                return self._edit_refusal("context_changed")
         from .review_offers import review_plan_choice_page
 
         return self._choice_content(
@@ -461,8 +513,12 @@ class UpdateContext:
         except EditFailure:
             return self._edit_refusal("context_changed")
         try:
-            rows, total, following = reader(plan, **kwargs)
-        except ValueError, TypeError, StopIteration:
+            rows, total, following = (
+                reader(plan, **kwargs)
+                if self._owner is None
+                else reader(plan, _choices=self._owner.choices(plan), **kwargs)
+            )
+        except ValueError, TypeError, StopIteration, OSError:
             return self._edit_refusal("offer_changed")
         return self._content_result(
             status="available",
@@ -609,11 +665,17 @@ class UpdateContext:
                 capture=self._last_capture,
                 next_actions=("continue_review", "save_update"),
             )
-        result = self._operations.save_update(
+        saver = (
+            self._operations.save_update if self._owner is None else self._owner.save
+        )
+        result = saver(
             self._preparation,
             **({"progress": progress} if progress is not None else {}),
             **({"cancel": cancel} if cancel is not None else {}),
         )
+        if result.preparation is None and self._owner is not None:
+            self._retire_owner()
+            self._preparation = self._binding = None
         return self._retain(result, selection_id=expected.selection_id)
 
     def refresh(self, binding, *, source=None, cancel=None, progress=None):
@@ -640,7 +702,11 @@ class UpdateContext:
         from .vault_progress_contracts import report_progress
 
         report_progress(progress, "current_inspection")
-        result = self._operations.refresh_update(self._preparation, source=source)
+        result = (
+            self._operations.refresh_update(self._preparation, source=source)
+            if self._owner is None
+            else self._owner.refresh(self._preparation, source=source, cancel=cancel)
+        )
         if result.preparation is not None and result.status in (
             "prepared_review",
             "unresolved",
@@ -761,6 +827,8 @@ class UpdateContext:
         )
 
     def _remember(self, result):
+        if isinstance(result, UpdateResult):
+            self._last_result = result
         self._last_summary = getattr(result, "summary", "")
         self._last_findings = getattr(result, "findings", ())
         self._last_omission = getattr(result, "diagnostic_omission", False)
@@ -797,6 +865,7 @@ class UpdateContext:
         self._last_actions = result.next_actions
 
     def _reset_history(self):
+        self._last_result = None
         self._last_summary = self._last_guidance = ""
         self._last_findings = ()
         self._last_omission = False
@@ -869,6 +938,7 @@ class UpdateContext:
             self._edit.close()
             self._edit = None
         self._reference_drafts.clear()
+        self._retire_owner()
         self._preparation = self._binding = None
         self._requires_source_refresh = False
         return UpdateContextResult(
@@ -902,15 +972,18 @@ class UpdateContext:
         if self._edit is not None:
             return self._uncommitted_draft()
         try:
+            canonical_choices = (
+                None if self._owner is None else self._owner.choices(plan)
+            )
             destinations = review_plan_attachment_reference_destinations(
-                plan, requirement_id
+                plan, requirement_id, _choices=canonical_choices
             )
             offered = {
                 token: ("drop",)
                 if self._kind == "attachment_cleanup"
                 else tuple(row.choice for row in destinations[token])
                 for token, _, _ in review_plan_attachment_references(
-                    plan, requirement_id
+                    plan, requirement_id, _choices=canonical_choices
                 )
             }
             selected = tuple(
@@ -926,7 +999,7 @@ class UpdateContext:
                 )
             ):
                 raise ValueError("Reference offer changed")
-        except ValueError, TypeError, StopIteration:
+        except ValueError, TypeError, StopIteration, OSError:
             return self._edit_refusal("offer_changed")
         self._reference_drafts.setdefault(requirement_id, {}).update(
             (row.reference_id, row) for row in selected
@@ -1050,6 +1123,8 @@ class UpdateContext:
             "recovery_required",
         ):
             self._requires_source_refresh = False
+        if result.status == "cancelled_before_publication":
+            return result.model_copy(update={"ready": False})
         if not self._requires_source_refresh:
             if (
                 self._preparation is not None
@@ -1125,7 +1200,11 @@ class UpdateContext:
                 return self._uncommitted_draft()
             requirement = next(
                 row
-                for row in inspect_review_choices(plan)
+                for row in (
+                    inspect_review_choices(plan)
+                    if self._owner is None
+                    else self._owner.choices(plan)
+                )
                 if row.requirement_id == requirement_id
             )
             if "edited" not in requirement.enabled_choices:

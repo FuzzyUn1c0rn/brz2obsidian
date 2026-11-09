@@ -29,10 +29,10 @@ def attachment_references(preparation, requirement_id):
     return review_plan_attachment_references(plan, requirement_id)
 
 
-def review_plan_attachment_references(plan, requirement_id):
+def review_plan_attachment_references(plan, requirement_id, *, _choices=None):
     requirement = next(
         row
-        for row in inspect_review_choices(plan)
+        for row in (inspect_review_choices(plan) if _choices is None else _choices)
         if row.requirement_id == requirement_id
     )
     change = next(
@@ -70,12 +70,14 @@ def attachment_reference_destinations(preparation, requirement_id):
     return review_plan_attachment_reference_destinations(plan, requirement_id)
 
 
-def review_plan_attachment_reference_destinations(plan, requirement_id):
+def review_plan_attachment_reference_destinations(
+    plan, requirement_id, *, _choices=None
+):
     from .update_context_contracts import UpdateReferenceDestination
 
     requirement = next(
         row
-        for row in inspect_review_choices(plan)
+        for row in (inspect_review_choices(plan) if _choices is None else _choices)
         if row.requirement_id == requirement_id
     )
     change = next(
@@ -98,7 +100,7 @@ def review_plan_attachment_reference_destinations(plan, requirement_id):
             if choice in link.choices and meaning is not None
         )
         for token, document, occurrence in review_plan_attachment_references(
-            plan, requirement_id
+            plan, requirement_id, _choices=_choices
         )
         for link in (links[(document.document_id, occurrence.occurrence_id)],)
     }
@@ -117,7 +119,7 @@ def attachment_reference_page(preparation, requirement_id, *, offset=0, limit=10
 
 
 def review_plan_attachment_reference_page(
-    plan, requirement_id, *, offset=0, limit=100, drop_only=False
+    plan, requirement_id, *, offset=0, limit=100, drop_only=False, _choices=None
 ):
     from .update_context_contracts import UpdateReferenceOffer
 
@@ -128,8 +130,10 @@ def review_plan_attachment_reference_page(
         or not 1 <= limit <= 100
     ):
         raise ValueError("Invalid reference page")
-    refs = review_plan_attachment_references(plan, requirement_id)
-    destinations = review_plan_attachment_reference_destinations(plan, requirement_id)
+    refs = review_plan_attachment_references(plan, requirement_id, _choices=_choices)
+    destinations = review_plan_attachment_reference_destinations(
+        plan, requirement_id, _choices=_choices
+    )
     end = min(len(refs), offset + limit)
     return (
         tuple(
@@ -188,11 +192,12 @@ def review_plan_choice_action(
     references=(),
     selected_entry_id=None,
     disassociate_entry_ids=(),
+    _choices=None,
 ):
     requirement = next(
         (
             row
-            for row in inspect_review_choices(plan)
+            for row in (inspect_review_choices(plan) if _choices is None else _choices)
             if row.requirement_id == requirement_id
         ),
         None,
@@ -263,7 +268,9 @@ def review_plan_choice_action(
         if choice == "remove":
             from .attachment_choices import validated_reference_choices
 
-            offered_refs = review_plan_attachment_references(plan, requirement_id)
+            offered_refs = review_plan_attachment_references(
+                plan, requirement_id, _choices=_choices
+            )
             subject = next(
                 row
                 for row in plan.facts.subjects
@@ -360,7 +367,9 @@ def review_plan_choice_action(
                 change,
                 alternative,
                 references,
-                review_plan_attachment_references(plan, requirement_id),
+                review_plan_attachment_references(
+                    plan, requirement_id, _choices=_choices
+                ),
             )
         elif references:
             raise ValueError("Reference choice is unavailable")

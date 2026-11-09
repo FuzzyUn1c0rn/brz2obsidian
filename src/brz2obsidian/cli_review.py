@@ -257,6 +257,23 @@ def _prepare(args):
             ),
         )
     operations = Operations()
+    from .application.operations import Operations as NativeOperations
+
+    if args.kind == "source-update" and type(operations) is NativeOperations:
+        from uuid import uuid4
+
+        from .application.update_context import UpdateContext
+
+        context = UpdateContext(operations=operations)
+        try:
+            opened = context.prepare(
+                args.vault, source=args.source, selection_id=str(uuid4())
+            )
+            if opened.binding is not None:
+                context.save(opened.binding)
+            return _update_result(context._last_result, command="prepare")
+        finally:
+            context._retire_owner()
     if args.kind == "source-update":
         prepared = operations.prepare_update(args.vault, args.source)
     elif args.kind == "onboarding":

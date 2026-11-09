@@ -1,5 +1,6 @@
 """Lexical owned admission and explicitly driven pure legacy review work."""
 
+import codecs
 import math
 import sys
 import time
@@ -291,6 +292,39 @@ class _ClosureState:
     epoch: int
 
 
+class _OwnedReviewExport:
+    """One owner-minted canonical export; declarations cannot mint this grant."""
+
+    def check(self, plan=None):
+        if self.session._publication_export is not self or self.session._closed:
+            raise OSError("Owned review export is retired")
+        self.session._content._check()
+        if plan is not None and not canonical_equal(plan, self.saved.plan):
+            raise OSError("Export differs from the complete canonical plan")
+
+    def copy(self, sha, output):
+        self.check()
+        value = self.values[sha]
+        with self.session._operation():
+            binding = self.session._binding(
+                value.occurrence,
+                value.identity,
+                value.reference,
+                inline=value.data if type(value) is InlineExactContent else None,
+            )
+            with closing(
+                self.session._content._read_owned(
+                    binding.registration.backing,
+                    binding.registration.reference,
+                    self.session._ledger,
+                    self.session._scope,
+                )
+            ) as chunks:
+                for block in chunks:
+                    if output.write(block) != len(block):
+                        raise OSError("Incomplete owned review export write")
+
+
 class ReviewSession:
     def __init__(self, observed, *, scratch_parent, budget):
         if type(budget) is not ReviewBudget:
@@ -313,14 +347,184 @@ class ReviewSession:
         self._operation_key = None
         self._operation_ordinal = self._next_ordinal = self._input_ordinal = 0
         self._outstanding = None
+        self._publication_export = None
+
+    @classmethod
+    def _owned_preparation(cls, observed, scratch_parent, capacity, *, _cancel=None):
+        maximum = (1 << 63) - 1
+        return cls(
+            observed,
+            scratch_parent=scratch_parent,
+            budget=ReviewBudget(
+                metadata_limit=capacity,
+                node_limit=maximum,
+                depth_limit=sys.getrecursionlimit(),
+                decoded_limit=maximum,
+                raw_work_limit=maximum,
+                encoded_limit=maximum,
+                request_limit=maximum,
+                step_limit=maximum,
+                timeout=TIMEOUT_MAX,
+                cancel=Event() if _cancel is None else _cancel,
+            ),
+        )
+
+    def _owned_value(self, reference):
+        registration = self._content._prepare_registered(
+            reference, self._ledger, self._scope
+        )
+        self._record = self._record or uuid4().hex
+        self._input_ordinal += 1
+        return self._retained_value(
+            registration, None, ("physical", self._input_ordinal), inline=False
+        )
+
+    def _assembly_content(self, value, *, semantic):
+        if semantic:
+            return self._text(value)
+        if type(value) is InlineExactContent:
+            return value
+        binding = self._binding(value.occurrence, value.identity, value.reference)
+        decoder, valid = codecs.getincrementaldecoder("utf-8")(), True
+        with closing(
+            self._content._read_owned(
+                binding.registration.backing,
+                binding.registration.reference,
+                self._ledger,
+                self._scope,
+            )
+        ) as chunks:
+            for block in chunks:
+                if valid:
+                    try:
+                        decoder.decode(block, final=False)
+                    except UnicodeDecodeError:
+                        valid = False
+            if valid:
+                try:
+                    decoder.decode(b"", final=True)
+                except UnicodeDecodeError:
+                    valid = False
+        return self._text(value) if valid else value
+
+    def _assembly_link_state(self, value, **arguments):
+        from brz2obsidian.application.update_facts import link_state
+
+        if type(value) is not OpaqueContent:
+            return link_state(value, **arguments)
+        # Only an actual complete classification can leave an opaque value here.
+        classified = self._assembly_content(value, semantic=False)
+        if type(classified) is InlineExactContent:
+            return link_state(classified, **arguments)
+        sample = link_state(InlineExactContent(data=b"\xff"), **arguments)
+        structure = sample.structure
+        structure = StructuredDocument.model_validate(
+            {
+                **{
+                    name: getattr(structure, name)
+                    for name in type(structure).model_fields
+                },
+                "content": value,
+                "body": structure.body.model_copy(update={"end": value.identity.size}),
+            }
+        )
+        roles = sample.file_roles
+        if roles is not None:
+            roles = roles.model_copy(update={"content_sha256": value.identity.sha256})
+        return sample.model_copy(
+            update={"content": value, "structure": structure, "file_roles": roles}
+        )
+
+    def _canonical_choices(self, plan):
+        from brz2obsidian.core.resolution import _inspect_canonical_choices
+
+        canonical = self._replay(plan)
+        if canonical is None:
+            raise OSError("Owned canonical review changed")
+        return _inspect_canonical_choices(canonical)
+
+    def _freeze_export(self, plan):
+        import json
+
+        from brz2obsidian.publication.vault_history import _stored_model_fields
+
+        with self._operation():
+            plan = self._admit_values(plan)
+            self._coadmit()
+            canonical = self._replay(plan)
+            if canonical is None:
+                raise OSError("Only canonical owned review can be exported")
+            saved = SavedReview(
+                schema_id="brz2obsidian.saved-review", schema_version=1, plan=canonical
+            )
+            values = {}
+
+            def project(value):
+                if isinstance(value, (InlineExactContent, OpaqueContent)):
+                    self._binding(
+                        value.occurrence,
+                        value.identity,
+                        value.reference,
+                        inline=value.data
+                        if type(value) is InlineExactContent
+                        else None,
+                    )
+                    values.setdefault(value.identity.sha256, value)
+                    return {
+                        "data": {"__brz2obsidian_review_blob__": value.identity.sha256},
+                        "reference": project(value.reference),
+                    }
+                if type(value) is bytes:
+                    item = self._admit_values(InlineExactContent(data=value))
+                    values.setdefault(item.identity.sha256, item)
+                    return {"__brz2obsidian_review_blob__": item.identity.sha256}
+                if isinstance(value, BaseModel):
+                    return {
+                        name: project(getattr(value, name))
+                        for name in _stored_model_fields(value)
+                    }
+                if isinstance(value, (tuple, list)):
+                    return [project(child) for child in value]
+                if value is None or type(value) in (str, bool, int, float):
+                    return value
+                raise OSError("Unsupported owned review wire value")
+
+            shape = {
+                "schema_id": "brz2obsidian.saved-review-refs",
+                "schema_version": 1,
+                "record": project(saved),
+            }
+            self._coadmit()
+            raw = json.dumps(
+                shape, sort_keys=True, separators=(",", ":"), allow_nan=False
+            ).encode("utf-8")
+            self._ledger.retain_metadata(4 * len(raw))
+            export = _OwnedReviewExport()
+            export.session, export.saved, export.raw, export.values = (
+                self,
+                saved,
+                raw,
+                MappingProxyType(values),
+            )
+            self._publication_export = export
+        return export
+
+    def _load_export_for_comparison(self, saved):
+        canonical = self._replay(saved.plan)
+        if canonical is None:
+            raise OSError("Export no longer reconstructs exactly")
+        effects = self._drive(SelectedEffectsWork(canonical))
+        return _load_result("loaded", saved, effects).loaded
 
     @classmethod
     def _retained_review(cls, git, manifest, commit, *, capacity):
         maximum = (1 << 63) - 1
         budget = ReviewBudget(
-            metadata_limit=max(
-                0, capacity - 4 * manifest.review_size - 64 * 1024 * 1024
-            ),
+            # M is a conservative model-work inventory, not measured heap.
+            # Envelope/semantic admission retain their independent capacity
+            # checks; subtracting those proxies here imposed a second, smaller
+            # metadata qualification ceiling on the actual reconstruction.
+            metadata_limit=capacity,
             node_limit=maximum,
             depth_limit=sys.getrecursionlimit(),
             decoded_limit=maximum,

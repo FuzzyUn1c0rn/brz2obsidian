@@ -69,6 +69,11 @@ class Operations:
 
         return prepare_update(self, vault, source)
 
+    def _new_owned_preparation(self):
+        from .owned_preparation import _OwnedPreparation
+
+        return _OwnedPreparation(self)
+
     def prepare_attachment_cleanup(self, vault):
         """Review recorded attachment ownership and current references explicitly."""
         from .attachment_cleanup import prepare_attachment_cleanup

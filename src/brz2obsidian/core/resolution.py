@@ -261,7 +261,11 @@ def inspect_review_choices(plan):
     checked = validate_review(plan)
     if checked.status != "accepted":
         raise ValueError("Invalid review")
-    plan = checked.plan
+    return _inspect_canonical_choices(checked.plan)
+
+
+def _inspect_canonical_choices(plan):
+    """Project an already reconstructed plan; no input admission occurs here."""
     approved = {(a.change_id, a.domain) for a in plan.approvals}
     rows = tuple(
         _choice_offer(

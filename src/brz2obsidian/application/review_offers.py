@@ -1,7 +1,5 @@
 """Bounded read-only summaries over the canonical offered review actions."""
 
-from hashlib import sha256
-
 from brz2obsidian.core import inspect_review_choices
 
 from .review_choices import requirement_digest
@@ -38,7 +36,7 @@ def choice_offers(preparation):
     return review_plan_choice_offers(plan)
 
 
-def review_plan_choice_offers(plan):
+def review_plan_choice_offers(plan, *, _choices=None):
     result = []
     changes = {row.change_id: row for row in plan.proposal.changes}
     reference_changes = {
@@ -46,7 +44,7 @@ def review_plan_choice_offers(plan):
         for row in plan.proposal.changes
         if row.attachment_review is not None
     }
-    for row in inspect_review_choices(plan):
+    for row in inspect_review_choices(plan) if _choices is None else _choices:
         selected = next(
             (
                 a
@@ -169,8 +167,8 @@ def choice_page(preparation, *, offset=0, limit=100):
     return _slice(choice_offers(preparation), offset, limit)
 
 
-def review_plan_choice_page(plan, *, offset=0, limit=100):
-    return _slice(review_plan_choice_offers(plan), offset, limit)
+def review_plan_choice_page(plan, *, offset=0, limit=100, _choices=None):
+    return _slice(review_plan_choice_offers(plan, _choices=_choices), offset, limit)
 
 
 def choice_detail_page(preparation, *, requirement_id, offset=0, limit=100):
@@ -180,10 +178,12 @@ def choice_detail_page(preparation, *, requirement_id, offset=0, limit=100):
     )
 
 
-def review_plan_choice_detail_page(plan, *, requirement_id, offset=0, limit=100):
+def review_plan_choice_detail_page(
+    plan, *, requirement_id, offset=0, limit=100, _choices=None
+):
     requirement = next(
         row
-        for row in inspect_review_choices(plan)
+        for row in (inspect_review_choices(plan) if _choices is None else _choices)
         if row.requirement_id == requirement_id
     )
     rows = []
@@ -194,8 +194,8 @@ def review_plan_choice_detail_page(plan, *, requirement_id, offset=0, limit=100)
                 choice=choice,
                 target_id=output.target_id,
                 path=output.path,
-                size=len(output.content.data),
-                sha256=sha256(output.content.data).hexdigest(),
+                size=output.content.identity.size,
+                sha256=output.content.identity.sha256,
             )
             for choice, output in _attachment_outputs(plan, requirement)
         ]
@@ -214,10 +214,8 @@ def review_plan_choice_detail_page(plan, *, requirement_id, offset=0, limit=100)
                     eligible=entry.eligible,
                     target_safe=entry.target_safe,
                     existence=entry.current.existence,
-                    size=len(content.data) if content is not None else None,
-                    sha256=sha256(content.data).hexdigest()
-                    if content is not None
-                    else None,
+                    size=content.identity.size if content is not None else None,
+                    sha256=content.identity.sha256 if content is not None else None,
                 )
             )
     elif requirement.domain == "compatible_group":
@@ -228,7 +226,7 @@ def review_plan_choice_detail_page(plan, *, requirement_id, offset=0, limit=100)
                 change_id=c.change_id,
                 subject_id=c.subject_id,
                 path=c.path,
-                size=len(c.result.data),
+                size=c.result.identity.size,
             )
             for c in group.comparisons
         ]

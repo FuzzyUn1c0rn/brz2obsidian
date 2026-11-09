@@ -341,7 +341,7 @@ class ContentSession:
         self._retained_semantic.clear()
 
     def _discard_fresh_scope(self):
-        if type(self._observation) is not _RetainedReviewRead:
+        if type(self._observation) not in (_RetainedReviewRead, _ContentOnlyRead):
             self._observation._discard_fresh_scope()
 
     def _require_current_observation(self):
@@ -373,6 +373,71 @@ class ContentSession:
         info = os.fstat(stream.fileno())
         self._files[path] = (info.st_dev, info.st_ino)
         return path, stream
+
+    def _import_physical(self, root, row, ledger, scope):
+        """Register an actual rendered file; a declaration alone is insufficient."""
+        self._require_private_scope(scope, ledger)
+        root = Path(root).absolute()
+        anchor = verify_directory(root)
+        ledger.reserve_file_cleanup()
+        backing, output = self._new_file()
+        transfer = _Transfer(
+            timeout=min(120, max(0.001, ledger.deadline - time.monotonic())),
+            cancel=ledger.budget.cancel,
+        )
+        ledger.raw_pass(row.size)
+        with output:
+            info, sha, _, identity = observe_file(
+                root,
+                root / row.path,
+                prefix_limit=0,
+                sink=transfer.sink(output, row.size),
+                expected_size=row.size,
+                read_chunk_limit=65536,
+            )
+            output.flush()
+            os.fsync(output.fileno())
+        mode = "100755" if os.name != "nt" and info.st_mode & stat.S_IXUSR else "100644"
+        if (info.st_size, sha, mode) != (
+            row.size,
+            row.sha256,
+            getattr(row, "mode", mode),
+        ) or verify_directory(root) != anchor:
+            raise OSError("Rendered input changed during owned acquisition")
+        reference = ImmutableContentReference(
+            content_id=self._namespace + ":" + uuid4().hex,
+            sha256=sha,
+            size=info.st_size,
+        )
+        self._values[reference.content_id] = (
+            reference,
+            backing,
+            mode,
+            ("rendered_source", str(root), anchor, row.path, identity, row),
+        )
+        with closing(self._read_owned(backing, reference, ledger, scope)) as chunks:
+            for _ in chunks:
+                pass
+        return reference
+
+    def _detach(self):
+        if self._private_operation is not None:
+            raise OSError("Content must leave its operation before publication")
+        self._check()
+        self._observation.__exit__()
+        self._observation = _ContentOnlyRead(self)
+
+    def _attach(self, observed):
+        from .vault_history import _UpdateRead
+
+        if self._private_operation is not None or type(observed) is not _UpdateRead:
+            raise OSError("Actual idle observation required for owner handoff")
+        self._check()
+        observed._check()
+        if self._observation._root != observed._root:
+            raise OSError("Content owner cannot change vault")
+        self._observation._open = False
+        self._observation = observed
 
     def _operation(self, ledger):
         return _PrivateOperation(self, ledger)
@@ -551,7 +616,7 @@ class ContentSession:
         ledger=None,
         scope=None,
     ):
-        if type(self._observation) is _RetainedReviewRead:
+        if type(self._observation) in (_RetainedReviewRead, _ContentOnlyRead):
             raise OSError(
                 "Retained review bytes confer no current acquisition authority"
             )
@@ -949,6 +1014,23 @@ class _DecodedImport:
     def abort(self):
         self.finished = True
         self.stream.close()
+
+
+class _ContentOnlyRead:
+    """Availability of the same owned files, with no native acquisition grant."""
+
+    def __init__(self, owner):
+        self._owner = owner
+        self._root = owner._observation._root
+        self._open = True
+
+    def _check(self):
+        if (
+            not self._open
+            or self._owner._closed
+            or verify_directory(self._owner._directory) != self._owner._anchor
+        ):
+            raise OSError("Owned content-only snapshot is unavailable")
 
 
 class _PrivateOperation:

@@ -271,12 +271,14 @@ class _IdleCheckpointObservation:
     def __init__(self, inspection, admission):
         from brz2obsidian.application.checkpoint_contracts import CheckpointRead
 
+        from .vault_history import _MetadataCheckpoint
+
         checkpoint = inspection.history
         if (
             admission.status != "supported"
             or not admission.inventory_complete
             or not inspection.complete
-            or not isinstance(checkpoint, CheckpointRead)
+            or type(checkpoint) not in (CheckpointRead, _MetadataCheckpoint)
             or checkpoint.status != "valid"
             or checkpoint.locator is None
             or inspection.linked_intents
@@ -397,10 +399,12 @@ class _Inspection:
         checkpoint_observation=None,
         policy_probe=False,
         new_operation=None,
+        _metadata_only=False,
     ):
         if new_operation not in (None, "format_transition"):
             raise ValueError("Unsupported new-operation observation purpose")
         self.new_operation = new_operation
+        self._metadata_only = _metadata_only
         self.root = Path(vault).absolute()
         self.subjects = ()
         self.request_subjects = subjects
@@ -1201,6 +1205,7 @@ class _Inspection:
                     _Git(self.root, self.executable),
                     linked_intents=self.linked_intents,
                     checkpoint_roles=self.checkpoint_roles,
+                    _metadata_only=self._metadata_only,
                 )
                 if self.history.status != "valid":
                     raise OSError("Current converter history unavailable")
@@ -1221,6 +1226,7 @@ class _Inspection:
                     _Git(self.root, self.executable),
                     linked_intents=self.linked_intents,
                     checkpoint_roles=self.checkpoint_roles,
+                    _metadata_only=self._metadata_only,
                 )
                 if self.history.status != "valid":
                     raise OSError("Current converter history unavailable")
@@ -2415,6 +2421,7 @@ def _observe_vault(
     _capture=None,
     _policy_probe=False,
     _new_operation=None,
+    _metadata_only=False,
 ):
     """Observe current storage; caller assertions cannot grant trusted proof."""
     inspection = _Inspection(
@@ -2426,6 +2433,7 @@ def _observe_vault(
         checkpoint_observation,
         _policy_probe,
         _new_operation,
+        _metadata_only,
     )
     try:
         with inspection.resources:
