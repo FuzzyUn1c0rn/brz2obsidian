@@ -634,7 +634,9 @@ class ContentSession:
                 raise OSError("Invalid retained checkpoint locator") from error
             checkpoint = self._observation.history.checkpoint
             if (
-                role
+                checkpoint is None
+                or checkpoint.status != "valid"
+                or role
                 not in ("source", "vault", "preimage", "proposed", "review_content")
                 or locator != checkpoint.locator
             ):

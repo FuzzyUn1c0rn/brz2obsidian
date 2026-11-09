@@ -259,7 +259,7 @@ def _prepare(args):
     operations = Operations()
     from .application.operations import Operations as NativeOperations
 
-    if args.kind == "source-update" and type(operations) is NativeOperations:
+    if args.kind in ("source-update", "onboarding") and type(operations) is NativeOperations:
         from uuid import uuid4
 
         from .application.update_context import UpdateContext
@@ -267,7 +267,9 @@ def _prepare(args):
         context = UpdateContext(operations=operations)
         try:
             opened = context.prepare(
-                args.vault, source=args.source, selection_id=str(uuid4())
+                args.vault, source=args.source, selection_id=str(uuid4()),
+                kind="onboarding" if args.kind == "onboarding" else "source_update",
+                original_source=args.original_source if args.kind == "onboarding" else None,
             )
             if opened.binding is not None:
                 context.save(opened.binding)

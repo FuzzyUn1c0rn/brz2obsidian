@@ -1748,12 +1748,13 @@ class _UpdateRead:
         self._bound_history = None
         self._inspection = None
         self._idle = None
+        self._absence = None
         self._terminal = None
         self._fresh_scope = None
         self._metadata_only = _metadata_only
 
     def __enter__(self):
-        from .vault_admission import _IdleCheckpointObservation
+        from .vault_admission import _AbsentHistoryObservation, _IdleCheckpointObservation
 
         if self._used:
             raise OSError("Update input reader cannot be reused")
@@ -1798,6 +1799,17 @@ class _UpdateRead:
                 if self._terminal is None:
                     self._idle = _IdleCheckpointObservation(inspection, admission)
                 self._check()
+            elif (
+                self._history.status == "absent"
+                and self._history.admission.status == "supported"
+                and self._history.admission.inventory_complete
+                and captured
+            ):
+                inspection, _ = captured[0]
+                self._absence = _AbsentHistoryObservation(inspection, self._history)
+                self._inspection = inspection
+                self._bound_history = self._history
+                self._check()
             return self
         except BaseException:
             self.__exit__()
@@ -1809,6 +1821,7 @@ class _UpdateRead:
         self._bound_history = None
         self._inspection = None
         self._idle = None
+        self._absence = None
         self._terminal = None
         self._fresh_scope = None
 
@@ -1826,6 +1839,9 @@ class _UpdateRead:
             self._fresh_scope = None
             raise OSError("Completed current input observation required")
         try:
+            if self._absence is not None:
+                self._absence.check(_Git(self._root, self._inspection.executable))
+                return
             _check_read_snapshot(
                 self._root,
                 _Git(self._root, self._inspection.executable),
@@ -1879,7 +1895,8 @@ class _UpdateRead:
             str(self._root),
             self._inspection.executable,
             self._inspection.current_refs,
-            self._inspection.history.locator,
+            self._inspection.history.locator if self._absence is None else None,
+            self._absence.anchors if self._absence is not None else None,
             lease,
         )
 
@@ -1940,7 +1957,8 @@ class _UpdateRead:
 
         self._check()
         if (
-            locator != self._bound_history.checkpoint.locator
+            self._absence is not None
+            or locator != self._bound_history.checkpoint.locator
             or type(paths) is not tuple
             or not paths
             or len(set(paths)) != len(paths)
@@ -1979,7 +1997,7 @@ class _UpdateRead:
         )
         self._check()
         if (
-            scoped.status != "intact"
+            scoped.status != ("absent" if self._absence is not None else "intact")
             or scoped.admission.status != "supported"
             or not captured
             or not _same_current_domain(self._inspection, captured[0][0])
@@ -2054,7 +2072,12 @@ def capture_checkpoint(
             if (
                 type(_owned_export) is not _OwnedReviewExport
                 or boundary != "local"
-                or review_source is None
+                or review_source is None and (
+                    review is None
+                    or review.facts.format_operation.kind != "onboarding"
+                    or source_binding is None
+                    or observed_source is None
+                )
             ):
                 raise OSError("Closed canonical owner export required")
             _owned_export.check(review)

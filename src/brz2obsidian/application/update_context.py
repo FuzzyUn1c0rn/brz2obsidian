@@ -100,9 +100,19 @@ class UpdateContext:
         if kind == "attachment_cleanup":
             result = self._operations.prepare_attachment_cleanup(vault)
         elif kind == "onboarding":
-            result = self._operations.prepare_onboarding(
-                vault, source, original_source=original_source
-            )
+            from .operations import Operations
+
+            if type(self._operations) is Operations:
+                self._owner = self._operations._new_owned_preparation()
+                result = self._owner.prepare(
+                    vault, source, kind=kind, original_source=original_source, cancel=cancel
+                )
+                if result.preparation is None:
+                    self._retire_owner()
+            else:
+                result = self._operations.prepare_onboarding(
+                    vault, source, original_source=original_source
+                )
         elif kind == "format_transition":
             result = self._operations.prepare_format_transition(vault, source)
         elif kind == "source_update":

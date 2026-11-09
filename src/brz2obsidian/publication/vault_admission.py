@@ -265,6 +265,53 @@ def _file_digest(path):
     return value.hexdigest()
 
 
+class _AbsentHistoryObservation:
+    """Actual completed root-Git absence; never a checkpoint or writer grant."""
+
+    def __init__(self, inspection, history):
+        from .vault_history import _Git
+
+        admission = history.admission
+        checkpoint = history.checkpoint
+        if (
+            type(inspection) is not _Inspection
+            or history.status != "absent"
+            or admission.status != "supported"
+            or not admission.inventory_complete
+            or admission.repository.kind != "root"
+            or not inspection.complete
+            or inspection.history is not None
+            or checkpoint is None
+            or checkpoint.status != "absent"
+            or checkpoint.locator is not None
+            or checkpoint.manifest is not None
+            or inspection.linked_intents
+            or inspection.recovery_observation is not None
+            or admission.preflight.operation_status != "idle"
+        ):
+            raise OSError("Completed supported history absence required")
+        self.root = inspection.root
+        self.executable = inspection.executable
+        self.refs = inspection.current_refs
+        self.anchors = verify_directory(self.root), verify_directory(self.root / ".git")
+        self.binary = _file_digest(Path(self.executable))
+        self.check(_Git(self.root, self.executable))
+
+    def check(self, git):
+        from .vault_history import _read
+
+        if (
+            (verify_directory(self.root), verify_directory(self.root / ".git")) != self.anchors
+            or _file_digest(Path(self.executable)) != self.binary
+            or git.call("for-each-ref", "--format=%(refname) %(objectname)") != self.refs
+            or any(_existing_git_operation_blockers(self.root / ".git"))
+            or _exists(self.root / ".brz2obsidian")
+            or _exists(self.root / ".git" / "brz2obsidian")
+            or _read(self.root, git).status != "absent"
+        ):
+            raise OSError("Current history absence or native anchors changed")
+
+
 class _IdleCheckpointObservation:
     """Private completed idle inspection; never accepted by a public writer."""
 

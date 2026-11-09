@@ -48,10 +48,12 @@ class _OwnedPreparation:
         self._tip = None
         self._cancel = _ProducerCancellation()
 
-    def _observe(self, vault, expected=None):
+    def _observe(self, vault, expected=None, *, expected_absent=False):
         fresh = _UpdateRead(vault, _metadata_only=True)
         fresh.__enter__()
         try:
+            if expected_absent and fresh.history.status != "absent":
+                raise OSError("association_or_history_changed")
             if expected is not None and (
                 fresh.history.status != "intact"
                 or fresh.history.checkpoint is None
@@ -173,18 +175,51 @@ class _OwnedPreparation:
         self._session._admit_current(admission, facts)
         return scoped if admission.preflight.consents else history
 
-    def prepare(self, vault, source, *, cancel=None):
+    def _start_session(self):
+        if self._session is None:
+            self._session = ReviewSession._owned_preparation(
+                self.observed, self._directory, lifecycle.available_memory(), _cancel=self._cancel
+            )
+
+    def _plan(self, history, facts):
+        facts = self._session._admit_values(facts)
+        history = self._scoped(history, facts)
+        self._session._coadmit()
+        return history, self._session._drive(PlanWork(facts, history.admission.preflight))
+
+    def prepare(self, vault, source, *, kind="source_update", original_source=None, cancel=None):
         self._cancel.probe = cancel
         try:
-            return self._prepare(vault, source)
+            return self._prepare(vault, source, kind=kind, original_source=original_source)
         finally:
             self._cancel.probe = None
             if self._session is not None and not self._session._closed:
                 self._session._ledger.release_failed()
 
-    def _prepare(self, vault, source):
+    def _prepare(self, vault, source, *, kind, original_source):
+        history = None
         try:
             history = self._observe(vault)
+            if kind == "onboarding":
+                from .onboarding import prepare_onboarding
+
+                if (
+                    history.status != "absent"
+                    or history.admission.status != "supported"
+                    or history.admission.repository.kind != "root"
+                    or not history.admission.inventory_complete
+                    or source is None
+                ):
+                    result = prepare_onboarding(self.operations, vault, source, original_source=original_source)
+                    self.close()
+                    return result
+                self._start_session()
+                with self._session._operation():
+                    result = prepare_onboarding(self.operations, vault, source, original_source=original_source, _owner=self)
+                    self.preparation = result.preparation
+                if result.preparation is None:
+                    self.close()
+                return result
             history, stopped = lifecycle._history(
                 self.operations,
                 vault,
@@ -260,6 +295,10 @@ class _OwnedPreparation:
             return result
         except OSError, ValueError, TypeError, KeyError, RecursionError:
             self.close()
+            if kind == "onboarding":
+                from .onboarding import refused
+
+                return refused("onboarding_unavailable", history)
             return lifecycle._refused(
                 "preparation_unavailable", action="inspect_source_and_history"
             )
@@ -290,8 +329,9 @@ class _OwnedPreparation:
                         "status": "cancelled_before_publication",
                         "ready": False,
                         "publication": "not_published",
-                        "history_retained": True,
-                        "checkpoint_commit": preparation.locator.commit,
+                        "preparation": preparation,
+                        "history_retained": preparation.locator is not None,
+                        "checkpoint_commit": preparation.locator.commit if preparation.locator else None,
                         "next_actions": ("continue_review",),
                     }
                 )
@@ -333,12 +373,13 @@ class _OwnedPreparation:
             from .update_contracts import UpdateResult
 
             return UpdateResult(
+                kind=prepared.kind,
                 status="prepared_review" if transition.plan.ready else "unresolved",
                 code=transition.code,
                 preparation=prepared,
                 ready=transition.status == "accepted" and transition.plan.ready,
-                history_retained=True,
-                checkpoint_commit=prepared.locator.commit,
+                history_retained=prepared.locator is not None,
+                checkpoint_commit=prepared.locator.commit if prepared.locator else None,
                 changes=len(transition.plan.proposal.changes),
                 unresolved=len(transition.plan.requirements),
                 next_actions=("save_update", "refresh_update"),
@@ -371,7 +412,7 @@ class _OwnedPreparation:
 
     def page(self, preparation, **arguments):
         try:
-            self._observe(preparation.vault, preparation.locator)
+            self._observe(preparation.vault, preparation.locator, expected_absent=preparation.locator is None)
             with self._session._operation():
                 plan = self._session._admit_values(preparation.review)
                 self._session._coadmit()
@@ -394,6 +435,13 @@ class _OwnedPreparation:
             )
 
     def _reobserve(self, preparation):
+        if preparation.kind == "onboarding":
+            from .onboarding import reobserve_onboarding
+
+            history, result, _ = reobserve_onboarding(self.operations, preparation, _owner=self)
+            if history is None or result.preparation is None:
+                raise OSError(result.code)
+            return history, result, None
         history = self._observe(preparation.vault, preparation.locator)
         if (
             self.operations.observe_reviewed_source(
@@ -506,8 +554,9 @@ class _OwnedPreparation:
                         "status": "cancelled_before_publication",
                         "ready": False,
                         "publication": "not_published",
-                        "history_retained": True,
-                        "checkpoint_commit": preparation.locator.commit,
+                        "preparation": preparation,
+                        "history_retained": preparation.locator is not None,
+                        "checkpoint_commit": preparation.locator.commit if preparation.locator else None,
                         "next_actions": ("continue_review", "refresh_update"),
                     }
                 )
@@ -623,26 +672,31 @@ class _OwnedPreparation:
                     }
                 )
             export = self._session._freeze_export(current.preparation.review)
-            baseline_directory = self._directory / ("baseline-" + uuid4().hex)
-            with self._session._operation():
-                baseline_directory.mkdir()
-                for path, value in baseline.items():
-                    self._write_content(value, baseline_directory / path)
-                modes = {
-                    row.path: row.mode for row in history.checkpoint.manifest.source
-                }
-                for path, mode in modes.items():
-                    (baseline_directory / path).chmod(
-                        0o755 if mode == "100755" else 0o644
-                    )
+            onboarding = current.preparation.kind == "onboarding"
+            if onboarding:
+                baseline_directory = current.preparation.payload_directory
+            else:
+                baseline_directory = self._directory / ("baseline-" + uuid4().hex)
+                with self._session._operation():
+                    baseline_directory.mkdir()
+                    for path, value in baseline.items():
+                        self._write_content(value, baseline_directory / path)
+                    modes = {
+                        row.path: row.mode for row in history.checkpoint.manifest.source
+                    }
+                    for path, mode in modes.items():
+                        (baseline_directory / path).chmod(
+                            0o755 if mode == "100755" else 0o644
+                        )
             self._session._content._detach()
             self.observed = None
-            association = preparation.locator.association
+            association = preparation.locator.association if preparation.locator else None
+            proposal_id = current.preparation.review.proposal.proposal_id
             captured = self.operations.capture_checkpoint(
                 preparation.vault,
                 baseline_directory,
-                vault_id=association.vault_id,
-                import_id=association.import_id,
+                vault_id=association.vault_id if association else "vault-" + proposal_id,
+                import_id=association.import_id if association else "import-" + proposal_id,
                 identity=current.preparation.review.facts.baseline_identity,
                 admission=history.admission,
                 subjects=lifecycle._subjects(
@@ -653,7 +707,7 @@ class _OwnedPreparation:
                 else (),
                 review=current.preparation.review,
                 source_binding=current.preparation.source_binding,
-                review_source=current.preparation.payload_directory,
+                review_source=None if onboarding else current.preparation.payload_directory,
                 observed_source=current.preparation.observed_source,
                 _owned_export=export,
                 **({"progress": progress} if progress is not None else {}),
@@ -730,8 +784,8 @@ class _OwnedPreparation:
                         "status": "cancelled_before_publication",
                         "publication": "not_published",
                         "preparation": preparation,
-                        "history_retained": True,
-                        "checkpoint_commit": preparation.locator.commit,
+                        "history_retained": preparation.locator is not None,
+                        "checkpoint_commit": preparation.locator.commit if preparation.locator else None,
                         "ready": False,
                         "next_actions": ("continue_review", "save_update"),
                     }
