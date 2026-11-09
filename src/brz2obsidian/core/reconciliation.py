@@ -1,9 +1,11 @@
 """Pure exact-byte reconciliation; interpretation and all I/O belong to callers."""
 
 import json
+from dataclasses import dataclass, replace
 from hashlib import sha256
 
-from brz2obsidian.content_values import require_inline
+from brz2obsidian.content_fingerprints import CompletedWork, drive_inline
+from brz2obsidian.content_values import content_key, content_sha, require_inline
 from brz2obsidian.contracts import (
     ChangeProvenance,
     ProposalAssumption,
@@ -52,11 +54,11 @@ def _dump(value):
 
 
 def _bytes(content):
-    return None if content is None else content.data
+    return content_key(content)
 
 
 def _content_identity(content):
-    return None if content is None else sha256(content.data).hexdigest()
+    return None if content is None else content_sha(content)
 
 
 def _assumptions(facts, subject, subject_id, safety):
@@ -177,277 +179,263 @@ def _proposal(subject):
     return "compatible", subject.incoming, "source_only", True
 
 
-def _reconcile(facts: ReconciliationInput, *, _applicability=()) -> UpdateProposal:
-    """Compare immutable exact versions and return review facts, never write consent.
+def _reconcile_subject(facts, subject, applicability):
+    changes, findings, local_changes, memory = [], [], [], []
+    subject_id = reconciliation_subject_id(
+        facts.incoming_identity.module_id,
+        facts.incoming_identity.collection_id,
+        subject.item_id,
+        subject.facet,
+    )
+    binding = bind_identity(facts, subject, subject_id, applicability=applicability)
+    subject = binding.subject
+    format_review = review_facts(facts, subject)
+    format_choice = format_proposal(facts, subject)
+    structure_problem = (
+        None
+        if subject.structure is None
+        else validate_structure_facts(
+            subject,
+            facts.baseline_identity,
+            facts.incoming_identity,
+            source_version=facts.format_operation.baseline_source_version,
+        )
+    )
+    link_problem = validate_current_link_context(facts, subject)
+    policy_allowed = (
+        facts.format_operation.kind != "attachment_cleanup"
+        and link_problem is None
+        and (
+            (format_review is None and format_choice is None)
+            or configuration_memory_allowed(facts, subject)
+        )
+        and structure_problem is None
+    )
 
-    The explicit safety attestations are outer validated facts, not validations
-    performed here. Missing attestations and unavailable inputs refuse dependent
-    changes. No current or incoming content is decoded or parsed.
-    """
-    facts = ReconciliationInput.model_validate(facts)
-    require_inline(facts)
-    changes, findings, local_changes = [], [], []
-    memory = list(facts.source_version_memory)
-    if not facts.subjects:
-        findings.extend(_findings(facts, None, None, facts.safety_facts))
-    for subject in facts.subjects:
-        subject_id = reconciliation_subject_id(
-            facts.incoming_identity.module_id,
-            facts.incoming_identity.collection_id,
-            subject.item_id,
-            subject.facet,
+    policy = preservation_policy(facts, subject, subject_id, policy_allowed)
+    binary_review, binary_assumptions = attachment_review(facts, subject, subject_id)
+    safety = tuple(
+        sorted(
+            (
+                f
+                for f in facts.safety_facts
+                if not f.subjects or subject.item_id in f.subjects
+            ),
+            key=lambda f: f.key,
         )
-        binding = bind_identity(
-            facts, subject, subject_id, applicability=_applicability
+    )
+    assumptions = (
+        _assumptions(facts, subject, subject_id, safety)
+        + binding.assumptions
+        + (() if binding.rename is None else binding.rename.assumptions)
+        + (policy.assumption,)
+        + binary_assumptions
+        + configuration_assumptions(facts, subject, subject_id)
+        + text_link_assumptions(facts, subject, subject_id, binding.target_path)
+    )
+    problems = _findings(facts, subject, subject_id, safety) + list(binding.findings)
+    if not reversal_safe(facts, subject, binding.target_path):
+        problems.append(
+            ReconciliationFinding(
+                code="unsafe_assumption",
+                subject_id=subject_id,
+                blocking=True,
+                assumption_keys=(f"{subject_id}:reversal",),
+            )
         )
-        subject = binding.subject
-        format_review = review_facts(facts, subject)
-        format_choice = format_proposal(facts, subject)
-        structure_problem = (
-            None
-            if subject.structure is None
-            else validate_structure_facts(
+    if link_problem is not None:
+        problems.append(
+            ReconciliationFinding(
+                code=link_problem,
+                subject_id=subject_id,
+                blocking=True,
+                assumption_keys=(f"links:{subject_id}",),
+            )
+        )
+    findings.extend(problems)
+    preservation_review = policy.review
+    disposition, result, rule, requires_decision = (
+        (policy.proposal if policy_allowed else None)
+        or format_choice
+        or _proposal(subject)
+    )
+    if facts.format_operation.kind == "attachment_cleanup":
+        disposition, result, rule, requires_decision = (
+            ("unresolved", None, "attachment_cleanup", True)
+            if subject.attachment is not None
+            else (
+                "preserve_vault",
+                subject.current.content,
+                "source_unchanged",
+                False,
+            )
+        )
+    if subject.operation_reversal is not None:
+        proof = subject.operation_reversal
+        already_target = all(
+            row.current.existence == row.target_existence
+            and content_bytes(row.current.content) == content_bytes(row.target)
+            for row in proof.outputs
+        )
+        primary = primary_reversal_content(subject)
+        disposition, result, rule, requires_decision = (
+            "local_deleted"
+            if already_target and primary is None
+            else "no_change"
+            if already_target
+            else "operation_reversal",
+            primary if already_target else None,
+            "operation_reversal",
+            not already_target,
+        )
+        preservation_review = None
+        if not any(
+            row.target is not None
+            and content_bytes(row.target) != content_bytes(row.current.content)
+            for row in proof.outputs
+        ):
+            binary_review = None
+    structured_result = None
+    if (
+        subject.structure is not None
+        and subject.interpretation == "supported"
+        and binding.review.status == "matched"
+        and not any(problem.blocking for problem in problems)
+        and rule in ("source_only", "divergent", "already_current")
+    ):
+        (disposition, result, rule, requires_decision), structured_result = (
+            structure_proposal(
                 subject,
                 facts.baseline_identity,
                 facts.incoming_identity,
                 source_version=facts.format_operation.baseline_source_version,
             )
         )
-        link_problem = validate_current_link_context(facts, subject)
-        policy_allowed = (
-            facts.format_operation.kind != "attachment_cleanup"
-            and link_problem is None
-            and (
-                (format_review is None and format_choice is None)
-                or configuration_memory_allowed(facts, subject)
-            )
-            and structure_problem is None
-        )
-
-        policy = preservation_policy(facts, subject, subject_id, policy_allowed)
-        binary_review, binary_assumptions = attachment_review(
-            facts, subject, subject_id
-        )
-        safety = tuple(
-            sorted(
-                (
-                    f
-                    for f in facts.safety_facts
-                    if not f.subjects or subject.item_id in f.subjects
-                ),
-                key=lambda f: f.key,
-            )
-        )
-        assumptions = (
-            _assumptions(facts, subject, subject_id, safety)
-            + binding.assumptions
-            + (() if binding.rename is None else binding.rename.assumptions)
-            + (policy.assumption,)
-            + binary_assumptions
-            + configuration_assumptions(facts, subject, subject_id)
-            + text_link_assumptions(facts, subject, subject_id, binding.target_path)
-        )
-        problems = _findings(facts, subject, subject_id, safety) + list(
-            binding.findings
-        )
-        if not reversal_safe(facts, subject, binding.target_path):
-            problems.append(
-                ReconciliationFinding(
-                    code="unsafe_assumption",
-                    subject_id=subject_id,
-                    blocking=True,
-                    assumption_keys=(f"{subject_id}:reversal",),
-                )
-            )
-        if link_problem is not None:
-            problems.append(
-                ReconciliationFinding(
-                    code=link_problem,
-                    subject_id=subject_id,
-                    blocking=True,
-                    assumption_keys=(f"links:{subject_id}",),
-                )
-            )
-        findings.extend(problems)
-        preservation_review = policy.review
-        disposition, result, rule, requires_decision = (
-            (policy.proposal if policy_allowed else None)
-            or format_choice
-            or _proposal(subject)
-        )
-        if facts.format_operation.kind == "attachment_cleanup":
-            disposition, result, rule, requires_decision = (
-                ("unresolved", None, "attachment_cleanup", True)
-                if subject.attachment is not None
-                else (
-                    "preserve_vault",
-                    subject.current.content,
-                    "source_unchanged",
-                    False,
-                )
-            )
-        if subject.operation_reversal is not None:
-            proof = subject.operation_reversal
-            already_target = all(
-                row.current.existence == row.target_existence
-                and content_bytes(row.current.content) == content_bytes(row.target)
-                for row in proof.outputs
-            )
-            primary = primary_reversal_content(subject)
-            disposition, result, rule, requires_decision = (
-                "local_deleted"
-                if already_target and primary is None
-                else "no_change"
-                if already_target
-                else "operation_reversal",
-                primary if already_target else None,
-                "operation_reversal",
-                not already_target,
-            )
-            preservation_review = None
-            if not any(
-                row.target is not None
-                and content_bytes(row.target) != content_bytes(row.current.content)
-                for row in proof.outputs
-            ):
-                binary_review = None
+    if (
+        structure_problem is not None
+        and format_review is None
+        and format_choice is None
+    ):
         structured_result = None
-        if (
-            subject.structure is not None
-            and subject.interpretation == "supported"
+        disposition, result, rule, requires_decision = (
+            "unresolved",
+            None,
+            structure_problem,
+            True,
+        )
+    if binding.review.status != "matched":
+        disposition, result, rule, requires_decision = (
+            "identity_resolution",
+            None,
+            "identity_resolution",
+            True,
+        )
+    if binding.review.status == "stale":
+        disposition = "stale"
+    if binding.rename is not None and binding.rename.status == "stale":
+        structured_result = None
+        disposition, result, rule, requires_decision = (
+            "stale",
+            None,
+            "rename_review",
+            True,
+        )
+    if any(problem.blocking for problem in problems):
+        structured_result = None
+        disposition, result, rule, requires_decision = (
+            "refused",
+            None,
+            "unsafe_input",
+            True,
+        )
+    if (
+        subject.baseline.status == "known"
+        and subject.current.existence != "unknown"
+        and _bytes(subject.current.content) != _bytes(subject.baseline.content)
+    ):
+        local_changes.append(subject_id)
+    change_id = _digest(
+        (
+            subject_id,
+            [(a.key, a.fingerprint) for a in assumptions],
+            binding.target_path,
+        )
+    )
+    decision, preservation_review, remembered, decision_findings = (
+        preservation_decision(
+            facts,
+            subject,
+            subject_id,
+            change_id,
+            assumptions,
+            preservation_review,
+            policy_allowed
             and binding.review.status == "matched"
             and not any(problem.blocking for problem in problems)
-            and rule in ("source_only", "divergent", "already_current")
-        ):
-            (disposition, result, rule, requires_decision), structured_result = (
-                structure_proposal(
-                    subject,
-                    facts.baseline_identity,
-                    facts.incoming_identity,
-                    source_version=facts.format_operation.baseline_source_version,
+            and disposition != "stale",
+        )
+    )
+    findings.extend(decision_findings)
+    if decision is not None and not any(problem.blocking for problem in problems):
+        disposition, result, rule, requires_decision = decision
+        structured_result = None
+    if remembered is not None:
+        memory.append(remembered)
+    changes.append(
+        ProposedChange(
+            change_id=change_id,
+            subject_id=subject_id,
+            item_id=subject.item_id,
+            facet=subject.facet,
+            path=subject.current.path,
+            target_path=binding.target_path,
+            original=subject.baseline.content,
+            current=subject.current.content,
+            incoming=subject.incoming
+            if subject.operation_reversal is None
+            else primary_reversal_content(subject, reverse=True),
+            result=result,
+            disposition=disposition,
+            requires_decision=requires_decision,
+            provenance=ChangeProvenance(
+                producer="operation-reversal/v1"
+                if rule == "operation_reversal"
+                else "identity-review/v1"
+                if rule in ("identity_resolution", "rename_review")
+                else "structure/v1"
+                if rule.startswith("structure_")
+                else "preservation/v1"
+                if rule
+                in (
+                    "source_absent",
+                    "local_deleted",
+                    "restoration_required",
+                    "remembered_keep",
+                    "remembered_decline",
+                    "preservation_decision",
                 )
-            )
-        if (
-            structure_problem is not None
-            and format_review is None
-            and format_choice is None
-        ):
-            structured_result = None
-            disposition, result, rule, requires_decision = (
-                "unresolved",
-                None,
-                structure_problem,
-                True,
-            )
-        if binding.review.status != "matched":
-            disposition, result, rule, requires_decision = (
-                "identity_resolution",
-                None,
-                "identity_resolution",
-                True,
-            )
-        if binding.review.status == "stale":
-            disposition = "stale"
-        if binding.rename is not None and binding.rename.status == "stale":
-            structured_result = None
-            disposition, result, rule, requires_decision = (
-                "stale",
-                None,
-                "rename_review",
-                True,
-            )
-        if any(problem.blocking for problem in problems):
-            structured_result = None
-            disposition, result, rule, requires_decision = (
-                "refused",
-                None,
-                "unsafe_input",
-                True,
-            )
-        if (
-            subject.baseline.status == "known"
-            and subject.current.existence != "unknown"
-            and _bytes(subject.current.content) != _bytes(subject.baseline.content)
-        ):
-            local_changes.append(subject_id)
-        change_id = _digest(
-            (
-                subject_id,
-                [(a.key, a.fingerprint) for a in assumptions],
-                binding.target_path,
-            )
+                else "format-review/v1"
+                if format_review is not None
+                else "exact-bytes/v1",
+                rule=rule,
+            ),
+            assumptions=assumptions,
+            decision_dependencies=(f"identity-repair:{subject_id}",)
+            if binding.review.repair_required
+            else (),
+            source_version=_content_identity(subject.incoming),
+            format_review=format_review,
+            preservation_review=preservation_review,
+            attachment_review=binary_review,
+            identity_review=binding.review,
+            rename_review=binding.rename,
+            structure_result=structured_result,
         )
-        decision, preservation_review, remembered, decision_findings = (
-            preservation_decision(
-                facts,
-                subject,
-                subject_id,
-                change_id,
-                assumptions,
-                preservation_review,
-                policy_allowed
-                and binding.review.status == "matched"
-                and not any(problem.blocking for problem in problems)
-                and disposition != "stale",
-            )
-        )
-        findings.extend(decision_findings)
-        if decision is not None and not any(problem.blocking for problem in problems):
-            disposition, result, rule, requires_decision = decision
-            structured_result = None
-        if remembered is not None:
-            memory.append(remembered)
-        changes.append(
-            ProposedChange(
-                change_id=change_id,
-                subject_id=subject_id,
-                item_id=subject.item_id,
-                facet=subject.facet,
-                path=subject.current.path,
-                target_path=binding.target_path,
-                original=subject.baseline.content,
-                current=subject.current.content,
-                incoming=subject.incoming
-                if subject.operation_reversal is None
-                else primary_reversal_content(subject, reverse=True),
-                result=result,
-                disposition=disposition,
-                requires_decision=requires_decision,
-                provenance=ChangeProvenance(
-                    producer="operation-reversal/v1"
-                    if rule == "operation_reversal"
-                    else "identity-review/v1"
-                    if rule in ("identity_resolution", "rename_review")
-                    else "structure/v1"
-                    if rule.startswith("structure_")
-                    else "preservation/v1"
-                    if rule
-                    in (
-                        "source_absent",
-                        "local_deleted",
-                        "restoration_required",
-                        "remembered_keep",
-                        "remembered_decline",
-                        "preservation_decision",
-                    )
-                    else "format-review/v1"
-                    if format_review is not None
-                    else "exact-bytes/v1",
-                    rule=rule,
-                ),
-                assumptions=assumptions,
-                decision_dependencies=(f"identity-repair:{subject_id}",)
-                if binding.review.repair_required
-                else (),
-                source_version=_content_identity(subject.incoming),
-                format_review=format_review,
-                preservation_review=preservation_review,
-                attachment_review=binary_review,
-                identity_review=binding.review,
-                rename_review=binding.rename,
-                structure_result=structured_result,
-            )
-        )
+    )
+    return changes[0], tuple(findings), tuple(local_changes), tuple(memory)
+
+
+def _finish_reconciliation(facts, changes, findings, local_changes, memory):
     readiness = (
         "refused"
         if any(finding.blocking for finding in findings)
@@ -470,6 +458,62 @@ def _reconcile(facts: ReconciliationInput, *, _applicability=()) -> UpdatePropos
     )
 
 
+@dataclass(frozen=True)
+class ReconcileWork:
+    facts: ReconciliationInput
+    applicability: tuple = ()
+    index: int = -1
+    changes: tuple = ()
+    findings: tuple = ()
+    local_changes: tuple = ()
+    memory: tuple = ()
+
+
+def advance_reconciliation(work, returned=None):
+    if returned is not None:
+        raise ValueError("Unexpected reconciliation child result")
+    if work.index == -1:
+        facts = ReconciliationInput.model_validate(work.facts)
+        return replace(
+            work,
+            facts=facts,
+            index=0,
+            memory=facts.source_version_memory,
+            findings=()
+            if facts.subjects
+            else tuple(_findings(facts, None, None, facts.safety_facts)),
+        )
+    if work.index == len(work.facts.subjects):
+        return CompletedWork(
+            _finish_reconciliation(
+                work.facts,
+                work.changes,
+                work.findings,
+                work.local_changes,
+                work.memory,
+            )
+        )
+    change, problems, local, remembered = _reconcile_subject(
+        work.facts,
+        work.facts.subjects[work.index],
+        work.applicability,
+    )
+    return replace(
+        work,
+        index=work.index + 1,
+        changes=work.changes + (change,),
+        findings=work.findings + problems,
+        local_changes=work.local_changes + local,
+        memory=work.memory + remembered,
+    )
+
+
+def _reconcile(facts: ReconciliationInput, *, _applicability=()) -> UpdateProposal:
+    return drive_inline(ReconcileWork(facts, _applicability))
+
+
 def reconcile(facts: ReconciliationInput) -> UpdateProposal:
     """Prepare facts with strict current-epoch producer decision admission."""
+    facts = ReconciliationInput.model_validate(facts)
+    require_inline(facts)
     return _reconcile(facts)

@@ -581,11 +581,11 @@ class _Inspection:
                     "Review subjects must name safe vault-relative paths.",
                 )
                 return False
-        if len({s.path for s in self.subjects}) != len(self.subjects):
+        if len({(s.path, s.subject_id) for s in self.subjects}) != len(self.subjects):
             self.finding(
                 "duplicate_subject",
                 "inventory",
-                "Review subjects must identify unique paths.",
+                "Review subjects must identify unique path-and-subject pairs.",
             )
             return False
         gitdir = root / ".git"

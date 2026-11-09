@@ -1152,7 +1152,7 @@ def test_unknown_access_environment_and_resource_observations_never_claim_deleti
 def test_admission_records_reject_unsupported_duplicate_unknown_and_inconsistent_fields(
     vault,
 ):
-    from brz2obsidian.application.vault_contracts import VaultAdmission
+    from brz2obsidian.application.vault_contracts import VaultAdmission, VaultSubject
 
     (vault / "note.md").write_bytes(b"one known file")
     result = inspect(vault)
@@ -1185,6 +1185,10 @@ def test_admission_records_reject_unsupported_duplicate_unknown_and_inconsistent
     )
     assert invalid.status == "refused"
     assert invalid.findings[0].code == "unsafe_subject"
+    subject = VaultSubject(path="note.md", subject_id="reviewed-note")
+    duplicate_subject = inspect(vault, subjects=(subject, subject))
+    assert duplicate_subject.status == "refused"
+    assert duplicate_subject.findings[0].code == "duplicate_subject"
 
 
 def test_fresh_process_policy_view_never_allocates_inside_the_vault(vault):

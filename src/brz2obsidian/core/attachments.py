@@ -3,6 +3,7 @@
 import json
 from hashlib import sha256
 
+from brz2obsidian.content_values import content_sha
 from brz2obsidian.contracts import (
     AttachmentAlternative,
     AttachmentOutput,
@@ -15,7 +16,7 @@ from .link_meanings import associated_link_reviews
 
 
 def _hash(content):
-    return None if content is None else sha256(content.data).hexdigest()
+    return None if content is None else content_sha(content)
 
 
 def _allocation_path(subject, ordinal):

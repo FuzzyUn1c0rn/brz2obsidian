@@ -1,5 +1,7 @@
 """Selected appearance-chain safety over bound normalized file identities."""
 
+from brz2obsidian.content_values import content_size
+
 from .link_meanings import resolve_link_meaning
 
 
@@ -27,7 +29,7 @@ def _icon_problem(state, targets, states):
         or not asset.file_roles.image_path
         or asset.existence != "present"
         or asset.content is None
-        or not asset.content.data
+        or not content_size(asset.content)
     ):
         return (
             "icon_target",

@@ -1,10 +1,13 @@
 """Scoped immutable evidence for an admitted exact binary/link choice."""
 
-import json
-from hashlib import sha256
-
+from brz2obsidian.content_fingerprints import (
+    consume_fingerprint,
+    fingerprint_request,
+    inline_fingerprint,
+)
+from brz2obsidian.content_values import same_content
 from brz2obsidian.contracts import ProposalAssumption
-from brz2obsidian.core.attachment_validation import validate_attachment_candidate
+from brz2obsidian.core.attachment_validation import _validate_attachment_candidate
 
 
 def _selected_target_ids(facts, selection, candidate):
@@ -22,7 +25,17 @@ def _selected_target_ids(facts, selection, candidate):
     return target_ids
 
 
-def attachment_candidate_assumption(facts, change, selection, candidate, decision_id):
+def attachment_candidate_request(
+    facts,
+    change,
+    selection,
+    candidate,
+    decision_id,
+    *,
+    prefix=(),
+    epoch=0,
+    context=None,
+):
     current = {d.document_id: d for d in facts.link_context.current_documents}
     relevant = {r.document_id for r in change.attachment_review.links} | {
         c.document_id for c in selection.link_choices
@@ -32,7 +45,7 @@ def attachment_candidate_assumption(facts, change, selection, candidate, decisio
         for d in candidate.documents
         if d.document_id in relevant
         or d.document_id not in current
-        or d.content.data != current[d.document_id].content.data
+        or not same_content(d.content, current[d.document_id].content)
     )
     target_ids = _selected_target_ids(facts, selection, candidate)
     target_ids.update(
@@ -43,29 +56,66 @@ def attachment_candidate_assumption(facts, change, selection, candidate, decisio
         if t is not None
     )
     payload = {
-        "selection": selection.model_dump(mode="json"),
-        "outputs": [o.model_dump(mode="json") for o in candidate.outputs],
-        "documents": [d.model_dump(mode="json") for d in documents],
-        "targets": [
-            t.model_dump(mode="json")
-            for t in candidate.targets
-            if t.target_id in target_ids
-        ],
+        "selection": selection,
+        "outputs": candidate.outputs,
+        "documents": documents,
+        "targets": [t for t in candidate.targets if t.target_id in target_ids],
         "target_facts": [
-            t.model_dump(mode="json")
-            for t in candidate.target_facts
-            if t.target_id in target_ids
+            t for t in candidate.target_facts if t.target_id in target_ids
         ],
     }
+    return fingerprint_request(
+        payload,
+        dialect="Js",
+        scope=(
+            "attachment-candidate",
+            facts.proposal_id,
+            facts.generation,
+            change.subject_id,
+            decision_id,
+            prefix,
+        ),
+        epoch=epoch,
+        context=context,
+    )
+
+
+def attachment_candidate_assumption(
+    facts,
+    change,
+    selection,
+    candidate,
+    decision_id,
+    *,
+    prefix=(),
+    epoch=0,
+    result=None,
+    request=None,
+):
+    if request is None:
+        if result is not None:
+            raise ValueError(
+                "A supplied fingerprint result requires its exact issued request"
+            )
+        request = attachment_candidate_request(
+            facts,
+            change,
+            selection,
+            candidate,
+            decision_id,
+            prefix=prefix,
+            epoch=epoch,
+        )
+    result = inline_fingerprint(request) if result is None else result
     return ProposalAssumption(
         key="review-attachment:" + decision_id,
         kind="candidate",
-        fingerprint=sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest(),
+        fingerprint=consume_fingerprint(request, result),
         depends_on=tuple(a.key for a in change.assumptions),
     )
 
 
-def attachment_selection_valid(facts, change, action, choice):
+def _attachment_selection_matches(facts, change, action, choice):
     selection, candidate = action.attachment_selection, action.attachment_candidate
     return (
         selection is not None
@@ -88,7 +138,17 @@ def attachment_selection_valid(facts, change, action, choice):
             change.change_id,
             action.reviewed_assumptions,
         )
-        and validate_attachment_candidate(facts, selection, candidate).valid
+    )
+
+
+def attachment_selection_valid(facts, change, action, choice):
+    return (
+        _attachment_selection_matches(facts, change, action, choice)
+        and _validate_attachment_candidate(
+            facts,
+            action.attachment_selection,
+            action.attachment_candidate,
+        ).valid
     )
 
 
@@ -102,7 +162,7 @@ def applicable_approvals(approvals, applicability):
     )
 
 
-def retained_attachment_view(facts, selection, candidate, original_facts):
+def retained_attachment_inputs(facts, selection, candidate, original_facts):
     """Rebind unrelated proof observations without changing originally selected writes."""
     from .review_effects import current_note_coverage
     from .review_links import current_observation_problem
@@ -142,8 +202,16 @@ def retained_attachment_view(facts, selection, candidate, original_facts):
         update={"targets": targets, "target_facts": states, "documents": documents}
     )
     observed_epoch = facts.model_copy(update={"generation": selection.generation})
+    return observed_epoch, view
+
+
+def retained_attachment_view(facts, selection, candidate, original_facts):
+    inputs = retained_attachment_inputs(facts, selection, candidate, original_facts)
+    if inputs is None:
+        return None
+    observed_epoch, view = inputs
     return (
         view
-        if validate_attachment_candidate(observed_epoch, selection, view).valid
+        if _validate_attachment_candidate(observed_epoch, selection, view).valid
         else None
     )

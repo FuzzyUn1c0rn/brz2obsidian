@@ -4,10 +4,13 @@ import json
 import unicodedata
 from hashlib import sha256
 
+from brz2obsidian.content_values import content_key, content_sha, same_content
 from brz2obsidian.contracts import (
     AssociatedLinkReview,
+    InlineExactContent,
     LinkMeaning,
     LinkQuery,
+    OpaqueContent,
     ProposalAssumption,
     ReferenceTarget,
 )
@@ -28,7 +31,7 @@ def resolve_link_meaning(query, display, fragment, targets, target_facts, invent
             path=None if target is None else target.canonical_path,
             target_version=None
             if state is None or state.content is None
-            else sha256(state.content.data).hexdigest(),
+            else content_sha(state.content),
             display_text=display,
             fragment=fragment,
             candidates=tuple(sorted(t.target_id for t in matches)),
@@ -115,8 +118,8 @@ def resolve_occurrence(occurrence, targets, target_facts, inventory):
 
 def _semantic(value):
     if hasattr(value, "model_dump"):
-        if hasattr(value, "data"):
-            return {"available_sha256": sha256(value.data).hexdigest()}
+        if isinstance(value, (InlineExactContent, OpaqueContent)):
+            return {"available_sha256": content_sha(value)}
         result = {
             name: _semantic(getattr(value, name))
             for name in type(value).model_fields
@@ -224,7 +227,7 @@ def associated_link_reviews(facts, subject, subject_id, both_outputs):
                     for state in context.incoming_target_facts
                     if state.target_id == association
                     and state.content is not None
-                    and state.content.data == output.content.data
+                    and same_content(state.content, output.content)
                 )
                 slots = tuple(
                     slot
@@ -363,8 +366,7 @@ def validate_current_link_context(facts, subject):
         if (
             len(observed) != 1
             or not observed_existence(entry.current, observed[0])
-            or (None if observed[0].content is None else observed[0].content.data)
-            != (None if entry.current.content is None else entry.current.content.data)
+            or content_key(observed[0].content) != content_key(entry.current.content)
         ):
             return "link_context_invalid"
         if record.kind != "resource" and entry.current.existence == "present":
@@ -372,7 +374,7 @@ def validate_current_link_context(facts, subject):
                 d
                 for d in context.current_documents
                 if d.source_path == entry.current.path
-                and d.content.data == entry.current.content.data
+                and same_content(d.content, entry.current.content)
             )
             if len(docs) != 1:
                 return "link_context_unavailable"
@@ -394,8 +396,7 @@ def validate_current_link_context(facts, subject):
         target.kind != "resource"
         or target.canonical_path != subject.current.path
         or not observed_existence(subject.current, state)
-        or (None if state.content is None else state.content.data)
-        != (None if subject.current.content is None else subject.current.content.data)
+        or content_key(state.content) != content_key(subject.current.content)
     ):
         return "link_context_invalid"
     from .link_validation import validate_link_target_state
@@ -435,7 +436,7 @@ def validate_current_link_context(facts, subject):
         if (
             len(entries) != 1
             or entries[0].current.content is None
-            or entries[0].current.content.data != doc.content.data
+            or not same_content(entries[0].current.content, doc.content)
         ):
             return "link_context_invalid"
         if doc.inventory != "complete" or doc.status != "supported":

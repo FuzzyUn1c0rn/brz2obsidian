@@ -2,6 +2,7 @@
 
 from typing import NamedTuple
 
+from brz2obsidian.content_values import content_key, same_content
 from brz2obsidian.contracts import ReferenceTarget, SelectedReviewEffects
 
 from .identity import _paths_collide, _target_safe
@@ -50,7 +51,7 @@ def cleanup_removal_continuation(facts, subject):
 
 
 def content_bytes(content):
-    return None if content is None else content.data
+    return content_key(content)
 
 
 def reversal_subject(facts, change):
@@ -212,7 +213,7 @@ def reversal_document_target(subject):
         or row.target_id != subject.item_id
         or row.produced is None
         or row.target is None
-        or row.produced.data == row.target.data
+        or same_content(row.produced, row.target)
         or subject.incoming != row.target
         or (target.target_id, target.canonical_path) != (row.target_id, row.path)
         or target.kind != "note"

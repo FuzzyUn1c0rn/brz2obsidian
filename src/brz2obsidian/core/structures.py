@@ -3,6 +3,7 @@
 import json
 from hashlib import sha256
 
+from brz2obsidian.content_values import content_sha, same_content
 from brz2obsidian.contracts import (
     ExactContent,
     ProposalAssumption,
@@ -54,7 +55,7 @@ def validate_structure_facts(
 
     if any(
         content is None
-        or doc.content.data != content.data
+        or not same_content(doc.content, content)
         or doc.output_format != version
         for doc, content, version in zip(
             documents,
@@ -88,12 +89,32 @@ def validate_structure_facts(
     # separately; an unsafe unchosen incoming alternative cannot veto safe keep.
     try:
         if comparison.alignment == "supported":
-            bodies = tuple(d.content.data[d.body.start : d.body.end] for d in documents)
-            if (
-                _apply(bodies[0], comparison.local_edits) != bodies[1]
-                or _apply(bodies[0], comparison.source_edits) != bodies[2]
+            for document, edits in (
+                (documents[1], comparison.local_edits),
+                (documents[2], comparison.source_edits),
             ):
-                return "structure_unbound"
+                original = documents[0]
+                if isinstance(original.content, ExactContent) and isinstance(
+                    document.content, ExactContent
+                ):
+                    before = original.content.data[
+                        original.body.start : original.body.end
+                    ]
+                    after = document.content.data[
+                        document.body.start : document.body.end
+                    ]
+                    if _apply(before, edits) != after:
+                        return "structure_unbound"
+                elif (
+                    edits
+                    or original.body.start != 0
+                    or document.body.start != 0
+                    or not same_content(original.content, document.content)
+                ):
+                    # For a whole body, _apply(body, ()) is exactly the owned
+                    # whole-version byte correspondence. Edited operands still
+                    # require actual available bytes; no status shortcut.
+                    return "structure_unbound"
         for index, document in enumerate(documents):
             validate_memberships(
                 document, target_safety=current_target_safety and index == 1
@@ -318,7 +339,7 @@ def structure_assumption(comparison):
         doc = getattr(comparison, name)
         values[name] = _semantic(doc)
         values[name].pop("content")
-        values[name]["content_sha256"] = sha256(doc.content.data).hexdigest()
+        values[name]["content_sha256"] = content_sha(doc.content)
     return values
 
 

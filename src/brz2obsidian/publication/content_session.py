@@ -4,19 +4,27 @@ The observation still admits legacy reviews eagerly. Neither this session nor a
 transport reference grants review, tracking, or publication authority.
 """
 
+import hashlib
 import os
 import shutil
 import stat
 import tempfile
 import time
+from contextlib import closing
 from dataclasses import dataclass
+from itertools import zip_longest
 from pathlib import Path
 from threading import Event
+from types import MappingProxyType
 from uuid import uuid4
 
 from brz2obsidian.application.checkpoint_contracts import CheckpointLocator
 from brz2obsidian.contracts import ImmutableContentReference
-from brz2obsidian.publication.vault_native import observe_file, verify_directory
+from brz2obsidian.publication.vault_native import (
+    _observed_chunks,
+    observe_file,
+    verify_directory,
+)
 
 
 class _Transfer:
@@ -70,6 +78,53 @@ class VerifiedStage:
     mode: str
 
 
+@dataclass(frozen=True, eq=False)
+class _PreparedRegistration:
+    session: object
+    reference: ImmutableContentReference
+    backing: Path
+    mode: str
+    origin: tuple
+    published_input: bool = False
+
+
+@dataclass(frozen=True, init=False)
+class _RegistrationView:
+    """Closed view of actual owner-minted records, never caller path mappings."""
+
+    session: object
+    scope: object
+    records: object
+
+    def __init__(self, session, records, scope):
+        if type(session) is not ContentSession:
+            raise OSError("Actual content owner required")
+        session._require_private_scope(scope)
+        rows = {}
+        for record in records:
+            session._check_prepared(record, scope)
+            previous = rows.get(record.reference.content_id)
+            if previous is not None and previous is not record:
+                raise OSError("Conflicting prepared registration")
+            rows[record.reference.content_id] = record
+        object.__setattr__(self, "session", session)
+        object.__setattr__(self, "scope", scope)
+        object.__setattr__(self, "records", MappingProxyType(rows))
+
+    def check(self, session):
+        if session is not self.session:
+            raise OSError("Registration view belongs to another owner")
+        self.session._require_private_scope(self.scope)
+
+    def resolve(self, reference):
+        self.check(self.session)
+        record = self.records.get(reference.content_id)
+        if record is None or record.reference != reference:
+            raise OSError("Content is outside the verified registration view")
+        self.session._check_prepared(record, self.scope)
+        return record.reference, record.backing, record.mode
+
+
 class ContentSession:
     """Lexical snapshots obtained from a live ``inspect_update_inputs`` reader.
 
@@ -99,6 +154,9 @@ class ContentSession:
         self._files = {}
         self._values = {}
         self._digests = {}
+        self._private_operation = None
+        self._prepared = {}
+        self._prepared_digests = {}
 
     def __enter__(self):
         self._check()
@@ -116,15 +174,188 @@ class ContentSession:
 
     def _new_file(self):
         path = self._directory / uuid4().hex
-        stream = path.open("xb")
+        stream = path.open("xb", buffering=0)
         info = os.fstat(stream.fileno())
         self._files[path] = (info.st_dev, info.st_ino)
         return path, stream
+
+    def _operation(self, ledger):
+        return _PrivateOperation(self, ledger)
+
+    def _begin_decoded(self, record, occurrence, ledger, scope):
+        """Private untrusted-byte ingress, never a path/manifest admission API."""
+        scope.check(self)
+        ledger.check()
+        if type(record) is not str or not record or type(occurrence) is not tuple:
+            raise OSError("Invalid decoded-input origin")
+        return _DecodedImport(self, record, occurrence, ledger, scope)
+
+    def _prepare_decoded(self, record, occurrence, ledger, scope):
+        self._require_private_scope(scope, ledger)
+        if type(record) is not str or not record or type(occurrence) is not tuple:
+            raise OSError("Invalid decoded-input origin")
+        return _DecodedImport(self, record, occurrence, ledger, scope, prepare=True)
+
+    def _begin_created(self, request, occurrence, ledger, scope):
+        from brz2obsidian.content_fingerprints import CreatedRequest
+
+        self._require_private_scope(scope, ledger)
+        if type(request) is not CreatedRequest or request.token.kind != "created":
+            raise OSError("Actual Created request required")
+        if type(request.size) is not int or not 0 <= request.size <= ledger.remaining(
+            "decoded"
+        ):
+            raise OSError("Created output exceeds remaining generated-byte credit")
+        self._budget(request.size, request.size)
+        return _DecodedImport(
+            self, "created", occurrence, ledger, scope, prepare=True, created=request
+        )
+
+    def _check_prepared(self, record, scope):
+        self._require_private_scope(scope)
+        if (
+            type(record) is not _PreparedRegistration
+            or record.session is not self
+            or self._prepared.get(record.reference.content_id) is not record
+        ):
+            raise OSError("Registration was not prepared by this content owner")
+        info = record.backing.lstat()
+        if self._files.get(record.backing) != (info.st_dev, info.st_ino):
+            raise OSError("Prepared backing identity changed")
+        if record.published_input and self._values.get(record.reference.content_id) != (
+            record.reference,
+            record.backing,
+            record.mode,
+            record.origin,
+        ):
+            raise OSError("Physical registration origin changed")
+
+    def _prepare_registered(self, reference, ledger, scope):
+        self._require_private_scope(scope, ledger)
+        self._registered(reference)
+        previous = self._prepared.get(reference.content_id)
+        if previous is not None:
+            self._check_prepared(previous, scope)
+            return previous
+        ledger.retain_metadata(512)
+        row = self._values[reference.content_id]
+        record = _PreparedRegistration(self, *row, published_input=True)
+        self._prepared[reference.content_id] = record
+        return record
+
+    def _registration_view(self, records, ledger, scope):
+        self._require_private_scope(scope, ledger)
+        ledger.retain_metadata(512 + 80 * len(records))
+        return _RegistrationView(self, records, scope)
+
+    def _require_private_scope(self, scope, ledger=None):
+        if (
+            type(self) is not ContentSession
+            or type(scope) is not _PrivateOperation
+            or scope.session is not self
+            or ledger is not None
+            and scope.ledger is not ledger
+        ):
+            raise OSError("Actual live owned content operation required")
+        scope.check(self)
+
+    def _read_owned(self, backing, reference, ledger, scope):
+        scope.check(self)
+        ledger.check()
+        ledger.raw_pass(reference.size)
+
+        def chunks():
+            scope.check(self)
+            ledger.check()
+            expected = self._files.get(backing)
+            info = backing.lstat()
+            if (info.st_dev, info.st_ino) != expected:
+                raise OSError("Owned backing identity changed")
+            with closing(
+                _observed_chunks(
+                    self._directory,
+                    backing,
+                    expected_size=reference.size,
+                    read_chunk_limit=65536,
+                )
+            ) as observed:
+                while True:
+                    ledger.check()
+                    try:
+                        block = next(observed)
+                    except StopIteration as complete:
+                        info, digest, _ = complete.value
+                        if (
+                            info.st_dev,
+                            info.st_ino,
+                        ) != expected or digest != reference.sha256:
+                            raise OSError("Registered content integrity failed")
+                        break
+                    yield block
+            scope.check(self)
+            ledger.check()
+
+        # Reserve this complete pass at construction, including when a second
+        # reader will be constructed before either stream starts consuming.
+        return chunks()
+
+    def _stage_decoded(self, reference, ledger, scope):
+        reference, backing, mode = scope.resolve(reference)
+        self._budget(reference.size, reference.size)
+        ledger.reserve_file_cleanup()
+        path, output = self._new_file()
+        with (
+            output,
+            closing(self._read_owned(backing, reference, ledger, scope)) as chunks,
+        ):
+            for block in chunks:
+                if output.write(block) != len(block):
+                    raise OSError("Incomplete stage write")
+            output.flush()
+            os.fsync(output.fileno())
+        with closing(self._read_owned(path, reference, ledger, scope)) as chunks:
+            for _ in chunks:
+                pass
+        return VerifiedStage(path, reference, mode)
 
     def acquire(
         self, path, *, byte_limit, role="current", locator=None, timeout=30, cancel=None
     ):
         """Snapshot an admitted origin; caller declarations confer no trust."""
+        return self._acquire(
+            path,
+            byte_limit=byte_limit,
+            role=role,
+            locator=locator,
+            timeout=timeout,
+            cancel=cancel,
+        )
+
+    def _acquire_current(self, path, ledger, scope):
+        """Current acquisition with cumulative native read-capacity accounting."""
+        scope.check(self)
+        return self._acquire(
+            path,
+            byte_limit=ledger.remaining("raw_work"),
+            role="current",
+            timeout=max(0.001, ledger.deadline - time.monotonic()),
+            cancel=ledger.budget.cancel,
+            ledger=ledger,
+            scope=scope,
+        )
+
+    def _acquire(
+        self,
+        path,
+        *,
+        byte_limit,
+        role,
+        locator=None,
+        timeout=30,
+        cancel=None,
+        ledger=None,
+        scope=None,
+    ):
         transfer = _Transfer(timeout=timeout, cancel=cancel)
         self._check()
         transfer.check()
@@ -149,15 +380,22 @@ class ContentSession:
         if row is None or getattr(row, "exclusion", None) in ("cache", "temporary"):
             raise OSError("Content path is unavailable in the admitted origin")
         self._budget(row.size, byte_limit)
+        if ledger is not None:
+            ledger.reserve_file_cleanup()
         backing, output = self._new_file()
         with output:
             sink = transfer.sink(output, row.size)
             if role == "current":
+                bounded = {}
+                if ledger is not None:
+                    ledger.raw_pass(row.size)
+                    bounded = {"expected_size": row.size, "read_chunk_limit": 65536}
                 info, digest, _, identity = observe_file(
                     self._observation._root,
                     self._observation._root / row.path,
                     prefix_limit=0,
                     sink=sink,
+                    **bounded,
                 )
                 mode = (
                     "100755"
@@ -188,23 +426,31 @@ class ContentSession:
             os.fsync(output.fileno())
         self._check()
         transfer.check()
-        self._copy(row, backing, _Discard(), transfer)
+        if ledger is None:
+            self._copy(row, backing, _Discard(), transfer)
+        else:
+            with closing(self._read_owned(backing, row, ledger, scope)) as chunks:
+                for _ in chunks:
+                    pass
         previous = self._digests.get(row.sha256)
         if previous is not None:
             previous_ref, previous_backing = previous
             if previous_ref.size != row.size:
                 raise OSError("Content digest has contradictory sizes")
-            with backing.open("rb") as stream:
-
-                class Compare:
-                    def write(self, block):
-                        if stream.read(len(block)) != block:
+            if ledger is not None:
+                with (
+                    closing(self._read_owned(backing, row, ledger, scope)) as left,
+                    closing(
+                        self._read_owned(previous_backing, previous_ref, ledger, scope)
+                    ) as right,
+                ):
+                    for a, b in zip_longest(left, right):
+                        if a != b:
                             raise OSError("Content digest has unequal exact bytes")
-                        return len(block)
-
-                self._copy(previous_ref, previous_backing, Compare(), transfer)
-                if stream.read(1):
-                    raise OSError("Content digest has unequal exact lengths")
+            else:
+                self._compare_backings(
+                    backing, previous_ref, previous_backing, transfer
+                )
             backing.unlink()
             del self._files[backing]
             backing = previous_backing
@@ -224,8 +470,24 @@ class ContentSession:
         self._digests[row.sha256] = (reference, backing)
         return reference
 
+    def _compare_backings(self, backing, previous_ref, previous_backing, transfer):
+        with backing.open("rb") as stream:
+
+            class Compare:
+                def write(self, block):
+                    if stream.read(len(block)) != block:
+                        raise OSError("Content digest has unequal exact bytes")
+                    return len(block)
+
+            self._copy(previous_ref, previous_backing, Compare(), transfer)
+            if stream.read(1):
+                raise OSError("Content digest has unequal exact lengths")
+
     def _resolve(self, reference):
         self._check()
+        return self._registered(reference)
+
+    def _registered(self, reference):
         if not isinstance(reference, ImmutableContentReference):
             raise OSError("Registered content reference required")
         try:
@@ -317,8 +579,13 @@ class ContentSession:
     def close(self):
         """Invalidate availability and retire only owned disposable files."""
         self._closed = True
+        if self._private_operation is not None:
+            self._private_operation.active = False
+            self._private_operation = None
         self._values.clear()
         self._digests.clear()
+        self._prepared.clear()
+        self._prepared_digests.clear()
         if not self._directory.exists():
             return
         try:
@@ -341,3 +608,189 @@ class ContentSession:
             raise OSError(
                 f"Owned content scratch retained at {self._directory}"
             ) from error
+
+
+class _DecodedImport:
+    """One owned transaction; declarations never determine its byte identity."""
+
+    def __init__(
+        self, session, record, occurrence, ledger, scope, *, prepare=False, created=None
+    ):
+        if prepare:
+            session._require_private_scope(scope, ledger)
+            ledger.retain_metadata(848)
+        self.session, self.record, self.occurrence, self.ledger = (
+            session,
+            record,
+            occurrence,
+            ledger,
+        )
+        ledger.reserve_file_cleanup()
+        self.path, self.stream = session._new_file()
+        self.digest, self.size = hashlib.sha256(), 0
+        self.finished = False
+        self.scope = scope
+        self.prepare, self.created = prepare, created
+
+    def write(self, block):
+        self.scope.check(self.session)
+        self.ledger.check()
+        if self.finished or type(block) is not bytes or len(block) > 65536:
+            raise OSError("Invalid decoded-input chunk")
+        if self.created is not None and self.size + len(block) > self.created.size:
+            raise OSError("Created write exceeds its exact recipe size")
+        self.ledger.take("decoded", len(block))
+        self.session._budget(len(block), len(block))
+        if self.stream.write(block) != len(block):
+            raise OSError("Incomplete decoded-input write")
+        self.digest.update(block)
+        self.size += len(block)
+
+    def finish(self, historical_reference):
+        self.scope.check(self.session)
+        if self.finished:
+            raise OSError("Decoded-input transaction is finished")
+        self.finished = True
+        self.stream.flush()
+        os.fsync(self.stream.fileno())
+        self.stream.close()
+        digest = self.digest.hexdigest()
+        if historical_reference is not None and (
+            historical_reference.size != self.size
+            or historical_reference.sha256 != digest
+        ):
+            raise OSError("Historical reference differs from decoded bytes")
+        reference = ImmutableContentReference(
+            content_id=self.session._namespace + ":" + uuid4().hex,
+            sha256=digest,
+            size=self.size,
+        )
+        with closing(
+            self.session._read_owned(self.path, reference, self.ledger, self.scope)
+        ) as chunks:
+            for _ in chunks:
+                pass
+        backing = self.path
+        if self.prepare:
+            if self.created is not None and self.size != self.created.size:
+                raise OSError("Created output differs from its recipe size")
+            origin = (
+                ("CREATED", self.created, self.occurrence)
+                if self.created is not None
+                else ("untrusted_review_input", self.record, self.occurrence)
+            )
+            previous = self.session._prepared_digests.get(digest)
+            if previous is not None:
+                self.session._check_prepared(previous, self.scope)
+                if previous.reference.size != self.size:
+                    raise OSError("Prepared digest has contradictory sizes")
+                with (
+                    closing(
+                        self.session._read_owned(
+                            previous.backing,
+                            previous.reference,
+                            self.ledger,
+                            self.scope,
+                        )
+                    ) as left,
+                    closing(
+                        self.session._read_owned(
+                            backing,
+                            reference,
+                            self.ledger,
+                            self.scope,
+                        )
+                    ) as right,
+                ):
+                    for a, b in zip_longest(left, right):
+                        if a != b:
+                            raise OSError("Prepared digest has unequal exact bytes")
+                backing = previous.backing
+            record = _PreparedRegistration(
+                self.session, reference, backing, "100644", origin
+            )
+            if reference.content_id in self.session._prepared:
+                raise OSError("Prepared registration identity was already used")
+            self.session._prepared[reference.content_id] = record
+            self.session._prepared_digests[digest] = record
+            return record
+        previous = self.session._digests.get(digest)
+        if previous is not None:
+            prior, prior_backing = previous
+            if prior.size != self.size:
+                raise OSError("Content digest has contradictory sizes")
+            with (
+                closing(
+                    self.session._read_owned(
+                        prior_backing, prior, self.ledger, self.scope
+                    )
+                ) as left,
+                closing(
+                    self.session._read_owned(
+                        backing, reference, self.ledger, self.scope
+                    )
+                ) as right,
+            ):
+                for a, b in zip_longest(left, right):
+                    if a != b:
+                        raise OSError("Content digest has unequal exact bytes")
+            backing = prior_backing
+        self.session._values[reference.content_id] = (
+            reference,
+            backing,
+            "100644",
+            ("untrusted_review_input", self.record, self.occurrence),
+        )
+        self.session._digests[digest] = reference, backing
+        return reference
+
+    def abort(self):
+        self.finished = True
+        self.stream.close()
+
+
+class _PrivateOperation:
+    """One non-reentrant scratch operation, bracketed by live observation checks.
+
+    Public ContentSession operations never consult or inherit this capability.
+    It cannot refresh a source observation or authorize an origin acquisition.
+    """
+
+    def __init__(self, session, ledger):
+        if session._private_operation is not None:
+            raise OSError("Nested private content operation")
+        session._check()
+        ledger.check()
+        self.session, self.ledger, self.active = session, ledger, True
+        session._private_operation = self
+
+    def __enter__(self):
+        self.check(self.session)
+        return self
+
+    def check(self, session):
+        if (
+            session is not self.session
+            or not self.active
+            or session._closed
+            or session._private_operation is not self
+            or not session._observation._open
+        ):
+            raise OSError("Private content operation is no longer live")
+        self.ledger.check()
+        if verify_directory(session._directory) != session._anchor:
+            raise OSError("Content scratch identity changed")
+
+    def resolve(self, reference):
+        self.check(self.session)
+        return self.session._registered(reference)
+
+    def __exit__(self, kind, error, traceback):
+        try:
+            if kind is None:
+                self.check(self.session)
+                self.session._check()
+                self.ledger.check()
+        finally:
+            self.active = False
+            self.session._private_operation = None

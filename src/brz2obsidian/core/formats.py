@@ -1,7 +1,6 @@
 """Pure normalized format/onboarding policy; no parsing or output generation."""
 
-from hashlib import sha256
-
+from brz2obsidian.content_values import content_key, content_sha
 from brz2obsidian.contracts import FormatReview
 
 # Historical review replay retains its recorded generation. Application admission
@@ -72,7 +71,7 @@ def established_original(facts, subject):
         return False
     return any(
         (output.item_id, output.facet) == (subject.item_id, subject.facet)
-        and output.content.data == subject.baseline.content.data
+        and content_key(output.content) == content_key(subject.baseline.content)
         for output in baseline.outputs
     )
 
@@ -90,11 +89,11 @@ def configuration_change(subject):
         and subject.incoming is not None
         and (
             subject.baseline.content is None
-            or subject.baseline.content.data != subject.incoming.data
+            or content_key(subject.baseline.content) != content_key(subject.incoming)
         )
         and (
             subject.current.content is None
-            or subject.current.content.data != subject.incoming.data
+            or content_key(subject.current.content) != content_key(subject.incoming)
         )
     )
 
@@ -202,7 +201,7 @@ def format_assumption(facts, subject):
             output_semantics(baseline.identity),
             baseline.source_version,
             tuple(
-                sha256(o.content.data).hexdigest()
+                content_sha(o.content)
                 for o in baseline.outputs
                 if (o.item_id, o.facet) == (subject.item_id, subject.facet)
             ),
