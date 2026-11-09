@@ -178,19 +178,28 @@ class _OwnedPreparation:
     def _start_session(self):
         if self._session is None:
             self._session = ReviewSession._owned_preparation(
-                self.observed, self._directory, lifecycle.available_memory(), _cancel=self._cancel
+                self.observed,
+                self._directory,
+                lifecycle.available_memory(),
+                _cancel=self._cancel,
             )
 
     def _plan(self, history, facts):
         facts = self._session._admit_values(facts)
         history = self._scoped(history, facts)
         self._session._coadmit()
-        return history, self._session._drive(PlanWork(facts, history.admission.preflight))
+        return history, self._session._drive(
+            PlanWork(facts, history.admission.preflight)
+        )
 
-    def prepare(self, vault, source, *, kind="source_update", original_source=None, cancel=None):
+    def prepare(
+        self, vault, source, *, kind="source_update", original_source=None, cancel=None
+    ):
         self._cancel.probe = cancel
         try:
-            return self._prepare(vault, source, kind=kind, original_source=original_source)
+            return self._prepare(
+                vault, source, kind=kind, original_source=original_source
+            )
         finally:
             self._cancel.probe = None
             if self._session is not None and not self._session._closed:
@@ -210,12 +219,20 @@ class _OwnedPreparation:
                     or not history.admission.inventory_complete
                     or source is None
                 ):
-                    result = prepare_onboarding(self.operations, vault, source, original_source=original_source)
+                    result = prepare_onboarding(
+                        self.operations, vault, source, original_source=original_source
+                    )
                     self.close()
                     return result
                 self._start_session()
                 with self._session._operation():
-                    result = prepare_onboarding(self.operations, vault, source, original_source=original_source, _owner=self)
+                    result = prepare_onboarding(
+                        self.operations,
+                        vault,
+                        source,
+                        original_source=original_source,
+                        _owner=self,
+                    )
                     self.preparation = result.preparation
                 if result.preparation is None:
                     self.close()
@@ -331,7 +348,9 @@ class _OwnedPreparation:
                         "publication": "not_published",
                         "preparation": preparation,
                         "history_retained": preparation.locator is not None,
-                        "checkpoint_commit": preparation.locator.commit if preparation.locator else None,
+                        "checkpoint_commit": preparation.locator.commit
+                        if preparation.locator
+                        else None,
                         "next_actions": ("continue_review",),
                     }
                 )
@@ -412,7 +431,11 @@ class _OwnedPreparation:
 
     def page(self, preparation, **arguments):
         try:
-            self._observe(preparation.vault, preparation.locator, expected_absent=preparation.locator is None)
+            self._observe(
+                preparation.vault,
+                preparation.locator,
+                expected_absent=preparation.locator is None,
+            )
             with self._session._operation():
                 plan = self._session._admit_values(preparation.review)
                 self._session._coadmit()
@@ -438,7 +461,9 @@ class _OwnedPreparation:
         if preparation.kind == "onboarding":
             from .onboarding import reobserve_onboarding
 
-            history, result, _ = reobserve_onboarding(self.operations, preparation, _owner=self)
+            history, result, _ = reobserve_onboarding(
+                self.operations, preparation, _owner=self
+            )
             if history is None or result.preparation is None:
                 raise OSError(result.code)
             return history, result, None
@@ -556,7 +581,9 @@ class _OwnedPreparation:
                         "publication": "not_published",
                         "preparation": preparation,
                         "history_retained": preparation.locator is not None,
-                        "checkpoint_commit": preparation.locator.commit if preparation.locator else None,
+                        "checkpoint_commit": preparation.locator.commit
+                        if preparation.locator
+                        else None,
                         "next_actions": ("continue_review", "refresh_update"),
                     }
                 )
@@ -690,13 +717,19 @@ class _OwnedPreparation:
                         )
             self._session._content._detach()
             self.observed = None
-            association = preparation.locator.association if preparation.locator else None
+            association = (
+                preparation.locator.association if preparation.locator else None
+            )
             proposal_id = current.preparation.review.proposal.proposal_id
             captured = self.operations.capture_checkpoint(
                 preparation.vault,
                 baseline_directory,
-                vault_id=association.vault_id if association else "vault-" + proposal_id,
-                import_id=association.import_id if association else "import-" + proposal_id,
+                vault_id=association.vault_id
+                if association
+                else "vault-" + proposal_id,
+                import_id=association.import_id
+                if association
+                else "import-" + proposal_id,
                 identity=current.preparation.review.facts.baseline_identity,
                 admission=history.admission,
                 subjects=lifecycle._subjects(
@@ -707,7 +740,9 @@ class _OwnedPreparation:
                 else (),
                 review=current.preparation.review,
                 source_binding=current.preparation.source_binding,
-                review_source=None if onboarding else current.preparation.payload_directory,
+                review_source=None
+                if onboarding
+                else current.preparation.payload_directory,
                 observed_source=current.preparation.observed_source,
                 _owned_export=export,
                 **({"progress": progress} if progress is not None else {}),
@@ -785,7 +820,9 @@ class _OwnedPreparation:
                         "publication": "not_published",
                         "preparation": preparation,
                         "history_retained": preparation.locator is not None,
-                        "checkpoint_commit": preparation.locator.commit if preparation.locator else None,
+                        "checkpoint_commit": preparation.locator.commit
+                        if preparation.locator
+                        else None,
                         "ready": False,
                         "next_actions": ("continue_review", "save_update"),
                     }

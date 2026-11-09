@@ -101,7 +101,9 @@ def test_absent_history_onboarding_saves_unknown_binary_originals(monkeypatch):
     operations = Operations(workflow=workflow)
     absent = operations.inspect_history(vault)
     assert absent.status == "absent", absent
-    assert absent.admission.status == "supported" and absent.admission.inventory_complete
+    assert (
+        absent.admission.status == "supported" and absent.admission.inventory_complete
+    )
     assert absent.admission.repository.kind == "root"
     assert absent.checkpoint.locator is None
     before = user_state(vault)
@@ -207,9 +209,9 @@ def test_absent_history_onboarding_saves_unknown_binary_originals(monkeypatch):
     )
     assert manifest["previous"] is None and manifest["boundary"] == "local"
     assert git(vault, "rev-list", "--count", saved.capture.ref) == b"1\n"
-    assert git(vault, "rev-list", "--parents", "-n", "1", saved.capture.commit).split() == [
-        saved.capture.commit.encode()
-    ]
+    assert git(
+        vault, "rev-list", "--parents", "-n", "1", saved.capture.commit
+    ).split() == [saved.capture.commit.encode()]
     assert envelope["schema_id"] == "brz2obsidian.saved-review-refs"
     assert envelope["schema_version"] == 1
     plan = envelope["record"]["plan"]
@@ -243,8 +245,14 @@ def test_absent_history_onboarding_saves_unknown_binary_originals(monkeypatch):
     ):
         assert source_rows[path]["size"] == size
         raw = git(vault, "cat-file", "blob", saved.capture.commit + ":source/" + path)
-        assert len(raw) == size and hashlib.sha256(raw).hexdigest() == incoming_hashes[name]
-        assert git(vault, "cat-file", "blob", saved.capture.commit + ":vault/" + path) == current
+        assert (
+            len(raw) == size
+            and hashlib.sha256(raw).hexdigest() == incoming_hashes[name]
+        )
+        assert (
+            git(vault, "cat-file", "blob", saved.capture.commit + ":vault/" + path)
+            == current
+        )
     del raw
     assert not saved.capture.authored_files_changed
     assert user_state(vault, owned_ref=saved.capture.ref) == before
@@ -256,23 +264,34 @@ def test_absent_history_onboarding_saves_unknown_binary_originals(monkeypatch):
     # publish another checkpoint or turn unknown originals into known bytes.
     revised_second = b"\xfeWriting after the first saved checkpoint.\r\n"
     (vault / second_path).write_bytes(revised_second)
-    repeat = worker_context_call(
-        context, {"command": "save", "binding": saved.binding}
+    repeat = worker_context_call(context, {"command": "save", "binding": saved.binding})
+    assert repeat.status == "stale_review" and repeat.code == "current_facts_changed", (
+        repeat
     )
-    assert repeat.status == "stale_review" and repeat.code == "current_facts_changed", repeat
     assert not repeat.ready and repeat.binding is not None and repeat.history_retained
     assert repeat.binding.revision > saved.binding.revision
     assert repeat.binding.checkpoint_commit == saved.capture.commit
-    assert git(vault, "for-each-ref", "--format=%(refname) %(objectname)") == refs_before_repeat
+    assert (
+        git(vault, "for-each-ref", "--format=%(refname) %(objectname)")
+        == refs_before_repeat
+    )
     assert (vault / ".brz2obsidian/locator.json").read_bytes() == locator_before_repeat
     assert context.page(saved.binding).code == "context_changed"
     closed = worker_context_call(
         context, {"command": "close", "binding": repeat.binding, "choice": "discard"}
     )
     assert closed.code == "context_closed" and closed.binding is None, closed
-    assert closed.history_retained and context.page(repeat.binding).code == "context_changed"
-    expected = dict(before, authored=dict(before["authored"], **{second_path: revised_second}))
+    assert (
+        closed.history_retained
+        and context.page(repeat.binding).code == "context_changed"
+    )
+    expected = dict(
+        before, authored=dict(before["authored"], **{second_path: revised_second})
+    )
     assert user_state(vault, owned_ref=saved.capture.ref) == expected
     assert _tree(scratch) == scratch_before
     assert _tree(rendered) == rendered_before and _digest(archive) == archive_before
-    assert git(vault, "rev-parse", saved.capture.ref).decode().strip() == saved.capture.commit
+    assert (
+        git(vault, "rev-parse", saved.capture.ref).decode().strip()
+        == saved.capture.commit
+    )

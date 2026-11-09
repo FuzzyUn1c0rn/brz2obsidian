@@ -301,9 +301,11 @@ class _AbsentHistoryObservation:
         from .vault_history import _read
 
         if (
-            (verify_directory(self.root), verify_directory(self.root / ".git")) != self.anchors
+            (verify_directory(self.root), verify_directory(self.root / ".git"))
+            != self.anchors
             or _file_digest(Path(self.executable)) != self.binary
-            or git.call("for-each-ref", "--format=%(refname) %(objectname)") != self.refs
+            or git.call("for-each-ref", "--format=%(refname) %(objectname)")
+            != self.refs
             or any(_existing_git_operation_blockers(self.root / ".git"))
             or _exists(self.root / ".brz2obsidian")
             or _exists(self.root / ".git" / "brz2obsidian")

@@ -447,7 +447,7 @@ def _render(
     )
     if _owner is not None:
         _owner._session._coadmit()
-    equivalent = _equivalent_payload(baseline, payload)
+    equivalent = _equivalent_payload(baseline, payload, _owner=_owner)
     if equivalent:
         for path, raw in baseline.items():
             if _owner is None:
@@ -458,7 +458,7 @@ def _render(
     return directory, payload, result.source_identity, equivalent
 
 
-def _equivalent_payload(baseline, incoming):
+def _equivalent_payload(baseline, incoming, *, _owner=None):
     if set(baseline) != set(incoming):
         return False
     old, new = record(baseline), record(incoming)
@@ -487,14 +487,25 @@ def _equivalent_payload(baseline, incoming):
                 + new["source_identity"]["snapshot_digest"]
                 + "; collection: "
             )
-            raw = (raw.data if hasattr(raw, "identity") else raw).replace(
+            report = (
+                _owner._session._text(raw).data
+                if _owner is not None
+                else raw.data
+                if hasattr(raw, "identity")
+                else raw
+            )
+            raw = report.replace(
                 ("Source fingerprint: " + new_sha + suffix).encode(),
                 ("Source fingerprint: " + old_sha + suffix).encode(),
                 1,
             )
         old_raw = baseline[path]
         if hasattr(old_raw, "identity") and type(raw) is bytes:
-            old_raw = old_raw.data
+            old_raw = (
+                _owner._session._text(old_raw).data
+                if _owner is not None
+                else old_raw.data
+            )
         if (
             not canonical_equal(raw, old_raw)
             if hasattr(raw, "identity") and hasattr(old_raw, "identity")

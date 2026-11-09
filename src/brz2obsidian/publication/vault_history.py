@@ -1754,7 +1754,10 @@ class _UpdateRead:
         self._metadata_only = _metadata_only
 
     def __enter__(self):
-        from .vault_admission import _AbsentHistoryObservation, _IdleCheckpointObservation
+        from .vault_admission import (
+            _AbsentHistoryObservation,
+            _IdleCheckpointObservation,
+        )
 
         if self._used:
             raise OSError("Update input reader cannot be reused")
@@ -2072,7 +2075,8 @@ def capture_checkpoint(
             if (
                 type(_owned_export) is not _OwnedReviewExport
                 or boundary != "local"
-                or review_source is None and (
+                or review_source is None
+                and (
                     review is None
                     or review.facts.format_operation.kind != "onboarding"
                     or source_binding is None

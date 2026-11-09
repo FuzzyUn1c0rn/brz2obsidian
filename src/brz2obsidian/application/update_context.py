@@ -105,7 +105,11 @@ class UpdateContext:
             if type(self._operations) is Operations:
                 self._owner = self._operations._new_owned_preparation()
                 result = self._owner.prepare(
-                    vault, source, kind=kind, original_source=original_source, cancel=cancel
+                    vault,
+                    source,
+                    kind=kind,
+                    original_source=original_source,
+                    cancel=cancel,
                 )
                 if result.preparation is None:
                     self._retire_owner()
