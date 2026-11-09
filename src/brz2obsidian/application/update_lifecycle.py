@@ -781,7 +781,7 @@ def _configuration_route(result, *, _owner=None):
     )
 
 
-def _text_choice(plan, change, choice, edited):
+def _text_choice(plan, change, choice, edited, *, _owner=None):
     if choice == "edited":
         if edited is None:
             raise ValueError("Edited bytes are required")
@@ -819,10 +819,13 @@ def _text_choice(plan, change, choice, edited):
     if plan.facts.incoming_identity.output_format == 8:
         # Observe only results reconstructed from the actual producer facts and
         # admitted actions. Unresolved peers do not imply a Current selection.
-        validated = validate_review(plan)
-        if validated.status != "accepted":
+        if _owner is None:
+            validated = validate_review(plan)
+            canonical = validated.plan if validated.status == "accepted" else None
+        else:
+            canonical = _owner._session._replay(plan)
+        if canonical is None:
             raise ValueError("The review plan is not canonical")
-        canonical = validated.plan
         selected = []
         versions = {
             row.change_id: (row, row.target_path, row.result)
@@ -976,7 +979,7 @@ def _current_path_choice(plan, change):
     )
 
 
-def text_choice_action(plan, action, *, edited=None):
+def text_choice_action(plan, action, *, edited=None, _owner=None):
     if (
         action.domain == "text"
         and action.choice == "current"
@@ -1023,6 +1026,7 @@ def text_choice_action(plan, action, *, edited=None):
                         change,
                         "incoming" if action.choice == "reverse" else action.choice,
                         edited,
+                        _owner=_owner,
                     )
                 }
             )

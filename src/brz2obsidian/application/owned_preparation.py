@@ -313,7 +313,9 @@ class _OwnedPreparation:
             choices = self._session._canonical_choices(plan)
             edited = values.pop("edited", None)
             action = review_plan_choice_action(plan, _choices=choices, **values)
-            action = lifecycle.text_choice_action(plan, action, edited=edited)
+            action = lifecycle.text_choice_action(
+                plan, action, edited=edited, _owner=self
+            )
             action = self._session._admit_values(action)
             self._session._coadmit()
             transition = self._session._drive(
@@ -727,6 +729,7 @@ class _OwnedPreparation:
                     update={
                         "status": "cancelled_before_publication",
                         "publication": "not_published",
+                        "preparation": preparation,
                         "history_retained": True,
                         "checkpoint_commit": preparation.locator.commit,
                         "ready": False,
