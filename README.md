@@ -594,6 +594,28 @@ and build a wheel using the same environment:
 .\.venv\Scripts\python.exe -m pip wheel --no-deps --no-build-isolation --wheel-dir tmp/build/wheels .
 ```
 
+### Snyk dependency scan
+
+After completing the Python 3.14+ environment setup above, run Snyk from the
+checkout root using the project interpreter explicitly:
+
+```powershell
+snyk test --file=requirements.txt --command=.\.venv\Scripts\python.exe
+```
+
+Snyk builds the dependency tree from installed packages. If it reports
+`Missing required packages` (`SNYK-OS-PYTHON-0013`), install `requirements.txt`
+in `.venv` and use the command above so it scans that environment. A bare
+`snyk test` uses the Python interpreter on `PATH`, which may be a different
+installation.
+
+For the optional GUI dependencies, install `requirements-gui.txt` in the same
+environment and scan that manifest too:
+
+```powershell
+snyk test --file=requirements-gui.txt --command=.\.venv\Scripts\python.exe
+```
+
 ### Python library
 
 Use the default factory to inspect or convert a BRZ archive:
