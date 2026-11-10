@@ -34,7 +34,9 @@ def validated_reference_choices(references, offered):
     return choices
 
 
-def selected_attachment_candidate(plan, change, alternative, references, offered_refs):
+def selected_attachment_candidate(
+    plan, change, alternative, references, offered_refs, *, _owner=None
+):
     context = plan.facts.link_context
     subject = next(
         row
@@ -43,6 +45,11 @@ def selected_attachment_candidate(plan, change, alternative, references, offered
     )
     targets = {row.target_id: row for row in context.current_targets}
     states = {row.target_id: row for row in context.current_target_facts}
+    observe_target = (
+        interpret_link_target
+        if _owner is None
+        else _owner._session._assembly_link_state
+    )
     for output in alternative.outputs:
         templates = tuple(
             row
@@ -80,7 +87,7 @@ def selected_attachment_candidate(plan, change, alternative, references, offered
                 }
             )
         targets[output.target_id] = target
-        states[output.target_id] = interpret_link_target(
+        states[output.target_id] = observe_target(
             output.content,
             target_id=output.target_id,
             existence="present",
@@ -173,7 +180,7 @@ def selected_attachment_candidate(plan, change, alternative, references, offered
         if bound:
             if len(bound) != 1:
                 raise ValueError("Document target is ambiguous")
-            states[target_id] = interpret_link_target(
+            states[target_id] = observe_target(
                 bound[0].content,
                 target_id=target_id,
                 existence="present",

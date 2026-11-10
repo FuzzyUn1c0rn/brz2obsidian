@@ -545,7 +545,9 @@ class _OwnedPreparation:
             self._session._coadmit()
             choices = self._session._canonical_choices(plan)
             edited = values.pop("edited", None)
-            action = review_plan_choice_action(plan, _choices=choices, **values)
+            action = review_plan_choice_action(
+                plan, _choices=choices, _owner=self, **values
+            )
             action = lifecycle.text_choice_action(
                 plan, action, edited=edited, _owner=self
             )

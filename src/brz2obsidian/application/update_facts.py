@@ -196,6 +196,7 @@ def link_state(
     *,
     target_id,
     existence,
+    memberships=None,
     membership_targets=(),
     source_path=None,
     output_format=7,
@@ -207,6 +208,7 @@ def link_state(
             content,
             target_id=target_id,
             existence=existence,
+            memberships=memberships,
             membership_targets=membership_targets,
             source_path=source_path,
             output_format=output_format,
@@ -219,13 +221,16 @@ def link_state(
         if content is not None
         else None
     )
-    memberships = (
-        tuple(
-            entry.target_id for group in document.memberships for entry in group.entries
+    if memberships is None:
+        memberships = (
+            tuple(
+                entry.target_id
+                for group in document.memberships
+                for entry in group.entries
+            )
+            if document is not None
+            else ()
         )
-        if document is not None
-        else ()
-    )
     return interpret_link_target(
         content,
         target_id=target_id,

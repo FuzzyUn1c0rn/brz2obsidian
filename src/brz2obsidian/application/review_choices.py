@@ -193,6 +193,7 @@ def review_plan_choice_action(
     selected_entry_id=None,
     disassociate_entry_ids=(),
     _choices=None,
+    _owner=None,
 ):
     requirement = next(
         (
@@ -370,6 +371,7 @@ def review_plan_choice_action(
                 review_plan_attachment_references(
                     plan, requirement_id, _choices=_choices
                 ),
+                _owner=_owner,
             )
         elif references:
             raise ValueError("Reference choice is unavailable")
