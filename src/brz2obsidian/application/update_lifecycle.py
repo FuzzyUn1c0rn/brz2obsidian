@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from brz2obsidian.content_fingerprints import canonical_equal
+from brz2obsidian.content_values import same_content
 from brz2obsidian.contracts import (
     ExactContent,
     ImportedItemIdentity,
@@ -772,7 +773,7 @@ def _configuration_route(result, *, _owner=None):
         changed |= (
             len(matching) != 1
             or matching[0].current.content is None
-            or matching[0].current.content.data != row.content.data
+            or not same_content(matching[0].current.content, row.content)
         )
     if not changed:
         return result
