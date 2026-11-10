@@ -4,7 +4,13 @@ import json
 from dataclasses import dataclass, replace
 from hashlib import sha256
 
-from brz2obsidian.content_fingerprints import CompletedWork, drive_inline
+from brz2obsidian.content_fingerprints import (
+    CompletedWork,
+    PendingFingerprint,
+    consume_fingerprint,
+    drive_inline,
+    fingerprint_request,
+)
 from brz2obsidian.content_values import content_key, content_sha, require_inline
 from brz2obsidian.contracts import (
     ChangeProvenance,
@@ -49,10 +55,6 @@ def _digest(value):
     return sha256(encoded).hexdigest()
 
 
-def _dump(value):
-    return None if value is None else value.model_dump(mode="json")
-
-
 def _bytes(content):
     return content_key(content)
 
@@ -61,7 +63,7 @@ def _content_identity(content):
     return None if content is None else content_sha(content)
 
 
-def _assumptions(facts, subject, subject_id, safety):
+def _assumptions(facts, subject, subject_id, safety, *, reversal_fingerprint=None):
     values = (
         (
             "identity",
@@ -114,11 +116,13 @@ def _assumptions(facts, subject, subject_id, safety):
         for fact in safety
     )
     if subject.operation_reversal is not None:
+        if reversal_fingerprint is None:
+            raise ValueError("Reversal fingerprint result required")
         assumptions.append(
             ProposalAssumption(
                 key=f"{subject_id}:reversal",
                 kind="operation",
-                fingerprint=_digest(_dump(subject.operation_reversal)),
+                fingerprint=reversal_fingerprint,
                 depends_on=(f"{subject_id}:baseline", f"{subject_id}:identity"),
             )
         )
@@ -179,7 +183,7 @@ def _proposal(subject):
     return "compatible", subject.incoming, "source_only", True
 
 
-def _reconcile_subject(facts, subject, applicability):
+def _reconcile_subject(facts, subject, applicability, *, reversal_fingerprint=None):
     changes, findings, local_changes, memory = [], [], [], []
     subject_id = reconciliation_subject_id(
         facts.incoming_identity.module_id,
@@ -225,7 +229,13 @@ def _reconcile_subject(facts, subject, applicability):
         )
     )
     assumptions = (
-        _assumptions(facts, subject, subject_id, safety)
+        _assumptions(
+            facts,
+            subject,
+            subject_id,
+            safety,
+            reversal_fingerprint=reversal_fingerprint,
+        )
         + binding.assumptions
         + (() if binding.rename is None else binding.rename.assumptions)
         + (policy.assumption,)
@@ -467,10 +477,14 @@ class ReconcileWork:
     findings: tuple = ()
     local_changes: tuple = ()
     memory: tuple = ()
+    pending: object = None
 
 
-def advance_reconciliation(work, returned=None):
-    if returned is not None:
+def advance_reconciliation(work, returned=None, *, context=None):
+    reversal_fingerprint = None
+    if work.pending is not None:
+        reversal_fingerprint = consume_fingerprint(work.pending, returned)
+    elif returned is not None:
         raise ValueError("Unexpected reconciliation child result")
     if work.index == -1:
         facts = ReconciliationInput.model_validate(work.facts)
@@ -493,10 +507,21 @@ def advance_reconciliation(work, returned=None):
                 work.memory,
             )
         )
+    subject = work.facts.subjects[work.index]
+    if subject.operation_reversal is not None and work.pending is None:
+        request = fingerprint_request(
+            subject.operation_reversal,
+            dialect="Jc",
+            scope=("reconciliation", work.facts.proposal_id, work.index, "reversal"),
+            epoch=0 if context is None else context.epoch,
+            context=context,
+        )
+        return PendingFingerprint(request, replace(work, pending=request))
     change, problems, local, remembered = _reconcile_subject(
         work.facts,
-        work.facts.subjects[work.index],
+        subject,
         work.applicability,
+        reversal_fingerprint=reversal_fingerprint,
     )
     return replace(
         work,
@@ -505,6 +530,7 @@ def advance_reconciliation(work, returned=None):
         findings=work.findings + problems,
         local_changes=work.local_changes + local,
         memory=work.memory + remembered,
+        pending=None,
     )
 
 

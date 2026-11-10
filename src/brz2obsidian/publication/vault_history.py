@@ -8,6 +8,7 @@ import shutil
 import stat
 import tempfile
 import zlib
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
@@ -688,7 +689,16 @@ class CheckpointReviewMemo:
         self._tip_key = None
         self._tip_review = None
 
-    def read(self, git, manifest, verified, *, include_review=False, commit=None):
+    def read(
+        self,
+        git,
+        manifest,
+        verified,
+        *,
+        include_review=False,
+        commit=None,
+        _owners=None,
+    ):
         key = (
             manifest.review_object,
             manifest.boundary == "local" and not manifest.proposed,
@@ -696,7 +706,13 @@ class CheckpointReviewMemo:
         review = None
         if key not in self._entries:
             if include_review or commit is None:
-                review, references = read_checkpoint_review(git, manifest, verified)
+                review, references = (
+                    read_checkpoint_review(git, manifest, verified)
+                    if _owners is None
+                    else _read_owned_checkpoint_review(
+                        git, manifest, verified, commit=commit, owners=_owners
+                    )
+                )
                 self._entries[key] = _checkpoint_review_metadata(
                     manifest, review, references
                 )
@@ -731,7 +747,13 @@ class CheckpointReviewMemo:
             if self._tip_key == key:
                 review = self._tip_review
             elif review is None:
-                review, _ = read_checkpoint_review(git, manifest, verified)
+                review, _ = (
+                    read_checkpoint_review(git, manifest, verified)
+                    if _owners is None
+                    else _read_owned_checkpoint_review(
+                        git, manifest, verified, commit=commit, owners=_owners
+                    )
+                )
             if self._tip_review is None:
                 self._tip_key, self._tip_review = key, review
         return self._entries[key], review if include_review else None
@@ -756,26 +778,35 @@ def _checkpoint_review_metadata(manifest, review, references):
 
 
 def _read_checkpoint_review_metadata(git, manifest, verified, *, commit):
+    with ExitStack() as owners:
+        review, references = _read_owned_checkpoint_review(
+            git, manifest, verified, commit=commit, owners=owners
+        )
+        return _checkpoint_review_metadata(manifest, review, references)
+
+
+def _read_owned_checkpoint_review(git, manifest, verified, *, commit, owners):
     from brz2obsidian.application.review_session import ReviewSession
 
+    if type(owners) is not ExitStack:
+        raise OSError("Lexical retained review ownership required")
     record, references, available = _review_reference_graph(git, manifest)
-    with ReviewSession._retained_review(
-        git,
-        manifest,
-        commit,
-        capacity=available_memory(),
-    ) as session:
-        review = session._load_retained(
-            record,
-            available,
-            references,
-            local=manifest.boundary == "local" and not manifest.proposed,
+    session = owners.enter_context(
+        ReviewSession._retained_review(
+            git,
+            manifest,
+            commit,
+            capacity=available_memory(),
         )
-        metadata = _checkpoint_review_metadata(manifest, review, references)
-        verified.update(available[sha][0] for sha in references)
-        # No LoadedReview/content value/owner is retained by these eleven
-        # scalar/identity/query/claim projections after the files close.
-        return metadata
+    )
+    review = session._load_retained(
+        record,
+        available,
+        references,
+        local=manifest.boundary == "local" and not manifest.proposed,
+    )
+    verified.update(available[sha][0] for sha in references)
+    return review, references
 
 
 def _review_reference_graph(git, manifest):
@@ -1098,7 +1129,7 @@ def _damaged_loose_payload(root, row):
 
 @dataclass(frozen=True)
 class _MetadataCheckpoint:
-    """Private result of the complete graph walk, with no returned byte model."""
+    """Full graph projection; an explicit lexical owner may retain its review."""
 
     locator: object
     manifest: object
@@ -1126,6 +1157,7 @@ def _read(
     damaged_payloads=None,
     ownership_demands_out=None,
     _metadata_only=False,
+    _owners=None,
 ):
     locator_path = root / ".brz2obsidian/locator.json"
     if not locator_path.exists():
@@ -1316,11 +1348,12 @@ def _read(
                 git,
                 manifest,
                 verified,
-                include_review=not _metadata_only
+                include_review=(not _metadata_only or _owners is not None)
                 and (
                     tip_manifest is None or (targets is not None and current in targets)
                 ),
                 commit=current,
+                _owners=_owners,
             )
         meaning = review_metadata[2] if manifest.review_object is not None else None
         if manifest.review_object is not None:
@@ -1592,10 +1625,22 @@ def _read(
                 roles=tuple(ownership_roles),
                 demands=ownership_demands,
             )
-    if _metadata_only:
-        if targets is not None:
+    if _metadata_only or _owners is not None:
+        if targets is not None and _owners is None:
             raise OSError("Metadata admission cannot return operation review models")
-        return _MetadataCheckpoint(locator, tip_manifest, tip_metadata)
+        result = _MetadataCheckpoint(
+            locator,
+            tip_manifest,
+            tip_metadata,
+            review=tip_review if _owners is not None else None,
+        )
+        if targets is not None:
+            if set(target_records) != set(targets):
+                raise OSError(
+                    "Operation checkpoint is outside the retained owned chain"
+                )
+            return result, target_records
+        return result
     result = CheckpointRead(
         schema_id="brz2obsidian.checkpoint-read",
         schema_version=1,
@@ -1651,6 +1696,8 @@ def _inspect_retained_history(vault, observation, *, subjects=(), active_operati
         active_operation=active_operation,
         recovery_observation=observation,
     )
+    if type(checkpoint) is _MetadataCheckpoint:
+        return _MetadataHistory(admission, checkpoint)
     return _history_result(
         status="intact" if checkpoint is not None else "unavailable",
         admission=admission,
@@ -1669,6 +1716,7 @@ def _inspect_history(
     _capture=None,
     _metadata_only=False,
     new_operation=None,
+    _owners=None,
 ):
     root = Path(vault).absolute()
     admission, history = _observe_vault(
@@ -1681,6 +1729,7 @@ def _inspect_history(
         _capture=_capture,
         _new_operation=new_operation,
         _metadata_only=_metadata_only,
+        _owners=_owners,
     )
     status = "unavailable"
     try:
@@ -1752,6 +1801,7 @@ class _UpdateRead:
         self._terminal = None
         self._fresh_scope = None
         self._metadata_only = _metadata_only
+        self._owners = ExitStack()
 
     def __enter__(self):
         from .vault_admission import (
@@ -1772,6 +1822,7 @@ class _UpdateRead:
                     (inspection, admission)
                 ),
                 _metadata_only=self._metadata_only,
+                _owners=self._owners if self._metadata_only else None,
             )
             if (
                 self._history.status == "intact"
@@ -1827,6 +1878,7 @@ class _UpdateRead:
         self._absence = None
         self._terminal = None
         self._fresh_scope = None
+        self._owners.close()
 
     @property
     def history(self):
@@ -1997,6 +2049,7 @@ class _UpdateRead:
             ),
             new_operation=new_operation,
             _metadata_only=self._metadata_only,
+            _owners=self._owners if self._metadata_only else None,
         )
         self._check()
         if (
@@ -2060,6 +2113,7 @@ def capture_checkpoint(
     progress=None,
     _observation=None,
     _owned_export=None,
+    _owners=None,
 ):
     root, source = Path(vault).absolute(), Path(source).absolute()
     objects = False
@@ -2072,19 +2126,43 @@ def capture_checkpoint(
         if _owned_export is not None:
             from brz2obsidian.application.review_session import _OwnedReviewExport
 
-            if (
-                type(_owned_export) is not _OwnedReviewExport
-                or boundary != "local"
-                or review_source is None
-                and (
-                    review is None
-                    or review.facts.format_operation.kind != "onboarding"
-                    or source_binding is None
-                    or observed_source is None
-                )
+            local_export = boundary == "local" and (
+                review_source is not None
+                or review is not None
+                and review.facts.format_operation.kind == "onboarding"
+                and source_binding is not None
+                and observed_source is not None
+            )
+            prepared_export = (
+                boundary == "prepared"
+                and proposed is not None
+                and active_operation is not None
+                and review is not None
+                and source_binding is not None
+                and observed_source is not None
+                and review_source is None
+                and _owners is not None
+            )
+            result_export = (
+                boundary == "result"
+                and expected_prepared is not None
+                and active_operation is not None
+                and operation_intent_commit is not None
+                and _observation is not None
+                and _owners is not None
+                and review_source is None
+            )
+            if type(_owned_export) is not _OwnedReviewExport or not (
+                local_export or prepared_export or result_export
             ):
                 raise OSError("Closed canonical owner export required")
             _owned_export.check(review)
+            if (prepared_export or result_export) and (
+                _owned_export.effects is None
+                or _owned_export.effects.status != "selected"
+                or _owned_export.session._selected is not _owned_export.effects
+            ):
+                raise OSError("Current canonical selected effects required")
         from brz2obsidian.application.vault_progress_contracts import report_progress
 
         report_progress(
@@ -2161,6 +2239,7 @@ def capture_checkpoint(
                     inspection
                 ),
                 _metadata_only=_owned_export is not None,
+                _owners=_owners,
             )
             if _observation is None
             else _inspect_retained_history(
@@ -2445,6 +2524,10 @@ def capture_checkpoint(
             ):
                 return result("refused", "prepared_review_changed")
             saved = prior.review.saved if prior.review is not None else None
+            if _owned_export is not None:
+                if saved is None:
+                    return result("refused", "prepared_review_changed")
+                _owned_export.check(saved.plan)
             if (
                 current.policy_continuity_fingerprint
                 != prior.manifest.policy_continuity_fingerprint
@@ -2626,7 +2709,11 @@ def capture_checkpoint(
                 ):
                     selected_effects = prior.review.historical_effects
                 if selected_effects is None:
-                    selected_effects = select_review_effects(saved.plan)
+                    if _owned_export is not None:
+                        _owned_export.check(saved.plan)
+                        selected_effects = _owned_export.effects
+                    else:
+                        selected_effects = select_review_effects(saved.plan)
                 if selected_effects.status == "selected":
                     for effect in selected_effects.files:
                         if effect.subject_id not in scopes:

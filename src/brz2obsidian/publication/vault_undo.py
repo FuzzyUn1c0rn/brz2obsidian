@@ -201,6 +201,9 @@ def _unpublished_undo_matches(observation):
         origin_commit=target.graph.origin_intent_commit,
         origin_plan=target.plan,
         undo_target=target,
+        origin_effects=target.observation.owned[target.intent.prepared_commit][
+            1
+        ].historical_effects,
     ) and _recovery_prepared_matches(
         transition,
         target.intent,
@@ -211,6 +214,7 @@ def _unpublished_undo_matches(observation):
         target.plan,
         direction="restore",
         undo_target=target,
+        origin_loaded=target.observation.owned[target.intent.prepared_commit][1],
     )
 
 

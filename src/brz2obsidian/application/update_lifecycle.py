@@ -1846,10 +1846,14 @@ def _reobserve_inputs(operations, preparation, observed):
     return (history, result, retained)
 
 
-def apply_update(operations, preparation, *, cancel=None, progress=None):
+def apply_update(operations, preparation, *, cancel=None, progress=None, _owner=None):
     native_contact = False
     try:
-        history, current, _ = _reobserve(operations, preparation)
+        history, current, _ = (
+            _reobserve(operations, preparation)
+            if _owner is None
+            else _owner._reobserve(preparation)
+        )
         if history is None or current.status == "stale_review":
             return current
         if current.code == "separate_configuration_operation_required":
@@ -1890,7 +1894,11 @@ def apply_update(operations, preparation, *, cancel=None, progress=None):
                 }
             )
         association = prepared.locator.association
-        selected = select_review_effects(prepared.review)
+        selected = (
+            select_review_effects(prepared.review)
+            if _owner is None
+            else _owner._session.select_review_effects(prepared.review)
+        )
         source_rows = tuple(
             (r.path, r.mode, r.size, r.sha256) for r in prepared.source_binding.files
         )
@@ -1925,19 +1933,25 @@ def apply_update(operations, preparation, *, cancel=None, progress=None):
             (r.path, r.mode, r.size, r.sha256)
             for r in history.checkpoint.manifest.vault
         )
-        retained_memory = (
-            _memory(history.checkpoint.review.saved.plan)
-            if history.checkpoint.review is not None
-            else ()
+        if _owner is not None:
+            if _owner._tip_commit != history.checkpoint.locator.commit:
+                _owner._tip = _owner._load_tip(history.checkpoint)
+            retained = _owner._tip
+        else:
+            retained = history.checkpoint.review
+        retained_memory = _memory(retained.saved.plan) if retained is not None else ()
+        same_memory = canonical_equal(
+            tuple(
+                sorted(
+                    _memory(prepared.review), key=lambda row: row.provenance.decision_id
+                )
+            ),
+            tuple(sorted(retained_memory, key=lambda row: row.provenance.decision_id)),
         )
-        same_memory = sorted(
-            _memory(prepared.review), key=lambda row: row.provenance.decision_id
-        ) == sorted(retained_memory, key=lambda row: row.provenance.decision_id)
         same_selected = all(
             row.path in current_files
-            and len(row.content.data) == current_files[row.path].size
-            and hashlib.sha256(row.content.data).hexdigest()
-            == current_files[row.path].sha256
+            and row.content.identity.size == current_files[row.path].size
+            and row.content.identity.sha256 == current_files[row.path].sha256
             for row in selected.files
         )
         if (
@@ -1963,6 +1977,9 @@ def apply_update(operations, preparation, *, cancel=None, progress=None):
                 publication="not_published",
                 summary="The source and vault are unchanged; no additional checkpoint was needed.",
             )
+        export = (
+            _owner._publication_export(prepared.review) if _owner is not None else None
+        )
         native_contact = True
         applied = operations.apply_reviewed_update(
             prepared.vault,
@@ -1973,6 +1990,7 @@ def apply_update(operations, preparation, *, cancel=None, progress=None):
             vault_id=association.vault_id,
             import_id=association.import_id,
             cancel=cancel,
+            **({"_owned_export": export} if export is not None else {}),
             **({"progress": progress} if progress is not None else {}),
         )
         status = update_application_status(applied)

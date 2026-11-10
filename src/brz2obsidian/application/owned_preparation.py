@@ -47,6 +47,7 @@ class _OwnedPreparation:
         self._session = self.observed = self.preparation = None
         self._closed = False
         self._tip = None
+        self._tip_commit = None
         self._cancel = _ProducerCancellation()
 
     def _observe(self, vault, expected=None, *, expected_absent=False):
@@ -89,13 +90,15 @@ class _OwnedPreparation:
         )
         self._session._content._observation = retained
         try:
-            return self._session._load_retained(
+            loaded = self._session._load_retained(
                 record,
                 available,
                 references,
                 local=checkpoint.manifest.boundary == "local"
                 and not checkpoint.manifest.proposed,
             )
+            self._tip_commit = checkpoint.locator.commit
+            return loaded
         finally:
             retained._open = False
             self._session._content._observation = current
@@ -501,6 +504,30 @@ class _OwnedPreparation:
             return review_plan_choice_offers(
                 plan, _choices=self._session._canonical_choices(plan)
             )
+
+    def apply(self, preparation, *, cancel=None, progress=None):
+        self._cancel.probe = cancel
+        try:
+            return lifecycle.apply_update(
+                self.operations,
+                preparation,
+                cancel=cancel,
+                progress=progress,
+                _owner=self,
+            )
+        finally:
+            self._cancel.probe = None
+            if self._session is not None and not self._session._closed:
+                self._session._ledger.release_failed()
+
+    def _publication_export(self, plan):
+        export = self._session._freeze_export(plan)
+        export.effects = self._session.select_review_effects(export.saved.plan)
+        if export.effects.status != "selected":
+            raise OSError("Whole current owned review required")
+        self._session._content._detach()
+        self.observed = None
+        return export
 
     def choices(self, plan):
         with self._session._operation():

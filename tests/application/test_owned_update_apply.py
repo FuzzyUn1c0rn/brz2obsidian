@@ -55,7 +55,9 @@ def test_default_context_applies_saved_binary_and_repeats_without_checkpoint_chu
     workflow.metadata_factory = lambda: metadata
     vault = root / "vault"
     converted = workflow.convert(initial_archive, vault)
-    assert converted.receipt is not None and converted.receipt.verified, converted
+    assert converted.receipt is not None and converted.receipt.verified, (
+        converted.model_dump_json()
+    )
     assert (vault / asset_path).read_bytes() == original
     baseline = root / "baseline"
     shutil.copytree(vault, baseline)
@@ -97,7 +99,9 @@ def test_default_context_applies_saved_binary_and_repeats_without_checkpoint_chu
         ),
         admission=operations.inspect_history(vault).admission,
     )
-    assert seed.status == "captured" and seed.locator.generation == 1, seed
+    assert seed.status == "captured" and seed.locator.generation == 1, (
+        seed.model_dump_json()
+    )
     seed_manifest_raw = git(vault, "cat-file", "blob", seed.commit + ":manifest.json")
     assert json.loads(seed_manifest_raw)["review_object"] is None
     before = user_state(vault, owned_ref=seed.ref)
@@ -114,12 +118,14 @@ def test_default_context_applies_saved_binary_and_repeats_without_checkpoint_chu
             "kind": "source_update",
         },
     )
-    assert opened.status == "prepared_review" and opened.binding is not None, opened
+    assert opened.status == "prepared_review" and opened.binding is not None, (
+        opened.model_dump_json()
+    )
     assert not opened.ready and opened.unresolved > 0
     page = worker_context_call(
         warm, {"command": "page", "binding": opened.binding, "byte_limit": 0}
     )
-    assert page.status == "available", page
+    assert page.status == "available", page.model_dump_json()
     index, row = next(
         (index, row)
         for index, row in enumerate(page.page.items)
@@ -182,12 +188,14 @@ def test_default_context_applies_saved_binary_and_repeats_without_checkpoint_chu
             "references": tuple(reference_choices),
         },
     )
-    assert chosen.code == "accepted" and chosen.binding is not None, chosen
+    assert chosen.code == "accepted" and chosen.binding is not None, (
+        chosen.model_dump_json()
+    )
     assert not chosen.ready
     choices = worker_context_call(
         warm, {"command": "choices", "binding": chosen.binding}
     )
-    assert choices.status == "available", choices
+    assert choices.status == "available", choices.model_dump_json()
     remaining = [offer for offer in choices.offers if offer.selected is None]
     assert len(remaining) == 1
     metadata_offer = remaining[0]
@@ -209,17 +217,23 @@ def test_default_context_applies_saved_binary_and_repeats_without_checkpoint_chu
             "assumptions_digest": metadata_offer.assumptions_digest,
         },
     )
-    assert chosen.code == "accepted" and chosen.binding is not None, chosen
+    assert chosen.code == "accepted" and chosen.binding is not None, (
+        chosen.model_dump_json()
+    )
     assert chosen.ready and chosen.unresolved == 0
     saved = worker_context_call(warm, {"command": "save", "binding": chosen.binding})
-    assert saved.code == "saved" and saved.capture is not None and saved.ready, saved
+    assert saved.code == "saved" and saved.capture is not None and saved.ready, (
+        saved.model_dump_json()
+    )
     assert saved.capture.status == "captured" and saved.history_retained
     assert saved.binding.checkpoint_generation == 2
     assert saved.binding.checkpoint_commit == saved.capture.commit != seed.commit
     closed = worker_context_call(
         warm, {"command": "close", "binding": saved.binding, "choice": "discard"}
     )
-    assert closed.code == "context_closed" and closed.binding is None, closed
+    assert closed.code == "context_closed" and closed.binding is None, (
+        closed.model_dump_json()
+    )
     assert _tree(scratch) == scratch_before
     assert user_state(vault, owned_ref=seed.ref) == before
     del warm, opened, chosen, page, converted
@@ -245,7 +259,7 @@ def test_default_context_applies_saved_binary_and_repeats_without_checkpoint_chu
         },
     )
     assert loaded.status == "unresolved" and loaded.code == "revalidation_required", (
-        loaded
+        loaded.model_dump_json()
     )
     assert not loaded.ready and loaded.binding is None and loaded.unresolved == 0
     assert loaded.checkpoint_commit == saved.capture.commit and loaded.history_retained
@@ -258,7 +272,9 @@ def test_default_context_applies_saved_binary_and_repeats_without_checkpoint_chu
             "selection_id": "22222222-2222-4222-8222-222222222222",
         },
     )
-    assert resumed.status == "prepared_review" and resumed.code == "unchanged", resumed
+    assert resumed.status == "prepared_review" and resumed.code == "unchanged", (
+        resumed.model_dump_json()
+    )
     assert resumed.ready and resumed.unresolved == 0 and resumed.binding is not None
     assert resumed.binding.proposal_id == saved.binding.proposal_id
     assert resumed.binding.generation == saved.binding.generation
@@ -275,7 +291,7 @@ def test_default_context_applies_saved_binary_and_repeats_without_checkpoint_chu
             "byte_limit": 256,
         },
     )
-    assert shown.status == "available", shown
+    assert shown.status == "available", shown.model_dump_json()
     displayed = shown.page.items[0]
     assert displayed.original == original and displayed.current == current
     assert displayed.incoming == b"\xfdIncoming binary\x00" + b"x" * (
@@ -288,7 +304,9 @@ def test_default_context_applies_saved_binary_and_repeats_without_checkpoint_chu
     applied = worker_context_call(
         cold, {"command": "apply", "binding": resumed.binding}
     )
-    assert applied.status == "applied" and applied.operation is not None, applied
+    assert applied.status == "applied" and applied.operation is not None, (
+        applied.model_dump_json()
+    )
     assert applied.publication == "complete" and applied.operation.history == "terminal"
     assert applied.binding is None and not applied.ready
     operation = applied.operation
@@ -355,7 +373,8 @@ def test_default_context_applies_saved_binary_and_repeats_without_checkpoint_chu
         seed.ref.removesuffix("/checkpoints") + "/operations/" + operation.operation_id
     )
     assert (
-        git(vault, "rev-parse", operation_ref).decode().strip() == operation.receipt_commit
+        git(vault, "rev-parse", operation_ref).decode().strip()
+        == operation.receipt_commit
     )
     after = user_state(vault, owned_ref=seed.ref)
     for key in ("head", "index", "config", "stages"):
@@ -382,19 +401,22 @@ def test_default_context_applies_saved_binary_and_repeats_without_checkpoint_chu
             "kind": "source_update",
         },
     )
-    assert opened_again.status == "prepared_review" and opened_again.ready, opened_again
+    assert opened_again.status == "prepared_review" and opened_again.ready, (
+        opened_again.model_dump_json()
+    )
     assert opened_again.unresolved == 0 and opened_again.binding is not None
     duplicate = worker_context_call(
         repeated, {"command": "apply", "binding": opened_again.binding}
     )
-    assert duplicate.status == "no_content_change" and duplicate.code == "already_current", (
-        duplicate
-    )
+    assert (
+        duplicate.status == "no_content_change" and duplicate.code == "already_current"
+    ), duplicate.model_dump_json()
     assert duplicate.operation is None and duplicate.publication == "not_published"
     assert duplicate.checkpoint_commit == operation.result_commit
     assert _tree(scratch) == scratch_before
     assert (
-        git(vault, "for-each-ref", "--format=%(refname) %(objectname)") == refs_before_repeat
+        git(vault, "for-each-ref", "--format=%(refname) %(objectname)")
+        == refs_before_repeat
     )
     assert (vault / ".brz2obsidian/locator.json").read_bytes() == locator_before_repeat
     assert user_state(vault, owned_ref=seed.ref) == after_apply
@@ -403,5 +425,6 @@ def test_default_context_applies_saved_binary_and_repeats_without_checkpoint_chu
     assert _tree(baseline) == baseline_before
     assert (_digest(initial_archive), _digest(incoming_archive)) == archives_before
     assert (
-        git(vault, "cat-file", "blob", seed.commit + ":manifest.json") == seed_manifest_raw
+        git(vault, "cat-file", "blob", seed.commit + ":manifest.json")
+        == seed_manifest_raw
     )

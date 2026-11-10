@@ -295,6 +295,8 @@ class _ClosureState:
 class _OwnedReviewExport:
     """One owner-minted canonical export; declarations cannot mint this grant."""
 
+    effects = None
+
     def check(self, plan=None):
         if self.session._publication_export is not self or self.session._closed:
             raise OSError("Owned review export is retired")
@@ -323,6 +325,26 @@ class _OwnedReviewExport:
                 for block in chunks:
                     if output.write(block) != len(block):
                         raise OSError("Incomplete owned review export write")
+
+    def stage(self, effect, output):
+        self.check()
+        if self.session._selected is not self.effects:
+            raise OSError("Current canonical selected effects required")
+        staged = self.session.stage_effect(effect)
+        with (
+            self.session._operation(),
+            closing(
+                self.session._content._read_owned(
+                    staged.path,
+                    staged.reference,
+                    self.session._ledger,
+                    self.session._scope,
+                )
+            ) as chunks,
+        ):
+            for block in chunks:
+                if output.write(block) != len(block):
+                    raise OSError("Incomplete selected stage copy")
 
 
 class ReviewSession:
@@ -356,7 +378,10 @@ class ReviewSession:
             observed,
             scratch_parent=scratch_parent,
             budget=ReviewBudget(
-                metadata_limit=capacity,
+                # This cumulative model-work credit spans prepare, choices,
+                # resume and publication; it is not an estimate of live heap.
+                # Actual retained envelope/semantic admission still uses capacity.
+                metadata_limit=max(capacity, 1024 * 1024 * 1024),
                 node_limit=maximum,
                 depth_limit=sys.getrecursionlimit(),
                 decoded_limit=maximum,

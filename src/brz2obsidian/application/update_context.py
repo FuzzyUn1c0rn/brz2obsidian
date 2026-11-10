@@ -570,7 +570,10 @@ class UpdateContext:
                 code="source_payload_changed",
                 binding=self._binding,
             )
-        result = self._operations.apply_update(
+        apply = (
+            self._operations.apply_update if self._owner is None else self._owner.apply
+        )
+        result = apply(
             self._preparation,
             cancel=cancel,
             **({"progress": progress} if progress is not None else {}),
@@ -586,6 +589,7 @@ class UpdateContext:
             return self._retain(result, selection_id=expected.selection_id)
         # Any attempted native mutation retires prior readiness; current native
         # inspection/resume supplies the next authority, including cancellation.
+        self._retire_owner()
         self._preparation = self._binding = None
         return self._source_projection(
             UpdateContextResult(
