@@ -965,7 +965,7 @@ def _document_preflight(root, retained, original, intent, facts, *, _owner=None)
     )
 
 
-def _finish_review(root, observed, *, previous=None, authority=None):
+def _finish_review(root, observed, *, previous=None, authority=None, _owner=None):
     original, intent, origin_commit, git, facts, preflight, current, retained = (
         _review_observation(
             root,
@@ -973,6 +973,7 @@ def _finish_review(root, observed, *, previous=None, authority=None):
             direction="finish",
             authority=authority,
             next_generation=(previous.proposal.generation + 1 if previous else None),
+            _owner=_owner,
         )
     )
     document_keys = {
@@ -1003,11 +1004,14 @@ def _finish_review(root, observed, *, previous=None, authority=None):
                     current,
                     direction="finish",
                     only_documents={item_id for item_id, _ in document_keys},
+                    _owner=_owner,
                 )
             }
         )
         if inactive_keys:
-            preflight = _document_preflight(root, retained, original, intent, facts)
+            preflight = _document_preflight(
+                root, retained, original, intent, facts, _owner=_owner
+            )
     from .attachment_ownership import compile_removal_continuations
 
     loaded = retained.owned[intent.prepared_commit][1]
@@ -1039,6 +1043,8 @@ def _finish_review(root, observed, *, previous=None, authority=None):
             )
         }
     )
+    if _owner is not None:
+        return _owner._history_plan(facts, preflight, previous or original)
     refreshed = refresh_review(previous or original, facts, preflight=preflight)
     if refreshed.status != "accepted":
         raise OSError("Current recovery review could not be refreshed")
@@ -1184,7 +1190,15 @@ def _restore_link_context(original, facts, before, affected, git, *, _owner=None
 
 
 def _operation_document_subjects(
-    original, intent, origin_commit, git, current, *, direction, only_documents=None
+    original,
+    intent,
+    origin_commit,
+    git,
+    current,
+    *,
+    direction,
+    only_documents=None,
+    _owner=None,
 ):
     """Rebind exact dependent-document versions to this admitted operation."""
     return _operation_document_subjects_from_owned(
@@ -1193,9 +1207,12 @@ def _operation_document_subjects(
         origin_commit,
         git,
         current,
-        review_owned_documents(original),
+        review_owned_documents(original)
+        if _owner is None
+        else _owner._history_owned_outputs(original, ()).documents,
         direction=direction,
         only_documents=only_documents,
+        _owner=_owner,
     )
 
 
@@ -1819,9 +1836,10 @@ def _prepare_recovery_observed(
     )
     selected_authority = (original, origin, origin_commit, authority)
     try:
-        if _owner is not None and direction == "restore":
+        if _owner is not None and direction in ("finish", "restore"):
             with _owner._session._operation():
-                review = _restore_review(
+                builder = _finish_review if direction == "finish" else _restore_review
+                review = builder(
                     root,
                     observed,
                     previous=previous,

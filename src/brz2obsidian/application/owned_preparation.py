@@ -320,7 +320,11 @@ class _OwnedPreparation:
 
         from .history_workflow import _prepared
 
-        if kind == "recovery" and direction in (None, "restore") and copy is None:
+        if (
+            kind == "recovery"
+            and direction in (None, "finish", "restore")
+            and copy is None
+        ):
             return _prepared(
                 vault, kind, prepare_recovery(vault, direction=direction, _owner=self)
             )
@@ -336,7 +340,10 @@ class _OwnedPreparation:
 
         from .history_workflow import _prepared
 
-        if preparation.kind == "recovery" and preparation.native.direction == "restore":
+        if preparation.kind == "recovery" and preparation.native.direction in (
+            "finish",
+            "restore",
+        ):
             return _prepared(
                 preparation.vault,
                 "recovery",
@@ -359,9 +366,12 @@ class _OwnedPreparation:
 
         from .history_workflow import _prepared
 
-        if preparation.kind == "recovery" and preparation.native.direction == "restore":
+        if preparation.kind == "recovery" and preparation.native.direction in (
+            "finish",
+            "restore",
+        ):
             fresh = prepare_recovery(
-                preparation.vault, direction="restore", _owner=self
+                preparation.vault, direction=preparation.native.direction, _owner=self
             )
             if (
                 fresh.generation != preparation.native.generation
@@ -422,15 +432,16 @@ class _OwnedPreparation:
 
         from .history_workflow import _executed
 
-        owned_restore = (
-            preparation.kind == "recovery" and preparation.native.direction == "restore"
+        owned_recovery = (
+            preparation.kind == "recovery"
+            and preparation.native.direction in ("finish", "restore")
         )
-        if preparation.kind != "undo" and not owned_restore:
+        if preparation.kind != "undo" and not owned_recovery:
             return self.operations.execute_history_workflow(
                 preparation, cancel=cancel, progress=progress
             )
         with self._history_cancellation(cancel):
-            execute = execute_recovery if owned_restore else execute_undo
+            execute = execute_recovery if owned_recovery else execute_undo
             result = execute(
                 preparation.vault,
                 preparation.native,

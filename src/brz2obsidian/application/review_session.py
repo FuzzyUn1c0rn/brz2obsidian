@@ -550,7 +550,7 @@ class ReviewSession:
             # Envelope/semantic admission retain their independent capacity
             # checks; subtracting those proxies here imposed a second, smaller
             # metadata qualification ceiling on the actual reconstruction.
-            metadata_limit=capacity,
+            metadata_limit=max(capacity, 1024 * 1024 * 1024),
             node_limit=maximum,
             depth_limit=sys.getrecursionlimit(),
             decoded_limit=maximum,

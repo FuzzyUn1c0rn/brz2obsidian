@@ -25,6 +25,8 @@ from brz2obsidian.application.checkpoint_contracts import (
     VaultInitializationResult,
 )
 from brz2obsidian.application.vault_contracts import VaultSubject
+from brz2obsidian.content_fingerprints import canonical_equal
+from brz2obsidian.content_values import content_sha, content_size
 from brz2obsidian.contracts import (
     ExactContent,
     OpaqueContent,
@@ -2163,7 +2165,7 @@ def capture_checkpoint(
                     or source_binding is None
                     and observed_source is None
                     and undo_of_receipt_commit is None
-                    and recovery_direction == "restore"
+                    and recovery_direction in ("finish", "restore")
                     and _observation is not None
                 )
                 and review_source is None
@@ -2612,9 +2614,8 @@ def capture_checkpoint(
                         (expected is None) != (source_row is None)
                         or expected is not None
                         and (
-                            len(expected.data) != source_row.size
-                            or hashlib.sha256(expected.data).hexdigest()
-                            != source_row.sha256
+                            content_size(expected) != source_row.size
+                            or content_sha(expected) != source_row.sha256
                         )
                     ):
                         return result("refused", "review_bytes_changed")
@@ -3036,9 +3037,17 @@ def capture_checkpoint(
                 if boundary != "result"
                 else prior.manifest.reviewed_source,
             )
+            # Duplicate meaning omits proof identities. An owned prepared
+            # export must retain the complete plan its result capture checks.
             if (
                 prior.status == "valid"
                 and prior.manifest.semantic_fingerprint == semantic
+                and (
+                    _owned_export is None
+                    or boundary != "prepared"
+                    or prior.review is not None
+                    and canonical_equal(saved.plan, prior.review.saved.plan)
+                )
             ):
                 if (
                     not _source_matches(source, source_files)
