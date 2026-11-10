@@ -2138,8 +2138,15 @@ def capture_checkpoint(
                 and proposed is not None
                 and active_operation is not None
                 and review is not None
-                and source_binding is not None
-                and observed_source is not None
+                and (
+                    source_binding is not None
+                    and observed_source is not None
+                    and undo_of_receipt_commit is None
+                    or source_binding is None
+                    and observed_source is None
+                    and undo_of_receipt_commit is not None
+                    and _observation is not None
+                )
                 and review_source is None
                 and _owners is not None
             )

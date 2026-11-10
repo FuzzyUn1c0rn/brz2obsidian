@@ -3,7 +3,7 @@
 import shutil
 import stat
 import tempfile
-from contextlib import closing
+from contextlib import closing, contextmanager
 from pathlib import Path
 from threading import Event
 from uuid import uuid4
@@ -49,6 +49,9 @@ class _OwnedPreparation:
         self._tip = None
         self._tip_commit = None
         self._cancel = _ProducerCancellation()
+        self._history_observation = self._history_origin = None
+        self._history_origin_commit = None
+        self._history_values = {}
 
     def _observe(self, vault, expected=None, *, expected_absent=False):
         fresh = _UpdateRead(vault, _metadata_only=True)
@@ -74,19 +77,22 @@ class _OwnedPreparation:
             raise
 
     def _load_tip(self, checkpoint):
-        if checkpoint.manifest.review_object is None:
+        return self._load_manifest_review(
+            checkpoint.manifest, checkpoint.locator.commit
+        )
+
+    def _load_manifest_review(self, manifest, commit):
+        if manifest.review_object is None:
             return None
         git = _Git(self.observed._root, self.observed._inspection.executable)
-        record, references, available = _review_reference_graph(
-            git, checkpoint.manifest
-        )
+        record, references, available = _review_reference_graph(git, manifest)
         current = self._session._content._observation
         retained = _RetainedReviewRead(
             git,
-            checkpoint.manifest,
-            checkpoint.locator.commit,
+            manifest,
+            commit,
             capacity=lifecycle.available_memory(),
-            envelope_size=checkpoint.manifest.review_size,
+            envelope_size=manifest.review_size,
         )
         self._session._content._observation = retained
         try:
@@ -94,10 +100,9 @@ class _OwnedPreparation:
                 record,
                 available,
                 references,
-                local=checkpoint.manifest.boundary == "local"
-                and not checkpoint.manifest.proposed,
+                local=manifest.boundary == "local" and not manifest.proposed,
             )
-            self._tip_commit = checkpoint.locator.commit
+            self._tip_commit = commit
             return loaded
         finally:
             retained._open = False
@@ -119,6 +124,264 @@ class _OwnedPreparation:
                 value = self._session._text(value)
             values[row.path] = value
         return values
+
+    def inspect_history(self, vault):
+        from .history_workflow import _history_admission
+
+        try:
+            if self._cancel.is_set():
+                raise OSError("History inspection cancelled")
+            history = self._observe(vault)
+            if self._cancel.is_set():
+                raise OSError("History inspection cancelled")
+            if (
+                history.status != "intact"
+                or history.admission.status != "supported"
+                or self.observed._terminal is None
+            ):
+                return self.operations.inspect_history_workflow(vault)
+            self._start_session()
+            operation = self.operations.inspect_update_status(vault)
+            self.observed._check()
+            if self._cancel.is_set():
+                raise OSError("History inspection cancelled")
+            return _history_admission(history, operation)
+        except OSError, ValueError, TypeError, UnicodeError:
+            if self._cancel.is_set():
+                raise
+            self.close()
+            return self.operations.inspect_history_workflow(vault)
+
+    @contextmanager
+    def _history_cancellation(self, cancel):
+        cancelled = False
+
+        def probe():
+            nonlocal cancelled
+            cancelled = cancelled or bool(cancel is not None and cancel())
+            return cancelled
+
+        self._cancel.probe = probe
+        try:
+            yield
+        finally:
+            self._cancel.probe = None
+
+    def history_fingerprint(self, preparation):
+        return self._session._fingerprint(preparation)
+
+    def _operation_target(self, target):
+        observation = target.observation
+        self._history_observation = observation
+        origin = target.graph.authorities[-1][1]
+        manifest, _ = observation.owned[origin.prepared_commit]
+        if self._history_origin_commit != origin.prepared_commit:
+            self._history_origin = self._load_manifest_review(
+                manifest, origin.prepared_commit
+            )
+            self._history_origin_commit = origin.prepared_commit
+        if self._history_origin is None:
+            raise OSError("Undo target lacks its canonical owned origin")
+        return target._replace(plan=self._history_origin.saved.plan)
+
+    def _operation_content(self, row):
+        if row is None:
+            return None
+        observation = self._history_observation
+        if (
+            observation is None
+            or not any(
+                row is candidate
+                for manifest, _ in observation.owned.values()
+                for role in (
+                    "source",
+                    "vault",
+                    "preimage",
+                    "proposed",
+                    "review_content",
+                )
+                for candidate in getattr(manifest, role)
+            )
+            and not any(
+                row is candidate
+                for graph in (observation.graph, *observation.graphs)
+                for _, authority in graph.authorities
+                for candidate in authority.before + authority.proposed
+            )
+        ):
+            raise OSError("Retained content is outside the validated operation graph")
+        key = row.object_id, row.size, row.sha256
+        if key not in self._history_values:
+            from brz2obsidian.publication.git_payload import verify_blobs
+
+            git = _Git(self.observed._root, self.observed._inspection.executable)
+            transaction = self._session._begin_input(("operation-role",) + key)
+
+            class Sink:
+                def write(self, block):
+                    for start in range(0, len(block), 65536):
+                        transaction.write(block[start : start + 65536])
+                    return len(block)
+
+            try:
+                verify_blobs(
+                    [*git.prefix, "cat-file", "--batch"],
+                    env=git.env,
+                    objects=((row.object_id, row.size, row.sha256, Sink()),),
+                    timeout=max(30, row.size / (8 * 1024 * 1024) + 30),
+                )
+                value = self._session._finish_input(transaction, None, inline=False)
+                self._history_values[key] = self._session._assembly_content(
+                    value, semantic=False
+                )
+            except BaseException:
+                transaction.abort()
+                raise
+        return self._history_values[key]
+
+    def _history_current(self, rows):
+        values = self._physical_payload(self.observed._root, rows)
+        return {
+            path: self._session._assembly_content(value, semantic=False)
+            for path, value in values.items()
+        }
+
+    def _history_scoped(self, subjects):
+        scoped = self.observed.inspect(subjects=subjects)
+        admission, actual = self.observed._consume_fresh_scope(
+            scoped, purpose=None, ledger=self._session._ledger
+        )
+        if {(row.path, row.subject_id) for row in actual} != {
+            (row.path, row.subject_id) for row in subjects
+        }:
+            raise OSError("Undo scoped admission differs from its actual subjects")
+        self._history_current_admission = admission
+        return admission
+
+    def _history_owned_outputs(self, plan, requests):
+        from brz2obsidian.core.reversals import (
+            ReviewOwnedOutputs,
+            _owned_documents,
+            _owned_targets,
+        )
+
+        if plan is not self._history_origin.saved.plan:
+            raise OSError("Owned output queries require the actual loaded origin")
+        self._session._coadmit()
+        effects = self._history_origin.historical_effects
+        if effects.status != "selected":
+            raise OSError("Original operation lacks canonical selected effects")
+
+        def selected():
+            return effects
+
+        return ReviewOwnedOutputs(
+            tuple(
+                _owned_targets(plan, change, decision, selected)
+                for change, decision in requests
+            ),
+            _owned_documents(plan, selected),
+            effects,
+        )
+
+    def _history_plan(self, facts, preflight, previous=None):
+        facts = self._session._admit_values(facts)
+        self._session._admit_current(self._history_current_admission, facts)
+        self._session._coadmit()
+        if previous is None:
+            return self._session._drive(PlanWork(facts, preflight))
+        transition = self._session._drive(RefreshWork(previous, facts, preflight))
+        if transition.status != "accepted":
+            raise OSError("Current Undo review could not be refreshed")
+        return transition.plan
+
+    def prepare_history(self, vault, *, kind, direction=None, copy=None):
+        from brz2obsidian.publication.vault_undo import prepare_undo
+
+        from .history_workflow import _prepared
+
+        if kind != "undo" or direction is not None or copy is not None:
+            return self.operations.prepare_history_workflow(
+                vault, kind=kind, direction=direction, copy=copy
+            )
+        return _prepared(vault, "undo", prepare_undo(vault, _owner=self))
+
+    def refresh_history(self, preparation):
+        from brz2obsidian.publication.vault_undo import prepare_undo
+
+        from .history_workflow import _prepared
+
+        if preparation.kind != "undo":
+            return self.operations.refresh_history_workflow(preparation)
+        return _prepared(
+            preparation.vault,
+            "undo",
+            prepare_undo(preparation.vault, previous=preparation.native, _owner=self),
+        )
+
+    def choose_history(self, preparation, **values):
+        from brz2obsidian.publication.vault_undo import _same_review, prepare_undo
+
+        from .history_workflow import _prepared
+
+        fresh = prepare_undo(preparation.vault, _owner=self)
+        if not _same_review(fresh, preparation.native):
+            raise ValueError("Undo review changed")
+        with self._session._operation():
+            plan = self._session._admit_values(preparation.native.review)
+            self._session._coadmit()
+            action = review_plan_choice_action(
+                plan,
+                _choices=self._session._canonical_choices(plan),
+                _owner=self,
+                **{key: value for key, value in values.items() if key != "edited"},
+            )
+            action = lifecycle.text_choice_action(
+                plan, action, edited=values.get("edited"), _owner=self
+            )
+            action = self._session._admit_values(action)
+            self._session._coadmit()
+            transition = self._session._drive(
+                ActionWork(plan, action, self._session._epoch)
+            )
+            if transition.status != "accepted":
+                raise ValueError(transition.code)
+        return _prepared(
+            preparation.vault,
+            "undo",
+            preparation.native.model_copy(
+                update={"review": transition.plan, "code": "undo_choice_recorded"}
+            ),
+        )
+
+    def history_page(self, plan, **arguments):
+        with self._session._operation():
+            plan = self._session._admit_values(plan)
+            self._session._coadmit()
+            return lifecycle.review_plan_page(plan, _owner=self, **arguments)
+
+    def execute_history(self, preparation, *, cancel=None, progress=None):
+        from brz2obsidian.publication.vault_undo import execute_undo
+
+        from .history_workflow import _executed
+
+        if preparation.kind != "undo":
+            return self.operations.execute_history_workflow(
+                preparation, cancel=cancel, progress=progress
+            )
+        self._cancel.probe = cancel
+        try:
+            result = execute_undo(
+                preparation.vault,
+                preparation.native,
+                cancel=cancel,
+                progress=progress,
+                executor=self.operations.vault_executor,
+                _owner=self,
+            )
+            return _executed(result, "undo")
+        finally:
+            self._cancel.probe = None
 
     def _source_payload(self, checkpoint):
         result = {}

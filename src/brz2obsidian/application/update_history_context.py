@@ -1,5 +1,6 @@
 """Private current shared history admission and explicit setup capability."""
 
+from contextlib import nullcontext
 from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
@@ -18,6 +19,7 @@ from .update_history_contracts import (
 class HistoryContext:
     def __init__(self, operations):
         self.operations = operations
+        self._owner = None
         self.binding = self.admission = None
         self.preparation = None
         self._last_result = None
@@ -61,16 +63,24 @@ class HistoryContext:
     def inspect(self, vault, *, selection_id, cancel=None):
         request_identity(selection_id)
         if cancel is not None and cancel():
-            self.binding = self.preparation = None
-            self._last_result = self._result(
-                status="cancelled_before_publication",
-                code="cancelled_before_inspection",
-                history_retained=None,
-                publication="not_published",
-                next_actions=("inspect_history",),
-            )
-            return self._last_result
-        admission = self.operations.inspect_history_workflow(vault)
+            return self._cancelled_inspection("cancelled_before_inspection")
+        with (
+            nullcontext()
+            if self._owner is None
+            else self._owner._history_cancellation(cancel)
+        ):
+            try:
+                admission = (
+                    self.operations.inspect_history_workflow(vault)
+                    if self._owner is None
+                    else self._owner.inspect_history(vault)
+                )
+            except OSError, ValueError:
+                if self._owner is not None and self._owner._cancel.is_set():
+                    return self._cancelled_inspection("cancelled_after_inspection")
+                raise
+            if self._owner is not None and self._owner._cancel.is_set():
+                return self._cancelled_inspection("cancelled_after_inspection")
         self.revision += 1
         operation, checkpoint = admission.operation, admission.checkpoint
         self.admission = admission
@@ -115,6 +125,17 @@ class HistoryContext:
                     "next_actions": ("inspect_history",),
                 }
             )
+        return self._last_result
+
+    def _cancelled_inspection(self, code):
+        self.binding = self.preparation = None
+        self._last_result = self._result(
+            status="cancelled_before_publication",
+            code=code,
+            history_retained=None,
+            publication="not_published",
+            next_actions=("inspect_history",),
+        )
         return self._last_result
 
     def _matches(self, binding):
@@ -208,7 +229,9 @@ class HistoryContext:
                     "revision": self.revision,
                     "fingerprint": sha256(
                         preparation.model_dump_json().encode()
-                    ).hexdigest(),
+                    ).hexdigest()
+                    if self._owner is None
+                    else self._owner.history_fingerprint(preparation),
                     **authority,
                     "proposal_id": review.proposal.proposal_id if review else None,
                     "review_generation": review.proposal.generation if review else None,
@@ -285,6 +308,14 @@ class HistoryContext:
         return self._last_result
 
     def _cancelled_preparation(self, code):
+        retired = {}
+        if self._owner is not None:
+            self.binding = self.preparation = None
+            retired = {
+                "binding": None,
+                "history_action": None,
+                "next_actions": ("inspect_history",),
+            }
         self._last_result = self._last_result.model_copy(
             update={
                 "status": "recovery_required"
@@ -292,6 +323,7 @@ class HistoryContext:
                 else "cancelled_before_publication",
                 "code": code,
                 "ready": False,
+                **retired,
             }
         )
         return self._last_result
@@ -318,11 +350,38 @@ class HistoryContext:
         from .vault_progress_contracts import report_progress
 
         report_progress(progress, "current_inspection")
-        result = self._project(
-            self.operations.prepare_history_workflow(
-                self.binding.vault, kind=kind, direction=direction, copy=copy_path
-            )
-        )
+        with (
+            nullcontext()
+            if self._owner is None
+            else self._owner._history_cancellation(cancel)
+        ):
+            try:
+                if self._owner is not None and self._owner._cancel.is_set():
+                    return self._cancelled_preparation(
+                        "cancelled_before_history_preparation"
+                    )
+                result = self._project(
+                    (
+                        self.operations.prepare_history_workflow
+                        if self._owner is None or kind != "undo"
+                        else self._owner.prepare_history
+                    )(
+                        self.binding.vault,
+                        kind=kind,
+                        direction=direction,
+                        copy=copy_path,
+                    )
+                )
+            except OSError, ValueError:
+                if self._owner is not None and self._owner._cancel.is_set():
+                    return self._cancelled_preparation(
+                        "cancelled_after_history_preparation"
+                    )
+                raise
+            if self._owner is not None and self._owner._cancel.is_set():
+                return self._cancelled_preparation(
+                    "cancelled_after_history_preparation"
+                )
         if cancel is not None and cancel() and self.preparation is not None:
             return self._cancelled_preparation("cancelled_after_history_preparation")
         return result
@@ -335,9 +394,33 @@ class HistoryContext:
         from .vault_progress_contracts import report_progress
 
         report_progress(progress, "current_inspection")
-        result = self._project(
-            self.operations.refresh_history_workflow(self.preparation)
-        )
+        with (
+            nullcontext()
+            if self._owner is None
+            else self._owner._history_cancellation(cancel)
+        ):
+            try:
+                if self._owner is not None and self._owner._cancel.is_set():
+                    return self._cancelled_preparation(
+                        "cancelled_before_history_preparation"
+                    )
+                result = self._project(
+                    (
+                        self.operations.refresh_history_workflow
+                        if self._owner is None
+                        else self._owner.refresh_history
+                    )(self.preparation)
+                )
+            except OSError, ValueError:
+                if self._owner is not None and self._owner._cancel.is_set():
+                    return self._cancelled_preparation(
+                        "cancelled_after_history_preparation"
+                    )
+                raise
+            if self._owner is not None and self._owner._cancel.is_set():
+                return self._cancelled_preparation(
+                    "cancelled_after_history_preparation"
+                )
         if cancel is not None and cancel() and self.preparation is not None:
             return self._cancelled_preparation("cancelled_after_history_preparation")
         return result
@@ -346,9 +429,11 @@ class HistoryContext:
         if not self._matches(binding) or self.preparation is None:
             return self.blocked("context_changed")
         return self._project(
-            self.operations.execute_history_workflow(
-                self.preparation, cancel=cancel, progress=progress
-            )
+            (
+                self.operations.execute_history_workflow
+                if self._owner is None
+                else self._owner.execute_history
+            )(self.preparation, cancel=cancel, progress=progress)
         )
 
     def page(self, binding, *, offset=0, limit=100, byte_offset=0, byte_limit=65536):
@@ -360,7 +445,8 @@ class HistoryContext:
             or getattr(self.preparation.native, "review", None) is None
         ):
             return self.blocked("context_changed")
-        page = review_plan_page(
+        reader = review_plan_page if self._owner is None else self._owner.history_page
+        page = reader(
             self.preparation.native.review,
             proposal_id=self.binding.proposal_id,
             generation=self.binding.review_generation,
@@ -389,7 +475,12 @@ class HistoryContext:
             return self.blocked("context_changed")
         try:
             rows, total, following = review_plan_choice_page(
-                self.preparation.native.review, offset=offset, limit=limit
+                self.preparation.native.review,
+                offset=offset,
+                limit=limit,
+                _choices=None
+                if self._owner is None
+                else self._owner.choices(self.preparation.native.review),
             )
         except ValueError, TypeError:
             return self.blocked("offer_changed")
@@ -423,6 +514,17 @@ class HistoryContext:
         ):
             return self.blocked("context_changed")
         try:
+            if self._owner is not None:
+                return self._project(
+                    self._owner.choose_history(
+                        self.preparation,
+                        requirement_id=requirement_id,
+                        choice=choice,
+                        assumptions_digest=assumptions_digest,
+                        references=references,
+                        edited=edited,
+                    )
+                )
             action = review_plan_choice_action(
                 self.preparation.native.review,
                 requirement_id=requirement_id,

@@ -29,6 +29,7 @@ from brz2obsidian.content_fingerprints import (
     canonical_equal,
     consume_created,
     consume_request,
+    fingerprint_request,
     issue_request,
     prospective_model,
 )
@@ -941,6 +942,20 @@ class ReviewSession:
             or request.epoch != self._epoch
         ):
             raise OSError("Fingerprint request belongs to another closure")
+
+        return self._project_fingerprint(request)
+
+    def _fingerprint(self, value):
+        """Fingerprint a private volatile handle's complete admitted field tree."""
+        with self._operation():
+            value = self._admit_values(value)
+            self._coadmit()
+            request = fingerprint_request(
+                value, dialect="Jc", scope=("history-binding",), epoch=self._epoch
+            )
+            return self._project_fingerprint(request).sha256
+
+    def _project_fingerprint(self, request):
 
         def translate(node):
             self._ledger.node(1)

@@ -29,6 +29,11 @@ def history_admission(
     """Describe supplied observations; callers cannot turn this value into write authority."""
     history = VaultHistoryInspection.model_validate(history)
     operation = VaultApplyResult.model_validate(operation)
+    return _history_admission(history, operation)
+
+
+def _history_admission(history, operation):
+    """Project an actual lexical observation without exporting its content owner."""
     admission = history.admission
     checkpoint = history.checkpoint
     locator = (

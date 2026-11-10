@@ -47,6 +47,8 @@ class UpdateContext:
 
     def _retire_owner(self):
         owner, self._owner = self._owner, None
+        if self._history._owner is owner:
+            self._history._owner = None
         if owner is not None:
             owner.close()
 
@@ -172,7 +174,25 @@ class UpdateContext:
             return self._uncommitted_draft(code="close_decision_required")
         self._reset_history()
         self._kind = "history"
-        result = self._history.inspect(vault, selection_id=selection_id, cancel=cancel)
+        from .operations import Operations
+
+        self._retire_owner()
+        if type(self._operations) is Operations:
+            self._owner = self._operations._new_owned_preparation()
+            self._history._owner = self._owner
+        try:
+            result = self._history.inspect(
+                vault, selection_id=selection_id, cancel=cancel
+            )
+        except BaseException:
+            self._retire_owner()
+            raise
+        if self._owner is not None and (
+            self._owner._session is None
+            or self._owner._closed
+            or result.binding is None
+        ):
+            self._retire_owner()
         self._remember(result)
         return result
 
@@ -187,6 +207,8 @@ class UpdateContext:
         if self.draft_pending:
             return self._uncommitted_draft()
         result = self._history.prepare(binding, **values)
+        if self._history.binding is None:
+            self._retire_owner()
         self._remember(result)
         return result
 
@@ -194,6 +216,8 @@ class UpdateContext:
         if self.draft_pending:
             return self._uncommitted_draft()
         result = self._history.refresh(binding, cancel=cancel, progress=progress)
+        if self._history.binding is None:
+            self._retire_owner()
         self._remember(result)
         return result
 
@@ -201,6 +225,8 @@ class UpdateContext:
         if self.draft_pending:
             return self._uncommitted_draft()
         result = self._history.execute(binding, cancel=cancel, progress=progress)
+        if self._history.preparation is None:
+            self._retire_owner()
         self._remember(result)
         return result
 
@@ -497,7 +523,7 @@ class UpdateContext:
                 return self._content_result(
                     status="available",
                     code="available",
-                    binding=self._binding,
+                    binding=self._review_binding(),
                     offers=offers[offset:end],
                     total_choices=len(offers),
                     next_choice_offset=end if end < len(offers) else None,
@@ -933,6 +959,7 @@ class UpdateContext:
                     self._edit.close()
                     self._edit = None
                 self._reference_drafts.clear()
+                self._retire_owner()
             self._remember(result)
             return result
         try:

@@ -39,6 +39,8 @@ from brz2obsidian.publication.vault_history import (
     _Git,
     _inspect_history,
     _inspect_retained_history,
+    _MetadataCheckpoint,
+    _MetadataHistory,
     _read,
     capture_checkpoint,
     inspect_history,
@@ -2231,16 +2233,20 @@ def _apply_reviewed_update(
             # execute_undo has validated this graph and the current review in
             # this same public call. Reobserve policy/inventory, then check it
             # again under our new lease; do not repeat the full history walk.
-            first = VaultHistoryInspection(
-                schema_id="brz2obsidian.vault-history-inspection",
-                schema_version=1,
-                status="intact",
-                checkpoint=undo_target.observation.checkpoint,
-                admission=_inspect_vault_for_recovery(
-                    root,
-                    undo_target.observation,
-                    subjects=subjects,
-                ),
+            checkpoint = undo_target.observation.checkpoint
+            admission = _inspect_vault_for_recovery(
+                root, undo_target.observation, subjects=subjects
+            )
+            first = (
+                _MetadataHistory(admission, checkpoint)
+                if type(checkpoint) is _MetadataCheckpoint
+                else VaultHistoryInspection(
+                    schema_id="brz2obsidian.vault-history-inspection",
+                    schema_version=1,
+                    status="intact",
+                    checkpoint=checkpoint,
+                    admission=admission,
+                )
             )
             reviewed_observation = first
         scoped_preflight = first.admission.preflight

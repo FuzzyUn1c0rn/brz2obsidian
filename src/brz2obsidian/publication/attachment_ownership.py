@@ -5,6 +5,7 @@ import io
 from typing import NamedTuple
 
 from brz2obsidian.application.checkpoint_contracts import CheckpointManifest
+from brz2obsidian.content_values import content_sha, content_size
 from brz2obsidian.contracts import (
     AttachmentRemovalContinuation,
     ExactContent,
@@ -751,8 +752,8 @@ def _published_origins(
             and content is not None
             and original_source.get(path) == row
             and produced.get(path) is not None
-            and produced[path].size == len(content.data)
-            and produced[path].sha256 == hashlib.sha256(content.data).hexdigest()
+            and produced[path].size == content_size(content)
+            and produced[path].sha256 == content_sha(content)
             and (
                 path in adopted
                 if onboarding

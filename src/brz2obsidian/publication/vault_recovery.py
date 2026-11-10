@@ -21,6 +21,7 @@ from brz2obsidian.application.vault_update_contracts import (
     VaultPathMetadata,
     VaultRecoveryIntent,
 )
+from brz2obsidian.content_values import content_sha, content_size
 from brz2obsidian.contracts import (
     ContentVersion,
     CurrentContent,
@@ -169,7 +170,14 @@ def _current_record_format(facts, path, content):
 
 
 def _review_observation(
-    root, observed, *, direction, authority, next_generation=None, undo_target=None
+    root,
+    observed,
+    *,
+    direction,
+    authority,
+    next_generation=None,
+    undo_target=None,
+    _owner=None,
 ):
     """Bind original S1 facts to independently observed current vault bytes."""
     git = _Git(root)
@@ -179,7 +187,11 @@ def _review_observation(
         for graph in retained.graphs
     ):
         raise OSError("Validated operation authority changed")
-    selected = select_review_effects(original)
+    selected = (
+        select_review_effects(original)
+        if _owner is None
+        else _owner._history_origin.historical_effects
+    )
     if selected.status != "selected":
         raise OSError("Original prepared review is not selected")
     selected_files = {row.path: row.content for row in selected.files}
@@ -204,7 +216,11 @@ def _review_observation(
         query_plan = pending.review.saved.plan
         query_effects = select_review_effects(query_plan)
     query_subjects = _review_subjects(query_plan, query_effects)
-    admission = _inspect_vault_for_recovery(root, retained, subjects=query_subjects)
+    admission = (
+        _inspect_vault_for_recovery(root, retained, subjects=query_subjects)
+        if _owner is None
+        else _owner._history_scoped(query_subjects)
+    )
     if (
         not admission.inventory_complete
         or admission.repository.kind != "root"
@@ -281,15 +297,27 @@ def _review_observation(
         ):
             raise OSError("Excluded recovery bytes lack current scoped consent")
     needed = sum(inventory[path].size for path in paths if path in inventory)
-    if available_memory() < 9 * needed + 64 * 1024 * 1024:
+    if _owner is None and available_memory() < 9 * needed + 64 * 1024 * 1024:
         raise OSError("Insufficient memory to review exact current recovery bytes")
     current = {}
+    owned_current = (
+        {}
+        if _owner is None
+        else _owner._history_current(
+            tuple(inventory[path] for path in paths if path in inventory)
+        )
+    )
     for path in sorted(paths):
         row = inventory.get(path)
         if row is None:
             if os.path.lexists(root / path):
                 raise OSError("Current recovery path is outside the inventory")
             current[path] = CurrentContent(existence="absent", path=path, content=None)
+            continue
+        if _owner is not None:
+            current[path] = CurrentContent(
+                existence="present", path=path, content=owned_current[path]
+            )
             continue
         sink = io.BytesIO()
         info, sha, _, _ = observe_file(root, root / path, prefix_limit=0, sink=sink)
@@ -388,6 +416,7 @@ def _review_observation(
                         else original_facts.baseline_identity.output_format,
                         qualify_roles=original_facts.incoming_identity.output_format
                         == 8,
+                        _owner=None if _owner is None else _owner._session,
                     )
                 )
         new_documents = []
@@ -456,8 +485,8 @@ def _review_observation(
                     or len(owner) != 1
                     or retained_target.identity is None
                     or row is None
-                    or row.size != len(content.data)
-                    or row.sha256 != hashlib.sha256(content.data).hexdigest()
+                    or row.size != content_size(content)
+                    or row.sha256 != content_sha(content)
                     or (path in known_identity_paths and owner[0].current.path != path)
                 ):
                     raise OSError("Operation-owned recovery note lacks retained proof")
@@ -478,6 +507,7 @@ def _review_observation(
                     existence="present",
                     membership_targets=tuple(current_targets),
                     source_path=path,
+                    _owner=None if _owner is None else _owner._session,
                 )
                 parsed = interpret_links(
                     observed_document.content,
@@ -709,12 +739,12 @@ def _review_observation(
             and subject.path in intent.affected_paths
             and old is not None
             and owners[0].current.content is not None
-            and old.size == len(owners[0].current.content.data)
-            and old.sha256 == hashlib.sha256(owners[0].current.content.data).hexdigest()
+            and old.size == content_size(owners[0].current.content)
+            and old.sha256 == content_sha(owners[0].current.content)
             and new is not None
             and selected_new is not None
-            and new.size == len(selected_new.data)
-            and new.sha256 == hashlib.sha256(selected_new.data).hexdigest()
+            and new.size == content_size(selected_new)
+            and new.sha256 == content_sha(selected_new)
             and old_current is not None
             and old_current.existence == "present"
         ):
@@ -896,7 +926,7 @@ def _inactive_attachment_proof(original, intent, subject):
     )
 
 
-def _document_preflight(root, retained, original, intent, facts):
+def _document_preflight(root, retained, original, intent, facts, *, _owner=None):
     """Reinspect the exact retained subject query after inactive-proof removal."""
     keys = {(subject.item_id, subject.facet) for subject in facts.subjects}
     owners = {
@@ -915,14 +945,20 @@ def _document_preflight(root, retained, original, intent, facts):
         if subject.operation_reversal is not None
         for row in subject.operation_reversal.outputs
     )
-    admission = _inspect_vault_for_recovery(
-        root,
-        retained,
-        subjects=tuple(
-            subject
-            for subject in _review_subjects(original, select_review_effects(original))
-            if subject.subject_id in owners and subject.path in paths
-        ),
+    selected = (
+        select_review_effects(original)
+        if _owner is None
+        else _owner._history_origin.historical_effects
+    )
+    subjects = tuple(
+        subject
+        for subject in _review_subjects(original, selected)
+        if subject.subject_id in owners and subject.path in paths
+    )
+    admission = (
+        _inspect_vault_for_recovery(root, retained, subjects=subjects)
+        if _owner is None
+        else _owner._history_scoped(subjects)
     )
     if (
         not admission.inventory_complete
@@ -1016,9 +1052,11 @@ def _finish_review(root, observed, *, previous=None, authority=None):
     return refreshed.plan
 
 
-def _owned_content(git, row):
+def _owned_content(git, row, *, _owner=None):
     if row is None:
         return None
+    if _owner is not None:
+        return _owner._operation_content(row)
     if available_memory() < 9 * row.size + 64 * 1024 * 1024:
         raise OSError("Insufficient memory to review retained operation payload")
     sink = io.BytesIO()
@@ -1071,7 +1109,7 @@ def _retained_source(root, git, rows):
         yield source
 
 
-def _restore_link_context(original, facts, before, affected, git):
+def _restore_link_context(original, facts, before, affected, git, *, _owner=None):
     """Interpret the exact original target inventory with current link owners."""
     context = facts.link_context
     if context is None:
@@ -1081,14 +1119,19 @@ def _restore_link_context(original, facts, before, affected, git):
     if len(current_states) != len(context.current_target_facts):
         raise OSError("Current recovery lookup is ambiguous")
     target_states = []
+    target_state = (
+        interpret_link_target
+        if _owner is None
+        else _owner._session._assembly_link_state
+    )
     for target in context.current_targets:
         if target.kind == "tag":
             continue
         path = target.canonical_path
         if path in affected:
-            content = _owned_content(git, before.get(path))
+            content = _owned_content(git, before.get(path), _owner=_owner)
             target_states.append(
-                interpret_link_target(
+                target_state(
                     content,
                     target_id=target.target_id,
                     existence="missing" if content is None else "present",
@@ -1112,7 +1155,7 @@ def _restore_link_context(original, facts, before, affected, git):
     documents = []
     for path, document in sorted(candidates.items()):
         content = (
-            _owned_content(git, before.get(path))
+            _owned_content(git, before.get(path), _owner=_owner)
             if path in affected
             else next(
                 (
@@ -1237,6 +1280,7 @@ def _operation_document_subjects_from_owned(
     *,
     direction,
     only_documents=None,
+    _owner=None,
 ):
     before = {row.path: row for row in intent.before}
     produced = {row.path: row for row in intent.proposed}
@@ -1249,8 +1293,8 @@ def _operation_document_subjects_from_owned(
         if approval.decision_id != decision_id:
             raise OSError("Dependent recovery document decision is ambiguous")
         path = reference.canonical_path
-        old = _owned_content(git, before.get(path))
-        new = _owned_content(git, produced.get(path))
+        old = _owned_content(git, before.get(path), _owner=_owner)
+        new = _owned_content(git, produced.get(path), _owner=_owner)
         documents = tuple(
             d
             for d in original.facts.link_context.current_documents
@@ -1322,7 +1366,9 @@ def _operation_document_subjects_from_owned(
     return tuple(subjects)
 
 
-def _restore_review(root, observed, *, previous=None, authority=None, undo_target=None):
+def _restore_review(
+    root, observed, *, previous=None, authority=None, undo_target=None, _owner=None
+):
     original, intent, origin_commit, git, facts, preflight, current, retained = (
         _review_observation(
             root,
@@ -1331,6 +1377,7 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
             authority=authority,
             next_generation=(previous.proposal.generation + 1 if previous else None),
             undo_target=undo_target,
+            _owner=_owner,
         )
     )
     before = {row.path: row for row in intent.before}
@@ -1370,7 +1417,11 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
             raise OSError("Recovery subject lacks original selected approval")
         ownership_subjects.append((subject, changes, approval))
         ownership_queries.append((approval.change_id, approval.decision_id))
-    owned_outputs = review_owned_outputs(original, tuple(ownership_queries))
+    owned_outputs = (
+        review_owned_outputs(original, tuple(ownership_queries))
+        if _owner is None
+        else _owner._history_owned_outputs(original, tuple(ownership_queries))
+    )
     owned_groups = owned_outputs.target_groups
     for (subject, changes, approval), owned in zip(
         ownership_subjects, owned_groups, strict=True
@@ -1380,8 +1431,8 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
             path = reference.canonical_path
             if path not in intent.affected_paths:
                 continue
-            old = _owned_content(git, before.get(path))
-            new = _owned_content(git, produced.get(path))
+            old = _owned_content(git, before.get(path), _owner=_owner)
+            new = _owned_content(git, produced.get(path), _owner=_owner)
             if (old is None) == (new is None):
                 continue
             rows.append(
@@ -1403,7 +1454,7 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
             continue
         if protected:
             protected_attachments.add((subject.item_id, subject.facet))
-        old = _owned_content(git, before.get(subject.path))
+        old = _owned_content(git, before.get(subject.path), _owner=_owner)
         if old is None and not rows:
             continue
         proof = (
@@ -1431,7 +1482,9 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
         if intent.kind == "undo" and intent.undo_of_receipt_commit is not None:
             # An Undo's directional incoming bytes can be authored preimage.
             # Its generated baseline remains the actual retained source role.
-            generated = _owned_content(git, produced_source.get(subject.path))
+            generated = _owned_content(
+                git, produced_source.get(subject.path), _owner=_owner
+            )
         subjects.append(
             subject.model_copy(
                 update={
@@ -1462,6 +1515,7 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
         current,
         owned_outputs.documents,
         direction="restore",
+        _owner=_owner,
     ):
         if subject.path in output_references or any(
             row.path == subject.path for row in subjects
@@ -1517,8 +1571,8 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
         ):
             raise OSError("Associated recovery document lacks retained authority")
         owner = owners[0]
-        generated = _owned_content(git, generated_files.get(path))
-        target = _owned_content(git, before[path])
+        generated = _owned_content(git, generated_files.get(path), _owner=_owner)
+        target = _owned_content(git, before[path], _owner=_owner)
         if generated is None or target is None:
             raise OSError("Associated recovery document source is unavailable")
         subjects.append(
@@ -1549,6 +1603,11 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
     if not subjects:
         raise OSError("Retained operation has no reviewed recovery subjects")
     identity_inventory = list(facts.identity_inventory)
+    target_state = (
+        interpret_link_target
+        if _owner is None
+        else _owner._session._assembly_link_state
+    )
     known_paths = {item.current.path for item in identity_inventory}
     context = facts.link_context
     for path, reference in sorted(output_references.items()):
@@ -1576,7 +1635,7 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
         if reference.target_id not in {target.target_id for target in current_refs}:
             current_refs.append(reference)
             current_states.append(
-                interpret_link_target(
+                target_state(
                     current[path].content,
                     target_id=reference.target_id,
                     existence="missing" if current[path].content is None else "present",
@@ -1588,10 +1647,10 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
                 )
             )
         if reference.target_id not in {target.target_id for target in incoming_refs}:
-            target = _owned_content(git, before.get(path))
+            target = _owned_content(git, before.get(path), _owner=_owner)
             incoming_refs.append(reference)
             incoming_states.append(
-                interpret_link_target(
+                target_state(
                     target,
                     target_id=reference.target_id,
                     existence="missing" if target is None else "present",
@@ -1675,7 +1734,7 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
             "identity_inventory": tuple(identity_inventory),
             "format_operation": format_operation,
             "link_context": _restore_link_context(
-                original, facts, before, set(intent.affected_paths), git
+                original, facts, before, set(intent.affected_paths), git, _owner=_owner
             ),
             "source_version_memory": (),
             "association_decisions": (),
@@ -1684,7 +1743,11 @@ def _restore_review(root, observed, *, previous=None, authority=None, undo_targe
         }
     )
     if protected_attachments:
-        preflight = _document_preflight(root, retained, original, intent, reverse_facts)
+        preflight = _document_preflight(
+            root, retained, original, intent, reverse_facts, _owner=_owner
+        )
+    if _owner is not None:
+        return _owner._history_plan(reverse_facts, preflight, previous)
     if previous is None:
         return prepare_review(reverse_facts, preflight=preflight)
     refreshed = refresh_review(previous, reverse_facts, preflight=preflight)

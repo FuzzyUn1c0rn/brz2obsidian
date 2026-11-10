@@ -59,6 +59,9 @@ def _onboarding_current_effects(facts, proposal, actions, approvals):
             ):
                 return False
             candidate = approval.attachment_candidate
+            if candidate is not None:
+                candidate_states = {s.target_id: s for s in candidate.target_facts}
+                current_states = {s.target_id: s for s in context.current_target_facts}
             if candidate is not None and (
                 approval.attachment_selection.link_choices
                 or len(candidate.outputs) != 1
@@ -66,8 +69,11 @@ def _onboarding_current_effects(facts, proposal, actions, approvals):
                 or {t.target_id: t for t in candidate.targets}
                 != {t.target_id: t for t in context.current_targets}
                 or len(candidate.target_facts) != len(context.current_target_facts)
-                or {s.target_id: s for s in candidate.target_facts}
-                != {s.target_id: s for s in context.current_target_facts}
+                or candidate_states.keys() != current_states.keys()
+                or any(
+                    not canonical_equal(state, current_states[target_id])
+                    for target_id, state in candidate_states.items()
+                )
                 or len(candidate.documents) != len(context.current_documents)
                 or {d.document_id: d for d in candidate.documents}
                 != {d.document_id: d for d in context.current_documents}
@@ -224,7 +230,7 @@ def selected_effect_blockers(facts, proposal, actions, approvals, *, composition
                     for d in source_documents
                     if d.source_path == row.path
                     and d.document_id == target_id
-                    and d.content == content
+                    and canonical_equal(d.content, content)
                 )
                 if len(retained_documents) != 1:
                     add("selected_link_context_conflict")
@@ -351,13 +357,15 @@ def selected_effect_blockers(facts, proposal, actions, approvals, *, composition
             and not change.requires_decision
             and change.disposition == "preserve_vault"
             and selected_path == subject.current.path
-            and content == subject.current.content
+            and canonical_equal(content, subject.current.content)
             and any(
                 document.document_id in explicit_documents
                 and document.source_path == selected_path
-                and document.content != content
+                and not canonical_equal(document.content, content)
                 and (prior := original_documents.get(document.document_id)) is not None
-                and (prior.content, prior.source_path) == (content, selected_path)
+                and canonical_equal(
+                    (prior.content, prior.source_path), (content, selected_path)
+                )
                 for document in proof_documents.values()
             )
         ):
@@ -463,7 +471,9 @@ def selected_effect_blockers(facts, proposal, actions, approvals, *, composition
         if (
             document.document_id in explicit_documents
             and existing is not None
-            and (existing.content, existing.source_path) != (content, selected_path)
+            and not canonical_equal(
+                (existing.content, existing.source_path), (content, selected_path)
+            )
         ):
             add("selected_output_conflict")
         documents[document.document_id] = document
@@ -655,7 +665,8 @@ def selected_effect_active(facts, proposal, approvals):
         if approval is not None and approval.attachment_candidate is not None:
             if any(
                 not any(
-                    e.current.path == o.path and e.current.content == o.content
+                    e.current.path == o.path
+                    and canonical_equal(e.current.content, o.content)
                     for e in facts.identity_inventory
                 )
                 for o in approval.attachment_candidate.outputs

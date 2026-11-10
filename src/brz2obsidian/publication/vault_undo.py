@@ -1,10 +1,12 @@
 """Latest completed-operation eligibility and shared reviewed reversal."""
 
 import time
+from contextlib import ExitStack
 from pathlib import Path
 from typing import NamedTuple
 
 from brz2obsidian.application.vault_undo_contracts import VaultUndoPreparation
+from brz2obsidian.content_fingerprints import canonical_equal
 from brz2obsidian.core import resolve_review, select_review_effects
 from brz2obsidian.publication.vault_apply import (
     _apply_reviewed_update,
@@ -326,13 +328,30 @@ def _preparation(status, code, *, target=None, review=None):
     )
 
 
-def _prepare_observed(root, observed, observation, *, previous=None):
+def _prepare_observed(root, observed, observation, *, previous=None, _owner=None):
     status, code, target = _eligible_target(observed, observation)
     if target is None:
         return _preparation(status, code), None
     target = target._replace(status=observed)
     if previous is not None and previous.target_receipt_commit != target.receipt_commit:
         return _preparation("refused", "undo_target_changed"), None
+    if _owner is not None:
+        target = _owner._operation_target(target)
+        with _owner._session._operation():
+            review = _restore_review(
+                root,
+                observed,
+                previous=previous.review if previous else None,
+                authority=(
+                    target.plan,
+                    target.intent,
+                    target.graph.origin_intent_commit,
+                    observation,
+                ),
+                undo_target=target,
+                _owner=_owner,
+            )
+        return _preparation("offered", code, target=target, review=review), target
     review = _restore_review(
         root,
         observed,
@@ -348,7 +367,7 @@ def _prepare_observed(root, observed, observation, *, previous=None):
     return _preparation("offered", code, target=target, review=review), target
 
 
-def prepare_undo(vault, *, previous=None):
+def prepare_undo(vault, *, previous=None, _owner=None):
     """Observe latest eligibility and prepare/refresh one canonical S1 reversal."""
     try:
         if previous is not None:
@@ -356,8 +375,21 @@ def prepare_undo(vault, *, previous=None):
             if previous.status != "offered":
                 return _preparation("refused", "undo_review_required")
         root = Path(vault).absolute()
-        observed, observation = _inspect_update_observation(root)
-        return _prepare_observed(root, observed, observation, previous=previous)[0]
+        if _owner is not None:
+            history = _owner._observe(vault)
+            if (
+                history.status != "intact"
+                or history.admission.status != "supported"
+                or _owner.observed._terminal is None
+            ):
+                return _preparation("unavailable", "undo_history_or_review_unavailable")
+            _owner._start_session()
+        observed, observation = _inspect_update_observation(
+            root, **({} if _owner is None else {"_owners": _owner.observed._owners})
+        )
+        return _prepare_observed(
+            root, observed, observation, previous=previous, _owner=_owner
+        )[0]
     except OSError, ValueError, TypeError, UnicodeError:
         return _preparation("unavailable", "undo_history_or_review_unavailable")
 
@@ -367,10 +399,12 @@ def _same_review(fresh, saved):
         fresh.status == saved.status == "offered"
         and fresh.checkpoint_commit == saved.checkpoint_commit
         and fresh.target_receipt_commit == saved.target_receipt_commit
-        and fresh.review.facts.model_copy(
-            update={"generation": saved.review.facts.generation}
+        and canonical_equal(
+            fresh.review.facts.model_copy(
+                update={"generation": saved.review.facts.generation}
+            ),
+            saved.review.facts,
         )
-        == saved.review.facts
         and fresh.review.preflight == saved.review.preflight
     )
 
@@ -394,7 +428,9 @@ def resolve_undo(vault, preparation, action):
         return _preparation("unavailable", "undo_resolution_unavailable")
 
 
-def execute_undo(vault, preparation, *, cancel=None, progress=None, executor=None):
+def execute_undo(
+    vault, preparation, *, cancel=None, progress=None, executor=None, _owner=None
+):
     """Start one new Undo operation through the existing staged apply executor."""
     start = time.monotonic()
     result = None
@@ -402,16 +438,37 @@ def execute_undo(vault, preparation, *, cancel=None, progress=None, executor=Non
         saved = VaultUndoPreparation.model_validate(preparation)
         if (
             saved.status != "offered"
-            or select_review_effects(saved.review).status != "selected"
+            or (
+                select_review_effects(saved.review)
+                if _owner is None
+                else _owner._session.select_review_effects(saved.review)
+            ).status
+            != "selected"
         ):
             return _outcome("refused", "undo_review_required", start=start, kind="undo")
         root = Path(vault).absolute()
-        observed, observation = _inspect_update_observation(root)
-        fresh, target = _prepare_observed(root, observed, observation)
+        if _owner is not None:
+            history = _owner._observe(vault)
+            if (
+                history.status != "intact"
+                or history.admission.status != "supported"
+                or _owner.observed._terminal is None
+            ):
+                return _outcome(
+                    "refused", "undo_review_stale", start=start, kind="undo"
+                )
+        observed, observation = _inspect_update_observation(
+            root, **({} if _owner is None else {"_owners": _owner.observed._owners})
+        )
+        fresh, target = _prepare_observed(root, observed, observation, _owner=_owner)
         if target is None or not _same_review(fresh, saved):
             return _outcome("refused", "undo_review_stale", start=start, kind="undo")
         association = observation.checkpoint.locator.association
-        with _retained_source(root, _Git(root), target.lineage.source) as source:
+        export = None if _owner is None else _owner._publication_export(saved.review)
+        with (
+            ExitStack() as owners,
+            _retained_source(root, _Git(root), target.lineage.source) as source,
+        ):
             try:
                 result = _apply_reviewed_update(
                     root,
@@ -423,6 +480,11 @@ def execute_undo(vault, preparation, *, cancel=None, progress=None, executor=Non
                     progress=progress,
                     executor=executor,
                     undo_target=target,
+                    **(
+                        {}
+                        if export is None
+                        else {"_owned_export": export, "_owners": owners}
+                    ),
                 )
             except _OwnedCleanupFailure as failure:
                 result = failure.result
