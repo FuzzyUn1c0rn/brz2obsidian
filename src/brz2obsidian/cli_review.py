@@ -317,10 +317,15 @@ def _inspect(args):
             ),
         )
     operations = Operations()
-    loaded = operations.load_update(args.vault)
-    if loaded.loaded is None:
-        return _update_result(loaded)
-    if (
+    from .application.operations import Operations as NativeOperations
+
+    if type(operations) is NativeOperations:
+        return _inspect_context(args, operations)
+    return _inspect_operations(args, operations)
+
+
+def _requested_identity_changed(args, loaded):
+    return (
         (args.proposal_id is not None and args.proposal_id != loaded.operation_id)
         or (args.generation is not None and args.generation != loaded.generation)
         or (
@@ -329,7 +334,92 @@ def _inspect(args):
                 loaded.checkpoint is None or args.checkpoint != loaded.checkpoint.commit
             )
         )
-    ):
+    )
+
+
+def _inspect_context(args, operations):
+    from uuid import uuid4
+
+    from .application.update_context import UpdateContext
+
+    context = UpdateContext(operations=operations)
+    selection = str(uuid4())
+    try:
+        context.load(args.vault, selection_id=selection)
+        loaded = context._last_result
+        if loaded.kind not in ("source_update", "onboarding"):
+            return _inspect_operations(args, operations, loaded=loaded)
+        if loaded.status != "unresolved" or loaded.code != "revalidation_required":
+            return _update_result(loaded)
+        if _requested_identity_changed(args, loaded):
+            return _update_result(
+                loaded,
+                status="stale_review",
+                code="review_identity_changed",
+                ready=False,
+                next_actions=("inspect_saved_review",),
+            )
+        opened = context.resume(args.vault, selection_id=selection)
+        current = context._last_result
+        if current.preparation is None:
+            return _update_result(current)
+        if (current.operation_id, current.generation, current.preparation.locator) != (
+            loaded.operation_id,
+            loaded.generation,
+            loaded.checkpoint,
+        ):
+            return _update_result(
+                current,
+                status="stale_review",
+                code="review_identity_changed",
+                ready=False,
+                next_actions=("review_update",),
+            )
+        shown = context.page(
+            opened.binding,
+            offset=args.offset,
+            limit=args.limit,
+            byte_offset=args.byte_offset,
+            byte_limit=args.byte_limit,
+        )
+        if shown.status != "available":
+            return _update_result(
+                current,
+                status="refused",
+                code=shown.code,
+                ready=False,
+                next_actions=("inspect_saved_review",),
+            )
+        choices = context.choice_page(
+            opened.binding, offset=args.offset, limit=args.limit
+        )
+        if choices.status != "available":
+            return _update_result(
+                current,
+                status="refused",
+                code=choices.code,
+                ready=False,
+                next_actions=("inspect_saved_review",),
+            )
+        return _update_result(
+            current,
+            page=shown.page,
+            choices=choices.offers,
+            choices_total=choices.total_choices,
+            choices_next_offset=choices.next_choice_offset,
+            omissions=("attachment_alternative_outputs",)
+            + (("source_gap_details",) if current.preparation.source_gaps else ()),
+        )
+    finally:
+        context._retire_owner()
+
+
+def _inspect_operations(args, operations, *, loaded=None):
+    if loaded is None:
+        loaded = operations.load_update(args.vault)
+    if loaded.loaded is None:
+        return _update_result(loaded)
+    if _requested_identity_changed(args, loaded):
         return _update_result(
             loaded,
             status="stale_review",

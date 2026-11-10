@@ -13,6 +13,7 @@ from brz2obsidian.contracts import RunMetadata, SourceIdentity
 from brz2obsidian.core.reconciliation import ReconcileWork
 from brz2obsidian.core.refresh import RefreshWork
 from brz2obsidian.core.resolution import ActionWork, PlanWork
+from brz2obsidian.core.selected_effects import SelectedEffectsWork
 from brz2obsidian.publication.content_session import _RetainedReviewRead
 from brz2obsidian.publication.vault_history import (
     _binding_signature,
@@ -209,7 +210,7 @@ class _OwnedPreparation:
                 return lifecycle._refused("saved_update_unavailable", history)
             # Other operation roles retain their existing public route until
             # their distinct restoration semantics are supported here.
-            if checkpoint.metadata[10] != "onboarding":
+            if checkpoint.metadata[10] not in ("onboarding", "source_update"):
                 return None
             self._start_session()
             self._tip = self._load_tip(checkpoint)
@@ -229,6 +230,10 @@ class _OwnedPreparation:
                     checkpoint=checkpoint.locator,
                     vault=history.admission.vault,
                 )
+            if plan.facts.format_operation.kind == "source_update":
+                result = self._resume_update(history, plan)
+                self.preparation = result.preparation
+                return result
             from .onboarding import _reobserve_onboarding
             from .update_contracts import UpdatePreparation
 
@@ -267,6 +272,75 @@ class _OwnedPreparation:
                 self._session._ledger.release_failed()
             if not resume or self.preparation is None:
                 self.close()
+
+    def _resume_update(self, history, plan):
+        checkpoint = history.checkpoint
+        with self._session._operation():
+            plan = self._session._admit_values(plan)
+            baseline = self._source_payload(checkpoint)
+            incoming = {
+                subject.path: subject.incoming
+                for subject in plan.facts.subjects
+                if subject.incoming is not None
+            }
+            self._session._coadmit()
+            directory, _ = self._restore_incoming(checkpoint, plan, incoming)
+            facts = lifecycle._observed_facts(
+                history,
+                baseline,
+                incoming,
+                proposal_id=plan.proposal.proposal_id,
+                generation=plan.proposal.generation,
+                source_memory=plan.facts.source_version_memory,
+                _owner=self,
+            )
+            facts = self._session._admit_values(facts)
+            self._session._coadmit()
+            canonical = self._session._replay(plan)
+            if canonical is None:
+                raise OSError("invalid_review")
+            effects = self._session._drive(SelectedEffectsWork(canonical))
+            scoped = self.observed.inspect(
+                subjects=lifecycle._subjects(facts, canonical, effects=effects)
+            )
+            if scoped.admission.inventory != history.admission.inventory:
+                raise OSError("Current inventory changed")
+            if (
+                not canonical_equal(facts, canonical.facts)
+                or scoped.admission.preflight != canonical.preflight
+            ):
+                facts = facts.model_copy(
+                    update={"generation": plan.proposal.generation + 1}
+                )
+        # resume_review alone consumes this same reader's latest scoped
+        # observation and corroborates current bytes before canonical refresh.
+        resumed = self._session.resume_review(
+            self._tip,
+            facts,
+            preflight=scoped.admission.preflight,
+            admission=scoped,
+        )
+        if resumed.status != "resumed":
+            return lifecycle._refused(resumed.code, history)
+        observed = checkpoint.manifest.observed_source or SourceIdentity.model_validate(
+            lifecycle.record(incoming)["source_identity"]
+        )
+        with self._session._operation():
+            current = self._session._admit_values(resumed.plan)
+            self._session._coadmit()
+            binding = self.operations.observe_reviewed_source(directory, current)
+            return lifecycle._prepared(
+                scoped,
+                directory,
+                binding,
+                current,
+                observed,
+                observed.source_sha256
+                != lifecycle.record(incoming)["source_identity"]["source_sha256"],
+                code=resumed.code,
+                stale=lifecycle._stale_slots(plan, current),
+                _owner=self,
+            )
 
     def _restore_incoming(self, checkpoint, plan, incoming):
         """Materialize registered content and corroborate the complete binding."""

@@ -29,8 +29,7 @@ def test_fresh_context_resumes_saved_unknown_binary_onboarding(monkeypatch):
     owner = {"owner": uuid4().hex, "root": str(root.resolve())}
     (root / ".fixture-owner.json").write_text(json.dumps(owner), encoding="utf-8")
     evidence = (
-        Path(__file__).resolve().parents[2]
-        / "tmp/r347-owned-resume-20261110/fixtures"
+        Path(__file__).resolve().parents[2] / "tmp/r347-owned-resume-20261110/fixtures"
     )
     evidence.mkdir(parents=True, exist_ok=True)
     (evidence / (owner["owner"] + ".json")).write_text(
@@ -101,7 +100,9 @@ def test_fresh_context_resumes_saved_unknown_binary_onboarding(monkeypatch):
     )
     assert page.status == "available", page
     row = next(
-        row for row in page.page.items if row.item_id == item_id and row.facet == "asset"
+        row
+        for row in page.page.items
+        if row.item_id == item_id and row.facet == "asset"
     )
     assert row.original is None
     offer = next(
@@ -263,5 +264,7 @@ def test_fresh_context_resumes_saved_unknown_binary_onboarding(monkeypatch):
     assert user_state(vault, owned_ref=saved.capture.ref) == before
     assert not (vault / "migration-record.json").exists()
     assert _tree(rendered) == rendered_before and _digest(archive) == archive_before
-    assert git(vault, "for-each-ref", "--format=%(refname) %(objectname)") == refs_before
+    assert (
+        git(vault, "for-each-ref", "--format=%(refname) %(objectname)") == refs_before
+    )
     assert (vault / ".brz2obsidian/locator.json").read_bytes() == locator_before
