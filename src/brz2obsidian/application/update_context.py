@@ -772,7 +772,7 @@ class UpdateContext:
         self._revision += 1
         if cancel is not None and cancel():
             return self._cancelled_inspection()
-        result = self._operations.load_update(vault)
+        result = self._restore_saved(vault, cancel=cancel)
         self._kind = result.kind
         if (
             cancel is not None
@@ -798,7 +798,7 @@ class UpdateContext:
         self._revision += 1
         if cancel is not None and cancel():
             return self._cancelled_inspection()
-        result = self._operations.resume_update(vault)
+        result = self._restore_saved(vault, resume=True, cancel=cancel)
         self._kind = result.kind
         if (
             cancel is not None
@@ -810,7 +810,33 @@ class UpdateContext:
             return self._cancelled_inspection(result)
         return self._retain(result, selection_id=selection_id)
 
+    def _restore_saved(self, vault, *, resume=False, cancel=None):
+        from .operations import Operations
+
+        self._retire_owner()
+        if type(self._operations) is Operations:
+            owner = self._operations._new_owned_preparation()
+            try:
+                result = owner.restore(vault, resume=resume, cancel=cancel)
+                if (
+                    result is not None
+                    and result.preparation is not None
+                    and not (cancel is not None and cancel())
+                ):
+                    self._owner = owner
+                if result is not None:
+                    return result
+            finally:
+                if self._owner is not owner:
+                    owner.close()
+        return (
+            self._operations.resume_update(vault)
+            if resume
+            else self._operations.load_update(vault)
+        )
+
     def _cancelled_inspection(self, result=None):
+        self._retire_owner()
         observed = UpdateContextResult(
             status="cancelled_before_publication",
             code="cancelled_after_inspection"

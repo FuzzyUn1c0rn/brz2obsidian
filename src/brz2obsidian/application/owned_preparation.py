@@ -9,7 +9,7 @@ from threading import Event
 from uuid import uuid4
 
 from brz2obsidian.content_fingerprints import canonical_equal
-from brz2obsidian.contracts import RunMetadata
+from brz2obsidian.contracts import RunMetadata, SourceIdentity
 from brz2obsidian.core.reconciliation import ReconcileWork
 from brz2obsidian.core.refresh import RefreshWork
 from brz2obsidian.core.resolution import ActionWork, PlanWork
@@ -183,6 +183,106 @@ class _OwnedPreparation:
                 lifecycle.available_memory(),
                 _cancel=self._cancel,
             )
+
+    def restore(self, vault, *, resume=False, cancel=None):
+        """Project saved history lexically, or retain a freshly resumed owner."""
+        from .update_contracts import UpdateResult
+
+        self._cancel.probe = cancel
+        history = None
+        try:
+            history = self._observe(vault)
+            history, stopped = lifecycle._history(
+                self.operations,
+                vault,
+                self.observed,
+                onboarding=True,
+                maintenance=True,
+            )
+            if stopped is not None:
+                return stopped
+            checkpoint = history.checkpoint
+            if (
+                checkpoint.manifest.review_object is None
+                or checkpoint.manifest.reviewed_source is None
+            ):
+                return lifecycle._refused("saved_update_unavailable", history)
+            # Other operation roles retain their existing public route until
+            # their distinct restoration semantics are supported here.
+            if checkpoint.metadata[10] != "onboarding":
+                return None
+            self._start_session()
+            self._tip = self._load_tip(checkpoint)
+            plan = self._tip.saved.plan
+            if not resume:
+                return UpdateResult(
+                    kind=plan.facts.format_operation.kind,
+                    status="unresolved",
+                    code="revalidation_required",
+                    operation_id=plan.proposal.proposal_id,
+                    generation=plan.proposal.generation,
+                    changes=len(plan.proposal.changes),
+                    unresolved=len(plan.requirements),
+                    next_actions=("resume_update",),
+                    history_retained=True,
+                    checkpoint_commit=checkpoint.locator.commit,
+                    checkpoint=checkpoint.locator,
+                    vault=history.admission.vault,
+                )
+            from .onboarding import _reobserve_onboarding
+            from .update_contracts import UpdatePreparation
+
+            with self._session._operation():
+                incoming = self._source_payload(checkpoint)
+                self._session._coadmit()
+                directory, binding = self._restore_incoming(checkpoint, plan, incoming)
+                prepared = UpdatePreparation(
+                    schema_id="brz2obsidian.update-preparation",
+                    schema_version=1,
+                    kind="onboarding",
+                    vault=history.admission.vault,
+                    locator=checkpoint.locator,
+                    payload_directory=str(directory),
+                    source_binding=binding,
+                    observed_source=checkpoint.manifest.observed_source
+                    or SourceIdentity.model_validate(
+                        lifecycle.record(incoming)["source_identity"]
+                    ),
+                    retained_source_provenance=False,
+                    review=plan,
+                )
+                _, result, _ = _reobserve_onboarding(
+                    self.operations, prepared, history, _owner=self
+                )
+                self.preparation = result.preparation
+                return result
+        except OSError, ValueError, TypeError, KeyError, AttributeError, RecursionError:
+            return lifecycle._refused(
+                "resume_unavailable" if resume else "saved_update_unavailable",
+                history,
+            )
+        finally:
+            self._cancel.probe = None
+            if self._session is not None and not self._session._closed:
+                self._session._ledger.release_failed()
+            if not resume or self.preparation is None:
+                self.close()
+
+    def _restore_incoming(self, checkpoint, plan, incoming):
+        """Materialize registered content and corroborate the complete binding."""
+        saved = checkpoint.manifest.reviewed_source
+        if set(incoming) != {row.path for row in saved.files}:
+            raise OSError("saved_payload_mismatch")
+        directory = self._directory / "incoming"
+        directory.mkdir()
+        for row in saved.files:
+            path = directory / row.path
+            self._write_content(incoming[row.path], path)
+            path.chmod(0o755 if row.mode == "100755" else 0o644)
+        actual = self.operations.observe_reviewed_source(directory, plan)
+        if actual.model_copy(update={"source_anchor": saved.source_anchor}) != saved:
+            raise OSError("saved_payload_mismatch")
+        return directory, actual
 
     def _plan(self, history, facts):
         facts = self._session._admit_values(facts)
