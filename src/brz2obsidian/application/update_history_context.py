@@ -363,7 +363,7 @@ class HistoryContext:
                 result = self._project(
                     (
                         self.operations.prepare_history_workflow
-                        if self._owner is None or kind != "undo"
+                        if self._owner is None or kind not in ("undo", "recovery")
                         else self._owner.prepare_history
                     )(
                         self.binding.vault,

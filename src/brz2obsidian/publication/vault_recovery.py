@@ -9,10 +9,12 @@ import sys
 import tempfile
 import time
 import unicodedata
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 from brz2obsidian.application.update_facts import link_state
+from brz2obsidian.application.update_subjects import review_subjects
+from brz2obsidian.application.vault_contracts import VaultSubject
 from brz2obsidian.application.vault_recovery_contracts import VaultRecoveryPreparation
 from brz2obsidian.application.vault_update_contracts import (
     VaultOperationLock,
@@ -21,6 +23,7 @@ from brz2obsidian.application.vault_update_contracts import (
     VaultPathMetadata,
     VaultRecoveryIntent,
 )
+from brz2obsidian.content_fingerprints import canonical_equal
 from brz2obsidian.content_values import content_sha, content_size
 from brz2obsidian.contracts import (
     ContentVersion,
@@ -34,6 +37,7 @@ from brz2obsidian.contracts import (
     ReconciliationSubject,
     ReferenceTarget,
     SupportedFormatBaseline,
+    reconciliation_subject_id,
 )
 from brz2obsidian.core import (
     prepare_review,
@@ -75,6 +79,7 @@ from brz2obsidian.publication.vault_apply import (
 )
 from brz2obsidian.publication.vault_history import (
     _Git,
+    _inspect_history,
     _inspect_retained_history,
     capture_checkpoint,
     inspect_history,
@@ -868,8 +873,8 @@ def _current_review_matches(review, admission):
             if content is None
             else (
                 row is not None
-                and row.size == len(content.data)
-                and row.sha256 == hashlib.sha256(content.data).hexdigest()
+                and row.size == content_size(content)
+                and row.sha256 == content_sha(content)
             )
         )
 
@@ -927,34 +932,22 @@ def _inactive_attachment_proof(original, intent, subject):
 
 
 def _document_preflight(root, retained, original, intent, facts, *, _owner=None):
-    """Reinspect the exact retained subject query after inactive-proof removal."""
-    keys = {(subject.item_id, subject.facet) for subject in facts.subjects}
-    owners = {
-        change.subject_id
-        for change in original.proposal.changes
-        if (change.item_id, change.facet) in keys
-    }
-    paths = {
-        path
-        for subject in facts.subjects
-        for path in (subject.path, subject.current.path)
-    }
-    paths.update(
-        row.path
-        for subject in facts.subjects
-        if subject.operation_reversal is not None
-        for row in subject.operation_reversal.outputs
-    )
-    selected = (
-        select_review_effects(original)
-        if _owner is None
-        else _owner._history_origin.historical_effects
-    )
-    subjects = tuple(
-        subject
-        for subject in _review_subjects(original, selected)
-        if subject.subject_id in owners and subject.path in paths
-    )
+    """Reinspect the actual derived RESTORE policy/current-claim domain."""
+    queries = {(row.path, row.subject_id): row for row in review_subjects(facts)}
+    for subject in facts.subjects:
+        if subject.operation_reversal is None:
+            continue
+        owner_id = reconciliation_subject_id(
+            facts.incoming_identity.module_id,
+            facts.incoming_identity.collection_id,
+            subject.item_id,
+            subject.facet,
+        )
+        for output in subject.operation_reversal.outputs:
+            queries[output.path, owner_id] = VaultSubject(
+                path=output.path, subject_id=owner_id
+            )
+    subjects = tuple(queries[key] for key in sorted(queries))
     admission = (
         _inspect_vault_for_recovery(root, retained, subjects=subjects)
         if _owner is None
@@ -1386,7 +1379,6 @@ def _restore_review(
     produced_source = {row.path: row for row in source_prepared.source}
     subjects = []
     baseline_outputs = []
-    protected_attachments = set()
     output_references = {}
     approved = {approval.change_id: approval for approval in original.approvals}
     document_keys = {
@@ -1452,8 +1444,6 @@ def _restore_review(
         )
         if subject.path not in intent.affected_paths and not rows and not protected:
             continue
-        if protected:
-            protected_attachments.add((subject.item_id, subject.facet))
         old = _owned_content(git, before.get(subject.path), _owner=_owner)
         if old is None and not rows:
             continue
@@ -1742,10 +1732,9 @@ def _restore_review(
             "preservation_decisions": (),
         }
     )
-    if protected_attachments:
-        preflight = _document_preflight(
-            root, retained, original, intent, reverse_facts, _owner=_owner
-        )
+    preflight = _document_preflight(
+        root, retained, original, intent, reverse_facts, _owner=_owner
+    )
     if _owner is not None:
         return _owner._history_plan(reverse_facts, preflight, previous)
     if previous is None:
@@ -1775,7 +1764,7 @@ def _recovery_preparation(
 
 
 def _prepare_recovery_observed(
-    root, observed, authority, *, direction=None, previous=None
+    root, observed, authority, *, direction=None, previous=None, _owner=None
 ):
     """Use one fully validated operation walk and a fresh current observation."""
     if direction not in (None, "finish", "restore"):
@@ -1823,9 +1812,30 @@ def _prepare_recovery_observed(
     loaded = authority.owned[origin.prepared_commit][1]
     if loaded is None:
         return _recovery_preparation("unavailable", "original_review_unavailable")
-    original = loaded.saved.plan
+    original = (
+        loaded.saved.plan
+        if _owner is None
+        else _owner._operation_origin(authority).saved.plan
+    )
     selected_authority = (original, origin, origin_commit, authority)
     try:
+        if _owner is not None and direction == "restore":
+            with _owner._session._operation():
+                review = _restore_review(
+                    root,
+                    observed,
+                    previous=previous,
+                    authority=selected_authority,
+                    _owner=_owner,
+                )
+            return _recovery_preparation(
+                "offered",
+                "recovery_review_required",
+                observed=observed,
+                directions=directions,
+                direction=direction,
+                review=review,
+            )
         review = (
             _finish_review(
                 root, observed, previous=previous, authority=selected_authority
@@ -1849,9 +1859,22 @@ def _prepare_recovery_observed(
     )
 
 
-def prepare_recovery(vault, *, direction=None):
+def prepare_recovery(vault, *, direction=None, _owner=None):
     """Offer a reviewed direction after one validated operation observation."""
     root = Path(vault).absolute()
+    if _owner is not None:
+        try:
+            _owner._observe(vault, _recovery=True)
+            _owner._start_session()
+            return _prepare_recovery_observed(
+                root,
+                _owner.observed._recovery_status,
+                _owner.observed._terminal,
+                direction=direction,
+                _owner=_owner,
+            )
+        except OSError, ValueError, TypeError, UnicodeError:
+            return _recovery_preparation("unavailable", "recovery_review_unavailable")
     observed, authority = _inspect_update_observation(root)
     return _prepare_recovery_observed(root, observed, authority, direction=direction)
 
@@ -1860,7 +1883,7 @@ def _refused_recovery(code):
     return _recovery_preparation("refused", code)
 
 
-def refresh_recovery(vault, preparation):
+def refresh_recovery(vault, preparation, *, _owner=None):
     """Refresh one selected recovery review from actual current bytes."""
     try:
         previous = VaultRecoveryPreparation.model_validate(preparation)
@@ -1871,18 +1894,29 @@ def refresh_recovery(vault, preparation):
         ):
             return _refused_recovery("recovery_review_required")
         root = Path(vault).absolute()
-        observed, authority = _inspect_update_observation(root)
+        if _owner is None:
+            observed, authority = _inspect_update_observation(root)
+        else:
+            _owner._observe(vault, _recovery=True)
+            observed, authority = (
+                _owner.observed._recovery_status,
+                _owner.observed._terminal,
+            )
         current = _prepare_recovery_observed(
             root,
             observed,
             authority,
             direction=previous.direction,
             previous=previous.review,
+            _owner=_owner,
         )
         if (
             current.status != "offered"
             or current.operation_id != previous.operation_id
             or current.intent_commit != previous.intent_commit
+            or _owner is not None
+            and (current.kind, current.generation)
+            != (previous.kind, previous.generation)
             or previous.direction not in current.available_directions
         ):
             return _refused_recovery("recovery_authority_changed")
@@ -1951,7 +1985,7 @@ def _same_recovery_review(offered, saved):
         and offered.intent_commit == saved.intent_commit
         and offered.kind == saved.kind
         and offered.direction == saved.direction
-        and current_facts == saved.review.facts
+        and canonical_equal(current_facts, saved.review.facts)
         and offered.review.preflight == saved.review.preflight
     )
 
@@ -2068,7 +2102,16 @@ def _cleanup_verified_terminal(root, saved, *, start):
         )
 
 
-def _execute_recovery(vault, preparation, *, cancel=None, progress=None, executor=None):
+def _execute_recovery(
+    vault,
+    preparation,
+    *,
+    cancel=None,
+    progress=None,
+    executor=None,
+    _owner=None,
+    _owners=None,
+):
     """Retain selected direction before ordinary per-file publication."""
     from brz2obsidian.application.vault_progress_contracts import report_progress
 
@@ -2083,25 +2126,113 @@ def _execute_recovery(vault, preparation, *, cancel=None, progress=None, executo
         return _cleanup_verified_terminal(root, saved, start=start)
     if saved.status != "offered" or saved.direction is None or saved.review is None:
         return _outcome("refused", "recovery_review_required", start=start)
-    selected = select_review_effects(saved.review)
-    if selected.status != "selected":
-        return _outcome("refused", selected.code, start=start)
-    if not supported_durable_volume(root):
-        return _outcome("refused", "unsupported_durable_volume", start=start)
-    observed, authority = _inspect_update_observation(root)
-    fresh = _prepare_recovery_observed(
-        root, observed, authority, direction=saved.direction
+    known = (
+        None
+        if _owner is None or _owner.observed is None
+        else _owner.observed._recovery_status
     )
-    if fresh.status != "offered" or not _same_recovery_review(fresh, saved):
-        if authority is not None and observed.operation_id == saved.operation_id:
-            return _refuse_known_recovery(
-                observed, "recovery_review_stale", start=start
+
+    def prelease_refusal(code):
+        outcome = (
+            _outcome(
+                "refused",
+                code,
+                start=start,
+                publication="unknown",
+                history="unknown",
+                recovery=True,
             )
-        return _outcome("refused", "recovery_review_stale", start=start)
+            if known is None
+            else _refuse_known_recovery(known, code, start=start)
+        )
+        if _owner is not None and _owner._cancel.is_set():
+            return outcome.model_copy(
+                update={
+                    "status": "cancelled",
+                    "code": "cancelled_before_recovery_lease",
+                }
+            )
+        return outcome
+
     try:
-        subjects = _review_subjects(saved.review, selected)
-    except OSError, ValueError, TypeError:
-        return _refuse_known_recovery(observed, "invalid_recovery_scope", start=start)
+        selected = (
+            select_review_effects(saved.review)
+            if _owner is None
+            else _owner._session.select_review_effects(saved.review)
+        )
+        if selected.status != "selected":
+            if _owner is not None and known is not None:
+                return prelease_refusal(selected.code)
+            return _outcome("refused", selected.code, start=start)
+        if not supported_durable_volume(root):
+            return _outcome("refused", "unsupported_durable_volume", start=start)
+
+        def read_operation():
+            return (
+                _inspect_update_observation(root)
+                if _owners is None
+                else _inspect_update_observation(root, _owners=_owners)
+            )
+
+        if _owner is None:
+            observed, authority = read_operation()
+            known = observed
+        else:
+            _owner._observe(vault, _recovery=True)
+            observed, authority = (
+                _owner.observed._recovery_status,
+                _owner.observed._terminal,
+            )
+        known = observed
+        fresh = _prepare_recovery_observed(
+            root, observed, authority, direction=saved.direction, _owner=_owner
+        )
+        if (
+            fresh.status != "offered"
+            or not _same_recovery_review(fresh, saved)
+            or (_owner is not None and fresh.generation != saved.generation)
+        ):
+            if authority is not None and observed.operation_id == saved.operation_id:
+                return _refuse_known_recovery(
+                    observed, "recovery_review_stale", start=start
+                )
+            return _outcome("refused", "recovery_review_stale", start=start)
+        try:
+            subjects = _review_subjects(saved.review, selected)
+        except OSError, ValueError, TypeError:
+            return _refuse_known_recovery(
+                observed, "invalid_recovery_scope", start=start
+            )
+        export = None if _owner is None else _owner._publication_export(saved.review)
+        if export is not None:
+            selected = export.effects
+            observed, authority = read_operation()
+            known = observed
+            if (
+                authority is None
+                or not observed.recovery_required
+                or (
+                    observed.operation_id,
+                    observed.kind,
+                    observed.generation,
+                    observed.intent_commit,
+                )
+                != (
+                    saved.operation_id,
+                    saved.kind,
+                    saved.generation,
+                    saved.intent_commit,
+                )
+                or observed.review_generation is not None
+                and observed.direction != saved.direction
+            ):
+                return _refuse_known_recovery(
+                    observed, "recovery_review_stale", start=start
+                )
+    except OSError, ValueError, TypeError, UnicodeError:
+        if _owner is None:
+            raise
+        return prelease_refusal("recovery_review_unavailable")
     operation_id = saved.operation_id
     acquired = False
     phase = "admission"
@@ -2191,7 +2322,8 @@ def _execute_recovery(vault, preparation, *, cancel=None, progress=None, executo
             for row in history.admission.inventory
             if not row.excluded or row.path in included_paths
         }
-        selected_files = {row.path: row.content.data for row in selected.files}
+        selected_rows = {row.path: row for row in selected.files}
+        selected_files = {path: row.content for path, row in selected_rows.items()}
         removals = set(selected.remove_paths)
         from .attachment_ownership import (
             review_ownership_claims,
@@ -2222,8 +2354,8 @@ def _execute_recovery(vault, preparation, *, cancel=None, progress=None, executo
             path
             for path, data in selected_files.items()
             if path not in before
-            or before[path].size != len(data)
-            or before[path].sha256 != hashlib.sha256(data).hexdigest()
+            or before[path].size != content_size(data)
+            or before[path].sha256 != content_sha(data)
         } | removals
         if not changed.issubset(origin.affected_paths):
             return _refuse_known_recovery(
@@ -2232,7 +2364,7 @@ def _execute_recovery(vault, preparation, *, cancel=None, progress=None, executo
         planned = len(changed)
         stage_need = (
             sum(row.size for path, row in before.items() if path not in removals)
-            + sum(len(data) for data in selected_files.values())
+            + sum(content_size(data) for data in selected_files.values())
             + sum(row.size for row in source_manifest.source)
             + 128 * 1024 * 1024
             + 4096 * (len(before) + len(selected_files) + len(source_manifest.source))
@@ -2269,9 +2401,23 @@ def _execute_recovery(vault, preparation, *, cancel=None, progress=None, executo
                     target = proposed_root / path
                     stage_parent_security(root, proposed_root, Path(path).parent)
                     with target.open("wb") as stream:
-                        stream.write(data)
+                        if export is None:
+                            stream.write(data.data)
+                        else:
+                            export.stage(selected_rows[path], stream)
                         stream.flush()
                         os.fsync(stream.fileno())
+                    if export is not None:
+                        info, sha, _, _ = observe_file(
+                            proposed_root, target, prefix_limit=0
+                        )
+                        if (info.st_size, sha) != (
+                            content_size(data),
+                            content_sha(data),
+                        ):
+                            raise OSError(
+                                "Recovery stage differs from the canonical selected content"
+                            )
                     if path in before:
                         shutil.copymode(root / path, target)
                     if path in changed:
@@ -2305,6 +2451,11 @@ def _execute_recovery(vault, preparation, *, cancel=None, progress=None, executo
                     active_operation=operation_id,
                     recovery_direction=saved.direction,
                     _observation=(current_status, current_authority),
+                    **(
+                        {}
+                        if export is None
+                        else {"_owned_export": export, "_owners": _owners}
+                    ),
                     progress=progress,
                 )
                 reused_preparation = (
@@ -2334,8 +2485,18 @@ def _execute_recovery(vault, preparation, *, cancel=None, progress=None, executo
                         review_generation=saved.review.proposal.generation,
                         prepared=prepared_commit,
                     )
-                tip = inspect_history(
-                    root, subjects=subjects, active_operation=operation_id
+                tip = (
+                    inspect_history(
+                        root, subjects=subjects, active_operation=operation_id
+                    )
+                    if export is None
+                    else _inspect_history(
+                        root,
+                        subjects=subjects,
+                        active_operation=operation_id,
+                        _metadata_only=True,
+                        _owners=_owners,
+                    )
                 )
                 if (
                     tip.status != "intact"
@@ -2520,7 +2681,7 @@ def _execute_recovery(vault, preparation, *, cancel=None, progress=None, executo
                     operation_generation=generation,
                     intent_commit=recovery_commit,
                 )
-                result_observation = _inspect_update_observation(root)
+                result_observation = read_operation()
                 current = _inspect_retained_history(
                     root,
                     result_observation[1],
@@ -2540,6 +2701,15 @@ def _execute_recovery(vault, preparation, *, cancel=None, progress=None, executo
                     active_operation=operation_id,
                     operation_intent_commit=recovery_commit,
                     _observation=result_observation,
+                    **(
+                        {}
+                        if export is None
+                        else {
+                            "review": export.saved.plan,
+                            "_owned_export": export,
+                            "_owners": _owners,
+                        }
+                    ),
                     progress=progress,
                 )
                 if result_checkpoint.status != "captured":
@@ -2597,7 +2767,7 @@ def _execute_recovery(vault, preparation, *, cancel=None, progress=None, executo
         )
     except OSError, ValueError, TypeError:
         failure = (
-            _inspect_update_observation(root)[0]
+            read_operation()[0]
             if phase in ("intent", "publication", "result", "terminal")
             else None
         )
@@ -2672,7 +2842,7 @@ def _execute_recovery(vault, preparation, *, cancel=None, progress=None, executo
                     pending_exception, (OSError, ValueError, TypeError)
                 ):
                     try:
-                        stopped = _inspect_update_observation(root)[0]
+                        stopped = read_operation()[0]
                     except OSError, ValueError, TypeError, UnicodeError:
                         stopped = None
                     if stopped is None or stopped.operation_id != operation_id:
@@ -2711,11 +2881,20 @@ def _execute_recovery(vault, preparation, *, cancel=None, progress=None, executo
                     )
 
 
-def execute_recovery(vault, preparation, *, cancel=None, progress=None, executor=None):
+def execute_recovery(
+    vault, preparation, *, cancel=None, progress=None, executor=None, _owner=None
+):
     """Apply a selected recovery direction through the shared Operations seam."""
     try:
-        return _execute_recovery(
-            vault, preparation, cancel=cancel, progress=progress, executor=executor
-        )
+        with ExitStack() as owners:
+            return _execute_recovery(
+                vault,
+                preparation,
+                cancel=cancel,
+                progress=progress,
+                executor=executor,
+                _owner=_owner,
+                _owners=owners if _owner is not None else None,
+            )
     except _OwnedRecoveryCleanupFailure as failure:
         return failure.result

@@ -1788,7 +1788,9 @@ def inspect_history(
 class _UpdateRead:
     """Single-use lexical reader; never accepted by capture or apply."""
 
-    def __init__(self, vault, *, git_executable=None, _metadata_only=False):
+    def __init__(
+        self, vault, *, git_executable=None, _metadata_only=False, _recovery=False
+    ):
         self._root = Path(vault).absolute()
         self._executable = git_executable
         self._used = False
@@ -1801,6 +1803,8 @@ class _UpdateRead:
         self._terminal = None
         self._fresh_scope = None
         self._metadata_only = _metadata_only
+        self._recovery = _recovery
+        self._recovery_status = None
         self._owners = ExitStack()
 
     def __enter__(self):
@@ -1815,6 +1819,15 @@ class _UpdateRead:
         try:
             self._open = True
             captured = []
+            recovery = None
+            if self._recovery:
+                from .vault_apply import _inspect_update_observation
+
+                self._recovery_status, recovery = _inspect_update_observation(
+                    self._root, _owners=self._owners
+                )
+                if recovery is None:
+                    raise OSError("Validated current recovery observation required")
             self._history = _inspect_history(
                 self._root,
                 git_executable=self._executable,
@@ -1823,6 +1836,7 @@ class _UpdateRead:
                 ),
                 _metadata_only=self._metadata_only,
                 _owners=self._owners if self._metadata_only else None,
+                recovery_observation=recovery,
             )
             if (
                 self._history.status == "intact"
@@ -2146,6 +2160,11 @@ def capture_checkpoint(
                     and observed_source is None
                     and undo_of_receipt_commit is not None
                     and _observation is not None
+                    or source_binding is None
+                    and observed_source is None
+                    and undo_of_receipt_commit is None
+                    and recovery_direction == "restore"
+                    and _observation is not None
                 )
                 and review_source is None
                 and _owners is not None
@@ -2365,7 +2384,12 @@ def capture_checkpoint(
                 or original.association_id != association_id
                 or source_manifest.identity != identity
                 or recovery_direction is not None
-                and select_review_effects(review).status != "selected"
+                and (
+                    select_review_effects(review)
+                    if _owned_export is None
+                    else _owned_export.effects
+                ).status
+                != "selected"
             ):
                 return result("refused", "recovery_review_required")
             if retained_recovery_direction is not None and (

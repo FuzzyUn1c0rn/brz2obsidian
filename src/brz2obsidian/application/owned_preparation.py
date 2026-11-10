@@ -53,8 +53,8 @@ class _OwnedPreparation:
         self._history_origin_commit = None
         self._history_values = {}
 
-    def _observe(self, vault, expected=None, *, expected_absent=False):
-        fresh = _UpdateRead(vault, _metadata_only=True)
+    def _observe(self, vault, expected=None, *, expected_absent=False, _recovery=False):
+        fresh = _UpdateRead(vault, _metadata_only=True, _recovery=_recovery)
         fresh.__enter__()
         try:
             if expected_absent and fresh.history.status != "absent":
@@ -139,9 +139,20 @@ class _OwnedPreparation:
                 or history.admission.status != "supported"
                 or self.observed._terminal is None
             ):
-                return self.operations.inspect_history_workflow(vault)
+                if history.admission.status != "recovery_first":
+                    return self.operations.inspect_history_workflow(vault)
+                history = self._observe(vault, _recovery=True)
+                operation = self.observed._recovery_status
+                if (
+                    history.status != "intact"
+                    or history.admission.status != "supported"
+                    or operation is None
+                    or not operation.recovery_required
+                ):
+                    return self.operations.inspect_history_workflow(vault)
+            else:
+                operation = self.operations.inspect_update_status(vault)
             self._start_session()
-            operation = self.operations.inspect_update_status(vault)
             self.observed._check()
             if self._cancel.is_set():
                 raise OSError("History inspection cancelled")
@@ -171,9 +182,17 @@ class _OwnedPreparation:
         return self._session._fingerprint(preparation)
 
     def _operation_target(self, target):
-        observation = target.observation
+        loaded = self._operation_origin(target.observation, graph=target.graph)
+        return target._replace(plan=loaded.saved.plan)
+
+    def _operation_origin(self, observation, *, graph=None):
         self._history_observation = observation
-        origin = target.graph.authorities[-1][1]
+        graph = observation.graph if graph is None else graph
+        if graph is not observation.graph and not any(
+            graph is item for item in observation.graphs
+        ):
+            raise OSError("Selected operation graph is outside the actual observation")
+        origin = graph.authorities[-1][1]
         manifest, _ = observation.owned[origin.prepared_commit]
         if self._history_origin_commit != origin.prepared_commit:
             self._history_origin = self._load_manifest_review(
@@ -182,7 +201,7 @@ class _OwnedPreparation:
             self._history_origin_commit = origin.prepared_commit
         if self._history_origin is None:
             raise OSError("Undo target lacks its canonical owned origin")
-        return target._replace(plan=self._history_origin.saved.plan)
+        return self._history_origin
 
     def _operation_content(self, row):
         if row is None:
@@ -296,10 +315,15 @@ class _OwnedPreparation:
         return transition.plan
 
     def prepare_history(self, vault, *, kind, direction=None, copy=None):
+        from brz2obsidian.publication.vault_recovery import prepare_recovery
         from brz2obsidian.publication.vault_undo import prepare_undo
 
         from .history_workflow import _prepared
 
+        if kind == "recovery" and direction in (None, "restore") and copy is None:
+            return _prepared(
+                vault, kind, prepare_recovery(vault, direction=direction, _owner=self)
+            )
         if kind != "undo" or direction is not None or copy is not None:
             return self.operations.prepare_history_workflow(
                 vault, kind=kind, direction=direction, copy=copy
@@ -307,10 +331,17 @@ class _OwnedPreparation:
         return _prepared(vault, "undo", prepare_undo(vault, _owner=self))
 
     def refresh_history(self, preparation):
+        from brz2obsidian.publication.vault_recovery import refresh_recovery
         from brz2obsidian.publication.vault_undo import prepare_undo
 
         from .history_workflow import _prepared
 
+        if preparation.kind == "recovery" and preparation.native.direction == "restore":
+            return _prepared(
+                preparation.vault,
+                "recovery",
+                refresh_recovery(preparation.vault, preparation.native, _owner=self),
+            )
         if preparation.kind != "undo":
             return self.operations.refresh_history_workflow(preparation)
         return _prepared(
@@ -320,13 +351,38 @@ class _OwnedPreparation:
         )
 
     def choose_history(self, preparation, **values):
+        from brz2obsidian.publication.vault_recovery import (
+            _same_recovery_review,
+            prepare_recovery,
+        )
         from brz2obsidian.publication.vault_undo import _same_review, prepare_undo
 
         from .history_workflow import _prepared
 
-        fresh = prepare_undo(preparation.vault, _owner=self)
-        if not _same_review(fresh, preparation.native):
-            raise ValueError("Undo review changed")
+        if preparation.kind == "recovery" and preparation.native.direction == "restore":
+            fresh = prepare_recovery(
+                preparation.vault, direction="restore", _owner=self
+            )
+            if (
+                fresh.generation != preparation.native.generation
+                or not _same_recovery_review(fresh, preparation.native)
+            ):
+                raise ValueError("Recovery review changed")
+            code = "recovery_choice_recorded"
+        elif preparation.kind == "undo":
+            fresh = prepare_undo(preparation.vault, _owner=self)
+            if not _same_review(fresh, preparation.native):
+                raise ValueError("Undo review changed")
+            code = "undo_choice_recorded"
+        else:
+            action = review_plan_choice_action(
+                preparation.native.review,
+                **{key: value for key, value in values.items() if key != "edited"},
+            )
+            action = lifecycle.text_choice_action(
+                preparation.native.review, action, edited=values.get("edited")
+            )
+            return self.operations.resolve_history_workflow(preparation, action)
         with self._session._operation():
             plan = self._session._admit_values(preparation.native.review)
             self._session._coadmit()
@@ -348,9 +404,9 @@ class _OwnedPreparation:
                 raise ValueError(transition.code)
         return _prepared(
             preparation.vault,
-            "undo",
+            preparation.kind,
             preparation.native.model_copy(
-                update={"review": transition.plan, "code": "undo_choice_recorded"}
+                update={"review": transition.plan, "code": code}
             ),
         )
 
@@ -361,17 +417,21 @@ class _OwnedPreparation:
             return lifecycle.review_plan_page(plan, _owner=self, **arguments)
 
     def execute_history(self, preparation, *, cancel=None, progress=None):
+        from brz2obsidian.publication.vault_recovery import execute_recovery
         from brz2obsidian.publication.vault_undo import execute_undo
 
         from .history_workflow import _executed
 
-        if preparation.kind != "undo":
+        owned_restore = (
+            preparation.kind == "recovery" and preparation.native.direction == "restore"
+        )
+        if preparation.kind != "undo" and not owned_restore:
             return self.operations.execute_history_workflow(
                 preparation, cancel=cancel, progress=progress
             )
-        self._cancel.probe = cancel
-        try:
-            result = execute_undo(
+        with self._history_cancellation(cancel):
+            execute = execute_recovery if owned_restore else execute_undo
+            result = execute(
                 preparation.vault,
                 preparation.native,
                 cancel=cancel,
@@ -379,9 +439,7 @@ class _OwnedPreparation:
                 executor=self.operations.vault_executor,
                 _owner=self,
             )
-            return _executed(result, "undo")
-        finally:
-            self._cancel.probe = None
+            return _executed(result, preparation.kind)
 
     def _source_payload(self, checkpoint):
         result = {}
