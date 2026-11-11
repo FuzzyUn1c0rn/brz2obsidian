@@ -2186,7 +2186,13 @@ def capture_checkpoint(
             ):
                 raise OSError("Closed canonical owner export required")
             _owned_export.check(review)
-            if (prepared_export or result_export) and (
+            if (
+                prepared_export
+                or result_export
+                or local_export
+                and review.ready
+                and review.facts.format_operation.kind == "attachment_cleanup"
+            ) and (
                 _owned_export.effects is None
                 or _owned_export.effects.status != "selected"
                 or _owned_export.session._selected is not _owned_export.effects

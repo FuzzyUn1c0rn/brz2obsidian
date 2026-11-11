@@ -4,6 +4,7 @@ import os
 import shutil
 import tempfile
 import zlib
+from contextlib import ExitStack
 from pathlib import Path
 
 from brz2obsidian.application.vault_repair_contracts import (
@@ -141,6 +142,11 @@ def _operation_blocker(root):
 
 def validate_history_copy(vault, copy):
     """Assess a complete supplied graph only under a local physical association."""
+    with ExitStack() as owners:
+        return _validate_history_copy(vault, copy, _owners=owners)
+
+
+def _validate_history_copy(vault, copy, *, _owners):
     root, supplied = Path(vault).absolute(), Path(copy).absolute()
     if (root / ".git").exists():
         try:
@@ -189,6 +195,7 @@ def validate_history_copy(vault, copy):
             missing_payloads=missing,
             damaged_payloads=damaged,
             linked_intents=linked_intents,
+            _owners=_owners,
         )
     except OSError, ValueError, TypeError, UnicodeError:
         target = None
@@ -241,7 +248,7 @@ def validate_history_copy(vault, copy):
             if line.startswith(operation_prefix)
         )
         if operation_refs and target.status == "valid":
-            operation = _inspect_update_status(root, observations=[])
+            operation = _inspect_update_status(root, observations=[], _owners=_owners)
             if (
                 operation.status
                 not in ("applied", "no_content_change", "restored", "undone")
@@ -293,10 +300,15 @@ def validate_history_copy(vault, copy):
         if not copy_supported or _operation_blocker(supplied):
             raise OSError("Supplied Git store is not self-contained")
         supplied_git = _Git(supplied)
-        copied = _read(supplied, supplied_git, trusted_association=association)
+        copied = _read(
+            supplied, supplied_git, trusted_association=association, _owners=_owners
+        )
         if copied.status == "valid":
             operation = _inspect_update_status(
-                supplied, observations=[], trusted_association=association
+                supplied,
+                observations=[],
+                trusted_association=association,
+                _owners=_owners,
             )
             if operation.code != "operation_absent" and (
                 operation.status
@@ -545,14 +557,16 @@ def execute_history_repair(vault, copy, preparation, *, progress=None):
             path = object_directory / oid[:2] / oid[2:]
             if retained_metadata(path) != metadata:
                 return False
-        after = _read(root, _Git(root))
-        if after.status != "valid" or after.locator.commit != current.target_commit:
-            return False
-        operation = _inspect_update_status(root, observations=[])
-        return operation.code == "operation_absent" or (
-            operation.status in ("applied", "no_content_change", "restored", "undone")
-            and not operation.recovery_required
-        )
+        with ExitStack() as owners:
+            after = _read(root, _Git(root), _owners=owners)
+            if after.status != "valid" or after.locator.commit != current.target_commit:
+                return False
+            operation = _inspect_update_status(root, observations=[], _owners=owners)
+            return operation.code == "operation_absent" or (
+                operation.status
+                in ("applied", "no_content_change", "restored", "undone")
+                and not operation.recovery_required
+            )
 
     attempted = False
     written = 0

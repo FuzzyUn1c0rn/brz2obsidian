@@ -1507,6 +1507,14 @@ class _OwnedPreparation:
                     }
                 )
             export = self._session._freeze_export(current.preparation.review)
+            if (
+                export.saved.plan.ready
+                and export.saved.plan.facts.format_operation.kind
+                == "attachment_cleanup"
+            ):
+                export.effects = self._session.select_review_effects(export.saved.plan)
+                if export.effects.status != "selected":
+                    raise OSError("Whole current owned review required")
             onboarding = current.preparation.kind == "onboarding"
             if onboarding:
                 baseline_directory = current.preparation.payload_directory
