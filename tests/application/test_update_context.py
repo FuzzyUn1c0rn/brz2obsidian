@@ -162,6 +162,17 @@ def test_attachment_versions_require_complete_valid_staged_references(
         opened.binding, requirement_id=offer.requirement_id
     ).references
     assert len(refs) == 2 and all(row.selected is None for row in refs)
+    assert all("drop" not in row.choices for row in refs)
+    refused_drop = send(
+        "stage_references",
+        binding=opened.binding,
+        requirement_id=offer.requirement_id,
+        choices=({"reference_id": refs[0].reference_id, "choice": "drop"},),
+    )
+    assert (
+        refused_drop.code == "offer_changed" and refused_drop.binding == opened.binding
+    )
+    assert not refused_drop.draft_pending
     command = "choose_history" if role == "history" else "choose"
     options = {
         "binding": opened.binding,

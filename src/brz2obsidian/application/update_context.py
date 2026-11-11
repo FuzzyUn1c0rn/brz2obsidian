@@ -395,7 +395,7 @@ class UpdateContext:
                 requirement_id,
                 offset=offset,
                 limit=limit,
-                drop_only=self._kind == "attachment_cleanup",
+                drop_only=plan.facts.format_operation.kind == "attachment_cleanup",
                 _choices=None if self._owner is None else self._owner.choices(plan),
             )
         except ValueError, StopIteration, OSError:
@@ -1074,7 +1074,7 @@ class UpdateContext:
             )
             offered = {
                 token: ("drop",)
-                if self._kind == "attachment_cleanup"
+                if plan.facts.format_operation.kind == "attachment_cleanup"
                 else tuple(row.choice for row in destinations[token])
                 for token, _, _ in review_plan_attachment_references(
                     plan, requirement_id, _choices=canonical_choices

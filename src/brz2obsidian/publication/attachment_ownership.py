@@ -74,8 +74,8 @@ def compile_removal_continuations(original, intent, origin_commit, *, effects):
             or row is None
             or path in proposed
             or subject.current.content is None
-            or row.size != len(subject.current.content.data)
-            or row.sha256 != hashlib.sha256(subject.current.content.data).hexdigest()
+            or row.size != content_size(subject.current.content)
+            or row.sha256 != content_sha(subject.current.content)
         ):
             raise OSError("Cleanup origin removal is unbound")
         target_id = subject.attachment.current_target_id
@@ -370,6 +370,7 @@ def validate_claims(
     continuation_origin_commit=None,
     continuation_before=(),
     continuation_direction=None,
+    continuation_effects=None,
 ):
     validate_removal_continuations(
         claims,
@@ -378,6 +379,7 @@ def validate_claims(
         origin_commit=continuation_origin_commit,
         before=continuation_before,
         direction=continuation_direction,
+        effects=continuation_effects,
     )
     if not roles:
         if claims or missing:

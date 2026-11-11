@@ -1612,6 +1612,7 @@ def _read(
                 root,
                 observations=completed_observations,
                 trusted_association=trusted_association,
+                _owners=_owners,
             )
             observation = completed_observations[0] if completed_observations else None
             if (
@@ -2311,6 +2312,7 @@ def capture_checkpoint(
             return result("refused", "association_mismatch")
         recovery_target = None
         recovery_origin_plan = None
+        recovery_origin_effects = None
         recovery_origin_intent_commit = None
         recovery_previous_operation_commit = None
         retained_recovery_direction = (
@@ -2375,6 +2377,7 @@ def capture_checkpoint(
             if origin_loaded is None:
                 return result("refused", "recovery_review_required")
             recovery_origin_plan = origin_loaded.saved.plan
+            recovery_origin_effects = origin_loaded.historical_effects
             original_prepared = authority.owned[original.prepared_commit][0]
             source_manifest = (
                 original_prepared
@@ -2448,7 +2451,10 @@ def capture_checkpoint(
             )
             from .attachment_ownership import review_ownership_claims, validate_claims
 
-            claims, missing = review_ownership_claims(saved.plan)
+            claims, missing = review_ownership_claims(
+                saved.plan,
+                _owned_export.effects if _owned_export is not None else None,
+            )
             if claims or missing:
                 try:
                     roles = (
@@ -2457,7 +2463,9 @@ def capture_checkpoint(
                         else _observation[1].checkpoint_roles
                     )
                     origin_claims = (
-                        review_ownership_claims(recovery_origin_plan)[0]
+                        review_ownership_claims(
+                            recovery_origin_plan, recovery_origin_effects
+                        )[0]
                         if recovery_origin_plan is not None
                         else ()
                     )
@@ -2497,6 +2505,7 @@ def capture_checkpoint(
                             else current.inventory
                         ),
                         continuation_direction=target_direction,
+                        continuation_effects=recovery_origin_effects,
                     )
                 except OSError, ValueError, TypeError, KeyError:
                     return result("refused", "cleanup_ownership_unbound")

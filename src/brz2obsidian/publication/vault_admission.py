@@ -1259,6 +1259,7 @@ class _Inspection:
                     linked_intents=self.linked_intents,
                     checkpoint_roles=self.checkpoint_roles,
                     _metadata_only=self._metadata_only,
+                    _owners=self._owners,
                 )
                 if self.history.status != "valid":
                     raise OSError("Current converter history unavailable")
@@ -1280,6 +1281,7 @@ class _Inspection:
                     linked_intents=self.linked_intents,
                     checkpoint_roles=self.checkpoint_roles,
                     _metadata_only=self._metadata_only,
+                    _owners=self._owners,
                 )
                 if self.history.status != "valid":
                     raise OSError("Current converter history unavailable")

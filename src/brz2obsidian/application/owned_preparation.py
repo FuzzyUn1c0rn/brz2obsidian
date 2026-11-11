@@ -450,6 +450,20 @@ class _OwnedPreparation:
                 executor=self.operations.vault_executor,
                 _owner=self,
             )
+            if owned_recovery and self._history_observation is not None:
+                graph = self._history_observation.graph
+                original = graph.authorities[-1][1]
+                if (
+                    self._history_origin is not None
+                    and self._history_origin_commit == original.prepared_commit
+                    and (result.operation_id, result.kind)
+                    == (graph.intent.operation_id, graph.intent.kind)
+                ):
+                    result = result.model_copy(
+                        update={
+                            "origin_role": self._history_origin.saved.plan.facts.format_operation.kind
+                        }
+                    )
             return _executed(result, preparation.kind)
 
     def _source_payload(self, checkpoint):

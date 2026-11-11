@@ -2499,9 +2499,13 @@ def _apply_reviewed_update(
                     _owners=_owners,
                 )
             )
-            manifest = tip.checkpoint.manifest
-            if tip.status != "intact" or manifest.boundary != "prepared":
+            if (
+                tip.status != "intact"
+                or tip.checkpoint is None
+                or tip.checkpoint.manifest.boundary != "prepared"
+            ):
                 raise OSError("Prepared checkpoint could not be rediscovered")
+            manifest = tip.checkpoint.manifest
             operation_generation = manifest.generation
             intent = VaultOperationIntent(
                 schema_id="brz2obsidian.vault-operation-intent",
