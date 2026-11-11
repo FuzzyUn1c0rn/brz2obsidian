@@ -356,7 +356,7 @@ def literal_cleanup_case(
 def test_cleanup_keeps_historical_original_distinct_from_current_retained_source(
     tmp_path, ownership
 ):
-    case = literal_cleanup_case(tmp_path)
+    case = literal_cleanup_case(tmp_path, output_format=8)
     case.retained.pop("Assets/remove.bin")
     record = json.loads(case.retained["migration-record.json"])
     record["asset_targets"] = [
@@ -413,7 +413,7 @@ def test_saved_unready_cleanup_resumes_from_current_source_and_fresh_ownership(
     from brz2obsidian.application.checkpoint_contracts import CheckpointResult
     from brz2obsidian.core import load_review, save_review
 
-    case = literal_cleanup_case(tmp_path)
+    case = literal_cleanup_case(tmp_path, output_format=8)
     case.retained.pop("Assets/remove.bin")
     record = json.loads(case.retained["migration-record.json"])
     record["asset_targets"] = [

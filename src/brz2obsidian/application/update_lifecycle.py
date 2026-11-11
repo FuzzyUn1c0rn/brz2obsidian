@@ -743,10 +743,11 @@ def _memory(plan):
     return tuple(records.values())
 
 
-def _producer_memory(checkpoint, proposal_id=None):
-    if checkpoint.review is None:
+def _producer_memory(checkpoint, proposal_id=None, *, _owner=None):
+    retained = _owner._tip if _owner is not None else checkpoint.review
+    if retained is None:
         return ()
-    saved = checkpoint.review.saved.plan
+    saved = retained.saved.plan
     if (
         checkpoint.manifest.boundary == "local"
         and checkpoint.manifest.reviewed_source is not None

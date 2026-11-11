@@ -100,7 +100,15 @@ class UpdateContext:
 
         report_progress(progress, "current_inspection")
         if kind == "attachment_cleanup":
-            result = self._operations.prepare_attachment_cleanup(vault)
+            from .operations import Operations
+
+            if type(self._operations) is Operations:
+                self._owner = self._operations._new_owned_preparation()
+                result = self._owner.prepare(vault, source, kind=kind, cancel=cancel)
+                if result.preparation is None:
+                    self._retire_owner()
+            else:
+                result = self._operations.prepare_attachment_cleanup(vault)
         elif kind == "onboarding":
             from .operations import Operations
 
