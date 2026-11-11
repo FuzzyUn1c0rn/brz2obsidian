@@ -498,11 +498,16 @@ class _OwnedPreparation:
 
     def _scoped(self, history, facts, plan=None):
         subjects = lifecycle._subjects(facts, plan)
-        scoped = self.observed.inspect(subjects=subjects)
+        purpose = (
+            "format_transition"
+            if facts.format_operation.kind == "format_transition"
+            else None
+        )
+        scoped = self.observed.inspect(subjects=subjects, new_operation=purpose)
         if scoped.admission.inventory != history.admission.inventory:
             raise OSError("Current inventory changed")
         admission, requested = self.observed._consume_fresh_scope(
-            scoped, purpose=None, ledger=self._session._ledger
+            scoped, purpose=purpose, ledger=self._session._ledger
         )
         if {(row.path, row.subject_id) for row in requested} != {
             (row.path, row.subject_id) for row in subjects
@@ -545,7 +550,11 @@ class _OwnedPreparation:
                 return lifecycle._refused("saved_update_unavailable", history)
             # Other operation roles retain their existing public route until
             # their distinct restoration semantics are supported here.
-            if checkpoint.metadata[10] not in ("onboarding", "source_update"):
+            if checkpoint.metadata[10] not in (
+                "onboarding",
+                "source_update",
+                "format_transition",
+            ):
                 return None
             self._start_session()
             self._tip = self._load_tip(checkpoint)
@@ -565,7 +574,10 @@ class _OwnedPreparation:
                     checkpoint=checkpoint.locator,
                     vault=history.admission.vault,
                 )
-            if plan.facts.format_operation.kind == "source_update":
+            if plan.facts.format_operation.kind in (
+                "source_update",
+                "format_transition",
+            ):
                 result = self._resume_update(history, plan)
                 self.preparation = result.preparation
                 return result
@@ -620,15 +632,29 @@ class _OwnedPreparation:
             }
             self._session._coadmit()
             directory, _ = self._restore_incoming(checkpoint, plan, incoming)
-            facts = lifecycle._observed_facts(
-                history,
-                baseline,
-                incoming,
-                proposal_id=plan.proposal.proposal_id,
-                generation=plan.proposal.generation,
-                source_memory=plan.facts.source_version_memory,
-                _owner=self,
-            )
+            maintenance = plan.facts.format_operation.kind == "format_transition"
+            if maintenance:
+                from .format_transition import transition_facts
+
+                baseline = lifecycle._baseline(checkpoint, baseline, _owner=self)
+                facts = transition_facts(
+                    history,
+                    baseline,
+                    incoming,
+                    proposal_id=plan.proposal.proposal_id,
+                    generation=plan.proposal.generation,
+                    _owner=self,
+                )
+            else:
+                facts = lifecycle._observed_facts(
+                    history,
+                    baseline,
+                    incoming,
+                    proposal_id=plan.proposal.proposal_id,
+                    generation=plan.proposal.generation,
+                    source_memory=plan.facts.source_version_memory,
+                    _owner=self,
+                )
             facts = self._session._admit_values(facts)
             self._session._coadmit()
             canonical = self._session._replay(plan)
@@ -636,7 +662,8 @@ class _OwnedPreparation:
                 raise OSError("invalid_review")
             effects = self._session._drive(SelectedEffectsWork(canonical))
             scoped = self.observed.inspect(
-                subjects=lifecycle._subjects(facts, canonical, effects=effects)
+                subjects=lifecycle._subjects(facts, canonical, effects=effects),
+                new_operation="format_transition" if maintenance else None,
             )
             if scoped.admission.inventory != history.admission.inventory:
                 raise OSError("Current inventory changed")
@@ -718,6 +745,16 @@ class _OwnedPreparation:
         history = None
         try:
             history = self._observe(vault)
+            if kind == "format_transition":
+                from .format_transition import prepare_format_transition
+
+                result = prepare_format_transition(
+                    self.operations, vault, source, _owner=self
+                )
+                self.preparation = result.preparation
+                if result.preparation is None:
+                    self.close()
+                return result
             if kind == "onboarding":
                 from .onboarding import prepare_onboarding
 
@@ -825,6 +862,10 @@ class _OwnedPreparation:
                 from .onboarding import refused
 
                 return refused("onboarding_unavailable", history)
+            if kind == "format_transition":
+                from .format_transition import refused
+
+                return refused("format_transition_unavailable", history)
             return lifecycle._refused(
                 "preparation_unavailable", action="inspect_source_and_history"
             )
@@ -866,6 +907,32 @@ class _OwnedPreparation:
             plan = self._session._admit_values(plan)
             self._session._coadmit()
             return self._session._canonical_choices(plan)
+
+    def configuration_choice_offer(self, preparation):
+        from .format_configuration import configuration_choice_offer
+
+        return configuration_choice_offer(
+            preparation, _choices=self.choices(preparation.review)
+        )
+
+    def resolve_configuration_choice(self, preparation, *, group_id, choice):
+        from .format_configuration import resolve_configuration_choice
+
+        return resolve_configuration_choice(
+            self.operations,
+            preparation,
+            group_id=group_id,
+            choice=choice,
+            _owner=self,
+        )
+
+    def resolve_update(self, preparation, action):
+        """Resolve one prevalidated group member without retaining a partial group."""
+        with self._session._operation():
+            plan = self._session._admit_values(preparation.review)
+            action = self._session._admit_values(action)
+            self._session._coadmit()
+            return self._action_result(preparation, plan, action)
 
     def choose(self, preparation, **values):
         try:
@@ -912,32 +979,36 @@ class _OwnedPreparation:
             )
             action = self._session._admit_values(action)
             self._session._coadmit()
-            transition = self._session._drive(
-                ActionWork(plan, action, self._session._epoch)
-            )
-            prepared = preparation.model_copy(
-                update={
-                    "review": transition.plan,
-                    "source_binding": preparation.source_binding.model_copy(
-                        update={"generation": transition.plan.proposal.generation}
-                    ),
-                }
-            )
-            self.preparation = prepared
-            from .update_contracts import UpdateResult
+            result = self._action_result(preparation, plan, action)
+            self.preparation = result.preparation
+            return result
 
-            return UpdateResult(
-                kind=prepared.kind,
-                status="prepared_review" if transition.plan.ready else "unresolved",
-                code=transition.code,
-                preparation=prepared,
-                ready=transition.status == "accepted" and transition.plan.ready,
-                history_retained=prepared.locator is not None,
-                checkpoint_commit=prepared.locator.commit if prepared.locator else None,
-                changes=len(transition.plan.proposal.changes),
-                unresolved=len(transition.plan.requirements),
-                next_actions=("save_update", "refresh_update"),
-            )
+    def _action_result(self, preparation, plan, action):
+        from .update_contracts import UpdateResult
+
+        transition = self._session._drive(
+            ActionWork(plan, action, self._session._epoch)
+        )
+        prepared = preparation.model_copy(
+            update={
+                "review": transition.plan,
+                "source_binding": preparation.source_binding.model_copy(
+                    update={"generation": transition.plan.proposal.generation}
+                ),
+            }
+        )
+        return UpdateResult(
+            kind=prepared.kind,
+            status="prepared_review" if transition.plan.ready else "unresolved",
+            code=transition.code,
+            preparation=prepared,
+            ready=transition.status == "accepted" and transition.plan.ready,
+            history_retained=prepared.locator is not None,
+            checkpoint_commit=prepared.locator.commit if prepared.locator else None,
+            changes=len(transition.plan.proposal.changes),
+            unresolved=len(transition.plan.requirements),
+            next_actions=("save_update", "refresh_update"),
+        )
 
     def _byteslice(self, value, offset, maximum):
         binding = self._session._binding(
@@ -1003,6 +1074,19 @@ class _OwnedPreparation:
                 raise OSError(result.code)
             return history, result, None
         history = self._observe(preparation.vault, preparation.locator)
+        maintenance = preparation.kind == "format_transition"
+        if maintenance:
+            history, stopped = lifecycle._history(
+                self.operations,
+                preparation.vault,
+                self.observed,
+                maintenance=True,
+                new_operation="format_transition",
+            )
+            if stopped is not None:
+                raise OSError(stopped.code)
+            if self._tip_commit != history.checkpoint.locator.commit:
+                self._tip = self._load_tip(history.checkpoint)
         if (
             self.operations.observe_reviewed_source(
                 preparation.payload_directory, preparation.review
@@ -1016,6 +1100,10 @@ class _OwnedPreparation:
             if self._session._replay(plan) is None:
                 raise OSError("invalid_review")
             baseline = self._source_payload(history.checkpoint)
+            if maintenance:
+                baseline = lifecycle._baseline(
+                    history.checkpoint, baseline, _owner=self
+                )
             incoming = lifecycle._read_physical(
                 preparation.payload_directory,
                 preparation.source_binding.files,
@@ -1041,15 +1129,27 @@ class _OwnedPreparation:
                         or binding.files != preparation.source_binding.files
                     ):
                         raise OSError("incoming_source_changed")
-            facts = lifecycle._observed_facts(
-                history,
-                baseline,
-                incoming,
-                proposal_id=plan.proposal.proposal_id,
-                generation=plan.proposal.generation,
-                source_memory=plan.facts.source_version_memory,
-                _owner=self,
-            )
+            if maintenance:
+                from .format_transition import transition_facts
+
+                facts = transition_facts(
+                    history,
+                    baseline,
+                    incoming,
+                    proposal_id=plan.proposal.proposal_id,
+                    generation=plan.proposal.generation,
+                    _owner=self,
+                )
+            else:
+                facts = lifecycle._observed_facts(
+                    history,
+                    baseline,
+                    incoming,
+                    proposal_id=plan.proposal.proposal_id,
+                    generation=plan.proposal.generation,
+                    source_memory=plan.facts.source_version_memory,
+                    _owner=self,
+                )
             facts = self._session._admit_values(facts)
             history = self._scoped(history, facts, plan)
             self._session._coadmit()
@@ -1105,7 +1205,7 @@ class _OwnedPreparation:
             ):
                 self.preparation = result.preparation
             return result
-        except OSError, ValueError, TypeError, KeyError, RecursionError:
+        except (OSError, ValueError, TypeError, KeyError, RecursionError) as error:
             if self._cancel.is_set():
                 return lifecycle._refused(
                     "cancelled_after_refresh", preparation=preparation
@@ -1122,6 +1222,14 @@ class _OwnedPreparation:
                         "next_actions": ("continue_review", "refresh_update"),
                     }
                 )
+            if preparation.kind == "format_transition" and error.args == (
+                "format_source_changed",
+            ):
+                from .format_transition import refused
+
+                return refused(
+                    "format_source_changed", action="choose_source_reference"
+                )
             return lifecycle._refused("refresh_unavailable", preparation=preparation)
         finally:
             self._cancel.probe = None
@@ -1130,11 +1238,16 @@ class _OwnedPreparation:
 
     def _replace_source(self, preparation, source):
         history = self._observe(preparation.vault)
+        maintenance = preparation.kind == "format_transition"
         history, stopped = lifecycle._history(
-            self.operations, preparation.vault, self.observed
+            self.operations,
+            preparation.vault,
+            self.observed,
+            maintenance=maintenance,
+            new_operation="format_transition" if maintenance else None,
         )
         if stopped is not None:
-            return stopped
+            return stopped.model_copy(update={"kind": preparation.kind})
         if history.checkpoint.locator.association != preparation.locator.association:
             raise OSError("association_mismatch")
         tip = self._load_tip(history.checkpoint)
@@ -1144,6 +1257,11 @@ class _OwnedPreparation:
             if self._session._replay(old) is None:
                 raise OSError("invalid_review")
             baseline = self._source_payload(history.checkpoint)
+            if maintenance:
+                self._tip = tip
+                baseline = lifecycle._baseline(
+                    history.checkpoint, baseline, _owner=self
+                )
             directory, incoming, observed_source, reused = lifecycle._render(
                 self.operations,
                 source,
@@ -1161,15 +1279,27 @@ class _OwnedPreparation:
                 memory = tip.saved.plan.facts.source_version_memory
             else:
                 memory = lifecycle._memory(tip.saved.plan)
-            facts = lifecycle._observed_facts(
-                history,
-                baseline,
-                incoming,
-                proposal_id=old.proposal.proposal_id,
-                generation=old.proposal.generation + 1,
-                source_memory=memory,
-                _owner=self,
-            )
+            if maintenance:
+                from .format_transition import transition_facts
+
+                facts = transition_facts(
+                    history,
+                    baseline,
+                    incoming,
+                    proposal_id=old.proposal.proposal_id,
+                    generation=old.proposal.generation + 1,
+                    _owner=self,
+                )
+            else:
+                facts = lifecycle._observed_facts(
+                    history,
+                    baseline,
+                    incoming,
+                    proposal_id=old.proposal.proposal_id,
+                    generation=old.proposal.generation + 1,
+                    source_memory=memory,
+                    _owner=self,
+                )
             facts = self._session._admit_values(facts)
             history = self._scoped(history, facts, old)
             self._session._coadmit()

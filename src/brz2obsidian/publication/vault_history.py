@@ -2244,15 +2244,15 @@ def capture_checkpoint(
             save_review(review)
             if review is not None
             and review.facts.format_operation.kind == "format_transition"
+            and _owned_export is None
             else None
         )
         if saved_result is not None and saved_result.status != "saved":
             return result("refused", "invalid_current_review")
         new_operation = (
             "format_transition"
-            if saved_result is not None
-            and saved_result.record.plan.facts.format_operation.kind
-            == "format_transition"
+            if review is not None
+            and review.facts.format_operation.kind == "format_transition"
             else None
         )
         captured_inspections = []

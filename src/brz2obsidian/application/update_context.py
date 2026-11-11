@@ -120,7 +120,15 @@ class UpdateContext:
                     vault, source, original_source=original_source
                 )
         elif kind == "format_transition":
-            result = self._operations.prepare_format_transition(vault, source)
+            from .operations import Operations
+
+            if type(self._operations) is Operations:
+                self._owner = self._operations._new_owned_preparation()
+                result = self._owner.prepare(vault, source, kind=kind, cancel=cancel)
+                if result.preparation is None:
+                    self._retire_owner()
+            else:
+                result = self._operations.prepare_format_transition(vault, source)
         elif kind == "source_update":
             from .operations import Operations
 
@@ -338,7 +346,11 @@ class UpdateContext:
             next_actions=("refresh_update",)
             if page.code == "source_payload_changed"
             else (),
-            configuration=self._operations.configuration_choice_offer(self._preparation)
+            configuration=(
+                self._operations.configuration_choice_offer(self._preparation)
+                if self._owner is None
+                else self._owner.configuration_choice_offer(self._preparation)
+            )
             if page.status == "available" and self._kind == "format_transition"
             else None,
             offers=tuple(
@@ -783,9 +795,12 @@ class UpdateContext:
             return self._edit_refusal("context_changed")
         if self._edit is not None or self._reference_drafts:
             return self._uncommitted_draft()
-        result = self._operations.resolve_configuration_choice(
-            self._preparation, group_id=group_id, choice=choice
+        chooser = (
+            self._operations.resolve_configuration_choice
+            if self._owner is None
+            else self._owner.resolve_configuration_choice
         )
+        result = chooser(self._preparation, group_id=group_id, choice=choice)
         return self._retain(result, selection_id=expected.selection_id)
 
     def load(self, vault, *, selection_id, cancel=None):

@@ -335,14 +335,15 @@ def _observed_facts(
     return assembled() if removed or additional else facts
 
 
-def _baseline(checkpoint, source):
+def _baseline(checkpoint, source, *, _owner=None):
+    review = _owner._tip if _owner is not None else checkpoint.review
     if (
         checkpoint.manifest.boundary != "local"
-        or checkpoint.review is None
+        or review is None
         or checkpoint.manifest.reviewed_source is not None
     ):
         return source
-    facts = checkpoint.review.saved.plan.producer_facts
+    facts = review.saved.plan.producer_facts
     # Saved unresolved reviews retain complete exact originals in schema-1
     # review_content; the source role retains the complete incoming payload.
     rows = {(s.item_id, s.facet): s for s in facts.subjects}
@@ -351,7 +352,11 @@ def _baseline(checkpoint, source):
     ].baseline.content
     if original_record is None:
         raise ValueError("onboarding_required")
-    old_record = json.loads(original_record.data)
+    old_record = json.loads(
+        _owner._session._text(original_record).data
+        if _owner is not None
+        else original_record.data
+    )
     paths = {
         (row["original_identity"], "content"): row["relative_path"]
         for row in old_record["item_targets"]
@@ -376,7 +381,13 @@ def _baseline(checkpoint, source):
         )
         if path is None:
             raise ValueError("baseline_payload_unavailable")
-        result[path] = subject.baseline.content.data
+        result[path] = (
+            _owner._session._text(subject.baseline.content)
+            if _owner is not None and path == "migration-record.json"
+            else subject.baseline.content
+            if _owner is not None
+            else subject.baseline.content.data
+        )
     return result
 
 
