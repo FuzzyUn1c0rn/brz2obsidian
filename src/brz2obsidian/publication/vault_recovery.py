@@ -219,7 +219,11 @@ def _review_observation(
         # Reobserve precisely the saved Undo scope, including real Owner
         # document facets that were dependent outputs of the original apply.
         query_plan = pending.review.saved.plan
-        query_effects = select_review_effects(query_plan)
+        query_effects = (
+            select_review_effects(query_plan)
+            if _owner is None
+            else pending.review.historical_effects
+        )
     query_subjects = _review_subjects(query_plan, query_effects)
     admission = (
         _inspect_vault_for_recovery(root, retained, subjects=query_subjects)

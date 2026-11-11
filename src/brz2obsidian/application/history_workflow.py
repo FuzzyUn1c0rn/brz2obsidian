@@ -45,6 +45,26 @@ def _history_admission(history, operation):
     )
     retained = history.status == "intact" and locator is not None
     git_setup = any(f.policy == "git" for f in admission.findings)
+    pending_undo = (
+        retained
+        and admission.status == "supported"
+        and not git_setup
+        and operation.code == "undo_prepared"
+        and operation.status == "content_complete"
+        and operation.kind == "apply"
+        and operation.phase == "prepared"
+        and operation.recovery_required
+        and operation.history == "terminal"
+        and operation.publication == "complete"
+        and operation.receipt_commit is not None
+        and operation.generation is not None
+        and locator.generation > operation.generation
+        and checkpoint.manifest.boundary == "prepared"
+        and checkpoint.manifest.undo_of_receipt_commit == operation.receipt_commit
+        and checkpoint.manifest.operation_intent_commit is None
+        and checkpoint.manifest.recovery_origin_intent_commit is None
+        and checkpoint.review is not None
+    )
     if (
         history.status == "unavailable"
         and checkpoint is None
@@ -67,7 +87,11 @@ def _history_admission(history, operation):
     ):
         status, code = "recovery_required", "recovery_first"
         actions = (
-            ("setup_git", "review_recovery") if git_setup else ("review_recovery",)
+            ("review_undo",)
+            if pending_undo
+            else ("setup_git", "review_recovery")
+            if git_setup
+            else ("review_recovery",)
         )
         if (
             operation.status == "unknown"
@@ -78,7 +102,11 @@ def _history_admission(history, operation):
             # permission. Native S2 alone can prove terminal missing payloads
             # independently of incompatible incomplete/corrupt metadata.
             actions += ("review_history_repair",)
-        summary = "Inspect the retained or suspected operation before starting another vault change."
+        summary = (
+            "Review the retained Undo preparation; no new operation has started."
+            if pending_undo
+            else "Inspect the retained or suspected operation before starting another vault change."
+        )
     elif git_setup:
         status, code, actions = "setup_required", "git_setup_required", ("setup_git",)
         summary = "Complete supported Git setup, then inspect the vault again."

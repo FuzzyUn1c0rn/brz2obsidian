@@ -337,11 +337,26 @@ def _prepare_observed(root, observed, observation, *, previous=None, _owner=None
         return _preparation("refused", "undo_target_changed"), None
     if _owner is not None:
         target = _owner._operation_target(target)
+        pending_review = None
+        checkpoint = observation.checkpoint
+        if (
+            observation.unpublished_prepared == checkpoint.locator.commit
+            and checkpoint.manifest.boundary == "prepared"
+            and checkpoint.manifest.undo_of_receipt_commit == target.receipt_commit
+            and checkpoint.manifest.operation_intent_commit is None
+            and checkpoint.manifest.recovery_origin_intent_commit is None
+            and checkpoint.review is not None
+        ):
+            pending = _owner._load_tip(checkpoint)
+            if pending is None:
+                raise OSError("Pending Undo lacks its canonical retained review")
+            if previous is None or canonical_equal(previous.review, pending.saved.plan):
+                pending_review = pending.saved.plan
         with _owner._session._operation():
             review = _restore_review(
                 root,
                 observed,
-                previous=previous.review if previous else None,
+                previous=previous.review if previous else pending_review,
                 authority=(
                     target.plan,
                     target.intent,
@@ -351,7 +366,14 @@ def _prepare_observed(root, observed, observation, *, previous=None, _owner=None
                 undo_target=target,
                 _owner=_owner,
             )
-        return _preparation("offered", code, target=target, review=review), target
+        prepared = _preparation("offered", code, target=target, review=review)
+        if pending_review is not None:
+            retained = _preparation(
+                "offered", code, target=target, review=pending_review
+            )
+            if _same_review(prepared, retained):
+                prepared = retained
+        return prepared, target
     review = _restore_review(
         root,
         observed,
@@ -376,7 +398,7 @@ def prepare_undo(vault, *, previous=None, _owner=None):
                 return _preparation("refused", "undo_review_required")
         root = Path(vault).absolute()
         if _owner is not None:
-            history = _owner._observe(vault)
+            history = _owner._observe(vault, _recovery=True)
             if (
                 history.status != "intact"
                 or history.admission.status != "supported"
@@ -384,8 +406,10 @@ def prepare_undo(vault, *, previous=None, _owner=None):
             ):
                 return _preparation("unavailable", "undo_history_or_review_unavailable")
             _owner._start_session()
-        observed, observation = _inspect_update_observation(
-            root, **({} if _owner is None else {"_owners": _owner.observed._owners})
+        observed, observation = (
+            _inspect_update_observation(root)
+            if _owner is None
+            else (_owner.observed._recovery_status, _owner.observed._terminal)
         )
         return _prepare_observed(
             root, observed, observation, previous=previous, _owner=_owner
@@ -448,7 +472,7 @@ def execute_undo(
             return _outcome("refused", "undo_review_required", start=start, kind="undo")
         root = Path(vault).absolute()
         if _owner is not None:
-            history = _owner._observe(vault)
+            history = _owner._observe(vault, _recovery=True)
             if (
                 history.status != "intact"
                 or history.admission.status != "supported"
@@ -457,8 +481,10 @@ def execute_undo(
                 return _outcome(
                     "refused", "undo_review_stale", start=start, kind="undo"
                 )
-        observed, observation = _inspect_update_observation(
-            root, **({} if _owner is None else {"_owners": _owner.observed._owners})
+        observed, observation = (
+            _inspect_update_observation(root)
+            if _owner is None
+            else (_owner.observed._recovery_status, _owner.observed._terminal)
         )
         fresh, target = _prepare_observed(root, observed, observation, _owner=_owner)
         if target is None or not _same_review(fresh, saved):
