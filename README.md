@@ -613,7 +613,7 @@ For the optional GUI dependencies, install `requirements-gui.txt` in the same
 environment and scan that manifest too:
 
 ```powershell
-snyk test --file=requirements-gui.txt --command=.\.venv\Scripts\python.exe
+snyk test --file=requirements-gui.txt --package-manager=pip --command=.\.venv\Scripts\python.exe
 ```
 
 ### Python library

@@ -1,4 +1,4 @@
-# Resolved on Windows / CPython 3.14.8. Install only in the project .venv.
+# Resolved on Windows / CPython 3.14.10. Install only in the project .venv.
 # Project installation follows: python -m pip install --no-build-isolation -e ".[dev]"
 annotated-types==0.8.0
 colorama==0.4.6
@@ -9,7 +9,7 @@ markdown-it-py==4.2.0
 mdurl==0.1.2
 numpy==2.5.4
 packaging==26.3
-pillow==12.3.0
+pillow==13.0.0
 pluggy==1.6.0
 pydantic==2.13.5
 pydantic_core==2.46.5
@@ -18,7 +18,7 @@ pytest==9.1.1
 pytest-xdist==3.8.0
 PyYAML==6.0.3
 ruff==0.16.10
-setuptools==84.0.0
+setuptools==84.1.0
 simplejpeg==1.9.0
 typing-inspection==0.4.4
 typing_extensions==4.16.0
