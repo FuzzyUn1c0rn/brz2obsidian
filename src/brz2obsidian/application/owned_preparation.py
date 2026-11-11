@@ -432,9 +432,9 @@ class _OwnedPreparation:
 
         from .history_workflow import _executed
 
-        owned_recovery = (
-            preparation.kind == "recovery"
-            and preparation.native.direction in ("finish", "restore")
+        owned_recovery = preparation.kind == "recovery" and (
+            preparation.native.direction in ("finish", "restore")
+            or preparation.native.status == "cleanup"
         )
         if preparation.kind != "undo" and not owned_recovery:
             return self.operations.execute_history_workflow(

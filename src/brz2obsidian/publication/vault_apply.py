@@ -1796,6 +1796,13 @@ def _inspect_update_status(
 
 def read_update_details(vault, *, offset=0, limit=100, expected=None):
     """Page only validated owned before/result comparison facts, never bytes."""
+    with ExitStack() as owners:
+        return _read_update_details(
+            vault, offset=offset, limit=limit, expected=expected, _owners=owners
+        )
+
+
+def _read_update_details(vault, *, offset, limit, expected, _owners):
     if (
         type(offset) is not int
         or offset < 0
@@ -1824,7 +1831,7 @@ def read_update_details(vault, *, offset=0, limit=100, expected=None):
             next_offset=next_offset,
         )
 
-    observed, observation = _inspect_update_observation(vault)
+    observed, observation = _inspect_update_observation(vault, _owners=_owners)
     if observed.status in ("unknown", "refused") or observed.intent_commit is None:
         return page("unavailable", "operation_authority_unavailable")
     if expected is not None:

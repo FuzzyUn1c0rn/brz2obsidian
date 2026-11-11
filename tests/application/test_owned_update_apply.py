@@ -10,6 +10,7 @@ from uuid import uuid4
 import brz2obsidian.application.update_lifecycle as lifecycle
 import brz2obsidian.publication.vault_history as history
 import brz2obsidian.publication.vault_native as native
+import brz2obsidian.publication.vault_recovery as recovery
 from brz2obsidian.application.operations import Operations
 from brz2obsidian.application.update_context import UpdateContext
 from brz2obsidian.application.wiring import default_workflow
@@ -247,7 +248,7 @@ def test_default_context_applies_saved_binary_and_repeats_without_checkpoint_chu
         capacity_observed.append(capacity)
         return capacity
 
-    for module in (native, history, lifecycle, checkpoint_payload):
+    for module in (native, history, lifecycle, checkpoint_payload, recovery):
         monkeypatch.setattr(module, "available_memory", available_memory)
     cold = UpdateContext(operations=Operations(workflow=workflow))
     loaded = worker_context_call(
@@ -301,15 +302,214 @@ def test_default_context_applies_saved_binary_and_repeats_without_checkpoint_chu
     selected = next(offer for offer in shown.offers if offer.domain == "attachment")
     assert selected.selected == "incoming" and selected.decision_id is not None
     assert (vault / asset_path).read_bytes() == current
-    applied = worker_context_call(
-        cold, {"command": "apply", "binding": resumed.binding}
+    marker = vault / ".git/brz2obsidian"
+    actual_unlink = Path.unlink
+    witnessed = []
+
+    def fail_actual_terminal_release(path, *arguments, **options):
+        if path.absolute() == (marker / "owner.json").absolute():
+            # _release closes its real held handle before this first unlink.
+            # Witness the actual terminal journal and exact published bytes.
+            owner_raw = path.read_bytes()
+            owner_record = json.loads(owner_raw)
+            operation_ref = (
+                seed.ref.removesuffix("/checkpoints")
+                + "/operations/"
+                + owner_record["operation_id"]
+            )
+            receipt_commit = git(vault, "rev-parse", operation_ref).decode().strip()
+            retained_receipt = json.loads(
+                git(vault, "cat-file", "blob", receipt_commit + ":receipt.json")
+            )
+            assert retained_receipt["status"] == "applied"
+            assert retained_receipt["operation_id"] == owner_record["operation_id"]
+            assert (
+                retained_receipt["result_commit"]
+                == json.loads((vault / ".brz2obsidian/locator.json").read_bytes())[
+                    "commit"
+                ]
+            )
+            assert (vault / asset_path).stat().st_size == size and _digest(
+                vault / asset_path
+            ) == incoming_digest
+            witnessed.append(
+                (owner_raw, (marker / "held").read_bytes(), receipt_commit)
+            )
+            raise OSError("Actual terminal owner unlink failed after receipt and bytes")
+        return actual_unlink(path, *arguments, **options)
+
+    with monkeypatch.context() as boundary:
+        boundary.setattr(Path, "unlink", fail_actual_terminal_release)
+        applied = worker_context_call(
+            cold, {"command": "apply", "binding": resumed.binding}
+        )
+    assert (
+        witnessed
+        and applied.status == "recovery_required"
+        and applied.operation is not None
+    ), applied.model_dump_json()
+    stopped = applied.operation
+    assert stopped.recovery_required and stopped.publication == "complete"
+    assert (
+        stopped.receipt_commit == witnessed[-1][2] and stopped.result_commit is not None
     )
-    assert applied.status == "applied" and applied.operation is not None, (
-        applied.model_dump_json()
-    )
-    assert applied.publication == "complete" and applied.operation.history == "terminal"
     assert applied.binding is None and not applied.ready
-    operation = applied.operation
+    assert (marker / "owner.json").read_bytes() == witnessed[-1][0]
+    assert (marker / "held").read_bytes() == witnessed[-1][1]
+    assert _tree(scratch) == scratch_before
+    refs_before_cleanup = git(
+        vault, "for-each-ref", "--format=%(refname) %(objectname)"
+    )
+    locator_before_cleanup = (vault / ".brz2obsidian/locator.json").read_bytes()
+    authored_before_cleanup = {
+        value.relative_to(vault).as_posix(): _digest(value)
+        for value in vault.rglob("*")
+        if value.is_file()
+        and value.relative_to(vault).parts[0] not in (".git", ".brz2obsidian")
+    }
+    detail_intent = json.loads(
+        git(vault, "cat-file", "blob", stopped.intent_commit + ":intent.json")
+    )
+    detail_paths = sorted(
+        {row["path"] for row in detail_intent["before"] + detail_intent["proposed"]}
+    )
+    offset = detail_paths.index(asset_path)
+    observed_terminal = Operations().inspect_update_status(vault)
+    assert (
+        observed_terminal.code == "terminal_cleanup_required"
+        and observed_terminal.recovery_required
+    )
+    assert (
+        observed_terminal.operation_id,
+        observed_terminal.generation,
+        observed_terminal.checkpoint_commit,
+        observed_terminal.intent_commit,
+        observed_terminal.result_commit,
+        observed_terminal.receipt_commit,
+    ) == (
+        stopped.operation_id,
+        stopped.generation,
+        stopped.checkpoint_commit,
+        stopped.intent_commit,
+        stopped.result_commit,
+        witnessed[-1][2],
+    )
+    assert observed_terminal.kind == "apply" and observed_terminal.direction == "finish"
+    details = Operations().read_history_details(
+        vault, expected=observed_terminal, offset=offset, limit=1
+    )
+    assert (
+        git(vault, "for-each-ref", "--format=%(refname) %(objectname)")
+        == refs_before_cleanup
+    )
+    assert (vault / ".brz2obsidian/locator.json").read_bytes() == locator_before_cleanup
+    assert (marker / "owner.json").read_bytes() == witnessed[-1][0]
+    assert (marker / "held").read_bytes() == witnessed[-1][1]
+    cleanup = UpdateContext(operations=Operations(workflow=workflow))
+    inspected = worker_context_call(
+        cleanup,
+        {
+            "command": "history",
+            "vault": str(vault),
+            "selection_id": "44444444-4444-4444-8444-444444444444",
+        },
+    )
+    assert inspected.status == "recovery_required" and inspected.binding is not None, (
+        inspected.model_dump_json()
+    )
+    assert inspected.history.operation.code == "terminal_cleanup_required"
+    assert "review_recovery" in inspected.next_actions
+    prepared_cleanup = worker_context_call(
+        cleanup,
+        {
+            "command": "prepare_history",
+            "binding": inspected.binding,
+            "kind": "recovery",
+        },
+    )
+    assert prepared_cleanup.status == "prepared_review" and prepared_cleanup.ready, (
+        prepared_cleanup.model_dump_json()
+    )
+    assert (
+        prepared_cleanup.binding is not None
+        and prepared_cleanup.binding.direction is None
+    )
+    assert (
+        prepared_cleanup.history_action.available_directions == ()
+        and prepared_cleanup.unresolved == 0
+    )
+    cleaned = worker_context_call(
+        cleanup, {"command": "execute_history", "binding": prepared_cleanup.binding}
+    )
+    assert (
+        details.status == "available"
+        and details.code == "validated"
+        and cleaned.status == "applied"
+        and cleaned.history_action.operation is not None
+    ), json.dumps(
+        {
+            "details": details.model_dump(mode="json"),
+            "cleanup": cleaned.model_dump(mode="json"),
+        }
+    )
+    assert details.status == "available" and details.code == "validated", (
+        details.model_dump_json()
+    )
+    assert (
+        details.total == len(detail_paths)
+        and details.offset == offset
+        and details.limit == 1
+    )
+    (detail,) = details.items
+    assert detail.path == asset_path
+    assert (
+        detail.before_size == len(current)
+        and detail.before_sha256 == hashlib.sha256(current).hexdigest()
+    )
+    assert detail.after_size == size and detail.after_sha256 == incoming_digest
+    assert len(details.model_dump_json()) < 8192
+    assert (
+        details.operation_id,
+        details.intent_commit,
+        details.generation,
+        details.kind,
+        details.direction,
+    ) == (
+        observed_terminal.operation_id,
+        observed_terminal.intent_commit,
+        observed_terminal.generation,
+        observed_terminal.kind,
+        observed_terminal.direction,
+    )
+    operation = cleaned.history_action.operation
+    assert (
+        operation.operation_id,
+        operation.generation,
+        operation.checkpoint_commit,
+        operation.intent_commit,
+        operation.result_commit,
+        operation.receipt_commit,
+    ) == (
+        stopped.operation_id,
+        stopped.generation,
+        stopped.checkpoint_commit,
+        stopped.intent_commit,
+        stopped.result_commit,
+        stopped.receipt_commit,
+    )
+    assert cleaned.publication == "complete" and operation.history == "terminal"
+    assert cleaned.binding is None and not cleaned.ready and not marker.exists()
+    assert (
+        git(vault, "for-each-ref", "--format=%(refname) %(objectname)")
+        == refs_before_cleanup
+    )
+    assert (vault / ".brz2obsidian/locator.json").read_bytes() == locator_before_cleanup
+    assert {
+        value.relative_to(vault).as_posix(): _digest(value)
+        for value in vault.rglob("*")
+        if value.is_file()
+        and value.relative_to(vault).parts[0] not in (".git", ".brz2obsidian")
+    } == authored_before_cleanup
     assert operation.phase == "terminal" and not operation.recovery_required
     assert operation.published_files == operation.planned_files > 0
     assert operation.checkpoint_commit != saved.capture.commit

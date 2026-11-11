@@ -2080,8 +2080,8 @@ class _OwnedRecoveryCleanupFailure(Exception):
         self.result = result
 
 
-def _cleanup_verified_terminal(root, saved, *, start):
-    observed, authority = _inspect_update_observation(root)
+def _cleanup_verified_terminal(root, saved, *, start, _owners=None):
+    observed, authority = _inspect_update_observation(root, _owners=_owners)
     if (
         authority is None
         or authority.graph.receipt is None
@@ -2094,7 +2094,7 @@ def _cleanup_verified_terminal(root, saved, *, start):
         return _outcome("refused", "terminal_cleanup_stale", start=start)
     try:
         _adopt(root, saved.operation_id)
-        held, held_authority = _inspect_update_observation(root)
+        held, held_authority = _inspect_update_observation(root, _owners=_owners)
         if (
             held_authority is None
             or held_authority.graph.commit != authority.graph.commit
@@ -2103,7 +2103,7 @@ def _cleanup_verified_terminal(root, saved, *, start):
             _park(root, saved.operation_id)
             return _outcome("refused", "terminal_cleanup_changed", start=start)
         _release(root, saved.operation_id)
-        final = _inspect_update_observation(root)[0]
+        final = _inspect_update_observation(root, _owners=_owners)[0]
         if final.status not in ("applied", "no_content_change", "undone", "restored"):
             raise OSError("Verified terminal status was not rediscovered")
         return final
@@ -2145,7 +2145,7 @@ def _execute_recovery(
         return _outcome("refused", "invalid_recovery_preparation", start=start)
     root = Path(vault).absolute()
     if saved.status == "cleanup":
-        return _cleanup_verified_terminal(root, saved, start=start)
+        return _cleanup_verified_terminal(root, saved, start=start, _owners=_owners)
     if saved.status != "offered" or saved.direction is None or saved.review is None:
         return _outcome("refused", "recovery_review_required", start=start)
     known = (
