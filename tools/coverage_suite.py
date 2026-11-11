@@ -7,6 +7,7 @@ Explicit --test selections are partial measurements and default to pytest only.
 import argparse
 import hashlib
 import json
+import math
 import os
 import signal
 import subprocess
@@ -39,8 +40,15 @@ def arguments():
     parser.add_argument("--min-branch", type=float)
     parser.add_argument("--measurement-intent")
     args = parser.parse_args()
-    if not 0 < args.timeout <= 900:
-        parser.error("--timeout must be greater than zero and at most 900 seconds")
+    if not math.isfinite(args.timeout) or args.timeout <= 0:
+        parser.error("--timeout must be positive and finite")
+    if args.timeout > 900 and not (
+        args.test and (args.measurement_intent or "").strip()
+    ):
+        parser.error(
+            "--timeout must be at most 900 seconds unless an explicit --test "
+            "selection has a nonempty --measurement-intent"
+        )
     if args.min_branch is not None and (
         not 0 <= args.min_branch <= 100 or not (args.measurement_intent or "").strip()
     ):
