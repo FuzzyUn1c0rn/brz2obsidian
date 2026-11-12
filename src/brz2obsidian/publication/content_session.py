@@ -520,7 +520,10 @@ class ContentSession:
         scope.check(self)
 
     def _read_owned(self, backing, reference, ledger, scope):
-        scope.check(self)
+        if type(scope) is _PrivateOperation:
+            scope._check_live(self)
+        else:
+            scope.check(self)
         ledger.check()
         ledger.raw_pass(reference.size)
 
@@ -1054,7 +1057,8 @@ class _PrivateOperation:
         self.check(self.session)
         return self
 
-    def check(self, session):
+    def _check_live(self, session):
+        """Check lexical identity and cancellation without filesystem IO."""
         if (
             session is not self.session
             or not self.active
@@ -1064,6 +1068,9 @@ class _PrivateOperation:
         ):
             raise OSError("Private content operation is no longer live")
         self.ledger.check()
+
+    def check(self, session):
+        self._check_live(session)
         if verify_directory(session._directory) != session._anchor:
             raise OSError("Content scratch identity changed")
 

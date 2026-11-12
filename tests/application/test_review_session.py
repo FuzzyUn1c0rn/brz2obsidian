@@ -3,8 +3,10 @@
 import json
 import shutil
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from threading import Event
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -773,3 +775,184 @@ def test_descriptor_onboarding_retains_exact_opaque_current_preservation(review_
     assert git(legacy_vault, "for-each-ref") == legacy_refs
     assert source.read_bytes() == source_before
     assert saved.record.model_dump_json() == wire
+
+
+def _review_preservation_state(vault):
+    paths = (
+        "Assets/data.bin",
+        ".brz2obsidian/locator.json",
+        ".git/HEAD",
+        ".git/index",
+        ".git/config",
+    )
+    return (
+        tuple(
+            (vault / path).read_bytes() if (vault / path).exists() else None
+            for path in paths
+        ),
+        git(vault, "for-each-ref"),
+    )
+
+
+def test_raw_review_rejects_malformed_and_ambiguous_envelopes(review_vault, tmp_path):
+    from brz2obsidian.application.review_session import ReviewBudget, ReviewSession
+
+    vault, _ = review_vault
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    sentinel = scratch / "user-file"
+    sentinel.write_bytes(b"retain this file")
+    raw = (FIXTURES / "attachment.inline.json").read_bytes()
+    assert raw.startswith(b'{"schema_id":"brz2obsidian.saved-review",')
+    assert b'"data":"YWJj"' in raw
+    cases = (
+        raw[:-1],  # Truncated envelope.
+        raw + b" true",  # A second value after a complete envelope.
+        raw.replace(
+            b'{"schema_id":',
+            b'{"schema_id":"brz2obsidian.saved-review","schema_id":',
+            1,
+        ),  # Duplicate member occurrence, even with the same value.
+        b"\xff" + raw,  # Invalid UTF-8.
+        raw.replace(b'"data":"YWJj"', b'"data":"YW@j"', 1),  # Invalid base64.
+        raw.replace(b'"data":"YWJj"', b'"data":"Y"', 1),  # Incomplete base64.
+    )
+    before = _review_preservation_state(vault)
+    budget = ReviewBudget(
+        metadata_limit=64 << 20,
+        node_limit=1048576,
+        depth_limit=256,
+        decoded_limit=64 << 20,
+        raw_work_limit=128 << 20,
+        encoded_limit=128 << 20,
+        request_limit=4096,
+        step_limit=2000000,
+        timeout=120,
+        cancel=Event(),
+    )
+    with Operations().inspect_update_inputs(vault) as observed:
+        with ReviewSession(observed, scratch_parent=scratch, budget=budget) as session:
+            valid = session.load_review(raw)
+            assert valid.status == "loaded" and not valid.ready
+            assert valid.loaded.readiness == "revalidation_required"
+        for invalid in cases:
+            with ReviewSession(
+                observed, scratch_parent=scratch, budget=budget
+            ) as session:
+                refused = session.load_review(invalid)
+                assert (
+                    refused.status,
+                    refused.code,
+                    refused.loaded,
+                    refused.ready,
+                ) == (
+                    "refused",
+                    "invalid_review",
+                    None,
+                    False,
+                )
+            assert sorted(path.name for path in scratch.iterdir()) == ["user-file"]
+    assert sentinel.read_bytes() == b"retain this file"
+    assert _review_preservation_state(vault) == before
+    assert (FIXTURES / "attachment.inline.json").read_bytes() == raw
+
+
+def test_raw_review_respects_caller_limits_and_retires_failed_loads(
+    review_vault, tmp_path
+):
+    from brz2obsidian.application.review_session import ReviewBudget, ReviewSession
+
+    vault, _ = review_vault
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    sentinel = scratch / "user-file"
+    sentinel.write_bytes(b"retain this file")
+    raw = (FIXTURES / "attachment.inline.json").read_bytes()
+    before = _review_preservation_state(vault)
+    budget = ReviewBudget(
+        metadata_limit=64 << 20,
+        node_limit=1048576,
+        depth_limit=256,
+        decoded_limit=64 << 20,
+        raw_work_limit=128 << 20,
+        encoded_limit=128 << 20,
+        request_limit=4096,
+        step_limit=2000000,
+        timeout=120,
+        cancel=Event(),
+    )
+    with Operations().inspect_update_inputs(vault) as observed:
+        with ReviewSession(observed, scratch_parent=scratch, budget=budget) as session:
+            assert session.load_review(raw).status == "loaded"
+        for field in ("decoded_limit", "raw_work_limit", "encoded_limit"):
+            limited = replace(budget, **{field: 0})
+            with ReviewSession(
+                observed, scratch_parent=scratch, budget=limited
+            ) as session:
+                refused = session.load_review(raw)
+                assert (
+                    refused.status,
+                    refused.code,
+                    refused.loaded,
+                    refused.ready,
+                ) == (
+                    "refused",
+                    "invalid_review",
+                    None,
+                    False,
+                ), field
+            assert sorted(path.name for path in scratch.iterdir()) == ["user-file"]
+    assert sentinel.read_bytes() == b"retain this file"
+    assert _review_preservation_state(vault) == before
+
+
+def test_cancel_and_deadline_close_live_session_without_touching_history(
+    review_vault, tmp_path, monkeypatch
+):
+    from brz2obsidian.application import review_session
+    from brz2obsidian.application.review_session import ReviewBudget, ReviewSession
+
+    vault, _ = review_vault
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    sentinel = scratch / "user-file"
+    sentinel.write_bytes(b"retain this file")
+    raw = (FIXTURES / "attachment.inline.json").read_bytes()
+    before = _review_preservation_state(vault)
+    real_monotonic = review_session.time.monotonic
+    clock = [real_monotonic()]
+    monkeypatch.setattr(
+        review_session, "time", SimpleNamespace(monotonic=lambda: clock[0])
+    )
+    budget = ReviewBudget(
+        metadata_limit=64 << 20,
+        node_limit=1048576,
+        depth_limit=256,
+        decoded_limit=64 << 20,
+        raw_work_limit=128 << 20,
+        encoded_limit=128 << 20,
+        request_limit=4096,
+        step_limit=2000000,
+        timeout=120,
+        cancel=Event(),
+    )
+    with Operations().inspect_update_inputs(vault) as observed:
+        for reason in ("cancel", "deadline"):
+            clock[0] = real_monotonic()
+            cancel = Event()
+            with ReviewSession(
+                observed, scratch_parent=scratch, budget=replace(budget, cancel=cancel)
+            ) as session:
+                loaded = session.load_review(raw)
+                assert loaded.status == "loaded" and not loaded.ready
+                if reason == "cancel":
+                    cancel.set()
+                else:
+                    clock[0] += 121.0
+                with pytest.raises(OSError, match="cancelled or time budget exhausted"):
+                    session.load_review(raw)
+            with pytest.raises(OSError, match="closed"):
+                session.load_review(raw)
+            assert sorted(path.name for path in scratch.iterdir()) == ["user-file"]
+    assert sentinel.read_bytes() == b"retain this file"
+    assert _review_preservation_state(vault) == before

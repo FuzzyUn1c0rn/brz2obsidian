@@ -1208,7 +1208,9 @@ class ReviewSession:
         value = OpaqueContent(
             identity=identity, reference=historical, occurrence=occurrence
         )
-        return self._text(value) if inline else value
+        # This binding was just checked, constructed and registered above.
+        # Semantic conversion still verifies the registration and full bytes.
+        return self._semantic_value(binding) if inline else value
 
     def _load_retained(self, record, available, references, *, local):
         from brz2obsidian.review_codec import _RetainedDecoder
