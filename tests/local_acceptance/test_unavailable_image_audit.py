@@ -20,6 +20,7 @@ from tests.sources.test_local_api_bom import note_api
 from tests.support.audit_sources import SCHEMA
 from tests.support.local_api import BRAIN, HOME, KEY, api_server
 from tests.support.local_api_payloads import IMAGE, PNG, attachment
+from tests.support.reviewed_api_workflow import reviewed_api_workflow
 
 CONTROL_IDS = tuple(f"b{i}111111-1111-4111-8111-111111111111" for i in range(4))
 MISSING = "![Lost *label*](.data/md-images/lost.png#$width=70p$)"
@@ -84,13 +85,20 @@ def unavailable_outputs(tmp_path_factory):
             purpose="convert",
         )
         with recording:
-            workflow = local_api_workflow(
-                LocalApiConfig(api_url=recording.api_url), credentials=lambda: KEY
+            workflow = reviewed_api_workflow(
+                LocalApiConfig(api_url=recording.api_url),
+                credentials=lambda: KEY,
+                profile_version="4",
             )
             api_result = workflow.convert(LocalApiSourceRef(BRAIN), api_vault)
             assert api_result.outcome == "warnings", api_result.issues
             recording.complete()
         baseline = recording.seal(qualification=controls)
+        record = json.loads((api_vault / "migration-record.json").read_bytes())
+        assert (record["profile_id"], record["profile_version"]) == (
+            "thebrain-local-api-reviewed",
+            "4",
+        )
     return source, brz_vault, brz_result, baseline, api_vault, api_result
 
 
@@ -260,8 +268,9 @@ def test_complete_unavailable_audit_refuses_coherently_rehashed_forgery(
     forged["receipt"]["destination"] = str(vault.resolve())
     rewrite_record(vault, record, forged)
     assert record["source_identity"] == identity
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError) as rejection:
         audit(adapter, source, baseline, vault)
+    assert str(rejection.value) != "API-bound profile"
     baseline.verify()
 
 
@@ -463,12 +472,19 @@ def family_outputs(tmp_path_factory):
             purpose="convert",
         )
         with recording:
-            result = local_api_workflow(
-                LocalApiConfig(api_url=recording.api_url), credentials=lambda: KEY
+            result = reviewed_api_workflow(
+                LocalApiConfig(api_url=recording.api_url),
+                credentials=lambda: KEY,
+                profile_version="4",
             ).convert(LocalApiSourceRef(BRAIN), api_vault)
             assert result.outcome == "warnings", result.issues
             recording.complete()
         baseline = recording.seal(qualification=controls)
+        record = json.loads((api_vault / "migration-record.json").read_bytes())
+        assert (record["profile_id"], record["profile_version"]) == (
+            "thebrain-local-api-reviewed",
+            "4",
+        )
     paths = [path for path, _query, _key in api.requests]
     return source, brz_vault, baseline, api_vault, paths
 
@@ -655,12 +671,19 @@ def decoded_destination_outputs(tmp_path_factory):
             purpose="convert",
         )
         with recording:
-            result = local_api_workflow(
-                LocalApiConfig(api_url=recording.api_url), credentials=lambda: KEY
+            result = reviewed_api_workflow(
+                LocalApiConfig(api_url=recording.api_url),
+                credentials=lambda: KEY,
+                profile_version="4",
             ).convert(LocalApiSourceRef(BRAIN), api_vault)
             assert result.outcome == "warnings", result.issues
             recording.complete()
         baseline = recording.seal(qualification=controls)
+        record = json.loads((api_vault / "migration-record.json").read_bytes())
+        assert (record["profile_id"], record["profile_version"]) == (
+            "thebrain-local-api-reviewed",
+            "4",
+        )
     return source, brz_vault, baseline, api_vault
 
 

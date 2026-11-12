@@ -7,6 +7,10 @@ import pytest
 from brz2obsidian.application.operations import Operations
 
 
+class ControlledOperations(Operations):
+    """Use the supplied history and checkpoint ports in the controlled fixture."""
+
+
 def test_interrupted_history_blocks_format_transition_before_source_access(monkeypatch):
     def unopened(*args, **kwargs):
         raise AssertionError(
@@ -145,7 +149,7 @@ def transition_case(tmp_path, monkeypatch, known_original=True):
     )
     workflow = default_workflow()
     workflow.metadata_factory = lambda: METADATA
-    operations = Operations(workflow=workflow)
+    operations = ControlledOperations(workflow=workflow)
     monkeypatch.setattr(operations, "inspect_history", lambda *args, **kwargs: history)
     monkeypatch.setattr(
         operations,

@@ -28,6 +28,7 @@ from tests.sources.test_local_api_bom import note_api
 from tests.support.audit_sources import SCHEMA
 from tests.support.local_api import BRAIN, HOME, KEY, api_server
 from tests.support.local_api_payloads import IMAGE, PNG, attachment
+from tests.support.reviewed_api_workflow import reviewed_api_workflow
 
 CANARY = "__BRZ_NO_FETCH_CANARY__"
 OWNED = "![Owned](.data/md-images/" + IMAGE + ".png)"
@@ -115,11 +116,16 @@ def external_outputs(tmp_path_factory):
                     config, credentials=lambda: KEY, profile_version="4"
                 ).open(LocalApiSourceRef(BRAIN)) as session:
                     api_snapshot = session.snapshot
-                api_result = local_api_workflow(
-                    config, credentials=lambda: KEY
+                api_result = reviewed_api_workflow(
+                    config, credentials=lambda: KEY, profile_version="4"
                 ).convert(LocalApiSourceRef(BRAIN), api_vault)
                 recording.complete()
             baseline = recording.seal(qualification=controls)
+            record = json.loads((api_vault / "migration-record.json").read_bytes())
+            assert (record["profile_id"], record["profile_version"]) == (
+                "thebrain-local-api-reviewed",
+                "4",
+            )
         assert not attempts
         yield {
             "brz": (source, brz_vault, brz_result, brz_snapshot),

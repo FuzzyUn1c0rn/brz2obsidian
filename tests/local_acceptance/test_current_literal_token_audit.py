@@ -7,7 +7,7 @@ from hashlib import sha256
 
 import pytest
 
-from brz2obsidian.application.wiring import default_workflow, local_api_workflow
+from brz2obsidian.application.wiring import default_workflow
 from brz2obsidian.sources.thebrain import BrzSourceModule
 from brz2obsidian.sources.thebrain.local_api import LocalApiConfig, LocalApiSourceRef
 from tests.application.test_literal_angles_workflow import literal_archive
@@ -25,6 +25,7 @@ from tests.local_acceptance.text import literal_edits
 from tests.sources.test_local_api_bom import note_api
 from tests.support.audit_sources import SCHEMA
 from tests.support.local_api import BRAIN, KEY, api_server
+from tests.support.reviewed_api_workflow import reviewed_api_workflow
 
 QUOTED_RAW = b"> <Example\n> /> tail\n"
 BRZ_RAW = (
@@ -138,13 +139,20 @@ def literal_outputs(tmp_path_factory):
             purpose="convert",
         )
         with recording:
-            workflow = local_api_workflow(
-                LocalApiConfig(api_url=recording.api_url), credentials=lambda: KEY
+            workflow = reviewed_api_workflow(
+                LocalApiConfig(api_url=recording.api_url),
+                credentials=lambda: KEY,
+                profile_version="4",
             )
             api_result = workflow.convert(LocalApiSourceRef(BRAIN), api_vault)
             assert api_result.outcome == "clean", api_result.issues
             recording.complete()
         baseline = recording.seal(qualification=controls)
+        record = json.loads((api_vault / "migration-record.json").read_bytes())
+        assert (record["profile_id"], record["profile_version"]) == (
+            "thebrain-local-api-reviewed",
+            "4",
+        )
     return source, brz_vault, brz_result, baseline, api_vault, api_result
 
 

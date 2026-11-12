@@ -8,6 +8,10 @@ import pytest
 from brz2obsidian.application.operations import Operations
 
 
+class ControlledOperations(Operations):
+    """Use the fixture's history port rather than native repository observation."""
+
+
 def owned_case():
     import tempfile
     from pathlib import Path
@@ -99,7 +103,7 @@ def legacy_inputs(tmp_path, monkeypatch=None, *, opaque=False):
         FilesystemPublisher(),
         metadata_factory=lambda: METADATA,
     )
-    operations = Operations(workflow=workflow)
+    operations = ControlledOperations(workflow=workflow)
     if monkeypatch is not None:
 
         def inspection(*args, **kwargs):

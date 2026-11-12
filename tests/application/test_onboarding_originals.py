@@ -22,6 +22,10 @@ ORIGINAL = PROPERTIES + (
 CURRENT = ORIGINAL + b"\r\nLocal retained writing.\r\n"
 
 
+class ControlledOperations(Operations):
+    """Use the supplied history port rather than real native owner observation."""
+
+
 def legacy_brz_case(root):
     archive = make_archive(root / "original.brz")
     workflow = default_workflow()
@@ -32,7 +36,7 @@ def legacy_brz_case(root):
     assert (vault / NOTE).read_bytes() == ORIGINAL
     (vault / NOTE).write_bytes(CURRENT)
     (vault / "Private.bin").write_bytes(b"\x00\xffPrivate retained bytes.\r\n")
-    return Operations(workflow=workflow), vault, archive
+    return ControlledOperations(workflow=workflow), vault, archive
 
 
 def controlled_history(operations, vault, monkeypatch):

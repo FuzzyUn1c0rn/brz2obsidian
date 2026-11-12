@@ -172,7 +172,7 @@ def test_matching_source_refresh_keeps_reader_and_fresh_observed_identity(
         module_version="3",
         profile_id="synthetic-folio-reviewed",
         profile_version="3",
-        output_format=7,
+        output_format=8,
         settings_digest=hashlib.sha256(b"{}").hexdigest(),
     )
     association = VaultAssociation(
@@ -753,10 +753,10 @@ def test_unavailable_recorded_generation_routes_before_payload_access(
     identity = OutputIdentity(
         collection_id="collection:recorded",
         module_id="thebrain-brz",
-        module_version="10",
+        module_version="11",
         profile_id="thebrain-format5-reviewed",
-        profile_version="10",
-        output_format=7,
+        profile_version="11",
+        output_format=8,
         settings_digest=hashlib.sha256(b"{}").hexdigest(),
     ).model_copy(update=difference)
     history = SimpleNamespace(
@@ -1231,7 +1231,10 @@ def test_save_and_apply_reobserve_exact_incoming_authority_before_native_contact
     from tests.support.folio_source import FOLIO_POLICY, FolioSourceModule
 
     identity = request().incoming_identity.model_copy(
-        update={"settings_digest": hashlib.sha256(b"{}").hexdigest()}
+        update={
+            "output_format": 8,
+            "settings_digest": hashlib.sha256(b"{}").hexdigest(),
+        }
     )
     facts = request()
     established = facts.format_operation.established_baseline.model_copy(

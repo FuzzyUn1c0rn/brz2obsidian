@@ -64,7 +64,7 @@ def note(body):
     ).encode()
 
 
-def payload(version, body, *, output_format=7):
+def payload(version, body, *, output_format=8):
     identity = SourceIdentity(
         source_id=COLLECTION,
         module_id="thebrain-brz",
@@ -122,7 +122,7 @@ def refused_publication():
 def admitted_case(tmp_path, monkeypatch, request):
     vault = tmp_path / "vault"
     vault.mkdir()
-    output_format = getattr(request, "param", 7)
+    output_format = getattr(request, "param", 8)
     before, incoming = (
         payload("a", "Original A.", output_format=output_format),
         payload("b", "Incoming B.", output_format=output_format),
@@ -329,7 +329,11 @@ def test_new_local_checkpoint_effect_is_not_silently_a_noop(admitted_case):
 
 
 def local_source_review(case, *, invented_memory):
-    incoming = payload("c", "Incoming C.")
+    incoming = payload(
+        "c",
+        "Incoming C.",
+        output_format=case.preparation.review.facts.incoming_identity.output_format,
+    )
     source = Path(case.preparation.payload_directory)
     for path, raw in incoming.items():
         (source / path).write_bytes(raw)

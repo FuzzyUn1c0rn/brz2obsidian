@@ -174,7 +174,7 @@ def test_cleanup_preparation_keeps_recovery_and_uncertain_references_out_of_read
 
 
 def literal_cleanup_case(
-    tmp_path, *, unchanged_note=False, independent_keep=False, output_format=7
+    tmp_path, *, unchanged_note=False, independent_keep=False, output_format=8
 ):
     vault = tmp_path / "vault"
     vault.mkdir()

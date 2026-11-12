@@ -7,7 +7,6 @@ from copy import deepcopy
 
 import pytest
 
-from brz2obsidian.application.wiring import local_api_workflow
 from brz2obsidian.sources.thebrain.local_api import LocalApiConfig, LocalApiSourceRef
 from tests.local_acceptance.api_baseline import prepare_controls
 from tests.local_acceptance.api_checker import check_api_vault, expected_asset
@@ -17,6 +16,7 @@ from tests.local_acceptance.test_checker_v2 import rewrite_record
 from tests.support.audit_sources import SCHEMA
 from tests.support.local_api import BRAIN, HOME, KEY, api_server
 from tests.support.local_api_payloads import FILE, PayloadApi, attachment
+from tests.support.reviewed_api_workflow import reviewed_api_workflow
 
 INTERNAL_FILES = (
     (FILE, "clip.mp4", b"\x00\xffmedia\x80\r\n"),
@@ -57,14 +57,21 @@ def internal_file_output(tmp_path_factory):
             purpose="convert",
         )
         with recording:
-            workflow = local_api_workflow(
-                LocalApiConfig(api_url=recording.api_url), credentials=lambda: KEY
+            workflow = reviewed_api_workflow(
+                LocalApiConfig(api_url=recording.api_url),
+                credentials=lambda: KEY,
+                profile_version="4",
             )
             result = workflow.convert(LocalApiSourceRef(BRAIN), vault)
             assert result.outcome == "clean", result.issues
             assert result.receipt.verified
             recording.complete()
         baseline = recording.seal(qualification=controls)
+        record = json.loads((vault / "migration-record.json").read_bytes())
+        assert (record["profile_id"], record["profile_version"]) == (
+            "thebrain-local-api-reviewed",
+            "4",
+        )
     return baseline, vault, result.model_dump(mode="json", by_alias=True)
 
 
@@ -134,8 +141,9 @@ def test_raw_api_audit_rejects_rehashed_ordinary_file_forgeries(
     # The claimed publication hashes/counts describe the forged actual files.
     # Independently recorded HTTP bytes/declarations still contradict them.
     rewrite_record(vault, record, deepcopy(original_result))
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError) as rejection:
         check_api_vault(baseline, vault, profile_version="4")
+    assert str(rejection.value) != "API-bound profile"
 
 
 @pytest.mark.parametrize("profile", ["1", "2", "3"])

@@ -7,7 +7,7 @@ from hashlib import sha256
 
 import pytest
 
-from brz2obsidian.application.wiring import default_workflow, local_api_workflow
+from brz2obsidian.application.wiring import default_workflow
 from brz2obsidian.sources.thebrain.local_api import LocalApiConfig, LocalApiSourceRef
 from tests.application.test_forgotten_workflow import rewrite
 from tests.application.test_literal_angles_workflow import literal_archive
@@ -21,6 +21,7 @@ from tests.sources.test_local_api_bom import note_api
 from tests.support.audit_sources import SCHEMA
 from tests.support.local_api import BRAIN, HOME, KEY, api_server
 from tests.support.local_api_payloads import NOTE
+from tests.support.reviewed_api_workflow import reviewed_api_workflow
 
 DOCUMENT = "01111111-1111-4111-8111-111111111111"
 LINK = "[Target](brain://IiIiIiIiIkKCIiIiIiIiIg/Home)"
@@ -292,14 +293,21 @@ def table_outputs(tmp_path_factory):
             folder / "http", upstream, brain_id=BRAIN, credential=KEY, purpose="convert"
         )
         with recording:
-            workflow = local_api_workflow(
-                LocalApiConfig(api_url=recording.api_url), credentials=lambda: KEY
+            workflow = reviewed_api_workflow(
+                LocalApiConfig(api_url=recording.api_url),
+                credentials=lambda: KEY,
+                profile_version="4",
             )
             assert workflow.inspect(LocalApiSourceRef(BRAIN)).outcome == "warnings"
             api_result = workflow.convert(LocalApiSourceRef(BRAIN), api_vault)
             assert api_result.outcome == "warnings"
             recording.complete()
         baseline = recording.seal(qualification=controls)
+        record = json.loads((api_vault / "migration-record.json").read_bytes())
+        assert (record["profile_id"], record["profile_version"]) == (
+            "thebrain-local-api-reviewed",
+            "4",
+        )
     return source, brz_vault, baseline, api_vault, brz_result, api_result
 
 
@@ -503,6 +511,7 @@ def test_current_tables_refuse_rehashed_output_claims(
             check_vault(source, vault)
         else:
             check_api_vault(baseline, vault, profile_version="4")
+    assert str(rejection.value) != "API-bound profile"
     if damage == "code-origin":
         assert str(rejection.value) == "independent compound kind/code ownership"
     baseline.verify()
