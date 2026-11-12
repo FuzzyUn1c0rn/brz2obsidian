@@ -2,7 +2,7 @@
 
 Snapshot last verified against live GitHub on **2026-11-12**. This is a saved overview, not a continuously updated board.
 
-**Current continuation, 2026-11-12:** continue #347's assembled qualification after integrating the remaining CLI-status and Windows verification-launch repairs at `a7e58339128709c5fea14dcf134730f3a89c53f9`. Monitor weekly usage and pause at **40% remaining or lower**. This supersedes the previous 50% threshold.
+**Current continuation, 2026-11-12:** continue assembled qualification after integrating CLI-status/Windows transport repairs at `a7e5833` and reviewed regression-fixture/orphan-history repairs at `c13d32d`. The first maintained run found 57 failures; the corrected paths passed 238 focused tests and 30 fresh independent tests. The complete maintained bundle still requires a passing result. Monitor weekly usage and pause at **40% remaining or lower**.
 
 ## Overall position
 
@@ -44,7 +44,7 @@ flowchart TD
 | Issue | Purpose | Actual progress and remaining work |
 |---|---|---|
 | [#292](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/292) | Overall type/tag relationships and inherited-icons feature | Core milestones M1–M4 accepted. Actual-source/native acceptance, final regression/review, user verdict and delivery remain. |
-| [#347](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/347) | Make large-attachment updates practical in memory | #366, the CLI review-status consumer and Windows verification-launch repairs are implemented, independently verified and integrated. Assembled resource/performance/regression and real-source qualification remain. |
+| [#347](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/347) | Make large-attachment updates practical in memory | #366, CLI review status, Windows verification transport and rejection of onboarding with unavailable orphan history are implemented, independently verified and integrated. Regression fixture bindings are corrected. Complete ordinary regression/coverage, resource/scaling and real-source qualification remain. |
 | [#348](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/348) | Bounded ICO/DIB/BMP icon support | Implementation and default library/CLI/Windows wiring complete; all three children closed. Broad regression, actual API/BRZ parity, native/user acceptance and delivery remain. |
 
 ## Forty closed issues
@@ -73,7 +73,7 @@ flowchart TD
 
 ## Remaining route for this effort
 
-1. Run the maintained assembled regression/coverage bundle and finish #347 resource/scaling qualification. The CLI-status and Windows transport repairs are integrated; their focused checks and independent review passed.
+1. Rerun the maintained assembled regression/coverage bundle (398 selectors, including the new native orphan-history regression), then finish #347 resource/scaling qualification. The consumer, transport, fixture and history-admission repairs are integrated and independently reviewed.
 2. Complete #348 assembled-candidate acceptance. #357 and #366 closeouts are complete.
 3. Complete #292 real-source/native checks and user acceptance.
 4. Deliver the assembled feature through its final PR and close the remaining parent issues.
