@@ -1,5 +1,6 @@
 """Explicit retained attachment cleanup using the existing review lifecycle."""
 
+from contextlib import nullcontext
 from uuid import uuid4
 
 from brz2obsidian.contracts import SourceIdentity
@@ -30,7 +31,14 @@ def refused(code, history=None, *, action="inspect_history"):
 
 
 def cleanup_facts(
-    history, retained, *, observed, proposal_id, generation, source_memory=()
+    history,
+    retained,
+    *,
+    observed,
+    proposal_id,
+    generation,
+    source_memory=(),
+    _owner=None,
 ):
     paths = tuple(row.path for row in history.admission.inventory)
     ownership = (
@@ -53,6 +61,7 @@ def cleanup_facts(
         generation=generation,
         source_memory=source_memory,
         retained_ownership=ownership,
+        _owner=_owner,
     )
     return facts.model_copy(
         update={
@@ -63,10 +72,14 @@ def cleanup_facts(
     )
 
 
-def prepare_attachment_cleanup(operations, vault):
+def prepare_attachment_cleanup(operations, vault, *, _owner=None):
     """Obtain current native admission before reading retained or authored bytes."""
     try:
-        with operations.inspect_update_inputs(vault) as observed:
+        with (
+            operations.inspect_update_inputs(vault)
+            if _owner is None
+            else nullcontext(_owner.observed)
+        ) as observed:
             history = observed.history
             if history.admission.status == "recovery_first":
                 return UpdateResult(
@@ -93,32 +106,51 @@ def prepare_attachment_cleanup(operations, vault):
             history, stopped = _history(operations, vault, observed)
             if stopped is not None:
                 return stopped.model_copy(update={"kind": "attachment_cleanup"})
-            retained = _read_source(operations, vault, history.checkpoint, observed)
-            if (
-                output_identity(record(retained))
-                != history.checkpoint.manifest.identity
-            ):
-                return refused("baseline_identity_mismatch", history)
-            facts = cleanup_facts(
-                history,
-                retained,
-                observed=observed,
-                proposal_id=uuid4().hex,
-                generation=1,
-                source_memory=_producer_memory(history.checkpoint),
-            )
-            history = _scoped(operations, history, facts, observed=observed)
-            review = prepare_review(facts, preflight=history.admission.preflight)
-            directory = _materialize(retained)
-            binding = operations.observe_reviewed_source(directory, review)
-            return _prepared(
-                history,
-                directory,
-                binding,
-                review,
-                SourceIdentity.model_validate(record(retained)["source_identity"]),
-                True,
-            )
+            if _owner is not None:
+                _owner._start_session()
+                _owner._tip = _owner._load_tip(history.checkpoint)
+            with _owner._session._operation() if _owner is not None else nullcontext():
+                retained = _read_source(
+                    operations, vault, history.checkpoint, observed, _owner=_owner
+                )
+                if (
+                    output_identity(record(retained))
+                    != history.checkpoint.manifest.identity
+                ):
+                    return refused("baseline_identity_mismatch", history)
+                facts = cleanup_facts(
+                    history,
+                    retained,
+                    observed=observed,
+                    proposal_id=uuid4().hex,
+                    generation=1,
+                    source_memory=_producer_memory(history.checkpoint, _owner=_owner),
+                    _owner=_owner,
+                )
+                if _owner is None:
+                    history = _scoped(operations, history, facts, observed=observed)
+                    review = prepare_review(
+                        facts, preflight=history.admission.preflight
+                    )
+                    directory = _materialize(retained)
+                else:
+                    history, review = _owner._plan(history, facts)
+                    directory = _owner._directory / "incoming"
+                    directory.mkdir()
+                    for row in history.checkpoint.manifest.source:
+                        path = directory / row.path
+                        _owner._write_content(retained[row.path], path)
+                        path.chmod(0o755 if row.mode == "100755" else 0o644)
+                binding = operations.observe_reviewed_source(directory, review)
+                return _prepared(
+                    history,
+                    directory,
+                    binding,
+                    review,
+                    SourceIdentity.model_validate(record(retained)["source_identity"]),
+                    True,
+                    _owner=_owner,
+                )
     except _ExcludedDependency:
         return refused(
             "excluded_dependency_requires_tracking", history, action="review_tracking"

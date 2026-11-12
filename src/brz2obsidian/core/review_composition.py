@@ -7,6 +7,7 @@ from brz2obsidian.content_fingerprints import (
     CompletedWork,
     CreatedRequest,
     PendingCreated,
+    canonical_equal,
     consume_created,
     drive_inline,
     request_token,
@@ -382,7 +383,7 @@ def automatic_reference_document(facts, change, approval, approvals):
     if (
         subject.attachment is not None
         or change.target_path != subject.current.path
-        or change.result != subject.current.content
+        or not canonical_equal(change.result, subject.current.content)
     ):
         return None
     owners = {
@@ -401,7 +402,7 @@ def automatic_reference_document(facts, change, approval, approvals):
     if (
         state.file_roles is None
         or state.file_roles.path != subject.current.path
-        or state.content != subject.current.content
+        or not canonical_equal(state.content, subject.current.content)
         or state.content is None
         or state.file_roles.content_sha256 != content_sha(state.content)
     ):
@@ -427,13 +428,14 @@ def automatic_reference_document(facts, change, approval, approvals):
                 ),
                 None,
             )
-            if prior is not None and (prior.source_path, prior.content) == (
-                subject.current.path,
-                subject.current.content,
+            if (
+                prior is not None
+                and prior.source_path == subject.current.path
+                and canonical_equal(prior.content, subject.current.content)
             ):
                 selected.append(document)
     return (
         selected[0]
-        if selected and all(row == selected[0] for row in selected)
+        if selected and all(canonical_equal(row, selected[0]) for row in selected)
         else None
     )

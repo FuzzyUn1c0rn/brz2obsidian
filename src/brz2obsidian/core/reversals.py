@@ -2,6 +2,7 @@
 
 from typing import NamedTuple
 
+from brz2obsidian.content_fingerprints import canonical_equal
 from brz2obsidian.content_values import content_key, same_content
 from brz2obsidian.contracts import ReferenceTarget, SelectedReviewEffects
 
@@ -209,12 +210,12 @@ def reversal_document_target(subject):
     row, target = proof.outputs[0], proof.owned_targets[0]
     if (
         row.path != subject.path
-        or row.current != subject.current
+        or not canonical_equal(row.current, subject.current)
         or row.target_id != subject.item_id
         or row.produced is None
         or row.target is None
         or same_content(row.produced, row.target)
-        or subject.incoming != row.target
+        or not canonical_equal(subject.incoming, row.target)
         or (target.target_id, target.canonical_path) != (row.target_id, row.path)
         or target.kind != "note"
         or target.identity is not None
@@ -250,18 +251,18 @@ def reversal_document_entry(facts, subject):
         or entry.identity is not None
         or entry.raw_identity is not None
         or entry.facet != "content"
-        or entry.current != subject.current
+        or not canonical_equal(entry.current, subject.current)
         or entry.current.existence != "present"
         or entry.target != target.target
         or target.status != "safe"
         or document.document_id != target.target_id
-        or document.content != entry.current.content
+        or not canonical_equal(document.content, entry.current.content)
         or document.status != "supported"
         or document.inventory != "complete"
         or context.inventory != "complete"
         or len(states) != 1
         or states[0].existence != "present"
-        or states[0].content != entry.current.content
+        or not canonical_equal(states[0].content, entry.current.content)
         or not _target_safe(
             subject.path,
             entry.target,
@@ -533,7 +534,7 @@ def _owned_documents(plan, selected_effects):
                 for d in context.incoming_documents
                 if (d.document_id, d.source_path)
                 == (retained.target_id, retained.canonical_path)
-                and d.content == files[0].content
+                and canonical_equal(d.content, files[0].content)
                 and d.status == "supported"
                 and d.inventory == "complete"
             )
@@ -541,7 +542,9 @@ def _owned_documents(plan, selected_effects):
                 reversal_document_entry(plan.producer_facts, subject) is None
                 or approval.domain != "reversal"
                 or approval.choice != "reverse"
-                or files[0].content != subject.operation_reversal.outputs[0].target
+                or not canonical_equal(
+                    files[0].content, subject.operation_reversal.outputs[0].target
+                )
                 or len(documents) != 1
             ):
                 raise ValueError(
@@ -602,12 +605,12 @@ def _owned_documents(plan, selected_effects):
                 or entries[0].identity is not None
                 or entries[0].raw_identity is not None
                 or entries[0].facet != "content"
-                or entries[0].current.content != prior[0].content
+                or not canonical_equal(entries[0].current.content, prior[0].content)
                 or entries[0].target != target.target
                 or owners != (approval,)
                 or len(files) != 1
                 or files[0].subject_id != change.subject_id
-                or files[0].content != document.content
+                or not canonical_equal(files[0].content, document.content)
             ):
                 raise ValueError(
                     "Changed document lacks unique retained selected authority"

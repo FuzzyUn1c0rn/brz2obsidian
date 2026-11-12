@@ -54,6 +54,11 @@ class HistoryAdmission(ReconciliationContract):
     ]
     next_actions: tuple[HistoryNextAction, ...]
     operation: VaultApplyResult
+    undo_target_receipt_commit: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{40}$",
+        exclude_if=lambda value: value is None,
+    )
     checkpoint: CheckpointLocator | None
     history_retained: bool
     recovery_gaps: tuple[str, ...]
@@ -70,10 +75,34 @@ class HistoryAdmission(ReconciliationContract):
     def truthful_routes(self):
         if len(set(self.next_actions)) != len(self.next_actions):
             raise ValueError("History actions must be distinct")
-        if self.status == "recovery_required" and (
-            "review_recovery" not in self.next_actions
-            or set(self.next_actions)
-            - {"review_recovery", "setup_git", "review_history_repair"}
+        pending_undo = (
+            self.operation.code == "undo_prepared"
+            and self.operation.status == "content_complete"
+            and (
+                self.operation.kind == "apply"
+                or self.operation.kind == "undo"
+                and self.operation.direction == "restore"
+                and self.undo_target_receipt_commit is not None
+            )
+            and self.operation.phase == "prepared"
+            and self.operation.recovery_required
+            and self.operation.history == "terminal"
+            and self.operation.publication == "complete"
+            and self.operation.receipt_commit is not None
+            and self.checkpoint is not None
+            and self.operation.generation is not None
+            and self.checkpoint.generation > self.operation.generation
+            and self.history_retained
+            and self.next_actions == ("review_undo",)
+        )
+        if (
+            self.status == "recovery_required"
+            and not pending_undo
+            and (
+                "review_recovery" not in self.next_actions
+                or set(self.next_actions)
+                - {"review_recovery", "setup_git", "review_history_repair"}
+            )
         ):
             raise ValueError(
                 "Unresolved operation state permits only recovery/setup routing"

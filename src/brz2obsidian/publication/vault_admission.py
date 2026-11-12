@@ -449,11 +449,13 @@ class _Inspection:
         policy_probe=False,
         new_operation=None,
         _metadata_only=False,
+        _owners=None,
     ):
         if new_operation not in (None, "format_transition"):
             raise ValueError("Unsupported new-operation observation purpose")
         self.new_operation = new_operation
         self._metadata_only = _metadata_only
+        self._owners = _owners
         self.root = Path(vault).absolute()
         self.subjects = ()
         self.request_subjects = subjects
@@ -1147,7 +1149,9 @@ class _Inspection:
                     _inspect_update_observation,
                 )
 
-                terminal_status, observation = _inspect_update_observation(self.root)
+                terminal_status, observation = _inspect_update_observation(
+                    self.root, _owners=self._owners
+                )
                 terminal_observation_missing = observation is None
                 if (
                     terminal_status.status
@@ -1255,6 +1259,7 @@ class _Inspection:
                     linked_intents=self.linked_intents,
                     checkpoint_roles=self.checkpoint_roles,
                     _metadata_only=self._metadata_only,
+                    _owners=self._owners,
                 )
                 if self.history.status != "valid":
                     raise OSError("Current converter history unavailable")
@@ -1276,6 +1281,7 @@ class _Inspection:
                     linked_intents=self.linked_intents,
                     checkpoint_roles=self.checkpoint_roles,
                     _metadata_only=self._metadata_only,
+                    _owners=self._owners,
                 )
                 if self.history.status != "valid":
                     raise OSError("Current converter history unavailable")
@@ -2471,6 +2477,7 @@ def _observe_vault(
     _policy_probe=False,
     _new_operation=None,
     _metadata_only=False,
+    _owners=None,
 ):
     """Observe current storage; caller assertions cannot grant trusted proof."""
     inspection = _Inspection(
@@ -2483,6 +2490,7 @@ def _observe_vault(
         _policy_probe,
         _new_operation,
         _metadata_only,
+        _owners,
     )
     try:
         with inspection.resources:

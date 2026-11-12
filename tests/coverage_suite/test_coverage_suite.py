@@ -267,6 +267,8 @@ def test_focused_measurement_uses_all_source_denominator_and_rejects_threshold(
         coverage_checkout,
         "--test",
         "tests/test_decisions.py::test_yes",
+        "--timeout",
+        "4500",
         "--min-branch",
         "50",
         "--measurement-intent",
@@ -275,6 +277,7 @@ def test_focused_measurement_uses_all_source_denominator_and_rejects_threshold(
     assert result.returncode == 1, result.stdout + result.stderr
     report, output = summary(coverage_checkout)
     assert report["status"] == "failed"
+    assert report["timeout_seconds"] == 4500
     assert report["measurement"] == "focused selection; partial suite evidence"
     assert report["branches"] == {"covered": 1, "total": 4, "percent": 25.0}
     assert report["lines"] == {"covered": 3, "total": 8, "percent": 37.5}
@@ -300,6 +303,15 @@ def test_measurement_override_needs_explicit_intent(tmp_path):
     result = invoke(tmp_path, "--min-branch", "1")
     assert result.returncode == 2
     assert "--measurement-intent" in result.stderr
+    extended = invoke(
+        tmp_path,
+        "--test",
+        "tests/test_decisions.py::test_yes",
+        "--timeout",
+        "901",
+    )
+    assert extended.returncode == 2
+    assert "--measurement-intent" in extended.stderr
     assert not (tmp_path / "tmp").exists()
 
 

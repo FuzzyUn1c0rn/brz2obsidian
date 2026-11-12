@@ -1176,7 +1176,7 @@ def advance_work(work, returned=None, *, context=None):
     if type(work) is CandidateWork:
         return advance_candidate(work, returned)
     if type(work) is ReconcileWork:
-        return advance_reconciliation(work, returned)
+        return advance_reconciliation(work, returned, context=context)
     if type(work) is PlanWork:
         return advance_plan(work, returned)
     if type(work) is AttachmentActionWork:

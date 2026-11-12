@@ -259,10 +259,7 @@ def _prepare(args):
     operations = Operations()
     from .application.operations import Operations as NativeOperations
 
-    if (
-        args.kind in ("source-update", "onboarding")
-        and type(operations) is NativeOperations
-    ):
+    if type(operations) is NativeOperations:
         from uuid import uuid4
 
         from .application.update_context import UpdateContext
@@ -273,7 +270,7 @@ def _prepare(args):
                 args.vault,
                 source=args.source,
                 selection_id=str(uuid4()),
-                kind="onboarding" if args.kind == "onboarding" else "source_update",
+                kind=args.kind.replace("-", "_"),
                 original_source=args.original_source
                 if args.kind == "onboarding"
                 else None,
@@ -347,8 +344,6 @@ def _inspect_context(args, operations):
     try:
         context.load(args.vault, selection_id=selection)
         loaded = context._last_result
-        if loaded.kind not in ("source_update", "onboarding"):
-            return _inspect_operations(args, operations, loaded=loaded)
         if loaded.status != "unresolved" or loaded.code != "revalidation_required":
             return _update_result(loaded)
         if _requested_identity_changed(args, loaded):
@@ -483,6 +478,10 @@ def _apply(args):
             guidance=("Inspect the saved proposal before applying it.",),
         )
     operations = Operations()
+    from .application.operations import Operations as NativeOperations
+
+    if type(operations) is NativeOperations:
+        return _apply_context(args, operations)
     loaded = operations.load_update(args.vault)
     if loaded.loaded is None:
         return _update_result(loaded, command="apply")
@@ -534,6 +533,66 @@ def _apply(args):
         source=current.preparation.observed_source,
         output_identity=current.preparation.review.facts.incoming_identity,
     )
+
+
+def _apply_context(args, operations):
+    from uuid import uuid4
+
+    from .application.update_context import UpdateContext
+
+    context = UpdateContext(operations=operations)
+    selection = str(uuid4())
+    try:
+        context.load(args.vault, selection_id=selection)
+        loaded = context._last_result
+        if loaded.status != "unresolved" or loaded.code != "revalidation_required":
+            return _update_result(loaded, command="apply")
+        if _requested_identity_changed(args, loaded):
+            return _update_result(
+                loaded,
+                command="apply",
+                status="stale_review",
+                code="review_identity_changed",
+                ready=False,
+                next_actions=("inspect_saved_review",),
+            )
+        opened = context.resume(args.vault, selection_id=selection)
+        current = context._last_result
+        if current.preparation is None:
+            return _update_result(current, command="apply")
+        if (current.operation_id, current.generation, current.preparation.locator) != (
+            loaded.operation_id,
+            loaded.generation,
+            loaded.checkpoint,
+        ):
+            return _update_result(
+                current,
+                command="apply",
+                status="stale_review",
+                code="review_identity_changed",
+                ready=False,
+                next_actions=("review_update",),
+            )
+        if not current.ready:
+            return _update_result(
+                current,
+                command="apply",
+                status="unresolved",
+                code="review_not_ready",
+                ready=False,
+                next_actions=("resolve_update", "save_update"),
+            )
+        context.apply(opened.binding)
+        return _update_result(
+            context._last_result,
+            command="apply",
+            proposal_id=current.operation_id,
+            generation=current.generation,
+            source=current.preparation.observed_source,
+            output_identity=current.preparation.review.facts.incoming_identity,
+        )
+    finally:
+        context._retire_owner()
 
 
 def report_argument_failure(command, *, json_output):

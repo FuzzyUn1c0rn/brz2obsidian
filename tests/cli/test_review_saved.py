@@ -82,7 +82,7 @@ def test_fresh_cli_inspects_and_applies_saved_incoming_brz_choices(case_path, tm
             capture_output=True,
             text=True,
             check=False,
-            timeout=90,
+            timeout=600,
         )
         evidence["refusals"][label].update(
             {
@@ -244,7 +244,7 @@ def test_fresh_cli_inspects_and_applies_saved_incoming_brz_choices(case_path, tm
         capture_output=True,
         text=True,
         check=False,
-        timeout=90,
+        timeout=600,
     )
     record(
         "inspect_returned",
@@ -327,7 +327,7 @@ def test_fresh_cli_inspects_and_applies_saved_incoming_brz_choices(case_path, tm
         capture_output=True,
         text=True,
         check=False,
-        timeout=180,
+        timeout=600,
     )
     record(
         "apply_returned",

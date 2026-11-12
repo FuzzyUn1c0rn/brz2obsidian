@@ -47,6 +47,8 @@ class UpdateContext:
 
     def _retire_owner(self):
         owner, self._owner = self._owner, None
+        if self._history._owner is owner:
+            self._history._owner = None
         if owner is not None:
             owner.close()
 
@@ -98,7 +100,15 @@ class UpdateContext:
 
         report_progress(progress, "current_inspection")
         if kind == "attachment_cleanup":
-            result = self._operations.prepare_attachment_cleanup(vault)
+            from .operations import Operations
+
+            if type(self._operations) is Operations:
+                self._owner = self._operations._new_owned_preparation()
+                result = self._owner.prepare(vault, source, kind=kind, cancel=cancel)
+                if result.preparation is None:
+                    self._retire_owner()
+            else:
+                result = self._operations.prepare_attachment_cleanup(vault)
         elif kind == "onboarding":
             from .operations import Operations
 
@@ -118,7 +128,15 @@ class UpdateContext:
                     vault, source, original_source=original_source
                 )
         elif kind == "format_transition":
-            result = self._operations.prepare_format_transition(vault, source)
+            from .operations import Operations
+
+            if type(self._operations) is Operations:
+                self._owner = self._operations._new_owned_preparation()
+                result = self._owner.prepare(vault, source, kind=kind, cancel=cancel)
+                if result.preparation is None:
+                    self._retire_owner()
+            else:
+                result = self._operations.prepare_format_transition(vault, source)
         elif kind == "source_update":
             from .operations import Operations
 
@@ -172,7 +190,25 @@ class UpdateContext:
             return self._uncommitted_draft(code="close_decision_required")
         self._reset_history()
         self._kind = "history"
-        result = self._history.inspect(vault, selection_id=selection_id, cancel=cancel)
+        from .operations import Operations
+
+        self._retire_owner()
+        if type(self._operations) is Operations:
+            self._owner = self._operations._new_owned_preparation()
+            self._history._owner = self._owner
+        try:
+            result = self._history.inspect(
+                vault, selection_id=selection_id, cancel=cancel
+            )
+        except BaseException:
+            self._retire_owner()
+            raise
+        if self._owner is not None and (
+            self._owner._session is None
+            or self._owner._closed
+            or result.binding is None
+        ):
+            self._retire_owner()
         self._remember(result)
         return result
 
@@ -187,6 +223,8 @@ class UpdateContext:
         if self.draft_pending:
             return self._uncommitted_draft()
         result = self._history.prepare(binding, **values)
+        if self._history.binding is None:
+            self._retire_owner()
         self._remember(result)
         return result
 
@@ -194,6 +232,8 @@ class UpdateContext:
         if self.draft_pending:
             return self._uncommitted_draft()
         result = self._history.refresh(binding, cancel=cancel, progress=progress)
+        if self._history.binding is None:
+            self._retire_owner()
         self._remember(result)
         return result
 
@@ -201,6 +241,8 @@ class UpdateContext:
         if self.draft_pending:
             return self._uncommitted_draft()
         result = self._history.execute(binding, cancel=cancel, progress=progress)
+        if self._history.preparation is None:
+            self._retire_owner()
         self._remember(result)
         return result
 
@@ -312,7 +354,11 @@ class UpdateContext:
             next_actions=("refresh_update",)
             if page.code == "source_payload_changed"
             else (),
-            configuration=self._operations.configuration_choice_offer(self._preparation)
+            configuration=(
+                self._operations.configuration_choice_offer(self._preparation)
+                if self._owner is None
+                else self._owner.configuration_choice_offer(self._preparation)
+            )
             if page.status == "available" and self._kind == "format_transition"
             else None,
             offers=tuple(
@@ -349,7 +395,7 @@ class UpdateContext:
                 requirement_id,
                 offset=offset,
                 limit=limit,
-                drop_only=self._kind == "attachment_cleanup",
+                drop_only=plan.facts.format_operation.kind == "attachment_cleanup",
                 _choices=None if self._owner is None else self._owner.choices(plan),
             )
         except ValueError, StopIteration, OSError:
@@ -497,7 +543,7 @@ class UpdateContext:
                 return self._content_result(
                     status="available",
                     code="available",
-                    binding=self._binding,
+                    binding=self._review_binding(),
                     offers=offers[offset:end],
                     total_choices=len(offers),
                     next_choice_offset=end if end < len(offers) else None,
@@ -570,7 +616,10 @@ class UpdateContext:
                 code="source_payload_changed",
                 binding=self._binding,
             )
-        result = self._operations.apply_update(
+        apply = (
+            self._operations.apply_update if self._owner is None else self._owner.apply
+        )
+        result = apply(
             self._preparation,
             cancel=cancel,
             **({"progress": progress} if progress is not None else {}),
@@ -586,6 +635,7 @@ class UpdateContext:
             return self._retain(result, selection_id=expected.selection_id)
         # Any attempted native mutation retires prior readiness; current native
         # inspection/resume supplies the next authority, including cancellation.
+        self._retire_owner()
         self._preparation = self._binding = None
         return self._source_projection(
             UpdateContextResult(
@@ -753,9 +803,12 @@ class UpdateContext:
             return self._edit_refusal("context_changed")
         if self._edit is not None or self._reference_drafts:
             return self._uncommitted_draft()
-        result = self._operations.resolve_configuration_choice(
-            self._preparation, group_id=group_id, choice=choice
+        chooser = (
+            self._operations.resolve_configuration_choice
+            if self._owner is None
+            else self._owner.resolve_configuration_choice
         )
+        result = chooser(self._preparation, group_id=group_id, choice=choice)
         return self._retain(result, selection_id=expected.selection_id)
 
     def load(self, vault, *, selection_id, cancel=None):
@@ -929,6 +982,7 @@ class UpdateContext:
                     self._edit.close()
                     self._edit = None
                 self._reference_drafts.clear()
+                self._retire_owner()
             self._remember(result)
             return result
         try:
@@ -1020,7 +1074,7 @@ class UpdateContext:
             )
             offered = {
                 token: ("drop",)
-                if self._kind == "attachment_cleanup"
+                if plan.facts.format_operation.kind == "attachment_cleanup"
                 else tuple(row.choice for row in destinations[token])
                 for token, _, _ in review_plan_attachment_references(
                     plan, requirement_id, _choices=canonical_choices

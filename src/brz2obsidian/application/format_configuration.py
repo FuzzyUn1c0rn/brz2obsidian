@@ -6,15 +6,18 @@ from hashlib import sha256
 from brz2obsidian.contracts import ReviewAction
 from brz2obsidian.core import inspect_review_choices
 
-from .review_choices import requirement_digest, review_choice_action
+from .review_choices import requirement_digest, review_plan_choice_action
 from .update_context_contracts import UpdateConfigurationOffer
 from .update_contracts import UpdatePreparation, UpdateResult
 
 
-def configuration_choice_offer(preparation):
+def configuration_choice_offer(preparation, *, _choices=None):
     preparation = UpdatePreparation.model_validate(preparation)
     plan = preparation.review
-    requirements = {row.change_id: row for row in inspect_review_choices(plan)}
+    requirements = {
+        row.change_id: row
+        for row in (inspect_review_choices(plan) if _choices is None else _choices)
+    }
     changes = configuration_changes(plan)
     if preparation.kind != "format_transition" or not changes:
         return None
@@ -47,32 +50,51 @@ def configuration_choice_offer(preparation):
     )
 
 
-def resolve_configuration_choice(operations, preparation, *, group_id, choice):
+def resolve_configuration_choice(
+    operations, preparation, *, group_id, choice, _owner=None
+):
     try:
         preparation = UpdatePreparation.model_validate(preparation)
-        offered = configuration_choice_offer(preparation)
+        choices = (
+            inspect_review_choices(preparation.review)
+            if _owner is None
+            else _owner.choices(preparation.review)
+        )
+        offered = configuration_choice_offer(preparation, _choices=choices)
         if (
             offered is None
             or group_id != offered.group_id
             or choice not in offered.choices
         ):
-            return operations.resolve_configuration(preparation, ())
+            return (
+                operations.resolve_configuration(preparation, ())
+                if _owner is None
+                else resolve_configuration(operations, preparation, (), _owner=_owner)
+            )
         changes = configuration_changes(preparation.review)
-        requirements = {
-            row.change_id: row for row in inspect_review_choices(preparation.review)
-        }
+        requirements = {row.change_id: row for row in choices}
         actions = tuple(
-            review_choice_action(
-                preparation,
+            review_plan_choice_action(
+                preparation.review,
                 requirement_id=requirements[key].requirement_id,
                 choice=choice,
                 assumptions_digest=requirement_digest(requirements[key]),
+                _choices=choices,
+                _owner=_owner,
             )
             for key in sorted(changes)
         )
-        return operations.resolve_configuration(preparation, actions)
-    except ValueError, TypeError, KeyError:
-        return operations.resolve_configuration(preparation, ())
+        return (
+            operations.resolve_configuration(preparation, actions)
+            if _owner is None
+            else resolve_configuration(operations, preparation, actions, _owner=_owner)
+        )
+    except OSError, ValueError, TypeError, KeyError:
+        return (
+            operations.resolve_configuration(preparation, ())
+            if _owner is None
+            else resolve_configuration(operations, preparation, (), _owner=_owner)
+        )
 
 
 def configuration_changes(plan):
@@ -122,7 +144,7 @@ def configuration_effects_authorized(preparation, selected):
     )
 
 
-def resolve_configuration(operations, preparation, actions):
+def resolve_configuration(operations, preparation, actions, *, _owner=None):
     original = None
     try:
         original = UpdatePreparation.model_validate(preparation)
@@ -148,7 +170,11 @@ def resolve_configuration(operations, preparation, actions):
         if qualified:
             current = original
             for action in actions:
-                result = operations.resolve_update(current, action)
+                result = (
+                    operations.resolve_update(current, action)
+                    if _owner is None
+                    else _owner.resolve_update(current, action)
+                )
                 if (
                     result.code != "accepted"
                     or result.preparation is None
@@ -160,6 +186,8 @@ def resolve_configuration(operations, preparation, actions):
                     break
                 current = result.preparation
             else:
+                if _owner is not None:
+                    _owner.preparation = result.preparation
                 return result
     except OSError, ValueError, TypeError, AttributeError, KeyError:
         pass

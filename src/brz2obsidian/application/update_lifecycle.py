@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from brz2obsidian.content_fingerprints import canonical_equal
+from brz2obsidian.content_values import same_content
 from brz2obsidian.contracts import (
     ExactContent,
     ImportedItemIdentity,
@@ -334,14 +335,15 @@ def _observed_facts(
     return assembled() if removed or additional else facts
 
 
-def _baseline(checkpoint, source):
+def _baseline(checkpoint, source, *, _owner=None):
+    review = _owner._tip if _owner is not None else checkpoint.review
     if (
         checkpoint.manifest.boundary != "local"
-        or checkpoint.review is None
+        or review is None
         or checkpoint.manifest.reviewed_source is not None
     ):
         return source
-    facts = checkpoint.review.saved.plan.producer_facts
+    facts = review.saved.plan.producer_facts
     # Saved unresolved reviews retain complete exact originals in schema-1
     # review_content; the source role retains the complete incoming payload.
     rows = {(s.item_id, s.facet): s for s in facts.subjects}
@@ -350,7 +352,11 @@ def _baseline(checkpoint, source):
     ].baseline.content
     if original_record is None:
         raise ValueError("onboarding_required")
-    old_record = json.loads(original_record.data)
+    old_record = json.loads(
+        _owner._session._text(original_record).data
+        if _owner is not None
+        else original_record.data
+    )
     paths = {
         (row["original_identity"], "content"): row["relative_path"]
         for row in old_record["item_targets"]
@@ -375,7 +381,13 @@ def _baseline(checkpoint, source):
         )
         if path is None:
             raise ValueError("baseline_payload_unavailable")
-        result[path] = subject.baseline.content.data
+        result[path] = (
+            _owner._session._text(subject.baseline.content)
+            if _owner is not None and path == "migration-record.json"
+            else subject.baseline.content
+            if _owner is not None
+            else subject.baseline.content.data
+        )
     return result
 
 
@@ -731,10 +743,11 @@ def _memory(plan):
     return tuple(records.values())
 
 
-def _producer_memory(checkpoint, proposal_id=None):
-    if checkpoint.review is None:
+def _producer_memory(checkpoint, proposal_id=None, *, _owner=None):
+    retained = _owner._tip if _owner is not None else checkpoint.review
+    if retained is None:
         return ()
-    saved = checkpoint.review.saved.plan
+    saved = retained.saved.plan
     if (
         checkpoint.manifest.boundary == "local"
         and checkpoint.manifest.reviewed_source is not None
@@ -772,7 +785,7 @@ def _configuration_route(result, *, _owner=None):
         changed |= (
             len(matching) != 1
             or matching[0].current.content is None
-            or matching[0].current.content.data != row.content.data
+            or not same_content(matching[0].current.content, row.content)
         )
     if not changed:
         return result
@@ -1845,10 +1858,14 @@ def _reobserve_inputs(operations, preparation, observed):
     return (history, result, retained)
 
 
-def apply_update(operations, preparation, *, cancel=None, progress=None):
+def apply_update(operations, preparation, *, cancel=None, progress=None, _owner=None):
     native_contact = False
     try:
-        history, current, _ = _reobserve(operations, preparation)
+        history, current, _ = (
+            _reobserve(operations, preparation)
+            if _owner is None
+            else _owner._reobserve(preparation)
+        )
         if history is None or current.status == "stale_review":
             return current
         if current.code == "separate_configuration_operation_required":
@@ -1889,7 +1906,11 @@ def apply_update(operations, preparation, *, cancel=None, progress=None):
                 }
             )
         association = prepared.locator.association
-        selected = select_review_effects(prepared.review)
+        selected = (
+            select_review_effects(prepared.review)
+            if _owner is None
+            else _owner._session.select_review_effects(prepared.review)
+        )
         source_rows = tuple(
             (r.path, r.mode, r.size, r.sha256) for r in prepared.source_binding.files
         )
@@ -1924,19 +1945,25 @@ def apply_update(operations, preparation, *, cancel=None, progress=None):
             (r.path, r.mode, r.size, r.sha256)
             for r in history.checkpoint.manifest.vault
         )
-        retained_memory = (
-            _memory(history.checkpoint.review.saved.plan)
-            if history.checkpoint.review is not None
-            else ()
+        if _owner is not None:
+            if _owner._tip_commit != history.checkpoint.locator.commit:
+                _owner._tip = _owner._load_tip(history.checkpoint)
+            retained = _owner._tip
+        else:
+            retained = history.checkpoint.review
+        retained_memory = _memory(retained.saved.plan) if retained is not None else ()
+        same_memory = canonical_equal(
+            tuple(
+                sorted(
+                    _memory(prepared.review), key=lambda row: row.provenance.decision_id
+                )
+            ),
+            tuple(sorted(retained_memory, key=lambda row: row.provenance.decision_id)),
         )
-        same_memory = sorted(
-            _memory(prepared.review), key=lambda row: row.provenance.decision_id
-        ) == sorted(retained_memory, key=lambda row: row.provenance.decision_id)
         same_selected = all(
             row.path in current_files
-            and len(row.content.data) == current_files[row.path].size
-            and hashlib.sha256(row.content.data).hexdigest()
-            == current_files[row.path].sha256
+            and row.content.identity.size == current_files[row.path].size
+            and row.content.identity.sha256 == current_files[row.path].sha256
             for row in selected.files
         )
         if (
@@ -1962,6 +1989,9 @@ def apply_update(operations, preparation, *, cancel=None, progress=None):
                 publication="not_published",
                 summary="The source and vault are unchanged; no additional checkpoint was needed.",
             )
+        export = (
+            _owner._publication_export(prepared.review) if _owner is not None else None
+        )
         native_contact = True
         applied = operations.apply_reviewed_update(
             prepared.vault,
@@ -1972,6 +2002,7 @@ def apply_update(operations, preparation, *, cancel=None, progress=None):
             vault_id=association.vault_id,
             import_id=association.import_id,
             cancel=cancel,
+            **({"_owned_export": export} if export is not None else {}),
             **({"progress": progress} if progress is not None else {}),
         )
         status = update_application_status(applied)

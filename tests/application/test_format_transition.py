@@ -23,7 +23,12 @@ def test_interrupted_history_blocks_format_transition_before_source_access(monke
             recovery_gaps=("preimage_unavailable",),
         ),
     )
-    monkeypatch.setattr(operations, "inspect_history", lambda vault: history)
+
+    def inspect_history(vault, **purpose):
+        assert purpose == {"new_operation": "format_transition"}
+        return history
+
+    monkeypatch.setattr(operations, "inspect_history", inspect_history)
     result = operations.prepare_format_transition(
         "unopened-vault", "unopened-reference.brz"
     )

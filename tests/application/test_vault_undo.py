@@ -4,6 +4,7 @@ import hashlib
 import json
 import tempfile
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -13,6 +14,7 @@ from brz2obsidian.application.review_choices import (
     review_plan_attachment_references,
     review_plan_choice_action,
 )
+from brz2obsidian.application.update_context import UpdateContext
 from brz2obsidian.application.update_lifecycle import text_choice_action
 from brz2obsidian.application.vault_recovery_contracts import VaultRecoveryPreparation
 from brz2obsidian.application.vault_undo_contracts import VaultUndoPreparation
@@ -31,6 +33,7 @@ from brz2obsidian.core import (
 from brz2obsidian.core.reversals import review_owned_documents
 from brz2obsidian.obsidian import interpret_link_target, interpret_links
 from brz2obsidian.publication.vault_apply import _NativeExecutor
+from tests.application.test_update_context import worker_context_call
 from tests.application.test_vault_apply import _apply, _ready_case
 from tests.application.test_vault_checkpoints import git, user_state
 from tests.application.test_vault_recovery_process import (
@@ -1489,6 +1492,26 @@ def test_production_undo_child_stops_partially_and_fresh_review_restores_same_ta
     assert repeat.status == "offered", repeat.code
     assert repeat.target_receipt_commit == applied.receipt_commit
     assert repeat.checkpoint_commit != prepared.checkpoint_commit
+    public = UpdateContext()
+    inspected = worker_context_call(
+        public,
+        {"command": "history", "vault": str(vault), "selection_id": str(uuid4())},
+    )
+    assert (
+        inspected.status == "available" and "review_undo" in inspected.next_actions
+    ), inspected.model_dump_json()
+    public_prepared = worker_context_call(
+        public,
+        {"command": "prepare_history", "binding": inspected.binding, "kind": "undo"},
+    )
+    assert public_prepared.status == "prepared_review", (
+        public_prepared.model_dump_json()
+    )
+    assert public_prepared.binding.target_receipt_commit == applied.receipt_commit
+    assert public_prepared.binding.checkpoint_commit == repeat.checkpoint_commit
+    assert (
+        public.close(public_prepared.binding, choice="discard").code == "context_closed"
+    )
     assert operations.execute_undo(vault, prepared).status == "refused"
     opposite = operations.prepare_recovery(vault, direction="finish")
     assert opposite.status == "refused"
@@ -1498,6 +1521,43 @@ def test_production_undo_child_stops_partially_and_fresh_review_restores_same_ta
         retained_path="Notes/Opening.md",
         prefix="undo:fresh-second",
     )
+    cancelled = operations.execute_undo(vault, second, cancel=lambda: True)
+    assert (
+        cancelled.status == "cancelled" and cancelled.code == "cancelled_before_intent"
+    ), cancelled.model_dump_json()
+    assert cancelled.intent_commit is None and cancelled.publication == "not_started"
+    retained = json.loads(
+        git(vault, "cat-file", "blob", cancelled.checkpoint_commit + ":manifest.json")
+    )
+    assert retained["undo_of_receipt_commit"] == applied.receipt_commit
+    assert retained["operation_intent_commit"] is None
+    assert (vault / "Notes/Closing.md").read_bytes() == b"closing incoming\n"
+    assert (vault / "Notes/Opening.md").read_bytes() == later
+    user_after_cancel = user_state(vault)
+    cold = UpdateContext()
+    pending = worker_context_call(
+        cold, {"command": "history", "vault": str(vault), "selection_id": str(uuid4())}
+    )
+    assert pending.status == "recovery_required" and pending.next_actions == (
+        "review_undo",
+    ), pending.model_dump_json()
+    assert (
+        pending.history.operation.kind == "undo"
+        and pending.history.operation.direction == "restore"
+    )
+    retry = worker_context_call(
+        cold, {"command": "prepare_history", "binding": pending.binding, "kind": "undo"}
+    )
+    assert retry.status == "prepared_review", retry.model_dump_json()
+    assert retry.binding.target_receipt_commit == applied.receipt_commit
+    assert retry.binding.checkpoint_commit == cancelled.checkpoint_commit
+    assert retry.binding.checkpoint_generation == cancelled.generation
+    assert cold.close(retry.binding, choice="discard").code == "context_closed"
+    assert user_state(vault) == user_after_cancel
+    second = operations.prepare_undo(vault, previous=second)
+    assert second.status == "offered" and second.review.ready, second.model_dump_json()
+    assert second.target_receipt_commit == applied.receipt_commit
+    assert second.checkpoint_commit == cancelled.checkpoint_commit
     undo_path.write_text(second.model_dump_json(), encoding="utf-8")
     _child(_UNDO_CHILD, vault, undo_path, expected=81)
     assert (vault / "Notes/Closing.md").read_bytes() == b"closing authored\r\n"
