@@ -180,7 +180,14 @@ def run(args):
         return report(_apply(args), json_output=args.json_output)
     if args.review_command == "inspect":
         return report(_inspect(args), json_output=args.json_output)
-    observed = Operations().inspect_history_workflow(args.vault)
+    operations = Operations()
+    from .application.operations import Operations as NativeOperations
+
+    observed = (
+        operations.inspect_owned_history_status(args.vault)
+        if type(operations) is NativeOperations
+        else operations.inspect_history_workflow(args.vault)
+    )
     result = CliReviewResult(
         command="status",
         status=observed.status,

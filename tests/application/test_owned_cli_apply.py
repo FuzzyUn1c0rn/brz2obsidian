@@ -574,3 +574,41 @@ def test_unknown_onboarding_establishes_baseline_before_fresh_cli_applies_binary
     }
     assert _tree(scratch) == scratch_before and _tree(rendered) == original_rendered
     assert (_digest(archive_a), _digest(archive_b)) == archives_before
+
+    status_authored = _authored(vault)
+    status_user_git = _user_git(vault)
+    status_refs = git(vault, "for-each-ref", "--format=%(refname) %(objectname)")
+    status_locator = (vault / ".brz2obsidian/locator.json").read_bytes()
+    status, status_pid = _fresh_cli(
+        root, scratch, "status", ["review", "status", str(vault), "--json"]
+    )
+    assert status_pid > 0
+    assert (status.command, status.status, status.code) == (
+        "status",
+        "available",
+        "history_available",
+    )
+    assert status.history_retained and status.checkpoint is not None
+    assert status.checkpoint.commit == applied.operation.result_commit
+    assert status.operation is not None
+    assert (
+        status.operation.operation_id,
+        status.operation.generation,
+        status.operation.status,
+        status.operation.result_commit,
+        status.operation.receipt_commit,
+    ) == (
+        applied.operation.operation_id,
+        applied.operation.generation,
+        "applied",
+        applied.operation.result_commit,
+        applied.operation.receipt_commit,
+    )
+    assert status.next_actions == ("review_update", "review_undo")
+    assert _authored(vault) == status_authored
+    assert _user_git(vault) == status_user_git
+    assert (
+        git(vault, "for-each-ref", "--format=%(refname) %(objectname)") == status_refs
+    )
+    assert (vault / ".brz2obsidian/locator.json").read_bytes() == status_locator
+    assert _tree(scratch) == scratch_before

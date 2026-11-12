@@ -365,6 +365,14 @@ class Operations:
             vault, offset=offset, limit=limit, expected=expected
         )
 
+    def inspect_owned_history_status(self, vault):
+        """Inspect current history as scalar admission and retire its owner."""
+        owner = self._new_owned_preparation()
+        try:
+            return owner.inspect_history(vault)
+        finally:
+            owner.close()
+
     def inspect_history_workflow(self, vault):
         """Inspect restart routing from fresh native operation and history facts."""
         from .history_workflow import inspect_history_workflow

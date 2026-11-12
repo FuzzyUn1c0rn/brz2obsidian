@@ -1444,7 +1444,9 @@ def test_latest_undo_keeps_reviewed_imported_and_later_writing_while_reversing_o
     )
 
 
-def test_production_undo_child_stops_partially_and_fresh_review_restores_same_target():
+def test_production_undo_child_stops_partially_and_fresh_review_restores_same_target(
+    capsys,
+):
     vault, source, review_path, user_before, checkpoint_ref = _two_note_case()
     operations = Operations()
     applied = _apply(
@@ -1500,6 +1502,18 @@ def test_production_undo_child_stops_partially_and_fresh_review_restores_same_ta
     assert (
         inspected.status == "available" and "review_undo" in inspected.next_actions
     ), inspected.model_dump_json()
+    from brz2obsidian.cli import main
+
+    before_status = user_state(vault)
+    locator_before_status = (vault / ".brz2obsidian/locator.json").read_bytes()
+    assert main(["review", "status", str(vault), "--json"]) == 0
+    cli_status = json.loads(capsys.readouterr().out)
+    assert cli_status["status"] == "available"
+    assert cli_status["next_actions"] == ["review_update", "review_undo"]
+    assert cli_status["operation"]["operation_id"] == restored.operation_id
+    assert cli_status["checkpoint"]["commit"] == restored.result_commit
+    assert user_state(vault) == before_status
+    assert (vault / ".brz2obsidian/locator.json").read_bytes() == locator_before_status
     public_prepared = worker_context_call(
         public,
         {"command": "prepare_history", "binding": inspected.binding, "kind": "undo"},
@@ -1545,6 +1559,15 @@ def test_production_undo_child_stops_partially_and_fresh_review_restores_same_ta
         pending.history.operation.kind == "undo"
         and pending.history.operation.direction == "restore"
     )
+    locator_before_status = (vault / ".brz2obsidian/locator.json").read_bytes()
+    assert main(["review", "status", str(vault), "--json"]) == 2
+    cli_status = json.loads(capsys.readouterr().out)
+    assert cli_status["status"] == "recovery_required"
+    assert cli_status["next_actions"] == ["review_undo"]
+    assert cli_status["operation"]["operation_id"] == restored.operation_id
+    assert cli_status["checkpoint"]["commit"] == cancelled.checkpoint_commit
+    assert user_state(vault) == user_after_cancel
+    assert (vault / ".brz2obsidian/locator.json").read_bytes() == locator_before_status
     retry = worker_context_call(
         cold, {"command": "prepare_history", "binding": pending.binding, "kind": "undo"}
     )
