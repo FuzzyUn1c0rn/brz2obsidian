@@ -204,10 +204,177 @@ def test_capture_entry_audits_its_own_public_conversion(
         record["profile_version"],
         record["schema_version"],
         record["renderer_version"],
-    ) == ("4", 8, "8")
+    ) == ("5", 8, "8")
     public = capsys.readouterr().out
     assert "KEY" not in public and BRAIN not in public and upstream not in public
     assert "parent M5 acceptance remains separate" in public
+
+
+def test_capture_profile_mismatch_preserves_returned_result_and_recording(
+    tmp_path, monkeypatch, capsys
+):
+    from types import SimpleNamespace
+
+    from brz2obsidian.application import wiring
+    from tests.local_acceptance.audit_run import main
+
+    monkeypatch.setenv("THE_BRAIN_LOCAL_API_KEY", "KEY")
+    controls = tmp_path / "controls"
+    assert main(["prepare-controls", "--directory", str(controls)]) == 0
+    manifest = controls / "manifest.json"
+    candidate = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    actual_factory = wiring.local_api_workflow
+    returned = []
+
+    def mismatched_factory(*args, **kwargs):
+        workflow = actual_factory(*args, **kwargs)
+
+        def convert(*convert_args, **convert_kwargs):
+            actual = workflow.convert(*convert_args, **convert_kwargs)
+            assert workflow.binding.source.profile_version == "5"
+            assert (
+                workflow.binding.policy.profile_version == actual.profile_version == "5"
+            )
+            assert actual.outcome in {"clean", "warnings"} and actual.receipt.verified
+            declared = actual.model_copy(update={"profile_version": "4"})
+            returned.append(declared.model_dump(mode="json", by_alias=True))
+            return declared
+
+        return SimpleNamespace(binding=workflow.binding, convert=convert)
+
+    monkeypatch.setattr(wiring, "local_api_workflow", mismatched_factory)
+    api = PayloadApi()
+    api.overrides["/api/v1/docs.json"] = (200, SCHEMA)
+    attempt, vault = tmp_path / "mismatched-attempt", tmp_path / "mismatched-vault"
+    with api_server(api) as (_, upstream):
+        code = main(
+            [
+                "capture-api",
+                "--api-url",
+                upstream,
+                "--brain",
+                BRAIN,
+                "--candidate",
+                candidate,
+                "--qualification",
+                str(manifest),
+                "--qualification-sha256",
+                hashlib.sha256(manifest.read_bytes()).hexdigest(),
+                "--attempt",
+                str(attempt),
+                "--vault",
+                str(vault),
+            ]
+        )
+    assert code == 2 and len(returned) == 1
+    report = json.loads((attempt / "audit.json").read_bytes())
+    assert report["outcome"] == "refused" and not report["m5_acceptance"]
+    assert report["failure"]["stage"] == "api-capture" and not report["audits"]
+    assert json.loads((attempt / "result.json").read_bytes()) == returned[0]
+    assert returned[0]["profile_version"] == "4"
+    recording = json.loads((attempt / "http/recording.json").read_bytes())
+    assert not recording["complete"] and recording["occurrences"]
+    assert "Acquisition did not complete" in recording["failures"]
+    assert all(
+        (attempt / "http" / row["body"]).is_file() for row in recording["occurrences"]
+    )
+    assert not (attempt / "http/manifest.json").exists()
+    assert (
+        json.loads((vault / "migration-record.json").read_bytes())["profile_version"]
+        == "5"
+    )
+    public = capsys.readouterr().out
+    assert "KEY" not in public and BRAIN not in public and upstream not in public
+
+
+def test_audit_cli_binds_current5_and_preserves_explicit_legacy3(tmp_path, capsys):
+    from tests.local_acceptance.audit_run import main
+    from tests.local_acceptance.test_api_icon_audit import handcrafted_icon_vault
+    from tests.local_acceptance.test_api_scope_v3 import (
+        complete_raster_support,
+        raster_scope_case,
+    )
+
+    candidate = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    baseline, vault = handcrafted_icon_vault(tmp_path / "current", output_version=8)
+    record = json.loads((vault / "migration-record.json").read_bytes())
+    assert (record["profile_id"], record["profile_version"]) == (
+        "thebrain-local-api-reviewed",
+        "5",
+    )
+
+    def audit_args(baseline, vault, output):
+        return [
+            "audit",
+            "--candidate",
+            candidate,
+            "--api-manifest",
+            str(baseline.manifest_path),
+            "--manifest-sha256",
+            baseline.fingerprint,
+            "--api-vault",
+            str(vault),
+            "--output",
+            str(output),
+        ]
+
+    explicit = tmp_path / "explicit5.json"
+    assert main(audit_args(baseline, vault, explicit) + ["--profile-version", "5"]) == 0
+    report = json.loads(explicit.read_bytes())
+    assert report["outcome"] == "qualified" and not report["m5_acceptance"]
+    assert report["audits"]["api"]["outcome"] == "qualified"
+    default = tmp_path / "default5.json"
+    assert main(audit_args(baseline, vault, default)) == 0
+    assert json.loads(default.read_bytes())["outcome"] == "qualified"
+    mismatch = tmp_path / "wrong4.json"
+    assert main(audit_args(baseline, vault, mismatch) + ["--profile-version", "4"]) == 2
+    refused = json.loads(mismatch.read_bytes())
+    assert refused["outcome"] == "refused" and refused["failure"]["stage"] == (
+        "api-source-audit"
+    )
+    assert not refused["audits"] and not refused["m5_acceptance"]
+
+    # Tamper only a disposable output copy; the independently pinned source is
+    # still a profile5 BMP, so the checker must reach its profile binding guard.
+    from tests.local_acceptance.api_checker import check_api_vault
+
+    forged = tmp_path / "forged-profile"
+    shutil.copytree(vault, forged)
+    forged_record_path = forged / "migration-record.json"
+    forged_record = json.loads(forged_record_path.read_bytes())
+    forged_record["profile_version"] = "4"
+    forged_record_path.write_text(json.dumps(forged_record), encoding="utf-8")
+    with pytest.raises(AssertionError, match="API-bound profile"):
+        check_api_vault(baseline, forged, profile_version="5")
+    forged_report = tmp_path / "forged-profile.json"
+    assert (
+        main(audit_args(baseline, forged, forged_report) + ["--profile-version", "5"])
+        == 2
+    )
+    assert json.loads(forged_report.read_bytes())["outcome"] == "refused"
+    assert json.loads((vault / "migration-record.json").read_bytes()) == record
+
+    with pytest.raises(SystemExit) as invalid:
+        main(
+            audit_args(baseline, vault, tmp_path / "unsupported.json")
+            + ["--profile-version", "6"]
+        )
+    assert invalid.value.code == 2 and not (tmp_path / "unsupported.json").exists()
+
+    legacy, old_vault = raster_scope_case(tmp_path / "legacy", profile="3")
+    complete_raster_support(legacy, old_vault)
+    old_record = json.loads((old_vault / "migration-record.json").read_bytes())
+    assert old_record["profile_version"] == "3" and old_record["schema_version"] == 7
+    old_report = tmp_path / "legacy3.json"
+    assert (
+        main(
+            audit_args(legacy, old_vault, old_report)
+            + ["--profile-version", "3", "--output-version", "7"]
+        )
+        == 0
+    )
+    assert json.loads(old_report.read_bytes())["outcome"] == "qualified"
+    assert "parent M5 acceptance remains separate" in capsys.readouterr().out
 
 
 def schema_recording(directory, captured, schema):

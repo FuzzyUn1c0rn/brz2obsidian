@@ -26,6 +26,8 @@ from .facts import classifications, member, relationships
 from .scope import scope
 
 ROOT = Path(__file__).resolve().parents[2]
+_API_PROFILE_VERSIONS = ("1", "2", "3", "4", "5")
+_CURRENT_API_PROFILE = "5"
 
 
 def candidate_identity(expected):
@@ -182,7 +184,7 @@ def audit_selected(
     manifest_sha256=None,
     api_vault=None,
     api_result=None,
-    profile_version="4",
+    profile_version=_CURRENT_API_PROFILE,
     output_version=8,
 ):
     """Audit only explicitly complete source/vault selections; retain a verdict.
@@ -367,6 +369,16 @@ def capture_api(
             write_json(
                 attempt / "result.json", result.model_dump(mode="json", by_alias=True)
             )
+            policy = workflow.binding.policy
+            profile_version = workflow.binding.source.profile_version
+            if (
+                profile_version not in _API_PROFILE_VERSIONS
+                or policy.profile_id != "thebrain-local-api-reviewed"
+                or policy.profile_version != profile_version
+                or result.profile_id != policy.profile_id
+                or result.profile_version != profile_version
+            ):
+                raise RecordingError("Public conversion profile binding differs")
             if result.outcome not in {"clean", "warnings"}:
                 raise RecordingError(
                     "Public conversion did not publish a complete output"
@@ -383,6 +395,7 @@ def capture_api(
             manifest_sha256=baseline.fingerprint,
             api_vault=vault,
             api_result=attempt / "result.json",
+            profile_version=profile_version,
         )
     except Exception as error:  # noqa: BLE001 - retain a safe refusal for every failure
         report = {
@@ -425,7 +438,9 @@ def main(argv=None):
     ):
         audit.add_argument("--" + flag, type=Path)
     audit.add_argument("--manifest-sha256")
-    audit.add_argument("--profile-version", choices=("1", "2", "3", "4"), default="4")
+    audit.add_argument(
+        "--profile-version", choices=_API_PROFILE_VERSIONS, default=_CURRENT_API_PROFILE
+    )
     audit.add_argument("--output-version", type=int, choices=(7, 8), default=8)
     capture = commands.add_parser(
         "capture-api",
