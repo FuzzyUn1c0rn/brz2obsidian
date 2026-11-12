@@ -2,7 +2,7 @@
 
 Snapshot last verified against live GitHub on **2026-11-12**. This is a saved overview, not a continuously updated board.
 
-**Current continuation, 2026-11-12:** continue assembled qualification after integrating CLI-status/Windows transport repairs at `a7e5833` and reviewed regression-fixture/orphan-history repairs at `c13d32d`. The first maintained run found 57 failures; the corrected paths passed 238 focused tests and 30 fresh independent tests. The complete maintained bundle still requires a passing result. Monitor weekly usage and pause at **40% remaining or lower**.
+**Current continuation, 2026-11-12:** implementation follow-ups are integrated through `26d884b` on `codex/r292-type-tag-support`. The latest complete maintained run passed all **2,716 tests and all four checks in 852.60 seconds**, but its **76.02% production branch coverage falls short of 80%**. The subsequent native-read guard refactor passed 59 committed author tests, 14 fresh verifier tests, all four checks and a native status/preservation probe. Complete current-candidate coverage, assembled resource/scaling, actual-source/native acceptance and delivery remain. Monitor weekly usage and pause at **40% remaining or lower**.
 
 ## Overall position
 
@@ -44,7 +44,7 @@ flowchart TD
 | Issue | Purpose | Actual progress and remaining work |
 |---|---|---|
 | [#292](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/292) | Overall type/tag relationships and inherited-icons feature | Core milestones M1–M4 accepted. Actual-source/native acceptance, final regression/review, user verdict and delivery remain. |
-| [#347](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/347) | Make large-attachment updates practical in memory | #366, CLI review status, Windows verification transport and rejection of onboarding with unavailable orphan history are implemented, independently verified and integrated. Regression fixture bindings are corrected. Complete ordinary regression/coverage, resource/scaling and real-source qualification remain. |
+| [#347](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/347) | Make large-attachment updates practical in memory | #366, CLI status, Windows verification transport, orphan-history refusal and duplicate native-read guard removal are implemented, independently verified and integrated. Latest complete maintained tests/checks pass; the 80% branch gate, assembled resource/scaling and real-source qualification remain. |
 | [#348](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/348) | Bounded ICO/DIB/BMP icon support | Implementation and default library/CLI/Windows wiring complete; all three children closed. Broad regression, actual API/BRZ parity, native/user acceptance and delivery remain. |
 
 ## Forty closed issues
@@ -73,7 +73,7 @@ flowchart TD
 
 ## Remaining route for this effort
 
-1. Rerun the maintained assembled regression/coverage bundle (398 selectors, including the new native orphan-history regression), then finish #347 resource/scaling qualification. The consumer, transport, fixture and history-admission repairs are integrated and independently reviewed.
+1. Bring the maintained selection up to date for the owned public consumers and meet the 80% branch/under-900-second gate; finish #347 assembled resource/scaling qualification. The latest 398-selector run passed its tests/checks but failed the coverage threshold. Reuse existing fixtures and measurement tools for the remaining work.
 2. Complete #348 assembled-candidate acceptance. #357 and #366 closeouts are complete.
 3. Complete #292 real-source/native checks and user acceptance.
 4. Deliver the assembled feature through its final PR and close the remaining parent issues.
@@ -99,4 +99,9 @@ Different-Brain imports in #259/#258 are a separate future feature.
 - Distinct independent verification passed 17/17 selected tests and all four checks on clean commit150316d, including the large owning publication/details/cleanup/repeat journey. Its total1,202.04 seconds is extended focused evidence, not ordinary-bundle qualification.
 - #366 was merged without conflict into the feature root as `72428d4e11e32a6592d71c90473a3fbd75778e25`. Fresh combined-tree16-case/all-four checks passed; candidate, verification and integration publication plus separate standalone validation all passed. [Completion and limits](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/366#issuecomment-6818425703) record internal closure. Parent acceptance/delivery remains open.
 - #357 was closed after reconciling C1–C8 against actual accepted checks, independent handoffs and feature-root integrations. [Closeout evidence and limits](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/357#issuecomment-6818230280) preserve the engineering-estimate amendment and original 44-selector scope. This does not complete #347 resource/native acceptance.
+- CLI status/Windows transport repairs were integrated as `a7e5833`; regression-fixture corrections and genuine orphan-history onboarding refusal followed as `c13d32d`, with 238 focused and 30 independent tests passing.
+- The subsequent complete maintained run at `d59e103` passed 2,716 tests, lint, formatting and dependency checks; receipt validation passed. Total elapsed was 852.60 seconds. Its 84.61% line coverage and 76.02% branch coverage are distinct: the required 80% branch gate remains unmet.
+- `26d884b` removes duplicate checks within an owned read while preserving complete semantic-byte verification and native checks at actual read/exit boundaries. Its final committed 59-test scope and fresh independent 14-test scope passed all four checks and receipt validation. A separate native status probe verified retained Git identities and preserved all 147 vault files. Candidate, verification and local integration records passed their separate validators.
+- The attempted 257-byte variant of a full publication/terminal-cleanup journey timed out; its source, partial evidence and fixture are preserved outside the maintained selection. The original 16 MiB owning test is unchanged. The guard refactor's initial staging-capability regression was caught by existing tests and repaired before acceptance.
+- Current work reuses the existing tiny native Undo fixture to qualify the owned History review path and prepares an assembled 16 MiB resource baseline. Full scaling, reported-source/API/BRZ/native UI, final user acceptance and delivery are still unqualified.
 
