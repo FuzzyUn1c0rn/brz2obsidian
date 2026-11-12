@@ -349,3 +349,122 @@ def test_source_change_during_reporting_rejects_success(coverage_checkout):
     assert "stale or changed" in (output / "validate-final.log").read_text(
         encoding="utf-8"
     )
+
+
+def test_long_maintained_selection_preserves_exact_scope_and_validates(
+    coverage_checkout,
+):
+    """A long manifest remains the same public four-check coverage operation."""
+    relative = "tests/é selected/test_many.py"
+    target = coverage_checkout / relative
+    target.parent.mkdir()
+    names = [f"test_case_{index:04d}_" + "independent_" * 4 for index in range(400)]
+    target.write_text(
+        "from brz2obsidian.decisions import choose\n\n\n"
+        + "\n\n".join(
+            f'def {name}():\n    assert choose(True) == "yes"\n' for name in names
+        ),
+        encoding="utf-8",
+    )
+    (coverage_checkout / "tests" / "test_excluded_failure.py").write_text(
+        "def test_excluded_failure():\n"
+        '    raise AssertionError("excluded discovery ran")\n',
+        encoding="utf-8",
+    )
+    manifest_path = coverage_checkout / "tools" / "test-suite.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["selectors"] += [f"{relative}::{name}" for name in names]
+    selectors = manifest["selectors"]
+    # This is a real unique selection beyond the native Windows command line,
+    # not repeated arguments for the same test or a mocked process failure.
+    assert len(selectors) == len(set(selectors)) == 404
+    assert sum(len(node) for node in selectors) > 32767
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+
+    result = invoke(coverage_checkout)
+    assert result.returncode == 0, result.stdout + result.stderr
+    report, _output = summary(coverage_checkout)
+    assert report["status"] == "passed"
+    assert report["measurement"] == "default suite"
+    assert report["timeout_seconds"] == 900
+    assert report["minimum_branch_percent"] == 80
+    assert report["production_files"] == 4
+    assert report["branches"] == {
+        "covered": 4,
+        "total": 4,
+        "percent": 100.0,
+    }
+    receipt_path = Path(report["receipt"])
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert {row["id"]: row["status"] for row in receipt["checks"]} == {
+        "pytest": "passed",
+        "lint": "passed",
+        "format": "passed",
+        "dependency": "passed",
+    }
+    selected = next(row for row in receipt["checks"] if row["id"] == "pytest")
+    assert selected["selection"]["selectors"] == selectors
+    assert selected["selection"]["keyword"] is None
+    assert selected["selection"]["marker"] is None
+    assert selected["selection"]["require_gui"] is True
+    assert selected["selection"]["workers"] == 4
+    assert selected["counts"]["collected"] == 404
+    assert selected["counts"]["passed"] == 404
+    assert selected["counts"]["failed"] == 0
+    assert selected["counts"]["gui_executed"] == 1
+    assert selected["counts"]["executed_nodes"] == sorted(
+        [
+            "tests/test_decisions.py::test_yes",
+            "tests/test_other.py::test_no",
+            "tests/test_gui.py::test_gui",
+            "tests/test_ui.py::test_ui_choices",
+            *(f"{relative}::{name}" for name in names),
+        ]
+    )
+    # Independent requirements come from the requested manifest in this test,
+    # not the coverage command's own generated requirements.
+    expected = coverage_checkout / "tmp" / "independent-long-required.json"
+    expected.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "environment": "gui",
+                "checks": [
+                    {
+                        "id": "pytest",
+                        "scope": "focused",
+                        "selectors": selectors,
+                        "keyword": None,
+                        "marker": None,
+                        "require_gui": True,
+                    },
+                    {"id": "lint"},
+                    {"id": "format"},
+                    {"id": "dependency"},
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    validated = subprocess.run(
+        [
+            sys.executable,
+            str(coverage_checkout / "tools" / "check.py"),
+            "validate",
+            "--checkout",
+            str(coverage_checkout),
+            "--receipt",
+            str(receipt_path),
+            "--requirements",
+            str(expected),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=60,
+        check=False,
+    )
+    assert validated.returncode == 0, validated.stdout + validated.stderr
+    assert "excluded discovery ran" not in result.stdout + result.stderr

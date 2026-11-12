@@ -25,6 +25,12 @@ def save(path, value):
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
 
+def windows_command_too_long(argv):
+    return os.name == "nt" and (
+        len(subprocess.list2cmdline(argv).encode("utf-16-le")) // 2 + 1 > 32767
+    )
+
+
 def arguments():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -277,10 +283,37 @@ def main():
         ]
         for check in checks:
             command += ["--check", check]
+        selector_position = len(command)
         for node in selectors:
             command += ["--test", node]
         if require_gui:
             command += ["--require-gui"]
+        selector_input = {}
+        if windows_command_too_long(command):
+            selector_path = output / "selectors.json"
+            raw = json.dumps(
+                selectors, ensure_ascii=False, separators=(",", ":")
+            ).encode("utf-8")
+            with selector_path.open("xb") as handle:
+                handle.write(raw)
+            selector_input = {
+                "selector_input": {
+                    "role": "selector_input",
+                    "path": str(selector_path),
+                    "size": len(raw),
+                    "sha256": hashlib.sha256(raw).hexdigest(),
+                }
+            }
+            command = [
+                *command[:selector_position],
+                "--tests-file",
+                str(selector_path),
+                *command[selector_position + 2 * len(selectors) :],
+            ]
+            if windows_command_too_long(command):
+                raise ValueError(
+                    "Compacted runner command exceeds Windows process limit"
+                )
         save(
             output / "plan.json",
             {
@@ -288,6 +321,7 @@ def main():
                 "command": command,
                 "requirements": str(output / "requirements.json"),
                 "coverage_config": str(config),
+                **selector_input,
             },
         )
         run_log = execute(command, root, output, "run", deadline)
