@@ -6,11 +6,11 @@ Snapshot last verified against live GitHub on **2026-11-12**. This is a saved ov
 
 ## Overall position
 
-There are **9 open issues repository-wide** after the documented #357 closeout:
+There are **8 open issues repository-wide** after the documented #357 and #366 closeouts:
 
-- **4 belong to the current #292 effort:** three parent/acceptance trackers and one current implementation issue, **#366**.
+- **3 belong to the current #292 effort:** the overall #292 parent and its #347 large-update and #348 icon acceptance tracks. Current follow-up work is under **#347**.
 - **5 belong to other work or historical bookkeeping.**
-- The complete #292 issue tree contains **39 closed issues and 4 open issues**. This is an issue count, not an estimate of remaining effort.
+- The complete #292 issue tree contains **40 closed issues and 3 open issues**. This is an issue count, not an estimate of remaining effort.
 
 “Closed” means an internal task was accepted and integrated into the feature branch. It does not necessarily mean released to main.
 
@@ -24,13 +24,14 @@ flowchart TD
     A --> B["Core behavior and source fixes<br/>23 CLOSED issues"]
     A --> C["#348 — Additional icon formats<br/>Implementation done; acceptance OPEN"]
     C --> D["#352, #355, #356<br/>CLOSED"]
-    A --> E["#347 — Memory-efficient large-attachment updates<br/>OPEN"]
+    A --> E["#347 — Memory-efficient large-attachment updates<br/>CURRENT remaining consumers and qualification"]
     E --> F["10 direct prerequisite/implementation issues<br/>CLOSED"]
     E --> G["#357 — Content representation and legacy replay<br/>CLOSED after evidence reconciliation"]
     G --> H["#359, #360<br/>CLOSED"]
-    E --> I["#366 — Apply, Undo, recovery and remaining consumers<br/>CURRENT IMPLEMENTATION"]
+    E --> I["#366 — Apply, Undo, recovery and remaining consumers<br/>CLOSED: independently verified and integrated"]
 
-    style I fill:#fff3cd,stroke:#b8860b,stroke-width:3px
+    style E fill:#fff3cd,stroke:#b8860b,stroke-width:3px
+    style I fill:#e8f5e9,stroke:#388e3c
     style B fill:#e8f5e9,stroke:#388e3c
     style D fill:#e8f5e9,stroke:#388e3c
     style F fill:#e8f5e9,stroke:#388e3c
@@ -38,16 +39,15 @@ flowchart TD
     style H fill:#e8f5e9,stroke:#388e3c
 ```
 
-## Four open issues in the current effort
+## Three open issues in the current effort
 
 | Issue | Purpose | Actual progress and remaining work |
 |---|---|---|
 | [#292](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/292) | Overall type/tag relationships and inherited-icons feature | Core milestones M1–M4 accepted. Actual-source/native acceptance, final regression/review, user verdict and delivery remain. |
-| [#347](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/347) | Make large-attachment updates practical in memory | Most foundations and production routes implemented. Finish #366, then complete assembled resource/performance, regression and real-source qualification. |
-| [#366](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/366) | Complete publication, operation history, Undo/recovery and remaining producers | Current implementation issue. Code substantially complete and whole-leaf source review passed. Latest Undo verification needs clean completion, independent verification and feature-root integration. |
+| [#347](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/347) | Make large-attachment updates practical in memory | #366 is complete and integrated. Remaining follow-up includes the CLI review-status eager-history consumer, the broad verification launcher's Windows argument transport, assembled resource/performance/regression and real-source qualification. |
 | [#348](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/348) | Bounded ICO/DIB/BMP icon support | Implementation and default library/CLI/Windows wiring complete; all three children closed. Broad regression, actual API/BRZ parity, native/user acceptance and delivery remain. |
 
-## Thirty-nine closed issues
+## Forty closed issues
 
 | Completed area | Closed issues |
 |---|---|
@@ -58,6 +58,7 @@ flowchart TD
 | Bounded content acquisition, comparison, serialization and legacy replay, including reconciled parent | [#349](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/349), [#350](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/350), [#354](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/354), [#357](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/357), [#359](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/359), [#360](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/360) |
 | Resource-observation and small resource-proof prerequisites | [#351](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/351), [#353](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/353), [#358](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/358) |
 | Cold history inspection, default preparation/choices/Save, onboarding and saved-review restoration | [#361](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/361), [#362](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/362), [#363](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/363), [#364](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/364) |
+| Owned publication, operation details, Undo/recovery, terminal cleanup and retained ownership/repair consumers | [#366](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/366) |
 | Independent icon expectations, ICO/DIB/BMP admission and default profile wiring | [#352](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/352), [#355](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/355), [#356](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/356) |
 
 ## Five other open issues: outside the current #292 implementation
@@ -72,7 +73,7 @@ flowchart TD
 
 ## Remaining route for this effort
 
-1. Finish #366: clean Undo verification, commit the latest correction, independent verification and feature-root integration.
+1. Complete #347's remaining CLI-status consumer and Windows verification-launch transport. #366 implementation, independent verification and integration are complete.
 2. Finish #347 resource/regression work and #348 assembled-candidate acceptance. #357 closeout is complete.
 3. Complete #292 real-source/native checks and user acceptance.
 4. Deliver the assembled feature through its final PR and close the remaining parent issues.
@@ -95,6 +96,7 @@ Different-Brain imports in #259/#258 are a separate future feature.
 - The unchanged Undo rerun passed all 20 selected tests, lint, formatting, dependency checks, partial coverage reporting and receipt validation in 390.74 seconds. The earlier child-process exits did not reproduce.
 - The restored-Undo correction is committed as `150316d6519e2f3ba3793baa268b09686515f628` on `codex/r347-owned-publication`.
 - Post-commit completion checks passed all 19 selected tests and all four check types in 214.72 seconds. The author checkout is clean.
-- Independent final-candidate verification and actual feature-root integration are still pending. #366 remains open; the parent acceptance/delivery limits above remain unchanged.
+- Distinct independent verification passed 17/17 selected tests and all four checks on clean commit150316d, including the large owning publication/details/cleanup/repeat journey. Its total1,202.04 seconds is extended focused evidence, not ordinary-bundle qualification.
+- #366 was merged without conflict into the feature root as `72428d4e11e32a6592d71c90473a3fbd75778e25`. Fresh combined-tree16-case/all-four checks passed; candidate, verification and integration publication plus separate standalone validation all passed. [Completion and limits](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/366#issuecomment-6818425703) record internal closure. Parent acceptance/delivery remains open.
 - #357 was closed after reconciling C1–C8 against actual accepted checks, independent handoffs and feature-root integrations. [Closeout evidence and limits](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/357#issuecomment-6818230280) preserve the engineering-estimate amendment and original 44-selector scope. This does not complete #347 resource/native acceptance.
 
