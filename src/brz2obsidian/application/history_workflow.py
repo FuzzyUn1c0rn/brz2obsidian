@@ -32,7 +32,7 @@ def history_admission(
     return _history_admission(history, operation)
 
 
-def _history_admission(history, operation):
+def _history_admission(history, operation, *, undo_target_receipt_commit=None):
     """Project an actual lexical observation without exporting its content owner."""
     admission = history.admission
     checkpoint = history.checkpoint
@@ -51,7 +51,12 @@ def _history_admission(history, operation):
         and not git_setup
         and operation.code == "undo_prepared"
         and operation.status == "content_complete"
-        and operation.kind == "apply"
+        and (
+            operation.kind == "apply"
+            or operation.kind == "undo"
+            and operation.direction == "restore"
+            and undo_target_receipt_commit is not None
+        )
         and operation.phase == "prepared"
         and operation.recovery_required
         and operation.history == "terminal"
@@ -60,7 +65,8 @@ def _history_admission(history, operation):
         and operation.generation is not None
         and locator.generation > operation.generation
         and checkpoint.manifest.boundary == "prepared"
-        and checkpoint.manifest.undo_of_receipt_commit == operation.receipt_commit
+        and checkpoint.manifest.undo_of_receipt_commit
+        == (undo_target_receipt_commit or operation.receipt_commit)
         and checkpoint.manifest.operation_intent_commit is None
         and checkpoint.manifest.recovery_origin_intent_commit is None
         and checkpoint.review is not None
@@ -121,10 +127,16 @@ def _history_admission(history, operation):
         if (
             checkpoint.manifest.boundary == "result"
             and checkpoint.review is not None
-            and checkpoint.review.saved.plan.facts.format_operation.kind
-            in ("source_update", "onboarding")
-            and operation.status == "applied"
-            and operation.kind == "apply"
+            and (
+                checkpoint.review.saved.plan.facts.format_operation.kind
+                in ("source_update", "onboarding")
+                and operation.status == "applied"
+                and operation.kind == "apply"
+                or undo_target_receipt_commit is not None
+                and operation.status == "restored"
+                and operation.kind == "undo"
+                and operation.direction == "restore"
+            )
             and operation.result_commit == locator.commit
             and operation.intent_commit == checkpoint.manifest.operation_intent_commit
         ):
@@ -150,6 +162,7 @@ def _history_admission(history, operation):
         code=code,
         next_actions=actions,
         operation=operation,
+        undo_target_receipt_commit=undo_target_receipt_commit,
         checkpoint=locator,
         history_retained=retained,
         recovery_gaps=admission.recovery_gaps,

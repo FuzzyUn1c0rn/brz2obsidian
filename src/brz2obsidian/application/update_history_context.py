@@ -94,6 +94,7 @@ class HistoryContext:
             operation_generation=operation.generation,
             intent_commit=operation.intent_commit,
             direction=operation.direction,
+            target_receipt_commit=admission.undo_target_receipt_commit,
             association_id=checkpoint.association.association_id
             if checkpoint
             else None,

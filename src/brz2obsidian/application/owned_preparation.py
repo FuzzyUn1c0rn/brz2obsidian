@@ -126,6 +126,8 @@ class _OwnedPreparation:
         return values
 
     def inspect_history(self, vault):
+        from brz2obsidian.publication.vault_undo import _eligible_target
+
         from .history_workflow import _history_admission
 
         try:
@@ -156,7 +158,14 @@ class _OwnedPreparation:
             self.observed._check()
             if self._cancel.is_set():
                 raise OSError("History inspection cancelled")
-            return _history_admission(history, operation)
+            status, _, target = _eligible_target(operation, self.observed._terminal)
+            return _history_admission(
+                history,
+                operation,
+                undo_target_receipt_commit=target.receipt_commit
+                if status == "offered" and target is not None
+                else None,
+            )
         except OSError, ValueError, TypeError, UnicodeError:
             if self._cancel.is_set():
                 raise

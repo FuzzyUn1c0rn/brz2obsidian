@@ -54,6 +54,11 @@ class HistoryAdmission(ReconciliationContract):
     ]
     next_actions: tuple[HistoryNextAction, ...]
     operation: VaultApplyResult
+    undo_target_receipt_commit: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{40}$",
+        exclude_if=lambda value: value is None,
+    )
     checkpoint: CheckpointLocator | None
     history_retained: bool
     recovery_gaps: tuple[str, ...]
@@ -73,7 +78,12 @@ class HistoryAdmission(ReconciliationContract):
         pending_undo = (
             self.operation.code == "undo_prepared"
             and self.operation.status == "content_complete"
-            and self.operation.kind == "apply"
+            and (
+                self.operation.kind == "apply"
+                or self.operation.kind == "undo"
+                and self.operation.direction == "restore"
+                and self.undo_target_receipt_commit is not None
+            )
             and self.operation.phase == "prepared"
             and self.operation.recovery_required
             and self.operation.history == "terminal"
