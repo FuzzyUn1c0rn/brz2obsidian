@@ -103,7 +103,8 @@ def legacy_inputs(tmp_path, monkeypatch=None, *, opaque=False):
         FilesystemPublisher(),
         metadata_factory=lambda: METADATA,
     )
-    operations = ControlledOperations(workflow=workflow)
+    operation_type = ControlledOperations if monkeypatch is not None else Operations
+    operations = operation_type(workflow=workflow)
     if monkeypatch is not None:
 
         def inspection(*args, **kwargs):
@@ -112,6 +113,50 @@ def legacy_inputs(tmp_path, monkeypatch=None, *, opaque=False):
 
         monkeypatch.setattr(operations, "inspect_history", inspection)
     return operations, vault, source, authored
+
+
+def test_orphan_checkpoint_ref_refuses_native_onboarding_without_changing_history():
+    from uuid import uuid4
+
+    from brz2obsidian.application.update_context import UpdateContext
+    from brz2obsidian.application.wiring import default_workflow
+    from tests.application.test_minimal_workflow import make_archive
+    from tests.application.test_owned_update_preparation import _digest, _tree
+    from tests.application.test_vault_checkpoints import git
+
+    root = owned_case()
+    source = make_archive(root / "source.brz")
+    vault = root / "vault"
+    converted = default_workflow().convert(source, vault)
+    assert converted.receipt is not None and converted.receipt.verified
+    git(vault, "init", "-q")
+    git(vault, "config", "core.autocrlf", "false")
+    git(vault, "add", ".")
+    git(vault, "commit", "-qm", "Independent authored baseline")
+    operations = Operations()
+    absent = operations.inspect_history(vault)
+    assert absent.status == "absent" and absent.admission.status == "supported"
+    assert absent.admission.repository.kind == "root"
+    assert absent.admission.inventory_complete
+    orphan = "refs/brz2obsidian/imports/" + "e" * 64 + "/checkpoints"
+    head = git(vault, "rev-parse", "HEAD").strip()
+    git(vault, "update-ref", orphan, head.decode("ascii"), "0" * 40)
+    assert not (vault / ".brz2obsidian").exists()
+    before, source_before = _tree(vault), _digest(source)
+    damaged = operations.inspect_history(vault)
+    assert damaged.status == "unavailable" and damaged.checkpoint is None
+    assert damaged.admission.status == "supported"
+    assert damaged.admission.inventory_complete
+    context = UpdateContext(operations=operations)
+    result = context.prepare(
+        vault, source=source, selection_id=str(uuid4()), kind="onboarding"
+    )
+    assert (result.status, result.code) == ("refused", "history_unavailable")
+    assert result.binding is None and not result.ready
+    assert result.publication == "not_started"
+    assert result.next_actions == ("inspect_history",)
+    assert _tree(vault) == before and _digest(source) == source_before
+    assert git(vault, "rev-parse", orphan).strip() == head
 
 
 def test_incomplete_history_gates_onboarding_before_any_source_access(monkeypatch):

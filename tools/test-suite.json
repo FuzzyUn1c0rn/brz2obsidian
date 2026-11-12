@@ -193,6 +193,7 @@
     "tests/application/test_update_saved_subjects.py",
     "tests/application/test_attachment_cleanup_history.py::test_native_cleanup_ownership_reads_qualified_ancestor_without_changing_current_source",
     "tests/application/test_onboarding.py::test_incomplete_history_gates_onboarding_before_any_source_access",
+    "tests/application/test_onboarding.py::test_orphan_checkpoint_ref_refuses_native_onboarding_without_changing_history",
     "tests/application/test_onboarding.py::test_notes_only_onboarding_keeps_exact_current_bytes_unknown",
     "tests/application/test_onboarding_originals.py::test_known_original_requires_complete_archive_renderer_and_record_proof[matching]",
     "tests/application/test_onboarding_originals.py::test_known_original_requires_complete_archive_renderer_and_record_proof[wrong_archive_digest]",

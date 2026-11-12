@@ -247,6 +247,8 @@ def prepare_onboarding(
         )
     if history.status == "intact":
         return refused("existing_history_requires_update", history)
+    if history.status != "absent":
+        return refused("history_unavailable", history)
     if source is None:
         return refused(
             "onboarding_evidence_required", history, action="choose_source_reference"
