@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
-from .api_manifest import audited, load_baseline, read_json, safe_path
+from .api_manifest import _same_json, audited, load_baseline, read_json, safe_path
 from .api_recording import write_json
 from .api_scope import strict
 
@@ -40,6 +40,43 @@ def route_shape(path):
 
 def observations(directory, ledger):
     """Verify every occurrence, preserving raw and content-decoded bytes."""
+
+    def same_observation(first, second):
+        if first["status"] != second["status"]:
+            return False
+        if first["decoded_sha256"] == second["decoded_sha256"]:
+            return True
+        statistics = "/api/brains/" + ledger["brain_id"] + "/statistics"
+        if not (
+            first["status"] == 200
+            and first["target"] == statistics
+            and second["target"] == statistics
+        ):
+            return False
+        left = read_json(
+            safe_path(directory, first["decoded_body"]).read_bytes(),
+            parse_float=Decimal,
+        )
+        right = read_json(
+            safe_path(directory, second["decoded_body"]).read_bytes(),
+            parse_float=Decimal,
+        )
+        if not (
+            type(left) is dict
+            and type(right) is dict
+            and left.keys() == right.keys()
+            and left.get("brainId") == right.get("brainId") == ledger["brain_id"]
+            and type(left.get("dateGenerated")) is str
+            and type(right.get("dateGenerated")) is str
+            and left["dateGenerated"] != right["dateGenerated"]
+        ):
+            return False
+        return all(
+            _same_json(value, right[key])
+            for key, value in left.items()
+            if key != "dateGenerated"
+        )
+
     indexed = {}
     for ordinal, row in enumerate(ledger["occurrences"], 1):
         assert row["ordinal"] == ordinal and row["method"] == "GET", (
@@ -73,11 +110,9 @@ def observations(directory, ledger):
         indexed.setdefault(path, []).append(row)
         previous = indexed[path][:-1]
         if not path.startswith("/api/search/"):
-            assert all(
-                p["status"] == row["status"]
-                and p["decoded_sha256"] == row["decoded_sha256"]
-                for p in previous
-            ), "contradictory repeated source observation"
+            assert all(same_observation(p, row) for p in previous), (
+                "contradictory repeated source observation"
+            )
     return indexed
 
 
