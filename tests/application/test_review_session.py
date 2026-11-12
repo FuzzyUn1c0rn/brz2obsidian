@@ -805,6 +805,20 @@ def test_raw_review_rejects_malformed_and_ambiguous_envelopes(review_vault, tmp_
     raw = (FIXTURES / "attachment.inline.json").read_bytes()
     assert raw.startswith(b'{"schema_id":"brz2obsidian.saved-review",')
     assert b'"data":"YWJj"' in raw
+    schema = b'"brz2obsidian.saved-review"'
+    assert raw.count(schema) == 1
+    escaped = raw.replace(schema, b'"\\u0062rz2obsidian.saved-review"', 1)
+    malformed_strings = (
+        b'"\\qrz2obsidian.saved-review"',
+        b'"\\u06"',
+        b'"\\ud800"',
+        b'"\\udc00"',
+        b'"brz2obsidian\x01.saved-review"',
+    )
+    expected_actions = [
+        ("legacy:both", "attachment", "both"),
+        ("legacy:consent", "storage", "accept"),
+    ]
     cases = (
         raw[:-1],  # Truncated envelope.
         raw + b" true",  # A second value after a complete envelope.
@@ -816,7 +830,9 @@ def test_raw_review_rejects_malformed_and_ambiguous_envelopes(review_vault, tmp_
         b"\xff" + raw,  # Invalid UTF-8.
         raw.replace(b'"data":"YWJj"', b'"data":"YW@j"', 1),  # Invalid base64.
         raw.replace(b'"data":"YWJj"', b'"data":"Y"', 1),  # Incomplete base64.
+        *(raw.replace(schema, value, 1) for value in malformed_strings),
     )
+    assert escaped != raw and all(invalid != raw for invalid in cases)
     before = _review_preservation_state(vault)
     budget = ReviewBudget(
         metadata_limit=64 << 20,
@@ -835,6 +851,23 @@ def test_raw_review_rejects_malformed_and_ambiguous_envelopes(review_vault, tmp_
             valid = session.load_review(raw)
             assert valid.status == "loaded" and not valid.ready
             assert valid.loaded.readiness == "revalidation_required"
+            plan = valid.loaded.saved.plan
+            assert plan.proposal.generation == 2
+            assert [
+                (action.decision_id, action.domain, action.choice)
+                for action in plan.actions
+            ] == expected_actions
+        with ReviewSession(observed, scratch_parent=scratch, budget=budget) as session:
+            equivalent = session.load_review(escaped)
+            assert equivalent.status == "loaded" and not equivalent.ready
+            assert equivalent.loaded.readiness == "revalidation_required"
+            equivalent_plan = equivalent.loaded.saved.plan
+            assert equivalent.loaded.saved.schema_id == "brz2obsidian.saved-review"
+            assert equivalent_plan.proposal.generation == 2
+            assert [
+                (action.decision_id, action.domain, action.choice)
+                for action in equivalent_plan.actions
+            ] == expected_actions
         for invalid in cases:
             with ReviewSession(
                 observed, scratch_parent=scratch, budget=budget
