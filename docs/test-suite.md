@@ -270,3 +270,13 @@ typed-matcher failure from 14.03 to 3.04 seconds and the actual file writer from
 15.14–15.82 to 5.71 seconds. The writer still changes the actual owned file once,
 retains its literal new bytes and compares other files/index/refs. These are
 focused observations, not a projected whole-S2 bundle qualification.
+
+The shared-attachment composition control checks two independently selected
+attachments that rewrite one note. Its sixteen public-review cases retain
+selection order, format 7/8, Incoming/keep-both, and empty/nonempty first-input
+distinctions, with exact resulting bytes and both retained target meanings.
+It protects composition and selected-effects behavior that single-attachment
+controls do not establish. Changes to reference composition, attachment choice
+retention or selected effects require this owning control and affected consumers.
+Its focused measurement remains separate from qualification of the complete
+selection's branch coverage and elapsed-time requirements.

@@ -167,6 +167,7 @@
     "tests/reconciliation/test_memberships.py",
     "tests/reconciliation/test_absence.py",
     "tests/reconciliation/test_attachments.py",
+    "tests/reconciliation/test_shared_attachment_composition.py",
     "tests/reconciliation/test_resolution.py",
     "tests/reconciliation/test_refresh.py",
     "tests/reconciliation/test_resume.py",
