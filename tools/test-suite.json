@@ -29,6 +29,7 @@
     "tests/application/test_vault_checkpoint_review_integrity.py::test_public_history_retains_exact_derived_effects_without_current_authority",
     "tests/application/test_vault_checkpoint_review_integrity.py::test_compact_review_duplicate_interpretation_key_refuses",
     "tests/application/test_vault_checkpoint_review_integrity.py::test_deep_compact_malformed_shape_returns_typed_refusal",
+    "tests/application/test_cold_checkpoint_ancestors.py::test_coherent_ancestor_reference_tamper_refuses_and_retires_owned_files",
     "tests/application/test_format_onboarding_context.py",
     "tests/gui/test_update_drafts.py",
     "tests/reconciliation/test_legacy_content_vectors.py",

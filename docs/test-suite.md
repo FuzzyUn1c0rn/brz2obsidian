@@ -297,3 +297,11 @@ user Git state and unrelated scratch files. The selected lost-locator handoff,
 Undo and recovery cases retain their distinct responsibilities. A fresh passing
 focused receipt must establish the native controls when triggered; their passed
 pytest row in a failed ordinary receipt does not qualify all four checks.
+
+The selected cold-history corruption control coherently rehashes a historical
+reference in an ancestor while retaining a well-formed tip. Public history
+inspection and update loading must refuse that chain, retire owned temporary
+files and preserve actual authored bytes, locator and refs. This checks a
+nonreturned ancestor; the compact-review controls separately check the current
+tip and its owned byte-role closure. Changes to ancestor admission or historical
+reference interpretation require this control and the affected current-tip cases.
