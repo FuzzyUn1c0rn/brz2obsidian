@@ -173,12 +173,13 @@ def test_view_retains_canonical_context_equivalences(capture, monkeypatch, equiv
     assert path.read_bytes() == RAW
 
 
+@pytest.mark.parametrize("hex_form", ["uppercase", "not_hex"])
 def test_view_preserves_manifest_hex_observation_when_bytes_type_changes(
-    capture, monkeypatch
+    capture, monkeypatch, hex_form
 ):
     class UpperHex(bytes):
         def hex(self):
-            return super().hex().upper()
+            return super().hex().upper() if hex_form == "uppercase" else "not hex"
 
     session, _, path = capture
     original = session._manifest_bytes

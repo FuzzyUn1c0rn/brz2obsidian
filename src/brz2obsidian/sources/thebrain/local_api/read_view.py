@@ -72,15 +72,7 @@ def _comparison_pin(context):
             return None
         values["manifest_bytes"] = manifest
         return _freeze_context(values)
-    except (
-        MigrationRefused,
-        ValueError,
-        TypeError,
-        KeyError,
-        RecursionError,
-        MemoryError,
-        OverflowError,
-    ):
+    except Exception:  # noqa: BLE001 - An unavailable optimization retains the original byte pin.
         return None
 
 
@@ -116,14 +108,7 @@ def _context_unchanged(session, pins):
         try:
             if _matches_context(values, pins.comparison):
                 return True
-        except (
-            ValueError,
-            TypeError,
-            KeyError,
-            RecursionError,
-            MemoryError,
-            OverflowError,
-        ):
+        except Exception:  # noqa: BLE001 - Only comparison errors fall back; fresh model projection is outside this handler.
             pass
     return _encode_context(values) == pins.context
 
