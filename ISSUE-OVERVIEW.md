@@ -6,13 +6,15 @@ Open issue list refreshed from GitHub on **2026-11-13**. Internal tree counts re
 
 **Implemented:** the type/tag and icon implementation children are closed. Large-update lifecycle consumers, owned CLI history, shared-note attachment composition, profile-5 acceptance forwarding and source-baseline compatibility fixes are integrated. The latest product change speeds API capture-context comparison while retaining fresh validation and the original canonical fallback. It passed 72 author tests and 70 independent tests, all four checks and structured integration validation. Its large-source performance remains unmeasured.
 
-**Scoped native progress:** the single-file 16/64/256 MiB journeys, shared-note four-file 16/64 MiB journeys, empty/65,537-byte boundary and two-file duplicate-content journey passed at their recorded revisions. They include Save, fresh-process load/resume, Apply, unchanged-source repeat and exact byte/history/user-Git preservation. Four-file256 and remaining resource/storage/worker/actual-source cases are still open.
+**Scoped native progress:** the single-file and shared-note four-file 16/64/256 MiB series, empty/65,537-byte boundary, duplicate-content and same-size distinct-content journeys passed at their recorded revisions. They include Save, fresh-process load/resume, Apply, unchanged-source repeat and exact byte/history/user-Git preservation. The complete four-file series has independent review; producer/consumer private-memory endpoint changes were +0.379 MiB / -0.793 MiB, within the 32 MiB tolerance. The incompressible consumer also completed successfully; its independent evidence review is pending. A fresh focused cancellation/refresh/draft/retirement control passed all four checks. Storage/capacity, worker, actual-source and final native/user obligations remain.
 
 **Remaining regression failures:** the completed404-selector diagnostic at `7affd21`, before the latest API refactor, had 2,756 passed and one GUI wait failure; lint, format and dependency checks passed. Its coverage was **9,726/12,208 branches (79.669%), 41 short of 80%**, and wall time **1,731.79 seconds** under concurrent native work. It does not qualify the ordinary gate. The GUI file passed 5/5 in isolation; the original failure's cause is still unproven. The current candidate needs fresh ordinary verification meeting 80% branches and under 900 seconds.
 
-**Actual-source status:** the older API conversion was canceled as superseded after 115.45 minutes, with its partial capture/output preserved and unqualified. Fresh current-profile API/BRZ qualification and native icon fidelity remain next. Native and final-user acceptance are separate.
+**Current ordinary attempt:** the independently reviewed 407-selector proposal remains unintegrated. Its new ordinary attempt reached roughly 73% before the 900-second deadline, without a complete receipt or coverage result. It does not qualify. Work is addressing repeated test setup before another full run; the completed failed diagnostic above remains the latest complete measurement.
 
-**Usage rule:** monitor weekly usage and pause all work at **25% remaining or lower**. Latest observation: 40% remaining.
+**Actual-source status:** the older API conversion was canceled as superseded after 115.45 minutes, with its partial capture/output preserved and unqualified. The fresh public profile-5 conversion completed and the captured source was sealed; its full independent source/output audit is running. Native icon observations have started on verified isolated API/BRZ review copies, with the selected category's 25 expected members independently bound to captured source relationships. Full parity, native fidelity and final-user verdict remain open.
+
+**Usage rule:** monitor weekly usage and pause all work at **25% remaining or lower**. Latest observation: 39% remaining.
 
 ## Overall position
 
@@ -54,7 +56,7 @@ flowchart TD
 | Issue | Purpose | Actual progress and remaining work |
 |---|---|---|
 | [#292](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/292) | Overall type/tag relationships and inherited-icons feature | Core milestones M1–M4 accepted. Actual-source/native acceptance, final regression/review, user verdict and delivery remain. |
-| [#347](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/347) | Make large-attachment updates practical in memory | Lifecycle consumers and the shared-note attachment proof repair are integrated. Scoped single-file 16/64/256, four-file 16/64, empty/chunk-boundary and duplicate-content journeys passed. Four-file256, remaining resource/storage/worker cases, ordinary 80%/under 900 and real-source qualification remain. |
+| [#347](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/347) | Make large-attachment updates practical in memory | Lifecycle consumers and the shared-note attachment proof repair are integrated. Scoped single-file and four-file 16/64/256, empty/chunk-boundary, duplicate, distinct and incompressible-content journeys passed. Independent review of the last orthogonal cases, remaining resource/storage/worker cases, ordinary 80%/under 900 and real-source qualification remain. |
 | [#348](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/348) | Bounded ICO/DIB/BMP icon support | Product implementation and default wiring complete; all three children closed. The profile-5 command and source-baseline compatibility repairs are integrated. A reviewed API read-validation optimization is now integrated. Fresh actual API/BRZ qualification, native/user acceptance, broad regression and delivery remain. |
 
 ## Forty closed issues
@@ -83,7 +85,7 @@ flowchart TD
 
 ## Remaining route for this effort
 
-1. Finish the four-file 256 MiB point and the remaining scoped resource/storage/worker checks for #347. Reuse applicable completed evidence at its recorded revision.
+1. Finish review of the last orthogonal cases and remaining scoped resource/storage/worker checks for #347. Reuse applicable completed evidence at its recorded revision.
 2. Qualify fresh current-profile API output and matching BRZ parity for #348, then complete the native icon views and actual reported-source update journey.
 3. Resolve the regression GUI uncertainty, coverage deficit and ordinary runtime; verify the assembled current candidate.
 4. Complete actual-user acceptance and the single delivery PR with independent whole-PR review. Parent #292/#347/#348 remain open until their gates are satisfied.
