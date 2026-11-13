@@ -1,6 +1,7 @@
 """Independent provider/resource graphs through public review boundaries."""
 
 import json
+from copy import deepcopy
 
 import pytest
 
@@ -129,12 +130,8 @@ def facts_for(baseline, incoming, current, *, generation=1):
     )
 
 
-@pytest.mark.parametrize("change", ["bytes", "missing", "competitor"])
-@pytest.mark.parametrize("opaque_provider", (False, True))
-def test_far_provider_icon_bytes_retire_dependent_choice_and_keep_unrelated_decision(
-    change,
-    opaque_provider,
-):
+@pytest.fixture(scope="module")
+def prepared_far_provider_review(opaque_provider):
     baseline, incoming, current = conflicted_graph()
     if opaque_provider:
         current["Categories/A.md"] = current["Categories/A.md"].replace(
@@ -162,6 +159,20 @@ def test_far_provider_icon_bytes_retire_dependent_choice_and_keep_unrelated_deci
     independent = next(a for a in plan.approvals if a.decision_id == "keep-independent")
     assert independent.provenance == "explicit_user"
     assert independent.source_memory.choice == "keep_vault"
+    return baseline, incoming, current, plan, independent
+
+
+@pytest.mark.parametrize("change", ["bytes", "missing", "competitor"])
+@pytest.mark.parametrize("opaque_provider", (False, True), scope="module")
+def test_far_provider_icon_bytes_retire_dependent_choice_and_keep_unrelated_decision(
+    change,
+    prepared_far_provider_review,
+):
+    # Only the unchanged public preparation is shared. Every changed observation
+    # and its decisions receive independent dictionaries and contract graphs.
+    baseline, incoming, current, plan, independent = deepcopy(
+        prepared_far_provider_review
+    )
     edited = dict(current)
     if change == "bytes":
         edited["Attachments/A.svg"] = BLUE
