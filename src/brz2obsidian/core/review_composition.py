@@ -1,4 +1,4 @@
-"""Compose explicit reference authority with an independently approved edited body."""
+"""Compose explicit reference authority for a shared reviewed document."""
 
 from dataclasses import dataclass, replace
 from hashlib import sha256
@@ -258,6 +258,40 @@ def _composition_inputs(facts, actions, approvals):
             conflict = True
             continue
         documents.append((document, states[0], prior, choices))
+    edited_documents = {document.document_id for document, _, _, _ in documents}
+    for document_id, prior in originals.items():
+        if (
+            document_id in edited_documents
+            or facts.format_operation.kind != "source_update"
+        ):
+            continue
+        selected = tuple(
+            (binary, choice, proof)
+            for binary in approvals
+            if binary.attachment_selection is not None
+            and binary.attachment_candidate is not None
+            for choice in binary.attachment_selection.link_choices
+            if choice.document_id == document_id
+            for proof in binary.attachment_candidate.documents
+            if proof.document_id == document_id
+        )
+        if len({binary.decision_id for binary, _, _ in selected}) < 2:
+            continue
+        states = tuple(
+            state
+            for state in context.current_target_facts
+            if state.content == prior.content
+            and any(
+                target.target_id == state.target_id
+                and target.canonical_path == prior.source_path
+                for target in context.current_targets
+            )
+        )
+        if prior.status != "supported" or len(states) != 1:
+            conflict = True
+            continue
+        choices = tuple((choice, proof, True) for _, choice, proof in selected)
+        documents.append((prior, states[0], prior, choices))
     return tuple(documents), conflict
 
 
@@ -362,6 +396,38 @@ def advance_composition(work, returned, context):
 def composed_text_documents(facts, actions, approvals):
     result = drive_inline(CompositionWork(facts, actions, approvals))
     return dict(result.documents), result.conflict
+
+
+def automatic_composed_document(facts, change, approval, composed):
+    """Bind a shared explicit reference result to its unchanged automatic owner."""
+    if (
+        approval is not None
+        or change.requires_decision
+        or change.disposition not in ("preserve_vault", "no_change")
+        or facts.link_context is None
+        or facts.format_operation.kind != "source_update"
+    ):
+        return None
+    subject = next(
+        row
+        for row in facts.subjects
+        if (row.item_id, row.facet) == (change.item_id, change.facet)
+    )
+    if (
+        subject.attachment is not None
+        or subject.operation_reversal is not None
+        or change.target_path != subject.current.path
+        or not canonical_equal(change.result, subject.current.content)
+    ):
+        return None
+    matches = tuple(
+        composed[prior.document_id]
+        for prior in facts.link_context.current_documents
+        if prior.document_id in composed
+        and prior.source_path == subject.current.path
+        and canonical_equal(prior.content, subject.current.content)
+    )
+    return matches[0] if len(matches) == 1 else None
 
 
 def automatic_reference_document(facts, change, approval, approvals):
