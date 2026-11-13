@@ -280,3 +280,20 @@ controls do not establish. Changes to reference composition, attachment choice
 retention or selected effects require this owning control and affected consumers.
 Its focused measurement remains separate from qualification of the complete
 selection's branch coverage and elapsed-time requirements.
+
+The read-view selection includes current in-memory association changes,
+canonical dictionary/sequence/value equivalences and literal manifest-hex
+observations. These public guards protect the structured comparison's fallback
+and permanent failed-view behavior alongside the existing metadata, complete
+integrity, closure and nested-admission controls. Changes to read-view pins,
+comparison or fallback require these guards and affected capture consumers.
+
+The proposed addition of `test_owned_update_controls.py` is withdrawn from the
+ordinary selection. Its complete native control remains a required focused check
+when owned preparation, binary paging, draft/edit sealing, cancellation,
+unchanged or changed-source refresh, retirement or their direct consumers change.
+It checks actual BRZ setup, invalidation of stale bindings and preservation of
+user Git state and unrelated scratch files. The selected lost-locator handoff,
+Undo and recovery cases retain their distinct responsibilities. A fresh passing
+focused receipt must establish the native controls when triggered; their passed
+pytest row in a failed ordinary receipt does not qualify all four checks.
