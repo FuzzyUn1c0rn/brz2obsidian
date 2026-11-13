@@ -281,12 +281,18 @@ retention or selected effects require this owning control and affected consumers
 Its focused measurement remains separate from qualification of the complete
 selection's branch coverage and elapsed-time requirements.
 
-The read-view selection includes current in-memory association changes,
-canonical dictionary/sequence/value equivalences and literal manifest-hex
-observations. These public guards protect the structured comparison's fallback
-and permanent failed-view behavior alongside the existing metadata, complete
-integrity, closure and nested-admission controls. Changes to read-view pins,
-comparison or fallback require these guards and affected capture consumers.
+The complete owning read-view file protects the structured comparison at every
+stream check: current associations, canonical equivalences, manifest-hex
+observations, consumed bytes and EOF, early close, thread/nesting authority,
+descriptor/root replacement and failure cleanup. These public outcomes retain
+permanent revocation alongside exact metadata and complete integrity checks.
+Changes to read-view pins, comparison or fallback require this owning file and
+affected capture consumers.
+
+The Both-image Restore control resolves its public choices once against the
+actual native preflight, then uses that ready plan for real interrupted Apply
+and Restore. It retains exact image/owner bytes, provider reversal and user-Git
+preservation without replaying the same choices against a second preflight.
 
 The proposed addition of `test_owned_update_controls.py` is withdrawn from the
 ordinary selection. Its complete native control remains a required focused check
