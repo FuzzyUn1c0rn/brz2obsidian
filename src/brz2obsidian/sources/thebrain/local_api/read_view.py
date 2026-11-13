@@ -106,10 +106,11 @@ def _context_unchanged(session, pins):
     values = _context_values(session)
     if pins.comparison is not None:
         try:
-            if _matches_context(values, pins.comparison):
-                return True
+            matched = _matches_context(values, pins.comparison)
         except Exception:  # noqa: BLE001 - Only comparison errors fall back; fresh model projection is outside this handler.
-            pass
+            matched = False
+        if matched:
+            return True
     return _encode_context(values) == pins.context
 
 
