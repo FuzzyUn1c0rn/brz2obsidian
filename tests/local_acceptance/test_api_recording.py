@@ -28,7 +28,14 @@ from tests.local_acceptance.test_api_scope_v3 import scope_baseline
 from tests.support.audit_sources import SCHEMA
 from tests.support.local_api import ALONE, BRAIN, HOME, api_server, thought
 from tests.support.local_api_graph import GraphApi, link
-from tests.support.local_api_payloads import NOTE, RAW_NOTE, PayloadApi
+from tests.support.local_api_payloads import (
+    FILE,
+    NOTE,
+    PNG,
+    RAW_NOTE,
+    FilePayloadApi,
+    PayloadApi,
+)
 
 
 @pytest.fixture(scope="module")
@@ -120,6 +127,259 @@ def test_public_capture_retains_independent_raw_baseline(
         json.loads((captured.directory / "recording.json").read_bytes()) == transcript
     )
     baseline.verify()
+
+
+def test_recorded_statistics_allow_distinct_generation_times(
+    tmp_path, qualification, sealed
+):
+    # The reviewed live source returned stable counts and generated times ten
+    # minutes apart. The older no-timestamp fixture remains independently valid.
+    legacy = [sealed.json(path) for path in sealed.data["statistics"]]
+    assert len(legacy) == 2 and all("dateGenerated" not in row for row in legacy)
+
+    api = PayloadApi()
+    api.overrides["/api/v1/docs.json"] = (200, SCHEMA)
+    route = f"/api/brains/{BRAIN}/statistics"
+    _, counters = api.response(route, {})
+    timestamps = ("2026-11-12T19:49:09+01:00", "2026-11-12T19:59:09+01:00")
+    observed_requests = []
+
+    def statistics(query):
+        assert not query
+        timestamp = timestamps[0] if not observed_requests else timestamps[1]
+        observed_requests.append(timestamp)
+        return 200, {**counters, "dateGenerated": timestamp}
+
+    api.overrides[route] = statistics
+    with api_server(api) as (_, upstream):
+        recording = ApiRecording(
+            tmp_path / "generated-statistics",
+            upstream,
+            brain_id=BRAIN,
+            credential="KEY",
+        )
+        with recording:
+            module = LocalApiSourceModule(
+                LocalApiConfig(api_url=recording.api_url),
+                credentials=lambda: "KEY",
+                profile_version="5",
+            )
+            with module.open(LocalApiSourceRef(BRAIN)) as session:
+                session.verify_consistency()
+            recording.complete()
+    assert len(observed_requests) >= 2
+    assert observed_requests[0] == timestamps[0]
+    assert all(value == timestamps[1] for value in observed_requests[1:])
+    baseline = recording.seal(qualification=qualification)
+    audit_baseline(baseline, profile_version="5")
+    observed = [baseline.json(path) for path in baseline.data["statistics"]]
+    assert [row["dateGenerated"] for row in observed] == list(timestamps)
+    assert [row["brainId"] for row in observed] == [BRAIN, BRAIN]
+    assert [row["thoughts"] for row in observed] == [2, 2]
+    ledger = baseline.json(baseline.data["http_responses"])
+    rows = [row for row in ledger["occurrences"] if row["target"] == route]
+    assert len(rows) == len(observed_requests)
+    assert [baseline.json(row["decoded_body"])["dateGenerated"] for row in rows] == (
+        observed_requests
+    )
+    baseline.verify()
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "counter",
+        "other_field",
+        "field_type",
+        "missing_time",
+        "time_type",
+        "foreign_brain",
+        "query",
+        "wrong_route",
+        "status",
+        "duplicate_key",
+        "tampered_body",
+    ],
+)
+def test_recorded_statistics_refuse_other_disagreement(
+    tmp_path, captured, qualification, failure
+):
+    directory = tmp_path / "unqualified-statistics"
+    directory.mkdir()
+    for source in captured.directory.glob("response-*.bin"):
+        shutil.copyfile(source, directory / source.name)
+    ledger = json.loads((captured.directory / "recording.json").read_bytes())
+    statistics = [
+        row
+        for row in ledger["occurrences"]
+        if row["target"] == f"/api/brains/{BRAIN}/statistics"
+    ]
+    assert len(statistics) >= 2
+    for index, row in enumerate(statistics):
+        assert row["content_encoding"] == "identity" and row["status"] == 200
+        if failure == "wrong_route":
+            row["target"] = "/api/brains/other/statistics"
+        value = json.loads((directory / row["decoded_body"]).read_bytes())
+        value["dateGenerated"] = (
+            "2026-11-12T19:49:09+01:00" if index == 0 else "2026-11-12T19:59:09+01:00"
+        )
+        value["other"] = {"count": 1}
+        if index == len(statistics) - 1:
+            if failure == "counter":
+                value["thoughts"] += 1
+            elif failure == "other_field":
+                value["other"]["count"] = 2
+            elif failure == "field_type":
+                value["other"]["count"] = True
+            elif failure == "missing_time":
+                del value["dateGenerated"]
+            elif failure == "time_type":
+                value["dateGenerated"] = 1
+            elif failure == "foreign_brain":
+                value["brainId"] = "99999999-9999-4999-8999-999999999999"
+            elif failure == "query":
+                row["target"] += "?view=other"
+            elif failure == "status":
+                row["status"] = 400
+        raw = json.dumps(value).encode()
+        if index == len(statistics) - 1 and failure == "duplicate_key":
+            raw = raw.replace(b'{"brainId":', b'{"brainId":"duplicate","brainId":', 1)
+        for field, length, digest in (
+            ("body", "length", "sha256"),
+            ("decoded_body", "decoded_length", "decoded_sha256"),
+        ):
+            (directory / row[field]).write_bytes(raw)
+            row[length] = len(raw)
+            row[digest] = hashlib.sha256(raw).hexdigest()
+        if index == len(statistics) - 1 and failure == "tampered_body":
+            (directory / row["decoded_body"]).write_bytes(raw + b" ")
+    raw = json.dumps(ledger).encode()
+    (directory / "recording.json").write_bytes(raw)
+    expected = {
+        "duplicate_key": "duplicate evidence JSON keys",
+        "tampered_body": "changed HTTP response evidence",
+    }.get(failure, "contradictory repeated source observation")
+    with pytest.raises(AssertionError, match=expected):
+        build_baseline(
+            directory, hashlib.sha256(raw).hexdigest(), qualification=qualification
+        )
+    assert not (directory / "manifest.json").exists()
+
+
+def test_recorded_graph_and_owner_allow_attachment_reordering(tmp_path, qualification):
+    # The live API returned the same declarations and positions in a different
+    # graph/list order; preserve both independent wire observations.
+    api = FilePayloadApi()
+    api.overrides["/api/v1/docs.json"] = (200, SCHEMA)
+    api.attachments[FILE]["position"] = 1
+    graph_path = f"/api/thoughts/{BRAIN}/{HOME}/graph"
+    status, graph = api.response(graph_path, {})
+    assert status == 200
+    assert [row["id"] for row in graph["attachments"]] == [NOTE, FILE]
+    graph["attachments"] = list(reversed(graph["attachments"]))
+    api.overrides[graph_path] = (200, graph)
+    with api_server(api) as (_, upstream):
+        recording = ApiRecording(
+            tmp_path / "reordered-attachments",
+            upstream,
+            brain_id=BRAIN,
+            credential="KEY",
+        )
+        with recording:
+            module = LocalApiSourceModule(
+                LocalApiConfig(api_url=recording.api_url),
+                credentials=lambda: "KEY",
+                profile_version="5",
+            )
+            with module.open(LocalApiSourceRef(BRAIN)) as session:
+                session.verify_consistency()
+            recording.complete()
+    baseline = recording.seal(qualification=qualification)
+    audit_baseline(baseline, profile_version="5")
+    graph_rows = baseline.json(baseline.data["graphs"][HOME])["attachments"]
+    owned = baseline.json(baseline.data["attachment_inventories"][HOME])
+    assert [(row["id"], row["position"]) for row in graph_rows] == [
+        (FILE, 1),
+        (NOTE, 0),
+    ]
+    assert [(row["id"], row["position"]) for row in owned] == [(NOTE, 0), (FILE, 1)]
+    assert baseline.bytes(baseline.data["payloads"][FILE]["path"]) == PNG
+    assert baseline.bytes(baseline.data["payloads"][NOTE]["path"]) == RAW_NOTE
+    baseline.verify()
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "duplicate",
+        "missing",
+        "extra",
+        "position",
+        "field",
+        "field_type",
+        "foreign_owner",
+        "foreign_brain",
+        "source_type",
+        "malformed_item",
+        "malformed_array",
+        "malformed_id",
+    ],
+)
+def test_recorded_graph_attachment_disagreement_never_seals(
+    tmp_path, captured, qualification, damage
+):
+    directory = tmp_path / "unqualified-graph-attachments"
+    directory.mkdir()
+    for source in captured.directory.glob("response-*.bin"):
+        shutil.copyfile(source, directory / source.name)
+    ledger = json.loads((captured.directory / "recording.json").read_bytes())
+    route = f"/api/thoughts/{BRAIN}/{HOME}/graph?includeSiblings=true"
+    row = next(item for item in ledger["occurrences"] if item["target"] == route)
+    assert row["status"] == 200 and row["content_encoding"] == "identity"
+    graph = json.loads((directory / row["decoded_body"]).read_bytes())
+    attachments = graph["attachments"]
+    assert len(attachments) == 1 and attachments[0]["id"] == NOTE
+    if damage == "duplicate":
+        attachments.append(copy.deepcopy(attachments[0]))
+    elif damage == "missing":
+        attachments.clear()
+    elif damage == "extra":
+        extra = copy.deepcopy(attachments[0])
+        extra["id"] = "99999999-9999-4999-8999-999999999999"
+        attachments.append(extra)
+    elif damage == "position":
+        attachments[0]["position"] = 7
+    elif damage == "field":
+        attachments[0]["name"] = "different source name"
+    elif damage == "field_type":
+        attachments[0]["position"] = False
+    elif damage == "foreign_owner":
+        attachments[0]["sourceId"] = ALONE
+    elif damage == "foreign_brain":
+        attachments[0]["brainId"] = "99999999-9999-4999-8999-999999999999"
+    elif damage == "source_type":
+        attachments[0]["sourceType"] = 3
+    elif damage == "malformed_array":
+        graph["attachments"] = {"id": NOTE}
+    elif damage == "malformed_id":
+        attachments[0]["id"] = "not-a-uuid"
+    else:
+        attachments[0] = "not an attachment object"
+    raw = json.dumps(graph).encode()
+    for field, length, digest in (
+        ("body", "length", "sha256"),
+        ("decoded_body", "decoded_length", "decoded_sha256"),
+    ):
+        (directory / row[field]).write_bytes(raw)
+        row[length] = len(raw)
+        row[digest] = hashlib.sha256(raw).hexdigest()
+    raw = json.dumps(ledger).encode()
+    (directory / "recording.json").write_bytes(raw)
+    with pytest.raises(AssertionError, match="same-counter attachment disagreement"):
+        build_baseline(
+            directory, hashlib.sha256(raw).hexdigest(), qualification=qualification
+        )
+    assert not (directory / "manifest.json").exists()
 
 
 def test_independent_audit_rechecks_recorded_required_coverage(

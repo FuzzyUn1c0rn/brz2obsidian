@@ -7,6 +7,7 @@ from brz2obsidian.core.link_meanings import resolve_occurrence
 from brz2obsidian.core.link_validation import _validate_link_document
 from brz2obsidian.core.review_appearance import provider_chain_blockers
 from brz2obsidian.core.review_composition import (
+    automatic_composed_document,
     automatic_reference_document,
 )
 from brz2obsidian.core.review_links import (
@@ -346,6 +347,24 @@ def selected_effect_blockers(facts, proposal, actions, approvals, *, composition
         if subject.attachment is not None:
             continue
         selected_path = change.target_path if approval is None else approval.target_path
+        composed = automatic_composed_document(
+            facts, change, approval, composed_documents
+        )
+        if composed is not None:
+            document, state = composed
+            documents[document.document_id] = document
+            proof_documents[document.document_id] = document
+            if not canonical_equal(document.content, subject.current.content):
+                targets_for_path = tuple(
+                    t
+                    for t in context.current_targets
+                    if t.canonical_path == selected_path
+                )
+                if len(targets_for_path) != 1:
+                    add("selected_link_context_conflict")
+                else:
+                    write(targets_for_path[0], document.content, selected_path, state)
+            continue
         reference = automatic_reference_document(facts, change, approval, approvals)
         if reference is not None:
             documents[reference.document_id] = reference

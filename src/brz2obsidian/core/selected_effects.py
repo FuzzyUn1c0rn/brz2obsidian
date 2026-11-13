@@ -10,6 +10,7 @@ from brz2obsidian.core.reversals import reversal_subject, selected_reversal_outp
 from brz2obsidian.core.review_attachments import applicable_approvals
 from brz2obsidian.core.review_composition import (
     CompositionWork,
+    automatic_composed_document,
     automatic_reference_document,
 )
 
@@ -157,10 +158,15 @@ def _project_review_effects_body(plan, effective_approvals, composition):
                         )
                 continue
             content = change.result if approval is None else approval.result
+            composed = automatic_composed_document(
+                plan.producer_facts, change, approval, composed_documents
+            )
+            if composed is not None:
+                content = composed_contents[composed[0].document_id]
             reference = automatic_reference_document(
                 plan.producer_facts, change, approval, tuple(approvals.values())
             )
-            if reference is not None:
+            if reference is not None and composed is None:
                 content = reference.content
             subject = reversal_subject(plan.producer_facts, change)
             if subject.operation_reversal is not None:
