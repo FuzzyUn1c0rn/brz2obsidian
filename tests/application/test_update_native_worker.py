@@ -482,16 +482,16 @@ def test_hidden_worker_real_capture_and_file_stop_reopen_from_exact_native_histo
                 and saved.capture.object_storage == "verified"
                 and not saved.capture.authored_files_changed
             )
-            expired = call(
-                {"command": "page", "binding": chosen.binding, "limit": 1}
-            )
+            expired = call({"command": "page", "binding": chosen.binding, "limit": 1})
             assert (
                 expired.status == "refused"
                 and expired.code == "context_changed"
                 and expired.binding is None
                 and not expired.ready
             )
-            assert user_git(vault) == before_git
+            with monkeypatch.context() as independent_git:
+                independent_git.setattr(subprocess, "Popen", launch)
+                assert user_git(vault) == before_git
             assert (vault / "Manual.md").read_bytes() == manual
             closed = call(
                 {"command": "close", "binding": saved.binding, "choice": "discard"}
