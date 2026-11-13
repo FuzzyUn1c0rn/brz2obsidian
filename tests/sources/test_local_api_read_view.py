@@ -5,6 +5,7 @@ import os
 import subprocess
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -85,6 +86,118 @@ def test_view_metadata_observation_is_pinned_even_after_restoration(capture, nam
         path.write_bytes(original)
         with pytest.raises(MigrationRefused), reader.open_payload(ASSET):
             pass
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "snapshot",
+        "audit",
+        "identifiers",
+        "root",
+        "bindings",
+        "manifest",
+        "manifest_bytes",
+    ],
+)
+def test_view_rechecks_current_memory_associations_and_keeps_caught_failure(
+    capture, monkeypatch, field
+):
+    session, _, path = capture
+    if field == "snapshot":
+        attribute = "_snapshot"
+        changed = session.snapshot.model_copy(update={"collection_title": "Changed"})
+    elif field == "audit":
+        attribute = "_audit"
+        # Python equality treats False and zero alike; the capture encoding does not.
+        changed = session._audit.model_copy(update={"atomic": 0})
+    else:
+        attribute = "_" + field
+        changed = deepcopy(getattr(session, attribute))
+        if field == "identifiers":
+            changed["profile_version"] = "changed"
+        elif field == "root":
+            changed += "changed"
+        elif field == "bindings":
+            changed[ASSET] = "payload/foreign.bin"
+        elif field == "manifest":
+            changed["files"][0]["actual_length"] += 1
+        else:
+            changed += b" "
+    with (
+        pytest.raises(MigrationRefused),
+        session.payload_read_view() as reader,
+        reader.open_payload(ASSET) as stream,
+    ):
+        assert stream.read(1) == b"A"
+        with monkeypatch.context() as fault:
+            fault.setattr(session, attribute, changed)
+            with pytest.raises(MigrationRefused):
+                stream.read(1)
+        with pytest.raises(MigrationRefused):
+            stream.read(1)
+    assert path.read_bytes() == RAW
+
+
+@pytest.mark.parametrize(
+    "equivalent", ["order", "sequence", "string", "manifest_bytes"]
+)
+def test_view_retains_canonical_context_equivalences(capture, monkeypatch, equivalent):
+    class Text(str):
+        pass
+
+    session, _, path = capture
+    with (
+        session.payload_read_view() as reader,
+        reader.open_payload(ASSET) as stream,
+    ):
+        assert stream.read(1) == b"A"
+        with monkeypatch.context() as change:
+            if equivalent == "order":
+                change.setattr(
+                    session,
+                    "_identifiers",
+                    dict(reversed(session._identifiers.items())),
+                )
+            elif equivalent == "sequence":
+                manifest = deepcopy(session._manifest)
+                manifest["files"] = tuple(manifest["files"])
+                change.setattr(session, "_manifest", manifest)
+            elif equivalent == "string":
+                change.setattr(session, "_root", Text(session._root))
+            else:
+                change.setattr(
+                    session, "_manifest_bytes", bytearray(session._manifest_bytes)
+                )
+            assert stream.read() == b"\nB\n"
+    assert path.read_bytes() == RAW
+
+
+def test_view_preserves_manifest_hex_observation_when_bytes_type_changes(
+    capture, monkeypatch
+):
+    class UpperHex(bytes):
+        def hex(self):
+            return super().hex().upper()
+
+    session, _, path = capture
+    original = session._manifest_bytes
+    encoded = UpperHex(original)
+    assert encoded.hex() != original.hex()
+    monkeypatch.setattr(session, "_manifest_bytes", encoded)
+    with (
+        pytest.raises(MigrationRefused),
+        session.payload_read_view() as reader,
+        reader.open_payload(ASSET) as stream,
+    ):
+        assert stream.read(1) == b"A"
+        with monkeypatch.context() as change:
+            change.setattr(session, "_manifest_bytes", original)
+            with pytest.raises(MigrationRefused):
+                stream.read(1)
+        with pytest.raises(MigrationRefused):
+            stream.read(1)
+    assert path.read_bytes() == RAW
 
 
 def test_view_rejects_nesting_concurrent_use_reentry_and_escaped_access(capture):

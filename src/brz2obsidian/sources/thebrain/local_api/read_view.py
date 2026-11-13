@@ -4,12 +4,12 @@ import hashlib
 import os
 import stat
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from threading import get_ident
 
 from brz2obsidian.contracts import MigrationFailed, MigrationRefused
 
-from .capture import canonical
+from .capture import canonical, parse_json
 from .errors import failure, refuse
 
 
@@ -29,18 +29,103 @@ def with_secondary(primary, secondary):
     return primary
 
 
+def _context_values(session):
+    return {
+        "snapshot": session.snapshot.model_dump(mode="json"),
+        "audit": session._audit.model_dump(mode="json"),
+        "identifiers": session._identifiers,
+        "root": session._root,
+        "bindings": session._bindings,
+        "manifest": session._manifest,
+        "manifest_bytes": session._manifest_bytes,
+    }
+
+
+def _encode_context(values):
+    return canonical({**values, "manifest_bytes": values["manifest_bytes"].hex()})
+
+
 def context_bytes(session):
-    return canonical(
-        {
-            "snapshot": session.snapshot.model_dump(mode="json"),
-            "audit": session._audit.model_dump(mode="json"),
-            "identifiers": session._identifiers,
-            "root": session._root,
-            "bindings": session._bindings,
-            "manifest": session._manifest,
-            "manifest_bytes": session._manifest_bytes.hex(),
-        }
-    )
+    return _encode_context(_context_values(session))
+
+
+def _freeze_context(value):
+    kind = type(value)
+    if kind in (type(None), bool, int, str, bytes):
+        return kind, value
+    if kind is list:
+        return tuple, tuple(_freeze_context(child) for child in value)
+    if kind is dict and all(type(key) is str for key in value):
+        return dict, tuple(
+            (key, _freeze_context(child)) for key, child in value.items()
+        )
+    raise TypeError("Unsupported comparison pin")
+
+
+def _comparison_pin(context):
+    try:
+        # Derive both proofs from the exact same immutable admitted bytes, not
+        # another observation of mutable session fields or an aliased dictionary.
+        values = parse_json(context.decode("utf-8"))
+        manifest = bytes.fromhex(values["manifest_bytes"])
+        if manifest.hex() != values["manifest_bytes"]:
+            return None
+        values["manifest_bytes"] = manifest
+        return _freeze_context(values)
+    except (
+        MigrationRefused,
+        ValueError,
+        TypeError,
+        KeyError,
+        RecursionError,
+        MemoryError,
+        OverflowError,
+    ):
+        return None
+
+
+def _matches_context(value, pin):
+    kind, expected = pin
+    if kind is tuple:
+        return (
+            type(value) in (list, tuple)
+            and len(value) == len(expected)
+            and all(
+                _matches_context(child, frozen)
+                for child, frozen in zip(value, expected)
+            )
+        )
+    if kind is dict:
+        return (
+            type(value) is dict
+            and len(value) == len(expected)
+            and all(type(key) is str for key in value)
+            and all(
+                key in value and _matches_context(value[key], child)
+                for key, child in expected
+            )
+        )
+    return type(value) is kind and value == expected
+
+
+def _context_unchanged(session, pins):
+    # Model projection remains fresh, once per check. Projection failures retain
+    # their old failure path rather than being retried by the optimization.
+    values = _context_values(session)
+    if pins.comparison is not None:
+        try:
+            if _matches_context(values, pins.comparison):
+                return True
+        except (
+            ValueError,
+            TypeError,
+            KeyError,
+            RecursionError,
+            MemoryError,
+            OverflowError,
+        ):
+            pass
+    return _encode_context(values) == pins.context
 
 
 def ordinary(path, *, directory=False):
@@ -63,6 +148,7 @@ class ReadPins:
     documents: tuple
     bindings: tuple
     files: tuple
+    comparison: tuple | None = None
 
 
 class CaptureReadView:
@@ -91,7 +177,7 @@ class CaptureReadView:
         try:
             self.session.verify_consistency()
             directory = self.session._directory
-            self.pins = ReadPins(
+            pins = ReadPins(
                 directory,
                 self.session._ownership,
                 ordinary(directory / "payload", directory=True)
@@ -108,6 +194,7 @@ class CaptureReadView:
                     for entry in self.session._manifest["files"]
                 ),
             )
+            self.pins = replace(pins, comparison=_comparison_pin(pins.context))
             return self
         except BaseException as error:
             self.failed = self.closed = True
@@ -137,7 +224,7 @@ class CaptureReadView:
                 self.session._directory != self.pins.directory
                 or self.session._ownership != self.pins.owner
                 or ordinary(self.pins.directory, directory=True) != self.pins.owner
-                or context_bytes(self.session) != self.pins.context
+                or not _context_unchanged(self.session, self.pins)
             ):
                 refuse("The pinned capture association changed")
             for name, expected in self.pins.documents:
