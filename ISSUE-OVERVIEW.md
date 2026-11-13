@@ -2,7 +2,7 @@
 
 Open issue list refreshed from GitHub on **2026-11-13**. Internal tree counts retain the previously reconciled map; this file is a dated snapshot.
 
-**Current feature root:** `codex/r292-type-tag-support`, implementation through `8abd20f`. There is one authoritative feature branch. Isolated helper branches hold reviewed candidates and the unintegrated regression-selection proposal.
+**Current feature root:** `codex/r292-type-tag-support`, product implementation through `8abd20f`, reviewed test/setup/selection contribution integrated through `0c81f96`. There is one authoritative feature branch; isolated helper branches and all historical evidence are preserved.
 
 **Implemented:** the type/tag and icon implementation children are closed. Large-update lifecycle consumers, owned CLI history, shared-note attachment composition, profile-5 acceptance forwarding and source-baseline compatibility fixes are integrated. The latest product change speeds API capture-context comparison while retaining fresh validation and the original canonical fallback. It passed 72 author tests and 70 independent tests, all four checks and structured integration validation. Its large-source performance remains unmeasured.
 
@@ -10,11 +10,11 @@ Open issue list refreshed from GitHub on **2026-11-13**. Internal tree counts re
 
 **Remaining regression failures:** the completed404-selector diagnostic at `7affd21`, before the latest API refactor, had 2,756 passed and one GUI wait failure; lint, format and dependency checks passed. Its coverage was **9,726/12,208 branches (79.669%), 41 short of 80%**, and wall time **1,731.79 seconds** under concurrent native work. It does not qualify the ordinary gate. The GUI file passed 5/5 in isolation; the original failure's cause is still unproven. The current candidate needs fresh ordinary verification meeting 80% branches and under 900 seconds.
 
-**Current ordinary attempt:** the independently reviewed 407-selector proposal remains unintegrated. Its new ordinary attempt reached roughly 73% before the 900-second deadline, without a complete receipt or coverage result. It does not qualify. Work is addressing repeated test setup before another full run; the completed failed diagnostic above remains the latest complete measurement.
+**Current ordinary candidate:** the reviewed test/setup/selection contribution is integrated. It removes repeated choice replay from one real recovery test while preserving its assertions and identical production line/branch sets. Selecting the complete read-view owner replaces seven narrower selectors, leaving 401 unique selectors with every prior responsibility retained. A fresh independent 52-case scope and all four checks passed. The preceding 407-selector attempt reached roughly 73% before the 900-second deadline, without a complete receipt or coverage result. Full current ordinary verification remains open; the failed diagnostic above remains the latest complete measurement.
 
-**Actual-source status:** the older API conversion was canceled as superseded after 115.45 minutes, with its partial capture/output preserved and unqualified. The fresh public profile-5 conversion completed and the captured source was sealed; its full independent source/output audit is running. Native icon observations have started on verified isolated API/BRZ review copies, with the selected category's 25 expected members independently bound to captured source relationships. Full parity, native fidelity and final-user verdict remain open.
+**Actual-source status:** the older API conversion was canceled as superseded after 115.45 minutes, with its partial capture/output preserved and unqualified. The fresh public profile-5 conversion completed and the captured source was sealed; its full independent source/output audit is running. The earlier public inspect completed acquisition, but its independent audit timed out; that inspect remains unqualified. Fresh native source/API/BRZ samples and controlled inheritance/priority edits in both review copies have independent scoped review. Source selection uses documented unique-title/context inference, conditional on drift reconciliation. Full inspect/conversion/parity qualification and final native/user verdicts remain open.
 
-**Usage rule:** monitor weekly usage and pause all work at **25% remaining or lower**. Latest observation: 39% remaining.
+**Usage rule:** monitor weekly usage and pause all work at **25% remaining or lower**. Latest observation: 37% remaining.
 
 ## Overall position
 
