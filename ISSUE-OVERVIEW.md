@@ -1,12 +1,18 @@
 # GitHub issue overview
 
-Snapshot last verified against live GitHub on **2026-11-12**. This is a saved overview, not a continuously updated board.
+Open issue list refreshed from GitHub on **2026-11-13**. Internal tree counts retain the previously reconciled map; this file is a dated snapshot.
 
-**Current continuation, 2026-11-12:** implementation follow-ups are integrated through `68945e2` on `codex/r292-type-tag-support`. The owned History/Undo path now uses the existing tiny native fixture. The profile-5 acceptance command is corrected and independently verified, including preservation of rejected conversion results.
+**Current feature root:** `codex/r292-type-tag-support`, implementation through `8abd20f`. There is one authoritative feature branch. Isolated helper branches hold reviewed candidates and the unintegrated regression-selection proposal.
 
-The complete **16 MiB and 256 MiB single-file journeys passed**, including fresh-process load, Apply and unchanged-source repeat. Application-driver peak private memory grew by **0.31 MiB for the producer** and decreased by **0.54 MiB for the consumer**, within the 32 MiB endpoint tolerance. Intermediate/many-file, other resource cases and actual-source/native acceptance remain.
+**Implemented:** the type/tag and icon implementation children are closed. Large-update lifecycle consumers, owned CLI history, shared-note attachment composition, profile-5 acceptance forwarding and source-baseline compatibility fixes are integrated. The latest product change speeds API capture-context comparison while retaining fresh validation and the original canonical fallback. It passed 72 author tests and 70 independent tests, all four checks and structured integration validation. Its large-source performance remains unmeasured.
 
-The latest complete maintained run passed **2,716 tests and all four checks in 852.60 seconds**, but measured **76.02% production branches**, below 80%. A subsequent expanded 403-selector attempt reached the 900-second deadline after **2,493 completed tests with no observed test failure**; it has no completed receipt or complete coverage result. The ordinary coverage/time gate remains open. Monitor weekly usage and pause at **40% remaining or lower**.
+**Scoped native progress:** the single-file 16/64/256 MiB journeys, shared-note four-file 16/64 MiB journeys, empty/65,537-byte boundary and two-file duplicate-content journey passed at their recorded revisions. They include Save, fresh-process load/resume, Apply, unchanged-source repeat and exact byte/history/user-Git preservation. Four-file256 and remaining resource/storage/worker/actual-source cases are still open.
+
+**Remaining regression failures:** the completed404-selector diagnostic at `7affd21`, before the latest API refactor, had 2,756 passed and one GUI wait failure; lint, format and dependency checks passed. Its coverage was **9,726/12,208 branches (79.669%), 41 short of 80%**, and wall time **1,731.79 seconds** under concurrent native work. It does not qualify the ordinary gate. The GUI file passed 5/5 in isolation; the original failure's cause is still unproven. The current candidate needs fresh ordinary verification meeting 80% branches and under 900 seconds.
+
+**Actual-source status:** the older API conversion was canceled as superseded after 115.45 minutes, with its partial capture/output preserved and unqualified. Fresh current-profile API/BRZ qualification and native icon fidelity remain next. Native and final-user acceptance are separate.
+
+**Usage rule:** monitor weekly usage and pause all work at **25% remaining or lower**. Latest observation: 40% remaining.
 
 ## Overall position
 
@@ -28,7 +34,7 @@ flowchart TD
     A --> B["Core behavior and source fixes<br/>23 CLOSED issues"]
     A --> C["#348 — Additional icon formats<br/>Implementation done; acceptance OPEN"]
     C --> D["#352, #355, #356<br/>CLOSED"]
-    A --> E["#347 — Memory-efficient large-attachment updates<br/>CURRENT remaining consumers and qualification"]
+    A --> E["#347 — Memory-efficient large-attachment updates<br/>Implementation integrated; qualification OPEN"]
     E --> F["10 direct prerequisite/implementation issues<br/>CLOSED"]
     E --> G["#357 — Content representation and legacy replay<br/>CLOSED after evidence reconciliation"]
     G --> H["#359, #360<br/>CLOSED"]
@@ -48,8 +54,8 @@ flowchart TD
 | Issue | Purpose | Actual progress and remaining work |
 |---|---|---|
 | [#292](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/292) | Overall type/tag relationships and inherited-icons feature | Core milestones M1–M4 accepted. Actual-source/native acceptance, final regression/review, user verdict and delivery remain. |
-| [#347](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/347) | Make large-attachment updates practical in memory | Consumer repairs and owned History/Undo are integrated. Complete 16/256 MiB single-file journeys pass with application-memory growth within tolerance. The intermediate/many-file and remaining resource cases, ordinary 80%/under-900 gate and real-source qualification remain. |
-| [#348](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/348) | Bounded ICO/DIB/BMP icon support | Product implementation and default wiring complete; all three children closed. The acceptance command's stale profile-4 default/forwarding is now fixed and independently verified for genuine profile 5 and explicit legacy selection. Fresh actual API/BRZ parity, native/user acceptance, broad regression and delivery remain. |
+| [#347](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/347) | Make large-attachment updates practical in memory | Lifecycle consumers and the shared-note attachment proof repair are integrated. Scoped single-file 16/64/256, four-file 16/64, empty/chunk-boundary and duplicate-content journeys passed. Four-file256, remaining resource/storage/worker cases, ordinary 80%/under 900 and real-source qualification remain. |
+| [#348](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/348) | Bounded ICO/DIB/BMP icon support | Product implementation and default wiring complete; all three children closed. The profile-5 command and source-baseline compatibility repairs are integrated. A reviewed API read-validation optimization is now integrated. Fresh actual API/BRZ qualification, native/user acceptance, broad regression and delivery remain. |
 
 ## Forty closed issues
 
@@ -77,40 +83,9 @@ flowchart TD
 
 ## Remaining route for this effort
 
-1. Complete a full current-candidate coverage measurement and a practical maintained selection meeting 80% branches and under 900 seconds. Finish #347's intermediate/many-file and remaining resource qualification. The expanded 403-selector attempt timed out; the completed 16/256 MiB single-file endpoints are scoped resource evidence.
-2. Use the corrected profile-5 acceptance command for fresh actual API acquisition and matching-BRZ qualification, then complete #348 native fidelity. #357 and #366 closeouts are complete.
-3. Complete #292 real-source/native checks and user acceptance.
-4. Deliver the assembled feature through its final PR and close the remaining parent issues.
+1. Finish the four-file 256 MiB point and the remaining scoped resource/storage/worker checks for #347. Reuse applicable completed evidence at its recorded revision.
+2. Qualify fresh current-profile API output and matching BRZ parity for #348, then complete the native icon views and actual reported-source update journey.
+3. Resolve the regression GUI uncertainty, coverage deficit and ordinary runtime; verify the assembled current candidate.
+4. Complete actual-user acceptance and the single delivery PR with independent whole-PR review. Parent #292/#347/#348 remain open until their gates are satisfied.
 
-Different-Brain imports in #259/#258 are a separate future feature.
-
-## Preserved implementation state at the pause
-
-- Feature root: `codex/r292-type-tag-support`, checkout `C:/Users/stefa/projects/brz2obsidian`, commit `740e3a9d7caa8cd683f5198a1fa3c4065599bf4b`.
-- Author: `codex/r347-owned-publication`, checkout `C:/Users/stefa/.codex/worktrees/r359-family-codec/brz2obsidian`, checkpoint `6ad06beee63f511b69df8f747c89f57bd3275e48`, plus five uncommitted restored-Undo files.
-- Latest whole-leaf source verdict: PASS for immutable candidate003. Runtime qualification remains incomplete.
-- Last focused run logged 18 passed and two Windows child-process exits with status `0xC0000142`; it was also cancelled at the usage threshold. The restored-Undo flow reached its final fresh-process status check; the other case failed during Git initialization. Their cause requires a clean rerun before classifying a product defect.
-- The extra Inline terminal-history control fails identically on clean accepted base; its evidence is preserved as a pre-existing failure.
-- SQLite/generic accounting work remains parked.
-- Detailed pause record: [current-state-resume113-paused.json](tmp/r347-owned-publication-20261110/current-state-resume113-paused.json).
-
-## Progress since the snapshot — 2026-11-12
-
-- Work resumed with the new pause threshold of 40% weekly remaining.
-- The unchanged Undo rerun passed all 20 selected tests, lint, formatting, dependency checks, partial coverage reporting and receipt validation in 390.74 seconds. The earlier child-process exits did not reproduce.
-- The restored-Undo correction is committed as `150316d6519e2f3ba3793baa268b09686515f628` on `codex/r347-owned-publication`.
-- Post-commit completion checks passed all 19 selected tests and all four check types in 214.72 seconds. The author checkout is clean.
-- Distinct independent verification passed 17/17 selected tests and all four checks on clean commit150316d, including the large owning publication/details/cleanup/repeat journey. Its total1,202.04 seconds is extended focused evidence, not ordinary-bundle qualification.
-- #366 was merged without conflict into the feature root as `72428d4e11e32a6592d71c90473a3fbd75778e25`. Fresh combined-tree16-case/all-four checks passed; candidate, verification and integration publication plus separate standalone validation all passed. [Completion and limits](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/366#issuecomment-6818425703) record internal closure. Parent acceptance/delivery remains open.
-- #357 was closed after reconciling C1–C8 against actual accepted checks, independent handoffs and feature-root integrations. [Closeout evidence and limits](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/357#issuecomment-6818230280) preserve the engineering-estimate amendment and original 44-selector scope. This does not complete #347 resource/native acceptance.
-- CLI status/Windows transport repairs were integrated as `a7e5833`; regression-fixture corrections and genuine orphan-history onboarding refusal followed as `c13d32d`, with 238 focused and 30 independent tests passing.
-- The subsequent complete maintained run at `d59e103` passed 2,716 tests, lint, formatting and dependency checks; receipt validation passed. Total elapsed was 852.60 seconds. Its 84.61% line coverage and 76.02% branch coverage are distinct: the required 80% branch gate remains unmet.
-- `26d884b` removes duplicate checks within an owned read while preserving complete semantic-byte verification and native checks at actual read/exit boundaries. Its final committed 59-test scope and fresh independent 14-test scope passed all four checks and receipt validation. A separate native status probe verified retained Git identities and preserved all 147 vault files. Candidate, verification and local integration records passed their separate validators.
-- The attempted 257-byte variant of a full publication/terminal-cleanup journey timed out; its source, partial evidence and fixture are preserved outside the maintained selection. The original 16 MiB owning test is unchanged. The guard refactor's initial staging-capability regression was caught by existing tests and repaired before acceptance.
-- Current work reuses the existing tiny native Undo fixture to qualify the owned History review path and prepares an assembled 16 MiB resource baseline. Full scaling, reported-source/API/BRZ/native UI, final user acceptance and delivery are still unqualified.
-- `4b71386` completes that owned History/Undo test contribution while preserving all 26 original assertions and one fixture/Apply. The committed owning case passed all four checks in 135.39 seconds; distinct review and candidate/verification/integration validation passed.
-- The compressible 16 MiB and 256 MiB one-file resource workloads completed their producer and fresh-process consumer journeys. Both checked physical and retained PREPARED/RESULT bytes, Git graph, user staging/history, source preservation and an unchanged repeat with no publication. Paired driver-private growth is +327,680 B and -561,152 B; Git-inclusive job peaks are reported separately. [Scoped evidence and remaining cases](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/347#issuecomment-6831734420) retain missed individual Git counters and the unqualified intermediate/many-file, worker/GUI and real-source limits.
-- Candidate `96718f2` adds five relevant existing test files to the maintained selection. Its 403-selector normal attempt timed out after 2,493 completed passing cases, with no completed receipt. It remains an unaccepted selection proposal on the author branch; no partial coverage union qualifies the ordinary gate.
-- `68945e2` fixes the actual-source audit command's stale profile-4 default and capture forwarding. A returned-result mismatch preserves the truthful result and incomplete raw recording while refusing sealing. Committed author checks passed 9 tests/all four checks in 65.86 seconds; fresh independent verification passed 3 tests/all four checks in 24.41 seconds. Target tooling coverage is 196/198 statements and 45/48 branches, separate from production coverage. Structured source review, verification and local integration passed.
-- The preserved archive, pristine output, review copy and private icon inventory remain available. Live API endpoint/schema/credential/source identity still need fresh metadata-only readiness; no new live API acquisition or native/user verdict is claimed.
-
+Different-Brain imports in #259/#258 remain a separate future feature. Historical snapshots, failed receipts, fixtures and worktrees remain preserved.
