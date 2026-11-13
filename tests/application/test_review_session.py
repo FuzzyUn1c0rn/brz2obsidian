@@ -221,47 +221,82 @@ def test_typed_reconstruction_reserves_before_new_graph_ownership(review_vault):
     original_wire = saved.model_dump_json()
     before = (vault / "Assets/data.bin").read_bytes(), git(vault, "for-each-ref")
     before_scratch = tuple(scratch.iterdir())
-    for metadata, nodes, expected in (
+    cases = (
         (8 << 20, 262144, "loaded"),
         # 64KiB admits fixed refusal/workspace escrow; the supplied SavedReview
         # graph exceeds it. One node admits the root reservation visit only.
         (65536, 262144, "refused"),
         (8 << 20, 1, "refused"),
-    ):
-        limits = ReviewBudget(
-            metadata_limit=metadata,
-            node_limit=nodes,
-            depth_limit=256,
-            decoded_limit=64 << 20,
-            raw_work_limit=128 << 20,
-            encoded_limit=128 << 20,
-            request_limit=4096,
-            step_limit=100000,
-            timeout=120,
-            cancel=Event(),
-        )
-        with (
-            Operations().inspect_update_inputs(vault) as observed,
-            ReviewSession(observed, scratch_parent=scratch, budget=limits) as session,
-        ):
-            result = session.load_review(saved)
-            assert result.status == expected
-            assert not result.ready
-            if expected == "loaded":
-                assert result.loaded.readiness == "revalidation_required"
-                assert result.loaded.saved.plan.proposal.generation == 2
-                assert tuple(
-                    a.decision_id for a in result.loaded.saved.plan.actions
-                ) == (
-                    "legacy:both",
-                    "legacy:consent",
-                )
-                assert (
-                    result.loaded.saved.plan.approvals[0].provenance == "explicit_user"
-                )
-            else:
-                assert result.code == "invalid_review" and result.loaded is None
-        assert tuple(scratch.iterdir()) == before_scratch
+    )
+    malformed_kinds = (
+        "unknown",
+        b"unknown",
+        17,
+        None,
+        False,
+        (["unknown"],),
+        {
+            "string": "unknown",
+            "bytes": b"unknown",
+            "int": 17,
+            "none": None,
+            "bool": False,
+        },
+    )
+    with Operations().inspect_update_inputs(vault) as observed:
+        for metadata, nodes, expected in cases:
+            limits = ReviewBudget(
+                metadata_limit=metadata,
+                node_limit=nodes,
+                depth_limit=256,
+                decoded_limit=64 << 20,
+                raw_work_limit=128 << 20,
+                encoded_limit=128 << 20,
+                request_limit=4096,
+                step_limit=100000,
+                timeout=120,
+                cancel=Event(),
+            )
+            with ReviewSession(
+                observed, scratch_parent=scratch, budget=limits
+            ) as session:
+                result = session.load_review(saved)
+                assert result.status == expected
+                assert not result.ready
+                if expected == "loaded":
+                    assert result.loaded.readiness == "revalidation_required"
+                    assert result.loaded.saved.plan.proposal.generation == 2
+                    assert tuple(
+                        a.decision_id for a in result.loaded.saved.plan.actions
+                    ) == (
+                        "legacy:both",
+                        "legacy:consent",
+                    )
+                    assert result.loaded.saved.plan.approvals[0].provenance == (
+                        "explicit_user"
+                    )
+                else:
+                    assert result.code == "invalid_review" and result.loaded is None
+            assert tuple(scratch.iterdir()) == before_scratch
+        for kind in malformed_kinds:
+            broken = saved.model_copy(deep=True)
+            facts = broken.plan.producer_facts
+            subject = facts.subjects[0].model_copy(update={"incoming": {"kind": kind}})
+            facts = facts.model_copy(
+                update={"subjects": (subject, *facts.subjects[1:])}
+            )
+            plan = broken.plan.model_copy(update={"producer_facts": facts})
+            broken = broken.model_copy(update={"plan": plan})
+            broken_before = broken.model_copy(deep=True)
+            generous = replace(limits, node_limit=262144, cancel=Event())
+            with ReviewSession(
+                observed, scratch_parent=scratch, budget=generous
+            ) as session:
+                result = session.load_review(broken)
+                assert result.status == "refused" and result.code == "invalid_review"
+                assert result.loaded is None and not result.ready
+            assert broken == broken_before
+            assert tuple(scratch.iterdir()) == before_scratch
     assert saved.model_dump_json() == original_wire
     assert (FIXTURES / "attachment.inline.json").read_bytes() == raw
     assert (
