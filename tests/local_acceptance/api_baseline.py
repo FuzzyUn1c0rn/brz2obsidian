@@ -144,6 +144,27 @@ def coverage(directory, ledger, *, allow_missing=False):
             safe_path(directory, row["decoded_body"]).read_bytes(), parse_float=Decimal
         )
 
+    def attachment_identities(items, owner):
+        assert type(items) is list, "same-counter attachment disagreement"
+        result = {}
+        for item in items:
+            assert type(item) is dict, "same-counter attachment disagreement"
+            key = item.get("id")
+            try:
+                canonical = type(key) is str and str(UUID(key)) == key and UUID(key).int
+            except ValueError:
+                canonical = False
+            assert (
+                canonical
+                and key not in result
+                and item.get("brainId") == brain
+                and item.get("sourceId") == owner
+                and type(item.get("sourceType")) is int
+                and item["sourceType"] == 2
+            ), "same-counter attachment disagreement"
+            result[key] = item
+        return result
+
     base = "/" + brain
     schema_row = required("/api/v1/docs.json")
     if schema_row:
@@ -302,9 +323,10 @@ def coverage(directory, ledger, *, allow_missing=False):
         owned = value(inventory)
         assert isinstance(owned, list), "authoritative attachment array"
         if graph["attachments"] is not None:
-            assert strict(graph["attachments"]) == strict(owned), (
-                "same-counter attachment disagreement"
-            )
+            assert _same_json(
+                attachment_identities(graph["attachments"], key),
+                attachment_identities(owned, key),
+            ), "same-counter attachment disagreement"
         for attachment in owned:
             assert attachment["sourceId"] == key and attachment["brainId"] == brain, (
                 "raw attachment ownership"

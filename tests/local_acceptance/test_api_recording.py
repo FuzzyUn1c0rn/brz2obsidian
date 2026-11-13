@@ -28,7 +28,14 @@ from tests.local_acceptance.test_api_scope_v3 import scope_baseline
 from tests.support.audit_sources import SCHEMA
 from tests.support.local_api import ALONE, BRAIN, HOME, api_server, thought
 from tests.support.local_api_graph import GraphApi, link
-from tests.support.local_api_payloads import NOTE, RAW_NOTE, PayloadApi
+from tests.support.local_api_payloads import (
+    FILE,
+    NOTE,
+    PNG,
+    RAW_NOTE,
+    FilePayloadApi,
+    PayloadApi,
+)
 
 
 @pytest.fixture(scope="module")
@@ -253,6 +260,122 @@ def test_recorded_statistics_refuse_other_disagreement(
         "tampered_body": "changed HTTP response evidence",
     }.get(failure, "contradictory repeated source observation")
     with pytest.raises(AssertionError, match=expected):
+        build_baseline(
+            directory, hashlib.sha256(raw).hexdigest(), qualification=qualification
+        )
+    assert not (directory / "manifest.json").exists()
+
+
+def test_recorded_graph_and_owner_allow_attachment_reordering(tmp_path, qualification):
+    # The live API returned the same declarations and positions in a different
+    # graph/list order; preserve both independent wire observations.
+    api = FilePayloadApi()
+    api.overrides["/api/v1/docs.json"] = (200, SCHEMA)
+    api.attachments[FILE]["position"] = 1
+    graph_path = f"/api/thoughts/{BRAIN}/{HOME}/graph"
+    status, graph = api.response(graph_path, {})
+    assert status == 200
+    assert [row["id"] for row in graph["attachments"]] == [NOTE, FILE]
+    graph["attachments"] = list(reversed(graph["attachments"]))
+    api.overrides[graph_path] = (200, graph)
+    with api_server(api) as (_, upstream):
+        recording = ApiRecording(
+            tmp_path / "reordered-attachments",
+            upstream,
+            brain_id=BRAIN,
+            credential="KEY",
+        )
+        with recording:
+            module = LocalApiSourceModule(
+                LocalApiConfig(api_url=recording.api_url),
+                credentials=lambda: "KEY",
+                profile_version="5",
+            )
+            with module.open(LocalApiSourceRef(BRAIN)) as session:
+                session.verify_consistency()
+            recording.complete()
+    baseline = recording.seal(qualification=qualification)
+    audit_baseline(baseline, profile_version="5")
+    graph_rows = baseline.json(baseline.data["graphs"][HOME])["attachments"]
+    owned = baseline.json(baseline.data["attachment_inventories"][HOME])
+    assert [(row["id"], row["position"]) for row in graph_rows] == [
+        (FILE, 1),
+        (NOTE, 0),
+    ]
+    assert [(row["id"], row["position"]) for row in owned] == [(NOTE, 0), (FILE, 1)]
+    assert baseline.bytes(baseline.data["payloads"][FILE]["path"]) == PNG
+    assert baseline.bytes(baseline.data["payloads"][NOTE]["path"]) == RAW_NOTE
+    baseline.verify()
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "duplicate",
+        "missing",
+        "extra",
+        "position",
+        "field",
+        "field_type",
+        "foreign_owner",
+        "foreign_brain",
+        "source_type",
+        "malformed_item",
+        "malformed_array",
+        "malformed_id",
+    ],
+)
+def test_recorded_graph_attachment_disagreement_never_seals(
+    tmp_path, captured, qualification, damage
+):
+    directory = tmp_path / "unqualified-graph-attachments"
+    directory.mkdir()
+    for source in captured.directory.glob("response-*.bin"):
+        shutil.copyfile(source, directory / source.name)
+    ledger = json.loads((captured.directory / "recording.json").read_bytes())
+    route = f"/api/thoughts/{BRAIN}/{HOME}/graph?includeSiblings=true"
+    row = next(item for item in ledger["occurrences"] if item["target"] == route)
+    assert row["status"] == 200 and row["content_encoding"] == "identity"
+    graph = json.loads((directory / row["decoded_body"]).read_bytes())
+    attachments = graph["attachments"]
+    assert len(attachments) == 1 and attachments[0]["id"] == NOTE
+    if damage == "duplicate":
+        attachments.append(copy.deepcopy(attachments[0]))
+    elif damage == "missing":
+        attachments.clear()
+    elif damage == "extra":
+        extra = copy.deepcopy(attachments[0])
+        extra["id"] = "99999999-9999-4999-8999-999999999999"
+        attachments.append(extra)
+    elif damage == "position":
+        attachments[0]["position"] = 7
+    elif damage == "field":
+        attachments[0]["name"] = "different source name"
+    elif damage == "field_type":
+        attachments[0]["position"] = False
+    elif damage == "foreign_owner":
+        attachments[0]["sourceId"] = ALONE
+    elif damage == "foreign_brain":
+        attachments[0]["brainId"] = "99999999-9999-4999-8999-999999999999"
+    elif damage == "source_type":
+        attachments[0]["sourceType"] = 3
+    elif damage == "malformed_array":
+        graph["attachments"] = {"id": NOTE}
+    elif damage == "malformed_id":
+        attachments[0]["id"] = "not-a-uuid"
+    else:
+        attachments[0] = "not an attachment object"
+    raw = json.dumps(graph).encode()
+    for field, length, digest in (
+        ("body", "length", "sha256"),
+        ("decoded_body", "decoded_length", "decoded_sha256"),
+    ):
+        (directory / row[field]).write_bytes(raw)
+        row[length] = len(raw)
+        row[digest] = hashlib.sha256(raw).hexdigest()
+    raw = json.dumps(ledger).encode()
+    (directory / "recording.json").write_bytes(raw)
+    with pytest.raises(AssertionError, match="same-counter attachment disagreement"):
         build_baseline(
             directory, hashlib.sha256(raw).hexdigest(), qualification=qualification
         )
