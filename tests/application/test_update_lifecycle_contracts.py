@@ -39,10 +39,10 @@ def controlled_public_input_reader(monkeypatch):
     monkeypatch.setattr(Operations, "inspect_update_inputs", inputs)
 
 
-def preparation(facts=None):
+def preparation(facts=None, *, observed_preflight=None):
     plan = prepare_review(
         with_review_links(request()) if facts is None else facts,
-        preflight=preflight(),
+        preflight=preflight() if observed_preflight is None else observed_preflight,
     )
     row = SourcePayloadFile(
         path="Notes/Opening.md",

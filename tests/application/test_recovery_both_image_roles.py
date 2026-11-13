@@ -13,7 +13,6 @@ from brz2obsidian.application.update_facts import assemble_facts
 from brz2obsidian.application.update_lifecycle import text_choice_action
 from brz2obsidian.core import (
     inspect_review_choices,
-    prepare_review,
     resolve_review,
     select_review_effects,
 )
@@ -61,7 +60,31 @@ def test_restore_keeps_new_both_image_and_owner_while_reversing_category_provide
         baseline, incoming, baseline, proposal_id="both-image-recovery", generation=1
     )
     operations = Operations()
-    prepared = preparation(facts)
+    vault, source = fixture_case()
+    for directory in (vault, source):
+        for name, raw in baseline.items():
+            path = directory / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(raw)
+    git(vault, "init", "-q")
+    git(vault, "config", "core.autocrlf", "false")
+    git(vault, "add", ".")
+    git(vault, "commit", "-qm", "Known current8 image graph")
+    captured = operations.capture_checkpoint(
+        vault,
+        source,
+        vault_id="both-image-vault",
+        import_id="both-image-import",
+        identity=facts.baseline_identity,
+        admission=operations.inspect_history(vault).admission,
+    )
+    assert captured.status == "captured", captured.code
+    for name, raw in incoming.items():
+        (source / name).write_bytes(raw)
+    # Resolve the public choices against this actual Native operation once.
+    # Their resulting plan can then be applied without replaying every action.
+    current_preflight = operations.inspect_history(vault).admission.preflight
+    prepared = preparation(facts, observed_preflight=current_preflight)
     for item in ("support:migration-record.json", "category:B", "category:C"):
         change = next(c for c in prepared.review.proposal.changes if c.item_id == item)
         result = operations.resolve_update(
@@ -130,39 +153,6 @@ def test_restore_keeps_new_both_image_and_owner_while_reversing_category_provide
     assert files["Categories/A.md"] == expected_owner
     assert files["Attachments/A.svg"] == RED
 
-    vault, source = fixture_case()
-    for directory in (vault, source):
-        for name, raw in baseline.items():
-            path = directory / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(raw)
-    git(vault, "init", "-q")
-    git(vault, "config", "core.autocrlf", "false")
-    git(vault, "add", ".")
-    git(vault, "commit", "-qm", "Known current8 image graph")
-    captured = operations.capture_checkpoint(
-        vault,
-        source,
-        vault_id="both-image-vault",
-        import_id="both-image-import",
-        identity=facts.baseline_identity,
-        admission=operations.inspect_history(vault).admission,
-    )
-    assert captured.status == "captured", captured.code
-    for name, raw in incoming.items():
-        (source / name).write_bytes(raw)
-    # Rebuild this real Native operation's preflight; the earlier pure public
-    # choices established the exact user-selected resource and owner bytes.
-    current_preflight = operations.inspect_history(vault).admission.preflight
-    real = prepare_review(facts, preflight=current_preflight)
-    for event in plan.actions:
-        # Actions retain their independently checked choices/candidates and are
-        # admitted against this fresh canonical review, not copied as grants.
-        replayed = resolve_review(real, event)
-        assert replayed.status == "accepted", replayed.code
-        real = replayed.plan
-    assert real.ready, real.blockers
-
     class StopAfterCategoryPublication:
         def move(self, stage, target, *, replace):
             move_file(stage, target, replace=replace)
@@ -177,8 +167,8 @@ def test_restore_keeps_new_both_image_and_owner_while_reversing_category_provide
     ).apply_reviewed_update(
         vault,
         source,
-        review=real,
-        source_binding=operations.observe_reviewed_source(source, real),
+        review=plan,
+        source_binding=operations.observe_reviewed_source(source, plan),
         vault_id="both-image-vault",
         import_id="both-image-import",
     )
