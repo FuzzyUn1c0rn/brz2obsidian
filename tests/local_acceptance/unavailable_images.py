@@ -6,6 +6,7 @@ import re
 from urllib.parse import quote, unquote, urlsplit
 from uuid import UUID
 
+from .api_manifest import _PassView, audited
 from .note_links import markdown_destination
 from .text import inline_candidates
 
@@ -46,6 +47,22 @@ def image_location(uri, *, authored=None):
 
 
 def api_images(baseline):
+    """Return independent mutable image facts within the existing audit lifetime."""
+    if isinstance(baseline, _PassView):
+        # An expired or foreign view must refuse, never reopen its former owner.
+        baseline._assessment.check()
+        bindings, absent = json.loads(_api_image_facts(baseline))
+        return bindings, absent
+    return _derive_api_images(baseline)
+
+
+@audited(reuse="scope")
+def _api_image_facts(baseline):
+    # Only derived metadata is retained. Each caller gets fresh nested maps.
+    return json.dumps(_derive_api_images(baseline), separators=(",", ":")).encode()
+
+
+def _derive_api_images(baseline):
     """Only independently bound owned metadata and content outcomes decide absence."""
     rows = {}
     for path in baseline.data["attachment_inventories"].values():

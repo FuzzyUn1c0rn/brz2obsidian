@@ -108,6 +108,167 @@ def audit(adapter, source, baseline, vault):
     return check_api_vault(baseline, vault, profile_version="4")
 
 
+def image_scope_baseline(directory, *, owner=HOME):
+    from tests.local_acceptance.api_manifest import load_baseline
+
+    directory.mkdir()
+    note = "00000000-0000-4000-8000-000000000201"
+    rows = [
+        {"id": note, "sourceId": owner, "type": 6, "isNotes": True, "location": None},
+        {
+            "id": IMAGE,
+            "brainId": BRAIN,
+            "sourceId": owner,
+            "sourceType": 2,
+            "type": 12,
+            "isNotes": False,
+            "location": IMAGE + ".png",
+        },
+    ]
+    values = {
+        "brain.json": {"id": BRAIN},
+        "inventory.json": rows,
+        "metadata.json": rows[1],
+        "ledger.json": {
+            "occurrences": [
+                {
+                    "phase": "source-acquisition",
+                    "target": f"/api/attachments/{BRAIN}/{IMAGE}/{operation}",
+                    "status": status,
+                }
+                for operation, status in (("metadata", 200), ("file-content", 404))
+            ]
+        },
+    }
+    files = {}
+    for name, value in values.items():
+        raw = json.dumps(value).encode()
+        (directory / name).write_bytes(raw)
+        files[name] = {"length": len(raw), "sha256": sha256(raw).hexdigest()}
+    data = {
+        "schema": "brz2obsidian.api-acceptance/1",
+        "files": files,
+        "brain": "brain.json",
+        "attachment_inventories": {owner: "inventory.json"},
+        "attachment_metadata": {IMAGE: {"status": 200, "path": "metadata.json"}},
+        "payloads": {note: {"status": 200}, IMAGE: {"status": 404}},
+        "http_responses": "ledger.json",
+    }
+    raw = json.dumps(data).encode()
+    (directory / "manifest.json").write_bytes(raw)
+    baseline = load_baseline(directory / "manifest.json", sha256(raw).hexdigest())
+    expected = (
+        {
+            note: {
+                "asset_id": note,
+                "owner": owner,
+                "role": "other",
+                "original_name": None,
+                "availability": "present",
+            },
+            IMAGE: {
+                "asset_id": IMAGE,
+                "owner": owner,
+                "role": "image",
+                "original_name": IMAGE + ".png",
+                "availability": "absent",
+            },
+        },
+        {
+            IMAGE: {
+                "basis": "api_declared_content404",
+                "metadata_sequence": 1,
+                "request_sequence": 2,
+                "status": 404,
+                "asset_id": IMAGE,
+            }
+        },
+    )
+    return baseline, expected
+
+
+def test_api_image_scope_preserves_order_types_and_independent_returned_maps(tmp_path):
+    from types import SimpleNamespace
+
+    from tests.local_acceptance.api_manifest import _audit_pass
+    from tests.local_acceptance.unavailable_images import api_images
+
+    baseline, expected = image_scope_baseline(tmp_path / "source")
+    for caller in (baseline, SimpleNamespace(data=baseline.data, json=baseline.json)):
+        assert api_images(caller) == expected
+    with _audit_pass(baseline) as view:
+        first = api_images(view)
+        assert type(first) is tuple and first == expected
+        assert list(first[0]) == list(expected[0])
+        assert list(first[1][IMAGE]) == list(expected[1][IMAGE])
+        assert type(first[1][IMAGE]["status"]) is int
+        first[0].pop(IMAGE)
+        next(iter(first[0].values()))["owner"] = "changed consumer result"
+        first[1][IMAGE]["status"] = False
+        assert api_images(view) == expected
+        other, other_expected = image_scope_baseline(
+            tmp_path / "other", owner=CONTROL_IDS[0]
+        )
+        with _audit_pass(other) as other_view:
+            assert api_images(other_view) == other_expected != expected
+        assert api_images(view) == expected
+    with _audit_pass(baseline) as view:
+        assert api_images(view) == expected
+
+
+@pytest.mark.parametrize("damage", ("manifest", "inventory"))
+def test_api_image_scope_failure_stays_refused_after_source_restore(tmp_path, damage):
+    from tests.local_acceptance.api_manifest import _audit_pass
+    from tests.local_acceptance.unavailable_images import api_images
+
+    baseline, expected = image_scope_baseline(tmp_path / "source")
+    path = baseline.manifest_path.parent / (damage + ".json")
+    raw = path.read_bytes()
+    with pytest.raises(AssertionError), _audit_pass(baseline) as view:
+        if damage == "manifest":
+            assert api_images(view) == expected
+        path.write_bytes(raw + b" ")
+        try:
+            with pytest.raises(AssertionError):
+                api_images(view)
+        finally:
+            path.write_bytes(raw)
+    with _audit_pass(baseline) as view:
+        assert api_images(view) == expected
+
+
+@pytest.mark.parametrize("execution", ("expired", "thread", "task"))
+def test_api_images_cannot_promote_a_foreign_or_expired_view(tmp_path, execution):
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+    from contextvars import copy_context
+
+    from tests.local_acceptance.api_manifest import _audit_pass
+    from tests.local_acceptance.unavailable_images import api_images
+
+    baseline, expected = image_scope_baseline(tmp_path / "source")
+    with _audit_pass(baseline) as view:
+        assert api_images(view) == expected
+        copied = copy_context()
+        if execution == "thread":
+            with (
+                ThreadPoolExecutor(max_workers=1) as executor,
+                pytest.raises(AssertionError, match="expired API audit pass"),
+            ):
+                executor.submit(copied.run, api_images, view).result()
+        elif execution == "task":
+
+            async def foreign_task():
+                api_images(view)
+
+            with pytest.raises(AssertionError, match="expired API audit pass"):
+                copied.run(asyncio.run, foreign_task())
+        assert api_images(view) == expected
+    if execution == "expired":
+        with pytest.raises(AssertionError, match="expired API audit pass"):
+            copied.run(api_images, view)
+
+
 @pytest.mark.parametrize("adapter", ("brz", "api"))
 def test_complete_unavailable_output_is_independently_source_bound(
     unavailable_outputs, adapter
