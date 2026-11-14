@@ -1,7 +1,7 @@
 """Pure exact-byte reconciliation; interpretation and all I/O belong to callers."""
 
 import json
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from hashlib import sha256
 
 from brz2obsidian.content_fingerprints import (
@@ -32,7 +32,7 @@ from .formats import (
     output_semantics,
     review_facts,
 )
-from .link_meanings import validate_current_link_context
+from .link_meanings import _OccurrenceMeanings, validate_current_link_context
 from .preservation import (
     configuration_assumptions,
     preservation_decision,
@@ -183,7 +183,9 @@ def _proposal(subject):
     return "compatible", subject.incoming, "source_only", True
 
 
-def _reconcile_subject(facts, subject, applicability, *, reversal_fingerprint=None):
+def _reconcile_subject(
+    facts, subject, applicability, *, reversal_fingerprint=None, _links=None
+):
     changes, findings, local_changes, memory = [], [], [], []
     subject_id = reconciliation_subject_id(
         facts.incoming_identity.module_id,
@@ -205,7 +207,7 @@ def _reconcile_subject(facts, subject, applicability, *, reversal_fingerprint=No
             source_version=facts.format_operation.baseline_source_version,
         )
     )
-    link_problem = validate_current_link_context(facts, subject)
+    link_problem = validate_current_link_context(facts, subject, _links=_links)
     policy_allowed = (
         facts.format_operation.kind != "attachment_cleanup"
         and link_problem is None
@@ -217,7 +219,9 @@ def _reconcile_subject(facts, subject, applicability, *, reversal_fingerprint=No
     )
 
     policy = preservation_policy(facts, subject, subject_id, policy_allowed)
-    binary_review, binary_assumptions = attachment_review(facts, subject, subject_id)
+    binary_review, binary_assumptions = attachment_review(
+        facts, subject, subject_id, _links=_links
+    )
     safety = tuple(
         sorted(
             (
@@ -478,6 +482,7 @@ class ReconcileWork:
     local_changes: tuple = ()
     memory: tuple = ()
     pending: object = None
+    _links: object = field(default=None, compare=False, repr=False)
 
 
 def advance_reconciliation(work, returned=None, *, context=None):
@@ -492,6 +497,7 @@ def advance_reconciliation(work, returned=None, *, context=None):
             work,
             facts=facts,
             index=0,
+            _links=_OccurrenceMeanings(facts.link_context),
             memory=facts.source_version_memory,
             findings=()
             if facts.subjects
@@ -522,6 +528,7 @@ def advance_reconciliation(work, returned=None, *, context=None):
         subject,
         work.applicability,
         reversal_fingerprint=reversal_fingerprint,
+        _links=work._links,
     )
     return replace(
         work,

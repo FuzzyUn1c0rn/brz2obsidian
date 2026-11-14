@@ -116,6 +116,56 @@ def resolve_occurrence(occurrence, targets, target_facts, inventory):
     )
 
 
+class _OccurrenceMeanings:
+    """Recomputed meanings retained only for one immutable reconciliation input."""
+
+    def __init__(self, context):
+        self.context = context
+        self._inputs = (
+            {}
+            if context is None
+            else {
+                stage: (
+                    getattr(context, stage + "_targets"),
+                    getattr(context, stage + "_target_facts"),
+                    context.inventory,
+                )
+                for stage in ("current", "incoming")
+            }
+        )
+        self._meanings = {}
+
+    def resolve(self, context, stage, occurrence):
+        targets = getattr(context, stage + "_targets")
+        states = getattr(context, stage + "_target_facts")
+        inventory = context.inventory
+        bound = self._inputs.get(stage)
+        if (
+            context is not self.context
+            or bound is None
+            or targets is not bound[0]
+            or states is not bound[1]
+            or inventory != bound[2]
+            or occurrence.query is None
+            and occurrence.meaning.status == "external"
+        ):
+            return resolve_occurrence(occurrence, targets, states, inventory)
+        query = occurrence.query
+        key = (
+            stage,
+            id(occurrence),
+            None if query is None else (query.value, query.mode, query.spellings),
+            occurrence.meaning.display_text,
+            occurrence.meaning.fragment,
+        )
+        if key not in self._meanings:
+            meaning = resolve_occurrence(occurrence, targets, states, inventory)
+            # Hold occurrences and query objects, not only their reusable ids.
+            # An exception above leaves no entry and cannot suppress validation.
+            self._meanings[key] = occurrence, query, meaning
+        return self._meanings[key][2]
+
+
 def _semantic(value):
     if hasattr(value, "model_dump"):
         if isinstance(value, (InlineExactContent, OpaqueContent)):
@@ -139,7 +189,7 @@ def _semantic(value):
     return value
 
 
-def associated_link_reviews(facts, subject, subject_id, both_outputs):
+def associated_link_reviews(facts, subject, subject_id, both_outputs, *, _links=None):
     context = facts.link_context
     if context is None:
         return (), (
@@ -165,6 +215,8 @@ def associated_link_reviews(facts, subject, subject_id, both_outputs):
             or any(
                 (
                     meaning := resolve_occurrence(o, targets, states, context.inventory)
+                    if _links is None
+                    else _links.resolve(context, stage, o)
                 ).target_id
                 == association
                 or association in meaning.candidates
@@ -311,7 +363,7 @@ SAFE_LINK_STATUSES = (
 )
 
 
-def validate_current_link_context(facts, subject):
+def validate_current_link_context(facts, subject, *, _links=None):
     """Bind current observations before any remembered or explicit preservation."""
     from .reversals import cleanup_removal_continuation
 
@@ -423,6 +475,8 @@ def validate_current_link_context(facts, subject):
                 context.current_target_facts,
                 context.inventory,
             )
+            if _links is None
+            else _links.resolve(context, "current", o)
             for o in doc.occurrences
         )
         affected |= any(
