@@ -78,8 +78,18 @@ def execute(argv, root, output, name, deadline):
             argv, cwd=root, stdout=log, stderr=subprocess.STDOUT, **flags
         )
         try:
-            code = process.wait(timeout=remaining)
-        except (subprocess.TimeoutExpired, KeyboardInterrupt) as error:
+            while True:
+                remaining = None if deadline is None else deadline - time.perf_counter()
+                if remaining is not None and remaining <= 0:
+                    raise TimeoutError(f"Global verification deadline interrupted {name}")
+                try:
+                    # Finite waits let Windows deliver Ctrl+C without a run deadline.
+                    interval = min(0.2, remaining) if remaining is not None else 0.2
+                    code = process.wait(timeout=interval)
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+        except (TimeoutError, KeyboardInterrupt) as error:
             if os.name == "nt":
                 subprocess.run(
                     ["taskkill", "/PID", str(process.pid), "/T", "/F"],
