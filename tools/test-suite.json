@@ -208,6 +208,7 @@
     "tests/cli/test_review_preparation.py",
     "tests/cli/test_review_output.py",
     "tests/application/test_update_worker_control.py",
+    "tests/application/test_worker_input.py",
     "tests/application/test_update_progress_delivery.py",
     "tests/application/test_update_snapshot_control.py",
     "tests/application/test_update_history_control.py",
