@@ -81,7 +81,9 @@ def execute(argv, root, output, name, deadline):
             while True:
                 remaining = None if deadline is None else deadline - time.perf_counter()
                 if remaining is not None and remaining <= 0:
-                    raise TimeoutError(f"Global verification deadline interrupted {name}")
+                    raise TimeoutError(
+                        f"Global verification deadline interrupted {name}"
+                    )
                 try:
                     # Finite waits let Windows deliver Ctrl+C without a run deadline.
                     interval = min(0.2, remaining) if remaining is not None else 0.2
