@@ -108,11 +108,13 @@ def audit(adapter, source, baseline, vault):
     return check_api_vault(baseline, vault, profile_version="4")
 
 
-def image_scope_baseline(directory, *, owner=HOME):
+def image_scope_baseline(
+    directory, *, owner=HOME, note_id="00000000-0000-4000-8000-000000000201"
+):
     from tests.local_acceptance.api_manifest import load_baseline
 
     directory.mkdir()
-    note = "00000000-0000-4000-8000-000000000201"
+    note = note_id
     rows = [
         {"id": note, "sourceId": owner, "type": 6, "isNotes": True, "location": None},
         {
@@ -214,6 +216,21 @@ def test_api_image_scope_preserves_order_types_and_independent_returned_maps(tmp
         assert api_images(view) == expected
     with _audit_pass(baseline) as view:
         assert api_images(view) == expected
+
+
+def test_api_image_scope_preserves_existing_scalar_inventory_keys(tmp_path):
+    """Helper representation is exact; full source audits qualify IDs separately."""
+    from tests.local_acceptance.api_manifest import _audit_pass
+    from tests.local_acceptance.unavailable_images import api_images
+
+    baseline, expected = image_scope_baseline(tmp_path / "source", note_id=7)
+    uncached = api_images(baseline)
+    assert uncached == expected and 7 in uncached[0]
+    with _audit_pass(baseline) as view:
+        scoped = api_images(view)
+        assert scoped == uncached
+        assert list(scoped[0]) == list(uncached[0])
+        assert type(next(iter(scoped[0]))) is int
 
 
 @pytest.mark.parametrize("damage", ("manifest", "inventory"))

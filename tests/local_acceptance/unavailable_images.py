@@ -52,14 +52,18 @@ def api_images(baseline):
         # An expired or foreign view must refuse, never reopen its former owner.
         baseline._assessment.check()
         bindings, absent = json.loads(_api_image_facts(baseline))
-        return bindings, absent
+        return dict(bindings), dict(absent)
     return _derive_api_images(baseline)
 
 
 @audited(reuse="scope")
 def _api_image_facts(baseline):
     # Only derived metadata is retained. Each caller gets fresh nested maps.
-    return json.dumps(_derive_api_images(baseline), separators=(",", ":")).encode()
+    # Entry pairs preserve the raw helper's scalar keys and insertion order.
+    bindings, absent = _derive_api_images(baseline)
+    return json.dumps(
+        [list(bindings.items()), list(absent.items())], separators=(",", ":")
+    ).encode()
 
 
 def _derive_api_images(baseline):
