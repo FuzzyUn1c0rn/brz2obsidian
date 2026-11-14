@@ -371,13 +371,18 @@ def test_refs_envelope_uses_actual_storage_and_baseline_only_role_closure(
     assert git(vault, "cat-file", "blob", captured.commit + ":review.json") == raw
 
 
-@pytest.mark.parametrize("kind", ("duplicate", "missing_role", "inline_envelope"))
+@pytest.mark.parametrize(
+    "kind",
+    ("duplicate", "missing_role", "inline_envelope", "marker_shape", "unowned_role"),
+)
 def test_git_ingress_refuses_corrupt_envelope_or_missing_owned_role(
     checkpoint_case, kind
 ):
     operations, vault, source, captured = checkpoint_case
     locator = vault / ".brz2obsidian/locator.json"
     original_locator = locator.read_bytes()
+    original_head = git(vault, "rev-parse", "HEAD")
+    original_index = (vault / ".git/index").read_bytes()
     raw = (FIXTURES / "checkpoint.review.json").read_bytes()
     try:
         if kind == "duplicate":
@@ -386,12 +391,41 @@ def test_git_ingress_refuses_corrupt_envelope_or_missing_owned_role(
             )
         elif kind == "missing_role":
             retarget_checkpoint(vault, captured, review_content=[])
-        else:
+        elif kind == "inline_envelope":
             retarget_checkpoint(vault, captured, review=wire("checkpoint"))
+        else:
+            envelope = json.loads(raw)
+            content = envelope["record"]["plan"]["facts"]["subjects"][0]["baseline"][
+                "content"
+            ]
+            marker = "__brz2obsidian_review_blob__"
+            assert isinstance(content["data"][marker], str)
+            manifest = json.loads(
+                git(vault, "cat-file", "blob", captured.commit + ":manifest.json")
+            )
+            assert "0" * 64 not in {
+                row["sha256"]
+                for role in (
+                    "source",
+                    "vault",
+                    "preimage",
+                    "proposed",
+                    "review_content",
+                )
+                for row in manifest[role]
+            }
+            content["data"] = (
+                {"unexpected": "value"}
+                if kind == "marker_shape"
+                else {marker: "0" * 64}
+            )
+            retarget_checkpoint(vault, captured, review=json.dumps(envelope).encode())
         before = locator.read_bytes()
         before_ref = git(vault, "rev-parse", captured.ref)
         result = operations.read_checkpoint(vault)
         assert result.status == "refused" and result.review is None
+        history = operations.inspect_history(vault)
+        assert history.checkpoint is None or history.checkpoint.review is None
         assert locator.read_bytes() == before
         assert git(vault, "rev-parse", captured.ref) == before_ref
         assert (vault / "Notes/Opening.md").read_bytes() == b"authored current\r\n"
@@ -399,3 +433,7 @@ def test_git_ingress_refuses_corrupt_envelope_or_missing_owned_role(
     finally:
         git(vault, "update-ref", captured.ref, captured.commit)
         locator.write_bytes(original_locator)
+    assert locator.read_bytes() == original_locator
+    assert git(vault, "rev-parse", captured.ref).decode().strip() == captured.commit
+    assert git(vault, "rev-parse", "HEAD") == original_head
+    assert (vault / ".git/index").read_bytes() == original_index

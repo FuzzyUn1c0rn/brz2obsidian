@@ -865,6 +865,11 @@ def test_raw_review_rejects_malformed_and_ambiguous_envelopes(review_vault, tmp_
         b"\xff" + raw,  # Invalid UTF-8.
         raw.replace(b'"data":"YWJj"', b'"data":"YW@j"', 1),  # Invalid base64.
         raw.replace(b'"data":"YWJj"', b'"data":"Y"', 1),  # Incomplete base64.
+        # A padded block ends at the streaming boundary; more data follows.
+        raw.replace(b'"data":"YWJj"', b'"data":"' + b"A" * 4092 + b'YQ==YQ=="', 1),
+        # The first content value is decoded before either bad continuation.
+        raw.replace(b'"title":"Opening"', b'"title":"\\ud800x"', 1),
+        raw.replace(b'"title":"Opening"', b'"title":"\\ud800\\u0041"', 1),
         *(raw.replace(schema, value, 1) for value in malformed_strings),
     )
     assert escaped != raw and all(invalid != raw for invalid in cases)
@@ -920,6 +925,76 @@ def test_raw_review_rejects_malformed_and_ambiguous_envelopes(review_vault, tmp_
                     False,
                 )
             assert sorted(path.name for path in scratch.iterdir()) == ["user-file"]
+        with ReviewSession(observed, scratch_parent=scratch, budget=budget) as session:
+            after = session.load_review(raw)
+            assert after.status == "loaded" and not after.ready
+            assert after.loaded.readiness == "revalidation_required"
+    assert sorted(path.name for path in scratch.iterdir()) == ["user-file"]
+    assert sentinel.read_bytes() == b"retain this file"
+    assert _review_preservation_state(vault) == before
+    assert (FIXTURES / "attachment.inline.json").read_bytes() == raw
+
+
+def test_raw_review_refuses_short_decoded_write_and_retires_owned_scratch(
+    review_vault, tmp_path, monkeypatch
+):
+    from brz2obsidian.application.review_session import ReviewBudget, ReviewSession
+
+    vault, _ = review_vault
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    sentinel = scratch / "user-file"
+    sentinel.write_bytes(b"retain this file")
+    raw = (FIXTURES / "attachment.inline.json").read_bytes()
+    before = _review_preservation_state(vault)
+    budget = ReviewBudget(
+        metadata_limit=64 << 20,
+        node_limit=1048576,
+        depth_limit=256,
+        decoded_limit=64 << 20,
+        raw_work_limit=128 << 20,
+        encoded_limit=128 << 20,
+        request_limit=4096,
+        step_limit=2000000,
+        timeout=120,
+        cancel=Event(),
+    )
+    short_write = Event()
+    real_open = Path.open
+
+    class ShortWriter:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def __getattr__(self, name):
+            return getattr(self.stream, name)
+
+        def write(self, block):
+            short_write.set()
+            return self.stream.write(block[:-1])
+
+    def short_open(path, mode="r", *args, **kwargs):
+        stream = real_open(path, mode, *args, **kwargs)
+        return ShortWriter(stream) if mode == "xb" else stream
+
+    with Operations().inspect_update_inputs(vault) as observed:
+        with ReviewSession(observed, scratch_parent=scratch, budget=budget) as session:
+            assert session.load_review(raw).status == "loaded"
+        with ReviewSession(observed, scratch_parent=scratch, budget=budget) as session:
+            with monkeypatch.context() as patch:
+                patch.setattr(Path, "open", short_open)
+                refused = session.load_review(raw)
+            assert (refused.status, refused.code, refused.loaded, refused.ready) == (
+                "refused",
+                "invalid_review",
+                None,
+                False,
+            )
+            assert short_write.is_set()
+        assert sorted(path.name for path in scratch.iterdir()) == ["user-file"]
+        with ReviewSession(observed, scratch_parent=scratch, budget=budget) as session:
+            assert session.load_review(raw).status == "loaded"
+    assert sorted(path.name for path in scratch.iterdir()) == ["user-file"]
     assert sentinel.read_bytes() == b"retain this file"
     assert _review_preservation_state(vault) == before
     assert (FIXTURES / "attachment.inline.json").read_bytes() == raw

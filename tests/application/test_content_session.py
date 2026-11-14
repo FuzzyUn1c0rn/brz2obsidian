@@ -130,16 +130,32 @@ def test_registered_values_reconstruct_but_altered_and_foreign_values_refuse(
                 session.page(value, offset=offset, limit=limit)
 
 
-def test_written_stage_must_match_the_verified_input(retained, tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("fault", "message"),
+    (
+        ("corrupt", "integrity"),
+        ("partial", "Incomplete content sink write"),
+        ("flush", "Synthetic flush failure"),
+        ("cancel", "cancel"),
+    ),
+)
+def test_written_stage_must_match_the_verified_input(
+    retained, tmp_path, monkeypatch, fault, message
+):
     vault, _ = retained
+    source = (vault / "note.md").read_bytes()
+    index = (vault / ".git/index").read_bytes()
+    refs = git(vault, "show-ref")
+    head = (vault / ".git/HEAD").read_bytes()
+    sentinel = tmp_path / "unrelated"
+    sentinel.write_bytes(b"keep")
+    cancelled = Event()
     with (
         inspect_update_inputs(vault) as observed,
         observed.content_session(scratch_parent=tmp_path) as session,
     ):
         value = session.acquire("note.md", byte_limit=6)
         real_open = Path.open
-
-        cancelled = Event()
 
         class FaultyWriter:
             def __init__(self, stream):
@@ -169,20 +185,24 @@ def test_written_stage_must_match_the_verified_input(retained, tmp_path, monkeyp
                     raise OSError("Synthetic flush failure")
                 self.stream.flush()
 
-        def corrupt_open(path, mode="r", *args, **kwargs):
+        def faulty_open(path, mode="r", *args, **kwargs):
             output = real_open(path, mode, *args, **kwargs)
             return FaultyWriter(output) if mode == "xb" else output
 
-        for fault in ("corrupt", "partial", "flush", "cancel"):
-            with monkeypatch.context() as patch:
-                patch.setattr(Path, "open", corrupt_open)
-                with pytest.raises(OSError):
-                    session.stage(value, byte_limit=6, cancel=cancelled)
-                if fault == "corrupt":
-                    with pytest.raises(OSError, match="integrity"):
-                        session.acquire("note.md", byte_limit=6)
-            cancelled.clear()
+        with monkeypatch.context() as patch:
+            patch.setattr(Path, "open", faulty_open)
+            with pytest.raises(OSError, match=message):
+                session.stage(value, byte_limit=6, cancel=cancelled)
+            if fault == "corrupt":
+                with pytest.raises(OSError, match="integrity"):
+                    session.acquire("note.md", byte_limit=6)
         assert session.page(value, offset=0, limit=6) == b"later\xff"
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["unrelated"]
+    assert sentinel.read_bytes() == b"keep"
+    assert (vault / "note.md").read_bytes() == source
+    assert (vault / ".git/index").read_bytes() == index
+    assert git(vault, "show-ref") == refs
+    assert (vault / ".git/HEAD").read_bytes() == head
 
 
 def test_equal_digest_registration_compares_complete_owned_bytes(retained, tmp_path):
