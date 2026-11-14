@@ -134,6 +134,23 @@ class _OccurrenceMeanings:
             }
         )
         self._meanings = {}
+        self._current_scope = None
+
+    def current_scope(self, context, inventory):
+        inputs = (
+            context,
+            context.current_targets,
+            context.current_target_facts,
+            context.current_documents,
+            inventory,
+        )
+        if context is not self.context:
+            return _CurrentScope(*inputs)
+        if self._current_scope is None:
+            self._current_scope = _CurrentScope(*inputs)
+        if all(a is b for a, b in zip(self._current_scope.inputs, inputs, strict=True)):
+            return self._current_scope
+        return _CurrentScope(*inputs)
 
     def resolve(self, context, stage, occurrence):
         targets = getattr(context, stage + "_targets")
@@ -164,6 +181,25 @@ class _OccurrenceMeanings:
             # An exception above leaves no entry and cannot suppress validation.
             self._meanings[key] = occurrence, query, meaning
         return self._meanings[key][2]
+
+
+def _buckets(items, key):
+    result = {}
+    for item in items:
+        result.setdefault(key(item), []).append(item)
+    return {key: tuple(values) for key, values in result.items()}
+
+
+class _CurrentScope:
+    """Ordered exact-key lookup references for one observed current scope."""
+
+    def __init__(self, context, targets, states, documents, inventory):
+        self.inputs = context, targets, states, documents, inventory
+        self.targets_by_id = _buckets(targets, lambda t: t.target_id)
+        self.targets_by_path = _buckets(targets, lambda t: t.canonical_path)
+        self.states_by_id = _buckets(states, lambda s: s.target_id)
+        self.entries_by_path = _buckets(inventory, lambda e: e.current.path)
+        self.documents_by_path = _buckets(documents, lambda d: d.source_path)
 
 
 def _semantic(value):
@@ -374,6 +410,17 @@ def validate_current_link_context(facts, subject, *, _links=None):
     if context is None or context.inventory != "complete":
         return "link_context_unavailable"
     association = subject.attachment.current_target_id
+    scope = (
+        _CurrentScope(
+            context,
+            context.current_targets,
+            context.current_target_facts,
+            context.current_documents,
+            facts.identity_inventory,
+        )
+        if _links is None
+        else _links.current_scope(context, facts.identity_inventory)
+    )
 
     def observed_existence(current, state):
         expected = (
@@ -385,36 +432,23 @@ def validate_current_link_context(facts, subject, *, _links=None):
 
     # Complete supplied scope is checked against the independently observed inventory.
     for state in context.current_target_facts:
-        records = tuple(
-            t for t in context.current_targets if t.target_id == state.target_id
-        )
+        records = scope.targets_by_id.get(state.target_id, ())
         if len(records) != 1:
             return "link_context_invalid"
         if (
             records[0].kind != "tag"
             and state.existence == "present"
-            and len(
-                tuple(
-                    e
-                    for e in facts.identity_inventory
-                    if e.current.path == records[0].canonical_path
-                )
-            )
-            != 1
+            and len(scope.entries_by_path.get(records[0].canonical_path, ())) != 1
         ):
             return "link_context_invalid"
     for entry in facts.identity_inventory:
-        matching = tuple(
-            t for t in context.current_targets if t.canonical_path == entry.current.path
-        )
+        matching = scope.targets_by_path.get(entry.current.path, ())
         if len(matching) != 1:
             return "link_context_unavailable"
         (record,) = matching
         if record.identity is not None and record.identity != entry.identity:
             return "link_context_invalid"
-        observed = tuple(
-            s for s in context.current_target_facts if s.target_id == record.target_id
-        )
+        observed = scope.states_by_id.get(record.target_id, ())
         if (
             len(observed) != 1
             or not observed_existence(entry.current, observed[0])
@@ -424,9 +458,8 @@ def validate_current_link_context(facts, subject, *, _links=None):
         if record.kind != "resource" and entry.current.existence == "present":
             docs = tuple(
                 d
-                for d in context.current_documents
-                if d.source_path == entry.current.path
-                and same_content(d.content, entry.current.content)
+                for d in scope.documents_by_path.get(entry.current.path, ())
+                if same_content(d.content, entry.current.content)
             )
             if len(docs) != 1:
                 return "link_context_unavailable"

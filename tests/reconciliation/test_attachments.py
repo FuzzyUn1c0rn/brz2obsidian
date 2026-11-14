@@ -4,6 +4,44 @@ from brz2obsidian.core import reconcile
 from tests.reconciliation.test_absence import facts_for
 
 
+def test_current_scope_preserves_duplicate_and_exact_document_decisions():
+    facts = linked_attachment_request()
+    context = facts.link_context
+    original = reconcile(facts)
+    assert not original.findings
+
+    for field, item in (
+        ("current_targets", context.current_targets[0]),
+        ("current_target_facts", context.current_target_facts[0]),
+    ):
+        changed = context.model_copy(update={field: getattr(context, field) + (item,)})
+        result = reconcile(facts.model_copy(update={"link_context": changed}))
+        assert [finding.code for finding in result.findings] == ["link_context_invalid"]
+        assert result.changes[0].disposition == "refused"
+
+    document = context.current_documents[0]
+    duplicate = context.model_copy(
+        update={"current_documents": context.current_documents + (document,)}
+    )
+    result = reconcile(facts.model_copy(update={"link_context": duplicate}))
+    assert [finding.code for finding in result.findings] == ["link_context_unavailable"]
+    assert result.changes[0].disposition == "refused"
+
+    different = document.model_copy(
+        update={
+            "document_id": "other:note",
+            "content": document.content.model_copy(update={"data": b"other"}),
+            "occurrences": (),
+        }
+    )
+    changed = context.model_copy(
+        update={"current_documents": context.current_documents + (different,)}
+    )
+    result = reconcile(facts.model_copy(update={"link_context": changed}))
+    assert not result.findings
+    assert result.changes[0].disposition == original.changes[0].disposition
+
+
 def attachment_request():
     from brz2obsidian.contracts import (
         AttachmentDestination,
