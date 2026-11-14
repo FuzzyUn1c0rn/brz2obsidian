@@ -63,6 +63,7 @@ def test_link_fingerprint_tracks_transitive_path_collisions_but_not_unrelated_ta
         return original.model_copy(
             update={
                 "target_id": identity,
+                "identity": None,
                 "canonical_path": path,
                 "representations": (path,),
                 "validation_fingerprint": fingerprint,
@@ -82,12 +83,15 @@ def test_link_fingerprint_tracks_transitive_path_collisions_but_not_unrelated_ta
         )
         changed = facts.model_copy(update={"link_context": changed_context})
         plan = prepare_review(changed, preflight=preflight())
-        return next(
+        assert not plan.ready
+        fingerprints = [
             assumption.fingerprint
             for change in plan.proposal.changes
             for assumption in change.assumptions
             if assumption.kind == "link"
-        )
+        ]
+        assert len(fingerprints) == 1
+        return fingerprints[0]
 
     initial = fingerprint((ancestor, sibling, unrelated))
     changed_sibling = sibling.model_copy(
