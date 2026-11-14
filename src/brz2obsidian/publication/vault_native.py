@@ -8,6 +8,63 @@ from contextlib import closing, contextmanager
 from pathlib import Path
 
 
+def _windows_bindings():
+    """Initialize shared API prototypes before concurrent native observations."""
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.GetFinalPathNameByHandleW.argtypes = [
+        wintypes.HANDLE,
+        wintypes.LPWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+    ]
+    kernel.GetFinalPathNameByHandleW.restype = wintypes.DWORD
+    kernel.LocalFree.argtypes = [ctypes.c_void_p]
+    kernel.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel.DuplicateHandle.argtypes = [
+        wintypes.HANDLE,
+        wintypes.HANDLE,
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.HANDLE),
+        wintypes.DWORD,
+        wintypes.BOOL,
+        wintypes.DWORD,
+    ]
+    security = ctypes.WinDLL("advapi32", use_last_error=True)
+    security.GetSecurityInfo.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        wintypes.DWORD,
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_void_p),
+    ]
+    security.GetSecurityInfo.restype = wintypes.DWORD
+    security.IsValidSid.argtypes = [ctypes.c_void_p]
+    security.GetLengthSid.argtypes = [ctypes.c_void_p]
+    security.GetLengthSid.restype = wintypes.DWORD
+    return kernel, security
+
+
+# Only API bindings are shared. Handles, buffers, security descriptors and every
+# filesystem/permission observation remain local to their individual calls.
+_WINDOWS_BINDINGS = _windows_bindings() if os.name == "nt" else None
+
+
 def available_memory():
     """Current available commit capacity, without reserving future capacity."""
     if os.name == "nt":
@@ -49,27 +106,7 @@ def _physical(info):
 @contextmanager
 def _handle(path, *, directory=False, write=False):
     """Open the named object itself, with maximal compatible sharing."""
-    from ctypes import wintypes
-
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel.CreateFileW.argtypes = [
-        wintypes.LPCWSTR,
-        wintypes.DWORD,
-        wintypes.DWORD,
-        ctypes.c_void_p,
-        wintypes.DWORD,
-        wintypes.DWORD,
-        wintypes.HANDLE,
-    ]
-    kernel.CreateFileW.restype = wintypes.HANDLE
-    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
-    kernel.GetFinalPathNameByHandleW.argtypes = [
-        wintypes.HANDLE,
-        wintypes.LPWSTR,
-        wintypes.DWORD,
-        wintypes.DWORD,
-    ]
-    kernel.GetFinalPathNameByHandleW.restype = wintypes.DWORD
+    kernel, security = _WINDOWS_BINDINGS
     rights = 0x80 | 0x20000 | (1 if directory else 0)  # list, metadata and security
     rights |= (0x2 | 0x4 | 0x40) if directory and write else 0
     if not directory:
@@ -102,21 +139,6 @@ def _handle(path, *, directory=False, write=False):
         # Native security descriptor availability establishes owner facts. Access
         # itself is decided by Windows for the actual process token; ownership
         # need not equal the current user (groups/system owners are legitimate).
-        security = ctypes.WinDLL("advapi32", use_last_error=True)
-        security.GetSecurityInfo.argtypes = [
-            wintypes.HANDLE,
-            ctypes.c_int,
-            wintypes.DWORD,
-            ctypes.POINTER(ctypes.c_void_p),
-            ctypes.c_void_p,
-            ctypes.c_void_p,
-            ctypes.c_void_p,
-            ctypes.POINTER(ctypes.c_void_p),
-        ]
-        security.GetSecurityInfo.restype = wintypes.DWORD
-        security.IsValidSid.argtypes = [ctypes.c_void_p]
-        security.GetLengthSid.argtypes = [ctypes.c_void_p]
-        security.GetLengthSid.restype = wintypes.DWORD
         descriptor = ctypes.c_void_p()
         owner = ctypes.c_void_p()
         code = security.GetSecurityInfo(
@@ -138,7 +160,6 @@ def _handle(path, *, directory=False, write=False):
                 ctypes.string_at(owner, security.GetLengthSid(owner))
             ).hexdigest()
         finally:
-            kernel.LocalFree.argtypes = [ctypes.c_void_p]
             kernel.LocalFree(descriptor)
         yield handle, owner_digest
     finally:
@@ -225,17 +246,7 @@ def _observed_chunks(
             # Duplicate the verified handle before transferring it to Python.
             from ctypes import wintypes
 
-            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-            kernel.GetCurrentProcess.restype = wintypes.HANDLE
-            kernel.DuplicateHandle.argtypes = [
-                wintypes.HANDLE,
-                wintypes.HANDLE,
-                wintypes.HANDLE,
-                ctypes.POINTER(wintypes.HANDLE),
-                wintypes.DWORD,
-                wintypes.BOOL,
-                wintypes.DWORD,
-            ]
+            kernel, _ = _WINDOWS_BINDINGS
             duplicate = wintypes.HANDLE()
             process = kernel.GetCurrentProcess()
             if not kernel.DuplicateHandle(
