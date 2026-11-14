@@ -11,39 +11,31 @@ coverage-guided reset. The executable selection is
 This is the complete ordinary bundle: selected pytest cases, Ruff lint and
 format checks, dependency checks, coverage reports and receipt validation. It
 requires the GUI development environment, actual GUI test execution, at least
-80% **branch coverage of all production Python**, and total elapsed time below
-900 seconds. Line coverage is reported separately. The generated summary,
+80% **branch coverage of all production Python**. It reports elapsed time. Line
+coverage is reported separately. The generated summary,
 coverage JSON and HTML identify the actual coverage and remaining gaps; the
 issue records the qualified candidate and measured baseline.
 
-For the current #314 qualification, the default bundle has an 800-second cap,
-including startup, reports and internal receipt validations. It includes the
-wrapper regression controls. Reserve 5 seconds for direct receipt validation,
-40 seconds for candidate, verification and integration records, 15 seconds for
-guards and bookkeeping, and 20 seconds as reserve. The earlier wrapper-family
-tooling measurement covered 42 of 60 branches; its source-bound evidence needs
-manual applicability assessment and is not a receipt for a changed candidate.
-The complete ledger must finish strictly below 900 seconds. Any additional
-required focused check belongs in that same ledger; the cap does not establish
-that a particular combination fits. Failed or interrupted qualifications remain
-failed and are preserved for diagnosis.
-
-```powershell
-.\.venv\Scripts\python.exe tools/coverage_suite.py --workers 4 --timeout 800
-```
+The user withdrew the former 900-second acceptance gate, the #314 800-second
+cap and associated reserves on 2026-11-14, including conflicting older ticket
+and skill requirements. Failed or interrupted qualifications retain their original
+outcomes. The earlier wrapper-family tooling measurement covered 42 of 60
+branches; its source-bound evidence needs manual applicability assessment and
+is not a receipt for a changed candidate.
 
 `coverage.json` retains exact contexts once per file, declared by
 `meta.context_scope="file"`. Function/class regions retain their ordinary summaries,
 executed/missing lines and branch arcs without repeating the full-file context map.
 All production files, including unexecuted modules, remain in the denominator.
-Raw coverage data and HTML contexts remain available. Reporting uses the same
-global deadline and validates the check receipt before and after reports.
+Raw coverage data and HTML contexts remain available. Reporting validates the
+check receipt before and after reports. An explicit
+positive finite `--timeout` sets an optional shared deadline.
 
 The maintained command uses four pytest-xdist workers, grouping module functions
 and class methods together with `loadscope`. It disables scope reordering and
 worker restarts. Manifest order is preserved within each worker; global serial
-order is not guaranteed. The existing 900-second deadline includes the worker
-processes and combined production coverage. Focused measurements and direct
+order is not guaranteed. Elapsed time includes the worker processes and combined
+production coverage. Focused measurements and direct
 runner checks remain serial by default; `--workers 2`, `--workers 3` or
 `--workers 4` selects parallel execution, and `--workers 1` can select serial
 maintained-suite execution.
@@ -202,7 +194,7 @@ matrices. Focused measurements guide additions and actual consolidation.
 
 The final assembled S1 check uses this maintained default once at its frozen
 head, including all four checks, actual GUI, all-production branch coverage and
-the total 900-second budget. A separately assigned fresh refresh/resume check may
+elapsed-time reporting. A separately assigned fresh refresh/resume check may
 use the matching runner directly; the default supplies line/branch/context/time
 measurement. Exact-snapshot receipt reuse across assigned candidate/integration
 or aggregate assessments requires explicit requirements and rationale, and never

@@ -6,7 +6,6 @@ import shutil
 import subprocess
 import sys
 import threading
-import time
 from pathlib import Path
 
 import pytest
@@ -129,7 +128,6 @@ def invoke(root, *args):
         capture_output=True,
         text=True,
         encoding="utf-8",
-        timeout=60,
         check=False,
     )
 
@@ -159,19 +157,16 @@ def test_default_command_validates_four_checks_and_reports_all_production(
         ),
         encoding="utf-8",
     )
-    rejected = invoke(coverage_checkout, "--timeout", "901")
-    assert rejected.returncode == 2
-    assert "at most 900 seconds" in rejected.stderr
     result = invoke(coverage_checkout)
     assert result.returncode == 0, result.stdout + result.stderr
     report, output = summary(coverage_checkout)
-    assert report["timeout_seconds"] == 900
+    assert report["timeout_seconds"] is None
     assert report["status"] == "passed"
     assert report["measurement"] == "default suite"
     assert report["lines"] == {"covered": 11, "total": 12, "percent": 100 * 11 / 12}
     assert report["branches"] == {"covered": 4, "total": 4, "percent": 100.0}
     assert report["production_files"] == 5
-    assert report["elapsed_seconds"] < 60
+    assert report["elapsed_seconds"] > 0
     assert 0 < report["pytest_seconds"] < report["runner_seconds"]
     assert report["test_counts"]["passed"] == 4
     assert report["test_counts"]["collected"] == 4
@@ -303,16 +298,31 @@ def test_measurement_override_needs_explicit_intent(tmp_path):
     result = invoke(tmp_path, "--min-branch", "1")
     assert result.returncode == 2
     assert "--measurement-intent" in result.stderr
-    extended = invoke(
-        tmp_path,
-        "--test",
-        "tests/test_decisions.py::test_yes",
-        "--timeout",
-        "901",
-    )
-    assert extended.returncode == 2
-    assert "--measurement-intent" in extended.stderr
     assert not (tmp_path / "tmp").exists()
+
+
+def test_ordinary_verification_accepts_explicit_timeout_above_900(coverage_checkout):
+    result = invoke(coverage_checkout, "--timeout", "901")
+    assert result.returncode == 0, result.stdout + result.stderr
+    report, _ = summary(coverage_checkout)
+    assert report["timeout_seconds"] == 901
+    assert report["status"] == "passed"
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "inf"])
+def test_timeout_must_be_positive_and_finite(tmp_path, value):
+    result = invoke(tmp_path, "--timeout", value)
+    assert result.returncode == 2
+    assert "--timeout must be positive and finite" in result.stderr
+
+
+def test_explicit_timeout_reports_failure(coverage_checkout):
+    result = invoke(coverage_checkout, "--timeout", "0.001")
+    assert result.returncode == 1, result.stdout + result.stderr
+    report, _ = summary(coverage_checkout)
+    assert report["status"] == "failed"
+    assert "deadline" in report["error"].lower()
+    assert report["timeout_seconds"] == 0.001
 
 
 def test_source_change_during_reporting_rejects_success(coverage_checkout):
@@ -320,8 +330,7 @@ def test_source_change_during_reporting_rejects_success(coverage_checkout):
     changed = threading.Event()
 
     def change_after_html_starts():
-        deadline = time.monotonic() + 30
-        while time.monotonic() < deadline and not stopped.is_set():
+        while not stopped.is_set():
             if list((coverage_checkout / "tmp" / "coverage-suite").glob("*/html.log")):
                 source = coverage_checkout / "src" / "brz2obsidian" / "decisions.py"
                 with source.open("a", encoding="utf-8") as handle:
@@ -340,7 +349,7 @@ def test_source_change_during_reporting_rejects_success(coverage_checkout):
         )
     finally:
         stopped.set()
-        editor.join(timeout=1)
+        editor.join()
     assert not editor.is_alive()
     assert changed.is_set(), "The public reporting phase was not reached"
     assert result.returncode == 1, result.stdout + result.stderr
@@ -386,7 +395,7 @@ def test_long_maintained_selection_preserves_exact_scope_and_validates(
     report, _output = summary(coverage_checkout)
     assert report["status"] == "passed"
     assert report["measurement"] == "default suite"
-    assert report["timeout_seconds"] == 900
+    assert report["timeout_seconds"] is None
     assert report["minimum_branch_percent"] == 80
     assert report["production_files"] == 4
     assert report["branches"] == {
@@ -463,7 +472,6 @@ def test_long_maintained_selection_preserves_exact_scope_and_validates(
         capture_output=True,
         text=True,
         encoding="utf-8",
-        timeout=60,
         check=False,
     )
     assert validated.returncode == 0, validated.stdout + validated.stderr
