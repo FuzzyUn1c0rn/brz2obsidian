@@ -52,3 +52,49 @@ def test_current_role_evidence_distinguishes_unavailable_and_empty_bytes(raw, di
     altered["file_roles"]["content_sha256"] = "0" * 64
     with pytest.raises(ValidationError, match="exact available target bytes"):
         LinkTargetFacts.model_validate(altered)
+
+
+def test_link_fingerprint_tracks_transitive_path_collisions_but_not_unrelated_targets():
+    facts = with_review_links(request())
+    context = facts.link_context
+    original = context.current_targets[0]
+
+    def target(identity, path, fingerprint):
+        return original.model_copy(
+            update={
+                "target_id": identity,
+                "canonical_path": path,
+                "representations": (path,),
+                "validation_fingerprint": fingerprint,
+                "target": original.target.model_copy(
+                    update={"normalized_path": path.casefold()}
+                ),
+            }
+        )
+
+    ancestor = target("ancestor", "Notes", "ancestor")
+    sibling = target("sibling", "Notes/Other.md", "sibling")
+    unrelated = target("unrelated", "Elsewhere/Other.md", "unrelated")
+
+    def fingerprint(rows):
+        changed_context = context.model_copy(
+            update={"current_targets": context.current_targets + rows}
+        )
+        changed = facts.model_copy(update={"link_context": changed_context})
+        plan = prepare_review(changed, preflight=preflight())
+        return next(
+            assumption.fingerprint
+            for change in plan.proposal.changes
+            for assumption in change.assumptions
+            if assumption.kind == "link"
+        )
+
+    initial = fingerprint((ancestor, sibling, unrelated))
+    changed_sibling = sibling.model_copy(
+        update={"validation_fingerprint": "changed sibling"}
+    )
+    changed_unrelated = unrelated.model_copy(
+        update={"validation_fingerprint": "changed unrelated"}
+    )
+    assert fingerprint((ancestor, changed_sibling, unrelated)) != initial
+    assert fingerprint((ancestor, sibling, changed_unrelated)) == initial
