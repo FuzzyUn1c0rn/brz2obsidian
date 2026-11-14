@@ -221,16 +221,20 @@ def test_api_image_scope_preserves_order_types_and_independent_returned_maps(tmp
 def test_api_image_scope_preserves_existing_scalar_inventory_keys(tmp_path):
     """Helper representation is exact; full source audits qualify IDs separately."""
     from tests.local_acceptance.api_manifest import _audit_pass
-    from tests.local_acceptance.unavailable_images import api_images
+    from tests.local_acceptance.unavailable_images import api_images, api_preparation
 
     baseline, expected = image_scope_baseline(tmp_path / "source", note_id=7)
     uncached = api_images(baseline)
     assert uncached == expected and 7 in uncached[0]
+    with pytest.raises(KeyError):
+        api_preparation(baseline, "7", "Plain text.", "4")
     with _audit_pass(baseline) as view:
         scoped = api_images(view)
         assert scoped == uncached
         assert list(scoped[0]) == list(uncached[0])
         assert type(next(iter(scoped[0]))) is int
+        with pytest.raises(KeyError):
+            api_preparation(view, "7", "Plain text.", "4")
 
 
 @pytest.mark.parametrize("damage", ("manifest", "inventory"))
