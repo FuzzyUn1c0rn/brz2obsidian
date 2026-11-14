@@ -34,6 +34,7 @@ from tests.support.audit_sources import (
     uncreated_tag_source,
 )
 from tests.support.local_api import BRAIN, api_server
+from tests.support.reviewed_api_workflow import reviewed_api_workflow
 from tests.support.type_tag_sources import IDS, TypeTagApi, brz_source
 
 
@@ -57,8 +58,10 @@ def paired_outputs(tmp_path_factory):
             purpose="convert",
         )
         with recording:
-            workflow = local_api_workflow(
-                LocalApiConfig(api_url=recording.api_url), credentials=lambda: "KEY"
+            workflow = reviewed_api_workflow(
+                LocalApiConfig(api_url=recording.api_url),
+                credentials=lambda: "KEY",
+                profile_version="4",
             )
             result = workflow.convert(LocalApiSourceRef(BRAIN), api_vault)
             assert result.outcome in {"clean", "warnings"}, result.issues
@@ -343,6 +346,7 @@ def test_explicit_one_source_or_pair_audit_records_bound_verdicts(
         manifest_sha256=baseline.fingerprint,
         api_vault=api_vault,
         api_result=api_vault.parent / "api-result.json",
+        profile_version="4",
     )
     assert result["outcome"] == "qualified"
     assert set(result["audits"]) == {"brz", "api"}
@@ -756,7 +760,7 @@ def test_nested_scope_cache_does_not_authorize_an_unsupported_profile(
         if path.resolve() == target and not attempted:
             attempted = True
             with pytest.raises(AssertionError, match="unsupported API profile"):
-                qualify_scope(baseline, profile_version="5")
+                qualify_scope(baseline, profile_version="6")
         return real_read(path)
 
     monkeypatch.setattr(Path, "read_bytes", observed_read)
@@ -903,6 +907,7 @@ def test_pair_audit_refuses_inputs_changed_during_comparison(
         manifest_sha256=baseline.fingerprint,
         api_vault=api_vault,
         api_result=run_result if changed_input == "run-result" else None,
+        profile_version="4",
     )
     assert changed.read_bytes() != initial
     assert result["outcome"] == "refused"
@@ -954,6 +959,7 @@ def test_final_audit_binding_covers_pass_closure_filesystem_reads(
         api_manifest=baseline.manifest_path,
         manifest_sha256=baseline.fingerprint,
         api_vault=vault,
+        profile_version="4",
     )
     # A late evidence scan may occur only while the final output binding can
     # still see a change. If no such I/O remains, this control need not inject.
