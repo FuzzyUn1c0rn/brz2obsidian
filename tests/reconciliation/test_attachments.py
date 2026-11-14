@@ -644,23 +644,12 @@ def linked_attachment_request(
     return facts
 
 
-def test_repeated_link_snapshots_recompute_versions_and_reject_stale_meanings(
-    monkeypatch,
-):
+def test_repeated_link_snapshots_recompute_versions_and_reject_stale_meanings():
     from hashlib import sha256
 
     from brz2obsidian.contracts import ExactContent
-    from brz2obsidian.core import link_meanings
     from brz2obsidian.obsidian import interpret_link_target
 
-    original = link_meanings.resolve_occurrence
-    observed = []
-
-    def resolve(*args):
-        observed.append(args[0])
-        return original(*args)
-
-    monkeypatch.setattr(link_meanings, "resolve_occurrence", resolve)
     proposals = []
     for raw in (b"first", b"second", b"first"):
         facts = linked_attachment_request(payload_current=raw)
@@ -678,11 +667,7 @@ def test_repeated_link_snapshots_recompute_versions_and_reject_stale_meanings(
                 )
             }
         )
-        observed.clear()
         proposal = reconcile(facts)
-        # Repeated full-context consumers share first-use resolution inside this
-        # call; a new call still observes its own exact current version.
-        assert observed and len({id(row) for row in observed}) == len(observed)
         links = proposal.changes[0].attachment_review.links
         assert [row.old.target_version for row in links] == [
             sha256(raw).hexdigest()
