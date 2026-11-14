@@ -116,15 +116,18 @@ def consumed_context(
                             ids.add(target.target_id)
         active_targets = tuple(t for t in targets if t.target_id in ids)
         for target in targets:
-            if target.canonical_path is not None and any(
-                t.target_id in ids
-                and t.canonical_path is not None
-                and _paths_collide(target.canonical_path, t.canonical_path)
-                for t in active_targets
+            if (
+                target.canonical_path is not None
+                and any(
+                    t.target_id in ids
+                    and t.canonical_path is not None
+                    and _paths_collide(target.canonical_path, t.canonical_path)
+                    for t in active_targets
+                )
+                and target.target_id not in ids
             ):
-                if target.target_id not in ids:
-                    ids.add(target.target_id)
-                    active_targets = tuple(t for t in targets if t.target_id in ids)
+                ids.add(target.target_id)
+                active_targets = tuple(t for t in targets if t.target_id in ids)
         changed = ids != previous
     return (
         inventory,
