@@ -41,7 +41,6 @@ from brz2obsidian.contracts import (
     OpaqueContent,
     ReconciliationInput,
     ReconciliationSubject,
-    ReviewPlan,
     ReviewPreflight,
     ReviewRefreshEvent,
     SavedReview,
@@ -254,17 +253,6 @@ class _Ledger:
         grant["temporary"] = 0
         self.release_metadata(shape.temporary)
         return result
-
-    def retire_completed(self, value):
-        # Drop only this completed constructor's temporary ownership. Its M/work
-        # remains charged; the admitted graph has its own caller/entry holder.
-        # No check() here: cancellation must not prevent reference retirement.
-        if not self._grants:
-            raise OSError("Completed construction grant is missing")
-        grant = self._grants[-1]
-        if grant["failed"] or grant["temporary"] or grant["value"] is not value:
-            raise OSError("Construction grant is not the completed temporary")
-        self._grants.pop()
 
     def release_failed(self):
         # A construction failure stops the operation, so its grant is last.
@@ -1210,12 +1198,7 @@ class ReviewSession:
                     # scope or grant is retained. Returned graphs are separate
                     # from the private entry.
                     self._ledger.admit_metadata(retained)
-                    reconstructed = self._ledger.construct(ReviewPlan, retained)
-                    try:
-                        prior = self._admit_values(reconstructed)
-                    finally:
-                        self._ledger.retire_completed(reconstructed)
-                    self._coadmit()
+                    prior = self._admit_values(retained)
                 else:
                     self._initial_review_entry = None
             else:
@@ -1226,11 +1209,7 @@ class ReviewSession:
             # model work, this conservative cumulative charge is not refunded
             # when the one-entry reference is retired.
             size = self._ledger.admit_metadata((self._record, plan, 0))
-            reconstructed = self._ledger.construct(ReviewPlan, plan)
-            try:
-                retained = self._admit_values(reconstructed)
-            finally:
-                self._ledger.retire_completed(reconstructed)
+            retained = self._admit_values(plan)
             self._coadmit()
             self._initial_review_entry = (self._record, retained, size)
         return plan
