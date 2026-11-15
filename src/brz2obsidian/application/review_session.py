@@ -1199,12 +1199,10 @@ class ReviewSession:
                     <= self._ledger.budget.metadata_limit
                 )
                 if retain_initial:
-                    # Recheck every reference/occurrence, including Created
-                    # results, against this operation's registrations. No old
-                    # scope or grant is retained. Returned graphs are separate
-                    # from the private entry.
+                    # The private seed is immutable; the caller freshly
+                    # coadmits the complete current binding view.
                     self._ledger.admit_metadata(retained)
-                    prior = self._admit_values(retained)
+                    prior = retained
                 else:
                     self._initial_review_entry = None
             else:
