@@ -1,10 +1,12 @@
 """Native producer controls keep immutable binary snapshots across requests."""
 
+import gc
 import hashlib
 import io
 import json
 import shutil
 import tempfile
+import weakref
 from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
@@ -13,7 +15,7 @@ from uuid import uuid4
 from brz2obsidian.application.operations import Operations
 from brz2obsidian.application.update_context import UpdateContext
 from brz2obsidian.application.wiring import default_workflow
-from brz2obsidian.contracts import OutputIdentity
+from brz2obsidian.contracts import OutputIdentity, ReviewPlan
 from tests.application.test_owned_update_preparation import _digest, _tree
 from tests.application.test_update_context import worker_context_call
 from tests.application.test_vault_checkpoints import git, user_state
@@ -155,6 +157,40 @@ def test_native_owned_controls_cancel_refresh_and_retire_snapshots(monkeypatch):
         context, {"command": "page", "binding": opened.binding, "byte_limit": 0}
     )
     assert page.status == "available", page
+
+    # Observe real typed construction without keeping the returned plans alive.
+    # Repeated unchanged queries may retain a stable canonical graph, but must
+    # not accumulate temporary full plans with the number of requests.
+    constructed_plans = []
+    actual_validate = ReviewPlan.model_validate.__func__
+
+    def observe_plan(cls, *arguments, **keywords):
+        result = actual_validate(cls, *arguments, **keywords)
+        constructed_plans.append(weakref.ref(result))
+        return result
+
+    def query_unchanged_page():
+        repeated = worker_context_call(
+            context,
+            {"command": "page", "binding": opened.binding, "byte_limit": 0},
+        )
+        assert repeated.status == "available", repeated
+        assert repeated.binding == page.binding
+        assert repeated.page == page.page and repeated.offers == page.offers
+
+    with monkeypatch.context() as construction:
+        construction.setattr(ReviewPlan, "model_validate", classmethod(observe_plan))
+        query_unchanged_page()
+        gc.collect()
+        warmed_live = sum(reference() is not None for reference in constructed_plans)
+        for _ in range(2):
+            query_unchanged_page()
+            gc.collect()
+            assert (
+                sum(reference() is not None for reference in constructed_plans)
+                <= warmed_live
+            )
+
     asset = next(
         row
         for row in page.page.items
