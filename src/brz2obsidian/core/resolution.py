@@ -389,7 +389,10 @@ def advance_plan(work, returned=None):
         prior = work.canonical_prior
         if (
             prior is not None
-            and canonical_equal(prior.producer_facts, facts)
+            and (
+                prior.producer_facts is facts
+                or canonical_equal(prior.producer_facts, facts)
+            )
             and prior.producer_applicability == work.producer_applicability
         ):
             proposal = prior.proposal
