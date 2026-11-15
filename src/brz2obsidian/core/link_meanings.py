@@ -22,6 +22,23 @@ def _key(value):
     return unicodedata.normalize("NFC", value).casefold()
 
 
+def _query_matches_target(query, target):
+    if target.canonical_path is None:
+        return False
+    path = _key(target.canonical_path)
+    paths = {path}
+    if target.kind != "resource" and path.endswith(".md"):
+        paths.add(path[:-3])
+    aliases = {_key(name) for name in target.representations}
+    value = _key(query.value)
+    return (
+        value in paths
+        or value in aliases
+        or bool({_key(spelling) for spelling in query.spellings}.intersection(aliases))
+        or (query.mode == "shortened" and any(p.endswith("/" + value) for p in paths))
+    )
+
+
 def resolve_link_meaning(query, display, fragment, targets, target_facts, inventory):
     def result(status, target=None, state=None, matches=()):
         return LinkMeaning(
@@ -41,28 +58,7 @@ def resolve_link_meaning(query, display, fragment, targets, target_facts, invent
         return result("unsupported")
     if inventory != "complete":
         return result("inventory_uncertain")
-    matches = []
-    for target in targets:
-        if target.canonical_path is None:
-            continue
-        path = _key(target.canonical_path)
-        paths = {path}
-        if target.kind != "resource" and path.endswith(".md"):
-            paths.add(path[:-3])
-        aliases = {_key(name) for name in target.representations}
-        value = _key(query.value)
-        if (
-            value in paths
-            or value in aliases
-            or bool(
-                {_key(spelling) for spelling in query.spellings}.intersection(aliases)
-            )
-            or (
-                query.mode == "shortened"
-                and any(p.endswith("/" + value) for p in paths)
-            )
-        ):
-            matches.append(target)
+    matches = [target for target in targets if _query_matches_target(query, target)]
     if not matches:
         return result("missing")
     if len(matches) != 1:

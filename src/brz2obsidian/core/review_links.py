@@ -8,7 +8,12 @@ from brz2obsidian.content_values import content_key, content_sha, same_content
 from brz2obsidian.contracts import LinkValidationBaseline, ProposalAssumption
 
 from .identity import _paths_collide, _target_context, _target_safe
-from .link_meanings import _semantic, resolve_link_meaning, resolve_occurrence
+from .link_meanings import (
+    _query_matches_target,
+    _semantic,
+    resolve_link_meaning,
+    resolve_occurrence,
+)
 from .link_validation import _validate_link_document
 from .reference_targets import validate_targets
 
@@ -40,11 +45,18 @@ def consumed_context(
     }
     for doc in documents:
         for occurrence in doc.occurrences:
-            # A single-target resolution detects lookup matches even when the full query is ambiguous.
-            for target in targets:
-                meaning = resolve_occurrence(occurrence, (target,), states, inventory)
-                if meaning.target_id is not None or meaning.candidates:
-                    ids.add(target.target_id)
+            # Discover each singleton match, even when the full query is ambiguous.
+            if occurrence.query is not None and inventory == "complete":
+                for target in targets:
+                    if _query_matches_target(occurrence.query, target):
+                        ids.add(target.target_id)
+            else:
+                for target in targets:
+                    meaning = resolve_occurrence(
+                        occurrence, (target,), states, inventory
+                    )
+                    if meaning.target_id is not None or meaning.candidates:
+                        ids.add(target.target_id)
     by_id = {target.target_id: target for target in targets}
     icon_documents = (
         {
