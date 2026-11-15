@@ -41,6 +41,7 @@ from brz2obsidian.contracts import (
     OpaqueContent,
     ReconciliationInput,
     ReconciliationSubject,
+    ReviewPlan,
     ReviewPreflight,
     ReviewRefreshEvent,
     SavedReview,
@@ -364,6 +365,8 @@ class ReviewSession:
         self._staged_bindings = None
         self._physical = {}
         self._record = None
+        self._initial_review_entry = None
+        self._retain_initial_review = False
         self._closed = False
         self._selected = None
         self._scope = None
@@ -375,7 +378,7 @@ class ReviewSession:
     @classmethod
     def _owned_preparation(cls, observed, scratch_parent, capacity, *, _cancel=None):
         maximum = (1 << 63) - 1
-        return cls(
+        result = cls(
             observed,
             scratch_parent=scratch_parent,
             budget=ReviewBudget(
@@ -394,12 +397,16 @@ class ReviewSession:
                 cancel=Event() if _cancel is None else _cancel,
             ),
         )
+        result._retain_initial_review = True
+        return result
 
     def _owned_value(self, reference):
         registration = self._content._prepare_registered(
             reference, self._ledger, self._scope
         )
-        self._record = self._record or uuid4().hex
+        if self._record is None:
+            self._initial_review_entry = None
+            self._record = uuid4().hex
         self._input_ordinal += 1
         return self._retained_value(
             registration, None, ("physical", self._input_ordinal), inline=False
@@ -572,6 +579,7 @@ class ReviewSession:
             envelope_size=manifest.review_size,
         )
         result._initialize_state()
+        result._retain_initial_review = True
         return result
 
     @property
@@ -583,6 +591,7 @@ class ReviewSession:
         return self._closure.comparison
 
     def _invalidate(self):
+        self._initial_review_entry = None
         self._operation_key = self._outstanding = self._selected = None
         self._content._clear_retained_semantic()
 
@@ -629,6 +638,7 @@ class ReviewSession:
         self._check()
         self._ledger.retain_metadata(768 + 16 * len(path))
         if self._record is None:
+            self._initial_review_entry = None
             self._record = uuid4().hex
         self._input_ordinal += 1
         occurrence = (self._record, "input", self._input_ordinal) + path
@@ -1038,6 +1048,7 @@ class ReviewSession:
                 inline=source.inline,
             )
         if self._record is None:
+            self._initial_review_entry = None
             self._record = uuid4().hex
         occurrence = (
             self._record,
@@ -1112,6 +1123,8 @@ class ReviewSession:
             raise
 
     def _drive(self, work):
+        if isinstance(work, RefreshWork):
+            self._initial_review_entry = None
         try:
             return self._drive_work(work)
         except BaseException:
@@ -1161,10 +1174,54 @@ class ReviewSession:
             else:
                 work = result
 
+    def _initial_review(self, facts, preflight):
+        self._check()
+        if not self._retain_initial_review:
+            return self._drive(PlanWork(facts, preflight))
+        entry = self._initial_review_entry
+        prior = None
+        retain_initial = True
+        if entry is not None:
+            record, retained, size = entry
+            workspace = self._ledger.budget.depth_limit * 128
+            if (
+                record == self._record
+                and canonical_equal(retained.history.initial_facts, facts)
+                and canonical_equal(retained.history.initial_preflight, preflight)
+            ):
+                retain_initial = (
+                    self._ledger.metadata + 2 * size + workspace
+                    <= self._ledger.budget.metadata_limit
+                )
+                if retain_initial:
+                    # Recheck every reference/occurrence, including Created
+                    # results, against this operation's registrations. No old
+                    # scope or grant is retained. Returned graphs are separate
+                    # from the private entry.
+                    self._ledger.admit_metadata(retained)
+                    reconstructed = self._ledger.construct(ReviewPlan, retained)
+                    prior = self._admit_values(reconstructed)
+                    self._coadmit()
+                else:
+                    self._initial_review_entry = None
+            else:
+                self._initial_review_entry = None
+        plan = self._drive(PlanWork(facts, preflight, canonical_prior=prior))
+        if prior is None and retain_initial:
+            # Reserve before owning a separate graph. As with other returned
+            # model work, this conservative cumulative charge is not refunded
+            # when the one-entry reference is retired.
+            size = self._ledger.admit_metadata((self._record, plan, 0))
+            reconstructed = self._ledger.construct(ReviewPlan, plan)
+            retained = self._admit_values(reconstructed)
+            self._coadmit()
+            self._initial_review_entry = (self._record, retained, size)
+        return plan
+
     def _canonical_replay(self, plan):
         history = plan.history
-        canonical = self._drive(
-            PlanWork(history.initial_facts, history.initial_preflight)
+        canonical = self._initial_review(
+            history.initial_facts, history.initial_preflight
         )
         for event in history.events:
             work = (
@@ -1174,17 +1231,17 @@ class ReviewSession:
             )
             transition = self._drive(work)
             if transition.status != "accepted":
+                self._initial_review_entry = None
                 return None
             canonical = transition.plan
         return canonical
 
     def _replay(self, plan):
         canonical = self._canonical_replay(plan)
-        return (
-            canonical
-            if canonical is not None and canonical_equal(canonical, plan)
-            else None
-        )
+        if canonical is None or not canonical_equal(canonical, plan):
+            self._initial_review_entry = None
+            return None
+        return canonical
 
     def _retained_value(self, registration, historical, path, *, inline):
         self._content._check_prepared(registration, self._scope)
@@ -1216,6 +1273,7 @@ class ReviewSession:
         from brz2obsidian.review_codec import _RetainedDecoder
 
         with self._operation():
+            self._initial_review_entry = None
             self._record = uuid4().hex
             registrations = self._content._prepare_retained(
                 available,
@@ -1271,6 +1329,7 @@ class ReviewSession:
     def load_review(self, raw):
         with self._operation():
             self._check()
+            self._initial_review_entry = None
             self._record = uuid4().hex
             self._selected = None
             try:
@@ -1395,6 +1454,7 @@ class ReviewSession:
                 loaded = self._ledger.construct(LoadedReview, loaded)
                 self._ledger.admit_metadata(loaded)
                 loaded = self._admit_values(loaded, ("loaded",))
+                self._initial_review_entry = None
                 self._record = uuid4().hex
                 facts = self._ledger.construct(ReconciliationInput, facts)
                 self._ledger.admit_metadata(facts)

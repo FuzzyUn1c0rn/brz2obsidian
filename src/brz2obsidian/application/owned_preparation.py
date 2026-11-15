@@ -317,6 +317,8 @@ class _OwnedPreparation:
         self._session._admit_current(self._history_current_admission, facts)
         self._session._coadmit()
         if previous is None:
+            # History seeds retain their independent construction. Canonical
+            # replay can retain its own freshly constructed initial result.
             return self._session._drive(PlanWork(facts, preflight))
         transition = self._session._drive(RefreshWork(previous, facts, preflight))
         if transition.status != "accepted":
@@ -796,8 +798,8 @@ class _OwnedPreparation:
         facts = self._session._admit_values(facts)
         history = self._scoped(history, facts)
         self._session._coadmit()
-        return history, self._session._drive(
-            PlanWork(facts, history.admission.preflight)
+        return history, self._session._initial_review(
+            facts, history.admission.preflight
         )
 
     def prepare(
@@ -920,9 +922,7 @@ class _OwnedPreparation:
                 facts = self._session._admit_values(facts)
                 history = self._scoped(history, facts)
                 self._session._coadmit()
-                plan = self._session._drive(
-                    PlanWork(facts, history.admission.preflight)
-                )
+                plan = self._session._initial_review(facts, history.admission.preflight)
                 binding = self.operations.observe_reviewed_source(directory, plan)
                 result = lifecycle._prepared(
                     history,
