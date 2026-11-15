@@ -671,7 +671,11 @@ class ReviewSession:
     def _binding(
         self, occurrence, identity, historical, *, published=False, inline=None
     ):
-        self._check()
+        if self._closed:
+            raise OSError("Review session is closed")
+        self._ledger.check()
+        if self._scope is not None:
+            self._scope._check_live(self._content)
         bindings = self._closure.bindings if published else self._staged_bindings
         binding = bindings.get(occurrence)
         if (
@@ -680,6 +684,8 @@ class ReviewSession:
             or binding.historical != historical
             or binding.origin != binding.registration.origin
         ):
+            if self._scope is not None:
+                self._scope.check(self._content)
             raise OSError("Content differs from its actual owned logical registration")
         self._content._check_prepared(binding.registration, self._scope)
         reference = binding.registration.reference
