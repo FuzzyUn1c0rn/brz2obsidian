@@ -1382,7 +1382,28 @@ class UpdateWorkbench(QWidget):
             self._inputs.show()
         elif self.queue.currentRow() == 1:
             self._body.addWidget(_label("Review the whole update", "sectionTitle"))
-            if self._state is None or self._state.binding is None:
+            state = self._state
+            applied = (
+                state is not None
+                and state.binding is None
+                and state.active_request_id is None
+                and not state.needs_inspection
+                and state.reply is not None
+                and state.reply is state.last_operation
+                and state.reply.status == "applied"
+                and state.reply.kind != "history"
+                and state.last_operation_vault == state.vault
+                and state.vault is not None
+            )
+            if applied:
+                self._body.addWidget(_label("Update applied", "sectionTitle"))
+                self._body.addWidget(_label(state.reply.summary or "Update applied."))
+                self._body.addWidget(_label("Updated vault: " + state.vault))
+                if self.vault is None or self.vault == state.vault:
+                    self._action_button_callback(
+                        "Inspect history for Undo", self._inspect_history
+                    )
+            elif state is None or state.binding is None:
                 self._body.addWidget(
                     _label(
                         "Choose an incoming BRZ archive and an existing vault.", "muted"

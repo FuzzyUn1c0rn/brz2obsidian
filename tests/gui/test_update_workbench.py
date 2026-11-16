@@ -703,3 +703,162 @@ def test_ready_first_setup_can_apply_without_manual_save(tmp_path):
         window.hide()
         window.deleteLater()
         app.processEvents()
+
+
+@pytest.mark.parametrize("switch_vault", (False, True))
+def test_applied_result_offers_validated_history_for_the_applied_vault(
+    tmp_path, switch_vault
+):
+    from brz2obsidian.application.update_history_contracts import (
+        HistoryContextBinding,
+        UpdateHistoryState,
+    )
+    from brz2obsidian_ui.window import MainWindow
+    from tests.gui.test_conversion_window import until, window_text
+    from tests.gui.test_update_history_controls import native_result
+    from tests.gui.update_projection_fixture import (
+        ProjectedReviewTransport,
+        ReviewControls,
+        ReviewDialogs,
+    )
+
+    app = QApplication.instance() or QApplication([])
+    vault = tmp_path / "Applied vault"
+    vault.mkdir()
+    source = tmp_path / "incoming.brz"
+    source.write_bytes(b"source")
+    other = tmp_path / "Other vault"
+    other.mkdir()
+    dialogs = ReviewDialogs(source, vault)
+
+    class Projection:
+        binding = None
+
+        def __call__(self, request, callbacks):
+            args = request.arguments
+            if args.command == "prepare":
+                self.binding = UpdateContextBinding(
+                    context_id=str(uuid4()),
+                    selection_id=args.selection_id,
+                    vault=str(vault),
+                    association_id="a" * 64,
+                    checkpoint_commit="b" * 40,
+                    checkpoint_generation=1,
+                    proposal_id="result-review",
+                    generation=1,
+                    revision=1,
+                )
+                return UpdateContextResult(
+                    status="prepared_review",
+                    code="prepared",
+                    kind="source_update",
+                    binding=self.binding,
+                    ready=True,
+                    changes=2,
+                    history_retained=True,
+                    checkpoint_commit="b" * 40,
+                    next_actions=("apply_update",),
+                )
+            if args.command == "apply":
+                assert args.binding == self.binding
+                return UpdateContextResult(
+                    status="applied",
+                    code="applied",
+                    kind="source_update",
+                    binding=None,
+                    summary="Two reviewed changes applied.",
+                    publication="complete",
+                    history_retained=True,
+                    checkpoint_commit="b" * 40,
+                    operation=native_result("applied"),
+                )
+            if args.command == "history":
+                assert args.vault == str(vault)
+                self.binding = HistoryContextBinding(
+                    context_id=str(uuid4()),
+                    selection_id=args.selection_id,
+                    vault=str(vault),
+                    revision=1,
+                    fingerprint="a" * 64,
+                    checkpoint_commit="b" * 40,
+                    checkpoint_generation=1,
+                )
+                history = UpdateHistoryState(
+                    status="available",
+                    code="history_available",
+                    operation=native_result("applied", direction="finish"),
+                    history_retained=True,
+                    recovery_gap_count=0,
+                    findings=(),
+                    diagnostic_omission=False,
+                    summary="Current history available.",
+                )
+                return UpdateContextResult(
+                    status="available",
+                    code="history_available",
+                    kind="history",
+                    binding=self.binding,
+                    history=history,
+                    history_retained=True,
+                    publication="complete",
+                    next_actions=("review_undo",),
+                )
+            assert args.command in ("page", "choices")
+            return UpdateContextResult(
+                status="available",
+                code="available",
+                kind="source_update",
+                binding=self.binding,
+            )
+
+    transport = ProjectedReviewTransport(Projection())
+    window = MainWindow(supervisor=transport, dialogs=dialogs)
+    window.show()
+    controls = ReviewControls(window, app)
+    try:
+        selection = str(uuid4())
+        window.runner.select_update(str(vault), selection_id=selection)
+        window.runner.submit_update(
+            {
+                "command": "prepare",
+                "kind": "source_update",
+                "vault": str(vault),
+                "source": str(source),
+                "selection_id": selection,
+            }
+        )
+        controls.click("Apply update")
+        until(
+            app,
+            lambda: (
+                window.runner.session.update_snapshot.reply is not None
+                and window.runner.session.update_snapshot.reply.status == "applied"
+            ),
+        )
+        assert window.runner.session.update_snapshot.binding is None
+        until(app, lambda: "Two reviewed changes applied." in window_text(window))
+        assert str(vault) in window_text(window)
+        assert controls.button("Review latest Undo") is None
+        if switch_vault:
+            controls.select("Archive & vault")
+            dialogs.vault = str(other)
+            controls.click("Choose update vault")
+            controls.select("Overview")
+            until(app, lambda: window.workbench.vault == str(other))
+            assert controls.button("Inspect history for Undo") is None
+            assert str(vault) in window_text(window)
+            assert not any(a.command == "history" for a in transport.commands)
+        else:
+            controls.click("Inspect history for Undo")
+            until(app, lambda: controls.button("Review latest Undo") is not None)
+            assert [a.command for a in transport.commands].count("history") == 1
+            assert next(
+                a.vault for a in transport.commands if a.command == "history"
+            ) == str(vault)
+            assert not any(a.command == "prepare_history" for a in transport.commands)
+    finally:
+        window.shutdown()
+        transport.close()
+        window.hide()
+        window.deleteLater()
+        app.processEvents()
