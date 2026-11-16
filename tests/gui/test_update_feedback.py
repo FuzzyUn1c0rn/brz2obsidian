@@ -486,3 +486,108 @@ def test_completed_unknown_history_keeps_current_recovery_route_and_retention(tm
         window.hide()
         window.deleteLater()
         app.processEvents()
+
+
+def test_unready_review_explains_blocker_after_read_and_vault_change(tmp_path):
+    from brz2obsidian_ui.window import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    vault = tmp_path / "First vault"
+    vault.mkdir()
+    other = tmp_path / "Other vault"
+    other.mkdir()
+    source = tmp_path / "incoming.brz"
+    source.write_bytes(b"source")
+    dialogs = ReviewDialogs(source, vault)
+
+    class Projection:
+        binding = None
+
+        def __call__(self, actual, callbacks):
+            args = actual.arguments
+            if args.command == "prepare":
+                self.binding = UpdateContextBinding(
+                    context_id=str(uuid4()),
+                    selection_id=args.selection_id,
+                    vault=str(vault),
+                    association_id="a" * 64,
+                    checkpoint_commit="b" * 40,
+                    checkpoint_generation=1,
+                    proposal_id="blocked-review",
+                    generation=1,
+                    revision=1,
+                )
+                return UpdateContextResult(
+                    status="unresolved",
+                    code="review_blocked",
+                    kind="source_update",
+                    binding=self.binding,
+                    changes=3,
+                    unresolved=0,
+                    ready=False,
+                    summary="A selected attachment conflicts with its reference.",
+                    findings=("The selected link target cannot be verified.",),
+                    guidance="Review the attachment and its references before applying.",
+                    next_actions=("resolve_update", "save_update"),
+                )
+            if args.command == "close":
+                return UpdateContextResult(
+                    status="no_content_change",
+                    code="context_closed",
+                    kind="source_update",
+                )
+            assert args.command in ("page", "choices")
+            return UpdateContextResult(
+                status="available",
+                code="available",
+                kind="source_update",
+                binding=self.binding,
+                summary="Generic available page.",
+            )
+
+    transport = ProjectedReviewTransport(Projection())
+    window = MainWindow(supervisor=transport, dialogs=dialogs)
+    window.show()
+    controls = ReviewControls(window, app)
+    try:
+        selection = str(uuid4())
+        window.runner.select_update(str(vault), selection_id=selection)
+        window.runner.submit_update(
+            {
+                "command": "prepare",
+                "kind": "source_update",
+                "vault": str(vault),
+                "source": str(source),
+                "selection_id": selection,
+            }
+        )
+        until(
+            app,
+            lambda: (
+                window.workbench.snapshot is not None
+                and window.workbench.snapshot.reply is not None
+                and window.workbench.snapshot.reply.code == "available"
+                and not window.workbench.busy
+            ),
+        )
+        assert window.workbench.snapshot.binding == transport.projection.binding
+        assert window.workbench.snapshot.unresolved == 0
+        assert not controls.button("Apply update").isEnabled()
+        until(app, lambda: "Prepared changes: 3" in window_text(window))
+        text = window_text(window)
+        assert "A selected attachment conflicts with its reference." in text
+        assert "The selected link target cannot be verified." in text
+        assert "Review the attachment and its references before applying." in text
+        assert "Generic available page." not in text
+        assert controls.button("Show review details") is not None
+        window.runner.select_update(str(other), selection_id=str(uuid4()))
+        until(app, lambda: window.workbench.snapshot.vault == str(other))
+        assert "A selected attachment conflicts with its reference." not in window_text(
+            window
+        )
+    finally:
+        window.shutdown()
+        transport.close()
+        window.hide()
+        window.deleteLater()
+        app.processEvents()

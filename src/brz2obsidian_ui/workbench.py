@@ -849,10 +849,28 @@ class UpdateWorkbench(QWidget):
             "incomplete",
             "content_complete",
         )
+        operation = state.last_operation
+        blocker = (
+            not not_started
+            and not uncertain
+            and not failed
+            and isinstance(state.binding, UpdateContextBinding)
+            and not state.review_ready
+            and operation is not None
+            and not operation.ready
+            and isinstance(operation.binding, UpdateContextBinding)
+            and operation.status in ("prepared_review", "unresolved")
+            and operation.binding.model_dump(exclude={"revision"})
+            == state.binding.model_dump(exclude={"revision"})
+            and operation.binding.revision <= state.binding.revision
+            and state.last_operation_vault == state.vault
+            and bool(operation.summary or operation.findings or operation.guidance)
+        )
         if not (
             not_started
             or uncertain
             or failed
+            or blocker
             or reply
             and (reply.findings or reply.guidance or reply.recovery_gap_count)
         ):
@@ -898,6 +916,14 @@ class UpdateWorkbench(QWidget):
                     "fieldError",
                 )
             )
+        if blocker:
+            self._body.addWidget(_label("Review needs attention", "sectionTitle"))
+            if operation.summary:
+                self._body.addWidget(_label(operation.summary))
+            for finding in operation.findings:
+                self._body.addWidget(_label(finding))
+            if operation.guidance:
+                self._body.addWidget(_label(operation.guidance))
         if not_started or uncertain or failed:
             self._body.addWidget(
                 _label(
