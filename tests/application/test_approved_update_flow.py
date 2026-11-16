@@ -1011,3 +1011,344 @@ context.close(state.binding,choice="discard")
         tuple(hashlib.sha256(p.read_bytes()).hexdigest() for p in (archive, incoming))
         == source_hashes
     )
+
+
+def supported_transition_facts(original, current, incoming):
+    from brz2obsidian.application.update_facts import automatic_merge_facts
+    from brz2obsidian.contracts import ExactContent
+    from brz2obsidian.obsidian import align_structure, interpret_structure
+    from tests.reconciliation.test_resolution import with_review_links
+    from tests.reconciliation.test_structure import structured_request
+
+    facts = structured_request(original, current, incoming)
+    documents = tuple(
+        interpret_structure(ExactContent(data=raw), output_format=version)
+        for raw, version in ((original, 7), (current, 7), (incoming, 8))
+    )
+    facts = facts.model_copy(
+        update={
+            "incoming_identity": facts.incoming_identity.model_copy(
+                update={"output_format": 8}
+            ),
+            "subjects": (
+                facts.subjects[0].model_copy(
+                    update={"structure": align_structure(*documents)}
+                ),
+            ),
+            "format_operation": facts.format_operation.model_copy(
+                update={
+                    "kind": "format_transition",
+                    "target_source_version": "source:a",
+                }
+            ),
+        }
+    )
+    return automatic_merge_facts(with_review_links(facts))
+
+
+def test_explicit_supported_transition_automatically_keeps_clean_and_combines_safe_files():
+    from brz2obsidian.core import prepare_review, select_review_effects
+    from tests.reconciliation.test_resolution import preflight
+
+    for original, current, incoming, expected in (
+        (b"Unchanged.\n", b"Unchanged.\n", b"Unchanged.\n", b"Unchanged.\n"),
+        (
+            b"Old presentation.\n",
+            b"Old presentation.\n",
+            b"Target presentation.\n",
+            b"Target presentation.\n",
+        ),
+        (
+            b"First old.\nMiddle.\nLast old.\n",
+            b"First local.\nMiddle.\nLast old.\n",
+            b"First old.\nMiddle.\nLast target.\n",
+            b"First local.\nMiddle.\nLast target.\n",
+        ),
+    ):
+        review = prepare_review(
+            supported_transition_facts(original, current, incoming),
+            preflight=preflight(),
+        )
+        assert review.proposal.operation == "format_transition"
+        assert review.ready and not review.requirements, review.requirements
+        assert review.proposal.changes[0].format_review is None
+        effects = select_review_effects(review)
+        assert effects.status == "selected", effects
+        assert [(f.path, f.content.data) for f in effects.files] == [
+            ("Notes/Opening.md", expected)
+        ]
+
+
+def test_transition_producer_interprets_automatic_combination_after_selecting_operation(
+    tmp_path,
+):
+    import hashlib
+    import json
+    from types import SimpleNamespace
+
+    from brz2obsidian.application.format_transition import transition_facts
+    from brz2obsidian.application.update_facts import output_identity, record
+    from brz2obsidian.core import prepare_review
+    from tests.reconciliation.test_resolution import preflight
+    from tests.support.recorded_format7 import historical_payload
+
+    original, _ = historical_payload()
+    # The controlled history port includes this independently specified support output.
+    original["Compatible text.md"] = b"First old.\nMiddle.\nLast old.\n"
+    incoming = dict(original)
+    target_record = record(incoming)
+    target_record["schema_version"] = 8
+    incoming["migration-record.json"] = json.dumps(target_record).encode()
+    guide_path = "Compatible text.md"
+    incoming[guide_path] = b"First old.\nMiddle.\nLast target.\n"
+    local = b"First local.\nMiddle.\nLast old.\n"
+    rows = []
+    for path, raw in original.items():
+        raw = local if path == guide_path else raw
+        target = tmp_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(raw)
+        rows.append(
+            SimpleNamespace(
+                path=path,
+                size=len(raw),
+                sha256=hashlib.sha256(raw).hexdigest(),
+                excluded=False,
+            )
+        )
+    history = SimpleNamespace(
+        checkpoint=SimpleNamespace(
+            review=None,
+            manifest=SimpleNamespace(
+                boundary="result", identity=output_identity(record(original))
+            ),
+        ),
+        admission=SimpleNamespace(vault=tmp_path, inventory=tuple(rows)),
+    )
+    facts = transition_facts(
+        history, original, incoming, proposal_id="explicit-transition", generation=1
+    )
+    review = prepare_review(facts, preflight=preflight())
+    note = next(
+        change for change in review.proposal.changes if change.path == guide_path
+    )
+    subject = next(subject for subject in facts.subjects if subject.path == guide_path)
+    assert subject.interpretation == "supported"
+    assert subject.structure.alignment == "supported", subject.structure.alignment
+    assert facts.format_operation.recorded_generation == "supported"
+    assert facts.format_operation.established_baseline is not None
+    assert (
+        facts.format_operation.baseline_source_version
+        == facts.format_operation.target_source_version
+    )
+    assert review.proposal.operation == "format_transition"
+    assert note.disposition == "compatible" and not note.requires_decision, (
+        note.provenance.rule,
+        note.format_review,
+        note.structure_result,
+    )
+    assert note.result.data == b"First local.\nMiddle.\nLast target.\n"
+    assert not any(
+        requirement.change_id == note.change_id for requirement in review.requirements
+    )
+
+
+def test_automatic_transition_keeps_conflicts_unsafe_unknown_and_legacy_reviews_blocked():
+    from brz2obsidian.contracts import ContentVersion
+    from brz2obsidian.core import (
+        inspect_review_choices,
+        prepare_review,
+        select_review_effects,
+    )
+    from tests.reconciliation.test_resolution import preflight
+
+    clean = supported_transition_facts(b"Old.\n", b"Old.\n", b"Target.\n")
+    conflict = supported_transition_facts(b"Old.\n", b"Local.\n", b"Target.\n")
+    unsafe = clean.model_copy(
+        update={
+            "safety_facts": tuple(
+                fact.model_copy(update={"status": "unsafe"})
+                if fact.kind == "target"
+                else fact
+                for fact in clean.safety_facts
+            )
+        }
+    )
+    unknown = clean.model_copy(
+        update={
+            "subjects": (
+                clean.subjects[0].model_copy(
+                    update={
+                        "baseline": ContentVersion(
+                            status="unknown",
+                            content=None,
+                            unavailable_digest="unknown-original",
+                        )
+                    }
+                ),
+            ),
+            "format_operation": clean.format_operation.model_copy(
+                update={"established_baseline": None}
+            ),
+        }
+    )
+    unsupported = supported_transition_facts(b"Old.\n", b"Old.\n", b"Target.\xff\n")
+    unbound = clean.model_copy(
+        update={
+            "subjects": (
+                clean.subjects[0].model_copy(
+                    update={
+                        "structure": clean.subjects[0].structure.model_copy(
+                            update={
+                                "incoming": clean.subjects[
+                                    0
+                                ].structure.incoming.model_copy(
+                                    update={"output_format": 7}
+                                )
+                            }
+                        )
+                    }
+                ),
+            )
+        }
+    )
+    for label, facts in (
+        ("conflicting edits", conflict),
+        ("unsafe target", unsafe),
+        ("unknown original", unknown),
+        ("unsupported target interpretation", unsupported),
+        ("unbound target interpretation", unbound),
+        (
+            "unavailable generation",
+            clean.model_copy(
+                update={
+                    "format_operation": clean.format_operation.model_copy(
+                        update={"recorded_generation": "unavailable"}
+                    )
+                }
+            ),
+        ),
+        (
+            "unknown source",
+            clean.model_copy(
+                update={
+                    "format_operation": clean.format_operation.model_copy(
+                        update={"target_source_version": None}
+                    )
+                }
+            ),
+        ),
+        (
+            "changed source",
+            clean.model_copy(
+                update={
+                    "format_operation": clean.format_operation.model_copy(
+                        update={"target_source_version": "source:b"}
+                    )
+                }
+            ),
+        ),
+        (
+            "legacy explicit policy",
+            clean.model_copy(
+                update={
+                    "format_operation": clean.format_operation.model_copy(
+                        update={"automatic_merge": False}
+                    )
+                }
+            ),
+        ),
+    ):
+        review = prepare_review(facts, preflight=preflight())
+        assert not review.ready, label
+        assert review.requirements or review.blockers, label
+        assert select_review_effects(review).status != "selected", label
+        if label == "conflicting edits":
+            assert review.proposal.changes[0].format_review is None
+            offer = inspect_review_choices(review)[0]
+            assert {"current", "incoming"} <= set(offer.enabled_choices)
+        if label == "legacy explicit policy":
+            assert review.proposal.changes[0].format_review is not None
+            assert review.requirements[0].domain == "format"
+
+
+def test_automatic_transition_keeps_opaque_assets_clean_and_validates_binary_effects():
+    from brz2obsidian.application.update_facts import automatic_merge_facts
+    from brz2obsidian.contracts import ExactContent
+    from brz2obsidian.core import prepare_review, select_review_effects
+    from tests.reconciliation.test_attachments import linked_attachment_request
+    from tests.reconciliation.test_resolution import preflight
+
+    raw = b"Authored [[Assets/data.bin|Retained wording]].\r\n"
+    for original in (b"\x00original", b"abc"):
+        facts = linked_attachment_request(payload_current=original, raw=raw)
+        subject = facts.subjects[0].model_copy(
+            update={
+                "interpretation": "opaque",
+                "facet": "asset",
+                "baseline": facts.subjects[0].baseline.model_copy(
+                    update={"content": ExactContent(data=original)}
+                ),
+            }
+        )
+        baseline = facts.format_operation.established_baseline
+        facts = facts.model_copy(
+            update={
+                "subjects": (subject,),
+                "incoming_identity": facts.incoming_identity.model_copy(
+                    update={"output_format": 8}
+                ),
+                "identity_inventory": tuple(
+                    row.model_copy(update={"facet": "asset"})
+                    if row.facet == "attachment:payload"
+                    else row
+                    for row in facts.identity_inventory
+                ),
+                "format_operation": facts.format_operation.model_copy(
+                    update={
+                        "kind": "format_transition",
+                        "target_source_version": "source:a",
+                        "established_baseline": baseline.model_copy(
+                            update={
+                                "outputs": tuple(
+                                    output.model_copy(
+                                        update={
+                                            "facet": "asset",
+                                            "content": ExactContent(data=original),
+                                        }
+                                    )
+                                    for output in baseline.outputs
+                                )
+                            }
+                        ),
+                    }
+                ),
+            }
+        )
+        normalized = automatic_merge_facts(facts)
+        review = prepare_review(normalized, preflight=preflight())
+        assert review.ready and not review.requirements, review.requirements
+        assert review.proposal.changes[0].format_review is None
+        selected = select_review_effects(review)
+        assert selected.status == "selected", selected
+        files = {row.path: row.content.data for row in selected.files}
+        assert files["Assets/data.bin"] == b"abc"
+        assert files.get("Notes/Owner.md", raw) == raw
+        if original != b"abc":
+            without_candidate = normalized.model_copy(
+                update={
+                    "subjects": (
+                        normalized.subjects[0].model_copy(
+                            update={
+                                "automatic_attachment": None,
+                                "automatic_attachment_links": (),
+                            }
+                        ),
+                    )
+                }
+            )
+            blocked = prepare_review(without_candidate, preflight=preflight())
+            assert (
+                not blocked.ready
+                and select_review_effects(blocked).status != "selected"
+            )

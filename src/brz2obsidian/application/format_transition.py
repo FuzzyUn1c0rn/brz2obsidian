@@ -7,7 +7,7 @@ from uuid import uuid4
 from brz2obsidian.contracts import SourceIdentity
 from brz2obsidian.core import prepare_review
 
-from .update_facts import record
+from .update_facts import automatic_merge_facts, record
 from .update_lifecycle import (
     _baseline,
     _history,
@@ -100,7 +100,7 @@ def transition_facts(
         )
         for subject in facts.subjects
     )
-    return facts.model_copy(
+    facts = facts.model_copy(
         update={
             "subjects": subjects,
             "baseline_identity": old_identity,
@@ -115,6 +115,7 @@ def transition_facts(
             ),
         }
     )
+    return automatic_merge_facts(facts, _owner=_owner)
 
 
 def prepare_format_transition(operations, vault, source=None, *, _owner=None):

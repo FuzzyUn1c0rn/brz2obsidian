@@ -123,12 +123,47 @@ def automatic_configuration(facts, subject):
     )
 
 
+def automatic_transition(facts, subject):
+    """Assess proven interpretable files inside an explicit source-stable operation."""
+    operation = facts.format_operation
+    comparison = subject.structure
+    return (
+        operation.automatic_merge
+        and operation.kind == "format_transition"
+        and operation.recorded_generation == "supported"
+        and operation.baseline_source_version is not None
+        and operation.baseline_source_version == operation.target_source_version
+        and subject.baseline.status == "known"
+        and not needs_onboarding(facts, subject)
+        and (
+            (
+                subject.attachment is not None
+                and subject.interpretation in ("opaque", "supported")
+            )
+            or (
+                subject.interpretation == "supported"
+                and comparison is not None
+                and comparison.alignment == "supported"
+                and all(
+                    document.status == "supported"
+                    for document in (
+                        comparison.original,
+                        comparison.current,
+                        comparison.incoming,
+                    )
+                )
+            )
+        )
+    )
+
+
 def format_proposal(facts, subject):
-    """A format operation always needs an explicit current-generation choice."""
+    """Retain explicit choices where the selected operation lacks safe evidence."""
     operation = facts.format_operation
     if (
         operation.kind == "attachment_cleanup"
         or automatic_onboarding(facts, subject)
+        or automatic_transition(facts, subject)
         or (operation.automatic_merge and _new_source_output(facts, subject))
     ):
         return None
@@ -182,6 +217,7 @@ def review_facts(facts, subject):
     if (
         facts.format_operation.kind == "attachment_cleanup"
         or automatic_onboarding(facts, subject)
+        or automatic_transition(facts, subject)
         or automatic_configuration(facts, subject)
         or (
             facts.format_operation.automatic_merge
