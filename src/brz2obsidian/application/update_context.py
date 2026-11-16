@@ -152,6 +152,8 @@ class UpdateContext:
         if result.preparation is not None:
             prepared = UpdatePreparation.model_validate(result.preparation)
             locator = prepared.locator
+            if self._owner is not None:
+                self._owner._bind_readonly_initial(result.preparation, prepared)
             self._preparation = prepared
             self._binding = UpdateContextBinding(
                 context_id=str(uuid4()),
@@ -319,7 +321,7 @@ class UpdateContext:
         page_reader = (
             self._operations.inspect_update_review
             if self._owner is None
-            else self._owner.page
+            else self._owner._readonly_page
         )
         page = page_reader(
             self._preparation,
@@ -367,7 +369,7 @@ class UpdateContext:
                     (
                         review_plan_choice_offers(self._preparation.review)
                         if self._owner is None
-                        else self._owner.offers(self._preparation.review)
+                        else self._owner._readonly_offers(self._preparation.review)
                     )
                     if page.status == "available"
                     else ()
@@ -498,6 +500,8 @@ class UpdateContext:
             )
         self._remember(result)
         if result.code == "accepted" and result.preparation is not None:
+            if self._owner is not None:
+                self._owner._clear_readonly_initial()
             if self._edit is not None:
                 self._edit.close()
                 self._edit = None
@@ -538,7 +542,7 @@ class UpdateContext:
                     or not 1 <= limit <= 100
                 ):
                     raise ValueError("Invalid choice page")
-                offers = self._owner.offers(plan)
+                offers = self._owner._readonly_offers(plan)
                 end = offset + limit
                 return self._content_result(
                     status="available",
@@ -576,7 +580,9 @@ class UpdateContext:
             rows, total, following = (
                 reader(plan, **kwargs)
                 if self._owner is None
-                else reader(plan, _choices=self._owner.choices(plan), **kwargs)
+                else reader(
+                    plan, _choices=self._owner._readonly_choices(plan), **kwargs
+                )
             )
         except ValueError, TypeError, StopIteration, OSError:
             return self._edit_refusal("offer_changed")
@@ -679,6 +685,8 @@ class UpdateContext:
         )
 
     def _retain(self, result, *, selection_id):
+        if self._owner is not None:
+            self._owner._clear_readonly_initial()
         self._kind = result.kind
         if result.preparation is not None:
             prepared = UpdatePreparation.model_validate(result.preparation)

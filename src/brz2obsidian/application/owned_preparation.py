@@ -3,6 +3,7 @@
 import shutil
 import stat
 import tempfile
+import weakref
 from contextlib import closing, contextmanager
 from pathlib import Path
 from threading import Event
@@ -12,7 +13,11 @@ from brz2obsidian.content_fingerprints import canonical_equal
 from brz2obsidian.contracts import RunMetadata, SourceIdentity
 from brz2obsidian.core.reconciliation import ReconcileWork
 from brz2obsidian.core.refresh import RefreshWork
-from brz2obsidian.core.resolution import ActionWork, PlanWork
+from brz2obsidian.core.resolution import (
+    ActionWork,
+    PlanWork,
+    _inspect_canonical_choices,
+)
 from brz2obsidian.core.selected_effects import SelectedEffectsWork
 from brz2obsidian.publication.content_session import _RetainedReviewRead
 from brz2obsidian.publication.vault_history import (
@@ -52,6 +57,64 @@ class _OwnedPreparation:
         self._history_observation = self._history_origin = None
         self._history_origin_commit = None
         self._history_values = {}
+        self._readonly_initial = self._readonly_initial_seed = None
+
+    def _stage_readonly_initial(self, result):
+        """Reserve the optional alias inside preparation's refusal boundary."""
+        self._clear_readonly_initial()
+        self.preparation = result.preparation
+        if self._session is None or self.preparation is None:
+            return
+        entry = self._session._initial_review_entry
+        if (
+            entry is None
+            or self.preparation.review.history.events
+            or not canonical_equal(entry[1], self.preparation.review)
+        ):
+            return
+        ledger = self._session._ledger
+        ledger.check()
+        # Two weak aliases own no additional plan graph. Only this known
+        # headroom miss is optional; live guard errors must refuse preparation.
+        if ledger.metadata + 256 > ledger.budget.metadata_limit:
+            return
+        ledger.retain_metadata(256)
+        self._readonly_initial_seed = weakref.ref(entry[1])
+
+    def _bind_readonly_initial(self, returned, retained):
+        """Transfer a freshly minted seed to the Context's validated alias."""
+        self._readonly_initial = None
+        if self._session is None or returned is not self.preparation:
+            self._clear_readonly_initial()
+            return
+        entry = self._session._initial_review_entry
+        seed = self._readonly_initial_seed
+        if (
+            entry is None
+            or seed is None
+            or seed() is not entry[1]
+            or not canonical_equal(returned.review, retained.review)
+        ):
+            self._clear_readonly_initial()
+            return
+        self._readonly_initial = weakref.ref(retained.review)
+
+    def _clear_readonly_initial(self):
+        self._readonly_initial = self._readonly_initial_seed = None
+
+    def _is_readonly_initial(self, plan):
+        alias, seed = self._readonly_initial, self._readonly_initial_seed
+        entry = self._session._initial_review_entry
+        if (
+            alias is not None
+            and alias() is plan
+            and seed is not None
+            and entry is not None
+            and seed() is entry[1]
+        ):
+            return True
+        self._clear_readonly_initial()
+        return False
 
     def _observe(self, vault, expected=None, *, expected_absent=False, _recovery=False):
         fresh = _UpdateRead(vault, _metadata_only=True, _recovery=_recovery)
@@ -823,7 +886,7 @@ class _OwnedPreparation:
                 from .attachment_cleanup import prepare_attachment_cleanup
 
                 result = prepare_attachment_cleanup(self.operations, vault, _owner=self)
-                self.preparation = result.preparation
+                self._stage_readonly_initial(result)
                 if result.preparation is None:
                     self.close()
                 return result
@@ -833,7 +896,7 @@ class _OwnedPreparation:
                 result = prepare_format_transition(
                     self.operations, vault, source, _owner=self
                 )
-                self.preparation = result.preparation
+                self._stage_readonly_initial(result)
                 if result.preparation is None:
                     self.close()
                 return result
@@ -861,7 +924,7 @@ class _OwnedPreparation:
                         original_source=original_source,
                         _owner=self,
                     )
-                    self.preparation = result.preparation
+                    self._stage_readonly_initial(result)
                 if result.preparation is None:
                     self.close()
                 return result
@@ -934,7 +997,7 @@ class _OwnedPreparation:
                     source_ref=str(Path(source).absolute()),
                     _owner=self,
                 )
-                self.preparation = result.preparation
+                self._stage_readonly_initial(result)
             return result
         except OSError, ValueError, TypeError, KeyError, RecursionError:
             self.close()
@@ -961,6 +1024,18 @@ class _OwnedPreparation:
             return review_plan_choice_offers(
                 plan, _choices=self._session._canonical_choices(plan)
             )
+
+    def _readonly_offers(self, plan):
+        with self._session._operation():
+            original = plan
+            plan = self._session._admit_values(plan)
+            self._session._coadmit()
+            choices = (
+                _inspect_canonical_choices(plan)
+                if self._is_readonly_initial(original)
+                else self._session._canonical_choices(plan)
+            )
+            return review_plan_choice_offers(plan, _choices=choices)
 
     def apply(self, preparation, *, cancel=None, progress=None):
         self._cancel.probe = cancel
@@ -991,6 +1066,17 @@ class _OwnedPreparation:
             plan = self._session._admit_values(plan)
             self._session._coadmit()
             return self._session._canonical_choices(plan)
+
+    def _readonly_choices(self, plan):
+        with self._session._operation():
+            original = plan
+            plan = self._session._admit_values(plan)
+            self._session._coadmit()
+            return (
+                _inspect_canonical_choices(plan)
+                if self._is_readonly_initial(original)
+                else self._session._canonical_choices(plan)
+            )
 
     def configuration_choice_offer(self, preparation):
         from .format_configuration import configuration_choice_offer
@@ -1120,6 +1206,12 @@ class _OwnedPreparation:
         return bytes(result)
 
     def page(self, preparation, **arguments):
+        return self._page(preparation, **arguments)
+
+    def _readonly_page(self, preparation, **arguments):
+        return self._page(preparation, _readonly=True, **arguments)
+
+    def _page(self, preparation, *, _readonly=False, **arguments):
         try:
             self._observe(
                 preparation.vault,
@@ -1129,7 +1221,14 @@ class _OwnedPreparation:
             with self._session._operation():
                 plan = self._session._admit_values(preparation.review)
                 self._session._coadmit()
-                return lifecycle.review_plan_page(plan, _owner=self, **arguments)
+                canonical = (
+                    plan
+                    if _readonly and self._is_readonly_initial(preparation.review)
+                    else None
+                )
+                return lifecycle.review_plan_page(
+                    plan, _owner=self, _canonical_plan=canonical, **arguments
+                )
         except (OSError, ValueError, TypeError, AttributeError) as error:
             from .update_contracts import UpdateReviewPage
 
@@ -1671,6 +1770,7 @@ class _OwnedPreparation:
             return lifecycle._refused("save_unavailable", preparation=preparation)
 
     def close(self):
+        self._clear_readonly_initial()
         if self._closed:
             return
         self._closed = True

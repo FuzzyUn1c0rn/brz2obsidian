@@ -1491,6 +1491,7 @@ def review_plan_page(
     byte_offset=0,
     byte_limit=65536,
     _owner=None,
+    _canonical_plan=None,
 ):
     def refused(code):
         return UpdateReviewPage(
@@ -1521,7 +1522,12 @@ def review_plan_page(
             or (
                 validate_review(plan).status != "accepted"
                 if _owner is None
-                else _owner._session._replay(plan) is None
+                else (
+                    _owner._session._replay(plan)
+                    if _canonical_plan is not plan
+                    else _canonical_plan
+                )
+                is None
             )
         ):
             return refused("invalid_page")
