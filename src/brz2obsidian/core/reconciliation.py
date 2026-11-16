@@ -332,6 +332,7 @@ def _reconcile_subject(
                 facts.baseline_identity,
                 facts.incoming_identity,
                 source_version=facts.format_operation.baseline_source_version,
+                automatic=facts.format_operation.automatic_merge,
             )
         )
     if (

@@ -1395,3 +1395,210 @@ def test_group_revalidates_typed_and_mapping_envelopes_before_accepting_history(
         "Notes/one.md": b"one local\n",
         "Notes/two.md": b"two local\n",
     }
+
+
+def test_default_worker_automatically_accepts_incoming_runtime_metadata():
+    import hashlib
+    import json
+
+    from brz2obsidian.application.update_context import UpdateContext
+    from tests.application.test_onboarding_completion import authored_files
+    from tests.application.test_update_context import worker_context_call
+    from tests.application.test_update_lifecycle import _user_state
+
+    _, vault, archive = first_setup_operations()
+    before = authored_files(vault)
+    user_before = _user_state(vault)
+    original_record = (vault / "migration-record.json").read_bytes()
+    source_sha = hashlib.sha256(archive.read_bytes()).hexdigest()
+    # Incoming uses the public default runtime metadata, distinct from the
+    # independently retained fixture's original generation metadata.
+    context = UpdateContext()
+    opened = worker_context_call(
+        context,
+        {
+            "command": "prepare",
+            "kind": "onboarding",
+            "vault": str(vault),
+            "source": str(archive),
+            "original_source": str(archive),
+            "selection_id": "11111111-1111-4111-8111-111111111111",
+        },
+    )
+    assert opened.binding is not None, opened
+    try:
+        shallow = worker_context_call(
+            context, {"command": "page", "binding": opened.binding, "byte_limit": 0}
+        )
+        offset = next(
+            index
+            for index, row in enumerate(shallow.page.items)
+            if row.current_path == "migration-record.json"
+        )
+        page = worker_context_call(
+            context,
+            {
+                "command": "page",
+                "binding": opened.binding,
+                "offset": offset,
+                "limit": 1,
+            },
+        )
+        record = page.page.items[0]
+        assert not record.omitted
+        assert record.original == record.current == original_record
+        assert record.incoming is not None and record.incoming != original_record
+        assert (
+            json.loads(record.incoming)["source_identity"]
+            == json.loads(original_record)["source_identity"]
+        )
+        assert record.result == record.incoming
+        assert record.disposition == "compatible"
+        assert (
+            opened.ready
+            and opened.unresolved == 0
+            and "apply_update" in opened.next_actions
+        )
+    finally:
+        worker_context_call(
+            context,
+            {"command": "close", "binding": opened.binding, "choice": "discard"},
+        )
+    assert authored_files(vault) == before and _user_state(vault) == user_before
+    assert hashlib.sha256(archive.read_bytes()).hexdigest() == source_sha
+
+
+def test_incoming_only_repeated_text_uses_exact_supported_target_across_operations():
+    from brz2obsidian.application.update_facts import automatic_merge_facts
+    from brz2obsidian.core import prepare_review, select_review_effects
+    from tests.reconciliation.test_resolution import preflight, with_review_links
+    from tests.reconciliation.test_structure import structured_request
+
+    original = b"Repeated.\nOld.\nRepeated.\n"
+    incoming = b"Repeated.\nTarget.\nRepeated.\n"
+    for kind in ("source_update", "onboarding", "format_transition"):
+        if kind == "format_transition":
+            facts = supported_transition_facts(original, original, incoming)
+        else:
+            facts = structured_request(original, original, incoming)
+            facts = facts.model_copy(
+                update={
+                    "format_operation": facts.format_operation.model_copy(
+                        update={"kind": kind}
+                    )
+                }
+            )
+            facts = automatic_merge_facts(with_review_links(facts))
+        assert facts.subjects[0].structure.alignment == "ambiguous"
+        plan = prepare_review(facts, preflight=preflight())
+        assert plan.ready and not plan.requirements, (kind, plan.requirements)
+        assert plan.proposal.operation == kind
+        change = plan.proposal.changes[0]
+        assert change.original.data == change.current.data == original
+        assert change.result.data == b"Repeated.\nTarget.\nRepeated.\n"
+        assert change.format_review is None and not change.requires_decision
+        effects = select_review_effects(plan)
+        assert effects.status == "selected"
+        assert [(row.path, row.content.data) for row in effects.files] == [
+            ("Notes/Opening.md", b"Repeated.\nTarget.\nRepeated.\n")
+        ]
+
+
+def test_incoming_only_shortcut_keeps_ambiguous_local_and_untrusted_results_blocked():
+    from brz2obsidian.application.update_facts import automatic_merge_facts
+    from brz2obsidian.contracts import ContentVersion
+    from brz2obsidian.core import prepare_review, select_review_effects
+    from tests.reconciliation.test_resolution import preflight, with_review_links
+    from tests.reconciliation.test_structure import structured_request
+
+    original = b"Repeated.\nOld.\nRepeated.\n"
+    incoming = b"Repeated.\nTarget.\nRepeated.\n"
+    local = b"Repeated.\nLocal.\nRepeated.\n"
+    clean = automatic_merge_facts(
+        with_review_links(structured_request(original, original, incoming))
+    )
+    conflict = automatic_merge_facts(
+        with_review_links(structured_request(original, local, incoming))
+    )
+    onboarding = conflict.model_copy(
+        update={
+            "format_operation": conflict.format_operation.model_copy(
+                update={"kind": "onboarding"}
+            )
+        }
+    )
+    unknown = clean.model_copy(
+        update={
+            "subjects": (
+                clean.subjects[0].model_copy(
+                    update={
+                        "baseline": ContentVersion(
+                            status="unknown", content=None, unavailable_digest="unknown"
+                        )
+                    }
+                ),
+            ),
+            "format_operation": clean.format_operation.model_copy(
+                update={"established_baseline": None}
+            ),
+        }
+    )
+    unsupported = automatic_merge_facts(
+        with_review_links(
+            structured_request(
+                original, original, b"---\npriority: 1\npriority: 2\n---\nTarget.\n"
+            )
+        )
+    )
+    unbound = clean.model_copy(
+        update={
+            "subjects": (
+                clean.subjects[0].model_copy(
+                    update={
+                        "structure": clean.subjects[0].structure.model_copy(
+                            update={
+                                "incoming": clean.subjects[
+                                    0
+                                ].structure.incoming.model_copy(
+                                    update={"output_format": 8}
+                                )
+                            }
+                        )
+                    }
+                ),
+            )
+        }
+    )
+    unsafe = clean.model_copy(
+        update={
+            "safety_facts": tuple(
+                fact.model_copy(update={"status": "unsafe"})
+                if fact.kind == "candidate"
+                else fact
+                for fact in clean.safety_facts
+            )
+        }
+    )
+    legacy = clean.model_copy(
+        update={
+            "format_operation": clean.format_operation.model_copy(
+                update={"automatic_merge": False}
+            )
+        }
+    )
+    for label, facts in (
+        ("ambiguous source update with authored edits", conflict),
+        ("ambiguous onboarding with authored edits", onboarding),
+        (
+            "ambiguous format transition with authored edits",
+            supported_transition_facts(original, local, incoming),
+        ),
+        ("unknown original", unknown),
+        ("unsupported target", unsupported),
+        ("unbound target", unbound),
+        ("unsafe candidate", unsafe),
+        ("legacy False", legacy),
+    ):
+        plan = prepare_review(facts, preflight=preflight())
+        assert not plan.ready and (plan.requirements or plan.blockers), label
+        assert select_review_effects(plan).status != "selected", label

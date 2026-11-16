@@ -131,7 +131,7 @@ def validate_structure_facts(
 
 
 def structure_proposal(
-    subject, baseline_identity, incoming_identity, *, source_version
+    subject, baseline_identity, incoming_identity, *, source_version, automatic=False
 ):
     comparison = subject.structure
     documents = comparison.original, comparison.current, comparison.incoming
@@ -144,14 +144,17 @@ def structure_proposal(
     )
     if problem is not None:
         return unresolved(problem)
-    if (
-        any(doc.status != "supported" for doc in documents)
-        or comparison.alignment == "unsupported"
-    ):
+    if any(doc.status != "supported" for doc in documents):
+        return unresolved("structure_unsupported")
+    original, current, incoming = documents
+    if automatic and same_content(current.content, original.content):
+        # No local delta needs hunk alignment. The outer automatic candidate and
+        # effect guards still validate this exact supported incoming document.
+        return ("compatible", incoming.content, "source_only", True), incoming
+    if comparison.alignment == "unsupported":
         return unresolved("structure_unsupported")
     if comparison.alignment != "supported":
         return unresolved("structure_ambiguous")
-    original, current, incoming = documents
     old_fields, current_fields, source_fields = (
         {f.key: f for f in doc.fields} for doc in documents
     )

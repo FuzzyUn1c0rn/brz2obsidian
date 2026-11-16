@@ -1,6 +1,6 @@
 """Pure normalized format/onboarding policy; no parsing or output generation."""
 
-from brz2obsidian.content_values import content_key, content_sha
+from brz2obsidian.content_values import content_key, content_sha, same_content
 from brz2obsidian.contracts import FormatReview
 
 # Historical review replay retains its recorded generation. Application admission
@@ -143,7 +143,10 @@ def automatic_transition(facts, subject):
             or (
                 subject.interpretation == "supported"
                 and comparison is not None
-                and comparison.alignment == "supported"
+                and (
+                    comparison.alignment == "supported"
+                    or same_content(subject.current.content, subject.baseline.content)
+                )
                 and all(
                     document.status == "supported"
                     for document in (
