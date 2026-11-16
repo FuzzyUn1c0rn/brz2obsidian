@@ -59,6 +59,11 @@ def test_current8_undo_retains_unaffected_metadata_only_resource_without_fabrica
     )
     assert captured.status == "captured", captured.code
     (source / "Categories/C.md").write_bytes(incoming["Categories/C.md"])
+    source_before = {
+        path.relative_to(source).as_posix(): path.read_bytes()
+        for path in source.rglob("*")
+        if path.is_file()
+    }
     plan = prepare_review(
         facts, preflight=operations.inspect_history(vault).admission.preflight
     )
@@ -119,27 +124,10 @@ def test_current8_undo_retains_unaffected_metadata_only_resource_without_fabrica
         s.current.path == "Attachments/manual.bin"
         for s in offered.review.producer_facts.subjects
     )
-    assert not offered.review.ready
-    assert select_review_effects(offered.review).status == "refused"
-    requirement = offered.review.requirements[0]
-    change = next(
-        c
-        for c in offered.review.proposal.changes
-        if c.change_id == requirement.change_id
-    )
-    request = text_choice_action(
-        offered.review,
-        action(
-            offered.review,
-            change,
-            domain=requirement.domain,
-            choice="reverse" if "reverse" in requirement.choices else "incoming",
-            decision_id="explicit-C-undo",
-        ),
-    )
-    resolved = resolve_review(offered.review, request)
-    assert resolved.status == "accepted" and resolved.plan.ready, resolved.code
-    effects = select_review_effects(resolved.plan)
+    assert offered.review.facts.format_operation.automatic_merge
+    assert offered.review.ready and offered.review.requirements == ()
+    assert offered.review.actions == offered.review.approvals == ()
+    effects = select_review_effects(offered.review)
     assert effects.status == "selected" and not effects.remove_paths
     assert [(row.path, row.content.data) for row in effects.files] == [
         ("Categories/C.md", baseline["Categories/C.md"])
@@ -152,3 +140,8 @@ def test_current8_undo_retains_unaffected_metadata_only_resource_without_fabrica
         operations.read_checkpoint(vault).locator,
     ) == before
     assert (vault / "Categories/C.md").read_bytes() == incoming["Categories/C.md"]
+    assert {
+        path.relative_to(source).as_posix(): path.read_bytes()
+        for path in source.rglob("*")
+        if path.is_file()
+    } == source_before

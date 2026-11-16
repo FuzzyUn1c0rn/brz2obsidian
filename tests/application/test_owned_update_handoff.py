@@ -61,7 +61,8 @@ def test_lost_locator_after_capture_retains_history_and_retires_context(
         },
     )
     assert opened.status == "prepared_review" and opened.binding is not None, opened
-    assert opened.code == "prepared" and not opened.ready
+    assert opened.code == "prepared" and opened.ready
+    assert "apply_update" in opened.next_actions
     assert opened.binding.checkpoint_commit == prior_locator["commit"]
     # Fault the filesystem only after the actual writer atomically publishes
     # its locator. Git capture and its returned result remain entirely real.
