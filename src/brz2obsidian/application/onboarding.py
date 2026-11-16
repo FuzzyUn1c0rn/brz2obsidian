@@ -272,18 +272,6 @@ def prepare_onboarding(
             directory=_owner._directory / "incoming" if _owner is not None else None,
             _owner=_owner,
         )
-        if (
-            original is not None
-            and record(original)["source_identity"]["snapshot_digest"]
-            != observed.snapshot_digest
-        ):
-            return refused(
-                "source_changes_require_separate_update", history
-            ).model_copy(
-                update={
-                    "next_actions": ("choose_matching_onboarding_source",),
-                }
-            )
         facts = _facts(
             history,
             original,

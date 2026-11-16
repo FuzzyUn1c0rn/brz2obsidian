@@ -667,6 +667,7 @@ def _prepared(
         if review.ready
         and preparation.kind == "onboarding"
         and preparation.locator is None
+        and not review.facts.format_operation.automatic_merge
         else ("apply_update",)
         if review.ready
         else ("resolve_update", "save_update"),
@@ -1061,7 +1062,10 @@ def resolve_update(operations, preparation, action, *, edited=None):
     try:
         preparation = UpdatePreparation.model_validate(preparation)
         plan = preparation.review
-        action = text_choice_action(plan, action, edited=edited)
+        from brz2obsidian.contracts import ReviewKeepCurrentGroup
+
+        if not isinstance(action, ReviewKeepCurrentGroup):
+            action = text_choice_action(plan, action, edited=edited)
         transition = resolve_review(plan, action)
         result_plan = transition.plan
         binding = preparation.source_binding.model_copy(
@@ -1094,6 +1098,7 @@ def resolve_update(operations, preparation, action, *, edited=None):
             if result_plan.ready
             and prepared.kind == "onboarding"
             and prepared.locator is None
+            and not result_plan.facts.format_operation.automatic_merge
             else ("apply_update",)
             if result_plan.ready
             else ("resolve_update", "save_update"),
@@ -1423,6 +1428,7 @@ def inspect_update_review(
     limit=100,
     byte_offset=0,
     byte_limit=65536,
+    queue="all",
 ):
     def refused(code):
         return UpdateReviewPage(
@@ -1476,6 +1482,7 @@ def inspect_update_review(
             limit=limit,
             byte_offset=byte_offset,
             byte_limit=byte_limit,
+            queue=queue,
         )
     except OSError, ValueError, TypeError, AttributeError:
         return refused("invalid_review")
@@ -1492,6 +1499,7 @@ def review_plan_page(
     byte_limit=65536,
     _owner=None,
     _canonical_plan=None,
+    queue="all",
 ):
     def refused(code):
         return UpdateReviewPage(
@@ -1531,10 +1539,18 @@ def review_plan_page(
             )
         ):
             return refused("invalid_page")
+        if queue not in ("all", "unresolved"):
+            return refused("invalid_page")
+        unresolved_ids = {r.change_id for r in plan.requirements}
+        changes = tuple(
+            c
+            for c in plan.proposal.changes
+            if queue == "all" or c.change_id in unresolved_ids
+        )
         items = []
         remaining = byte_limit
         approvals = {approval.change_id: approval for approval in plan.approvals}
-        for change in plan.proposal.changes[offset : offset + limit]:
+        for change in changes[offset : offset + limit]:
             UpdatePreparation.relative_vault_path(change.path)
             UpdatePreparation.relative_vault_path(change.target_path)
             approval = approvals.get(change.change_id)
@@ -1594,7 +1610,7 @@ def review_plan_page(
                 )
             )
         following = offset + len(items)
-        total = len(plan.proposal.changes)
+        total = len(changes)
         return UpdateReviewPage(
             status="available",
             code="available",
@@ -1903,14 +1919,56 @@ def apply_update(operations, preparation, *, cancel=None, progress=None, _owner=
                 }
             )
         if prepared.kind == "onboarding" and prepared.locator is None:
-            return current.model_copy(
-                update={
-                    "status": "unresolved",
-                    "code": "first_checkpoint_required",
-                    "ready": False,
-                    "next_actions": ("save_update",),
-                }
+            if not prepared.review.facts.format_operation.automatic_merge:
+                return current.model_copy(
+                    update={
+                        "status": "unresolved",
+                        "code": "first_checkpoint_required",
+                        "ready": False,
+                        "next_actions": ("save_update",),
+                    }
+                )
+            captured = (
+                save_update(operations, prepared, cancel=cancel, progress=progress)
+                if _owner is None
+                else _owner._save(prepared, cancel=cancel, progress=progress)
             )
+            if captured.code != "saved" or captured.preparation is None:
+                return captured
+            if cancel is not None and cancel():
+                return captured.model_copy(
+                    update={
+                        "status": "cancelled_before_publication",
+                        "code": "cancelled_before_publication",
+                        "ready": False,
+                        "publication": "not_published",
+                        "next_actions": ("continue_review", "refresh_update"),
+                    }
+                )
+            # The existing capture retained source/current separately. Reobserve
+            # the new checkpoint before entering the existing publication path.
+            applied = apply_update(
+                operations,
+                captured.preparation,
+                cancel=cancel,
+                progress=progress,
+                _owner=_owner,
+            )
+            retained = {
+                "capture": applied.capture or captured.capture,
+                "history_retained": applied.history_retained
+                or captured.history_retained,
+                "checkpoint_commit": applied.checkpoint_commit
+                or captured.checkpoint_commit,
+            }
+            if (
+                applied.preparation is None
+                and applied.application is None
+                and applied.status
+                not in ("publication_unknown", "recovery_required", "failed")
+            ):
+                retained["preparation"] = captured.preparation
+            return applied.model_copy(update=retained)
         association = prepared.locator.association
         selected = (
             select_review_effects(prepared.review)

@@ -25,6 +25,7 @@ from brz2obsidian.core.identity import bind_identity
 
 from .attachments import attachment_review
 from .formats import (
+    _new_source_output,
     configuration_memory_allowed,
     format_assumption,
     format_findings,
@@ -39,7 +40,7 @@ from .preservation import (
     preservation_policy,
 )
 from .reversals import content_bytes, primary_reversal_content, reversal_safe
-from .review_links import text_link_assumptions
+from .review_links import compatible_result_eligible, text_link_assumptions
 from .structures import (
     structure_assumption,
     structure_dependencies,
@@ -161,7 +162,7 @@ def _findings(facts, subject, subject_id, safety):
     return problems
 
 
-def _proposal(subject):
+def _proposal(subject, *, automatic=False):
     original = _bytes(subject.baseline.content)
     current = _bytes(subject.current.content)
     incoming = _bytes(subject.incoming)
@@ -174,6 +175,8 @@ def _proposal(subject):
     if incoming == original:
         disposition = "no_change" if current == original else "preserve_vault"
         return disposition, subject.current.content, "source_unchanged", False
+    if automatic and subject.attachment is not None and current == original:
+        return "compatible", subject.incoming, "source_only", True
     if subject.interpretation != "supported":
         return "unresolved", None, "unsupported_interpretation", True
     if current == incoming:
@@ -269,9 +272,15 @@ def _reconcile_subject(
     findings.extend(problems)
     preservation_review = policy.review
     disposition, result, rule, requires_decision = (
-        (policy.proposal if policy_allowed else None)
+        (
+            ("compatible", subject.incoming, "source_only", True)
+            if facts.format_operation.automatic_merge
+            and _new_source_output(facts, subject)
+            else None
+        )
+        or (policy.proposal if policy_allowed else None)
         or format_choice
-        or _proposal(subject)
+        or _proposal(subject, automatic=facts.format_operation.automatic_merge)
     )
     if facts.format_operation.kind == "attachment_cleanup":
         disposition, result, rule, requires_decision = (
@@ -446,7 +455,16 @@ def _reconcile_subject(
             structure_result=structured_result,
         )
     )
-    return changes[0], tuple(findings), tuple(local_changes), tuple(memory)
+    change = changes[0]
+    if (
+        facts.format_operation.automatic_merge
+        and disposition == "compatible"
+        and format_review is None
+        and binary_review is None
+        and compatible_result_eligible(facts, change)
+    ):
+        change = change.model_copy(update={"requires_decision": False})
+    return change, tuple(findings), tuple(local_changes), tuple(memory)
 
 
 def _finish_reconciliation(facts, changes, findings, local_changes, memory):

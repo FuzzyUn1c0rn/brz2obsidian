@@ -1147,12 +1147,14 @@ def advance_work(work, returned=None, *, context=None):
         ActionWork,
         ApprovalWork,
         AttachmentActionWork,
+        KeepCurrentWork,
         PlanWork,
         PreservedMemoryWork,
         ProducerActionWork,
         advance_action,
         advance_approval,
         advance_attachment_action,
+        advance_keep_current,
         advance_plan,
         advance_preserved_memory,
         advance_producer_action,
@@ -1181,6 +1183,8 @@ def advance_work(work, returned=None, *, context=None):
         return advance_plan(work, returned)
     if type(work) is AttachmentActionWork:
         return advance_attachment_action(work, returned, context)
+    if type(work) is KeepCurrentWork:
+        return advance_keep_current(work, returned, context)
     if type(work) is ActionWork:
         return advance_action(work, returned, context)
     if type(work) is AttachmentViewsWork:

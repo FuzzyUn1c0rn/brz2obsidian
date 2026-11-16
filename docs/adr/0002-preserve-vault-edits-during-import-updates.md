@@ -17,9 +17,10 @@ arbitrary vaults defers ordinary-note combination but supports a choice to reuse
 existing vault categories, as recorded in
 [the import placement decision](0005-keep-imported-collections-distinct.md).
 
-Present proposed changes for review before applying them. Changes established
-to be compatible can be proposed automatically; conflicting source and vault
-edits require a user decision, with neither side silently winning. Keep a vault
+Present proposed changes for review before applying them. Merge changes proven
+compatible automatically, preserving vault-only edits and combining independent
+edits. Conflicting source and vault edits require a user decision, with neither
+side silently winning. Keep a vault
 note and flag the disappearance when its source item is absent from a later
 archive. Respect a note deleted in the vault rather than automatically
 recreating it.
@@ -37,8 +38,10 @@ conflicts is outside that release. If the source of a locally deleted note later
 changes, offer explicit restoration while keeping the note deleted by default.
 Do not repeatedly offer restoration for an unchanged source item.
 
-Support vaults created before update tracking through explicit onboarding review.
-Use trustworthy original generated output when available; otherwise preserve the
+Support vaults created before update tracking through one onboarding operation
+that establishes the original imported version and current vault separately.
+Use trustworthy original generated output when available and merge compatible
+changes without routine per-file format confirmations; otherwise preserve the
 current vault and require review of uncertain differences when establishing its
 first update baseline. Do not infer an unchanged original from the current vault
 or from the migration record alone.
@@ -47,8 +50,10 @@ Accept a user-selected archive from the same Brain even when it is older or has
 different scope. Present it as the incoming source version, without assuming
 chronological order. Missing source items remain subject to the preservation
 rule above. Include generated dashboards, templates and guides in the reviewed
-proposal with protection for local edits; Obsidian configuration changes require
-a distinct choice because they affect the whole vault.
+proposal with protection for local edits. Apply the same proven-compatibility
+rule to configuration changes; genuine configuration conflicts still require a
+choice because they affect the whole vault. Separate output-format upgrades keep
+their explicitly reviewed operation and provenance.
 
 Use the Windows app as the primary conflict-review interface. The CLI supports
 inspecting a proposal and applying a fully resolved plan under the same rules,
@@ -92,10 +97,19 @@ application. Tie decisions to the source and vault state reviewed; on reopening,
 recheck those inputs and invalidate decisions whose assumptions changed. Applying
 still requires the whole update to be resolved.
 
-Allow bulk approval of compatible changes after a summary, with access to
-individual comparisons. Conflicts, category/tag mappings and configuration
-choices require explicit resolution. Whole-update review does not require
-individual approval of every compatible file change.
+Show a summary of automatic changes and unresolved conflicts, with access to
+individual comparisons. Resolve genuine conflicts individually or use **Keep
+current for all unresolved conflicts**. This group action preserves earlier
+choices and automatic changes; unsafe identity, mapping or other unresolved
+requirements retain their own gates. Save and close remain available before all
+conflicts are resolved. Reopening revalidates the review and retains valid
+choices; only a complete current review authorizes Apply.
+
+The [approved 2026-11-16 update flow](https://github.com/FuzzyUn1c0rn/brz2obsidian/issues/292#accepted-update-flow-2026-11-16)
+supersedes routine compatible-file and configuration confirmations in this ADR.
+The original/current distinction, uncertain-original review and separate
+[format-upgrade operation](0006-review-output-format-upgrades-separately.md)
+remain required.
 
 These choices favour preservation and explicit review over automatic replacement
 or mirroring source deletions. They extend the existing one-time migration

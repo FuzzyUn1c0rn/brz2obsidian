@@ -1,5 +1,6 @@
 """The default producer's lexical content owner, using the existing review engine."""
 
+import hashlib
 import shutil
 import stat
 import tempfile
@@ -1103,6 +1104,85 @@ class _OwnedPreparation:
             action = self._session._admit_values(action)
             self._session._coadmit()
             return self._action_result(preparation, plan, action)
+
+    def keep_current_unresolved(self, preparation, *, group_id, cancel=None):
+        from .review_choices import keep_current_group_action
+
+        previous_probe = self._cancel.probe
+        if cancel is not None:
+            self._cancel.probe = cancel
+        try:
+            if preparation.source_ref is not None:
+                source_hash = hashlib.sha256()
+                with Path(preparation.source_ref).open("rb") as stream:
+                    while block := stream.read(1024 * 1024):
+                        if self._cancel.is_set():
+                            raise OSError("cancelled_before_choice")
+                        source_hash.update(block)
+                source_sha = source_hash.hexdigest()
+                if source_sha != preparation.observed_source.source_sha256:
+                    return lifecycle._refused(
+                        "source_payload_changed", preparation=preparation
+                    )
+            history = self._observe(
+                preparation.vault,
+                preparation.locator,
+                expected_absent=preparation.locator is None,
+            )
+            if history.admission.inventory != preparation.current_inventory:
+                return lifecycle._refused(
+                    "current_inputs_changed", preparation=preparation
+                )
+            if (
+                self.operations.observe_reviewed_source(
+                    preparation.payload_directory, preparation.review
+                )
+                != preparation.source_binding
+            ):
+                return lifecycle._refused(
+                    "source_payload_changed", preparation=preparation
+                )
+            with self._session._operation():
+                plan = self._session._admit_values(preparation.review)
+                self._session._coadmit()
+                choices = self._session._canonical_choices(plan)
+                action = keep_current_group_action(
+                    plan, group_id, _choices=choices, _owner=self
+                )
+                # The prospective constructors reserved the produced event;
+                # reserve its private registration copy before walking/cloning it.
+                self._session._ledger.admit_metadata(action)
+                action = self._session._admit_values(action)
+                self._session._coadmit()
+                result = self._action_result(preparation, plan, action)
+                self.preparation = result.preparation
+                return result
+        except OSError, ValueError:
+            if self._cancel.is_set():
+                return lifecycle._refused(
+                    "cancelled_before_choice", preparation=preparation
+                ).model_copy(
+                    update={
+                        "status": "cancelled_before_publication",
+                        "ready": False,
+                        "publication": "not_published",
+                        "preparation": preparation,
+                        "history_retained": preparation.locator is not None,
+                        "checkpoint_commit": preparation.locator.commit
+                        if preparation.locator
+                        else None,
+                        "next_actions": ("continue_review",),
+                    }
+                )
+            return lifecycle._refused("invalid_review_group", preparation=preparation)
+        finally:
+            self._cancel.probe = previous_probe
+            if (
+                self._session is not None
+                and not self._session._closed
+                and not self._cancel.is_set()
+            ):
+                self._session._ledger.release_failed()
 
     def choose(self, preparation, **values):
         try:

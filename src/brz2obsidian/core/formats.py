@@ -38,6 +38,11 @@ def format_findings(facts):
             operation.baseline_source_version is not None
             and operation.target_source_version is not None
             and operation.baseline_source_version != operation.target_source_version
+            and not (
+                operation.kind == "onboarding"
+                and operation.automatic_merge
+                and output_semantics(baseline) == output_semantics(target)
+            )
         ):
             return ("format_source_changed",)
         return ()
@@ -98,13 +103,41 @@ def configuration_change(subject):
     )
 
 
+def automatic_onboarding(facts, subject):
+    """Known generated originals permit normal three-way setup reconciliation."""
+    return (
+        facts.format_operation.automatic_merge
+        and facts.format_operation.kind == "onboarding"
+        and not needs_onboarding(facts, subject)
+        and output_semantics(facts.baseline_identity)
+        == output_semantics(facts.incoming_identity)
+    )
+
+
+def automatic_configuration(facts, subject):
+    return (
+        facts.format_operation.automatic_merge
+        and facts.format_operation.kind == "source_update"
+        and not needs_onboarding(facts, subject)
+        and subject.baseline.status == "known"
+        and content_key(subject.current.content)
+        == content_key(subject.baseline.content)
+    )
+
+
 def format_proposal(facts, subject):
     """A format operation always needs an explicit current-generation choice."""
     operation = facts.format_operation
-    if operation.kind == "attachment_cleanup":
+    if (
+        operation.kind == "attachment_cleanup"
+        or automatic_onboarding(facts, subject)
+        or (operation.automatic_merge and _new_source_output(facts, subject))
+    ):
         return None
     if operation.kind == "source_update":
-        if configuration_change(subject):
+        if configuration_change(subject) and not automatic_configuration(
+            facts, subject
+        ):
             return "unresolved", None, "format_review", True
         if subject.baseline.status == "known" and needs_onboarding(facts, subject):
             return "unresolved", None, "onboarding_required", True
@@ -123,7 +156,7 @@ def _new_source_output(facts, subject):
     operation = facts.format_operation
     baseline = operation.established_baseline
     return (
-        operation.kind == "source_update"
+        operation.kind in ("source_update", "onboarding")
         and operation.recorded_generation == "supported"
         and baseline is not None
         and baseline.identity.output_format in REVIEW_FORMATS
@@ -134,7 +167,7 @@ def _new_source_output(facts, subject):
         and baseline.source_version == operation.baseline_source_version
         and operation.target_source_version is not None
         and facts.inventory == "complete"
-        and subject.output_role != "configuration"
+        and (subject.output_role != "configuration" or operation.automatic_merge)
         and subject.baseline.status == "unknown"
         and subject.baseline.content is None
         and subject.baseline.unavailable_digest is None
@@ -148,7 +181,15 @@ def _new_source_output(facts, subject):
 
 
 def review_facts(facts, subject):
-    if facts.format_operation.kind == "attachment_cleanup":
+    if (
+        facts.format_operation.kind == "attachment_cleanup"
+        or automatic_onboarding(facts, subject)
+        or automatic_configuration(facts, subject)
+        or (
+            facts.format_operation.automatic_merge
+            and _new_source_output(facts, subject)
+        )
+    ):
         return None
     if (
         facts.format_operation.kind == "source_update"

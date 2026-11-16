@@ -414,6 +414,7 @@ class CandidateWork:
     selection: AttachmentSelection
     candidate: AttachmentCandidate
     phase: str = "validate"
+    canonical_proposal: object = None
 
 
 @dataclass(frozen=True)
@@ -450,6 +451,14 @@ def advance_candidate(work, returned=None):
                     work.facts, work.selection, work.candidate, invalid
                 )
             )
+        if work.canonical_proposal is not None:
+            return replace(
+                work,
+                facts=facts,
+                selection=selection,
+                candidate=candidate,
+                phase="finish_bound",
+            )
         return ChildWork(
             ReconcileWork(facts),
             replace(
@@ -460,10 +469,13 @@ def advance_candidate(work, returned=None):
                 phase="finish",
             ),
         )
-    if work.phase != "finish":
+    if work.phase not in ("finish", "finish_bound"):
         raise ValueError("Unknown candidate phase")
     validation = _validate_proposed_attachment(
-        work.facts, work.selection, work.candidate, returned
+        work.facts,
+        work.selection,
+        work.candidate,
+        work.canonical_proposal if work.phase == "finish_bound" else returned,
     )
     return CompletedWork(
         CandidateValidationProof(work.facts, work.selection, work.candidate, validation)

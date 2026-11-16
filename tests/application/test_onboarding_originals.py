@@ -222,4 +222,6 @@ def test_reobserved_originals_are_qualified_not_caller_pristine_flags(
     assert note.current.content.data == CURRENT
     assert refreshed.preparation.original_source_ref == str(archive.absolute())
     assert refreshed.generation == (2 if forged else 1)
-    assert refreshed.status == ("stale_review" if forged else "prepared_review")
+    # Explicit Refresh can expose readiness after independently restoring the
+    # trustworthy original; no routine format approvals remain under UF292.
+    assert refreshed.status == "prepared_review"

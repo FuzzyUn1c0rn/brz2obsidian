@@ -290,7 +290,16 @@ class UpdateContext:
         self._remember(result)
         return result
 
-    def page(self, binding, *, offset=0, limit=100, byte_offset=0, byte_limit=65536):
+    def page(
+        self,
+        binding,
+        *,
+        offset=0,
+        limit=100,
+        byte_offset=0,
+        byte_limit=65536,
+        queue="all",
+    ):
         if self._kind == "history":
             return self._history.page(
                 binding,
@@ -331,6 +340,7 @@ class UpdateContext:
             limit=limit,
             byte_offset=byte_offset,
             byte_limit=byte_limit,
+            queue=queue,
         )
         if page.status == "refused" and page.code == "association_or_history_changed":
             self._retire_owner()
@@ -531,7 +541,78 @@ class UpdateContext:
             )
         )
 
-    def choice_page(self, binding, *, offset=0, limit=100):
+    def keep_current_unresolved(self, binding, *, group_id, cancel=None):
+        try:
+            self._live_review(binding)
+        except EditFailure:
+            return self._edit_refusal("context_changed")
+        if self.draft_pending:
+            return self._uncommitted_draft()
+        if cancel is not None and cancel():
+            return self._content_result(
+                status="cancelled_before_publication",
+                code="cancelled_before_choice",
+                binding=self._binding,
+            )
+        from brz2obsidian.core.resolution import unresolved_current_scope
+
+        digest, members = unresolved_current_scope(self._preparation.review)
+        if digest is None or digest != group_id:
+            return self._edit_refusal("group_changed")
+        chooser = (
+            self._operations.keep_current_unresolved
+            if self._owner is None
+            else self._owner.keep_current_unresolved
+        )
+        try:
+            result = chooser(
+                self._preparation,
+                group_id=group_id,
+                **(
+                    {"cancel": cancel}
+                    if self._owner is not None and cancel is not None
+                    else {}
+                ),
+            )
+        except ValueError, OSError:
+            return self._edit_refusal("group_changed")
+        self._remember(result)
+        if result.code != "accepted" or result.preparation is None:
+            return self._project(result)
+        projected = self._retain(result, selection_id=self._binding.selection_id)
+        return projected.model_copy(update={"affected_conflicts": len(members)})
+
+    def choice_page(self, binding, *, offset=0, limit=100, queue="all"):
+        if queue == "unresolved":
+            try:
+                plan = self._live_review(binding)
+                if (
+                    type(offset) is not int
+                    or offset < 0
+                    or type(limit) is not int
+                    or not 1 <= limit <= 100
+                ):
+                    raise ValueError("Invalid page")
+                rows = (
+                    review_plan_choice_offers(plan)
+                    if self._owner is None
+                    else self._owner._readonly_offers(plan)
+                )
+                unresolved_ids = {r.requirement_id for r in plan.requirements}
+                rows = tuple(r for r in rows if r.requirement_id in unresolved_ids)
+                end = offset + limit
+                return self._content_result(
+                    status="available",
+                    code="available",
+                    binding=self._binding,
+                    offers=rows[offset:end],
+                    total_choices=len(rows),
+                    next_choice_offset=end if end < len(rows) else None,
+                )
+            except ValueError, OSError, EditFailure:
+                return self._edit_refusal("context_changed")
+        if queue != "all":
+            return self._edit_refusal("invalid_page")
         if self._owner is not None:
             try:
                 plan = self._live_review(binding)
@@ -1206,6 +1287,38 @@ class UpdateContext:
         return self._content_result(**values)
 
     def _source_projection(self, result):
+        if (
+            self._preparation is not None
+            and result.binding == self._binding
+            and result.binding is not None
+        ):
+            from brz2obsidian.core.resolution import (
+                CONTENT_CONFLICT_DOMAINS,
+                unresolved_current_scope,
+            )
+
+            plan = self._preparation.review
+            digest, members = unresolved_current_scope(plan)
+            changes = {c.change_id: c for c in plan.proposal.changes}
+            conflicts = {
+                r.change_id
+                for r in plan.requirements
+                if r.domain in CONTENT_CONFLICT_DOMAINS
+                and r.change_id in changes
+                and changes[r.change_id].disposition != "compatible"
+            }
+            result = result.model_copy(
+                update={
+                    "changes": len(plan.proposal.changes),
+                    "unresolved": len(plan.requirements),
+                    "keep_current_count": len(members),
+                    "keep_current_group_id": digest,
+                    "unresolved_conflicts": len(conflicts),
+                    "unresolved_exceptions": sum(
+                        r.change_id not in conflicts for r in plan.requirements
+                    ),
+                }
+            )
         result = result.model_copy(
             update={
                 "summary": self._last_summary[:2048],

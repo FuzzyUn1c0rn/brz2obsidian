@@ -194,7 +194,13 @@ def review_plan_choice_action(
     disassociate_entry_ids=(),
     _choices=None,
     _owner=None,
+    _group=False,
 ):
+    def construct(model, **fields):
+        if _group and _owner is not None:
+            return _owner._session._ledger.construct(model, fields)
+        return model(**fields)
+
     requirement = next(
         (
             row
@@ -375,7 +381,8 @@ def review_plan_choice_action(
             )
         elif references:
             raise ValueError("Reference choice is unavailable")
-        selection = AttachmentSelection(
+        selection = construct(
+            AttachmentSelection,
             schema_id="brz2obsidian.attachment-selection",
             schema_version=1,
             proposal_id=plan.proposal.proposal_id,
@@ -388,7 +395,8 @@ def review_plan_choice_action(
             link_choices=links,
             provenance="explicit_user",
         )
-        candidate = candidate or AttachmentCandidate(
+        candidate = candidate or construct(
+            AttachmentCandidate,
             schema_id="brz2obsidian.attachment-candidate",
             schema_version=1,
             outputs=alternative.outputs,
@@ -396,7 +404,8 @@ def review_plan_choice_action(
             targets=context.current_targets,
             target_facts=states,
         )
-    action = ReviewAction(
+    action = construct(
+        ReviewAction,
         schema_id="brz2obsidian.review-action",
         schema_version=1,
         decision_id=str(uuid4()),
@@ -440,3 +449,34 @@ def resolve_update_choice(
     if preparation.kind == "format_transition" and action.domain == "configuration":
         return operations.resolve_configuration(preparation, ())
     return operations.resolve_update(preparation, action, edited=edited)
+
+
+def keep_current_group_action(plan, group_id, *, _choices=None, _owner=None):
+    from brz2obsidian.contracts import ReviewKeepCurrentGroup
+    from brz2obsidian.core.resolution import unresolved_current_scope
+
+    digest, members = unresolved_current_scope(plan)
+    if digest is None or digest != group_id:
+        raise ValueError("Conflict group changed")
+    choices = inspect_review_choices(plan) if _choices is None else _choices
+    actions = tuple(
+        review_plan_choice_action(
+            plan,
+            requirement_id=row.requirement_id,
+            choice="current",
+            assumptions_digest=requirement_digest(row),
+            _choices=choices,
+            _owner=_owner,
+            _group=True,
+        )
+        for row in members
+    )
+    fields = {
+        "schema_id": "brz2obsidian.review-keep-current-group",
+        "schema_version": 1,
+        "group_id": group_id,
+        "actions": actions,
+    }
+    if _owner is not None:
+        return _owner._session._ledger.construct(ReviewKeepCurrentGroup, fields)
+    return ReviewKeepCurrentGroup(**fields)

@@ -12,6 +12,7 @@ from pydantic import TypeAdapter
 from brz2obsidian.contracts import (
     ReconciliationInput,
     ReviewAction,
+    ReviewKeepCurrentGroup,
     ReviewPlan,
     ReviewPreflight,
     ReviewRefreshEvent,
@@ -19,7 +20,7 @@ from brz2obsidian.contracts import (
 
 _FACTS = TypeAdapter(ReconciliationInput)
 _PREFLIGHT = TypeAdapter(ReviewPreflight)
-_EVENT = TypeAdapter(ReviewAction | ReviewRefreshEvent)
+_EVENT = TypeAdapter(ReviewAction | ReviewRefreshEvent | ReviewKeepCurrentGroup)
 _PLAN = TypeAdapter(ReviewPlan)
 
 

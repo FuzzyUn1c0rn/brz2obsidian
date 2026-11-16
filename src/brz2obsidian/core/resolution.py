@@ -19,6 +19,7 @@ from brz2obsidian.content_values import (
     same_content,
 )
 from brz2obsidian.contracts import (
+    AttachmentSelection,
     CompatibleReviewGroup,
     IdentityAssociationDecision,
     PreservationDecision,
@@ -29,6 +30,7 @@ from brz2obsidian.contracts import (
     ReviewApproval,
     ReviewConsentDecision,
     ReviewHistory,
+    ReviewKeepCurrentGroup,
     ReviewPlan,
     ReviewPreflight,
     ReviewRefreshEvent,
@@ -53,7 +55,7 @@ from brz2obsidian.core.review_attachments import (
     attachment_candidate_assumption,
     attachment_candidate_request,
 )
-from brz2obsidian.core.review_composition import CompositionWork
+from brz2obsidian.core.review_composition import CompositionOutcome, CompositionWork
 from brz2obsidian.core.review_effects import selected_effect_blockers
 from brz2obsidian.core.review_links import (
     compatible_result_eligible,
@@ -381,6 +383,10 @@ class PlanWork:
     proposal: object = None
     effective_approvals: tuple = ()
     filtered_applicability: tuple = ()
+    automatic_plan: object = None
+    automatic_index: int = 0
+    automatic_jobs: tuple = ()
+    automatic_action: object = None
 
 
 def advance_plan(work, returned=None):
@@ -403,6 +409,64 @@ def advance_plan(work, returned=None):
             )
     elif work.phase == "finish":
         proposal = returned
+    elif work.phase == "automatic_member":
+        if type(returned) is ReviewApproval:
+            approval = returned.model_copy(update={"provenance": "automatic_merge"})
+            work = replace(
+                work,
+                actions=work.actions + (work.automatic_action,),
+                approvals=work.approvals + (approval,),
+            )
+        return replace(
+            work, phase="automatic", automatic_index=work.automatic_index + 1
+        )
+    elif work.phase == "automatic":
+        if work.automatic_index < len(work.automatic_jobs):
+            change, subject = work.automatic_jobs[work.automatic_index]
+            selection = AttachmentSelection(
+                schema_id="brz2obsidian.attachment-selection",
+                schema_version=1,
+                proposal_id=facts.proposal_id,
+                generation=facts.generation,
+                item_id=change.item_id,
+                facet=change.facet,
+                reviewed_change_id=change.change_id,
+                reviewed_assumptions=change.assumptions,
+                choice="incoming",
+                link_choices=subject.automatic_attachment_links,
+                provenance="explicit_user",
+            )
+            action = ReviewAction(
+                schema_id="brz2obsidian.review-action",
+                schema_version=1,
+                decision_id="automatic:" + change.change_id,
+                proposal_id=facts.proposal_id,
+                expected_generation=facts.generation,
+                change_id=change.change_id,
+                reviewed_assumptions=change.assumptions,
+                domain="attachment",
+                choice="incoming",
+                candidate=None,
+                attachment_selection=selection,
+                attachment_candidate=subject.automatic_attachment,
+                selected_entry_id=None,
+                disassociate_entry_ids=(),
+            )
+            plan = work.automatic_plan.model_copy(
+                update={"actions": work.actions, "approvals": work.approvals}
+            )
+            return ChildWork(
+                AttachmentActionWork(
+                    plan,
+                    action,
+                    change,
+                    selection,
+                    subject.automatic_attachment,
+                    group_defer=True,
+                ),
+                replace(work, phase="automatic_member", automatic_action=action),
+            )
+        proposal = work.proposal
     elif work.phase == "composed":
         return CompletedWork(
             _finish_plan(
@@ -421,6 +485,39 @@ def advance_plan(work, returned=None):
         )
     else:
         raise ValueError("Invalid plan phase")
+    if work.phase in ("proposal", "finish") and facts.format_operation.automatic_merge:
+        approved = {a.change_id for a in work.approvals}
+        subjects = {(s.item_id, s.facet): s for s in facts.subjects}
+        jobs = tuple(
+            (c, subjects[(c.item_id, c.facet)])
+            for c in proposal.changes
+            if c.disposition == "compatible"
+            and c.attachment_review is not None
+            and c.format_review is None
+            and c.change_id not in approved
+            and subjects[(c.item_id, c.facet)].automatic_attachment is not None
+        )
+        if jobs:
+            seed = _finish_plan(
+                work.facts,
+                facts,
+                work.preflight,
+                work.actions,
+                work.approvals,
+                work.consents,
+                proposal,
+                work.producer_applicability,
+                work.attachment_applicability,
+                CompositionOutcome(),
+                work.approvals,
+            )
+            return replace(
+                work,
+                phase="automatic",
+                proposal=proposal,
+                automatic_plan=seed,
+                automatic_jobs=jobs,
+            )
     applicability = tuple(
         a
         for a in work.attachment_applicability
@@ -469,6 +566,7 @@ def _finish_plan(
         c
         for c in proposal.changes
         if c.disposition == "compatible"
+        and c.requires_decision
         and _domain(facts, c) == "text"
         and compatible_result_eligible(facts, c)
         and (c.change_id, "text") not in approved
@@ -643,7 +741,7 @@ def _producer_transition(plan, action, facts, change):
     return ProducerActionWork(plan, action, facts, change.subject_id)
 
 
-def _resolve_action(plan, action, *, _epoch=0):
+def _resolve_action(plan, action, *, _epoch=0, _group_admitted=False):
     action = ReviewAction.model_validate(action)
     reserved = {
         d.decision_id
@@ -660,9 +758,14 @@ def _resolve_action(plan, action, *, _epoch=0):
         return _transition(plan, "refused", "wrong_proposal")
     if action.expected_generation != plan.proposal.generation:
         return _transition(plan, "stale", "generation_changed")
-    if current_observation_problem(plan.producer_facts) is not None:
+    if (
+        not _group_admitted
+        and current_observation_problem(plan.producer_facts) is not None
+    ):
         return _transition(plan, "refused", "unsafe_producer_choice")
-    if preflight_blockers(plan.facts, plan.preflight, plan.proposal):
+    if not _group_admitted and preflight_blockers(
+        plan.facts, plan.preflight, plan.proposal
+    ):
         return _transition(plan, "refused", "preflight_refused")
     if action.domain not in (
         "attachment",
@@ -1094,7 +1197,14 @@ def _append_action(plan, action, result):
 
 
 def _resolve(plan, action):
-    return drive_inline(ActionWork(plan, ReviewAction.model_validate(action)))
+    return drive_inline(
+        ActionWork(
+            plan,
+            action
+            if isinstance(action, ReviewKeepCurrentGroup)
+            else ReviewAction.model_validate(action),
+        )
+    )
 
 
 def _reconstruct_review(plan: ReviewPlan) -> ReviewTransition:
@@ -1150,7 +1260,11 @@ def resolve_review(plan: ReviewPlan, action: ReviewAction) -> ReviewTransition:
     validated = validate_review(plan)
     if validated.status != "accepted":
         return validated
-    action = ReviewAction.model_validate(action)
+    action = (
+        action
+        if isinstance(action, ReviewKeepCurrentGroup)
+        else ReviewAction.model_validate(action)
+    )
     require_inline(action)
     return _resolve(validated.plan, action)
 
@@ -1308,6 +1422,8 @@ class ApprovalWork:
     memory_choice: str | None = None
     derive_plain: bool = False
     phase: str = "memory"
+    group_defer: bool = False
+    group_memory: object = None
 
 
 def _plain_approval_values(plan, action, change):
@@ -1332,7 +1448,7 @@ def _plain_approval_values(plan, action, change):
 
 
 def _approval_plan(
-    plan, action, change, content, dependencies, source_accepted, memory
+    plan, action, change, content, dependencies, source_accepted, memory, *, defer=False
 ):
     approval = ReviewApproval(
         schema_id="brz2obsidian.review-approval",
@@ -1350,6 +1466,8 @@ def _approval_plan(
         attachment_selection=action.attachment_selection,
         attachment_candidate=action.attachment_candidate,
     )
+    if defer:
+        return approval
     return PlanWork(
         plan.facts,
         plan.preflight,
@@ -1369,7 +1487,11 @@ def _approval_plan(
 
 
 def advance_approval(work, returned=None):
-    if work.phase == "memory" and work.memory_choice is not None:
+    if (
+        work.phase == "memory"
+        and work.memory_choice is not None
+        and not work.group_defer
+    ):
         return ChildWork(
             PreservedMemoryWork(
                 work.plan, work.change, work.action, work.memory_choice
@@ -1392,23 +1514,26 @@ def advance_approval(work, returned=None):
             return CompletedWork(
                 _transition(work.plan, "refused", "unsafe_producer_choice")
             )
+        if work.group_defer:
+            memory = work.group_memory
         content, dependencies = (
             _plain_approval_values(work.plan, work.action, work.change)
             if work.derive_plain
             else (work.content, work.dependencies)
         )
-        return ChildWork(
-            _approval_plan(
-                work.plan,
-                work.action,
-                work.change,
-                content,
-                dependencies,
-                work.source_accepted,
-                memory,
-            ),
-            replace(work, phase="finish"),
+        updated = _approval_plan(
+            work.plan,
+            work.action,
+            work.change,
+            content,
+            dependencies,
+            work.source_accepted,
+            memory,
+            defer=work.group_defer,
         )
+        if work.group_defer:
+            return CompletedWork(updated)
+        return ChildWork(updated, replace(work, phase="finish"))
     if work.phase == "finish":
         return CompletedWork(_transition(returned, "accepted", "accepted"))
     raise ValueError("Invalid approval phase")
@@ -1425,6 +1550,10 @@ class ActionWork:
 
 
 def advance_action(work, returned=None, context=None):
+    if work.phase == "resolve" and isinstance(work.action, ReviewKeepCurrentGroup):
+        return ChildWork(
+            KeepCurrentWork(work.plan, work.action), replace(work, phase="append")
+        )
     if work.phase == "resolve":
         result = _resolve_action(work.plan, work.action, _epoch=context.epoch)
         if type(result) is PlanTransition:
@@ -1455,6 +1584,7 @@ class AttachmentActionWork:
     candidate: object
     epoch: int = 0
     phase: str = "validate"
+    group_defer: bool = False
     memory: object = None
     pending: object = None
 
@@ -1464,7 +1594,12 @@ def advance_attachment_action(work, returned=None, context=None):
     selection, candidate = work.selection, work.candidate
     if work.phase == "validate":
         return ChildWork(
-            CandidateWork(plan.producer_facts, selection, candidate),
+            CandidateWork(
+                plan.producer_facts,
+                selection,
+                candidate,
+                canonical_proposal=plan.proposal if work.group_defer else None,
+            ),
             replace(work, phase="validated"),
         )
     if work.phase == "validated":
@@ -1473,7 +1608,8 @@ def advance_attachment_action(work, returned=None, context=None):
         ).valid:
             return CompletedWork(_transition(plan, "refused", "attachment_invalid"))
         if (
-            action.choice == "current"
+            not work.group_defer
+            and action.choice == "current"
             and plan.producer_facts.format_operation.kind == "source_update"
             and not (
                 change.current is not None
@@ -1485,7 +1621,9 @@ def advance_attachment_action(work, returned=None, context=None):
                 PreservedMemoryWork(plan, change, action, "keep_vault"),
                 replace(work, phase="memory"),
             )
-        return replace(work, phase="request", memory=None)
+        return replace(
+            work, phase="request", memory=work.memory if work.group_defer else None
+        )
     if work.phase == "memory":
         memory = _consume_memory(returned, plan, change, action, "keep_vault")
         if memory is None:
@@ -1534,11 +1672,226 @@ def advance_attachment_action(work, returned=None, context=None):
             dependencies,
             action.choice not in ("current", "remove") and action.domain != "reversal",
             memory,
+            defer=work.group_defer,
         )
+        if work.group_defer:
+            return CompletedWork(updated)
         return ChildWork(
-            updated,
-            replace(work, phase="finish", memory=None, pending=None),
+            updated, replace(work, phase="finish", memory=None, pending=None)
         )
     if work.phase == "finish":
         return CompletedWork(_transition(returned, "accepted", "accepted"))
     raise ValueError("Invalid attachment action phase")
+
+
+CONTENT_CONFLICT_DOMAINS = frozenset(
+    {"text", "attachment", "mapping", "format", "configuration"}
+)
+
+
+def _current_conflict_safe(plan, change, domain):
+    subject = next(
+        s
+        for s in plan.producer_facts.subjects
+        if (s.item_id, s.facet) == (change.item_id, change.facet)
+    )
+    if (
+        subject.structure is not None
+        and domain in ("text", "mapping", "format", "configuration")
+        and validate_structure_facts(
+            subject,
+            plan.producer_facts.baseline_identity,
+            plan.producer_facts.incoming_identity,
+            source_version=plan.producer_facts.format_operation.baseline_source_version,
+            current_target_safety=True,
+        )
+        is not None
+    ):
+        return False
+    return change.attachment_review is not None or selected_current_links_safe(
+        plan.producer_facts, change
+    )
+
+
+def unresolved_current_scope(plan):
+    """Describe current-capable unresolved content slots of an admitted plan."""
+    requirements = {(r.change_id, r.domain) for r in plan.requirements}
+    changes = {c.change_id: c for c in plan.proposal.changes}
+    members = tuple(
+        row
+        for row in _inspect_canonical_choices(plan)
+        if (row.change_id, row.domain) in requirements
+        and row.domain in CONTENT_CONFLICT_DOMAINS
+        and changes[row.change_id].disposition != "compatible"
+        and "current" in row.enabled_choices
+        and _current_conflict_safe(plan, changes[row.change_id], row.domain)
+        and not any(
+            f.blocking and f.subject_id in (None, changes[row.change_id].subject_id)
+            for f in plan.proposal.findings
+        )
+    )
+    digest = (
+        sha256(
+            json.dumps(
+                [
+                    (
+                        r.change_id,
+                        r.domain,
+                        [(a.key, a.fingerprint) for a in r.assumptions],
+                    )
+                    for r in members
+                ],
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()
+        if members
+        else None
+    )
+    return digest, members
+
+
+@dataclass(frozen=True)
+class KeepCurrentWork:
+    plan: ReviewPlan
+    event: ReviewKeepCurrentGroup
+    phase: str = "validate"
+    jobs: tuple = ()
+    memory_facts: object = None
+    memories: tuple = ()
+    index: int = 0
+    approvals: tuple = ()
+    members: tuple = ()
+    decision_ids: frozenset = frozenset()
+    selected: object = None
+    source_memories: object = None
+
+
+def advance_keep_current(work, returned=None, context=None):
+    plan, event = work.plan, work.event
+    if work.phase == "validate":
+        digest, members = unresolved_current_scope(plan)
+        if digest != event.group_id or len(members) != len(event.actions):
+            return CompletedWork(_transition(plan, "stale", "assumptions_changed"))
+        if current_observation_problem(
+            plan.producer_facts
+        ) is not None or preflight_blockers(plan.facts, plan.preflight, plan.proposal):
+            return CompletedWork(_transition(plan, "refused", "preflight_refused"))
+        return replace(
+            work,
+            phase="validate_member",
+            members=members,
+            memory_facts=plan.producer_facts,
+        )
+    if work.phase == "validate_member":
+        if work.index == len(work.members):
+            if work.memory_facts is not plan.producer_facts:
+                return ChildWork(
+                    ReconcileWork(work.memory_facts, plan.producer_applicability),
+                    replace(work, phase="memory", index=0),
+                )
+            return replace(work, phase="member", index=0)
+        row, action = work.members[work.index], event.actions[work.index]
+        if (
+            action.change_id != row.change_id
+            or action.domain != row.domain
+            or action.choice != "current"
+            or action.decision_id in work.decision_ids
+        ):
+            return CompletedWork(_transition(plan, "refused", "choice_not_admitted"))
+        job = _resolve_action(plan, action, _epoch=context.epoch, _group_admitted=True)
+        if type(job) not in (ApprovalWork, AttachmentActionWork):
+            return CompletedWork(
+                job
+                if hasattr(job, "status")
+                else _transition(plan, "refused", "choice_not_admitted")
+            )
+        memory_choice = (
+            job.memory_choice
+            if type(job) is ApprovalWork
+            else (
+                "keep_vault"
+                if plan.producer_facts.format_operation.kind == "source_update"
+                and not same_content(job.change.current, job.change.incoming)
+                else None
+            )
+        )
+        memory_facts = work.memory_facts
+        if memory_choice is not None:
+            memory_plan = plan.model_copy(update={"producer_facts": memory_facts})
+            memory_facts = _preserved_memory_facts(
+                memory_plan, job.change, action, memory_choice
+            )
+        return replace(
+            work,
+            jobs=work.jobs + ((job, memory_choice),),
+            memory_facts=memory_facts,
+            decision_ids=work.decision_ids | {action.decision_id},
+            index=work.index + 1,
+        )
+    if work.phase == "memory":
+        return replace(
+            work,
+            phase="memory_member",
+            selected={c.subject_id: c for c in returned.changes},
+            source_memories={
+                m.provenance.decision_id: m for m in returned.source_version_memory
+            },
+        )
+    if work.phase == "memory_member":
+        if work.index == len(work.jobs):
+            return replace(work, phase="member", index=0)
+        job, choice = work.jobs[work.index]
+        memory = None
+        if choice is not None:
+            change = work.selected[job.change.subject_id]
+            memory = work.source_memories.get(job.action.decision_id)
+            if (
+                memory is None
+                or change.requires_decision
+                or change.disposition != "preserve_vault"
+                or not same_content(change.result, job.change.current)
+            ):
+                return CompletedWork(
+                    _transition(plan, "refused", "unsafe_producer_choice")
+                )
+        return replace(work, memories=work.memories + (memory,), index=work.index + 1)
+    if work.phase == "member":
+        if work.index == len(work.jobs):
+            return ChildWork(
+                PlanWork(
+                    plan.facts,
+                    plan.preflight,
+                    plan.actions + event.actions,
+                    plan.approvals + work.approvals,
+                    plan.consents,
+                    producer_facts=plan.producer_facts,
+                    producer_applicability=plan.producer_applicability,
+                    attachment_applicability=plan.attachment_applicability,
+                    canonical_prior=plan,
+                ),
+                replace(work, phase="finish"),
+            )
+        job, _ = work.jobs[work.index]
+        memory = work.memories[work.index] if work.memories else None
+        job = replace(
+            job,
+            group_defer=True,
+            **(
+                {"group_memory": memory}
+                if type(job) is ApprovalWork
+                else {"memory": memory}
+            ),
+        )
+        return ChildWork(job, replace(work, phase="collected"))
+    if work.phase == "collected":
+        if type(returned) is not ReviewApproval:
+            return CompletedWork(returned)
+        return replace(
+            work,
+            phase="member",
+            index=work.index + 1,
+            approvals=work.approvals + (returned,),
+        )
+    if work.phase == "finish":
+        return CompletedWork(_transition(returned, "accepted", "accepted"))
+    raise ValueError("Invalid keep-current group phase")

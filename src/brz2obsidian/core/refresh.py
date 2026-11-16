@@ -8,6 +8,7 @@ from brz2obsidian.contracts import (
     ReconciliationInput,
     ReviewAction,
     ReviewAttachmentApplicability,
+    ReviewKeepCurrentGroup,
     ReviewPreflight,
     ReviewProducerApplicability,
     ReviewRefreshEvent,
@@ -142,6 +143,8 @@ def advance_attachment_views(work, returned=None):
         if (
             isinstance(event, ReviewAction)
             and event.decision_id == approval.decision_id
+            or isinstance(event, ReviewKeepCurrentGroup)
+            and any(a.decision_id == approval.decision_id for a in event.actions)
         ):
             return replace(work, phase="view")
         return replace(

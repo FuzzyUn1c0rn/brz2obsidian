@@ -241,6 +241,17 @@ def known_result_document(facts, change):
     context = facts.link_context
     if context is None or change.result is None:
         return None
+    subject = next(
+        s
+        for s in facts.subjects
+        if (s.item_id, s.facet) == (change.item_id, change.facet)
+    )
+    candidate = subject.automatic_result
+    if candidate is not None and same_content(candidate.content, change.result):
+        from .text_candidates import validate_text_candidate
+
+        if validate_text_candidate(facts, change, candidate, "edited"):
+            return candidate.links, candidate.link_targets, candidate.link_target_facts
     options = []
     for documents, targets, states in (
         (

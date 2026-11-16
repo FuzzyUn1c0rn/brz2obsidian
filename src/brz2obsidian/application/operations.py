@@ -151,6 +151,14 @@ class Operations:
             disassociate_entry_ids=disassociate_entry_ids,
         )
 
+    def keep_current_unresolved(self, preparation, *, group_id):
+        """Resolve the exact unresolved content group in one canonical transition."""
+        from .review_choices import keep_current_group_action
+
+        return self.resolve_update(
+            preparation, keep_current_group_action(preparation.review, group_id)
+        )
+
     def resolve_update(self, preparation, action, *, edited=None):
         """Resolve one offered S1 choice, binding edited text to its actual target."""
         from .update_lifecycle import resolve_update

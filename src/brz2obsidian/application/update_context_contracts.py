@@ -186,6 +186,11 @@ class UpdateContextResult(ReconciliationContract):
     draft_pending: bool = False
     changes: int = Field(default=0, ge=0)
     unresolved: int = Field(default=0, ge=0)
+    unresolved_conflicts: int = Field(default=0, ge=0)
+    unresolved_exceptions: int = Field(default=0, ge=0)
+    keep_current_count: int = Field(default=0, ge=0)
+    keep_current_group_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    affected_conflicts: int = Field(default=0, ge=0)
     stale: int = Field(
         default=0,
         ge=0,

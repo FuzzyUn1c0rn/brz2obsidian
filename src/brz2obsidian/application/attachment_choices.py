@@ -35,7 +35,7 @@ def validated_reference_choices(references, offered):
 
 
 def selected_attachment_candidate(
-    plan, change, alternative, references, offered_refs, *, _owner=None
+    plan, change, alternative, references, offered_refs, *, _owner=None, _session=None
 ):
     context = plan.facts.link_context
     subject = next(
@@ -45,10 +45,9 @@ def selected_attachment_candidate(
     )
     targets = {row.target_id: row for row in context.current_targets}
     states = {row.target_id: row for row in context.current_target_facts}
+    session = _session if _session is not None else getattr(_owner, "_session", None)
     observe_target = (
-        interpret_link_target
-        if _owner is None
-        else _owner._session._assembly_link_state
+        interpret_link_target if session is None else session._assembly_link_state
     )
     for output in alternative.outputs:
         templates = tuple(

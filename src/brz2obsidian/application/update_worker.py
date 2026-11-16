@@ -199,6 +199,10 @@ class UpdateWorker:
                 result = self.context.choice_details(**values)
             elif args.command == "choose":
                 result = self.context.choose(**values)
+            elif args.command == "keep_current_unresolved":
+                result = self.context.keep_current_unresolved(
+                    **values, cancel=cancel.is_set
+                )
             elif args.command == "choose_configuration":
                 result = self.context.choose_configuration(**values)
             elif args.command == "stage_references":

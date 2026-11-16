@@ -4,6 +4,7 @@ import hashlib
 import json
 import unicodedata
 from pathlib import PurePosixPath
+from types import SimpleNamespace
 
 from brz2obsidian.contracts import (
     AttachmentDestination,
@@ -28,6 +29,7 @@ from brz2obsidian.contracts import (
 )
 from brz2obsidian.obsidian import (
     align_structure,
+    inspect_text_candidate,
     interpret_link_target,
     interpret_links,
     interpret_structure,
@@ -545,6 +547,7 @@ def assemble_facts(
             schema_id="brz2obsidian.format-operation",
             schema_version=1,
             kind="onboarding" if onboarding else "source_update",
+            automatic_merge=True,
             recorded_generation="supported" if originals_known else "unknown",
             baseline_source_version=old_record["source_identity"]["snapshot_digest"]
             if originals_known
@@ -562,12 +565,156 @@ def assemble_facts(
         ),
         link_context=None,
     )
-    return facts.model_copy(
+    facts = facts.model_copy(
         update={
             "link_context": _link_context(
                 facts, old_record, new_record, current_inventory, _owner=_owner
             )
         }
+    )
+
+    return automatic_merge_facts(facts, _owner=_owner)
+
+
+def automatic_merge_facts(facts, *, _owner=None):
+    """Interpret computed clean results; Core independently validates their evidence."""
+    facts = facts.model_copy(
+        update={
+            "format_operation": facts.format_operation.model_copy(
+                update={"automatic_merge": True}
+            )
+        }
+    )
+    from brz2obsidian.content_fingerprints import drive_inline
+    from brz2obsidian.core.reconciliation import ReconcileWork
+
+    proposal = (
+        drive_inline(ReconcileWork(facts))
+        if _owner is None
+        else _owner._drive(ReconcileWork(facts))
+    )
+    context = facts.link_context
+    subjects = []
+    for subject, change in zip(facts.subjects, proposal.changes, strict=True):
+        if (
+            change.disposition == "compatible"
+            and change.attachment_review is not None
+            and change.format_review is None
+        ):
+            subject = automatic_attachment_facts(
+                facts, proposal, subject, change, _owner=_owner
+            )
+            subjects.append(subject)
+            continue
+        if (
+            change.disposition != "compatible"
+            or change.structure_result is None
+            or subject.attachment is not None
+            or change.format_review is not None
+        ):
+            subjects.append(subject)
+            continue
+        targets = context.incoming_targets
+        own = next(
+            (
+                t
+                for t in context.current_targets
+                if t.canonical_path == change.target_path
+            ),
+            None,
+        )
+        if own is None:
+            subjects.append(subject)
+            continue
+        content = change.result
+        state = link_state(
+            content,
+            target_id=own.target_id,
+            existence="present",
+            membership_targets=targets,
+            source_path=change.target_path,
+            output_format=facts.incoming_identity.output_format,
+            _owner=_owner,
+        )
+        states = tuple(
+            s for s in context.incoming_target_facts if s.target_id != own.target_id
+        ) + (state,)
+        candidate = inspect_text_candidate(
+            content,
+            identity=_identity(facts.incoming_identity, subject.item_id),
+            target=subject.source_target,
+            output_format=facts.incoming_identity.output_format,
+            source_path=change.target_path,
+            document_id=own.target_id,
+            path_mode="vault",
+            link_targets=targets,
+            link_target_facts=states,
+            link_inventory=context.inventory,
+            membership_targets=targets,
+        )
+        subjects.append(subject.model_copy(update={"automatic_result": candidate}))
+    return facts.model_copy(update={"subjects": tuple(subjects)})
+
+
+def automatic_attachment_facts(facts, proposal, subject, change, *, _owner=None):
+    from brz2obsidian.contracts import ReviewRequirement
+
+    from .attachment_choices import selected_attachment_candidate
+    from .review_choices import review_plan_attachment_references
+
+    # Interpretation only: this view does not supply a canonical admission verdict.
+    view = SimpleNamespace(facts=facts, proposal=proposal)
+    row = ReviewRequirement(
+        requirement_id=change.change_id,
+        change_id=change.change_id,
+        domain="attachment",
+        choices=("incoming",),
+        assumptions=change.assumptions,
+    )
+    alternative = next(
+        (
+            a
+            for a in change.attachment_review.alternatives
+            if a.choice == "incoming" and a.eligible
+        ),
+        None,
+    )
+    if alternative is None:
+        return subject
+    refs = review_plan_attachment_references(view, row.requirement_id, _choices=(row,))
+    offered = {
+        (r.document_id, r.occurrence_id): r for r in change.attachment_review.links
+    }
+    choices = []
+    for token, doc, occurrence in refs:
+        link = offered[(doc.document_id, occurrence.occurrence_id)]
+        if (
+            link.old is None
+            or link.incoming is None
+            or "use_incoming" not in link.choices
+        ):
+            return subject
+        # Only the content version may change; preserve destination identity, path,
+        # fragment, status and authored display text without guessing a reference.
+        if (
+            link.old.model_copy(update={"target_version": link.incoming.target_version})
+            != link.incoming
+        ):
+            return subject
+        choices.append({"reference_id": token, "choice": "use_incoming"})
+    try:
+        links, candidate = selected_attachment_candidate(
+            view,
+            change,
+            alternative,
+            tuple(choices),
+            refs,
+            _session=_owner,
+        )
+    except ValueError:
+        return subject
+    return subject.model_copy(
+        update={"automatic_attachment": candidate, "automatic_attachment_links": links}
     )
 
 
