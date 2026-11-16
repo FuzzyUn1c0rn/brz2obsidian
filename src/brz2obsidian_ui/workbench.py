@@ -1492,6 +1492,25 @@ class UpdateWorkbench(QWidget):
                         "muted",
                     )
                 )
+                reply = self._state.reply
+                if (
+                    isinstance(self._state.binding, HistoryContextBinding)
+                    and not self._state.review_ready
+                    and not self._state.needs_inspection
+                    and self._state.unresolved == 0
+                    and reply is not None
+                    and reply.binding == self._state.binding
+                    and reply.status in ("prepared_review", "available")
+                    and reply.history_action is not None
+                    and reply.history_action.status == "review_required"
+                    and reply.history_action.summary
+                ):
+                    self._body.addWidget(
+                        _label("Review needs attention", "sectionTitle")
+                    )
+                    self._body.addWidget(_label(reply.history_action.summary))
+                    if reply.guidance:
+                        self._body.addWidget(_label(reply.guidance))
                 operation = self._state.last_operation
                 if isinstance(self._state.binding, UpdateContextBinding) and operation:
                     self._body.addWidget(

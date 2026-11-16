@@ -50,6 +50,8 @@ from brz2obsidian.application.contracts import (
 from brz2obsidian.application.operations import validate_vault_name
 from brz2obsidian.application.runner import HostRunner
 from brz2obsidian.application.transport import Supervisor
+from brz2obsidian.application.update_context_contracts import UpdateContextBinding
+from brz2obsidian.application.update_history_contracts import HistoryContextBinding
 from brz2obsidian_ui.platform_actions import CompletionActions, DiagnosticActions
 from brz2obsidian_ui.validation import api_configuration
 from brz2obsidian_ui.workbench import UpdateWorkbench
@@ -934,11 +936,36 @@ class MainWindow(QMainWindow):
             if command is not None:
                 self.submit(command)
 
+    def _undo_footer(self, state):
+        if (
+            state is None
+            or not isinstance(state.binding, HistoryContextBinding)
+            or state.binding.proposal_id is None
+            or state.reply is None
+            or state.reply.binding != state.binding
+            or state.reply.history_action is None
+            or state.reply.history_action.kind != "undo"
+        ):
+            return False, False
+        return True, bool(
+            state.ready
+            and not self.workbench.busy
+            and state.reply.history_action.ready
+            and "execute_history" in state.next_actions
+        )
+
     def _primary_action(self):
         if self.tabs.currentIndex() == 3:
             state = self.workbench.snapshot
-            if (
+            _, undo_ready = self._undo_footer(state)
+            if undo_ready:
+                self.primary.setEnabled(False)
+                self.runner.submit_update(
+                    {"command": "execute_history", "binding": state.binding}
+                )
+            elif (
                 state is not None
+                and isinstance(state.binding, UpdateContextBinding)
                 and state.ready
                 and not self.workbench.busy
                 and "apply_update" in state.next_actions
@@ -1291,11 +1318,18 @@ class MainWindow(QMainWindow):
             button.setVisible(not reviewing)
         if reviewing:
             state = self.workbench.snapshot
-            self.primary.setVisible(state is not None and state.binding is not None)
-            self.primary.setText("Apply update")
-            self.primary.setAccessibleName("Apply update")
+            undo_visible, undo_ready = self._undo_footer(state)
+            source_review = state is not None and isinstance(
+                state.binding, UpdateContextBinding
+            )
+            self.primary.setVisible(source_review or undo_visible)
+            self.primary.setText(
+                "Execute reviewed undo" if undo_visible else "Apply update"
+            )
+            self.primary.setAccessibleName(self.primary.text())
             self.primary.setEnabled(
-                state is not None
+                undo_ready
+                or source_review
                 and state.ready
                 and not self.workbench.busy
                 and "apply_update" in state.next_actions
