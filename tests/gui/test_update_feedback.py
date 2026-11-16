@@ -646,6 +646,7 @@ def test_stale_apply_explanation_survives_read_and_retires_on_new_state(
                     changes=2,
                     unresolved=0,
                     ready=False,
+                    summary="2 comparisons; 0 choices remain.",
                     next_actions=("refresh_update", "save_update"),
                 )
             if args.command == "refresh":
@@ -729,6 +730,7 @@ def test_stale_apply_explanation_survives_read_and_retires_on_new_state(
         until(app, lambda: "Prepared changes: 2" in window_text(window))
         text = window_text(window)
         assert "The review inputs changed. Refresh review before applying." in text
+        assert "2 comparisons; 0 choices remain." in text
         assert "Generic page available." not in text
         assert controls.button("Refresh review").isEnabled()
         if followup == "other_vault":

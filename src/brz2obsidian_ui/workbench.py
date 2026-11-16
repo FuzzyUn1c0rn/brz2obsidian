@@ -941,22 +941,23 @@ class UpdateWorkbench(QWidget):
             )
         if retained_stale:
             self._body.addWidget(_label("Review needs attention", "sectionTitle"))
+            reason = {
+                "source_payload_changed": "The source changed. Refresh review before applying.",
+                "current_facts_changed": "The review inputs changed. Refresh review before applying.",
+            }.get(operation.code)
             self._body.addWidget(
                 _label(
-                    operation.summary
-                    or (
-                        "The source changed. Refresh review before applying."
-                        if operation.code == "source_payload_changed"
-                        else "The review inputs changed. Refresh review before applying."
-                        if operation.code == "current_facts_changed"
-                        else "The review changed. Refresh review before applying."
-                    ),
+                    reason
+                    or operation.summary
+                    or "The review changed. Refresh review before applying.",
                     "fieldError",
                 )
             )
+            if reason and operation.summary and operation.summary != reason:
+                self._body.addWidget(_label(operation.summary))
             if operation.guidance:
                 self._body.addWidget(_label(operation.guidance))
-            elif operation.summary:
+            elif operation.summary and not reason:
                 self._body.addWidget(_label("Refresh review before applying."))
         if blocker:
             self._body.addWidget(_label("Review needs attention", "sectionTitle"))
