@@ -120,8 +120,6 @@ def automatic_configuration(facts, subject):
         and facts.format_operation.kind == "source_update"
         and not needs_onboarding(facts, subject)
         and subject.baseline.status == "known"
-        and content_key(subject.current.content)
-        == content_key(subject.baseline.content)
     )
 
 

@@ -825,3 +825,81 @@ def test_unresolved_first_apply_does_not_capture_or_publish(monkeypatch):
         refused.capture is None and not (vault / ".brz2obsidian/locator.json").exists()
     )
     assert authored_files(vault) == files and all_refs(vault) == refs
+
+
+def test_supported_independent_configuration_edits_merge_without_format_choice():
+    from brz2obsidian.application.update_facts import automatic_merge_facts
+    from brz2obsidian.core import prepare_review, select_review_effects
+    from tests.reconciliation.test_resolution import preflight, with_review_links
+    from tests.reconciliation.test_structure import structured_request
+
+    facts = structured_request(
+        b"First old.\nMiddle.\nLast old.\n",
+        b"First local.\nMiddle.\nLast old.\n",
+        b"First old.\nMiddle.\nLast source.\n",
+    )
+    facts = facts.model_copy(
+        update={
+            "subjects": (
+                facts.subjects[0].model_copy(update={"output_role": "configuration"}),
+            )
+        }
+    )
+    plan = prepare_review(
+        automatic_merge_facts(with_review_links(facts)), preflight=preflight()
+    )
+    assert plan.ready and not plan.requirements, plan.requirements
+    effects = select_review_effects(plan)
+    assert effects.status == "selected"
+    assert effects.files[0].content.data == b"First local.\nMiddle.\nLast source.\n"
+
+
+def test_configuration_conflict_keeps_explicit_safe_version_choices():
+    from brz2obsidian.application.update_facts import automatic_merge_facts
+    from brz2obsidian.core import (
+        inspect_review_choices,
+        prepare_review,
+        resolve_review,
+        select_review_effects,
+    )
+    from tests.reconciliation.test_resolution import (
+        action,
+        literal_text_candidate,
+        preflight,
+        with_review_links,
+    )
+    from tests.reconciliation.test_structure import structured_request
+
+    facts = structured_request(
+        b"Setting old.\n", b"Setting local.\n", b"Setting source.\n"
+    )
+    facts = facts.model_copy(
+        update={
+            "subjects": (
+                facts.subjects[0].model_copy(update={"output_role": "configuration"}),
+            )
+        }
+    )
+    facts = automatic_merge_facts(with_review_links(facts))
+    plan = prepare_review(facts, preflight=preflight())
+    assert not plan.ready and len(plan.requirements) == 1
+    offer = inspect_review_choices(plan)[0]
+    assert offer.domain == "configuration" and {"current", "incoming", "edited"} <= set(
+        offer.enabled_choices
+    )
+    for choice, expected in (
+        ("current", b"Setting local.\n"),
+        ("incoming", b"Setting source.\n"),
+    ):
+        candidate = (
+            literal_text_candidate(facts, expected) if choice == "incoming" else None
+        )
+        selected = resolve_review(
+            plan,
+            action(plan, domain="configuration", choice=choice, candidate=candidate),
+        )
+        assert selected.status == "accepted" and selected.plan.ready, selected
+        effects = select_review_effects(selected.plan)
+        assert (
+            effects.status == "selected" and effects.files[0].content.data == expected
+        )

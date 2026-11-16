@@ -185,9 +185,10 @@ def _choice_requirements(facts, proposal):
 
 
 def _format_choice_unavailable(change, domain, choice):
-    return domain in ("configuration", "format") and (
-        change.format_review is None
-        or choice != "current"
+    return (domain == "format" and change.format_review is None) or (
+        domain in ("configuration", "format")
+        and change.format_review is not None
+        and choice != "current"
         and not change.format_review.target_eligible
     )
 
