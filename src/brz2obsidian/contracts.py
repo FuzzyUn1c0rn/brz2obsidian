@@ -1262,8 +1262,9 @@ class OperationReversalOutput(ReconciliationContract):
 class OperationReversalTarget(ReconciliationContract):
     """Outer-validated selected-output ownership and exact operation versions.
 
-    Origin IDs join the retained canonical decision; they are not authority by
-    themselves. Outer history verifies membership and complete inventories again
+    Origin IDs join the retained canonical selection; an absent decision joins
+    only a canonical automatic result. They are not authority by themselves.
+    Outer history verifies membership and complete inventories again
     before publication. No output row creates a source item or facet.
     """
 
@@ -1275,7 +1276,9 @@ class OperationReversalTarget(ReconciliationContract):
     operation_generation: int = Field(ge=1)
     history_fingerprint: str = Field(min_length=1)
     origin_change_id: str = Field(min_length=1)
-    origin_decision_id: str = Field(min_length=1)
+    origin_decision_id: str | None = Field(
+        default=None, min_length=1, exclude_if=lambda value: value is None
+    )
     owned_targets: tuple[ReferenceTarget, ...]
     outputs: tuple[OperationReversalOutput, ...]
 

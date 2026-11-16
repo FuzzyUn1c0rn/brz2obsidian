@@ -424,7 +424,9 @@
     "tests/application/test_approved_update_flow.py::test_bulk_current_recertifies_prior_incoming_reference_without_new_choice",
     "tests/application/test_approved_update_flow.py::test_bulk_current_recertifies_automatic_incoming_note_without_reapproval",
     "tests/application/test_approved_update_flow.py::test_resource_recertification_preserves_real_semantic_and_authority_blockers",
-    "tests/application/test_approved_update_flow.py::test_unknown_review_choice_raises_a_domain_error_before_action_construction"
+    "tests/application/test_approved_update_flow.py::test_unknown_review_choice_raises_a_domain_error_before_action_construction",
+    "tests/application/test_approved_update_flow.py::test_automatic_inverse_targets_include_proven_absence_without_a_decision",
+    "tests/application/test_approved_update_flow.py::test_automatic_inverse_authority_cannot_replace_explicit_or_unavailable_history"
   ],
   "schema_version": 1
 }

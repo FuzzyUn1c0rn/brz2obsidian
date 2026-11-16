@@ -2416,3 +2416,519 @@ def test_owned_mixed_group_and_reselect_keep_automatic_note_and_worker_usable(
         assert (
             git(case.vault, "for-each-ref", "--format=%(refname) %(objectname)") == refs
         )
+
+
+def test_automatic_selected_content_retains_an_inverse_without_fabricated_approval():
+    from brz2obsidian.application.operations import Operations
+    from brz2obsidian.application.update_facts import automatic_merge_facts
+    from brz2obsidian.core import prepare_review, select_review_effects
+    from tests.application.test_vault_apply import _apply
+    from tests.application.test_vault_checkpoints import fixture_case, git, user_state
+    from tests.reconciliation.test_resolution import with_review_links
+    from tests.reconciliation.test_structure import structured_request
+
+    original = b"Original automatic prose.\n"
+    incoming = b"Incoming automatic prose.\n"
+    vault, source = fixture_case()
+    for root in (vault, source):
+        (root / "Notes").mkdir()
+        (root / "Notes/Opening.md").write_bytes(original)
+    git(vault, "init", "-q")
+    git(vault, "config", "core.autocrlf", "false")
+    (vault / "Personal.md").write_bytes(b"Independent personal writing.\n")
+    git(vault, "add", "Personal.md")
+    git(vault, "commit", "-qm", "Independent automatic Undo fixture")
+    operations = Operations()
+    facts = automatic_merge_facts(
+        with_review_links(structured_request(original, original, incoming))
+    )
+    seeded = operations.capture_checkpoint(
+        vault,
+        source,
+        vault_id="vault-one",
+        import_id="import-one",
+        identity=facts.incoming_identity,
+        admission=operations.inspect_history(vault).admission,
+    )
+    assert seeded.status == "captured", seeded.code
+    (source / "Notes/Opening.md").write_bytes(incoming)
+    plan = prepare_review(
+        facts, preflight=operations.inspect_history(vault).admission.preflight
+    )
+    assert plan.ready and plan.actions == plan.approvals == ()
+    assert {
+        row.path: row.content.data for row in select_review_effects(plan).files
+    } == {"Notes/Opening.md": incoming}
+    applied = _apply(
+        operations,
+        vault,
+        source,
+        review=plan,
+        vault_id="vault-one",
+        import_id="import-one",
+    )
+    assert (
+        applied.status == "applied"
+        and (vault / "Notes/Opening.md").read_bytes() == incoming
+    ), applied.code
+    before = user_state(vault)
+    refs = git(vault, "for-each-ref", "--format=%(refname) %(objectname)")
+    undo = operations.prepare_undo(vault)
+    assert undo.status == "offered", undo.code
+    assert undo.target_receipt_commit == applied.receipt_commit
+    (change,) = undo.review.proposal.changes
+    assert change.current.data == incoming and change.incoming.data == original
+    assert user_state(vault) == before
+    assert git(vault, "for-each-ref", "--format=%(refname) %(objectname)") == refs
+
+
+def automatic_mixed_inverse_facts():
+    from brz2obsidian.application.update_facts import automatic_merge_facts
+    from brz2obsidian.contracts import ContentVersion, CurrentContent
+    from tests.reconciliation.test_identity import with_subjects
+    from tests.reconciliation.test_resolution import with_review_links
+    from tests.reconciliation.test_structure import structured_request
+
+    facts = reference_recertification_facts(
+        divergent=False, current_payload=b"\x00original"
+    )
+    subjects, inventory = list(facts.subjects), list(facts.identity_inventory)
+    context = facts.link_context
+    for item, path, original, incoming, role in (
+        (
+            "support:metadata",
+            "metadata.json",
+            b'{"version":1}\n',
+            b'{"version":2}\n',
+            "guide",
+        ),
+        (
+            "support:config",
+            ".obsidian/options.json",
+            b'{"setting":1}\n',
+            b'{"setting":2}\n',
+            "configuration",
+        ),
+        ("entry:new", "Notes/New.md", None, b"New source note.\n", "note"),
+    ):
+        extra = structured_request(original or b"", original or b"", incoming)
+        old = extra.subjects[0]
+        current = CurrentContent(
+            existence="absent" if original is None else "present",
+            path=path,
+            content=None if original is None else old.current.content,
+        )
+        target = old.source_target.model_copy(
+            update={"normalized_path": path.casefold()}
+        )
+        subject = old.model_copy(
+            update={
+                "item_id": item,
+                "path": path,
+                "current": current,
+                "source_target": target,
+                "output_role": role,
+                "baseline": ContentVersion(
+                    status="unknown", content=None, unavailable_digest=None
+                )
+                if original is None
+                else old.baseline,
+                "structure": None if original is None else old.structure,
+            }
+        )
+        entry = extra.identity_inventory[0].model_copy(
+            update={
+                "entry_id": item,
+                "identity": extra.identity_inventory[0].identity.model_copy(
+                    update={"item_id": item}
+                ),
+                "current": current,
+                "target": target,
+            }
+        )
+        extra = with_review_links(with_subjects(extra, (subject,), (entry,)))
+        subjects.append(subject)
+        inventory.append(entry)
+        context = context.model_copy(
+            update={
+                field: getattr(context, field) + getattr(extra.link_context, field)
+                for field in (
+                    "current_targets",
+                    "incoming_targets",
+                    "current_target_facts",
+                    "incoming_target_facts",
+                    "current_documents",
+                    "incoming_documents",
+                )
+            }
+        )
+    return automatic_merge_facts(
+        with_subjects(facts, tuple(subjects), tuple(inventory)).model_copy(
+            update={"link_context": context}
+        )
+    )
+
+
+def test_automatic_inverse_targets_include_proven_absence_without_a_decision():
+    from brz2obsidian.core import (
+        prepare_review,
+        review_owned_targets,
+        select_review_effects,
+    )
+    from tests.reconciliation.test_resolution import preflight
+
+    plan = prepare_review(automatic_mixed_inverse_facts(), preflight=preflight())
+    assert plan.ready, (plan.requirements, plan.blockers)
+    assert (
+        len(plan.approvals) == 1 and plan.approvals[0].provenance == "automatic_merge"
+    )
+    expected = {
+        "Notes/Owner.md": b"New prose [[Assets/data.bin]].",
+        "Assets/data.bin": b"abc",
+        "metadata.json": b'{"version":2}\n',
+        ".obsidian/options.json": b'{"setting":2}\n',
+        "Notes/New.md": b"New source note.\n",
+    }
+    assert {
+        row.path: row.content.data for row in select_review_effects(plan).files
+    } == expected
+    for change in plan.proposal.changes:
+        approval = next(
+            (a for a in plan.approvals if a.change_id == change.change_id), None
+        )
+        owned = review_owned_targets(
+            plan, change.change_id, None if approval is None else approval.decision_id
+        )
+        assert [(row.canonical_path, row.status) for row in owned] == [
+            (change.target_path, "safe")
+        ]
+
+
+def test_automatic_inverse_authority_cannot_replace_explicit_or_unavailable_history():
+    import pytest
+    from pydantic import ValidationError
+
+    from brz2obsidian.core import (
+        prepare_review,
+        resolve_review,
+        review_owned_targets,
+        select_review_effects,
+    )
+    from tests.reconciliation.test_resolution import action, preflight
+    from tests.reconciliation.test_reversal_absence import reversal_facts
+
+    facts = automatic_mixed_inverse_facts()
+    plan = prepare_review(facts, preflight=preflight())
+    note = next(row for row in plan.proposal.changes if row.path == "Notes/Owner.md")
+    subject = next(row for row in facts.subjects if row.path == note.path)
+    explicit = resolve_review(
+        plan,
+        action(
+            plan,
+            note,
+            choice="incoming",
+            candidate=subject.automatic_result,
+            decision_id="explicit:note",
+        ),
+    ).plan
+    assert explicit.ready
+    assert (
+        review_owned_targets(explicit, note.change_id, "explicit:note")[
+            0
+        ].canonical_path
+        == note.path
+    )
+    for origin, change_id, decision in (
+        (plan, note.change_id, ""),
+        (plan, note.change_id, "missing:decision"),
+        (plan, "missing:change", None),
+        (explicit, note.change_id, None),
+        (explicit.model_copy(update={"approvals": ()}), note.change_id, None),
+        (explicit.model_copy(update={"actions": ()}), note.change_id, None),
+    ):
+        with pytest.raises(ValueError):
+            review_owned_targets(origin, change_id, decision)
+    restored = type(explicit).model_validate_json(explicit.model_dump_json())
+    assert restored == explicit
+    assert (
+        review_owned_targets(restored, note.change_id, "explicit:note")[
+            0
+        ].canonical_path
+        == note.path
+    )
+
+    legacy = reversal_facts().subjects[0].operation_reversal
+    raw = legacy.model_dump_json()
+    assert '"origin_decision_id":"origin:decision"' in raw
+    assert type(legacy).model_validate_json(raw).model_dump_json() == raw
+    automatic = type(legacy).model_validate(
+        legacy.model_copy(update={"origin_decision_id": None})
+    )
+    assert "origin_decision_id" not in automatic.model_dump()
+    assert type(automatic).model_validate_json(automatic.model_dump_json()) == automatic
+    with pytest.raises(ValidationError):
+        type(legacy).model_validate(
+            legacy.model_copy(update={"origin_decision_id": ""})
+        )
+
+    absent = subject.model_copy(update={"automatic_result": None})
+    no_incoming = facts.link_context.model_copy(
+        update={
+            "incoming_documents": tuple(
+                d
+                for d in facts.link_context.incoming_documents
+                if d.source_path != note.path
+            )
+        }
+    )
+    cases = (
+        facts.model_copy(
+            update={
+                "format_operation": facts.format_operation.model_copy(
+                    update={"automatic_merge": False}
+                )
+            }
+        ),
+        facts.model_copy(
+            update={
+                "subjects": tuple(
+                    absent if s.path == note.path else s for s in facts.subjects
+                ),
+                "link_context": no_incoming,
+            }
+        ),
+        facts.model_copy(
+            update={
+                "subjects": tuple(
+                    s.model_copy(
+                        update={
+                            "incoming": None,
+                            "automatic_result": None,
+                            "structure": None,
+                        }
+                    )
+                    if s.path == note.path
+                    else s
+                    for s in facts.subjects
+                )
+            }
+        ),
+    )
+    for changed in cases:
+        refused = prepare_review(changed, preflight=preflight())
+        assert not refused.ready
+        assert select_review_effects(refused).status == "refused"
+        with pytest.raises(ValueError):
+            review_owned_targets(
+                refused,
+                next(
+                    c.change_id for c in refused.proposal.changes if c.path == note.path
+                ),
+                None,
+            )
+
+
+def test_mixed_automatic_apply_has_owned_reviewed_undo_with_exact_preimage():
+    from brz2obsidian.application.operations import Operations
+    from brz2obsidian.application.update_context import UpdateContext
+    from brz2obsidian.core import prepare_review
+    from tests.application.test_onboarding_completion import authored_files
+    from tests.application.test_update_context import worker_context_call
+    from tests.application.test_vault_apply import _apply
+    from tests.application.test_vault_checkpoints import fixture_case, git, user_state
+    from tests.application.test_vault_recovery_process import _assert_user_state
+    from tests.application.test_vault_undo import _operation_ref
+
+    facts = automatic_mixed_inverse_facts()
+    vault, source = fixture_case()
+    for subject in facts.subjects:
+        for root, value in (
+            (vault, subject.current.content),
+            (source, subject.baseline.content),
+        ):
+            if value is not None:
+                target = root / subject.path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(value.data)
+    git(vault, "init", "-q")
+    git(vault, "config", "core.autocrlf", "false")
+    (vault / "Personal.md").write_bytes(b"Committed personal writing.\n")
+    git(vault, "add", "Personal.md")
+    git(vault, "commit", "-qm", "Independent mixed automatic Undo fixture")
+    git(vault, "update-ref", "refs/notes/user-proof", "HEAD")
+    git(vault, "update-ref", "refs/brz2obsidian/unrelated-user-proof", "HEAD")
+    (vault / "Personal.md").write_bytes(b"Staged personal writing.\n")
+    git(vault, "add", "Personal.md")
+    (vault / "Personal.md").write_bytes(b"Unstaged personal writing.\n")
+    operations = Operations()
+    seed = operations.capture_checkpoint(
+        vault,
+        source,
+        vault_id="vault-one",
+        import_id="import-one",
+        identity=facts.incoming_identity,
+        admission=operations.inspect_history(vault).admission,
+    )
+    assert seed.status == "captured", seed.code
+    original = authored_files(vault)
+    user = user_state(vault)
+    for subject in facts.subjects:
+        target = source / subject.path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(subject.incoming.data)
+    source_before = authored_files(source)
+    review = prepare_review(
+        facts, preflight=operations.inspect_history(vault).admission.preflight
+    )
+    assert review.ready and len(review.approvals) == 1
+    applied = _apply(
+        operations,
+        vault,
+        source,
+        review=review,
+        vault_id="vault-one",
+        import_id="import-one",
+    )
+    assert applied.status == "applied", applied.code
+    expected = {
+        "Notes/Owner.md": b"New prose [[Assets/data.bin]].",
+        "Assets/data.bin": b"abc",
+        "metadata.json": b'{"version":2}\n',
+        ".obsidian/options.json": b'{"setting":2}\n',
+        "Notes/New.md": b"New source note.\n",
+        "Personal.md": b"Unstaged personal writing.\n",
+    }
+    assert authored_files(vault) == expected
+    before_review = user_state(vault)
+    undo = operations.prepare_undo(vault)
+    assert undo.status == "offered", undo.code
+    created = next(s for s in undo.review.facts.subjects if s.path == "Notes/New.md")
+    proof = created.operation_reversal
+    assert proof.origin_decision_id is None
+    assert "origin_decision_id" not in proof.model_dump()
+    assert proof.outputs[0].produced.data == b"New source note.\n"
+    assert (
+        proof.outputs[0].target is None
+        and proof.outputs[0].target_existence == "absent"
+    )
+    assert type(undo).model_validate_json(undo.model_dump_json()) == undo
+    # An absent decision never lets another selected change own this creation.
+    wrong = created.model_copy(
+        update={
+            "operation_reversal": proof.model_copy(
+                update={"origin_change_id": "missing:origin"}
+            )
+        }
+    )
+    forged = undo.model_copy(
+        update={
+            "review": undo.review.model_copy(
+                update={
+                    "facts": undo.review.facts.model_copy(
+                        update={
+                            "subjects": tuple(
+                                wrong if s.path == created.path else s
+                                for s in undo.review.facts.subjects
+                            )
+                        }
+                    )
+                }
+            )
+        }
+    )
+    refused = operations.execute_undo(vault, forged)
+    assert refused.status == "refused" and not refused.authored_files_changed
+    assert user_state(vault) == before_review
+
+    context = UpdateContext(operations=operations)
+    active = None
+
+    def send(command, **values):
+        result = worker_context_call(context, {"command": command, **values})
+        assert result is not None, (command, "Expected typed worker terminal result")
+        return result
+
+    try:
+        active = send(
+            "history",
+            vault=str(vault),
+            selection_id="11111111-1111-4111-8111-111111111111",
+        )
+        assert "review_undo" in active.next_actions
+        active = send("prepare_history", binding=active.binding, kind="undo")
+        assert (
+            active.status == "prepared_review"
+            and active.binding.target_receipt_commit == applied.receipt_commit
+        ), active
+        page = send("page", binding=active.binding)
+        assert {row.current_path: row.current for row in page.page.items} == {
+            path: value for path, value in expected.items() if path != "Personal.md"
+        }
+        required = {(r.change_id, r.domain) for r in undo.review.requirements}
+        for change_id, domain in sorted(required):
+            offers = send("history_choices", binding=active.binding).offers
+            offer = next(
+                row
+                for row in offers
+                if row.change_id == change_id and row.domain == domain
+            )
+            choice = "reverse" if domain == "reversal" else "incoming"
+            assert choice in offer.choices, (domain, offer.choices)
+            if offer.reference_review and domain == "attachment":
+                missing = send(
+                    "choose_history",
+                    binding=active.binding,
+                    requirement_id=offer.requirement_id,
+                    choice=choice,
+                    assumptions_digest=offer.assumptions_digest,
+                )
+                assert missing.code == "reference_choices_required"
+                assert missing.binding == active.binding
+                assert user_state(vault) == before_review
+                references = send(
+                    "references",
+                    binding=active.binding,
+                    requirement_id=offer.requirement_id,
+                )
+                assert references.references
+                assert all(
+                    "use_incoming" in row.choices for row in references.references
+                )
+                active = send(
+                    "stage_references",
+                    binding=active.binding,
+                    requirement_id=offer.requirement_id,
+                    choices=tuple(
+                        {"reference_id": row.reference_id, "choice": "use_incoming"}
+                        for row in references.references
+                    ),
+                )
+                assert active.code == "reference_choices_staged"
+            active = send(
+                "choose_history",
+                binding=active.binding,
+                requirement_id=offer.requirement_id,
+                choice=choice,
+                assumptions_digest=offer.assumptions_digest,
+            )
+            assert active.status == "prepared_review", active
+        assert active.ready, active
+        assert user_state(vault) == before_review
+        active = send("execute_history", binding=active.binding)
+        assert active.status == "undone", active
+        completed = active.history_action.operation
+        assert completed.publication == "complete" and completed.kind == "undo"
+    finally:
+        if active is not None and active.binding is not None:
+            context.close(active.binding, choice="discard")
+        else:
+            context.close(choice="discard")
+    assert authored_files(vault) == original
+    assert authored_files(source) == source_before
+    allowed = {
+        seed.ref.encode(),
+        _operation_ref(seed.ref, applied.operation_id),
+        _operation_ref(seed.ref, completed.operation_id),
+    }
+    _assert_user_state(user, user_state(vault), allowed_refs=allowed)
+    assert operations.prepare_undo(vault).status == "already_undone"

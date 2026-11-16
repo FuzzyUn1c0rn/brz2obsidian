@@ -1422,14 +1422,16 @@ def _restore_review(
         if len(changes) != 1:
             raise OSError("Recovery subject has no unique original change")
         approval = approved.get(changes[0].change_id)
-        if approval is None:
-            if subject.path not in intent.affected_paths:
-                # An automatic, unchanged producer has no decision to reverse.
-                # Affected outputs still require retained selected ownership.
-                continue
-            raise OSError("Recovery subject lacks original selected approval")
+        if approval is None and subject.path not in intent.affected_paths:
+            # An automatic, unchanged producer has no decision to reverse.
+            # Affected outputs still require retained selected ownership.
+            continue
         ownership_subjects.append((subject, changes, approval))
-        ownership_queries.append((approval.change_id, approval.decision_id))
+        ownership_queries.append(
+            (changes[0].change_id, None)
+            if approval is None
+            else (approval.change_id, approval.decision_id)
+        )
     owned_outputs = (
         review_owned_outputs(original, tuple(ownership_queries))
         if _owner is None
@@ -1479,8 +1481,8 @@ def _restore_review(
                 history_fingerprint=_operation_history_fingerprint(
                     origin_commit, intent
                 ),
-                origin_change_id=approval.change_id,
-                origin_decision_id=approval.decision_id,
+                origin_change_id=changes[0].change_id,
+                origin_decision_id=None if approval is None else approval.decision_id,
                 owned_targets=owned,
                 outputs=tuple(rows),
             )

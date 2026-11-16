@@ -7,6 +7,7 @@ from brz2obsidian.content_values import content_key, same_content
 from brz2obsidian.contracts import ReferenceTarget, SelectedReviewEffects
 
 from .identity import _paths_collide, _target_safe
+from .review_links import known_result_document
 
 
 class ReviewOwnedOutputs(NamedTuple):
@@ -451,25 +452,59 @@ def _owned_targets(plan, change_id, decision_id, selected_effects):
         ),
         None,
     )
-    if approval is None:
+    change = next((c for c in plan.proposal.changes if c.change_id == change_id), None)
+    if change is None:
         raise ValueError("Origin decision does not own this change")
-    change = next(c for c in plan.proposal.changes if c.change_id == change_id)
     subject = reversal_subject(plan.producer_facts, change)
+    known = (
+        known_result_document(plan.producer_facts, change)
+        if decision_id is None
+        else None
+    )
+    automatic = (
+        decision_id is None
+        and plan.producer_facts.format_operation.automatic_merge
+        and change.disposition == "compatible"
+        and not change.requires_decision
+        and subject.attachment is None
+        and not any(a.change_id == change_id for a in plan.approvals)
+        and not any(a.change_id == change_id for a in plan.actions)
+        and known is not None
+    )
+    if approval is None and not automatic:
+        raise ValueError("Origin decision does not own this change")
     if subject.operation_reversal is not None:
         return subject.operation_reversal.owned_targets
-    if approval.attachment_candidate is not None:
+    if approval is not None and approval.attachment_candidate is not None:
         candidate = approval.attachment_candidate
         ids = {o.target_id for o in candidate.outputs}
         return tuple(t for t in candidate.targets if t.target_id in ids)
-    action = next(a for a in plan.actions if a.decision_id == decision_id)
+    action = (
+        None
+        if automatic
+        else next(a for a in plan.actions if a.decision_id == decision_id)
+    )
     context = plan.producer_facts.link_context
     targets = (
         () if context is None else context.current_targets + context.incoming_targets
     )
-    if action.candidate is not None:
-        targets = action.candidate.link_targets + targets
+    candidate = None if automatic else action.candidate
+    if candidate is not None:
+        targets = candidate.link_targets + targets
+    if automatic:
+        targets = known[1] + targets
     effects = selected_effects()
     paths = {f.path for f in effects.files if f.subject_id == change.subject_id}
+    if automatic and (
+        effects.status != "selected"
+        or paths != {change.target_path}
+        or any(
+            f.path == change.target_path
+            and not same_content(f.content, known[0].content)
+            for f in effects.files
+        )
+    ):
+        raise ValueError("Automatic origin lacks its exact selected output")
     if (
         change.rename_review is not None
         and change.rename_review.status == "accepted"
