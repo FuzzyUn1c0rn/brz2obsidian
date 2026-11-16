@@ -381,10 +381,10 @@ class ReviewSession:
             observed,
             scratch_parent=scratch_parent,
             budget=ReviewBudget(
-                # This cumulative model-work credit spans prepare, choices,
-                # resume and publication; it is not an estimate of live heap.
-                # Actual retained envelope/semantic admission still uses capacity.
-                metadata_limit=max(capacity, 1024 * 1024 * 1024),
+                # Finite cumulative model work spans the whole review lifetime;
+                # it is not live heap and must not be capped by current capacity.
+                # Envelope/semantic admission retains its capacity checks.
+                metadata_limit=maximum,
                 node_limit=maximum,
                 depth_limit=sys.getrecursionlimit(),
                 decoded_limit=maximum,
@@ -552,11 +552,10 @@ class ReviewSession:
     def _retained_review(cls, git, manifest, commit, *, capacity):
         maximum = (1 << 63) - 1
         budget = ReviewBudget(
-            # M is a conservative model-work inventory, not measured heap.
-            # Envelope/semantic admission retain their independent capacity
-            # checks; subtracting those proxies here imposed a second, smaller
-            # metadata qualification ceiling on the actual reconstruction.
-            metadata_limit=max(capacity, 1024 * 1024 * 1024),
+            # M counts cumulative model work, not measured live heap. Give it
+            # the same finite native-domain credit as the other work counters;
+            # envelope/semantic admission still uses actual capacity separately.
+            metadata_limit=maximum,
             node_limit=maximum,
             depth_limit=sys.getrecursionlimit(),
             decoded_limit=maximum,
