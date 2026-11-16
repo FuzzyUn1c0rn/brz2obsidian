@@ -850,7 +850,7 @@ class UpdateWorkbench(QWidget):
             "content_complete",
         )
         operation = state.last_operation
-        blocker = (
+        current_operation = (
             not not_started
             and not uncertain
             and not failed
@@ -859,11 +859,15 @@ class UpdateWorkbench(QWidget):
             and operation is not None
             and not operation.ready
             and isinstance(operation.binding, UpdateContextBinding)
-            and operation.status in ("prepared_review", "unresolved")
             and operation.binding.model_dump(exclude={"revision"})
             == state.binding.model_dump(exclude={"revision"})
             and operation.binding.revision <= state.binding.revision
             and state.last_operation_vault == state.vault
+        )
+        retained_stale = current_operation and operation.status == "stale_review"
+        blocker = (
+            current_operation
+            and operation.status in ("prepared_review", "unresolved")
             and bool(operation.summary or operation.findings or operation.guidance)
         )
         if not (
@@ -871,6 +875,7 @@ class UpdateWorkbench(QWidget):
             or uncertain
             or failed
             or blocker
+            or retained_stale
             or reply
             and (reply.findings or reply.guidance or reply.recovery_gap_count)
         ):
@@ -900,6 +905,7 @@ class UpdateWorkbench(QWidget):
             self._body.addWidget(_label("Review could not continue", "sectionTitle"))
             known = {
                 "context_changed": "The review changed. Reopen or refresh the current review before choosing.",
+                "current_facts_changed": "The review inputs changed. Refresh review before applying.",
                 "offer_changed": "This choice changed. Refresh the current review before choosing again.",
                 "uncommitted_draft": "Accept or explicitly discard your draft before continuing.",
                 "source_payload_changed": "The source changed. Refresh and review the affected choices before applying.",
@@ -916,6 +922,25 @@ class UpdateWorkbench(QWidget):
                     "fieldError",
                 )
             )
+        if retained_stale:
+            self._body.addWidget(_label("Review needs attention", "sectionTitle"))
+            self._body.addWidget(
+                _label(
+                    operation.summary
+                    or (
+                        "The source changed. Refresh review before applying."
+                        if operation.code == "source_payload_changed"
+                        else "The review inputs changed. Refresh review before applying."
+                        if operation.code == "current_facts_changed"
+                        else "The review changed. Refresh review before applying."
+                    ),
+                    "fieldError",
+                )
+            )
+            if operation.guidance:
+                self._body.addWidget(_label(operation.guidance))
+            elif operation.summary:
+                self._body.addWidget(_label("Refresh review before applying."))
         if blocker:
             self._body.addWidget(_label("Review needs attention", "sectionTitle"))
             if operation.summary:

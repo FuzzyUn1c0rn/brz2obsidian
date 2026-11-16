@@ -591,3 +591,168 @@ def test_unready_review_explains_blocker_after_read_and_vault_change(tmp_path):
         window.hide()
         window.deleteLater()
         app.processEvents()
+
+
+@pytest.mark.parametrize("followup", ("refresh", "refused", "recovery", "other_vault"))
+def test_stale_apply_explanation_survives_read_and_retires_on_new_state(
+    tmp_path, followup
+):
+    from brz2obsidian_ui.window import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    vault = tmp_path / "Vault"
+    vault.mkdir()
+    other = tmp_path / "Other"
+    other.mkdir()
+    source = tmp_path / "incoming.brz"
+    source.write_bytes(b"source")
+
+    class Projection:
+        binding = None
+        stale = False
+
+        def __call__(self, actual, callbacks):
+            args = actual.arguments
+            if args.command == "prepare":
+                self.binding = UpdateContextBinding(
+                    context_id=str(uuid4()),
+                    selection_id=args.selection_id,
+                    vault=str(vault),
+                    association_id="a" * 64,
+                    checkpoint_commit="b" * 40,
+                    checkpoint_generation=1,
+                    proposal_id="review",
+                    generation=1,
+                    revision=1,
+                )
+                return UpdateContextResult(
+                    status="prepared_review",
+                    code="prepared",
+                    kind="source_update",
+                    binding=self.binding,
+                    changes=2,
+                    ready=True,
+                    next_actions=("apply_update", "save_update"),
+                )
+            if args.command == "apply":
+                assert args.binding == self.binding
+                self.stale = True
+                self.binding = self.binding.model_copy(update={"revision": 2})
+                return UpdateContextResult(
+                    status="stale_review",
+                    code="current_facts_changed",
+                    kind="source_update",
+                    binding=self.binding,
+                    changes=2,
+                    unresolved=0,
+                    ready=False,
+                    next_actions=("refresh_update", "save_update"),
+                )
+            if args.command == "refresh":
+                assert args.binding == self.binding
+                if followup == "refused":
+                    return UpdateContextResult(
+                        status="refused",
+                        code="controlled_refusal",
+                        kind="source_update",
+                        binding=self.binding,
+                        summary="A newer refusal needs attention.",
+                    )
+                if followup == "recovery":
+                    return UpdateContextResult(
+                        status="recovery_required",
+                        code="controlled_recovery",
+                        kind="source_update",
+                        summary="A newer recovery needs attention.",
+                        publication="partial",
+                    )
+                self.binding = self.binding.model_copy(update={"revision": 3})
+                self.stale = False
+                return UpdateContextResult(
+                    status="prepared_review",
+                    code="refreshed",
+                    kind="source_update",
+                    binding=self.binding,
+                    changes=2,
+                    ready=True,
+                    next_actions=("apply_update", "save_update"),
+                )
+            assert args.command in ("page", "choices")
+            return UpdateContextResult(
+                status="available",
+                code="available",
+                kind="source_update",
+                binding=self.binding,
+                summary="Generic page available.",
+            )
+
+    transport = ProjectedReviewTransport(Projection())
+    window = MainWindow(supervisor=transport)
+    window.show()
+    controls = ReviewControls(window, app)
+    try:
+        selection = str(uuid4())
+        window.runner.select_update(str(vault), selection_id=selection)
+        window.runner.submit_update(
+            {
+                "command": "prepare",
+                "kind": "source_update",
+                "vault": str(vault),
+                "source": str(source),
+                "selection_id": selection,
+            }
+        )
+        controls.click("Apply update")
+        until(
+            app,
+            lambda: (
+                window.workbench.snapshot is not None
+                and window.workbench.snapshot.last_operation is not None
+                and window.workbench.snapshot.last_operation.status == "stale_review"
+                and window.workbench.snapshot.reply is not None
+                and window.workbench.snapshot.reply.code == "available"
+                and not window.workbench.busy
+            ),
+        )
+        assert window.workbench.snapshot.unresolved == 0
+        assert not controls.button("Apply update").isEnabled()
+        until(app, lambda: "Prepared changes: 2" in window_text(window))
+        text = window_text(window)
+        assert "The review inputs changed. Refresh review before applying." in text
+        assert "Generic page available." not in text
+        assert controls.button("Refresh review").isEnabled()
+        if followup == "other_vault":
+            window.runner.select_update(str(other), selection_id=str(uuid4()))
+            until(app, lambda: window.workbench.snapshot.vault == str(other))
+        else:
+            controls.click("Refresh review")
+            until(
+                app,
+                lambda: (
+                    window.workbench.snapshot.last_operation is not None
+                    and window.workbench.snapshot.last_operation.status
+                    != "stale_review"
+                    and not window.workbench.busy
+                ),
+            )
+            if followup == "refresh":
+                until(app, lambda: controls.button("Apply update").isEnabled())
+            else:
+                expected = "refusal" if followup == "refused" else "recovery"
+                until(
+                    app,
+                    lambda: (
+                        "A newer " + expected + " needs attention."
+                        in window_text(window)
+                    ),
+                )
+        assert (
+            "The review inputs changed. Refresh review before applying."
+            not in window_text(window)
+        )
+    finally:
+        window.shutdown()
+        transport.close()
+        window.hide()
+        window.deleteLater()
+        app.processEvents()
