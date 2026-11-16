@@ -55,6 +55,7 @@ class UpdateWorkbench(QWidget):
         self._state = None
         self._binding_key = None
         self._page = None
+        self._page_queue = "all"
         self._offers = ()
         self._row_offers = ()
         self._offer_page = (0, 0, None)
@@ -126,7 +127,7 @@ class UpdateWorkbench(QWidget):
         self._inputs = self._make_inputs(path_widget)
         scroll.setWidget(self.workspace)
         layout.addWidget(scroll, 1)
-        self.queue.currentRowChanged.connect(self._render)
+        self.queue.currentRowChanged.connect(self._queue_changed)
         self._render()
 
     def present(self, state):
@@ -214,12 +215,21 @@ class UpdateWorkbench(QWidget):
         if reply is not None and reply is not self._last_reply:
             self._last_reply = reply
             if reply.binding == binding and binding is not None:
-                if reply.page is not None:
+                request_queue = (self._read_request or {}).get("queue", "all")
+                matching_queue = (
+                    isinstance(binding, HistoryContextBinding)
+                    or request_queue == self._page_queue
+                )
+                if reply.page is not None and matching_queue:
                     self._page = reply.page
                     self._row_offers = reply.offers
                 if reply.configuration is not None:
                     self._configuration = reply.configuration
-                if reply.page is None and (reply.offers or reply.total_choices):
+                if (
+                    reply.page is None
+                    and (reply.offers or reply.total_choices)
+                    and matching_queue
+                ):
                     self._offers = reply.offers
                     offset = (self._read_request or {}).get("offset", 0)
                     self._offer_page = (
@@ -538,6 +548,31 @@ class UpdateWorkbench(QWidget):
             self._rendered = None
             self._draft_changed()
 
+    def _queue_changed(self, *_):
+        desired = "unresolved" if self.queue.currentRow() == 2 else "all"
+        if desired != self._page_queue:
+            self._page_queue = desired
+            self._page, self._offers, self._row_offers = None, (), ()
+            self._offer_page = (0, 0, None)
+            self._requested.difference_update(("page", "choices"))
+            self._cursors.clear()
+            self._rendered = None
+        self._render()
+        state = self._state
+        if (
+            state
+            and state.binding
+            and not self.busy
+            and not state.needs_inspection
+            and "page" not in self._requested
+            and not (
+                isinstance(state.binding, HistoryContextBinding)
+                and state.binding.proposal_id is None
+            )
+        ):
+            self._requested.add("page")
+            self._read("page", binding=state.binding, offset=0, limit=100)
+
     def _read(self, command, *, binding=None, **arguments):
         state = self._state
         if (
@@ -549,6 +584,10 @@ class UpdateWorkbench(QWidget):
             return
         if binding is not None and binding != state.binding:
             return
+        if command in ("page", "choices") and isinstance(
+            state.binding, UpdateContextBinding
+        ):
+            arguments["queue"] = self._page_queue
         # Busy-state focus changes can move the viewport before present().
         self._read_position = (
             (self.queue.currentRow(), self._binding_key),
@@ -1352,7 +1391,9 @@ class UpdateWorkbench(QWidget):
             else:
                 self._body.addWidget(
                     _label(
-                        f"Changes: {self._state.changes}    Unresolved choices: {self._state.unresolved}"
+                        f"Prepared changes: {self._state.changes}    Unresolved choices: {self._state.unresolved}"
+                        if isinstance(self._state.binding, UpdateContextBinding)
+                        else f"Changes: {self._state.changes}    Unresolved choices: {self._state.unresolved}"
                     )
                 )
                 self._body.addWidget(
@@ -1361,6 +1402,36 @@ class UpdateWorkbench(QWidget):
                         "muted",
                     )
                 )
+                operation = self._state.last_operation
+                if isinstance(self._state.binding, UpdateContextBinding) and operation:
+                    self._body.addWidget(
+                        _label(
+                            f"Unresolved conflicts: {operation.unresolved_conflicts}"
+                        )
+                    )
+                    if operation.unresolved_exceptions:
+                        self._body.addWidget(
+                            _label(
+                                f"Other choices requiring attention: {operation.unresolved_exceptions}"
+                            )
+                        )
+                    if operation.keep_current_count and operation.keep_current_group_id:
+                        if (
+                            operation.keep_current_count
+                            < operation.unresolved_conflicts
+                        ):
+                            self._body.addWidget(
+                                _label(
+                                    "Other conflicts require individual resolution.",
+                                    "muted",
+                                )
+                            )
+                        self._action_button(
+                            f"Keep current for all unresolved conflicts ({operation.keep_current_count})",
+                            "keep_current_unresolved",
+                            binding=self._state.binding,
+                            group_id=operation.keep_current_group_id,
+                        )
         elif self.queue.currentRow() == 3:
             self._render_offers()
         elif self.queue.currentRow() == 4:

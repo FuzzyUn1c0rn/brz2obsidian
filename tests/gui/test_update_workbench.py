@@ -63,6 +63,7 @@ def test_review_queue_stays_left_while_workspace_selection_retains_review(tmp_pa
     proposal = "retained-proposal"
     kept_decision = "explicit-keep-local"
     calls = []
+    page_queues = []
 
     class ReviewChannel:
         # Typed controlled worker transport; the real HostRunner/session and
@@ -89,6 +90,7 @@ def test_review_queue_stays_left_while_workspace_selection_retains_review(tmp_pa
                     generation=3,
                     revision=1,
                 )
+
                 result = UpdateContextResult(
                     status="prepared_review",
                     code="prepared",
@@ -131,6 +133,9 @@ def test_review_queue_stays_left_while_workspace_selection_retains_review(tmp_pa
                         omitted=False,
                     ),
                 )
+                page_queues.append(arguments.queue)
+                if arguments.queue == "unresolved":
+                    comparisons = (comparisons[1],)
                 offset, limit = arguments.offset, arguments.limit
                 items = comparisons[offset : offset + limit]
                 following = offset + len(items)
@@ -144,9 +149,9 @@ def test_review_queue_stays_left_while_workspace_selection_retains_review(tmp_pa
                         code="available",
                         proposal_id=proposal,
                         generation=3,
-                        total=2,
+                        total=len(comparisons),
                         offset=offset,
-                        next_offset=following if following < 2 else None,
+                        next_offset=following if following < len(comparisons) else None,
                         items=items,
                         omitted=False,
                     ),
@@ -239,6 +244,8 @@ def test_review_queue_stays_left_while_workspace_selection_retains_review(tmp_pa
         )
         assert queue is not None and workspace is not None
         _until(app, lambda: "Review the whole update" in _visible_text(workspace))
+        assert "Prepared changes: 2" in _visible_text(workspace)
+        assert "Unresolved choices: 1" in _visible_text(workspace)
         _until(app, lambda: window.runner.session.update_snapshot.binding is not None)
         binding = window.runner.session.update_snapshot.binding
         assert binding.proposal_id == proposal and binding.generation == 3
@@ -259,6 +266,7 @@ def test_review_queue_stays_left_while_workspace_selection_retains_review(tmp_pa
 
         before_navigation = len(calls)
         select("Conflicts")
+        _until(app, lambda: "unresolved" in page_queues)
         _until(app, lambda: "Notes/Conflict.md" in _visible_text(workspace))
         assert "Private writing stays." in _visible_text(workspace)
         assert "Incoming source differs." in _visible_text(workspace)
@@ -281,6 +289,10 @@ def test_review_queue_stays_left_while_workspace_selection_retains_review(tmp_pa
         )
         retained = window.runner.session.update_snapshot.reply.offers[0]
         assert retained.selected == "current" and retained.decision_id == kept_decision
+        _until(app, lambda: "Notes/Conflict.md" in _visible_text(workspace))
+        assert "Notes/Kept.md" not in _visible_text(workspace)
+        select("All changes")
+        _until(app, lambda: "Notes/Kept.md" in _visible_text(workspace))
         for width in (780, 520):
             window.resize(width, 760)
             app.processEvents()
@@ -293,6 +305,399 @@ def test_review_queue_stays_left_while_workspace_selection_retains_review(tmp_pa
             list(vault.iterdir()) == []
             and source.read_bytes() == b"Controlled worker transport input"
         )
+    finally:
+        window.shutdown()
+        window.hide()
+        window.deleteLater()
+        app.processEvents()
+
+
+@pytest.mark.parametrize("exceptions", (0, 1))
+def test_bulk_keep_current_sends_one_bound_group_request(tmp_path, exceptions):
+    from PySide6.QtWidgets import QPushButton
+
+    from brz2obsidian_ui.window import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    source = tmp_path / "incoming.brz"
+    source.write_bytes(b"source")
+    group_id = "e" * 64
+    calls = []
+
+    class ReviewChannel:
+        closed = False
+        poisoned = False
+        binding = None
+
+        def run(self, request, **callbacks):
+            if callbacks.get("on_dispatched"):
+                callbacks["on_dispatched"](request)
+            args = request.arguments
+            calls.append(args)
+            if args.command == "prepare":
+                self.binding = UpdateContextBinding(
+                    context_id=str(uuid4()),
+                    selection_id=args.selection_id,
+                    vault=str(vault),
+                    association_id="a" * 64,
+                    checkpoint_commit="b" * 40,
+                    checkpoint_generation=2,
+                    proposal_id="mixed-proposal",
+                    generation=3,
+                    revision=1,
+                )
+                result = UpdateContextResult(
+                    status="prepared_review",
+                    code="prepared",
+                    kind="source_update",
+                    binding=self.binding,
+                    changes=5,
+                    unresolved=3 + 2 * exceptions,
+                    unresolved_conflicts=3 + exceptions,
+                    unresolved_exceptions=exceptions,
+                    keep_current_count=3,
+                    keep_current_group_id=group_id,
+                    history_retained=True,
+                    checkpoint_commit="b" * 40,
+                    next_actions=("resolve_update", "save_update"),
+                )
+            elif args.command == "keep_current_unresolved":
+                result = UpdateContextResult(
+                    status="prepared_review",
+                    code="accepted",
+                    kind="source_update",
+                    binding=self.binding,
+                    changes=5,
+                    unresolved=2 * exceptions,
+                    ready=not exceptions,
+                    unresolved_exceptions=exceptions,
+                    affected_conflicts=3,
+                    history_retained=True,
+                    checkpoint_commit="b" * 40,
+                    next_actions=("resolve_update", "save_update")
+                    if exceptions
+                    else ("apply_update", "save_update"),
+                )
+            elif args.command == "page":
+                offer = UpdateChoiceOffer(
+                    requirement_id="draft-offer",
+                    change_id="draft-row",
+                    domain="text",
+                    choices=("current", "incoming", "edited"),
+                    assumptions_digest="d" * 64,
+                )
+                row = UpdateComparison(
+                    change_id="draft-row",
+                    item_id="draft-item",
+                    facet="content",
+                    current_path="Notes/Draft.md",
+                    incoming_path="Notes/Draft.md",
+                    disposition="unresolved",
+                    original=b"Original",
+                    current=b"Current",
+                    incoming=b"Incoming",
+                    result=None,
+                    offset=0,
+                    omitted=False,
+                )
+                result = UpdateContextResult(
+                    status="available",
+                    code="available",
+                    kind="source_update",
+                    binding=self.binding,
+                    page=UpdateReviewPage(
+                        status="available",
+                        code="available",
+                        proposal_id="mixed-proposal",
+                        generation=3,
+                        total=1,
+                        offset=0,
+                        next_offset=None,
+                        items=(row,),
+                        omitted=False,
+                    ),
+                    offers=(offer,),
+                )
+            elif args.command == "choices":
+                result = UpdateContextResult(
+                    status="available",
+                    code="available",
+                    kind="source_update",
+                    binding=self.binding,
+                    offers=(),
+                    total_choices=0,
+                )
+            else:
+                raise AssertionError(args.command)
+            return Terminal(
+                phase="completed",
+                response=WorkerResponse(
+                    operation="update",
+                    request_id=request.request_id,
+                    sequence=request.sequence,
+                    result=result,
+                ),
+            )
+
+        def close(self):
+            self.closed = True
+
+    channel = ReviewChannel()
+
+    class WorkerTransport:
+        def open_update(self, **kwargs):
+            return channel
+
+        def run(self, request):
+            raise AssertionError("Review must use persistent transport")
+
+    window = MainWindow(supervisor=WorkerTransport())
+    window.show()
+    try:
+        tabs = window.findChild(QTabBar)
+        tabs.setCurrentIndex(
+            next(i for i in range(tabs.count()) if tabs.tabText(i) == "Update vault")
+        )
+        selection = str(uuid4())
+        window.runner.select_update(str(vault), selection_id=selection)
+        window.runner.submit_update(
+            {
+                "command": "prepare",
+                "kind": "source_update",
+                "vault": str(vault),
+                "source": str(source),
+                "selection_id": selection,
+            }
+        )
+
+        def group_button():
+            return next(
+                (
+                    b
+                    for b in window.findChildren(QPushButton)
+                    if b.isVisible()
+                    and b.text().startswith("Keep current for all unresolved conflicts")
+                ),
+                None,
+            )
+
+        _until(app, lambda: window.runner.session.update_snapshot.binding is not None)
+        assert (
+            window.runner.session.update_snapshot.last_operation.keep_current_count == 3
+        )
+        _until(
+            app, lambda: window.runner.session.update_snapshot.active_request_id is None
+        )
+        assert not window.runner.session.update_snapshot.needs_inspection
+        _until(app, lambda: group_button() is not None and group_button().isEnabled())
+        assert "3" in group_button().text()
+        assert f"Unresolved conflicts: {3 + exceptions}" in _visible_text(window)
+        if exceptions:
+            assert "Other choices requiring attention: 1" in _visible_text(window)
+            assert "Other conflicts require individual resolution." in _visible_text(
+                window
+            )
+
+        if not exceptions:
+            queue = next(
+                row
+                for row in window.findChildren(QAbstractItemView)
+                if row.accessibleName() == "Review queue"
+            )
+
+            def select_queue(name):
+                model = queue.model()
+                index = next(
+                    model.index(i, 0)
+                    for i in range(model.rowCount())
+                    if model.index(i, 0).data() == name
+                )
+                QTest.mouseClick(
+                    queue.viewport(),
+                    Qt.MouseButton.LeftButton,
+                    pos=queue.visualRect(index).center(),
+                )
+
+            select_queue("Conflicts")
+
+            def edit_button():
+                return next(
+                    (
+                        b
+                        for b in window.findChildren(QPushButton)
+                        if b.isVisible()
+                        and b.accessibleName() == "Edit result for Notes/Draft.md"
+                    ),
+                    None,
+                )
+
+            _until(app, lambda: edit_button() is not None and edit_button().isEnabled())
+            edit_button().click()
+            editor = next(
+                row
+                for row in window.findChildren(QPlainTextEdit)
+                if row.accessibleName() == "Edited result for Notes/Draft.md"
+            )
+            editor.setPlainText("My unfinished draft")
+            select_queue("Overview")
+            _until(app, lambda: group_button() is not None)
+            assert not group_button().isEnabled()
+            assert editor.toPlainText() == "My unfinished draft"
+            discard = next(
+                b
+                for b in window.findChildren(QPushButton)
+                if b.isVisible() and b.accessibleName() == "Discard edited result"
+            )
+            discard.click()
+            _until(
+                app, lambda: group_button() is not None and group_button().isEnabled()
+            )
+        QTest.mouseClick(group_button(), Qt.MouseButton.LeftButton)
+        _until(app, lambda: any(c.command == "keep_current_unresolved" for c in calls))
+        groups = [c for c in calls if c.command == "keep_current_unresolved"]
+        assert len(groups) == 1
+        assert groups[0].binding == channel.binding and groups[0].group_id == group_id
+        assert not any(c.command == "choose" for c in calls)
+        _until(
+            app,
+            lambda: (
+                window.runner.session.update_snapshot.last_operation.affected_conflicts
+                == 3
+            ),
+        )
+        assert window.runner.session.update_snapshot.ready is (not exceptions)
+    finally:
+        window.shutdown()
+        window.hide()
+        window.deleteLater()
+        app.processEvents()
+
+
+def test_ready_first_setup_can_apply_without_manual_save(tmp_path):
+    from PySide6.QtWidgets import QPushButton
+
+    from brz2obsidian_ui.window import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    source = tmp_path / "incoming.brz"
+    source.write_bytes(b"source")
+    commands = []
+
+    class Channel:
+        closed = False
+        poisoned = False
+        binding = None
+
+        def run(self, request, **callbacks):
+            if callbacks.get("on_dispatched"):
+                callbacks["on_dispatched"](request)
+            args = request.arguments
+            commands.append(args.command)
+            if args.command == "prepare":
+                self.binding = UpdateContextBinding(
+                    context_id=str(uuid4()),
+                    selection_id=args.selection_id,
+                    vault=str(vault),
+                    association_id=None,
+                    proposal_id="setup",
+                    generation=1,
+                    revision=1,
+                )
+                result = UpdateContextResult(
+                    status="prepared_review",
+                    code="prepared",
+                    kind="onboarding",
+                    binding=self.binding,
+                    changes=1,
+                    ready=True,
+                    next_actions=("apply_update", "save_update"),
+                )
+            elif args.command in ("page", "choices"):
+                result = UpdateContextResult(
+                    status="available",
+                    code="available",
+                    kind="onboarding",
+                    binding=self.binding,
+                    page=UpdateReviewPage(
+                        status="available",
+                        code="available",
+                        proposal_id="setup",
+                        generation=1,
+                        total=0,
+                        offset=0,
+                        next_offset=None,
+                        items=(),
+                        omitted=False,
+                    )
+                    if args.command == "page"
+                    else None,
+                )
+            elif args.command == "apply":
+                result = UpdateContextResult(
+                    status="refused",
+                    code="controlled",
+                    kind="onboarding",
+                    binding=self.binding,
+                )
+            else:
+                raise AssertionError(args.command)
+            return Terminal(
+                phase="completed",
+                response=WorkerResponse(
+                    operation="update",
+                    request_id=request.request_id,
+                    sequence=request.sequence,
+                    result=result,
+                ),
+            )
+
+        def close(self):
+            self.closed = True
+
+    channel = Channel()
+
+    class Transport:
+        def open_update(self, **kwargs):
+            return channel
+
+    window = MainWindow(supervisor=Transport())
+    window.show()
+    try:
+        tabs = window.findChild(QTabBar)
+        tabs.setCurrentIndex(
+            next(i for i in range(tabs.count()) if tabs.tabText(i) == "Update vault")
+        )
+        selection = str(uuid4())
+        window.runner.select_update(str(vault), selection_id=selection)
+        window.runner.submit_update(
+            {
+                "command": "prepare",
+                "kind": "onboarding",
+                "vault": str(vault),
+                "source": str(source),
+                "selection_id": selection,
+            }
+        )
+
+        def apply_button():
+            return next(
+                (
+                    b
+                    for b in window.findChildren(QPushButton)
+                    if b.isVisible() and b.accessibleName() == "Apply update"
+                ),
+                None,
+            )
+
+        _until(app, lambda: apply_button() is not None and apply_button().isEnabled())
+        assert channel.binding.checkpoint_commit is None
+        apply_button().click()
+        _until(app, lambda: "apply" in commands)
+        assert "save" not in commands
     finally:
         window.shutdown()
         window.hide()

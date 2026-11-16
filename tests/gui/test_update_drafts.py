@@ -174,7 +174,7 @@ def test_owned_draft_preserves_review_until_explicit_commit_or_discard(
                 for row in window.runner.session.update_snapshot.reply.offers
                 if row.selected == "current"
             )
-            select("Conflicts")
+            select("All changes")
             until(
                 app,
                 lambda: button("Keep vault version for Notes/Opening.md") is not None,

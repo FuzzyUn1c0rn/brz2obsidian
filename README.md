@@ -405,20 +405,36 @@ or that the live Brain remained unchanged.
 ### Review an existing vault
 
 In Windows, select **Update vault**, choose the incoming BRZ and existing vault,
-then select **Prepare update review**. The left queue opens compatible comparisons,
-conflicts and other required choices beside the decision workspace. **All changes**
-opens the canonical comparisons, including history reversals. Accept or
-discard edited text and reference drafts explicitly. **Apply update** requires the
-whole review to be resolved. Inputs stay locked to the reviewed target while that
-review is open.
+then select **Prepare update review**. Preparation builds a preview: it preserves
+vault-only edits, accepts safe incoming changes and merges compatible edits
+automatically. It does not write those changes to the vault. The summary shows
+unresolved conflicts and other exceptions that still need attention; compatible
+files do not require individual approval. **All changes** remains available for
+optional comparisons, including history reversals.
+
+Resolve remaining conflicts individually or select **Keep current for all
+unresolved conflicts**, checking the displayed affected count. This keeps the
+vault versions only for conflicts still awaiting a decision. Earlier decisions
+remain intact, and automatically merged changes still proceed. Exceptions that
+cannot safely keep the current version remain visible and prevent application.
+Accept or discard edited text and reference drafts explicitly. **Apply update**
+requires the whole review to be resolved and current inputs to pass revalidation.
+Inputs stay locked to the reviewed target while that review is open.
+
+For a ready first setup, **Apply update** creates the required history checkpoint
+as part of the operation before applying the reviewed changes. Saving manually
+first is optional. Original imported versions and current vault files remain
+separate in that history.
 
 For file choices that require reference decisions, open **Review references**,
 choose an offered option for every occurrence, then select **Stage reference
 choices** before choosing the file version. Missing staging alone does not
 require **Refresh review**.
 
-Use **Save review** to retain decisions. **Reopen saved review** loads them without
-granting apply readiness; **Resume saved review** rechecks current inputs.
+Use **Save review** to retain decisions even while conflicts remain unresolved,
+or **Save review and close** to leave a partly resolved review. **Reopen saved
+review** loads decisions without granting apply readiness; **Resume saved review**
+rechecks current inputs and retains still-valid decisions.
 **Refresh review** reviews changes made between operations and retains unaffected
 decisions. **Review operation** also offers onboarding, separate format transitions
 and attachment-file cleanup. **Inspect history and recovery** opens current setup,
@@ -428,17 +444,21 @@ completed rollback.
 
 Older BRZ vaults using profile 10/output 7 or recorded profile 9/output 6 need a
 separate format transition to profile 11/output 8. Keep the same unchanged,
-scoped BRZ while reviewing and completing that transition. Then prepare the
-changed BRZ as a separate source update. If supported history is missing, review
-onboarding and save the preservation choices first. Local notes, aliases,
-category memberships, appearance providers, templates and configuration remain
-subject to the explicit review choices.
+scoped BRZ while reviewing and completing that transition. The transition also
+merges proven-safe changes automatically; unresolved differences and unavailable
+evidence remain for review. Then prepare the changed BRZ as a separate source update. If supported history is missing, review
+onboarding with trustworthy original input when available. Original imported
+versions and current vault edits remain separate. Safe changes merge
+automatically; uncertain differences remain for review. Local notes, aliases,
+category memberships, appearance providers, templates and configuration retain
+their preservation checks.
 
-Attachment rows in onboarding or output-format reviews support **Keep vault
-version** when safe; **Use incoming version** and **Keep both versions** are
-unavailable. During an ordinary source update, such a row can require the separate
-onboarding or output-format review. Ordinary attachment-update rows retain their
-offered alternatives and reference-choice requirements.
+Attachments participate in automatic merging when their content and reference
+evidence establishes a safe result. For remaining conflicts, the offered file
+versions depend on the validated storage and reference choices; unavailable
+options explain what prevents their use. Some ordinary source-update cases still
+need the separate onboarding or output-format review. Keep-both and reference
+choices remain available only where the review establishes that they are safe.
 
 Saved output 7 reviews retain their recorded interpretation and original-byte
 evidence. Missing originals stay unknown: current vault notes and a new output 8
@@ -494,7 +514,8 @@ reused; it does not report whether Save retained the incoming source.
 
 Use `review --help` and `review prepare --help` for the option reference and
 separate onboarding, format-transition and attachment-cleanup routes.
-Required configuration and consent remain explicit. Keep the vault idle during
+Configuration effects remain visible, and consent requirements outside automatic
+merging remain explicit. Keep the vault idle during
 operations: concurrent editing or syncing by Obsidian, TheBrain or other programs
 is unsupported. Supported Git and current storage policy are checked. Missing
 history cannot prove earlier versions. Retained history grows disk use, and attachment

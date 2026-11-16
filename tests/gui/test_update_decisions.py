@@ -343,7 +343,22 @@ def test_current_and_incoming_choices_retain_decision_and_gate_whole_review_appl
         current = button("Keep vault version for Notes/Opening.md")
         apply = button("Apply update")
         assert apply is not None and not apply.isEnabled()
+
+        def select_queue(name):
+            index = next(
+                model.index(i, 0)
+                for i in range(model.rowCount())
+                if model.index(i, 0).data() == name
+            )
+            QTest.mouseClick(
+                queue.viewport(),
+                Qt.MouseButton.LeftButton,
+                pos=queue.visualRect(index).center(),
+            )
+
         current.click()
+        until(app, lambda: window.runner.session.update_snapshot.unresolved == 1)
+        select_queue("All changes")
         until(app, lambda: any(row.selected == "current" for row in offers_when_idle()))
         chosen = next(row for row in offers_when_idle() if row.selected == "current")
         assert chosen.decision_id is not None
@@ -358,6 +373,7 @@ def test_current_and_incoming_choices_retain_decision_and_gate_whole_review_appl
         assert captions.count("Unresolved") == 1
         assert "Chosen: current" in captions
 
+        select_queue("Conflicts")
         until(
             app,
             lambda: (
@@ -370,6 +386,8 @@ def test_current_and_incoming_choices_retain_decision_and_gate_whole_review_appl
             "The independent conflict must offer its admitted Incoming choice"
         )
         incoming.click()
+        until(app, lambda: window.runner.session.update_snapshot.ready)
+        select_queue("All changes")
         until(
             app,
             lambda: (

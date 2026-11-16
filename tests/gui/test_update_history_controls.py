@@ -623,7 +623,7 @@ def test_window_close_preserves_local_and_worker_drafts_until_explicit_discard(
                 "selection_id": selection,
             }
         )
-        controls.select("Conflicts")
+        controls.select("All changes")
         controls.click("Edit result for Notes/Opening.md")
         editor = next(
             w
