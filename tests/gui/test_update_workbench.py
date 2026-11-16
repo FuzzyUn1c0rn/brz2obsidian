@@ -579,6 +579,8 @@ def test_ready_first_setup_can_apply_without_manual_save(tmp_path):
     from PySide6.QtWidgets import QPushButton
 
     from brz2obsidian_ui.window import MainWindow
+    from tests.gui.test_update_history_controls import native_result
+    from tests.gui.update_projection_fixture import ReviewControls
 
     app = QApplication.instance() or QApplication([])
     vault = tmp_path / "vault"
@@ -638,10 +640,15 @@ def test_ready_first_setup_can_apply_without_manual_save(tmp_path):
                 )
             elif args.command == "apply":
                 result = UpdateContextResult(
-                    status="refused",
-                    code="controlled",
+                    status="applied",
+                    code="applied",
                     kind="onboarding",
-                    binding=self.binding,
+                    binding=None,
+                    summary="First setup applied.",
+                    publication="complete",
+                    history_retained=True,
+                    checkpoint_commit="b" * 40,
+                    operation=native_result("applied"),
                 )
             else:
                 raise AssertionError(args.command)
@@ -695,9 +702,13 @@ def test_ready_first_setup_can_apply_without_manual_save(tmp_path):
 
         _until(app, lambda: apply_button() is not None and apply_button().isEnabled())
         assert channel.binding.checkpoint_commit is None
+        controls = ReviewControls(window, app)
+        controls.select("Other choices")
+        _until(app, lambda: apply_button() is not None and apply_button().isEnabled())
         apply_button().click()
-        _until(app, lambda: "apply" in commands)
-        assert "save" not in commands
+        _until(app, lambda: "First setup applied." in _visible_text(window))
+        assert window.workbench.queue.currentIndex().data() == "Overview"
+        assert "apply" in commands and "save" not in commands
     finally:
         window.shutdown()
         window.hide()
@@ -827,6 +838,14 @@ def test_applied_result_offers_validated_history_for_the_applied_vault(
                 "selection_id": selection,
             }
         )
+        until(
+            app,
+            lambda: (
+                controls.button("Apply update") is not None
+                and controls.button("Apply update").isEnabled()
+            ),
+        )
+        controls.select("Other choices")
         controls.click("Apply update")
         until(
             app,
@@ -838,6 +857,17 @@ def test_applied_result_offers_validated_history_for_the_applied_vault(
         assert window.runner.session.update_snapshot.binding is None
         until(app, lambda: "Two reviewed changes applied." in window_text(window))
         assert str(vault) in window_text(window)
+        queue = next(
+            row
+            for row in window.findChildren(QAbstractItemView)
+            if row.accessibleName() == "Review queue"
+        )
+        assert queue.currentIndex().data() == "Overview"
+        controls.select("Other choices")
+        window.workbench.present(window.runner.session.update_snapshot)
+        app.processEvents()
+        assert queue.currentIndex().data() == "Other choices"
+        controls.select("Overview")
         assert controls.button("Review latest Undo") is None
         if switch_vault:
             controls.select("Archive & vault")

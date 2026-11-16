@@ -403,6 +403,7 @@ def test_history_controls_use_current_admitted_setup_recovery_undo_and_repair(
                 ),
             )
             assert terminal_text in window_text(window)
+            assert window.workbench.queue.currentIndex().data() == "History & recovery"
             assert not window.runner.session.update_snapshot.ready
         assert list(vault.iterdir()) == [] and list(copy.iterdir()) == []
     finally:

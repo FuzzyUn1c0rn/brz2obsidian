@@ -702,6 +702,14 @@ def test_stale_apply_explanation_survives_read_and_retires_on_new_state(
                 "selection_id": selection,
             }
         )
+        until(
+            app,
+            lambda: (
+                controls.button("Apply update") is not None
+                and controls.button("Apply update").isEnabled()
+            ),
+        )
+        controls.select("Other choices")
         controls.click("Apply update")
         until(
             app,
@@ -716,6 +724,8 @@ def test_stale_apply_explanation_survives_read_and_retires_on_new_state(
         )
         assert window.workbench.snapshot.unresolved == 0
         assert not controls.button("Apply update").isEnabled()
+        assert window.workbench.queue.currentIndex().data() == "Other choices"
+        controls.select("Overview")
         until(app, lambda: "Prepared changes: 2" in window_text(window))
         text = window_text(window)
         assert "The review inputs changed. Refresh review before applying." in text

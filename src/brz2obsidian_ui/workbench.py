@@ -133,8 +133,23 @@ class UpdateWorkbench(QWidget):
     def present(self, state):
         if self._state is not None and state.revision < self._state.revision:
             return
-        previous_binding = self._state.binding if self._state is not None else None
+        previous = self._state
+        previous_binding = previous.binding if previous is not None else None
         binding = state.binding
+        applied_now = (
+            previous is not None
+            and isinstance(previous_binding, UpdateContextBinding)
+            and binding is None
+            and state.selection_id == previous.selection_id
+            and state.vault == previous_binding.vault
+            and state.last_operation_vault == state.vault
+            and state.reply is not None
+            and state.reply is state.last_operation
+            and state.last_operation is not previous.last_operation
+            and state.reply.status == "applied"
+            and state.reply.kind != "history"
+            and state.transport_phase == "completed"
+        )
         key = (state.selection_id, binding.model_dump_json() if binding else None)
         if key != self._binding_key:
             self._binding_key = key
@@ -150,6 +165,8 @@ class UpdateWorkbench(QWidget):
             self._configuration = None
             self._identity_selection.clear()
         self._state = state
+        if applied_now:
+            self.queue.setCurrentRow(1)
         scope = (state.selection_id, state.vault)
         if (
             scope != self._history_scope
