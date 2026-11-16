@@ -1602,3 +1602,817 @@ def test_incoming_only_shortcut_keeps_ambiguous_local_and_untrusted_results_bloc
         plan = prepare_review(facts, preflight=preflight())
         assert not plan.ready and (plan.requirements or plan.blockers), label
         assert select_review_effects(plan).status != "selected", label
+
+
+def test_ready_owned_group_advertises_apply_and_retains_it_after_refresh():
+    import json
+    from zipfile import ZipFile
+
+    from brz2obsidian.application.update_context import UpdateContext
+    from tests.application.test_onboarding_completion import authored_files
+    from tests.application.test_update_context import worker_context_call
+    from tests.application.test_update_lifecycle import _user_state
+
+    operations, vault, archive = first_setup_operations()
+    before, user_before = authored_files(vault), _user_state(vault)
+    incoming = archive.with_name("ready-group-incoming.brz")
+    with ZipFile(archive) as old, ZipFile(incoming, "w") as new:
+        for name in old.namelist():
+            raw = old.read(name)
+            if name.endswith("/Notes.md"):
+                raw = b"Incoming prose.\r\n"
+            if name == "attachments.json":
+                record = json.loads(raw)
+                record["DataLength"] = 17
+                raw = json.dumps(record).encode()
+            new.writestr(name, raw)
+    context = UpdateContext(operations=operations)
+
+    def send(command, **values):
+        return worker_context_call(context, {"command": command, **values})
+
+    opened = send(
+        "prepare",
+        kind="onboarding",
+        vault=str(vault),
+        source=str(incoming),
+        original_source=str(archive),
+        selection_id="11111111-1111-4111-8111-111111111111",
+    )
+    assert (
+        opened.binding is not None
+        and not opened.ready
+        and opened.keep_current_count > 0
+    ), opened
+    active = opened
+    try:
+        grouped = send(
+            "keep_current_unresolved",
+            binding=opened.binding,
+            group_id=opened.keep_current_group_id,
+        )
+        active = grouped
+        assert (
+            grouped.code == "accepted" and grouped.ready and grouped.unresolved == 0
+        ), grouped
+        assert "apply_update" in grouped.next_actions, grouped.next_actions
+        refreshed = send("refresh", binding=grouped.binding)
+        active = refreshed
+        assert refreshed.ready and "apply_update" in refreshed.next_actions, refreshed
+        assert refreshed.unresolved == 0
+        page = send("page", binding=refreshed.binding)
+        note = next(
+            row
+            for row in page.page.items
+            if row.item_id == "22222222-2222-4222-8222-222222222222"
+        )
+        assert note.result == CURRENT
+    finally:
+        send("close", binding=active.binding, choice="discard")
+    assert authored_files(vault) == before and _user_state(vault) == user_before
+
+
+def test_bulk_current_recertifies_prior_incoming_reference_without_new_choice(tmp_path):
+    import json
+    import subprocess
+    import sys
+
+    from brz2obsidian.application.operations import Operations
+    from brz2obsidian.application.review_choices import requirement_digest
+    from brz2obsidian.application.update_facts import automatic_merge_facts
+    from brz2obsidian.contracts import ExactContent
+    from brz2obsidian.core import (
+        inspect_review_choices,
+        refresh_review,
+        select_review_effects,
+    )
+    from brz2obsidian.core.resolution import unresolved_current_scope
+    from tests.application.test_update_lifecycle_contracts import preparation
+    from tests.reconciliation.test_identity import with_subjects
+    from tests.reconciliation.test_resolution import (
+        note_and_attachment_request,
+        preflight,
+    )
+
+    facts = note_and_attachment_request()
+    note = facts.subjects[0].model_copy(
+        update={
+            "baseline": facts.subjects[0].baseline.model_copy(
+                update={
+                    "content": ExactContent(data=b"Baseline prose [[Assets/data.bin]].")
+                }
+            )
+        }
+    )
+    facts = automatic_merge_facts(
+        with_subjects(facts, (note, facts.subjects[1]), facts.identity_inventory)
+    )
+    prepared = preparation(facts)
+    offered = next(
+        row for row in inspect_review_choices(prepared.review) if row.domain == "text"
+    )
+    operations = Operations()
+    selected = operations.resolve_update_choice(
+        prepared,
+        requirement_id=offered.requirement_id,
+        choice="incoming",
+        assumptions_digest=requirement_digest(offered),
+    )
+    assert selected.code == "accepted" and not selected.ready
+    prior = selected.preparation.review
+    digest, members = unresolved_current_scope(prior)
+    assert len(members) == 1
+    grouped = operations.keep_current_unresolved(selected.preparation, group_id=digest)
+    assert grouped.code == "accepted" and grouped.ready, (
+        grouped.preparation.review.blockers
+    )
+    plan = grouped.preparation.review
+    assert plan.requirements == () and not plan.blockers
+    assert plan.actions[: len(prior.actions)] == prior.actions
+    assert all(approval in plan.approvals for approval in prior.approvals)
+    assert len(plan.history.events) == 2 and len(plan.actions) == 2
+    effects = select_review_effects(plan)
+    expected = {
+        "Assets/data.bin": b"\x00authored",
+        "Notes/Owner.md": b"New prose [[Assets/data.bin]].",
+    }
+    assert (
+        effects.status == "selected"
+        and {row.path: row.content.data for row in effects.files} == expected
+    )
+    refreshed = refresh_review(
+        plan, facts.model_copy(update={"generation": 2}), preflight=preflight()
+    )
+    assert refreshed.status == "accepted" and refreshed.plan.ready
+    cold = tmp_path / "recertified-group.json"
+    cold.write_text(plan.model_dump_json(), encoding="utf-8")
+    code = """import json,sys
+from pathlib import Path
+from brz2obsidian.contracts import ReviewPlan
+from brz2obsidian.core import validate_review,select_review_effects
+plan=ReviewPlan.model_validate_json(Path(sys.argv[1]).read_text(encoding="utf-8"))
+result=validate_review(plan)
+effects=select_review_effects(plan)
+print(json.dumps({"valid":result.status,"ready":result.plan.ready,"files":{row.path:row.content.data.hex() for row in effects.files}}))
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", code, str(cold)], capture_output=True, check=False
+    )
+    assert completed.returncode == 0, completed.stderr.decode(errors="replace")
+    assert json.loads(completed.stdout) == {
+        "valid": "accepted",
+        "ready": True,
+        "files": {path: raw.hex() for path, raw in expected.items()},
+    }
+
+
+def test_bulk_current_recertifies_automatic_incoming_note_without_reapproval():
+    from brz2obsidian.application.operations import Operations
+    from brz2obsidian.application.update_facts import automatic_merge_facts
+    from brz2obsidian.core import select_review_effects
+    from brz2obsidian.core.resolution import unresolved_current_scope
+    from brz2obsidian.obsidian import align_structure, interpret_structure
+    from tests.application.test_update_lifecycle_contracts import preparation
+    from tests.reconciliation.test_resolution import note_and_attachment_request
+
+    facts = note_and_attachment_request()
+    note = facts.subjects[0]
+    comparison = align_structure(
+        *(
+            interpret_structure(content, output_format=7)
+            for content in (note.baseline.content, note.current.content, note.incoming)
+        )
+    )
+    facts = facts.model_copy(
+        update={
+            "subjects": (
+                note.model_copy(update={"structure": comparison}),
+                facts.subjects[1],
+            )
+        }
+    )
+    prepared = preparation(automatic_merge_facts(facts))
+    clean = prepared.review.proposal.changes[0]
+    assert clean.disposition == "compatible" and not clean.requires_decision
+    assert not prepared.review.actions
+    digest, members = unresolved_current_scope(prepared.review)
+    assert len(members) == 1
+    result = Operations().keep_current_unresolved(prepared, group_id=digest)
+    assert result.ready and not result.preparation.review.requirements, (
+        result.preparation.review.blockers
+    )
+    assert (
+        len(result.preparation.review.actions)
+        == len(result.preparation.review.history.events)
+        == 1
+    )
+    from brz2obsidian.contracts import ReviewPlan
+    from brz2obsidian.core import validate_review
+
+    restored = ReviewPlan.model_validate_json(
+        result.preparation.review.model_dump_json()
+    )
+    assert validate_review(restored).status == "accepted" and restored.ready
+    effects = select_review_effects(result.preparation.review)
+    assert effects.status == "selected"
+    assert {row.path: row.content.data for row in effects.files} == {
+        "Assets/data.bin": b"\x00authored",
+        "Notes/Owner.md": b"New prose [[Assets/data.bin]].",
+    }
+
+
+def test_owned_format_transition_normalization_uses_admitted_session():
+    import hashlib
+
+    from brz2obsidian.application.update_context import UpdateContext
+    from tests.application.test_format_transition_native import user_git_state
+    from tests.application.test_onboarding import owned_case
+    from tests.application.test_onboarding_completion import authored_files
+    from tests.application.test_type_tag_compatibility import seed_format7
+    from tests.application.test_update_context import worker_context_call
+    from tests.application.test_vault_checkpoints import git
+    from tests.support.recorded_format7 import NOTE, ORIGINAL
+
+    operations, vault, source, current = seed_format7(owned_case())
+    before, user = authored_files(vault), user_git_state(vault)
+    refs = git(vault, "for-each-ref", "--format=%(refname) %(objectname)")
+    source_sha = hashlib.sha256(source.read_bytes()).hexdigest()
+    context = UpdateContext(operations=operations)
+    opened = worker_context_call(
+        context,
+        {
+            "command": "prepare",
+            "kind": "format_transition",
+            "vault": str(vault),
+            "source": str(source),
+            "selection_id": "11111111-1111-4111-8111-111111111111",
+        },
+    )
+    try:
+        assert opened.status == "prepared_review" and opened.binding is not None, opened
+        page = worker_context_call(
+            context, {"command": "page", "binding": opened.binding}
+        )
+        note = next(row for row in page.page.items if row.current_path == NOTE)
+        assert note.original == ORIGINAL and note.current == current
+        assert opened.kind == "format_transition" and note.incoming is not None
+    finally:
+        if opened.binding is not None:
+            context.close(opened.binding, choice="discard")
+    assert authored_files(vault) == before and user_git_state(vault) == user
+    assert git(vault, "for-each-ref", "--format=%(refname) %(objectname)") == refs
+    assert hashlib.sha256(source.read_bytes()).hexdigest() == source_sha
+
+
+def reference_recertification_facts(
+    *,
+    current_payload=b"\x00authored",
+    incoming_payload=b"abc",
+    reference=b"[[Assets/data.bin]]",
+    divergent=True,
+    incoming_target=None,
+):
+    from brz2obsidian.application.update_facts import automatic_merge_facts
+    from brz2obsidian.contracts import ExactContent
+    from brz2obsidian.obsidian import (
+        align_structure,
+        interpret_link_target,
+        interpret_links,
+        interpret_structure,
+    )
+    from tests.reconciliation.test_identity import with_subjects
+    from tests.reconciliation.test_resolution import note_and_attachment_request
+
+    facts = note_and_attachment_request()
+    note, binary = facts.subjects
+    original = (
+        ExactContent(data=b"Baseline prose [[Assets/data.bin]].")
+        if divergent
+        else note.baseline.content
+    )
+    received = ExactContent(data=b"New prose " + reference + b".")
+    note = note.model_copy(
+        update={
+            "baseline": note.baseline.model_copy(update={"content": original}),
+            "incoming": received,
+            "structure": align_structure(
+                *(
+                    interpret_structure(raw, output_format=7)
+                    for raw in (original, note.current.content, received)
+                )
+            ),
+        }
+    )
+    binary = binary.model_copy(
+        update={
+            "current": binary.current.model_copy(
+                update={"content": ExactContent(data=current_payload)}
+            ),
+            "incoming": ExactContent(data=incoming_payload),
+        }
+    )
+    inventory = tuple(
+        row.model_copy(update={"current": binary.current})
+        if row.current.path == "Assets/data.bin"
+        else row
+        for row in facts.identity_inventory
+    )
+    context = facts.link_context
+    current_targets = context.current_targets
+    incoming_targets = tuple(
+        incoming_target
+        if incoming_target is not None and target.target_id == "resource:payload"
+        else target
+        for target in context.incoming_targets
+    )
+
+    def states(rows, targets, resource, owner):
+        return tuple(
+            interpret_link_target(
+                resource if row.target_id == "resource:payload" else owner,
+                target_id=row.target_id,
+                existence="present",
+                memberships=(),
+                membership_targets=targets,
+                source_path=next(
+                    target.canonical_path
+                    for target in targets
+                    if target.target_id == row.target_id
+                ),
+                output_format=7,
+            )
+            for row in rows
+        )
+
+    old_states = states(
+        context.current_target_facts,
+        current_targets,
+        binary.current.content,
+        note.current.content,
+    )
+    new_states = states(
+        context.incoming_target_facts, incoming_targets, binary.incoming, note.incoming
+    )
+
+    def document(raw, targets, target_states):
+        return interpret_links(
+            raw,
+            document_id="owner:note",
+            source_path="Notes/Owner.md",
+            path_mode="vault",
+            targets=targets,
+            target_facts=target_states,
+            inventory="complete",
+        )
+
+    facts = with_subjects(facts, (note, binary), inventory)
+    return automatic_merge_facts(
+        facts.model_copy(
+            update={
+                "link_context": context.model_copy(
+                    update={
+                        "current_targets": current_targets,
+                        "incoming_targets": incoming_targets,
+                        "current_target_facts": old_states,
+                        "incoming_target_facts": new_states,
+                        "current_documents": (
+                            document(note.current.content, current_targets, old_states),
+                        ),
+                        "incoming_documents": (
+                            document(note.incoming, incoming_targets, new_states),
+                        ),
+                    }
+                )
+            }
+        )
+    )
+
+
+def test_resource_recertification_preserves_real_semantic_and_authority_blockers():
+    from brz2obsidian.application.operations import Operations
+    from brz2obsidian.application.review_choices import requirement_digest
+    from brz2obsidian.contracts import ExactContent, ImportedItemIdentity
+    from brz2obsidian.core import inspect_review_choices, select_review_effects
+    from brz2obsidian.core.resolution import unresolved_current_scope
+    from tests.application.test_update_lifecycle_contracts import preparation
+
+    base = reference_recertification_facts()
+    automatic = reference_recertification_facts(divergent=False)
+    target = next(
+        row
+        for row in base.link_context.incoming_targets
+        if row.target_id == "resource:payload"
+    )
+    moved = target.model_copy(
+        update={
+            "canonical_path": "Elsewhere/data.bin",
+            "target": target.target.model_copy(
+                update={"normalized_path": "elsewhere/data.bin"}
+            ),
+            "representations": ("Elsewhere/data.bin",),
+        }
+    )
+    foreign = target.model_copy(
+        update={
+            "identity": ImportedItemIdentity(
+                collection_id="other:collection",
+                module_id="other-module",
+                item_id="other:asset",
+            )
+        }
+    )
+    absent = automatic.model_copy(
+        update={
+            "subjects": (
+                automatic.subjects[0].model_copy(update={"automatic_result": None}),
+                automatic.subjects[1],
+            )
+        }
+    )
+    mismatch = automatic.model_copy(
+        update={
+            "subjects": (
+                automatic.subjects[0].model_copy(
+                    update={
+                        "automatic_result": automatic.subjects[
+                            0
+                        ].automatic_result.model_copy(
+                            update={"content": ExactContent(data=b"Mismatched proof.")}
+                        )
+                    }
+                ),
+                automatic.subjects[1],
+            )
+        }
+    )
+    unsafe = automatic.model_copy(
+        update={
+            "subjects": (
+                automatic.subjects[0].model_copy(
+                    update={
+                        "automatic_result": automatic.subjects[
+                            0
+                        ].automatic_result.model_copy(
+                            update={
+                                "document": automatic.subjects[
+                                    0
+                                ].automatic_result.document.model_copy(
+                                    update={"status": "unsafe"}
+                                )
+                            }
+                        )
+                    }
+                ),
+                automatic.subjects[1],
+            )
+        }
+    )
+    cases = (
+        (
+            "legacy False",
+            base.model_copy(
+                update={
+                    "format_operation": base.format_operation.model_copy(
+                        update={"automatic_merge": False}
+                    )
+                }
+            ),
+        ),
+        (
+            "missing current fragment",
+            reference_recertification_facts(
+                current_payload=b"No heading.\n",
+                incoming_payload=b"# Needed\n",
+                reference=b"[[Assets/data.bin#Needed]]",
+            ),
+        ),
+        (
+            "unavailable current fragment",
+            reference_recertification_facts(
+                incoming_payload=b"# Needed\n", reference=b"[[Assets/data.bin#Needed]]"
+            ),
+        ),
+        (
+            "ambiguous current fragment",
+            reference_recertification_facts(
+                current_payload=b"# Needed\n# Needed\n",
+                incoming_payload=b"# Needed\n",
+                reference=b"[[Assets/data.bin#Needed]]",
+            ),
+        ),
+        (
+            "changed reference path",
+            reference_recertification_facts(
+                reference=b"[[Elsewhere/data.bin]]", incoming_target=moved
+            ),
+        ),
+        (
+            "changed reference identity",
+            reference_recertification_facts(incoming_target=foreign),
+        ),
+        ("missing automatic authority", absent),
+        ("mismatched automatic authority", mismatch),
+        ("unsafe automatic authority", unsafe),
+    )
+    operations = Operations()
+    for label, facts in cases:
+        prepared = preparation(facts)
+        offers = inspect_review_choices(prepared.review)
+        if label not in (
+            "missing automatic authority",
+            "mismatched automatic authority",
+            "unsafe automatic authority",
+        ):
+            offered = next(row for row in offers if row.domain == "text")
+            selected = operations.resolve_update_choice(
+                prepared,
+                requirement_id=offered.requirement_id,
+                choice="incoming",
+                assumptions_digest=requirement_digest(offered),
+            )
+            if label == "changed reference identity":
+                assert selected.code == "invalid_candidate" and not selected.ready
+                assert (
+                    select_review_effects(selected.preparation.review).status
+                    != "selected"
+                )
+                continue
+            assert selected.code == "accepted", (label, selected.code)
+            prepared = selected.preparation
+        digest, members = unresolved_current_scope(prepared.review)
+        assert len(members) == 1, label
+        result = operations.keep_current_unresolved(prepared, group_id=digest)
+        assert result.code == "accepted" and not result.ready, label
+        assert not result.preparation.review.requirements, label
+        assert "selected_link_context_conflict" in result.preparation.review.blockers, (
+            label
+        )
+        assert select_review_effects(result.preparation.review).status != "selected", (
+            label
+        )
+        if label == "missing current fragment":
+            assert "selected_link_context_conflict" in result.findings
+            assert "reference evidence" in result.summary
+            assert "All changes" in result.guidance
+            assert "apply_update" not in result.next_actions
+
+    # A later Incoming proof is explicit new authority; an older Current choice
+    # must not silently reinterpret that newer reference meaning.
+    from tests.reconciliation.test_resolution import action
+
+    initial = preparation(base)
+    offers = inspect_review_choices(initial.review)
+    text = next(row for row in offers if row.domain == "text")
+    attachment = next(row for row in offers if row.domain == "attachment")
+    old_proof = (
+        operations.resolve_update_choice(
+            initial,
+            requirement_id=text.requirement_id,
+            choice="incoming",
+            assumptions_digest=requirement_digest(text),
+        )
+        .preparation.review.actions[-1]
+        .candidate
+    )
+    binary_first = operations.resolve_update_choice(
+        initial,
+        requirement_id=attachment.requirement_id,
+        choice="current",
+        assumptions_digest=requirement_digest(attachment),
+    )
+    plan = binary_first.preparation.review
+    note = next(change for change in plan.proposal.changes if change.facet == "content")
+    newer = operations.resolve_update(
+        binary_first.preparation,
+        action(
+            plan,
+            note,
+            choice="incoming",
+            candidate=old_proof,
+            decision_id="newer-explicit-reference",
+        ),
+    )
+    assert newer.code == "accepted" and not newer.ready
+    assert "selected_link_context_conflict" in newer.preparation.review.blockers
+    assert newer.preparation.review.actions[-1].candidate == old_proof
+
+    # Authored local text is never promoted to an automatic Incoming authority.
+    local = preparation(base)
+    asset = next(
+        row
+        for row in inspect_review_choices(local.review)
+        if row.domain == "attachment"
+    )
+    chosen = operations.resolve_update_choice(
+        local,
+        requirement_id=asset.requirement_id,
+        choice="current",
+        assumptions_digest=requirement_digest(asset),
+    )
+    assert not chosen.ready and len(chosen.preparation.review.requirements) == 1
+    assert chosen.preparation.review.approvals[0].domain == "attachment"
+    unknown_current = automatic.subjects[0].current.model_copy(
+        update={"existence": "unknown", "content": None}
+    )
+    unknown = automatic.model_copy(
+        update={
+            "subjects": (
+                automatic.subjects[0].model_copy(update={"current": unknown_current}),
+                automatic.subjects[1],
+            ),
+            "identity_inventory": tuple(
+                row.model_copy(update={"current": unknown_current})
+                if row.current.path == "Notes/Owner.md"
+                else row
+                for row in automatic.identity_inventory
+            ),
+        }
+    )
+    unready = preparation(unknown).review
+    assert not unready.ready and (unready.blockers or unready.requirements)
+    assert select_review_effects(unready).status != "selected"
+
+
+def test_unknown_review_choice_raises_a_domain_error_before_action_construction():
+    import pytest
+
+    from brz2obsidian.application.operations import Operations
+    from tests.application.test_update_lifecycle_contracts import preparation
+
+    prepared = preparation(reference_recertification_facts())
+    before = prepared.model_dump_json()
+    with pytest.raises(ValueError):
+        Operations().resolve_update_choice(
+            prepared,
+            requirement_id="0" * 64,
+            choice="incoming",
+            assumptions_digest="0" * 64,
+        )
+    assert prepared.model_dump_json() == before
+
+
+def test_owned_mixed_group_and_reselect_keep_automatic_note_and_worker_usable(
+    monkeypatch,
+):
+    import hashlib
+
+    from brz2obsidian.application.update_context import UpdateContext
+    from tests.application.test_onboarding_completion import authored_files
+    from tests.application.test_owned_update_controls import _native_controls_case
+    from tests.application.test_update_context import worker_context_call
+    from tests.application.test_vault_checkpoints import git, user_state
+
+    case = _native_controls_case(monkeypatch, automatic_linked_note=True)
+    before, user = (
+        authored_files(case.vault),
+        user_state(case.vault, owned_ref=case.seed.ref),
+    )
+    refs = git(case.vault, "for-each-ref", "--format=%(refname) %(objectname)")
+    context = UpdateContext(operations=case.operations)
+
+    def send(command, **values):
+        result = worker_context_call(context, {"command": command, **values})
+        assert result is not None, (
+            command,
+            "Worker must return a typed terminal result",
+        )
+        return result
+
+    active = send(
+        "prepare",
+        kind="source_update",
+        vault=str(case.vault),
+        source=str(case.incoming_archive),
+        selection_id="11111111-1111-4111-8111-111111111111",
+    )
+    assert active.binding is not None and active.keep_current_count == 2, active
+    stale_binding = active.binding
+    try:
+        rows = send("page", binding=active.binding).page.items
+        note = next(row for row in rows if row.current_path == case.note_path)
+        clean = next(
+            row
+            for row in rows
+            if row.item_id == case.automatic_note_id and row.facet == "content"
+        )
+        assert clean.original == clean.current and clean.result == clean.incoming
+        assert b"Incoming clean [[Attachments/22222222/payload.bin]]." in clean.result
+        incoming_note, incoming_clean = note.incoming, clean.incoming
+        offer = next(
+            row
+            for row in send("choices", binding=active.binding).offers
+            if row.change_id == note.change_id and row.domain == "text"
+        )
+        active = send(
+            "choose",
+            binding=active.binding,
+            requirement_id=offer.requirement_id,
+            choice="incoming",
+            assumptions_digest=offer.assumptions_digest,
+        )
+        prior = next(
+            row
+            for row in send("choices", binding=active.binding).offers
+            if row.change_id == note.change_id and row.domain == "text"
+        )
+        assert active.keep_current_count == 1 and prior.selected == "incoming"
+        active = send(
+            "keep_current_unresolved",
+            binding=active.binding,
+            group_id=active.keep_current_group_id,
+        )
+        assert (
+            active.ready
+            and "apply_update" in active.next_actions
+            and active.affected_conflicts == 1
+        ), active
+        active = send("refresh", binding=active.binding)
+        assert active.ready and "apply_update" in active.next_actions, active
+        rows = send("page", binding=active.binding).page.items
+        assert (
+            next(row for row in rows if row.current_path == case.note_path).result
+            == incoming_note
+        )
+        assert (
+            next(
+                row
+                for row in rows
+                if row.item_id == case.automatic_note_id and row.facet == "content"
+            ).result
+            == incoming_clean
+        )
+        binary = next(
+            row for row in rows if row.item_id == case.asset_id and row.facet == "asset"
+        )
+        assert binary.current == case.current
+        offers = send("choices", binding=active.binding).offers
+        asset = next(row for row in offers if row.change_id == binary.change_id)
+        assert asset.selected == "current"
+        details = send(
+            "choice_details",
+            binding=active.binding,
+            requirement_id=asset.requirement_id,
+        )
+        current = next(row for row in details.choice_details if row.choice == "current")
+        assert current.path == case.asset_path and current.size == len(case.current)
+        assert current.sha256 == hashlib.sha256(case.current).hexdigest()
+        references = send(
+            "references", binding=active.binding, requirement_id=asset.requirement_id
+        )
+        assert references.references and not references.draft_pending
+        # Opening then discarding an unstaged reference view sends no mutation.
+        offers = send("choices", binding=active.binding).offers
+        again = next(
+            row
+            for row in offers
+            if row.change_id == note.change_id and row.domain == "text"
+        )
+        assert again.selected == "incoming" and again.decision_id == prior.decision_id
+        active = send(
+            "choose",
+            binding=active.binding,
+            requirement_id=again.requirement_id,
+            choice="incoming",
+            assumptions_digest=again.assumptions_digest,
+        )
+        assert active.ready and "apply_update" in active.next_actions, active
+        current_binding = active.binding
+        stale = send(
+            "choose",
+            binding=stale_binding,
+            requirement_id=again.requirement_id,
+            choice="incoming",
+            assumptions_digest=again.assumptions_digest,
+        )
+        assert stale.status == "refused" and stale.code == "context_changed"
+        invalid = send(
+            "choose",
+            binding=current_binding,
+            requirement_id=again.requirement_id,
+            choice="incoming",
+            assumptions_digest="0" * 64,
+        )
+        assert invalid.status == "refused" and invalid.code == "invalid_review_action"
+        active = invalid
+        assert send("choices", binding=active.binding).status == "available"
+        unknown = send(
+            "choose",
+            binding=active.binding,
+            requirement_id="0" * 64,
+            choice="incoming",
+            assumptions_digest="0" * 64,
+        )
+        assert unknown.status == "refused" and unknown.code == "invalid_review_action"
+        active = unknown
+        active = send("refresh", binding=active.binding)
+        assert active.ready and "apply_update" in active.next_actions, active
+    finally:
+        if active.binding is not None:
+            context.close(active.binding, choice="discard")
+        assert (
+            authored_files(case.vault) == before
+            and user_state(case.vault, owned_ref=case.seed.ref) == user
+        )
+        assert (
+            git(case.vault, "for-each-ref", "--format=%(refname) %(objectname)") == refs
+        )

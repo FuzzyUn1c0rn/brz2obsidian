@@ -1221,9 +1221,14 @@ class _OwnedPreparation:
             self._session._coadmit()
             choices = self._session._canonical_choices(plan)
             edited = values.pop("edited", None)
-            action = review_plan_choice_action(
-                plan, _choices=choices, _owner=self, **values
-            )
+            try:
+                action = review_plan_choice_action(
+                    plan, _choices=choices, _owner=self, **values
+                )
+            except ValueError:
+                return lifecycle._refused(
+                    "invalid_review_action", preparation=preparation
+                )
             action = lifecycle.text_choice_action(
                 plan, action, edited=edited, _owner=self
             )
@@ -1247,17 +1252,28 @@ class _OwnedPreparation:
                 ),
             }
         )
-        return UpdateResult(
+        ready = transition.status == "accepted" and transition.plan.ready
+        result = UpdateResult(
             kind=prepared.kind,
             status="prepared_review" if transition.plan.ready else "unresolved",
             code=transition.code,
             preparation=prepared,
-            ready=transition.status == "accepted" and transition.plan.ready,
+            ready=ready,
             history_retained=prepared.locator is not None,
             checkpoint_commit=prepared.locator.commit if prepared.locator else None,
             changes=len(transition.plan.proposal.changes),
             unresolved=len(transition.plan.requirements),
-            next_actions=("save_update", "refresh_update"),
+            next_actions=("save_update",)
+            if ready
+            and prepared.kind == "onboarding"
+            and prepared.locator is None
+            and not transition.plan.facts.format_operation.automatic_merge
+            else ("apply_update",)
+            if ready
+            else ("resolve_update", "save_update"),
+        )
+        return lifecycle._review_explanation(
+            lifecycle._configuration_route(result, _owner=self)
         )
 
     def _byteslice(self, value, offset, maximum):

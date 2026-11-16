@@ -27,7 +27,7 @@ from tests.application.test_verified_coverage import (
 )
 
 
-def _native_controls_case(monkeypatch):
+def _native_controls_case(monkeypatch, *, automatic_linked_note=False):
     root = Path(tempfile.mkdtemp(prefix="brz2obsidian-362-controls-"))
     marker = {"owner": uuid4().hex, "root": str(root.resolve())}
     (root / ".fixture-owner.json").write_text(json.dumps(marker), encoding="utf-8")
@@ -49,6 +49,22 @@ def _native_controls_case(monkeypatch):
     incoming = b"\xffIncoming binary.\r\n"
     replacement = b"\xfeReplacement binary.\r\n"
     add_attachment(parts, asset_id, 1, "payload.bin", original)
+    automatic_note_id = "44444444-4444-4444-8444-444444444444"
+    automatic_attachment_id = "55555555-5555-4555-8555-555555555555"
+    original_clean = b"Original clean [[Attachments/22222222/payload.bin]].\r\n"
+    incoming_clean = b"Incoming clean [[Attachments/22222222/payload.bin]].\r\n"
+    if automatic_linked_note:
+        thought = json.loads(parts["thoughts.json"].splitlines()[0])
+        thought.update(Id=automatic_note_id, Name="Clean linked note")
+        parts["thoughts.json"] += b"\n" + json.dumps(thought).encode()
+        add_attachment(
+            parts,
+            automatic_attachment_id,
+            1,
+            "Notes.md",
+            original_clean,
+            owner=automatic_note_id,
+        )
     initial_archive = write_source(initial, parts)
     workflow = default_workflow()
     metadata = workflow.metadata_factory()
@@ -57,6 +73,15 @@ def _native_controls_case(monkeypatch):
     converted = workflow.convert(initial_archive, vault)
     assert converted.receipt is not None and converted.receipt.verified, converted
     assert (vault / asset_path).read_bytes() == original
+    automatic_note_path = None
+    if automatic_linked_note:
+        record = json.loads((vault / "migration-record.json").read_bytes())
+        automatic_note_path = next(
+            row["relative_path"]
+            for row in record["item_targets"]
+            if row["original_identity"] == automatic_note_id
+        )
+        assert original_clean in (vault / automatic_note_path).read_bytes()
     shutil.copytree(vault, baseline)
     note_path = "Home — Entry thought.md"
     note = (vault / note_path).read_bytes()
@@ -71,6 +96,11 @@ def _native_controls_case(monkeypatch):
         change_record(parts, asset_id, DataLength=len(payload))
         parts["22222222-2222-4222-8222-222222222222/Notes.md"] = b"Incoming prose.\r\n"
         change_record(parts, "33333333-3333-4333-8333-333333333333", DataLength=17)
+        if automatic_linked_note:
+            parts[automatic_note_id + "/Notes.md"] = incoming_clean
+            change_record(
+                parts, automatic_attachment_id, DataLength=len(incoming_clean)
+            )
         write_source(directory, parts)
     git(vault, "init", "-q")
     git(vault, "config", "core.autocrlf", "false")
@@ -124,6 +154,8 @@ def _native_controls_case(monkeypatch):
         initial_archive=initial_archive,
         incoming_archive=root / "incoming/source.brz",
         replacement_archive=root / "replacement/source.brz",
+        automatic_note_id=automatic_note_id if automatic_linked_note else None,
+        automatic_note_path=automatic_note_path,
     )
 
 

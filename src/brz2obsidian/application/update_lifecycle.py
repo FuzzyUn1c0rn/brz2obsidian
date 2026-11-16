@@ -571,6 +571,11 @@ def _review_explanation(result):
     """Expose approved guidance without copying authored names or references."""
     messages = (
         (
+            "selected_link_context_conflict",
+            "The selected file versions have incompatible or unavailable reference evidence.",
+            "Review the selected notes, attachment versions and reference choices in All changes. Choose compatible targets or repair the affected references, then refresh before applying.",
+        ),
+        (
             "selected_provider_cycle",
             "The selected appearance-category chains contain a cycle.",
             "Review the selected appearance-category chains and remove the repeated provider before applying. A nearer owned icon does not repair the independent cycle.",
@@ -815,6 +820,8 @@ def _text_choice(plan, change, choice, edited, *, _owner=None):
         content = change.incoming
     if content is None:
         return None
+    if _owner is not None:
+        content = _owner._session._assembly_content(content, semantic=True)
     context = plan.producer_facts.link_context
     document_id = next(
         (
@@ -905,6 +912,7 @@ def _text_choice(plan, change, choice, edited, *, _owner=None):
                 membership_targets=targets,
                 source_path=owner.canonical_path,
                 output_format=8,
+                _owner=_owner._session if _owner is not None else None,
             )
             states = tuple(s for s in states if s.target_id != owner.target_id) + (
                 observed,
@@ -917,6 +925,7 @@ def _text_choice(plan, change, choice, edited, *, _owner=None):
             membership_targets=targets,
             source_path=change.target_path,
             output_format=plan.facts.incoming_identity.output_format,
+            _owner=_owner._session if _owner is not None else None,
         )
         states = tuple(s for s in states if s.target_id != own.target_id) + (observed,)
     return inspect_text_candidate(

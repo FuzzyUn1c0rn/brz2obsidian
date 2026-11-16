@@ -115,7 +115,9 @@ def transition_facts(
             ),
         }
     )
-    return automatic_merge_facts(facts, _owner=_owner)
+    return automatic_merge_facts(
+        facts, _owner=_owner._session if _owner is not None else None
+    )
 
 
 def prepare_format_transition(operations, vault, source=None, *, _owner=None):
