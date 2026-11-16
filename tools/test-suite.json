@@ -417,7 +417,8 @@
     "tests/application/test_approved_update_flow.py::test_explicit_supported_transition_automatically_keeps_clean_and_combines_safe_files",
     "tests/application/test_approved_update_flow.py::test_transition_producer_interprets_automatic_combination_after_selecting_operation",
     "tests/application/test_approved_update_flow.py::test_automatic_transition_keeps_conflicts_unsafe_unknown_and_legacy_reviews_blocked",
-    "tests/application/test_approved_update_flow.py::test_automatic_transition_keeps_opaque_assets_clean_and_validates_binary_effects"
+    "tests/application/test_approved_update_flow.py::test_automatic_transition_keeps_opaque_assets_clean_and_validates_binary_effects",
+    "tests/application/test_approved_update_flow.py::test_group_revalidates_typed_and_mapping_envelopes_before_accepting_history"
   ],
   "schema_version": 1
 }

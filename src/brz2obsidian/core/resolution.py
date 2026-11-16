@@ -1201,7 +1201,7 @@ def _resolve(plan, action):
     return drive_inline(
         ActionWork(
             plan,
-            action
+            ReviewKeepCurrentGroup.model_validate(action)
             if isinstance(action, ReviewKeepCurrentGroup)
             else ReviewAction.model_validate(action),
         )
@@ -1256,13 +1256,15 @@ def validate_review(plan: ReviewPlan) -> ReviewTransition:
     return reconstructed
 
 
-def resolve_review(plan: ReviewPlan, action: ReviewAction) -> ReviewTransition:
+def resolve_review(
+    plan: ReviewPlan, action: ReviewAction | ReviewKeepCurrentGroup
+) -> ReviewTransition:
     """Reconstruct prior authority, then admit exactly one current-generation action."""
     validated = validate_review(plan)
     if validated.status != "accepted":
         return validated
     action = (
-        action
+        ReviewKeepCurrentGroup.model_validate(action)
         if isinstance(action, ReviewKeepCurrentGroup)
         else ReviewAction.model_validate(action)
     )

@@ -1352,3 +1352,46 @@ def test_automatic_transition_keeps_opaque_assets_clean_and_validates_binary_eff
                 not blocked.ready
                 and select_review_effects(blocked).status != "selected"
             )
+
+
+def test_group_revalidates_typed_and_mapping_envelopes_before_accepting_history():
+    import pytest
+    from pydantic import ValidationError
+
+    from brz2obsidian.application.review_choices import keep_current_group_action
+    from brz2obsidian.core import (
+        prepare_review,
+        resolve_review,
+        select_review_effects,
+        validate_review,
+    )
+    from brz2obsidian.core.resolution import unresolved_current_scope
+    from tests.reconciliation.test_resolution import preflight
+
+    plan = prepare_review(mixed_facts(), preflight=preflight())
+    before = plan.model_dump_json()
+    group_id, _ = unresolved_current_scope(plan)
+    event = keep_current_group_action(plan, group_id)
+    for field, invalid in (
+        ("schema_version", 2),
+        ("schema_id", "brz2obsidian.foreign-group"),
+    ):
+        typed = event.model_copy(update={field: invalid})
+        mapping = event.model_dump() | {field: invalid}
+        for malformed in (typed, mapping):
+            with pytest.raises(ValidationError) as rejected:
+                resolve_review(plan, malformed)
+            assert any(error["loc"] == (field,) for error in rejected.value.errors())
+            assert plan.model_dump_json() == before
+    accepted = resolve_review(plan, event)
+    assert accepted.status == "accepted" and accepted.plan.ready
+    assert len(accepted.plan.history.events) == 1
+    assert validate_review(accepted.plan).status == "accepted"
+    effects = select_review_effects(accepted.plan)
+    assert effects.status == "selected"
+    assert {row.path: row.content.data for row in effects.files} == {
+        "Notes/clean.md": b"incoming\n",
+        "Notes/prior.md": b"prior local\n",
+        "Notes/one.md": b"one local\n",
+        "Notes/two.md": b"two local\n",
+    }
