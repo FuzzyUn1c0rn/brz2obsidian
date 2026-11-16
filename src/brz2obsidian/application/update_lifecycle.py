@@ -567,9 +567,14 @@ def _stale_slots(before, after):
     return len((prior - current) & required)
 
 
-def _review_explanation(result):
+def _review_explanation(result, *, review=None):
     """Expose approved guidance without copying authored names or references."""
     messages = (
+        (
+            "current_link_coverage_unavailable",
+            "Some links in the current vault could not be verified.",
+            "Review the current notes and attachment targets in All changes. Restore complete supported link evidence before applying.",
+        ),
         (
             "selected_link_context_conflict",
             "The selected file versions have incompatible or unavailable reference evidence.",
@@ -586,22 +591,24 @@ def _review_explanation(result):
             "Follow the selected appearance-category chain to the note with the invalid declaration. Choose a valid category membership there or leave its appearance category blank. Repair or clear any invalid icon declaration, including a missing or unsuitable image target, then refresh the review. A nearer owned icon does not repair the independent declaration.",
         ),
     )
+    if review is None and result.preparation is not None:
+        review = result.preparation.review
     selected = tuple(
-        row
-        for row in messages
-        if result.preparation is not None
-        and row[0] in result.preparation.review.blockers
+        row for row in messages if review is not None and row[0] in review.blockers
     )
     if selected:
-        return result.model_copy(
-            update={
-                "summary": " ".join(row[1] for row in selected),
-                "findings": tuple(
-                    dict.fromkeys((*result.findings, *(row[0] for row in selected)))
-                ),
-                "guidance": " ".join([row[2] for row in selected] + [result.guidance]),
-            }
-        )
+        guidance = tuple(row[2] for row in selected)
+        updates = {
+            "summary": " ".join(row[1] for row in selected),
+            "guidance": (*guidance, *result.guidance)
+            if isinstance(result.guidance, tuple)
+            else " ".join((*guidance, result.guidance)),
+        }
+        if hasattr(result, "findings"):
+            updates["findings"] = tuple(
+                dict.fromkeys((*result.findings, *(row[0] for row in selected)))
+            )
+        return result.model_copy(update=updates)
     return result
 
 

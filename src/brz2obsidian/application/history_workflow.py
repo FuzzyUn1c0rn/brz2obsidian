@@ -231,7 +231,7 @@ def _prepared(vault, kind, native, *, copy=None):
         if direction_required
         else "review_required"
     )
-    return HistoryWorkflowResult(
+    result = HistoryWorkflowResult(
         status=status,
         kind=kind,
         code=native.code,
@@ -247,6 +247,12 @@ def _prepared(vault, kind, native, *, copy=None):
         copy_validation=native.validation if kind == "repair" else None,
         guidance=_GUIDANCE,
     )
+    review = getattr(native, "review", None)
+    if review is not None:
+        from .update_lifecycle import _review_explanation
+
+        return _review_explanation(result, review=review)
+    return result
 
 
 def prepare_history_workflow(operations, vault, *, kind, direction=None, copy=None):

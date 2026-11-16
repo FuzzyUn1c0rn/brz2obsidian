@@ -1220,6 +1220,60 @@ def _operation_document_subjects(
     )
 
 
+def _unaffected_attachment_context(original, intent, subject, change, approval):
+    """Retain a selected association, without granting any resource write."""
+    if (
+        subject.attachment is None
+        or subject.incoming is None
+        or subject.current.existence != "present"
+        or subject.current.content is None
+        or subject.path != subject.current.path
+        or change.path != subject.path
+        or change.target_path != subject.path
+        or subject.path in intent.affected_paths
+    ):
+        return False
+    selected = change.result if approval is None else approval.result
+    if approval is None:
+        kept = not change.requires_decision and change.disposition in (
+            "no_change",
+            "preserve_vault",
+        )
+    else:
+        kept = approval.domain == "attachment" and approval.choice == "current"
+    before = next((row for row in intent.before if row.path == subject.path), None)
+    proposed = next((row for row in intent.proposed if row.path == subject.path), None)
+    owners = tuple(
+        row
+        for row in original.producer_facts.identity_inventory
+        if row.identity_state == "valid"
+        and row.identity is not None
+        and (
+            row.identity.module_id,
+            row.identity.collection_id,
+            row.identity.item_id,
+            row.facet,
+        )
+        == (
+            original.producer_facts.incoming_identity.module_id,
+            original.producer_facts.incoming_identity.collection_id,
+            subject.item_id,
+            subject.facet,
+        )
+        and row.current.path == subject.path
+        and row.target == subject.source_target
+    )
+    return (
+        kept
+        and len(owners) == 1
+        and selected is not None
+        and before is not None
+        and before == proposed
+        and before.size == content_size(selected)
+        and before.sha256 == content_sha(selected)
+    )
+
+
 def _protected_resource_context(facts, subjects, context, retained, git):
     """Keep exact historical associations for resources outside reversal writes."""
     if context is None or facts.incoming_identity.output_format != 8:
@@ -1422,25 +1476,32 @@ def _restore_review(
         if len(changes) != 1:
             raise OSError("Recovery subject has no unique original change")
         approval = approved.get(changes[0].change_id)
-        if approval is None and subject.path not in intent.affected_paths:
+        context_only = _unaffected_attachment_context(
+            original, intent, subject, changes[0], approval
+        )
+        if (
+            approval is None
+            and subject.path not in intent.affected_paths
+            and not context_only
+        ):
             # An automatic, unchanged producer has no decision to reverse.
             # Affected outputs still require retained selected ownership.
             continue
-        ownership_subjects.append((subject, changes, approval))
-        ownership_queries.append(
-            (changes[0].change_id, None)
-            if approval is None
-            else (approval.change_id, approval.decision_id)
-        )
+        ownership_subjects.append((subject, changes, approval, context_only))
+        if not context_only:
+            ownership_queries.append(
+                (changes[0].change_id, None)
+                if approval is None
+                else (approval.change_id, approval.decision_id)
+            )
     owned_outputs = (
         review_owned_outputs(original, tuple(ownership_queries))
         if _owner is None
         else _owner._history_owned_outputs(original, tuple(ownership_queries))
     )
-    owned_groups = owned_outputs.target_groups
-    for (subject, changes, approval), owned in zip(
-        ownership_subjects, owned_groups, strict=True
-    ):
+    owned_groups = iter(owned_outputs.target_groups)
+    for subject, changes, approval, context_only in ownership_subjects:
+        owned = () if context_only else next(owned_groups)
         rows = []
         for reference in owned:
             path = reference.canonical_path
@@ -1462,8 +1523,10 @@ def _restore_review(
                 )
             )
             output_references[path] = reference
-        protected = bool(document_keys) and _inactive_attachment_proof(
-            original, intent, subject
+        protected = (
+            context_only
+            or bool(document_keys)
+            and _inactive_attachment_proof(original, intent, subject)
         )
         if subject.path not in intent.affected_paths and not rows and not protected:
             continue

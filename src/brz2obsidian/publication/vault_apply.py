@@ -2367,6 +2367,10 @@ def _apply_reviewed_update(
             or before[path].size != content_size(data)
             or before[path].sha256 != content_sha(data)
         } | removals
+        if undo_target is not None and not changed.issubset(
+            undo_target.intent.affected_paths
+        ):
+            return outcome("refused", "undo_effect_outside_origin", start=start)
         planned = len(changed)
         before_metadata = {}
         result_metadata = {}

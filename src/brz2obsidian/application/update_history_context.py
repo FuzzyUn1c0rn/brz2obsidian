@@ -247,6 +247,9 @@ class HistoryContext:
             else ()
         )
         validation = result.copy_validation
+        review = getattr(preparation.native, "review", None) if preparation else None
+        findings = review.blockers if review is not None else ()
+        guidance = " ".join(result.guidance)
         copy_state = (
             UpdateHistoryCopyState(
                 status=validation.status,
@@ -287,6 +290,13 @@ class HistoryContext:
             if operation
             else self.admission.operation.publication,
             next_actions=result.next_actions,
+            summary=result.summary[:2048],
+            findings=tuple(row[:160] for row in findings[:20]),
+            guidance=guidance[:2048],
+            diagnostic_omission=len(result.summary) > 2048
+            or len(guidance) > 2048
+            or len(findings) > 20
+            or any(len(row) > 160 for row in findings),
             history_action=UpdateHistoryActionState(
                 kind=result.kind,
                 status=result.status,
