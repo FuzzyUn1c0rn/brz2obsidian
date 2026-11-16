@@ -8,7 +8,7 @@ from brz2obsidian.contracts import RunMetadata, SourceIdentity
 from brz2obsidian.core import prepare_review, refresh_review, validate_review
 
 from .update_contracts import UpdatePreparation
-from .update_facts import output_identity, record
+from .update_facts import _outputs, output_identity, record
 from .update_lifecycle import (
     _history,
     _materialize,
@@ -189,7 +189,8 @@ def _original_payload(operations, history, source, *, _owner=None):
 
 
 def _retained_original_payload(history, proposal_id, incoming, *, _owner=None):
-    from brz2obsidian.content_fingerprints import canonical_equal
+    """Recover the saved original catalog independently of the incoming version."""
+    from brz2obsidian.content_values import same_content
 
     checkpoint = history.checkpoint
     saved = (
@@ -203,27 +204,85 @@ def _retained_original_payload(history, proposal_id, incoming, *, _owner=None):
         return None
     facts = saved.saved.plan.producer_facts
     operation = facts.format_operation
+    baseline = operation.established_baseline
+    incoming_record = record(incoming)
     if (
         facts.proposal_id != proposal_id
         or operation.kind != "onboarding"
         or operation.recorded_generation != "supported"
-        or operation.established_baseline is None
-        or operation.baseline_source_version != operation.target_source_version
-        or output_identity(record(incoming)) != facts.baseline_identity
-        or record(incoming)["source_identity"]["snapshot_digest"]
-        != operation.baseline_source_version
-        or any(
-            s.baseline.content is None
-            or (
-                not canonical_equal(incoming.get(s.path), s.baseline.content)
-                if _owner is not None
-                else incoming.get(s.path) != s.baseline.content.data
-            )
-            for s in facts.subjects
-        )
+        or baseline is None
+        or baseline.identity != facts.baseline_identity
+        or baseline.source_version != operation.baseline_source_version
+        or output_identity(incoming_record) != facts.incoming_identity
+        or incoming_record["source_identity"]["snapshot_digest"]
+        != operation.target_source_version
     ):
         return None
-    return incoming
+    subjects = {(s.item_id, s.facet): s for s in facts.subjects}
+    outputs = {(o.item_id, o.facet): o for o in baseline.outputs}
+    if any(
+        s.baseline.status == "known" and key not in outputs
+        for key, s in subjects.items()
+    ) or any(
+        key not in subjects
+        or subjects[key].baseline.status != "known"
+        or not same_content(subjects[key].baseline.content, output.content)
+        for key, output in outputs.items()
+    ):
+        return None
+    record_key = ("support:migration-record.json", "content")
+    if record_key not in outputs:
+        return None
+    original_record_content = subjects[record_key].baseline.content
+    if _owner is not None:
+        original_record_content = _owner._session._assembly_content(
+            original_record_content, semantic=True
+        )
+    original_record = record({"migration-record.json": original_record_content})
+    if (
+        output_identity(original_record) != baseline.identity
+        or original_record["source_identity"]["snapshot_digest"]
+        != baseline.source_version
+    ):
+        return None
+    # The original migration record owns imported paths. Support paths are
+    # declared by the established original output set, never current filenames.
+    paths = (
+        {
+            row["relative_path"]
+            for row in original_record["item_targets"]
+            if row["created"]
+        }
+        | {
+            row["relative_path"]
+            for row in original_record["asset_targets"]
+            if row["relative_path"] is not None
+        }
+        | {
+            output.item_id.removeprefix("support:")
+            for output in baseline.outputs
+            if output.facet == "content" and output.item_id.startswith("support:")
+        }
+    )
+    catalog = _outputs(original_record, dict.fromkeys(paths))
+    original = {}
+    for key in outputs:
+        if key not in catalog:
+            return None
+        path = catalog[key][0]
+        UpdatePreparation.relative_vault_path(path)
+        if path in original:
+            return None
+        content = (
+            original_record_content
+            if key == record_key
+            else subjects[key].baseline.content
+        )
+        original[path] = content if _owner is not None else content.data
+    # Created items must all be present; absent source assets remain absent.
+    if set(_outputs(original_record, original)) != set(outputs):
+        return None
+    return original
 
 
 def prepare_onboarding(

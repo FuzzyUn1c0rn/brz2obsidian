@@ -903,3 +903,111 @@ def test_configuration_conflict_keeps_explicit_safe_version_choices():
         assert (
             effects.status == "selected" and effects.files[0].content.data == expected
         )
+
+
+def test_distinct_original_onboarding_cold_resume_keeps_original_and_choice():
+    import hashlib
+    import json
+    import subprocess
+    import sys
+    from zipfile import ZipFile
+
+    from brz2obsidian.application.update_context import UpdateContext
+    from tests.application.test_onboarding_completion import authored_files
+    from tests.application.test_update_context import worker_context_call
+    from tests.application.test_update_lifecycle import _user_state
+
+    operations, vault, archive = first_setup_operations()
+    user_before, files_before = _user_state(vault), authored_files(vault)
+    incoming = archive.with_name("distinct-incoming.brz")
+    with ZipFile(archive) as old, ZipFile(incoming, "w") as new:
+        for name in old.namelist():
+            raw = old.read(name)
+            if name.endswith("/Notes.md"):
+                raw = b"Incoming prose.\r\n"
+            if name == "attachments.json":
+                record = json.loads(raw)
+                record["DataLength"] = 17
+                raw = json.dumps(record).encode()
+            new.writestr(name, raw)
+    source_hashes = tuple(
+        hashlib.sha256(p.read_bytes()).hexdigest() for p in (archive, incoming)
+    )
+    context = UpdateContext(operations=operations)
+
+    def send(command, **values):
+        return worker_context_call(context, {"command": command, **values})
+
+    opened = send(
+        "prepare",
+        kind="onboarding",
+        vault=str(vault),
+        source=str(incoming),
+        original_source=str(archive),
+        selection_id="11111111-1111-4111-8111-111111111111",
+    )
+    assert opened.binding is not None and opened.unresolved > 0, opened
+    page = send("page", binding=opened.binding, queue="unresolved")
+    note = next(
+        r
+        for r in page.page.items
+        if r.item_id == "22222222-2222-4222-8222-222222222222"
+    )
+    assert note.original == ORIGINAL and note.current == CURRENT
+    assert note.incoming == ORIGINAL.replace(
+        b"Authored body.\r\n", b"Incoming prose.\r\n"
+    )
+    offer = next(r for r in page.offers if r.change_id == note.change_id)
+    selected = send(
+        "choose",
+        binding=opened.binding,
+        requirement_id=offer.requirement_id,
+        choice="current",
+        assumptions_digest=offer.assumptions_digest,
+    )
+    assert selected.code == "accepted" and selected.unresolved > 0, selected
+    selected_offer = next(
+        r
+        for r in send("choices", binding=selected.binding).offers
+        if r.change_id == note.change_id
+    )
+    decision_id = selected_offer.decision_id
+    assert selected_offer.selected == "current" and decision_id is not None
+    saved = send("save", binding=selected.binding)
+    assert saved.code == "saved" and saved.unresolved > 0, saved
+    assert (
+        send("close", binding=saved.binding, choice="discard").code == "context_closed"
+    )
+    result_path = archive.with_name("cold-distinct-result.json")
+    code = """import json,sys
+from pathlib import Path
+from brz2obsidian.application.update_context import UpdateContext
+context=UpdateContext()
+state=context.resume(sys.argv[1],selection_id="22222222-2222-4222-8222-222222222222")
+assert state.binding is not None,state
+page=context.page(state.binding)
+note=next(r for r in page.page.items if r.item_id=="22222222-2222-4222-8222-222222222222")
+offer=next(r for r in context.choice_page(state.binding).offers if r.change_id==note.change_id)
+Path(sys.argv[2]).write_text(json.dumps({"original":None if note.original is None else note.original.hex(),"current":note.current.hex(),"incoming":note.incoming.hex(),"selected":offer.selected,"decision_id":offer.decision_id,"unresolved":state.unresolved,"stale":state.stale}),encoding="utf-8")
+context.close(state.binding,choice="discard")
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", code, str(vault), str(result_path)],
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr.decode(errors="replace")
+    cold = json.loads(result_path.read_text(encoding="utf-8"))
+    assert cold["original"] == ORIGINAL.hex(), cold
+    assert cold["current"] == CURRENT.hex()
+    assert (
+        cold["incoming"]
+        == ORIGINAL.replace(b"Authored body.\r\n", b"Incoming prose.\r\n").hex()
+    )
+    assert cold["selected"] == "current" and cold["decision_id"] == decision_id
+    assert cold["unresolved"] == saved.unresolved and cold["stale"] == 0
+    assert authored_files(vault) == files_before and _user_state(vault) == user_before
+    assert (
+        tuple(hashlib.sha256(p.read_bytes()).hexdigest() for p in (archive, incoming))
+        == source_hashes
+    )
