@@ -949,17 +949,18 @@ def check_items(raw, record, archive, vault, assets):
         for _, a in sorted(assigned_types.items())
     ], "classification identity/target/evidence correspondence"
     for key in sorted(created):
-        tags = sorted(
-            {
-                tag_tokens[r["ThoughtIdA"]]
-                for r in assignments
-                if r["ThoughtIdB"] == key
-            },
-            key=str.casefold,
-        )
+        native = {
+            tag_tokens[r["ThoughtIdA"]] for r in assignments if r["ThoughtIdB"] == key
+        }
         declared, calendar, icon = expected_metadata(raw, key, assets)
-        if key in definitions:
-            tags = sorted(set(tags) | {"categories"}, key=str.casefold)
+        if output_version == 9:
+            if key in definitions:
+                native.add("categories")
+            tags = sorted(native, key=lambda tag: (tag.casefold(), tag))
+        else:
+            tags = sorted(native, key=str.casefold)
+            if key in definitions:
+                tags = sorted(set(tags) | {"categories"}, key=str.casefold)
         provider = assigned_types.get(key, {}).get("definition_key")
         category = "[[" + names[provider] + "]]" if provider else None
         effective = source_icon(key, owned, providers, definitions).asset

@@ -2,6 +2,9 @@
 
 import hashlib
 import json
+import os
+import subprocess
+import sys
 from contextlib import closing
 
 import pytest
@@ -18,6 +21,66 @@ from tests.application.test_graph_modules import POLICY, edge, generated, item, 
 from tests.application.test_module_seams import METADATA
 from tests.sources.test_local_api import golden_inputs
 from tests.sources.test_local_api_icons_v5 import vector_inputs
+
+
+def category_tag_order():
+    source_tags = ("Categories", "Topic0", "Topic1", "Topic4", "Topic6")
+    facts = snapshot(
+        (
+            item("category", "Work", role="definition"),
+            *(
+                item(f"tag{i}", token, role="tag")
+                for i, token in enumerate(source_tags)
+            ),
+        ),
+        tuple(
+            edge(f"edge{i}", f"tag{i}", "category", "tag")
+            for i in range(len(source_tags))
+        ),
+    )
+    analysis = analyze(facts, POLICY)
+    # Format 8 built its membership set directly, then added the category role.
+    # Evaluate that historical ordering under the same interpreter and hash seed.
+    historical = {token for token in source_tags}
+    historical.add("categories")
+    notes = {}
+    for version in (8, 9):
+        metadata = METADATA.model_copy(update={"renderer_version": str(version)})
+        vault = render(plan(analysis, output_format=version), metadata)
+        note = generated(vault, "Categories/Work.md")
+        notes[str(version)] = [
+            json.loads(line.removeprefix("  - "))
+            for line in note.split("tags:\n", 1)[1].split("aliases:", 1)[0].splitlines()
+        ]
+    return notes, sorted(historical, key=str.casefold)
+
+
+@pytest.mark.parametrize("hash_seed", ("42", "2"))
+def test_category_tag_casefold_tie_preserves_old_bytes_and_has_stable_new_order(
+    hash_seed,
+):
+    code = (
+        "import json; from tests.application.test_connected_empty_thoughts_format8 "
+        "import category_tag_order; print(json.dumps(category_tag_order()))"
+    )
+    process = subprocess.run(
+        [sys.executable, "-c", code],
+        env=os.environ | {"PYTHONHASHSEED": hash_seed},
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    )
+    notes, historical = json.loads(process.stdout)
+    assert notes["8"] == historical
+    assert notes["9"] == [
+        "Categories",
+        "categories",
+        "Topic0",
+        "Topic1",
+        "Topic4",
+        "Topic6",
+    ]
 
 
 def test_format8_reserves_a_colliding_empty_hub_and_lists_uncreated_jump_pair():

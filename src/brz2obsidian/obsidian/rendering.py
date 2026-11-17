@@ -265,7 +265,7 @@ def render(plan: MigrationPlan, run_metadata: RunMetadata) -> RenderedVault:
                 item,
                 plan.source_identity.source_id,
                 category_links.get(item.key, []),
-                native_tags.get(item.key, ()),
+                native_tags.get(item.key, []),
                 asset_paths,
             )
             + "# "

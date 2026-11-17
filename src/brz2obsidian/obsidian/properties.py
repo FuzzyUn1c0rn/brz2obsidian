@@ -15,13 +15,22 @@ def property_memberships(plan, targets):
     for membership in plan.tag_memberships:
         if membership.native:
             tags[membership.item_key].add(tokens[membership.tag_key])
-    return categories, tags
+    # Add the role tag to the same set. Copying the set can change the order of
+    # case-fold ties, which is observable when reproducing format-8 bytes.
+    for item in plan.analysis.snapshot.items:
+        if item.role == "definition":
+            tags[item.key].add("categories")
+
+    def total_tag_order(token):
+        return token.casefold(), token
+
+    tag_order = total_tag_order if plan.output_format == 9 else str.casefold
+    return categories, {
+        key: sorted(values, key=tag_order) for key, values in tags.items()
+    }
 
 
 def property_frontmatter(item, source_id, categories, native_tags, asset_paths):
-    tags = set(native_tags)
-    if item.role == "definition":
-        tags.add("categories")
     dates = item.calendar_dates
     appearance = item.declared_appearance
     icon = appearance.icon_asset_id if appearance else None
@@ -34,7 +43,7 @@ def property_frontmatter(item, source_id, categories, native_tags, asset_paths):
             else None,
             "created": dates.created if dates else None,
             "updated": dates.updated if dates else None,
-            "tags": sorted(tags, key=str.casefold),
+            "tags": native_tags,
             "aliases": [],
             "source_collection_id": source_id,
             "source_item_id": item.original_identity,

@@ -2181,7 +2181,9 @@ def check_scope_memberships(
         expected = {
             "categories": categories,
             "appearance_category": categories[0] if categories else None,
-            "tags": sorted(native, key=str.casefold),
+            "tags": sorted(native, key=lambda tag: (tag.casefold(), tag))
+            if record.get("schema_version") == 9
+            else sorted(native, key=str.casefold),
             "aliases": [],
             "source_collection_id": brain,
             "source_item_id": key,
