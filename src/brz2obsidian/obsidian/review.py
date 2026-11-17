@@ -10,6 +10,7 @@ from brz2obsidian.contracts import (
     StructureSpan,
     TextCandidateDocument,
 )
+from brz2obsidian.output_formats import REVIEWABLE_OUTPUT_FORMATS
 
 from .links import interpret_links
 
@@ -51,7 +52,7 @@ def inspect_text_candidate(
     appearance_present = False
     status, issues = "safe", ()
     try:
-        if output_format not in (7, 8):
+        if output_format not in REVIEWABLE_OUTPUT_FORMATS:
             raise ValueError("candidate_format_unsupported")
         text = raw.decode("utf-8")
         if (

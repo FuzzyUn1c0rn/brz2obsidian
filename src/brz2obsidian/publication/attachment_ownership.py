@@ -13,6 +13,7 @@ from brz2obsidian.contracts import (
     RetainedAttachmentOwnership,
 )
 from brz2obsidian.obsidian import interpret_attachment_mapping
+from brz2obsidian.output_formats import REVIEWABLE_OUTPUT_FORMATS
 from brz2obsidian.publication.git_payload import verify_blobs
 from brz2obsidian.publication.vault_native import available_memory
 
@@ -809,7 +810,7 @@ def _ownership_at_cutoffs(git, *, association, roles, requests, observation=None
             else _manifest(git, association, role)
         )
         if (
-            manifest.identity.output_format not in (7, 8)
+            manifest.identity.output_format not in REVIEWABLE_OUTPUT_FORMATS
             or manifest.identity.settings_digest != hashlib.sha256(b"{}").hexdigest()
         ):
             # An unqualified old format cannot establish an origin. It also

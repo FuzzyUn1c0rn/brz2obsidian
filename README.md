@@ -442,16 +442,23 @@ recovery, latest Undo and matching-history repair actions. Closing an active
 operation offers background/wait/safe-stop choices; a stop request is not a
 completed rollback.
 
-Older BRZ vaults using profile 10/output 7 or recorded profile 9/output 6 need a
-separate format transition to profile 11/output 8. Keep the same unchanged,
-scoped BRZ while reviewing and completing that transition. The transition also
-merges proven-safe changes automatically; unresolved differences and unavailable
-evidence remain for review. Then prepare the changed BRZ as a separate source update. If supported history is missing, review
-onboarding with trustworthy original input when available. Original imported
-versions and current vault edits remain separate. Safe changes merge
-automatically; uncertain differences remain for review. Local notes, aliases,
-category memberships, appearance providers, templates and configuration retain
-their preservation checks.
+Tracked BRZ vaults using profile 11/output 8, profile 10/output 7 or recorded
+profile 9/output 6 can review a separate format transition to profile 11/output 9.
+Use the same scoped BRZ source that established the vault. The transition adds
+generated notes for connected empty thoughts and reconciles the active listings.
+It preserves retained obsolete listings and shows them in the review summary.
+Review any unresolved identities, local edits and links before applying. Then
+prepare a changed BRZ as a separate source update.
+
+If supported history is missing, review onboarding with trustworthy original
+input when available. Original imported versions and current vault edits remain
+separate. Missing originals stay unknown until exact historical output can be
+established. Local notes, aliases, category memberships, appearance providers,
+templates and configuration retain their preservation checks.
+
+If a source item loses its last reason to generate a note, the update keeps any
+existing vault note. When that item qualifies again, review matches an existing
+note by its recorded identity and preserves a recorded local deletion by default.
 
 Attachments participate in automatic merging when their content and reference
 evidence establishes a safe result. For remaining conflicts, the offered file
@@ -460,9 +467,9 @@ options explain what prevents their use. Some ordinary source-update cases still
 need the separate onboarding or output-format review. Keep-both and reference
 choices remain available only where the review establishes that they are safe.
 
-Saved output 7 reviews retain their recorded interpretation and original-byte
-evidence. Missing originals stay unknown: current vault notes and a new output 8
-render cannot prove the bytes an older renderer produced. Refreshing a review
+Saved reviews retain the interpretation and exact originals of their recorded
+generations. For example, you can resume an output-8 source update or an in-progress
+transition from output 7 to 8. Refreshing a review
 rechecks the full selected category/provider chains and their used resources,
 including providers beyond the native eight-link display limit; changes can
 retire dependent approvals while preserving unrelated decisions. After applying

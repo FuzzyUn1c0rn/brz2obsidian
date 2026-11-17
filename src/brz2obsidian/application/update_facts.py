@@ -35,6 +35,7 @@ from brz2obsidian.obsidian import (
     interpret_structure,
 )
 from brz2obsidian.obsidian_dialect import native_properties
+from brz2obsidian.output_formats import QUALIFIED_OUTPUT_FORMATS
 
 
 def digest(value):
@@ -175,7 +176,7 @@ def _membership_targets(records, inventory=()):
     # Current templates carry the reserved role even when this source has no
     # definitions. Keep recorded7 target registries deterministic for replay.
     # The shared role identity remains stable across the qualified7/8 grammar.
-    if rows or identity.output_format == 8:
+    if rows or identity.output_format in QUALIFIED_OUTPUT_FORMATS:
         result.append(
             ReferenceTarget(
                 schema_id="brz2obsidian.reference-target",
@@ -250,7 +251,7 @@ def _observed_identity(path, content, identity, established, *, native_metadata=
         return "valid", _identity(identity, established[path][0]), established[path][2]
     if not path.lower().endswith(".md"):
         return "missing", None, None
-    if identity.output_format == 8 or native_metadata:
+    if identity.output_format in QUALIFIED_OUTPUT_FORMATS or native_metadata:
         properties = native_properties(content)
         names = ("source_collection_id", "source_item_id")
         if properties is not None and all(
@@ -311,6 +312,7 @@ def assemble_facts(
     originals_known=True,
     onboarding=False,
     retained_ownership=None,
+    retired_note_ids=(),
     _owner=None,
 ):
     def content(raw, *, semantic):
@@ -328,8 +330,38 @@ def assemble_facts(
     old_record, new_record = record(baseline), record(incoming)
     old_identity, identity = output_identity(old_record), output_identity(new_record)
     old, new = _outputs(old_record, baseline), _outputs(new_record, incoming)
-    ownership = {}
+    old_reserved, new_reserved = {}, {}
+    qualified_scope = (
+        identity.output_format == 9
+        and originals_known
+        and (old_identity.collection_id, old_identity.module_id)
+        == (identity.collection_id, identity.module_id)
+    )
+    if qualified_scope:
+        old_reserved, new_reserved = (
+            {
+                (row["original_identity"], "content"): row["relative_path"]
+                for row in value["item_targets"]
+                if not row["created"]
+            }
+            for value in (old_record, new_record)
+        )
+    retired = set()
     historical = {}
+    if qualified_scope:
+        known_items = {row["original_identity"] for row in new_record["item_targets"]}
+        retired.update(set(retired_note_ids) & known_items)
+        retired.update(
+            key[0]
+            for key in old.keys() & new_reserved.keys()
+            if old[key][0] in baseline
+        )
+        historical.update(
+            (key, (path, "note", PurePosixPath(path).stem))
+            for key, path in new_reserved.items()
+            if key[0] in retired and key not in old
+        )
+    ownership = {}
     if retained_ownership is not None:
         paths = set()
         for proof in retained_ownership:
@@ -361,12 +393,15 @@ def assemble_facts(
             or key in new
             and new[key][0] != value[0]
             for key, value in historical.items()
+            if key[1] == "asset"
         ):
             raise ValueError("Retained asset moved without current identity proof")
     established = {
         path: (item, role, facet) for (item, facet), (path, role, _) in old.items()
     }
     for (item, facet), (path, role, _) in historical.items():
+        if facet != "asset":
+            continue
         if path in established and established[path] != (item, role, facet):
             raise ValueError("Retained asset path has a different association")
         established[path] = item, role, facet
@@ -382,7 +417,7 @@ def assemble_facts(
             established,
             # A new format8 operation qualifies edited native metadata while
             # the baseline identity and merge grammar retain their generation.
-            native_metadata=identity.output_format == 8,
+            native_metadata=identity.output_format in QUALIFIED_OUTPUT_FORMATS,
         )
         inventory.append(
             IdentityInventoryItem(
@@ -412,7 +447,9 @@ def assemble_facts(
         original = (
             content(baseline[old_path], semantic=facet != "asset")
             if originals_known
-            and (retained_ownership is None or key in old)
+            and (
+                key in old or identity.output_format != 9 and retained_ownership is None
+            )
             and old_path in baseline
             else None
         )
@@ -516,6 +553,11 @@ def assemble_facts(
                 output_role=role,
                 structure=structure,
                 attachment=attachment,
+                prior_reservation=received is not None
+                and old_reserved.get(key) == path,
+                source_still_reserved=received is None and key in new_reserved,
+                previously_generated=item in retired
+                and (key in old_reserved or key in new_reserved),
             )
         )
         if original is not None:
@@ -543,6 +585,7 @@ def assemble_facts(
         ),
         identity_inventory=tuple(inventory),
         source_version_memory=source_memory,
+        retired_note_ids=tuple(sorted(retired)),
         format_operation=FormatOperation(
             schema_id="brz2obsidian.format-operation",
             schema_version=1,
@@ -741,6 +784,14 @@ def _link_context(
         (_identity(facts.incoming_identity, s.item_id), s.facet): s
         for s in facts.subjects
     }
+    unbound_reservations = {
+        s.path: s
+        for s in facts.subjects
+        if s.prior_reservation and not s.previously_generated
+    }
+    observed_identities = {
+        (row.identity, row.facet) for row in facts.identity_inventory
+    }
     current_memberships = _membership_targets(
         (baseline_record, incoming_record), facts.identity_inventory
     )
@@ -791,9 +842,22 @@ def _link_context(
         )
         if actual.kind == "resource":
             actual = actual.model_copy(update={"identity": None})
+        intended = (
+            unbound_reservations.get(row.current.path)
+            if subject is None
+            and row.identity_state == "missing"
+            and row.identity is None
+            else None
+        )
+        if (
+            intended is not None
+            and (_identity(facts.incoming_identity, intended.item_id), intended.facet)
+            in observed_identities
+        ):
+            intended = None
         future = (
             actual
-            if subject is None
+            if subject is None or subject.source_still_reserved
             else actual.model_copy(
                 update={
                     "canonical_path": subject.path,
@@ -802,23 +866,46 @@ def _link_context(
                 }
             )
         )
+        if intended is not None:
+            future = actual.model_copy(
+                update={
+                    "identity": _identity(facts.incoming_identity, intended.item_id)
+                }
+            )
         # Duplicate identities retain distinct physical targets for ambiguity.
         if any(t.target_id == target_id for t in current_targets):
             actual = actual.model_copy(
                 update={"target_id": target_id + ":" + row.entry_id}
             )
             future = future.model_copy(update={"target_id": actual.target_id})
-        received = row.current.content if subject is None else subject.incoming
+        generated = subject or intended
+        received = row.current.content if generated is None else generated.incoming
+        reserved = (
+            subject is not None
+            and (subject.prior_reservation or subject.source_still_reserved)
+            and row.current.path == subject.path
+            and row.current.existence == "absent"
+        )
+        if subject is not None and subject.source_still_reserved:
+            received = row.current.content
+        current_existence = "present" if row.current.content is not None else "missing"
+        if reserved:
+            current_existence = "intentionally_uncreated"
+        incoming_existence = "present" if received is not None else "missing"
+        if reserved and subject.previously_generated:
+            received = None
+            incoming_existence = "intentionally_uncreated"
         current_targets.append(actual)
         incoming_targets.append(future)
         current_states.append(
             link_state(
                 row.current.content,
                 target_id=actual.target_id,
-                existence="present" if row.current.content is not None else "missing",
+                existence=current_existence,
                 membership_targets=current_memberships,
                 source_path=actual.canonical_path,
-                qualify_roles=facts.incoming_identity.output_format == 8,
+                qualify_roles=facts.incoming_identity.output_format
+                in QUALIFIED_OUTPUT_FORMATS,
                 output_format=(
                     7
                     if facts.baseline_identity.output_format == 6
@@ -831,7 +918,7 @@ def _link_context(
             link_state(
                 received,
                 target_id=future.target_id,
-                existence="present" if received is not None else "missing",
+                existence=incoming_existence,
                 membership_targets=incoming_memberships,
                 source_path=future.canonical_path,
                 output_format=facts.incoming_identity.output_format,
@@ -896,8 +983,8 @@ def _link_context(
                     targets=tuple(current_targets),
                     target_facts=tuple(current_states),
                     inventory="complete",
-                    output_format=8
-                    if facts.incoming_identity.output_format == 8
+                    output_format=facts.incoming_identity.output_format
+                    if facts.incoming_identity.output_format in QUALIFIED_OUTPUT_FORMATS
                     else (
                         7
                         if facts.baseline_identity.output_format == 6

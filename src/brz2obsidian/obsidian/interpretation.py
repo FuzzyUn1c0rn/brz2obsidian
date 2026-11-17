@@ -23,6 +23,7 @@ from brz2obsidian.obsidian.sections import (
     align_sections,
     interpret_sections,
 )
+from brz2obsidian.output_formats import REVIEWABLE_OUTPUT_FORMATS
 
 
 class _Unsupported(ValueError):
@@ -144,7 +145,7 @@ def interpret_structure(
     fields, body_start, status, issues = (), 0, "supported", ()
     memberships, appearance, sections = (), None, ()
     try:
-        if output_format not in (7, 8):
+        if output_format not in REVIEWABLE_OUTPUT_FORMATS:
             raise _Unsupported("format_unsupported")
         try:
             raw.decode("utf-8")

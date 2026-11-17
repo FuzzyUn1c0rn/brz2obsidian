@@ -23,6 +23,7 @@ from brz2obsidian.contracts import (
 )
 from brz2obsidian.core import analyze, plan
 from brz2obsidian.diagnostics import contextual_issue
+from brz2obsidian.output_formats import CURRENT_OUTPUT_FORMAT
 
 
 @dataclass(frozen=True)
@@ -47,7 +48,7 @@ class Workflow:
         now = datetime.now(UTC)
         return RunMetadata(
             converter_version=__version__,
-            renderer_version="9",
+            renderer_version=str(CURRENT_OUTPUT_FORMAT),
             run_id=str(uuid4()),
             run_time=now.isoformat(),
             obsidian_version="1.13.7",

@@ -21,6 +21,7 @@ from brz2obsidian.obsidian_dialect import (
     file_roles,
     migration_record_data,
 )
+from brz2obsidian.output_formats import QUALIFIED_OUTPUT_FORMATS
 
 from .base_views import view_anchors
 
@@ -125,7 +126,8 @@ def interpret_link_target(
             existence=existence,
             reference_query=reference_query,
         )
-        if (output_format == 8 or qualify_roles) and source_path is not None
+        if (output_format in QUALIFIED_OUTPUT_FORMATS or qualify_roles)
+        and source_path is not None
         else None
     )
 
@@ -236,7 +238,7 @@ def interpret_links(
     target_facts,
     inventory,
     output_format=7,
-    record_format=8,
+    record_format=None,
 ):
     occurrences, issues, consumed = [], [], []
 
@@ -259,12 +261,17 @@ def interpret_links(
     except UnicodeDecodeError:
         text = ""
         issues.append("encoding_unsupported")
-    if output_format == 8 and source_path == "migration-record.json":
+    if (
+        output_format in QUALIFIED_OUTPUT_FORMATS
+        and source_path == "migration-record.json"
+    ):
+        if record_format is None:
+            record_format = output_format
         if not migration_record_data(text, source_path, record_format=record_format):
             issues.append("record_data_unsupported")
         return document()
     masked, code_issues = _code_ranges(text)
-    if output_format == 8:
+    if output_format in QUALIFIED_OUTPUT_FORMATS:
         masked.extend(canonical_player_ranges(text))
     issues.extend(code_issues)
     pattern = (
@@ -299,7 +306,7 @@ def interpret_links(
             # A literal drive-rooted path is outside managed-vault resolution.
             # Preserve its spelling; percent signs and fragments are opaque here.
             external = (
-                output_format == 8
+                output_format in QUALIFIED_OUTPUT_FORMATS
                 and not wiki
                 and re.match(r"^[A-Za-z]:[\\/]", semantic_destination) is not None
                 and not any(ord(c) < 32 for c in semantic_destination)
@@ -344,10 +351,16 @@ def interpret_links(
                     target_text,
                     source_path,
                     "relative"
-                    if output_format == 8
+                    if output_format in QUALIFIED_OUTPUT_FORMATS
                     and path_mode == "vault"
                     and not wiki
                     and target_text.startswith(("./", "../"))
+                    else "shortened"
+                    if output_format == 9
+                    and path_mode == "vault"
+                    and wiki
+                    and target_text
+                    and "/" not in target_text
                     else path_mode,
                     (f"[[{target_text}]]", f"[[{target_text}|{display}]]")
                     if wiki

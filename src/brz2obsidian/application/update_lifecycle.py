@@ -28,8 +28,10 @@ from brz2obsidian.core import (
     select_review_effects,
     validate_review,
 )
+from brz2obsidian.core.formats import obsolete_support_listing
 from brz2obsidian.core.selected_effects import SelectedEffectsWork
 from brz2obsidian.obsidian import inspect_text_candidate
+from brz2obsidian.output_formats import QUALIFIED_OUTPUT_FORMATS
 from brz2obsidian.publication.vault_native import available_memory, observe_file
 
 from .update_contracts import (
@@ -75,6 +77,7 @@ def _history(
     onboarding=False,
     maintenance=False,
     new_operation=None,
+    recorded_output_format=None,
 ):
     purpose = {"new_operation": new_operation} if new_operation is not None else {}
     history = (
@@ -134,13 +137,17 @@ def _history(
     if onboarding and onboarding_pending:
         return history, None
     identity = history.checkpoint.manifest.identity
-    if identity.output_format == 9:
-        return history, _refused("update_output_format_unavailable", history)
-    if identity.output_format != 8:
+    workflow = operations._configured_workflow()
+    target_format = (
+        int(workflow.metadata_factory().renderer_version)
+        if recorded_output_format not in QUALIFIED_OUTPUT_FORMATS
+        else recorded_output_format
+    )
+    if identity.output_format != target_format:
         return history, _refused(
             "format_transition_required", history, action="review_format_transition"
         )
-    policy = operations._configured_workflow().binding.policy
+    policy = workflow.binding.policy
     if (
         identity.module_id,
         identity.profile_id,
@@ -226,8 +233,26 @@ class _ExcludedDependency(ValueError):
 
 
 def _observed_facts(
-    history, baseline, incoming, *, retained_ownership=None, _owner=None, **identity
+    history,
+    baseline,
+    incoming,
+    *,
+    retained_ownership=None,
+    retained_review=None,
+    _owner=None,
+    **identity,
 ):
+    if retained_review is None:
+        retained_review = (
+            getattr(_owner, "_tip", None)
+            if _owner is not None
+            else getattr(getattr(history, "checkpoint", None), "review", None)
+        )
+    retired_note_ids = (
+        retained_review.saved.plan.producer_facts.retired_note_ids
+        if retained_review is not None
+        else ()
+    )
     inventory = history.admission.inventory
     managed = set(baseline) | set(incoming)
     if retained_ownership is not None:
@@ -259,6 +284,7 @@ def _observed_facts(
             current,
             current_inventory=inventory,
             retained_ownership=retained_ownership,
+            retired_note_ids=retired_note_ids,
             _owner=_owner._session if _owner is not None else None,
             **identity,
         )
@@ -433,7 +459,14 @@ class _UpdateRenderer:
 
 
 def _render(
-    operations, source, baseline, *, metadata=None, directory=None, _owner=None
+    operations,
+    source,
+    baseline,
+    *,
+    metadata=None,
+    output_format=None,
+    directory=None,
+    _owner=None,
 ):
     from .contracts import BrzSourceSelection
 
@@ -441,15 +474,9 @@ def _render(
         BrzSourceSelection(path=str(Path(source).absolute()))
     )
     if metadata is None:
-        # The update lifecycle targets format 8 until format-9 review is supported.
-        if (
-            "migration-record.json" in baseline
-            and record(baseline)["schema_version"] == 9
-        ):
-            raise ValueError("update_output_format_unavailable")
         metadata = workflow.metadata_factory()
-        if metadata.renderer_version == "9":
-            metadata = metadata.model_copy(update={"renderer_version": "8"})
+    if output_format is not None:
+        metadata = metadata.model_copy(update={"renderer_version": str(output_format)})
     renderer = Workflow(
         workflow.binding,
         _UpdateRenderer(workflow.renderer, baseline, _owner=_owner),
@@ -654,6 +681,16 @@ def _prepared(
         for row in source_record["item_targets"]
         if not row["created"]
     )
+    retained_notes = sum(
+        s.source_still_reserved and s.current.existence == "present"
+        for s in review.facts.subjects
+    )
+    retained_listings = tuple(
+        s.path
+        for s in review.facts.subjects
+        if s.current.existence == "present"
+        and obsolete_support_listing(review.facts, s)
+    )
     preparation = UpdatePreparation(
         schema_id="brz2obsidian.update-preparation",
         schema_version=1,
@@ -685,6 +722,19 @@ def _prepared(
         summary=(
             f"{len(review.proposal.changes)} comparisons; "
             f"{len(review.requirements)} choices remain."
+            + (
+                f" {retained_notes} vault notes are retained for source items "
+                "that still exist but no longer qualify for generated notes."
+                if retained_notes
+                else ""
+            )
+            + (
+                " Retained vault listings omitted from the new generated output: "
+                + ", ".join(retained_listings)
+                + "."
+                if retained_listings
+                else ""
+            )
         ),
         next_actions=("save_update",)
         if review.ready
@@ -866,7 +916,7 @@ def _text_choice(plan, change, choice, edited, *, _owner=None):
         states = tuple(s for s in states if s.target_id not in selected_ids) + tuple(
             s for s in candidate.target_facts if s.target_id in selected_ids
         )
-    if plan.facts.incoming_identity.output_format == 8:
+    if plan.facts.incoming_identity.output_format in QUALIFIED_OUTPUT_FORMATS:
         # Observe only results reconstructed from the actual producer facts and
         # admitted actions. Unresolved peers do not imply a Current selection.
         if _owner is None:
@@ -929,7 +979,7 @@ def _text_choice(plan, change, choice, edited, *, _owner=None):
                 existence="present" if chosen is not None else "missing",
                 membership_targets=targets,
                 source_path=owner.canonical_path,
-                output_format=8,
+                output_format=plan.facts.incoming_identity.output_format,
                 _owner=_owner._session if _owner is not None else None,
             )
             states = tuple(s for s in states if s.target_id != owner.target_id) + (
@@ -1006,7 +1056,7 @@ def _current_path_choice(plan, change):
         membership_targets=targets,
         source_path=change.target_path,
         output_format=facts.baseline_identity.output_format,
-        qualify_roles=facts.incoming_identity.output_format == 8,
+        qualify_roles=facts.incoming_identity.output_format in QUALIFIED_OUTPUT_FORMATS,
     )
     states = tuple(
         observed if row.target_id == owner.target_id else row
@@ -1165,12 +1215,14 @@ def refresh_update(operations, preparation, *, source=None):
 def _refresh_source_update(operations, preparation, observed, *, source):
     try:
         maintenance = preparation.kind == "format_transition"
+        output_format = preparation.source_binding.incoming_identity.output_format
         history, stopped = _history(
             operations,
             preparation.vault,
             observed,
             maintenance=maintenance,
             new_operation="format_transition" if maintenance else None,
+            recorded_output_format=output_format,
         )
         if stopped is not None:
             return stopped
@@ -1181,7 +1233,7 @@ def _refresh_source_update(operations, preparation, observed, *, source):
         )
         baseline = _baseline(history.checkpoint, retained)
         directory, incoming, observed_source, reused = _render(
-            operations, source, baseline
+            operations, source, baseline, output_format=output_format
         )
         if maintenance:
             from .format_transition import transition_facts
@@ -1747,6 +1799,7 @@ def _reobserve_inputs(operations, preparation, observed):
         new_operation="format_transition"
         if preparation.kind == "format_transition"
         else None,
+        recorded_output_format=preparation.source_binding.incoming_identity.output_format,
     )
     if stopped is not None:
         return (None, stopped.model_copy(update={"kind": preparation.kind}), None)

@@ -4,6 +4,7 @@ import hashlib
 import subprocess
 import sys
 
+from brz2obsidian.application.operations import Operations
 from brz2obsidian.application.update_contracts import UpdateResult
 from brz2obsidian.application.update_lifecycle import text_choice_action
 from brz2obsidian.application.vault_update_contracts import VaultApplyResult
@@ -247,6 +248,10 @@ def finish_interrupted_transition(operations, vault, prepared, root):
 
 def test_actual_format6_transition_resumes_declines_config_then_applies_distinct_source_b():
     root, operations, vault, archive, user_before = native_format_case(True)
+    direct = Operations().prepare_format_transition(vault, archive)
+    assert direct.preparation is not None, direct
+    assert direct.preparation.review.facts.baseline_identity.output_format == 6
+    assert direct.preparation.review.facts.incoming_identity.output_format == 9
     configuration = b'{"user":"keep exact legacy configuration"}\r\n'
     (vault / ".obsidian/app.json").write_bytes(configuration)
     configs_before = {

@@ -53,6 +53,7 @@ from brz2obsidian.obsidian import (
     interpret_links,
     interpret_structure,
 )
+from brz2obsidian.output_formats import QUALIFIED_OUTPUT_FORMATS
 from brz2obsidian.publication.git_payload import verify_blobs
 from brz2obsidian.publication.vault_admission import (
     _inspect_vault_for_recovery,
@@ -1143,7 +1144,8 @@ def _restore_link_context(original, facts, before, affected, git, *, _owner=None
                     output_format=7
                     if original.facts.baseline_identity.output_format == 6
                     else original.facts.baseline_identity.output_format,
-                    qualify_roles=original.facts.incoming_identity.output_format == 8,
+                    qualify_roles=original.facts.incoming_identity.output_format
+                    in QUALIFIED_OUTPUT_FORMATS,
                 )
             )
         elif target.target_id in current_states:
@@ -1276,7 +1278,10 @@ def _unaffected_attachment_context(original, intent, subject, change, approval):
 
 def _protected_resource_context(facts, subjects, context, retained, git):
     """Keep exact historical associations for resources outside reversal writes."""
-    if context is None or facts.incoming_identity.output_format != 8:
+    if (
+        context is None
+        or facts.incoming_identity.output_format not in QUALIFIED_OUTPUT_FORMATS
+    ):
         return context
     included = {(subject.item_id, subject.facet) for subject in subjects}
     protected = {

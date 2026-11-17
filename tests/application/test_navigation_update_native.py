@@ -1,0 +1,237 @@
+"""Public update journeys for format 9 and saved format-8 authority."""
+
+import json
+import shutil
+
+from brz2obsidian.application.operations import Operations
+from brz2obsidian.application.update_facts import output_identity
+from brz2obsidian.application.wiring import default_workflow
+from tests.application.test_format_transition_native import user_git_state
+from tests.application.test_graph_workflow import graph_archive, identity
+from tests.application.test_type_tag_updates import fresh_resume, use_incoming
+from tests.application.test_update_lifecycle import case_path, git
+from tests.support.recorded_format6 import NOTE, ORIGINAL
+from tests.support.recorded_format7 import FIXTURE, historical_payload
+from tests.support.recorded_format8 import format8_workflow
+
+__all__ = ["case_path"]
+
+LEAF = "Notes/Leaf.md"
+LISTING = "Uncreated targets.md"
+REPORT = "MIGRATION REPORT.md"
+RECORD = "migration-record.json"
+TITLES = {1: "Entry", 2: "Leaf", 3: "Jump A", 4: "Jump B"}
+RELATIONSHIPS = ((1, 2, 1, 1, -1), (3, 4, 3, 1, -1))
+
+
+def checkpoint(root, source, workflow):
+    vault = root / "vault"
+    converted = workflow.convert(source, vault)
+    assert converted.receipt is not None and converted.receipt.verified, converted
+    original = root / "original"
+    shutil.copytree(vault, original)
+    identity = output_identity(json.loads((original / RECORD).read_bytes()))
+    git(vault, "init", "-q")
+    git(vault, "config", "core.autocrlf", "false")
+    authored = b"Read [[Notes/Leaf.md|Leaf]].\r\n"
+    (vault / "Manual.md").write_bytes(authored)
+    git(vault, "add", "Manual.md")
+    git(vault, "commit", "-qm", "Independent vault history")
+    git(vault, "branch", "user-owned")
+    operations = Operations(workflow=workflow)
+    captured = operations.capture_checkpoint(
+        vault,
+        original,
+        identity=identity,
+        vault_id="navigation-test-vault",
+        import_id="navigation-test-import",
+        admission=operations.inspect_history(vault).admission,
+    )
+    assert captured.status == "captured", captured
+    return vault, original, authored
+
+
+def review_plan(result):
+    assert result.status == "prepared_review" and result.preparation is not None, result
+    return result.preparation
+
+
+def test_tracked_format8_upgrade_cold_resume_retains_authored_link_and_listing(
+    case_path,
+):
+    source = graph_archive(case_path / "original.brz", TITLES, RELATIONSHIPS)
+    vault, original, authored = checkpoint(case_path, source, format8_workflow())
+    user_before = user_git_state(vault)
+    assert not (vault / LEAF).exists()
+    listing = (original / LISTING).read_bytes() + b"\nMy retained annotation.\r\n"
+    (vault / LISTING).write_bytes(listing)
+    operations = Operations()
+    assert operations.prepare_update(vault, source).code == "format_transition_required"
+    offered = operations.prepare_format_transition(vault, source)
+    prepared = review_plan(offered)
+    facts = prepared.review.facts
+    assert (
+        facts.baseline_identity.output_format,
+        facts.incoming_identity.output_format,
+    ) == (8, 9)
+    assert facts.format_operation.baseline_source_version == (
+        facts.format_operation.target_source_version
+    )
+    assert LISTING in offered.summary
+    leaf = next(c for c in prepared.review.proposal.changes if c.item_id == identity(2))
+    assert leaf.original is None and leaf.current is None
+    assert b"## Parents" in leaf.incoming.data
+    ready = use_incoming(operations, prepared)
+    saved = operations.save_update(ready)
+    assert saved.code == "saved", saved
+    assert not (vault / LEAF).exists()
+    resumed = fresh_resume(vault, case_path / "transition-resumed.json")
+    assert resumed.review.ready
+    assert resumed.kind == "format_transition"
+    result = operations.apply_update(resumed)
+    assert result.status == "applied", result
+    assert (vault / LEAF).read_bytes() == leaf.incoming.data
+    assert (vault / "Manual.md").read_bytes() == authored
+    assert (vault / LISTING).read_bytes() == listing
+    assert b"[[Uncreated targets.md|" not in (vault / REPORT).read_bytes()
+    generated = json.loads((vault / RECORD).read_bytes())
+    assert generated["schema_version"] == 9
+    assert LISTING not in {
+        row["relative_path"] for row in generated["support_artifacts"]
+    }
+    assert user_git_state(vault) == user_before
+    undo = operations.prepare_undo(vault)
+    assert (undo.status, undo.code) == ("none", "latest_operation_is_maintenance")
+    history = operations.inspect_history(vault).checkpoint.locator
+    assert operations.prepare_format_transition(vault, source).code == (
+        "format_transition_not_required"
+    )
+    repeated = review_plan(operations.prepare_update(vault, source))
+    assert operations.apply_update(repeated).code == "already_current"
+    assert operations.inspect_history(vault).checkpoint.locator == history
+
+
+def test_saved_format8_source_update_reassembles_in_current_format9_process(case_path):
+    initial = graph_archive(
+        case_path / "original.brz",
+        {1: "Entry"},
+        notes={1: (b"Original body.\r\n", 4)},
+    )
+    incoming = graph_archive(
+        case_path / "incoming.brz",
+        {1: "Entry"},
+        notes={1: (b"Incoming body.\r\n", 4)},
+    )
+    workflow = format8_workflow()
+    vault, _, _ = checkpoint(case_path, initial, workflow)
+    old_operations = Operations(workflow=workflow)
+    prepared = review_plan(old_operations.prepare_update(vault, incoming))
+    saved = old_operations.save_update(use_incoming(old_operations, prepared))
+    assert saved.code == "saved", saved
+    current = Operations()
+    assert default_workflow().metadata_factory().renderer_version == "9"
+    resumed = fresh_resume(vault, case_path / "old-source-update-resumed.json")
+    assert resumed.kind == "source_update" and resumed.review.ready
+    assert resumed.review.facts.baseline_identity.output_format == 8
+    assert resumed.review.facts.incoming_identity.output_format == 8
+    refreshed = review_plan(current.refresh_update(resumed, source=incoming))
+    assert refreshed.review.facts.incoming_identity.output_format == 8
+    assert current.apply_update(use_incoming(current, refreshed)).status == "applied"
+    assert json.loads((vault / RECORD).read_bytes())["schema_version"] == 8
+
+
+def test_format9_retirement_and_requalification_keep_local_deletion_after_cold_resume(
+    case_path,
+):
+    titles = {1: "Entry", 2: "Leaf", 3: "Kept"}
+    initial = graph_archive(
+        case_path / "generated.brz",
+        titles,
+        ((1, 2, 1, 1, -1), (1, 3, 1, 1, -1)),
+    )
+    dormant = graph_archive(case_path / "dormant.brz", titles)
+    qualifying = graph_archive(
+        case_path / "requalified.brz", titles, ((1, 2, 3, 1, -1), (1, 3, 3, 1, -1))
+    )
+    vault, _, authored = checkpoint(case_path, initial, default_workflow())
+    (vault / LEAF).unlink()
+    kept_path = vault / "Notes/Kept.md"
+    retained = kept_path.read_bytes() + b"\nAuthored during the first import.\r\n"
+    kept_path.write_bytes(retained)
+    # This test exercises a prior recorded deletion without an authored
+    # reference to the deleted file. The upgrade test covers authored links.
+    (vault / "Manual.md").write_bytes(
+        authored.replace(b"[[Notes/Leaf.md|Leaf]]", b"it")
+    )
+    operations = Operations()
+    retirement = operations.prepare_update(vault, dormant)
+    prepared = review_plan(retirement)
+    assert "still exist but no longer qualify" in retirement.summary
+    assert prepared.review.facts.retired_note_ids == (identity(2), identity(3))
+    result = operations.apply_update(use_incoming(operations, prepared))
+    assert result.status == "applied", result
+    assert not (vault / LEAF).exists()
+    assert kept_path.read_bytes() == retained
+
+    # A new process reconstructs the private reviews from the authenticated
+    # recorded generation and reobserves the current working directory.
+    moved = vault / "Moved/Kept.md"
+    moved.parent.mkdir()
+    kept_path.rename(moved)
+    offered = review_plan(operations.prepare_update(vault, qualifying))
+    saved = operations.save_update(offered)
+    assert saved.code == "saved", saved
+    resumed = fresh_resume(vault, case_path / "requalified-resumed.json")
+    rows = {row.item_id: row for row in resumed.review.proposal.changes}
+    deletion = rows[identity(2)]
+    assert deletion.original is None and deletion.current is None
+    assert deletion.disposition == "local_deleted" and not deletion.requires_decision
+    retained_note = rows[identity(3)]
+    assert retained_note.original is None
+    assert retained_note.identity_review.selected_entry_id == "file:Moved/Kept.md"
+    assert retained_note.current.data == retained
+    assert b"## Related" in retained_note.incoming.data
+    assert moved.read_bytes() == retained and not kept_path.exists()
+    assert not (vault / LEAF).exists()
+
+
+def test_recorded_format7_routes_to_current_and_reopens_saved_format8(case_path):
+    payload, _ = historical_payload()
+    original, vault = case_path / "recorded-original", case_path / "vault"
+    for name, raw in payload.items():
+        for directory in (original, vault):
+            path = directory / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(raw)
+    source = FIXTURE / "source.brz"
+    git(vault, "init", "-q")
+    git(vault, "config", "core.autocrlf", "false")
+    current = Operations()
+    captured = current.capture_checkpoint(
+        vault,
+        original,
+        identity=output_identity(json.loads(payload[RECORD])),
+        vault_id="navigation-legacy-vault",
+        import_id="navigation-legacy-import",
+        admission=current.inspect_history(vault).admission,
+    )
+    assert captured.status == "captured", captured
+    direct = review_plan(current.prepare_format_transition(vault, source))
+    assert direct.review.facts.baseline_identity.profile_version == "10"
+    assert direct.review.facts.baseline_identity.output_format == 7
+    assert direct.review.facts.incoming_identity.output_format == 9
+    assert current.inspect_history(vault).checkpoint.locator == captured.locator
+
+    historical = Operations(workflow=format8_workflow())
+    legacy = review_plan(historical.prepare_format_transition(vault, source))
+    saved = historical.save_update(legacy)
+    assert saved.code == "saved", saved
+    resumed = fresh_resume(vault, case_path / "old-transition-resumed.json")
+    assert resumed.kind == "format_transition"
+    assert resumed.review.facts.baseline_identity.output_format == 7
+    assert resumed.review.facts.incoming_identity.output_format == 8
+    (row,) = [r for r in resumed.review.proposal.changes if r.path == NOTE]
+    assert row.original.data == row.current.data == ORIGINAL
+    assert resumed.review.facts.format_operation.baseline_source_version == (
+        resumed.review.facts.format_operation.target_source_version
+    )

@@ -14,6 +14,7 @@ from brz2obsidian.contracts import (
     ReferenceDeclarationFacts,
     SourceIdentity,
 )
+from brz2obsidian.output_formats import REVIEWABLE_OUTPUT_FORMATS
 
 IMAGE_EXTENSIONS = frozenset(
     (".avif", ".bmp", ".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp")
@@ -65,7 +66,7 @@ def migration_record_data(text, source_path, *, record_format=8):
             or value.get("schema") != "brz2obsidian.migration"
             or type(value.get("schema_version")) is not int
             or type(record_format) is not int
-            or record_format not in (6, 7, 8)
+            or record_format not in (6, *REVIEWABLE_OUTPUT_FORMATS)
             or value["schema_version"] != record_format
             or any(
                 not isinstance(value.get(key), str) or not value[key]

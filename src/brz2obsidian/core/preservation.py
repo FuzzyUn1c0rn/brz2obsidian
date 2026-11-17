@@ -105,9 +105,14 @@ def preservation_policy(facts, subject, subject_id, allowed):
         proposal = ("source_absent", subject.current.content, "source_absent", False)
         kind, choices = "source_absent", ()
     elif deleted:
-        unchanged = subject.incoming is None or (
-            subject.baseline.content is not None
-            and content_key(subject.incoming) == content_key(subject.baseline.content)
+        unchanged = (
+            subject.previously_generated
+            or subject.incoming is None
+            or (
+                subject.baseline.content is not None
+                and content_key(subject.incoming)
+                == content_key(subject.baseline.content)
+            )
         )
         suppressed = unchanged or bool(matches)
         proposal = (

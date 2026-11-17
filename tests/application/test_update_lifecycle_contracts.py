@@ -756,7 +756,7 @@ def test_unavailable_recorded_generation_routes_before_payload_access(
         module_version="11",
         profile_id="thebrain-format5-reviewed",
         profile_version="11",
-        output_format=8,
+        output_format=9,
         settings_digest=hashlib.sha256(b"{}").hexdigest(),
     ).model_copy(update=difference)
     history = SimpleNamespace(
@@ -885,18 +885,18 @@ def source_refresh_preparation(payload, directory):
 
 
 def current_source_refresh_preparation(tmp_path):
-    from tests.support.recorded_format8 import format8_workflow
+    from brz2obsidian.application.wiring import default_workflow
     from tests.support.type_tag_sources import brz_source
 
-    vault = tmp_path / "current8"
-    converted = format8_workflow().convert(brz_source(tmp_path / "current.brz"), vault)
+    vault = tmp_path / "current9"
+    converted = default_workflow().convert(brz_source(tmp_path / "current.brz"), vault)
     assert converted.outcome == "clean" and converted.receipt is not None
     payload = {
         row.relative_path: (vault / row.relative_path).read_bytes()
         for row in converted.receipt.manifest
     }
     prepared = source_refresh_preparation(payload, vault)
-    assert prepared.review.facts.baseline_identity.output_format == 8
+    assert prepared.review.facts.baseline_identity.output_format == 9
     assert prepared.review.facts.baseline_identity.profile_version == "11"
     return prepared
 

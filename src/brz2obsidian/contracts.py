@@ -1335,6 +1335,13 @@ class ReconciliationSubject(ReconciliationContract):
     output_role: Literal["note", "dashboard", "template", "guide", "configuration"]
     structure: StructureComparison | None
     attachment: AttachmentFacts | None
+    prior_reservation: bool = Field(default=False, exclude_if=lambda value: not value)
+    previously_generated: bool = Field(
+        default=False, exclude_if=lambda value: not value
+    )
+    source_still_reserved: bool = Field(
+        default=False, exclude_if=lambda value: not value
+    )
     automatic_attachment: AttachmentCandidate | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
@@ -1366,6 +1373,9 @@ class ReconciliationInput(ReconciliationContract):
     source_version_memory: tuple[SourceVersionMemory, ...]
     preservation_decisions: tuple[PreservationDecision, ...] = ()
     link_context: LinkContext | None
+    retired_note_ids: tuple[str, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
 
     @model_validator(mode="after")
     def unique_subjects_and_facts(self):
@@ -1727,6 +1737,7 @@ class IdentityReview(ReconciliationContract):
         "association_proposed",
         "target_unsafe",
         "current_mismatch",
+        "reserved_path_adoption",
     ]
     selected_entry_id: str | None
     candidates: tuple[IdentityCandidate, ...]

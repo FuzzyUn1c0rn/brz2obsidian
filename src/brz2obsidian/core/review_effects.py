@@ -18,6 +18,7 @@ from brz2obsidian.core.review_links import (
     known_result_document,
     onboarding_current_context,
 )
+from brz2obsidian.output_formats import QUALIFIED_OUTPUT_FORMATS
 
 from .reversals import (
     content_bytes,
@@ -27,6 +28,39 @@ from .reversals import (
     selected_reversal_outputs,
 )
 from .text_candidates import validate_text_candidate
+
+
+def _promoted_reservation(occurrence, actual, adopted_ids):
+    before = occurrence.meaning
+    query = occurrence.query
+    if (
+        query is None
+        or query.mode != "exact"
+        or before.path is None
+        or query.value not in (before.path, before.path.removesuffix(".md"))
+        or actual.status != "resolved"
+        or actual.target_identity is None
+    ):
+        return False
+    identity = before.target_identity
+    if (
+        before.status == "resolved"
+        and identity is None
+        and before.target_id in adopted_ids
+    ):
+        identity = actual.target_identity
+    elif before.status != "intentionally_uncreated":
+        return False
+    return (
+        before.model_copy(
+            update={
+                "status": "resolved",
+                "target_identity": identity,
+                "target_version": actual.target_version,
+            }
+        )
+        == actual
+    )
 
 
 def _onboarding_current_effects(facts, proposal, actions, approvals):
@@ -191,6 +225,7 @@ def selected_effect_blockers(facts, proposal, actions, approvals, *, composition
     explicit_documents = set()
     operation_documents = set()
     changed_ids = set()
+    adopted_ids = set()
     blockers = []
     composed_documents = dict(composition.documents)
     composition_conflict = composition.conflict
@@ -515,6 +550,20 @@ def selected_effect_blockers(facts, proposal, actions, approvals, *, composition
         )
         if len(own) == 1:
             target = own[0]
+            if change.identity_review.reason == "reserved_path_adoption":
+                promoted = tuple(
+                    t
+                    for t in source_targets
+                    if t.target_id == target.target_id
+                    and t.canonical_path == selected_path
+                    and candidate is not None
+                    and t.identity == candidate.identity
+                )
+                if len(promoted) != 1:
+                    add("selected_link_context_conflict")
+                    continue
+                target = promoted[0]
+                adopted_ids.add(target.target_id)
             if selected_path != target.canonical_path:
                 supplied = tuple(
                     t
@@ -620,7 +669,7 @@ def selected_effect_blockers(facts, proposal, actions, approvals, *, composition
     final_targets = tuple(targets.values())
     final_states = tuple(states.values())
     # Historical7 persisted reviews retain their qualified replay semantics.
-    if facts.incoming_identity.output_format == 8:
+    if facts.incoming_identity.output_format in QUALIFIED_OUTPUT_FORMATS:
         for code in provider_chain_blockers(
             context.current_target_facts,
             final_states,
@@ -702,10 +751,14 @@ def selected_effect_blockers(facts, proposal, actions, approvals, *, composition
                             for old in prior.occurrences
                         )
                     )
-                    and occurrence.meaning.model_copy(
-                        update={"target_version": actual.target_version}
+                    and (
+                        occurrence.meaning.model_copy(
+                            update={"target_version": actual.target_version}
+                        )
+                        == actual
+                        or facts.incoming_identity.output_format == 9
+                        and _promoted_reservation(occurrence, actual, adopted_ids)
                     )
-                    == actual
                 ):
                     occurrence = occurrence.model_copy(update={"meaning": actual})
                 occurrences.append(occurrence)

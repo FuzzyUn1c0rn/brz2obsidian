@@ -12,6 +12,7 @@ from brz2obsidian.contracts import (
     ReconciliationContract,
     SourceIdentity,
 )
+from brz2obsidian.output_formats import REVIEWABLE_OUTPUT_FORMATS
 
 
 def interpret_attachment_mapping(content: ExactContent, *, identity: OutputIdentity):
@@ -28,7 +29,7 @@ def interpret_attachment_mapping(content: ExactContent, *, identity: OutputIdent
     )
     if (
         record["schema"] != "brz2obsidian.migration"
-        or actual.output_format not in (7, 8)
+        or actual.output_format not in REVIEWABLE_OUTPUT_FORMATS
         or actual != identity
     ):
         raise ValueError("Attachment mapping generation is unqualified")

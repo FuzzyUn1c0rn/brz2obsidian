@@ -61,9 +61,9 @@ def test_converter_vault_without_source_history_routes_to_preservation_onboardin
     source = make_archive(case_path / "incoming.brz")
     vault = case_path / "vault"
     operations = Operations()
-    from tests.support.recorded_format8 import format8_workflow
+    from brz2obsidian.application.wiring import default_workflow
 
-    assert format8_workflow().convert(source, vault).receipt is not None
+    assert default_workflow().convert(source, vault).receipt is not None
     git(vault, "init", "-q")
     git(vault, "config", "core.autocrlf", "false")
     before = (vault / "Home — Entry thought.md").read_bytes()
@@ -77,7 +77,7 @@ def test_converter_vault_without_source_history_routes_to_preservation_onboardin
 
 
 def _seed(case_path, *, two_notes=False, capture_history=True):
-    from tests.support.recorded_format8 import format8_workflow
+    from brz2obsidian.application.wiring import default_workflow
 
     archive = make_archive(case_path / "initial.brz")
     if two_notes:
@@ -110,7 +110,7 @@ def _seed(case_path, *, two_notes=False, capture_history=True):
             )
         archive = second
     vault, source = case_path / "vault", case_path / "source"
-    workflow = format8_workflow()
+    workflow = default_workflow()
     metadata = workflow.metadata_factory()
     workflow.metadata_factory = lambda: metadata
     receipt = workflow.convert(archive, vault).receipt
@@ -160,7 +160,7 @@ def _seed(case_path, *, two_notes=False, capture_history=True):
         module_version="11",
         profile_id="thebrain-format5-reviewed",
         profile_version="11",
-        output_format=8,
+        output_format=9,
         settings_digest=hashlib.sha256(b"{}").hexdigest(),
     )
     result = Operations().capture_checkpoint(
@@ -490,9 +490,9 @@ def test_unreferenced_ignored_authored_bytes_never_enter_the_saved_review(case_p
     excludes = vault / ".git/info/exclude"
     excludes.write_bytes(excludes.read_bytes() + b"\nIgnored/\n")
     incoming = _changed_archive(initial, case_path / "incoming.brz")
-    from tests.support.recorded_format8 import format8_workflow
+    from brz2obsidian.application.wiring import default_workflow
 
-    workflow = format8_workflow()
+    workflow = default_workflow()
     metadata = workflow.metadata_factory().model_copy(
         update={
             "run_id": "incoming-B-280",

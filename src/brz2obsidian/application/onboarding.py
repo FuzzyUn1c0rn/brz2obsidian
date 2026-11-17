@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from brz2obsidian.contracts import RunMetadata, SourceIdentity
 from brz2obsidian.core import prepare_review, refresh_review, validate_review
+from brz2obsidian.output_formats import QUALIFIED_OUTPUT_FORMATS
 
 from .update_contracts import UpdatePreparation
 from .update_facts import _outputs, output_identity, record
@@ -33,7 +34,7 @@ def refused(code, history=None, *, action="inspect_history"):
 
 def transition_required(facts):
     old, target = facts.baseline_identity, facts.incoming_identity
-    return old.output_format != 8 or (
+    return old.output_format not in QUALIFIED_OUTPUT_FORMATS or (
         old.output_format,
         old.profile_id,
         old.profile_version,
@@ -119,8 +120,6 @@ def _facts(history, original, incoming, *, proposal_id, generation, _owner=None)
     old = _recorded_identity(
         history, facts.incoming_identity, proposal_id, _owner=_owner
     )
-    if old.output_format == 9 and facts.incoming_identity.output_format == 8:
-        raise ValueError("update_output_format_unavailable")
     if old != facts.baseline_identity:
         facts = facts.model_copy(update={"baseline_identity": old})
     if original is None and transition_required(facts):
@@ -155,8 +154,8 @@ def _original_payload(operations, history, source, *, _owner=None):
         metadata = RunMetadata.model_validate(old["run_metadata"])
         policy = operations._configured_workflow().binding.policy
         if (
-            old["schema_version"] != 8
-            or metadata.renderer_version != "8"
+            old["schema_version"] not in QUALIFIED_OUTPUT_FORMATS
+            or metadata.renderer_version != str(old["schema_version"])
             or (
                 identity.module_id,
                 identity.module_version,
@@ -185,6 +184,22 @@ def _original_payload(operations, history, source, *, _owner=None):
             )
         if observed != identity or record(payload) != old:
             return None
+        if old["schema_version"] == 8:
+            category_ids = {
+                row["item_key"]
+                for row in old["item_targets"]
+                if row["relative_path"].startswith("Categories/")
+            }
+            if any(
+                row["item_key"] in category_ids
+                and row["native"]
+                and row["token"] != "categories"
+                and row["token"].casefold() == "categories"
+                for row in old["tag_memberships"]
+            ):
+                # The format-8 record has no producer hash seed. Matching the
+                # record cannot establish which exact tag order it emitted.
+                return None
         return payload
     except OSError, ValueError, KeyError, TypeError, AttributeError:
         return None
