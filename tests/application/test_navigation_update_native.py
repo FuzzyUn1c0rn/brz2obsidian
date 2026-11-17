@@ -3,6 +3,8 @@
 import json
 import shutil
 
+import pytest
+
 from brz2obsidian.application.operations import Operations
 from brz2obsidian.application.update_facts import output_identity
 from brz2obsidian.application.update_lifecycle import text_choice_action
@@ -334,15 +336,16 @@ def test_interrupted_format9_upgrade_finishes_with_authored_reserved_links(case_
     assert json.loads((vault / RECORD).read_bytes())["schema_version"] == 9
 
 
+@pytest.mark.parametrize("save_first", (False, True), ids=("direct", "saved-first"))
 def test_unavailable_format9_intent_ref_keeps_the_edited_review_resumable(
-    case_path, monkeypatch
+    case_path, monkeypatch, save_first
 ):
     from brz2obsidian.publication.vault_history import _Git
 
     source = graph_archive(
         case_path / "original.brz", {1: "Entry", 2: "Leaf"}, (RELATIONSHIPS[0],)
     )
-    vault, _, authored = checkpoint(case_path, source, format8_workflow())
+    vault, original, authored = checkpoint(case_path, source, format8_workflow())
     home = next(vault.glob("Home*.md"))
     home_before = home.read_bytes()
     occupant_path = vault / LEAF
@@ -358,6 +361,20 @@ def test_unavailable_format9_intent_ref_keeps_the_edited_review_resumable(
     )
     moved.write_bytes(local)
     operations = Operations()
+    if save_first:
+        # Record the current authored inventory at the old source generation
+        # so the subsequent LOCAL review memo can retain this authority.
+        history = operations.inspect_history(vault)
+        association = history.checkpoint.locator.association
+        baseline = operations.capture_checkpoint(
+            vault,
+            original,
+            identity=history.checkpoint.manifest.identity,
+            vault_id=association.vault_id,
+            import_id=association.import_id,
+            admission=history.admission,
+        )
+        assert baseline.status == "captured", baseline
     prepared = review_plan(operations.prepare_format_transition(vault, source))
     leaf = next(c for c in prepared.review.proposal.changes if c.item_id == identity(2))
     leaf_result = leaf.incoming.data + b"\nLocal prose.\r\n"
@@ -370,6 +387,18 @@ def test_unavailable_format9_intent_ref_keeps_the_edited_review_resumable(
         operations, choose_text(operations, with_leaf, referrer, edited)
     )
     assert ready.review.ready
+    approvals = tuple(
+        a.decision_id for a in ready.review.approvals if a.result is not None
+    )
+    if save_first:
+        saved = operations.save_update(ready)
+        assert saved.code == "saved", saved
+        assert saved.checkpoint != baseline.locator
+        ready_from_memo = review_plan(Operations().resume_update(vault))
+        assert ready_from_memo.review.ready
+        assert ready_from_memo.locator == saved.checkpoint
+        assert ready_from_memo.review.preflight == ready.review.preflight
+        ready = ready_from_memo
     call = _Git.call
 
     def refuse_operation_ref(self, *args, **kwargs):
@@ -397,7 +426,8 @@ def test_unavailable_format9_intent_ref_keeps_the_edited_review_resumable(
     assert occupant_path.read_bytes() == occupant
     assert (vault / "Manual.md").read_bytes() == authored
 
-    resumed = review_plan(Operations().resume_update(vault))
+    restarted = Operations()
+    resumed = review_plan(restarted.resume_update(vault))
     assert resumed.review.ready
     assert resumed.review.facts.baseline_identity.output_format == 8
     assert resumed.review.facts.incoming_identity.output_format == 9
@@ -405,3 +435,15 @@ def test_unavailable_format9_intent_ref_keeps_the_edited_review_resumable(
         edited,
         leaf_result,
     }
+
+    assert (
+        tuple(a.decision_id for a in resumed.review.approvals if a.result is not None)
+        == approvals
+    )
+    applied = restarted.apply_update(resumed)
+    assert applied.status == "applied", applied
+    assert home.read_bytes() == edited
+    assert moved.read_bytes() == leaf_result
+    assert occupant_path.read_bytes() == occupant
+    assert (vault / "Manual.md").read_bytes() == authored
+    assert json.loads((vault / RECORD).read_bytes())["schema_version"] == 9

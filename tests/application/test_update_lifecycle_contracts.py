@@ -1695,47 +1695,63 @@ def test_onboarding_save_rechecks_current_authority_before_any_checkpoint(
     } == expected_incoming
 
 
+@pytest.mark.parametrize("saved_first", (False, True), ids=("direct", "saved-memo"))
 def test_unpublished_format_preparation_keeps_parent_review_authority(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, saved_first
 ):
     from brz2obsidian.publication.vault_admission import _Inspection
     from brz2obsidian.publication.vault_history import _CheckpointRole, _RolePolicy
 
     inspection = _Inspection(tmp_path, (), None, new_operation="format_transition")
-    previous = SimpleNamespace(
-        commit="b" * 40,
-        generation=1,
-        model_dump=lambda **kwargs: {"commit": "b" * 40, "generation": 1},
-    )
-    locator = SimpleNamespace(
-        commit="c" * 40,
-        generation=2,
-        model_copy=lambda **kwargs: previous,
-    )
-    inspection.history = SimpleNamespace(status="valid", locator=locator)
+    anchor = preparation().locator
+    locator = anchor.model_copy(update={"commit": "d" * 40, "generation": 3})
     inspection.repo = SimpleNamespace(kind="root", git_directory="controlled")
     inspection.operation = "idle"
+    authority = inspection._state_fingerprint(anchor)
     policy = _RolePolicy((), ("p", "q"), (), (), "", "", None)
-    parent = _CheckpointRole(
-        previous.commit, None, 1, "local", None, None, None, None, None, identity="old"
+    baseline = _CheckpointRole(
+        anchor.commit,
+        None,
+        1,
+        "local",
+        None,
+        None,
+        None,
+        None,
+        None,
+        identity="old",
+        memo_fingerprint="same-source-and-policy",
+        policy_context=policy,
     )
+    parent = baseline
+    if saved_first:
+        saved_locator = anchor.model_copy(update={"commit": "c" * 40, "generation": 2})
+        parent = baseline._replace(
+            commit=saved_locator.commit,
+            previous=baseline.commit,
+            generation=saved_locator.generation,
+            review_parent_fingerprint=authority,
+            review_kind="format_transition",
+        )
+    else:
+        locator = locator.model_copy(update={"generation": 2})
     pending = _CheckpointRole(
         locator.commit,
-        previous.commit,
-        2,
+        parent.commit,
+        locator.generation,
         "prepared",
         None,
         None,
         None,
         None,
         None,
-        review_parent_fingerprint=inspection._state_fingerprint(previous),
+        review_parent_fingerprint=authority,
         policy_context=policy,
         review_kind="format_transition",
         identity="new",
         review_baseline_identity="old",
+        reviewed_payload="same-incoming",
     )
-    inspection.checkpoint_roles = [pending, parent]
     admission = SimpleNamespace(status="supported", inventory_complete=True)
     fresh = SimpleNamespace(
         policy_fingerprint="p",
@@ -1743,7 +1759,43 @@ def test_unpublished_format_preparation_keeps_parent_review_authority(
         preflight=SimpleNamespace(consents=()),
     )
     monkeypatch.setattr(inspection, "_policy_observation", lambda *args: fresh)
-    assert inspection._review_context(admission, {}) == (previous, True)
 
+    parents = [parent, baseline] if saved_first else [baseline]
+    if saved_first:
+        inspection.history = SimpleNamespace(status="valid", locator=saved_locator)
+        inspection.checkpoint_roles = parents
+        assert inspection._review_context(admission, {}) == (anchor, True)
+    inspection.history = SimpleNamespace(status="valid", locator=locator)
+    inspection.checkpoint_roles = [pending, *parents]
+    assert inspection._format_prepared_parent() == parent
+    assert inspection._review_context(admission, {}) == (anchor, True)
+
+    if saved_first:
+        foreign_memo = parent._replace(memo_fingerprint="different-source")
+        inspection.checkpoint_roles = [pending, foreign_memo, baseline]
+        assert inspection._review_context(admission, {}) == (locator, False)
+        inspection.checkpoint_roles = [pending, *parents]
     fresh.policy_continuity_fingerprint = "changed"
     assert inspection._review_context(admission, {}) == (locator, False)
+
+    fresh.policy_continuity_fingerprint = "q"
+    saved_again = locator.model_copy(
+        update={"commit": "e" * 40, "generation": locator.generation + 1}
+    )
+    local = parent._replace(
+        commit=saved_again.commit,
+        previous=pending.commit,
+        generation=saved_again.generation,
+        review_parent_fingerprint=authority,
+        review_kind="format_transition",
+        reviewed_payload=pending.reviewed_payload,
+    )
+    inspection.history = SimpleNamespace(status="valid", locator=saved_again)
+    inspection.checkpoint_roles = [local, pending, *parents]
+    assert inspection._review_context(admission, {}) == (anchor, True)
+    inspection.checkpoint_roles = [
+        local._replace(reviewed_payload="different-incoming"),
+        pending,
+        *parents,
+    ]
+    assert inspection._review_context(admission, {}) == (saved_again, False)

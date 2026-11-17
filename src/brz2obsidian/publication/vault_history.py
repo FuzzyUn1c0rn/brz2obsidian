@@ -1019,6 +1019,7 @@ class _CheckpointRole(NamedTuple):
     identity: OutputIdentity | None = None
     review_baseline_identity: OutputIdentity | None = None
     baseline_source: tuple | None = None
+    reviewed_payload: str | None = None
 
 
 def _review_context_fingerprint(association, manifest):
@@ -1447,14 +1448,26 @@ def _read(
                 and manifest.review_object is not None
             )
         if checkpoint_roles is not None:
-            pending_format = (
-                not checkpoint_roles
-                and manifest.boundary == "prepared"
-                and manifest.reviewed_source is not None
+            format_review = (
+                manifest.reviewed_source is not None
                 and review_metadata[10] == "format_transition"
+                and manifest.preimage == manifest.vault
+            )
+            pending_format = (
+                format_review
+                and manifest.boundary == "prepared"
                 and manifest.undo_of_receipt_commit is None
                 and manifest.recovery_direction is None
+                and (
+                    not checkpoint_roles
+                    or len(checkpoint_roles) == 1
+                    and checkpoint_roles[0].boundary == "local"
+                    and checkpoint_roles[0].reviewed_payload is not None
+                )
             )
+            # An unpublished format change may follow a LOCAL review memo
+            # whose authority still resides in its validated history.
+            memo_roles = memo_roles or pending_format
             checkpoint_roles.append(
                 _CheckpointRole(
                     current,
@@ -1490,8 +1503,7 @@ def _read(
                     if memo_roles
                     else None,
                     review_metadata[4]
-                    if (memo_roles or pending_format)
-                    and manifest.review_object is not None
+                    if memo_roles and manifest.review_object is not None
                     else None,
                     review_metadata[7] if manifest.review_object is not None else False,
                     review_context_fingerprint=_review_context_fingerprint(
@@ -1515,6 +1527,15 @@ def _read(
                     baseline_source=manifest.source
                     if len(checkpoint_roles) == 1
                     and checkpoint_roles[0].review_baseline_identity is not None
+                    else None,
+                    reviewed_payload=digest(
+                        manifest.reviewed_source.model_dump(
+                            mode="json", exclude={"source_anchor", "generation"}
+                        )
+                    )
+                    if (
+                        pending_format or format_review and manifest.boundary == "local"
+                    )
                     else None,
                 )
             )

@@ -2001,12 +2001,12 @@ class _Inspection:
             for required in policy.requirements
         )
 
-    def _qualified_policy_context(self, role, parent, admission, observations):
+    def _qualified_policy_context(self, role, parent, tip, admission, observations):
         if self.policy_probe or admission is None or admission.status != "supported":
             return False
         current = getattr(role, "policy_context", None)
         previous = getattr(parent, "policy_context", None)
-        tip = getattr(self.checkpoint_roles[0], "policy_context", None)
+        tip = getattr(tip, "policy_context", None)
         if (
             current is None
             or previous is None
@@ -2052,7 +2052,9 @@ class _Inspection:
             and old.preflight.consents != previous.requirements
         )
 
-    def _completed_source_review_parent(self, role, parent, admission, observations):
+    def _completed_source_review_parent(
+        self, role, parent, tip, admission, observations
+    ):
         """Prove only a first memo's history anchor, using its OWN current policy."""
         if (
             self.policy_probe
@@ -2068,7 +2070,7 @@ class _Inspection:
             return False
         current = role.policy_context
         previous = parent.policy_context
-        tip = self.checkpoint_roles[0].policy_context
+        tip = tip.policy_context
         terminal = self.recovery_observation
         if (
             current is None
@@ -2131,7 +2133,7 @@ class _Inspection:
             and fresh.preflight.consents == current.requirements
         )
 
-    def _saved_format_parent(self, role, parent, admission, observations):
+    def _saved_format_parent(self, role, parent, tip, admission, observations):
         """A saved format memo may use its actual onboarding LOCAL as storage."""
         if (
             self.policy_probe
@@ -2148,7 +2150,7 @@ class _Inspection:
         ):
             return False
         current, previous = role.policy_context, parent.policy_context
-        tip = self.checkpoint_roles[0].policy_context
+        tip = tip.policy_context
         physical = self.history.locator.model_copy(
             update={"commit": parent.commit, "generation": parent.generation}
         )
@@ -2174,10 +2176,8 @@ class _Inspection:
             and fresh.preflight.consents == current.requirements
         )
 
-    def _review_locator(self, admission=None, observations=None):
+    def _review_locator(self, locator, roles, admission, observations):
         """Keep memo dependencies on their proved parent, after full validation."""
-        locator = self.history.locator
-        roles = self.checkpoint_roles
         if (
             self.operation != "idle"
             or not roles
@@ -2186,6 +2186,7 @@ class _Inspection:
             or roles[0].generation != locator.generation
         ):
             return locator
+        tip = roles[0]
         parent = context = None
         for role in reversed(roles):
             actual = locator.model_copy(
@@ -2204,12 +2205,14 @@ class _Inspection:
                     or parent.boundary == "result"
                     and self._same_review_context(role, parent)
                     or self._completed_source_review_parent(
-                        role, parent, admission, observations
+                        role, parent, tip, admission, observations
                     )
-                    or self._saved_format_parent(role, parent, admission, observations)
+                    or self._saved_format_parent(
+                        role, parent, tip, admission, observations
+                    )
                     or parent.boundary in ("local", "result")
                     and self._qualified_policy_context(
-                        role, parent, admission, observations
+                        role, parent, tip, admission, observations
                     )
                 )
                 and role.operation_intent_commit is None
@@ -2243,16 +2246,16 @@ class _Inspection:
             parent, context = role, selected
         return context
 
-    def _format_prepared_parent(self):
+    def _format_prepared_parent(self, *, offset=0):
         """Find the physical baseline of an initial unpublished format change."""
         roles = self.checkpoint_roles
-        if self.operation != "idle" or len(roles) < 2:
+        if self.operation != "idle" or len(roles) < offset + 2:
             return None
-        tip, parent = roles[:2]
-        actual = self.history.locator
+        actual, current = self.history.locator, roles[0]
+        tip, parent = roles[offset : offset + 2]
         if (
-            tip.commit == actual.commit
-            and tip.generation == actual.generation
+            current.commit == actual.commit
+            and current.generation == actual.generation
             and tip.boundary == "prepared"
             and tip.review_kind == "format_transition"
             and tip.review_baseline_identity is not None
@@ -2268,40 +2271,79 @@ class _Inspection:
             return parent
         return None
 
-    def _prepared_format_context(self, admission, observations):
-        if self.policy_probe or admission is None or not admission.inventory_complete:
-            return None
-        parent = self._format_prepared_parent()
-        if parent is None:
-            return None
-        tip = self.checkpoint_roles[0]
-        policy = tip.policy_context
-        locator = self.history.locator.model_copy(
-            update={"commit": parent.commit, "generation": parent.generation}
-        )
-        if policy is None or tip.review_parent_fingerprint != self._state_fingerprint(
-            locator
-        ):
-            return None
+    def _current_role_policy_matches(self, policy, admission, observations):
+        if policy is None:
+            return False
         try:
             fresh = self._policy_observation(policy.subjects, admission, observations)
         except OSError, ValueError, TypeError:
-            return None
-        if (
+            return False
+        return (
             fresh is not None
             and (fresh.policy_fingerprint, fresh.policy_continuity_fingerprint)
             == policy.fingerprints
             and fresh.preflight.consents == policy.requirements
+        )
+
+    def _format_retry_context(self, admission, observations):
+        if (
+            self.policy_probe
+            or admission is None
+            or admission.status != "supported"
+            or not admission.inventory_complete
+            or not self.checkpoint_roles
         ):
-            return locator
-        return None
+            return None
+        roles = self.checkpoint_roles
+        current = roles[0]
+        saved = current if current.boundary == "local" else None
+        offset = 0 if saved is None else 1
+        parent = self._format_prepared_parent(offset=offset)
+        if parent is None:
+            return None
+        prepared = roles[offset]
+        if saved is not None and (
+            saved.review_kind != "format_transition"
+            or saved.previous != prepared.commit
+            or saved.generation != prepared.generation + 1
+            or saved.reviewed_payload is None
+            or saved.reviewed_payload != prepared.reviewed_payload
+            or saved.identity != parent.identity
+            or saved.policy_context is None
+            or parent.policy_context is None
+            or saved.policy_context.context_basis != parent.policy_context.context_basis
+            or saved.review_parent_fingerprint != prepared.review_parent_fingerprint
+        ):
+            return None
+        locator = self.history.locator.model_copy(
+            update={"commit": parent.commit, "generation": parent.generation}
+        )
+        # The physical parent retains the old source. Its saved review may
+        # still depend on an earlier checkpoint proved by the LOCAL memo chain.
+        if prepared.review_parent_fingerprint != self._state_fingerprint(locator):
+            locator = self._review_locator(
+                locator, roles[offset + 1 :], admission, observations
+            )
+            if prepared.review_parent_fingerprint != self._state_fingerprint(locator):
+                return None
+        if not self._current_role_policy_matches(
+            prepared.policy_context, admission, observations
+        ):
+            return None
+        if saved is not None and not self._current_role_policy_matches(
+            saved.policy_context, admission, observations
+        ):
+            return None
+        return locator
 
     def _review_context(self, admission=None, observations=None):
-        prepared_parent = self._prepared_format_context(admission, observations)
-        if prepared_parent is not None:
-            return prepared_parent, True
-        locator = self._review_locator(admission, observations)
+        format_anchor = self._format_retry_context(admission, observations)
+        if format_anchor is not None:
+            return format_anchor, True
         roles = self.checkpoint_roles
+        locator = self._review_locator(
+            self.history.locator, roles, admission, observations
+        )
         if (
             self.new_operation == "format_transition"
             and not self.policy_probe
