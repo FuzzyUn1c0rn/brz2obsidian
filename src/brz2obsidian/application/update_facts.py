@@ -691,14 +691,16 @@ def _bind_moved_navigation(facts, source_record):
                 )
                 if match is not None:
                     peer, identity = match
-                    links[occurrence.relationship_heading, identity.item_id] = (
-                        MovedNavigationReference(
-                            heading=occurrence.relationship_heading,
-                            label=occurrence.meaning.display_text,
-                            identity=identity,
-                            source_path=peer.path,
-                            observed_path=peer.current.path,
-                        )
+                    key = (occurrence.relationship_heading, identity.item_id)
+                    links[key] = MovedNavigationReference(
+                        heading=occurrence.relationship_heading,
+                        label=occurrence.meaning.display_text,
+                        identity=identity,
+                        source_path=peer.path,
+                        observed_path=peer.current.path,
+                        section_boundary=occurrence.relationship_boundary
+                        if key not in links
+                        else None,
                     )
         current = current_documents.get((document_id, subject.current.path))
         if (
@@ -706,7 +708,9 @@ def _bind_moved_navigation(facts, source_record):
             and current is not None
             and current.status == "supported"
             and same_content(subject.baseline.content, subject.incoming)
-            and moved_navigation_valid(links.values(), current.occurrences)
+            and moved_navigation_valid(
+                links.values(), current.occurrences, current.occurrences
+            )
         ):
             links.clear()
         subjects.append(

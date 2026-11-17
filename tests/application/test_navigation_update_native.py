@@ -225,7 +225,13 @@ def choose_text(operations, prepared, change, edited):
     ]
     result = operations.resolve_update(
         prepared,
-        action(prepared.review, change, domain=offer.domain, choice="edited"),
+        action(
+            prepared.review,
+            change,
+            domain=offer.domain,
+            choice="edited",
+            decision_id=f"requalify:{change.item_id}",
+        ),
         edited=edited,
     )
     assert result.code == "accepted", result

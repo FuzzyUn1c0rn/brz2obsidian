@@ -35,7 +35,7 @@ def generated(analysis, generation):
     }
 
 
-def navigation_review(*, occupant=None, observer=LINK, extra=None):
+def navigation_review(*, occupant=None, observer=LINK, extra=None, owner_edit=None):
     analysis = analyze(
         snapshot((item("leaf", "Leaf"),), (edge("edge", "entry", "leaf"),)), POLICY
     )
@@ -44,6 +44,9 @@ def navigation_review(*, occupant=None, observer=LINK, extra=None):
     current = original | {MANUAL: observer} | (extra or {})
     if occupant is not None:
         current[PATH] = occupant
+    if owner_edit is not None:
+        home = "Home \u2014 Entry.md"
+        current[home] = owner_edit(current[home])
     facts = assemble_facts(
         original, incoming, current, proposal_id="promotion", generation=1
     )
@@ -317,8 +320,13 @@ def test_obsolete_listing_retains_current_bytes_and_has_no_incoming_file():
     assert listing.result.data == local and not listing.requires_decision
 
 
-@pytest.mark.parametrize("occupied", (False, True), ids=("free", "occupied"))
-def test_generated_navigation_requires_the_approved_moved_note_destination(occupied):
+@pytest.mark.parametrize("placement", ("free", "occupied", "authored-before"))
+def test_generated_navigation_requires_the_approved_moved_note_destination(placement):
+    occupied = placement != "free"
+    authored = placement == "authored-before"
+    canonical, relocated = b"[[Notes/Leaf.md|Leaf]]", b"[[Moved/Leaf.md|Leaf]]"
+    heading = b"## Children\n\n"
+    authored_block = heading + b"- " + canonical + b"\n\nAuthored context.\n\n"
     moved = "Moved/Leaf.md"
     local = (
         b'---\nsource_collection_id: "collection"\n'
@@ -329,6 +337,9 @@ def test_generated_navigation_requires_the_approved_moved_note_destination(occup
         occupant=occupant,
         observer=LINK if occupied else b"Independent local prose.\r\n",
         extra={moved: local},
+        owner_edit=lambda body: (
+            body.replace(heading, authored_block + heading, 1) if authored else body
+        ),
     )
     leaf = comparison(review, "leaf")
     assert leaf.target_path == moved and leaf.original is None
@@ -352,7 +363,20 @@ def test_generated_navigation_requires_the_approved_moved_note_destination(occup
         ),
     )
     assert refused.status == "refused"
-    corrected = initial.replace(b"[[Notes/Leaf.md|Leaf]]", b"[[Moved/Leaf.md|Leaf]]")
+    prefix, generated, suffix = initial.rpartition(canonical)
+    assert generated == canonical
+    corrected = prefix + relocated + suffix
+    if authored:
+        assert authored_block in corrected
+        requested = action(chosen, entry, domain=offer.domain, choice="edited")
+        for wrong in (
+            initial.replace(canonical, relocated, 1),
+            initial.replace(canonical, relocated),
+        ):
+            outcome = resolve_review(
+                chosen, text_choice_action(chosen, requested, edited=wrong)
+            )
+            assert outcome.status == "refused"
     final = choose(chosen, "entry", offer.domain, "edited", edited=corrected)
     effects = select_review_effects(final)
     assert effects.status == "selected", (final.blockers, final.requirements)
@@ -368,6 +392,16 @@ def test_generated_navigation_requires_the_approved_moved_note_destination(occup
         if link.meaning.path == moved
     ]
     assert changed.meaning.target_identity.item_id == "leaf"
+    if authored:
+        (retained,) = [
+            link
+            for link in approval.candidate.links.occurrences
+            if link.raw == canonical
+        ]
+        assert retained.meaning.status == "resolved"
+        assert (
+            retained.meaning.path == PATH and retained.meaning.target_identity is None
+        )
 
     if not occupied:
         source = {s.path: s.incoming.data for s in final.facts.subjects if s.incoming}

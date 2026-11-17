@@ -97,30 +97,76 @@ def _known_memberships(subject, document, choice, *, mapping_choice):
     return True
 
 
-def moved_navigation_valid(references, occurrences):
-    for reference in references:
-        matches = [
-            link
-            for link in occurrences
-            if link.relationship_heading == reference.heading
-            and not link.embedded
-            and link.meaning.display_text == reference.label
+def _navigation_entries(reference, occurrences):
+    return tuple(
+        link
+        for link in occurrences
+        if link.relationship_heading == reference.heading
+        and not link.embedded
+        and link.meaning.display_text == reference.label
+        and (
+            link.meaning.target_identity == reference.identity
+            or link.query is not None
             and (
-                link.meaning.target_identity == reference.identity
-                or link.query is not None
-                and (
-                    matches_exact_note_path(link.query, reference.source_path)
-                    or matches_exact_note_path(link.query, reference.observed_path)
-                )
+                matches_exact_note_path(link.query, reference.source_path)
+                or matches_exact_note_path(link.query, reference.observed_path)
             )
-        ]
-        if not matches or any(
-            link.meaning.status != "resolved"
-            or link.meaning.target_identity != reference.identity
-            or link.meaning.path is None
-            or link.query is None
-            or not matches_exact_note_path(link.query, link.meaning.path)
-            for link in matches
+        )
+    )
+
+
+def _generated_navigation_entry(reference, entries, *, require_boundary):
+    if not entries:
+        return None
+    if len(entries) == 1 and not require_boundary:
+        return entries[0]
+    if reference.section_boundary is None:
+        return None
+    anchored = tuple(
+        link
+        for link in entries
+        if link.relationship_boundary == reference.section_boundary
+    )
+    return anchored[0] if len(anchored) == 1 else None
+
+
+def _authored_navigation_entries(entries, generated):
+    return tuple(
+        (
+            link.raw,
+            link.relationship_boundary,
+            link.meaning.model_copy(update={"target_version": None}),
+        )
+        for link in entries
+        if link != generated
+    )
+
+
+def moved_navigation_valid(references, occurrences, current_occurrences):
+    for reference in references:
+        current = _navigation_entries(reference, current_occurrences)
+        selected = _navigation_entries(reference, occurrences)
+        # A repeated heading cannot grant ownership. Disambiguate against the
+        # unique boundary observed in the exact generated output and retain
+        # the other entries with their independently observed destinations.
+        require_boundary = len(current) > 1 or len(selected) > 1
+        before = _generated_navigation_entry(
+            reference, current, require_boundary=require_boundary
+        )
+        after = _generated_navigation_entry(
+            reference, selected, require_boundary=require_boundary
+        )
+        if (
+            len(current) > 1
+            and before is None
+            or after is None
+            or after.meaning.status != "resolved"
+            or after.meaning.target_identity != reference.identity
+            or after.meaning.path is None
+            or after.query is None
+            or not matches_exact_note_path(after.query, after.meaning.path)
+            or _authored_navigation_entries(current, before)
+            != _authored_navigation_entries(selected, after)
         ):
             return False
     return True
@@ -195,10 +241,25 @@ def validate_text_candidate(facts, change, candidate, choice, *, mapping_choice=
         baseline=baseline,
     ).valid:
         return False
-    if not moved_navigation_valid(
-        subject.moved_navigation, candidate.links.occurrences
-    ):
-        return False
+    if subject.moved_navigation:
+        current_documents = (
+            tuple(
+                doc
+                for doc in context.current_documents
+                if doc.source_path == change.path
+                and same_content(doc.content, change.current)
+            )
+            if context is not None and change.current is not None
+            else ()
+        )
+        if change.current is not None and len(current_documents) != 1:
+            return False
+        if not moved_navigation_valid(
+            subject.moved_navigation,
+            candidate.links.occurrences,
+            current_documents[0].occurrences if current_documents else (),
+        ):
+            return False
     if any(
         t.identity is not None and t.identity != candidate.identity
         for t in candidate.link_targets
