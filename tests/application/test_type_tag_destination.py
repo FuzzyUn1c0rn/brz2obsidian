@@ -8,7 +8,7 @@ import yaml
 from brz2obsidian.application.wiring import default_workflow
 from brz2obsidian.vault_check import check_vault
 from tests.application.test_graph_workflow import identity
-from tests.support.type_tag_sources import DEEP_ICON, ICON, IDS, brz_source
+from tests.support.type_tag_sources import DEEP_ICON, EDGES, ICON, IDS, brz_source
 
 
 def test_full_finite_icon_snapshots_keep_owned_icons_and_direct_membership(tmp_path):
@@ -36,7 +36,7 @@ def test_full_finite_icon_snapshots_keep_owned_icons_and_direct_membership(tmp_p
         "through the selected appearance-category chain starting at " + IDS["C"]
         in adaptation["description"]
     )
-    assert sum(t["created"] for t in targets.values()) == 20
+    assert sum(t["created"] for t in targets.values()) == 21
     for name, provider in (("B", "A"), ("C", "B"), ("D", "C"), ("F", "E")):
         text = (destination / targets[IDS[name]]["relative_path"]).read_text(
             encoding="utf-8"
@@ -105,7 +105,7 @@ def test_native_bases_share_eight_link_lookup_and_report_depth_without_refusal(
     assert all(i.severity == "warning" for i in result.issues)
     vault = tmp_path / "vault"
     record = json.loads((vault / "migration-record.json").read_bytes())
-    assert record["schema_version"] == 8 and record["renderer_version"] == "8"
+    assert record["schema_version"] == 9 and record["renderer_version"] == "9"
     assert record["source_identity"]["format_version"] == "5"
     bases = [
         yaml.safe_load((vault / f"Templates/Bases/{name}.base").read_bytes())
@@ -219,7 +219,10 @@ def test_nested_tag_facts_stay_readable_with_independent_tokens(tmp_path, create
         write_source,
     )
 
-    source = brz_source(tmp_path / "base.brz")
+    source = brz_source(
+        tmp_path / "base.brz",
+        edges=tuple(edge for edge in EDGES if edge != (11, 17, 3, 1, -1)),
+    )
     if created:
         with ZipFile(source) as archive:
             parts = {name: archive.read(name) for name in archive.namelist()}

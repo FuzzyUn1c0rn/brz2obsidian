@@ -15,12 +15,13 @@ def image_formula(value):
 
 def tag_listing(roles, titles, names, created, tokens, assignments, *, output_version):
     """Readable direct source-tag edges; no transitive/ancestor projection."""
+    nested_tags = output_version in (8, 9)
     focused = [
         tag
         for tag in sorted(tokens)
         if not any(a == tag for a, _ in assignments)
         or any(
-            a == tag and (b not in created or output_version == 8 and roles[b] == 4)
+            a == tag and (b not in created or nested_tags and roles[b] == 4)
             for a, b in assignments
         )
     ]
@@ -28,7 +29,7 @@ def tag_listing(roles, titles, names, created, tokens, assignments, *, output_ve
         return ""
     text = "# Tag memberships\n\n" + (
         "Explicit nested source-tag facts, assignments on uncreated targets and source tags without assignments. Tokens are independent: a parent tag is not inferred on a child tag's members. Use native tag search for created assigned notes.\n\n"
-        if output_version == 8
+        if nested_tags
         else "Assignments on uncreated targets and source tags without assignments. Use native tag search for created assigned notes.\n\n"
     )
 
@@ -44,8 +45,7 @@ def tag_listing(roles, titles, names, created, tokens, assignments, *, output_ve
             {
                 b
                 for a, b in assignments
-                if a == tag
-                and (b not in created or output_version == 8 and roles[b] == 4)
+                if a == tag and (b not in created or nested_tags and roles[b] == 4)
             }
         )
         text += (
@@ -55,7 +55,7 @@ def tag_listing(roles, titles, names, created, tokens, assignments, *, output_ve
                 + " (#"
                 + tokens[child]
                 + ("); uncreated target.\n" if child not in created else ").\n")
-                if output_version == 8 and roles[child] == 4
+                if nested_tags and roles[child] == 4
                 else "- " + linked(child) + "\n"
                 for child in visible
             )
@@ -161,7 +161,7 @@ def check_base8(text, role):
 
 def check_base(path, role, *, output_version=7):
     text = path.read_bytes().decode()
-    if output_version == 8:
+    if output_version in (8, 9):
         return check_base8(text, role)
     # This is a closed literal authoring contract, not a native-engine simulator.
     formulas = {}
@@ -258,7 +258,7 @@ def check_support_content(vault, names, definitions, *, output_version=7):
         "Templates/New note.md": template(),
         "Templates/Category starter.md": template(role_tag=True)
         + "\n"
-        + (CATEGORY_VIEWS_8 if output_version == 8 else CATEGORY_VIEWS),
+        + (CATEGORY_VIEWS_8 if output_version in (8, 9) else CATEGORY_VIEWS),
         "Templates/Member template starter.md": template()
         + "\n<!-- Duplicate this as a full template, then set categories and appearance_category to your existing category. Keep the date/title variables for insertion into a new note. See Vault guide. -->\n",
     }
@@ -289,7 +289,9 @@ def check_support_content(vault, names, definitions, *, output_version=7):
         "Full native templates can replace shared",
         "CRLF line endings to LF",
         "Empty means no inheritance",
-        "Invalid appearance category." if output_version == 8 else "Invalid provider",
+        "Invalid appearance category."
+        if output_version in (8, 9)
+        else "Invalid provider",
         "body-icon snapshots",
         "source colours remain in migration-record.json without vault colour properties",
         "without timezone conversion",

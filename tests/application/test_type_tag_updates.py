@@ -28,6 +28,7 @@ from tests.application.test_graph_workflow import graph_archive
 from tests.application.test_onboarding_completion import authored_files
 from tests.application.test_update_lifecycle import git
 from tests.reconciliation.test_resolution import action
+from tests.support.recorded_format8 import format8_workflow
 from tests.support.type_tag_sources import (
     BRAIN,
     EDGES,
@@ -118,7 +119,7 @@ def seed_current(root, *, source=None, onboarding=False):
         graph_archive(root / "bootstrap.brz", {1: "Entry"}) if onboarding else source
     )
     vault = root / "vault"
-    converted = default_workflow().convert(bootstrap, vault)
+    converted = format8_workflow().convert(bootstrap, vault)
     assert converted.outcome == "clean", converted.issues
     original = root / "original-v1"
     if not onboarding:

@@ -6,13 +6,10 @@ from pathlib import PurePosixPath
 from brz2obsidian.obsidian_dialect import video_player_markup
 
 
-def resource_section(plan, owner):
-    targets = {target.asset_id: target for target in plan.asset_targets}
+def resource_section(assets, targets):
     lines = []
-    for asset in sorted(plan.analysis.snapshot.assets, key=lambda a: a.asset_id):
+    for asset in assets:
         target = targets[asset.asset_id]
-        if asset.owner != owner:
-            continue
         if asset.availability == "absent" and asset.role in {"note_original", "icon"}:
             continue
         if asset.availability == "absent":

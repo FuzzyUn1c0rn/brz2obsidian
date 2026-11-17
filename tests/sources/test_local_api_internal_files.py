@@ -225,7 +225,7 @@ def test_historical_profiles_do_not_acquire_current_ordinary_file_admission(
         assert result.outcome == "clean", result.issues
         record = json.loads((vault / "migration-record.json").read_bytes())
         assert (
-            record["profile_version"] == profile and record["renderer_version"] == "8"
+            record["profile_version"] == profile and record["renderer_version"] == "9"
         )
         assert (vault / "Attachments/22222222/manual.pdf").read_bytes() == PDF_BYTES
         api.attachments[FILE]["location"] = "clip.mp4"

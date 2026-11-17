@@ -12,9 +12,11 @@ from .support import SUPPORT_NAMESPACE, support_artifacts
 from .tags import assign_tags
 
 
-def plan(analysis: Analysis) -> MigrationPlan:
+def plan(analysis: Analysis, *, output_format: int = 8) -> MigrationPlan:
     snapshot = analysis.snapshot
-    targets = assign_item_targets(analysis, resource_owners(snapshot))
+    targets = assign_item_targets(
+        analysis, resource_owners(snapshot), output_format=output_format
+    )
     isolated, related_pairs = select_fallbacks(snapshot, targets)
     asset_targets = assign_asset_targets(snapshot)
     created = {t.item_key for t in targets if t.created}
@@ -61,6 +63,7 @@ def plan(analysis: Analysis) -> MigrationPlan:
         source_identity=snapshot.identity,
         profile_id=analysis.policy.profile_id,
         profile_version=analysis.policy.profile_version,
+        output_format=output_format,
         item_targets=tuple(targets),
         asset_targets=asset_targets,
         tag_targets=tag_targets,

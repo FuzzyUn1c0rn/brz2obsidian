@@ -425,6 +425,7 @@ class MigrationPlan(Contract):
     source_identity: SourceIdentity
     profile_id: str
     profile_version: str
+    output_format: Literal[8, 9] = 8
     item_targets: tuple[ItemTarget, ...]
     asset_targets: tuple[AssetTarget, ...]
     tag_targets: tuple[TagTarget, ...] = ()
@@ -505,6 +506,7 @@ class DocumentInspection(Contract):
 
 class Inspection(Contract):
     item_targets: tuple[ItemTarget, ...]
+    output_format: Literal[8, 9] = 8
     classification_assignments: tuple[ClassificationAssignment, ...] = ()
     asset_targets: tuple[AssetTarget, ...] = ()
     assets: tuple[Asset, ...] = ()

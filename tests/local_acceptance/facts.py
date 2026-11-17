@@ -12,6 +12,30 @@ def identities(records, label):
     return result
 
 
+def navigation_selection(initial, relationships, output_version):
+    """Derive materialized identities from independently admitted source edges."""
+    if output_version == 9:
+        neighbors = {
+            endpoint
+            for kind, left, right in relationships
+            if kind in {"hierarchy", "related"}
+            for endpoint in (left, right)
+        }
+        return initial | neighbors
+
+    selected = set(initial)
+    hierarchy = [(a, b) for kind, a, b in relationships if kind == "hierarchy"]
+    while pending := [
+        (a, b) for a, b in hierarchy if a not in selected and b not in selected
+    ]:
+        counts = {
+            parent: sum(parent in pair for pair in pending)
+            for parent in {a for a, _ in pending}
+        }
+        selected.add(min(counts, key=lambda key: (-counts[key], key)))
+    return selected
+
+
 def assert_acyclic(edges, message):
     """Iterative source-edge check, including branching and self-assignment."""
     adjacent = {}

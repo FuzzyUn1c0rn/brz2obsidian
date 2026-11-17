@@ -188,6 +188,7 @@ class ReviewedInspection(Versioned, SourceArguments):
     )
     source_identity: SourceIdentity
     converter_version: str
+    output_format: Literal[8, 9] = 8
     profile_id: str
     profile_version: str
     outcome: Literal["clean", "warnings"]

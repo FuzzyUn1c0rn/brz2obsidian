@@ -23,6 +23,7 @@ from .appearance import check_depth_warnings, source_icon
 from .facts import (
     classifications,
     identities,
+    navigation_selection,
     note_ids,
     relationships,
     video,
@@ -158,17 +159,19 @@ def check_vault(source, vault):
         "obsidian_property_types_configuration",
         "original_evidence",
     }, "migration record schema fields"
-    assert (record["schema"], record["schema_version"]) == (
-        "brz2obsidian.migration",
-        8,
-    ), "record schema version"
+    output_version = record["schema_version"]
+    assert record["schema"] == "brz2obsidian.migration" and output_version in (8, 9), (
+        "record schema version"
+    )
     assert (
         record["converter_version"]
         == record["run_metadata"]["converter_version"]
         == "0.3.0"
     ), "converter version"
     assert (
-        record["renderer_version"] == record["run_metadata"]["renderer_version"] == "8"
+        record["renderer_version"]
+        == record["run_metadata"]["renderer_version"]
+        == str(output_version)
     ), "renderer version"
     with Path(source).open("rb") as stream:
         assert (
@@ -812,21 +815,16 @@ def check_items(raw, record, archive, vault, assets):
             kind in {2, 3, 8} or (kind in {1, 12} and a["DataLength"] > 0)
         ):
             content.add(owner)
-    created = (content & thoughts.keys()) | {home} | definitions | assigned_types.keys()
-    initial = set(created)
-    hierarchy = [
-        (r["ThoughtIdA"], r["ThoughtIdB"])
-        for r in raw["links.json"]
-        if relation_kinds[r["Id"]] == "hierarchy"
-    ]
-    while uncovered := [
-        (a, b) for a, b in hierarchy if a not in created and b not in created
-    ]:
-        candidates = {a for a, _ in uncovered}
-        chosen = min(
-            candidates, key=lambda k: (-sum(k in {a, b} for a, b in uncovered), k)
-        )
-        created.add(chosen)
+    initial = (content & thoughts.keys()) | {home} | definitions | assigned_types.keys()
+    output_version = record["schema_version"]
+    created = navigation_selection(
+        initial,
+        [
+            (relation_kinds[r["Id"]], r["ThoughtIdA"], r["ThoughtIdB"])
+            for r in raw["links.json"]
+        ],
+        output_version,
+    )
     check_depth_warnings(
         record,
         created,
@@ -841,7 +839,9 @@ def check_items(raw, record, archive, vault, assets):
             and target["original_title"] == thoughts[key]["Name"]
         ), "item identity assignment"
         assert target["relative_path"] == names[key], "item filename assignment"
-        assert target["created"] == (key in created), "greedy eligibility"
+        assert target["created"] == (key in created), (
+            "source-bound note materialization"
+        )
         reasons = (
             (["content"] if key in content else [])
             + (["home"] if key == home else [])
@@ -849,7 +849,7 @@ def check_items(raw, record, archive, vault, assets):
             + (["classification"] if key in assigned_types else [])
         )
         if key in created and key not in initial:
-            reasons = ["hierarchy"]
+            reasons = ["navigation" if output_version == 9 else "hierarchy"]
         assert target["creation_reasons"] == reasons, "creation reasons"
         assert target["vault_tag_token"] == tag_tokens.get(key), "native tag token"
         declared, calendar, icon = expected_metadata(raw, key, assets)
@@ -1158,12 +1158,22 @@ def check_items(raw, record, archive, vault, assets):
         ]
     }, "native bookmark"
     check_listings(
-        raw, vault, thoughts, names, created, tag_tokens, assignments, documents
+        raw,
+        vault,
+        thoughts,
+        names,
+        created,
+        tag_tokens,
+        assignments,
+        documents,
+        output_version=output_version,
     )
     return (
         {
             "notes": len(created),
-            "hierarchy_only": len(created - initial),
+            ("navigation_only" if output_version == 9 else "hierarchy_only"): len(
+                created - initial
+            ),
             "ordinary_notes": sum(thoughts[k]["Kind"] == 1 for k in created),
             "tag_notes": sum(thoughts[k]["Kind"] == 4 for k in created),
             "category_notes": len(definitions),
@@ -1234,7 +1244,16 @@ def expected_metadata(raw, key, assets):
 
 
 def check_listings(
-    raw, vault, thoughts, names, created, tokens, assignments, documents
+    raw,
+    vault,
+    thoughts,
+    names,
+    created,
+    tokens,
+    assignments,
+    documents,
+    *,
+    output_version,
 ):
     represented = set()
     pairs = set()
@@ -1295,6 +1314,17 @@ def check_listings(
         assert (vault / "Uncreated targets.md").read_bytes() == listing.encode(), (
             "focused uncreated listing"
         )
+    report = (vault / "MIGRATION REPORT.md").read_text(encoding="utf-8")
+    uncreated_reference = "[[Uncreated targets.md|Uncreated targets]]"
+    if listing:
+        explanation = " lists otherwise unrepresented empty thoughts"
+        if output_version == 8:
+            explanation += " and Related pairs"
+        assert uncreated_reference + explanation + ".\n" in report, (
+            "uncreated listing report explanation"
+        )
+    else:
+        assert uncreated_reference not in report, "absent uncreated listing report link"
     listing = tag_listing(
         {key: row["Kind"] for key, row in thoughts.items()},
         {key: row["Name"] for key, row in thoughts.items()},
@@ -1302,7 +1332,7 @@ def check_listings(
         created,
         tokens,
         [(row["ThoughtIdA"], row["ThoughtIdB"]) for row in assignments],
-        output_version=8,
+        output_version=output_version,
     )
     assert (vault / "Tag memberships.md").is_file() == bool(listing), (
         "conditional tag listing"

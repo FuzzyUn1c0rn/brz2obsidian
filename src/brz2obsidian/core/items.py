@@ -34,7 +34,7 @@ def _bounded(readable, prefix, suffix):
     return prefix + readable.rstrip(" .") + suffix
 
 
-def assign_item_targets(analysis, resource_owners=()):
+def assign_item_targets(analysis, resource_owners, *, output_format):
     snapshot = analysis.snapshot
     items = sorted(
         (i for i in snapshot.items if i.live and i.role != "system"),
@@ -58,17 +58,26 @@ def assign_item_targets(analysis, resource_owners=()):
             selected.append("classification")
         if selected:
             reasons[item.key] = tuple(selected)
-    edges = [
-        (r.item_a, r.item_b) for r in snapshot.relationships if r.kind == "hierarchy"
-    ]
-    while uncovered := [
-        (a, b) for a, b in edges if a not in reasons and b not in reasons
-    ]:
-        parents = {a for a, b in uncovered}
-        chosen = min(
-            parents, key=lambda key: (-sum(key in {a, b} for a, b in uncovered), key)
-        )
-        reasons[chosen] = ("hierarchy",)
+    if output_format == 9:
+        for relationship in snapshot.relationships:
+            if relationship.kind in ("hierarchy", "related"):
+                reasons.setdefault(relationship.item_a, ("navigation",))
+                reasons.setdefault(relationship.item_b, ("navigation",))
+    else:
+        edges = [
+            (r.item_a, r.item_b)
+            for r in snapshot.relationships
+            if r.kind == "hierarchy"
+        ]
+        while uncovered := [
+            (a, b) for a, b in edges if a not in reasons and b not in reasons
+        ]:
+            parents = {a for a, b in uncovered}
+            chosen = min(
+                parents,
+                key=lambda key: (-sum(key in {a, b} for a, b in uncovered), key),
+            )
+            reasons[chosen] = ("hierarchy",)
     readable = {item.key: _readable(item.title) for item in items}
     widths = {item.key: 0 for item in items}
     seeds = {item.key: item.naming_seed for item in items}

@@ -13,7 +13,6 @@ import brz2obsidian.publication.vault_native as native
 import brz2obsidian.publication.vault_recovery as recovery
 from brz2obsidian.application.operations import Operations
 from brz2obsidian.application.update_context import UpdateContext
-from brz2obsidian.application.wiring import default_workflow
 from brz2obsidian.contracts import OutputIdentity
 from brz2obsidian.publication import checkpoint_payload
 from tests.application.test_owned_update_preparation import _digest, _tree
@@ -29,6 +28,7 @@ from tests.application.test_verified_coverage import (
     source_parts,
     write_source,
 )
+from tests.support.recorded_format8 import format8_workflow
 
 
 def test_fresh_history_context_finishes_large_incoming_after_stopped_apply(monkeypatch):
@@ -57,7 +57,7 @@ def test_fresh_history_context_finishes_large_incoming_after_stopped_apply(monke
     parts = source_parts(initial_directory)
     add_attachment(parts, item_id, 1, "large.bin", original)
     initial_archive = write_source(initial_directory, parts)
-    workflow = default_workflow()
+    workflow = format8_workflow()
     metadata = workflow.metadata_factory()
     workflow.metadata_factory = lambda: metadata
     vault = root / "vault"

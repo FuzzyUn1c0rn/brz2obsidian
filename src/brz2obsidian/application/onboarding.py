@@ -119,6 +119,8 @@ def _facts(history, original, incoming, *, proposal_id, generation, _owner=None)
     old = _recorded_identity(
         history, facts.incoming_identity, proposal_id, _owner=_owner
     )
+    if old.output_format == 9 and facts.incoming_identity.output_format == 8:
+        raise ValueError("update_output_format_unavailable")
     if old != facts.baseline_identity:
         facts = facts.model_copy(update={"baseline_identity": old})
     if original is None and transition_required(facts):

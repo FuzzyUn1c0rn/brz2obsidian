@@ -47,6 +47,7 @@ class _ReviewedPublisher:
             self.reviewed.converter_version != __version__
             or metadata.converter_version != self.reviewed.converter_version
             or metadata.renderer_version != artifacts.renderer_version
+            or plan.output_format != self.reviewed.output_format
             or plan.profile_id != self.reviewed.profile_id
             or plan.profile_version != self.reviewed.profile_version
             or plan.analysis.policy.profile_id != self.reviewed.profile_id

@@ -47,7 +47,7 @@ class Workflow:
         now = datetime.now(UTC)
         return RunMetadata(
             converter_version=__version__,
-            renderer_version="8",
+            renderer_version="9",
             run_id=str(uuid4()),
             run_time=now.isoformat(),
             obsidian_version="1.13.7",
@@ -110,12 +110,27 @@ class Workflow:
                     phase = "analysis"
                     analysis = analyze(session.snapshot, self.binding.policy)
                     counts, issues = analysis.counts, analysis.issues
-                    migration_plan = plan(analysis)
+                    metadata = self.metadata_factory()
+                    if metadata.renderer_version not in ("8", "9"):
+                        raise MigrationRefused(
+                            (
+                                Issue(
+                                    code="unsupported_format",
+                                    phase="planning",
+                                    message="Output format must be 8 or 9.",
+                                    guidance="Select supported renderer metadata.",
+                                ),
+                            )
+                        )
+                    migration_plan = plan(
+                        analysis, output_format=int(metadata.renderer_version)
+                    )
                     counts, issues = migration_plan.counts, migration_plan.issues
                     if operation == "inspect":
                         session.verify_consistency()
                         inspection = Inspection(
                             item_targets=migration_plan.item_targets,
+                            output_format=migration_plan.output_format,
                             classification_assignments=session.snapshot.classification_assignments,
                             asset_targets=migration_plan.asset_targets,
                             assets=session.snapshot.assets,
@@ -135,9 +150,7 @@ class Workflow:
                         )
                     else:
                         phase = "rendering"
-                        artifacts = self.renderer.render(
-                            migration_plan, self.metadata_factory()
-                        )
+                        artifacts = self.renderer.render(migration_plan, metadata)
                         phase = "publication"
                         receipt = self.publisher.publish(
                             artifacts, session, destination

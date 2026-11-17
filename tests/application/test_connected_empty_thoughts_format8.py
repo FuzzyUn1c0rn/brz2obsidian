@@ -59,7 +59,7 @@ def test_format8_reserves_a_colliding_empty_hub_and_lists_uncreated_jump_pair():
             ),
         ),
     )
-    migration = plan(analyze(facts, POLICY))
+    migration = plan(analyze(facts, POLICY), output_format=8)
     assert {
         row.item_key: (row.relative_path, row.created, row.creation_reasons)
         for row in migration.item_targets
@@ -123,7 +123,9 @@ def test_format8_output_preserves_qualified_api_capture_identity(
             "profile_version": "3",
         }
     with closing(LocalApiSession(**arguments, capture_parent=tmp_path)) as session:
-        vault = render(plan(analyze(session.snapshot, policy)), METADATA)
+        vault = render(
+            plan(analyze(session.snapshot, policy), output_format=8), METADATA
+        )
         session.verify_consistency()
 
     record = json.loads(generated(vault, "migration-record.json"))

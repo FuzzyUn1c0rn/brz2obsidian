@@ -464,7 +464,7 @@ def test_capture_entry_audits_its_own_public_conversion(
         record["profile_version"],
         record["schema_version"],
         record["renderer_version"],
-    ) == ("5", 8, "8")
+    ) == ("5", 9, "9")
     public = capsys.readouterr().out
     assert "KEY" not in public and BRAIN not in public and upstream not in public
     assert "parent M5 acceptance remains separate" in public
@@ -563,7 +563,7 @@ def test_audit_cli_binds_current5_and_preserves_explicit_legacy3(tmp_path, capsy
         "5",
     )
 
-    def audit_args(baseline, vault, output):
+    def audit_args(baseline, vault, output, output_version=8):
         return [
             "audit",
             "--candidate",
@@ -576,6 +576,8 @@ def test_audit_cli_binds_current5_and_preserves_explicit_legacy3(tmp_path, capsy
             str(vault),
             "--output",
             str(output),
+            "--output-version",
+            str(output_version),
         ]
 
     explicit = tmp_path / "explicit5.json"
@@ -628,8 +630,8 @@ def test_audit_cli_binds_current5_and_preserves_explicit_legacy3(tmp_path, capsy
     old_report = tmp_path / "legacy3.json"
     assert (
         main(
-            audit_args(legacy, old_vault, old_report)
-            + ["--profile-version", "3", "--output-version", "7"]
+            audit_args(legacy, old_vault, old_report, output_version=7)
+            + ["--profile-version", "3"]
         )
         == 0
     )

@@ -885,11 +885,11 @@ def source_refresh_preparation(payload, directory):
 
 
 def current_source_refresh_preparation(tmp_path):
-    from brz2obsidian.application.wiring import default_workflow
+    from tests.support.recorded_format8 import format8_workflow
     from tests.support.type_tag_sources import brz_source
 
     vault = tmp_path / "current8"
-    converted = default_workflow().convert(brz_source(tmp_path / "current.brz"), vault)
+    converted = format8_workflow().convert(brz_source(tmp_path / "current.brz"), vault)
     assert converted.outcome == "clean" and converted.receipt is not None
     payload = {
         row.relative_path: (vault / row.relative_path).read_bytes()

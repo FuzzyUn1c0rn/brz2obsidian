@@ -541,6 +541,12 @@ originals containing excluded references are omitted explicitly. Present
 attachment bytes are preserved. External URLs and directory links remain
 references; the converter does not download their contents.
 
+Fresh conversions record output format 9. Both endpoints of every included
+parent/child or jump relationship have a note, even when the source thought
+note is empty. Use **Parents**, **Children**, and **Related** to browse from
+either endpoint. **Uncreated targets** lists isolated empty thoughts when
+applicable.
+
 Current BRZ11 and local API5 imports preserve unknown, attribute-free delimiters
 such as `<Example>`, `</Example>` and `<Example/>` as visible text. Each token is
 independent: unmatched or mismatched names stay visible, while surrounding
@@ -552,7 +558,7 @@ elements and attributes, declarations and processing instructions remain outside
 this literal class. Existing code, comments, escapes, supported line breaks and
 reviewed tables retain their own handling. Retained API4 captures preserve this
 literal-token support. Retained API1/2/3 captures keep their
-earlier grammar even when rendered into output8. Source adaptations record exact
+earlier grammar when rendered into newer output formats. Source adaptations record exact
 token spelling and coordinates; unsafe originals containing excluded content
 are still omitted.
 

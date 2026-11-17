@@ -391,6 +391,7 @@ def test_explicit5_workflow_preserves_whole_container_and_refuses_bad_icon_witho
             source_selection=selection,
             source_identity=inspected.source_identity,
             converter_version=inspected.converter_version,
+            output_format=inspected.inspection.output_format,
             profile_id=inspected.profile_id,
             profile_version=inspected.profile_version,
             outcome="clean",

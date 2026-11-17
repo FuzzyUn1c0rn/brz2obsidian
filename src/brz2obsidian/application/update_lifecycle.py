@@ -134,6 +134,8 @@ def _history(
     if onboarding and onboarding_pending:
         return history, None
     identity = history.checkpoint.manifest.identity
+    if identity.output_format == 9:
+        return history, _refused("update_output_format_unavailable", history)
     if identity.output_format != 8:
         return history, _refused(
             "format_transition_required", history, action="review_format_transition"
@@ -438,7 +440,16 @@ def _render(
     workflow, reference = operations._selected_workflow(
         BrzSourceSelection(path=str(Path(source).absolute()))
     )
-    metadata = workflow.metadata_factory() if metadata is None else metadata
+    if metadata is None:
+        # The update lifecycle targets format 8 until format-9 review is supported.
+        if (
+            "migration-record.json" in baseline
+            and record(baseline)["schema_version"] == 9
+        ):
+            raise ValueError("update_output_format_unavailable")
+        metadata = workflow.metadata_factory()
+        if metadata.renderer_version == "9":
+            metadata = metadata.model_copy(update={"renderer_version": "8"})
     renderer = Workflow(
         workflow.binding,
         _UpdateRenderer(workflow.renderer, baseline, _owner=_owner),
