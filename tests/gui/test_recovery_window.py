@@ -80,7 +80,7 @@ def finish(app, window):
 
 
 def test_published_ui_requires_new_attempt_before_editing_and_creates_another_vault(
-    tmp_path,
+    tmp_path, request
 ):
     app = QApplication.instance() or QApplication([])
     source = make_archive(tmp_path / "archive.brz")
@@ -110,7 +110,35 @@ def test_published_ui_requires_new_attempt_before_editing_and_creates_another_va
         until(app, lambda: window.snapshot.reviewed is not None)
         name.setFocus()
         QTest.keyClicks(name, "Another vault")
-        until(app, lambda: "convert" in window.snapshot.allowed_actions)
+        while True:
+            if request.session.shouldstop:
+                pytest.exit(str(request.session.shouldstop))
+            app.processEvents()
+            state = window.snapshot
+            if name.text() != "Another vault":
+                pytest.fail(f"The entered vault name changed: {name.text()!r}")
+            if (
+                state.vault_name == "Another vault"
+                and not state.active_request_id
+                and not state.validation_pending
+                and not state.validation_request_id
+            ):
+                validation = state.destination_validation
+                if (
+                    validation is None
+                    or validation.outcome != "valid"
+                    or state.destination_revision != state.revision
+                    or state.destination != str(tmp_path / "Another vault")
+                ):
+                    pytest.fail(
+                        "Current destination validation did not succeed: "
+                        f"revision={state.revision}, "
+                        f"destination_revision={state.destination_revision}, "
+                        f"validation={validation}, destination={state.destination}"
+                    )
+                assert "convert" in state.allowed_actions
+                break
+            QTest.qWait(10)
         button(window, "Convert").click()
         until(app, lambda: window.snapshot.publication is not None)
         assert window.snapshot.publication.receipt_verified, window.snapshot.result
