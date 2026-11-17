@@ -2177,26 +2177,57 @@ class _Inspection:
         )
 
     def _review_locator(self, locator, roles, admission, observations):
-        """Keep memo dependencies on their proved parent, after full validation."""
+        """Carry only the review authority proved by each validated checkpoint."""
         if (
             self.operation != "idle"
             or not roles
-            or roles[0].memo_fingerprint is None
             or roles[0].commit != locator.commit
             or roles[0].generation != locator.generation
         ):
             return locator
         tip = roles[0]
-        parent = context = None
+        if tip.memo_fingerprint is None and tip.review_baseline_identity is None:
+            return locator
+        verify_retry = (
+            tip.review_kind == "format_transition"
+            and not self.policy_probe
+            and admission is not None
+            and admission.status == "supported"
+            and admission.inventory_complete
+        )
+        recorded = self._recorded_preparations(roles) if verify_retry else ()
+        memo_tips = self._format_memo_tips(roles) if verify_retry else {}
+        parent = physical_parent = context = prepared_baseline = None
         for role in reversed(roles):
             actual = locator.model_copy(
                 update={"commit": role.commit, "generation": role.generation}
             )
             selected = actual
+            memo_tip = memo_tips.get(role.commit, tip)
+            next_prepared_baseline = None
             if (
-                parent is not None
-                and role.previous == parent.commit
-                and role.generation == parent.generation + 1
+                verify_retry
+                and self._format_preparation_follows(role, parent)
+                and role.commit not in recorded
+                and self._current_role_policy_matches(
+                    role.policy_context, admission, observations
+                )
+            ):
+                # An unpublished preparation can bind either its physical
+                # parent or the review anchor already proved for that parent.
+                for candidate in (physical_parent, context):
+                    if role.review_parent_fingerprint == self._state_fingerprint(
+                        candidate
+                    ):
+                        selected = candidate
+                        next_prepared_baseline = parent
+                        break
+            elif prepared_baseline is not None and self._format_save_follows(
+                role, parent, prepared_baseline, admission, observations
+            ):
+                selected = context
+            elif (
+                self._follows_role(role, parent)
                 and role.boundary == "local"
                 and role.memo_fingerprint is not None
                 and (
@@ -2205,25 +2236,18 @@ class _Inspection:
                     or parent.boundary == "result"
                     and self._same_review_context(role, parent)
                     or self._completed_source_review_parent(
-                        role, parent, tip, admission, observations
+                        role, parent, memo_tip, admission, observations
                     )
                     or self._saved_format_parent(
-                        role, parent, tip, admission, observations
+                        role, parent, memo_tip, admission, observations
                     )
                     or parent.boundary in ("local", "result")
                     and self._qualified_policy_context(
-                        role, parent, tip, admission, observations
+                        role, parent, memo_tip, admission, observations
                     )
                 )
-                and role.operation_intent_commit is None
-                and role.undo_of_receipt_commit is None
-                and role.recovery_origin_intent_commit is None
-                and role.recovery_previous_operation_commit is None
-                and role.recovery_direction is None
+                and not self._has_operation_lineage(role)
             ):
-                physical_parent = locator.model_copy(
-                    update={"commit": parent.commit, "generation": parent.generation}
-                )
                 if parent.boundary == "result":
                     if role.review_parent_fingerprint == self._state_fingerprint(
                         physical_parent
@@ -2243,33 +2267,105 @@ class _Inspection:
                     physical_parent
                 ):
                     selected = physical_parent
-            parent, context = role, selected
+            parent, physical_parent, context = role, actual, selected
+            prepared_baseline = next_prepared_baseline
         return context
 
-    def _format_prepared_parent(self, *, offset=0):
+    @staticmethod
+    def _format_memo_tips(roles):
+        # Prove the memo as it stood before the next PREPARED used it. The
+        # staged target's policy context cannot qualify the older LOCAL memo.
+        tips = {}
+        tip = None
+        for role in roles:
+            if role.review_baseline_identity is not None:
+                tip = None
+            else:
+                if tip is None:
+                    tip = role
+                tips[role.commit] = tip
+        return tips
+
+    @staticmethod
+    def _follows_role(role, parent):
+        return (
+            parent is not None
+            and role.previous == parent.commit
+            and role.generation == parent.generation + 1
+        )
+
+    @staticmethod
+    def _has_operation_lineage(role):
+        return any(
+            value is not None
+            for value in (
+                role.operation_intent_commit,
+                role.undo_of_receipt_commit,
+                role.recovery_origin_intent_commit,
+                role.recovery_previous_operation_commit,
+                role.recovery_direction,
+            )
+        )
+
+    def _format_preparation_follows(self, role, parent):
+        return (
+            self._follows_role(role, parent)
+            and role.boundary == "prepared"
+            and role.review_kind == "format_transition"
+            and role.reviewed_payload is not None
+            and role.review_baseline_identity is not None
+            and role.review_baseline_identity == parent.identity
+            and role.identity != parent.identity
+            and parent.boundary in ("local", "result")
+            and not self._has_operation_lineage(role)
+        )
+
+    def _recorded_preparations(self, roles):
+        recorded = {
+            role.previous for role in roles if role.operation_intent_commit is not None
+        }
+        terminal = self.recovery_observation
+        if terminal is not None:
+            recorded.update(
+                authority.prepared_commit
+                for graph in terminal.graphs or (terminal.graph,)
+                for _, authority in graph.authorities
+            )
+        return recorded
+
+    def _format_prepared_parent(self):
         """Find the physical baseline of an initial unpublished format change."""
         roles = self.checkpoint_roles
-        if self.operation != "idle" or len(roles) < offset + 2:
+        if self.operation != "idle" or len(roles) < 2:
             return None
-        actual, current = self.history.locator, roles[0]
-        tip, parent = roles[offset : offset + 2]
+        actual = self.history.locator
+        tip, parent = roles[:2]
         if (
-            current.commit == actual.commit
-            and current.generation == actual.generation
-            and tip.boundary == "prepared"
-            and tip.review_kind == "format_transition"
-            and tip.review_baseline_identity is not None
-            and tip.review_baseline_identity == parent.identity
-            and tip.identity != parent.identity
-            and tip.previous == parent.commit
-            and tip.generation == parent.generation + 1
-            and parent.boundary in ("local", "result")
-            and tip.operation_intent_commit is None
-            and tip.undo_of_receipt_commit is None
-            and tip.recovery_direction is None
+            tip.commit == actual.commit
+            and tip.generation == actual.generation
+            and self._format_preparation_follows(tip, parent)
+            and tip.commit not in self._recorded_preparations(roles)
         ):
             return parent
         return None
+
+    def _format_save_follows(self, saved, prepared, baseline, admission, observations):
+        return (
+            self._follows_role(saved, prepared)
+            and saved.boundary == "local"
+            and saved.review_kind == "format_transition"
+            and saved.reviewed_payload == prepared.reviewed_payload
+            and saved.identity == baseline.identity
+            and not self._has_operation_lineage(saved)
+            and saved.policy_context is not None
+            and baseline.policy_context is not None
+            and saved.policy_context.context_basis
+            == baseline.policy_context.context_basis
+            and saved.review_parent_fingerprint == prepared.review_parent_fingerprint
+            and self._current_role_policy_matches(
+                saved.policy_context, admission, observations
+            )
+        )
 
     def _current_role_policy_matches(self, policy, admission, observations):
         if policy is None:
@@ -2285,61 +2381,7 @@ class _Inspection:
             and fresh.preflight.consents == policy.requirements
         )
 
-    def _format_retry_context(self, admission, observations):
-        if (
-            self.policy_probe
-            or admission is None
-            or admission.status != "supported"
-            or not admission.inventory_complete
-            or not self.checkpoint_roles
-        ):
-            return None
-        roles = self.checkpoint_roles
-        current = roles[0]
-        saved = current if current.boundary == "local" else None
-        offset = 0 if saved is None else 1
-        parent = self._format_prepared_parent(offset=offset)
-        if parent is None:
-            return None
-        prepared = roles[offset]
-        if saved is not None and (
-            saved.review_kind != "format_transition"
-            or saved.previous != prepared.commit
-            or saved.generation != prepared.generation + 1
-            or saved.reviewed_payload is None
-            or saved.reviewed_payload != prepared.reviewed_payload
-            or saved.identity != parent.identity
-            or saved.policy_context is None
-            or parent.policy_context is None
-            or saved.policy_context.context_basis != parent.policy_context.context_basis
-            or saved.review_parent_fingerprint != prepared.review_parent_fingerprint
-        ):
-            return None
-        locator = self.history.locator.model_copy(
-            update={"commit": parent.commit, "generation": parent.generation}
-        )
-        # The physical parent retains the old source. Its saved review may
-        # still depend on an earlier checkpoint proved by the LOCAL memo chain.
-        if prepared.review_parent_fingerprint != self._state_fingerprint(locator):
-            locator = self._review_locator(
-                locator, roles[offset + 1 :], admission, observations
-            )
-            if prepared.review_parent_fingerprint != self._state_fingerprint(locator):
-                return None
-        if not self._current_role_policy_matches(
-            prepared.policy_context, admission, observations
-        ):
-            return None
-        if saved is not None and not self._current_role_policy_matches(
-            saved.policy_context, admission, observations
-        ):
-            return None
-        return locator
-
     def _review_context(self, admission=None, observations=None):
-        format_anchor = self._format_retry_context(admission, observations)
-        if format_anchor is not None:
-            return format_anchor, True
         roles = self.checkpoint_roles
         locator = self._review_locator(
             self.history.locator, roles, admission, observations
@@ -2366,13 +2408,9 @@ class _Inspection:
             return self.history.locator, True
         return locator, bool(
             roles
-            and roles[0].boundary == "local"
+            and roles[0].boundary in ("local", "prepared")
             and roles[0].review_kind == "format_transition"
-            and roles[0].operation_intent_commit is None
-            and roles[0].undo_of_receipt_commit is None
-            and roles[0].recovery_origin_intent_commit is None
-            and roles[0].recovery_previous_operation_commit is None
-            and roles[0].recovery_direction is None
+            and not self._has_operation_lineage(roles[0])
             and roles[0].review_parent_fingerprint == self._state_fingerprint(locator)
         )
 

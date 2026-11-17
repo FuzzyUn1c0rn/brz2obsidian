@@ -1695,13 +1695,14 @@ def test_onboarding_save_rechecks_current_authority_before_any_checkpoint(
     } == expected_incoming
 
 
-@pytest.mark.parametrize("saved_first", (False, True), ids=("direct", "saved-memo"))
+@pytest.mark.parametrize("baseline_kind", ("direct", "saved-memo", "onboarding-memo"))
 def test_unpublished_format_preparation_keeps_parent_review_authority(
-    tmp_path, monkeypatch, saved_first
+    tmp_path, monkeypatch, baseline_kind
 ):
     from brz2obsidian.publication.vault_admission import _Inspection
     from brz2obsidian.publication.vault_history import _CheckpointRole, _RolePolicy
 
+    saved_first = baseline_kind != "direct"
     inspection = _Inspection(tmp_path, (), None, new_operation="format_transition")
     anchor = preparation().locator
     locator = anchor.model_copy(update={"commit": "d" * 40, "generation": 3})
@@ -1733,6 +1734,9 @@ def test_unpublished_format_preparation_keeps_parent_review_authority(
             review_parent_fingerprint=authority,
             review_kind="format_transition",
         )
+        if baseline_kind == "onboarding-memo":
+            baseline = baseline._replace(review_kind="onboarding")
+            parent = parent._replace(memo_fingerprint="first-format-memo")
     else:
         locator = locator.model_copy(update={"generation": 2})
     pending = _CheckpointRole(
@@ -1746,7 +1750,7 @@ def test_unpublished_format_preparation_keeps_parent_review_authority(
         None,
         None,
         review_parent_fingerprint=authority,
-        policy_context=policy,
+        policy_context=policy._replace(context_basis="incoming-format-context"),
         review_kind="format_transition",
         identity="new",
         review_baseline_identity="old",
@@ -1771,7 +1775,9 @@ def test_unpublished_format_preparation_keeps_parent_review_authority(
     assert inspection._review_context(admission, {}) == (anchor, True)
 
     if saved_first:
-        foreign_memo = parent._replace(memo_fingerprint="different-source")
+        foreign_memo = parent._replace(
+            memo_fingerprint="different-source", policy_context=None
+        )
         inspection.checkpoint_roles = [pending, foreign_memo, baseline]
         assert inspection._review_context(admission, {}) == (locator, False)
         inspection.checkpoint_roles = [pending, *parents]
@@ -1799,3 +1805,40 @@ def test_unpublished_format_preparation_keeps_parent_review_authority(
         *parents,
     ]
     assert inspection._review_context(admission, {}) == (saved_again, False)
+
+    roles = [local, pending, *parents]
+    previous = local
+    for template in (local, pending, local, pending, local, local):
+        next_locator = locator.model_copy(
+            update={
+                "commit": f"{previous.generation + 1:040x}",
+                "generation": previous.generation + 1,
+            }
+        )
+        next_role = template._replace(
+            commit=next_locator.commit,
+            previous=previous.commit,
+            generation=next_locator.generation,
+        )
+        roles.insert(0, next_role)
+        inspection.history = SimpleNamespace(status="valid", locator=next_locator)
+        inspection.checkpoint_roles = roles
+        assert inspection._review_context(admission, {}) == (anchor, True)
+        if next_role.boundary == "prepared":
+            assert inspection._format_prepared_parent() == previous
+        previous = next_role
+
+    inspection.checkpoint_roles = [
+        role._replace(operation_intent_commit="1" * 40) if role == pending else role
+        for role in roles
+    ]
+    assert inspection._review_context(admission, {}) == (next_locator, False)
+
+    inspection.checkpoint_roles = roles
+    inspection.recovery_observation = SimpleNamespace(
+        graphs=(),
+        graph=SimpleNamespace(
+            authorities=((None, SimpleNamespace(prepared_commit=pending.commit)),)
+        ),
+    )
+    assert inspection._review_context(admission, {}) == (next_locator, False)

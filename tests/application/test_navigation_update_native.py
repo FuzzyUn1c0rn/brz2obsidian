@@ -406,40 +406,53 @@ def test_unavailable_format9_intent_ref_keeps_the_edited_review_resumable(
             raise OSError("Deterministic failure before the intent ref write")
         return call(self, *args, **kwargs)
 
-    with monkeypatch.context() as fault:
-        fault.setattr(_Git, "call", refuse_operation_ref)
-        failed = operations.apply_update(ready)
-    assert (failed.status, failed.code, failed.publication) == (
-        "failed",
-        "intent_ref_unavailable",
-        "not_published",
-    ), failed
-    assert failed.next_actions == ("resume_update",)
-    assert failed.application.history == "prepared"
-    assert (
-        not failed.application.recovery_required
-        and not failed.application.intent_commit
-    )
-    assert failed.application.published_files == 0
-    assert Operations().inspect_update_status(vault).code == "operation_absent"
-    assert home.read_bytes() == home_before and moved.read_bytes() == local
-    assert occupant_path.read_bytes() == occupant
-    assert (vault / "Manual.md").read_bytes() == authored
-
     restarted = Operations()
-    resumed = review_plan(restarted.resume_update(vault))
-    assert resumed.review.ready
-    assert resumed.review.facts.baseline_identity.output_format == 8
-    assert resumed.review.facts.incoming_identity.output_format == 9
-    assert {approval.result.data for approval in resumed.review.approvals} >= {
-        edited,
-        leaf_result,
-    }
+    attempts = 2 if save_first else 1
+    for attempt in range(attempts):
+        with monkeypatch.context() as fault:
+            fault.setattr(_Git, "call", refuse_operation_ref)
+            failed = restarted.apply_update(ready)
+        assert (failed.status, failed.code, failed.publication) == (
+            "failed",
+            "intent_ref_unavailable",
+            "not_published",
+        ), failed
+        assert failed.next_actions == ("resume_update",)
+        assert failed.application.history == "prepared"
+        assert (
+            not failed.application.recovery_required
+            and not failed.application.intent_commit
+        )
+        assert failed.application.published_files == 0
+        assert Operations().inspect_update_status(vault).code == "operation_absent"
+        assert home.read_bytes() == home_before and moved.read_bytes() == local
+        assert occupant_path.read_bytes() == occupant
+        assert (vault / "Manual.md").read_bytes() == authored
 
-    assert (
-        tuple(a.decision_id for a in resumed.review.approvals if a.result is not None)
-        == approvals
-    )
+        restarted = Operations()
+        resumed = review_plan(restarted.resume_update(vault))
+        assert resumed.review.ready
+        assert resumed.review.facts.baseline_identity.output_format == 8
+        assert resumed.review.facts.incoming_identity.output_format == 9
+        assert {approval.result.data for approval in resumed.review.approvals} >= {
+            edited,
+            leaf_result,
+        }
+
+        assert (
+            tuple(
+                a.decision_id for a in resumed.review.approvals if a.result is not None
+            )
+            == approvals
+        )
+        if attempt + 1 < attempts:
+            saved_again = restarted.save_update(resumed)
+            assert saved_again.code == "saved", saved_again
+            restarted = Operations()
+            ready = review_plan(restarted.resume_update(vault))
+            assert ready.review.ready
+            assert ready.review.preflight == resumed.review.preflight
+
     applied = restarted.apply_update(resumed)
     assert applied.status == "applied", applied
     assert home.read_bytes() == edited

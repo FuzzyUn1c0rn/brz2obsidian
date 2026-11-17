@@ -1453,17 +1453,17 @@ def _read(
                 and review_metadata[10] == "format_transition"
                 and manifest.preimage == manifest.vault
             )
+            if tip_manifest is None:
+                format_roles = format_review and manifest.boundary in (
+                    "local",
+                    "prepared",
+                )
             pending_format = (
-                format_review
+                format_roles
+                and format_review
                 and manifest.boundary == "prepared"
                 and manifest.undo_of_receipt_commit is None
                 and manifest.recovery_direction is None
-                and (
-                    not checkpoint_roles
-                    or len(checkpoint_roles) == 1
-                    and checkpoint_roles[0].boundary == "local"
-                    and checkpoint_roles[0].reviewed_payload is not None
-                )
             )
             # An unpublished format change may follow a LOCAL review memo
             # whose authority still resides in its validated history.
@@ -1533,9 +1533,7 @@ def _read(
                             mode="json", exclude={"source_anchor", "generation"}
                         )
                     )
-                    if (
-                        pending_format or format_review and manifest.boundary == "local"
-                    )
+                    if pending_format or format_review and manifest.boundary == "local"
                     else None,
                 )
             )
