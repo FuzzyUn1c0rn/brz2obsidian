@@ -4,13 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from brz2obsidian.contracts import ContentVersion
+from brz2obsidian.contracts import ContentVersion, SavedReview
 from brz2obsidian.core import (
     load_review,
     reconcile,
     resume_review,
     select_review_effects,
 )
+from brz2obsidian.obsidian import interpret_link_target, interpret_links
 from tests.reconciliation.test_identity import inventory_item, with_subjects
 from tests.reconciliation.test_proposals import request
 
@@ -18,6 +19,104 @@ FIXTURES = (
     Path(__file__).resolve().parents[1]
     / "fixtures/saved_reviews/connected-empty-thoughts"
 )
+PATH = "Notes/Opening.md"
+TARGET = "subject:entry:opening:content"
+PROPERTIES = (
+    b'---\nsource_collection_id: "folio:collection"\n'
+    b'source_item_id: "entry:opening"\n---\n\n'
+)
+RELATIVE = b"[Back to top](./Opening.md#Opening)"
+WIKI = b"[[Notes/Opening.md#Opening|Back to top]]"
+CURRENT = PROPERTIES + b"# Opening\r\n\r\nLocal prose.\r\n\r\n" + RELATIVE + b"\r\n"
+
+
+def assert_link(document, raw_link):
+    assert document.status == "supported"
+    (link,) = document.occurrences
+    assert link.raw == raw_link
+    assert (link.query.mode, link.query.value) == ("exact", PATH)
+    meaning = link.meaning
+    assert (meaning.status, meaning.target_id, meaning.path) == (
+        "resolved",
+        TARGET,
+        PATH,
+    )
+    assert (
+        meaning.target_identity.collection_id,
+        meaning.target_identity.module_id,
+        meaning.target_identity.item_id,
+    ) == ("folio:collection", "synthetic-folio", "entry:opening")
+    assert (meaning.fragment.kind, meaning.fragment.value) == ("heading", "Opening")
+
+
+def observe_note(content, targets, structure_format, link_format, *, qualify_roles):
+    state = interpret_link_target(
+        content,
+        target_id=TARGET,
+        existence="present",
+        memberships=(),
+        source_path=PATH,
+        output_format=structure_format,
+        qualify_roles=qualify_roles,
+    )
+    document = interpret_links(
+        content,
+        document_id=TARGET,
+        source_path=PATH,
+        path_mode="vault",
+        targets=targets,
+        target_facts=(state,),
+        inventory="complete",
+        output_format=link_format,
+    )
+    return state, document
+
+
+def assert_recorded_roles(plan, old_format, incoming):
+    facts = plan.producer_facts
+    (subject,) = facts.subjects
+    comparison = subject.structure
+    assert comparison is not None
+    assert (
+        comparison.original.output_format,
+        comparison.current.output_format,
+        comparison.incoming.output_format,
+    ) == (old_format, old_format, 8)
+    original_link = WIKI if old_format == 7 else RELATIVE
+    original = (
+        PROPERTIES
+        + b"# Opening\r\n\r\nOriginal generated prose.\r\n\r\n"
+        + original_link
+        + b"\r\n"
+    )
+    (change,) = plan.proposal.changes
+    assert change.original.data == comparison.original.content.data == original
+    assert change.current.data == comparison.current.content.data == CURRENT
+    assert change.incoming.data == comparison.incoming.content.data == incoming
+
+    context = facts.link_context
+    (current,) = context.current_target_facts
+    (target,) = context.incoming_target_facts
+    assert (current.structure.output_format, target.structure.output_format) == (
+        old_format,
+        8,
+    )
+    assert current.file_roles.path == target.file_roles.path == PATH
+    (current_doc,) = context.current_documents
+    (incoming_doc,) = context.incoming_documents
+    assert current_doc.content.data == CURRENT
+    assert incoming_doc.content.data == incoming
+    assert_link(current_doc, RELATIVE)
+    assert_link(incoming_doc, RELATIVE)
+
+    _, original_doc = observe_note(
+        subject.baseline.content,
+        context.current_targets,
+        old_format,
+        old_format,
+        qualify_roles=False,
+    )
+    assert_link(original_doc, original_link)
 
 
 @pytest.mark.parametrize(
@@ -44,7 +143,12 @@ FIXTURES = (
 def test_cold_review_keeps_recorded_format_roles_and_authored_choice(
     fixture_name, kind, old_format, old_profile, source_version, incoming
 ):
-    result = load_review((FIXTURES / fixture_name).read_bytes())
+    raw = (FIXTURES / fixture_name).read_bytes()
+    incoming = PROPERTIES + incoming + b"\n" + RELATIVE + b"\n"
+    assert_recorded_roles(
+        SavedReview.model_validate_json(raw).plan, old_format, incoming
+    )
+    result = load_review(raw)
     assert result.status == "loaded" and not result.ready
     loaded = result.loaded
     historical = loaded.saved.plan
@@ -63,25 +167,45 @@ def test_cold_review_keeps_recorded_format_roles_and_authored_choice(
         operation.baseline_source_version,
         operation.target_source_version,
     ) == (kind, "source:a", source_version)
-    (change,) = historical.proposal.changes
-    assert change.original.data == b"# Opening\r\n\r\nOriginal generated prose.\r\n"
-    assert change.current.data == b"# Opening\r\n\r\nLocal prose.\r\n"
-    assert change.incoming.data == incoming
+    assert_recorded_roles(historical, old_format, incoming)
 
-    resumed = resume_review(loaded, facts, preflight=historical.preflight)
+    context = facts.link_context
+    (subject,) = facts.subjects
+    current_state, current_doc = observe_note(
+        subject.current.content,
+        context.current_targets,
+        old_format,
+        8,
+        qualify_roles=True,
+    )
+    incoming_state, incoming_doc = observe_note(
+        subject.incoming, context.incoming_targets, 8, 8, qualify_roles=False
+    )
+    observed = facts.model_copy(
+        update={
+            "link_context": context.model_copy(
+                update={
+                    "current_target_facts": (current_state,),
+                    "current_documents": (current_doc,),
+                    "incoming_target_facts": (incoming_state,),
+                    "incoming_documents": (incoming_doc,),
+                }
+            ),
+        }
+    )
+    resumed = resume_review(loaded, observed, preflight=historical.preflight)
     assert (resumed.status, resumed.code, resumed.ready) == (
         "resumed",
         "unchanged",
         True,
     )
+    assert_recorded_roles(resumed.plan, old_format, incoming)
     assert [approval.decision_id for approval in resumed.plan.approvals] == [
         "keep-authored-opening"
     ]
     effects = select_review_effects(resumed.plan)
     assert effects.status == "selected" and effects.remove_paths == ()
-    assert [(row.path, row.content.data) for row in effects.files] == [
-        ("Notes/Opening.md", b"# Opening\r\n\r\nLocal prose.\r\n")
-    ]
+    assert [(row.path, row.content.data) for row in effects.files] == [(PATH, CURRENT)]
 
 
 @pytest.mark.parametrize(
