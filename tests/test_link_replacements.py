@@ -7,6 +7,59 @@ from brz2obsidian.obsidian import interpret_link_target, interpret_links
 from tests.reconciliation.test_attachments import target_for_links
 
 
+@pytest.mark.parametrize(
+    "raw",
+    (
+        b"![](C:\\Imported\\image.webp#$width=65p$)",
+        b"![](<d:/Imported images/100%literal.webp#^opaque[fragment]>)",
+    ),
+)
+def test_format8_preserves_literal_external_windows_destination(raw):
+    document = interpret_links(
+        ExactContent(data=raw),
+        document_id="owner",
+        source_path="Notes/note.md",
+        path_mode="vault",
+        targets=(),
+        target_facts=(),
+        inventory="complete",
+        output_format=8,
+    )
+    assert document.status == "supported" and not document.issues
+    (occurrence,) = document.occurrences
+    assert occurrence.raw == document.content.data == raw
+    assert occurrence.query is None
+    assert occurrence.meaning.status == "external"
+    assert occurrence.meaning.target_id is None
+    assert occurrence.meaning.path is None and occurrence.meaning.fragment is None
+
+
+@pytest.mark.parametrize(
+    "raw, output_format",
+    (
+        (b"![](C:\\Imported\\image.webp)", 7),
+        (b"![](C:relative.webp)", 8),
+        (b"[[C:\\Imported\\image.webp]]", 8),
+        (b"![](C%3A%5CImported%5Cimage.webp)", 8),
+        (b"![](C:\\Imported images\\image.webp)", 8),
+        (b"![](<C:\\Imported\\bad\x00image.webp>)", 8),
+    ),
+)
+def test_external_windows_support_preserves_existing_path_refusals(raw, output_format):
+    document = interpret_links(
+        ExactContent(data=raw),
+        document_id="owner",
+        source_path="Notes/note.md",
+        path_mode="vault",
+        targets=(),
+        target_facts=(),
+        inventory="complete",
+        output_format=output_format,
+    )
+    assert document.status == "unsupported"
+    assert all(o.meaning.status != "external" for o in document.occurrences)
+
+
 def test_format8_interprets_rendered_relative_image_and_vault_wiki_together():
     image = target_for_links("image", "Attachments/id/É image.webp", kind="resource")
     note = target_for_links("note", "Notes/Other.md")

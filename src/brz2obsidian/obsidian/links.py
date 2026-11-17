@@ -296,33 +296,47 @@ def interpret_links(
             ):
                 raise ValueError("Unsupported destination")
             semantic_destination = raw_destination[1:-1] if angled else raw_destination
+            # A literal drive-rooted path is outside managed-vault resolution.
+            # Preserve its spelling; percent signs and fragments are opaque here.
+            external = (
+                output_format == 8
+                and not wiki
+                and re.match(r"^[A-Za-z]:[\\/]", semantic_destination) is not None
+                and not any(ord(c) < 32 for c in semantic_destination)
+            )
             target_text, marker, fragment_text = semantic_destination.partition("#")
-            if not wiki:
+            if not wiki and not external:
                 target_text, fragment_text = (
                     _decode(target_text),
                     _decode(fragment_text),
                 )
-            if marker and (
-                not fragment_text
-                or (
-                    fragment_text.startswith("^")
-                    and not re.fullmatch(r"\^[A-Za-z0-9-]+", fragment_text)
-                )
-                or any(
-                    not part or any(c in "[]|^" for c in part)
-                    for part in fragment_text.removeprefix("^").split("#")
+            if (
+                not external
+                and marker
+                and (
+                    not fragment_text
+                    or (
+                        fragment_text.startswith("^")
+                        and not re.fullmatch(r"\^[A-Za-z0-9-]+", fragment_text)
+                    )
+                    or any(
+                        not part or any(c in "[]|^" for c in part)
+                        for part in fragment_text.removeprefix("^").split("#")
+                    )
                 )
             ):
                 raise ValueError("Unsupported fragment")
             fragment = (
                 None
-                if not fragment_text
+                if external or not fragment_text
                 else LinkFragment(
                     kind="block" if fragment_text.startswith("^") else "heading",
                     value=fragment_text.removeprefix("^"),
                 )
             )
-            external = not wiki and re.match(r"(?i)^(https?://|mailto:)", target_text)
+            external = external or (
+                not wiki and re.match(r"(?i)^(https?://|mailto:)", target_text)
+            )
             query = (
                 None
                 if external
