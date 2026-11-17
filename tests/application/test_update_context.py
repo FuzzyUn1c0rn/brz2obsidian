@@ -411,6 +411,7 @@ def test_onboarding_worker_preserves_separate_original_evidence_input(
         hashlib.sha256(archive.read_bytes()).digest()
         != hashlib.sha256(reference.read_bytes()).digest()
     )
+    source_before = (archive.read_bytes(), reference.read_bytes())
     before = {
         path.relative_to(vault).as_posix(): path.read_bytes()
         for path in vault.rglob("*")
@@ -426,9 +427,9 @@ def test_onboarding_worker_preserves_separate_original_evidence_input(
     }
     context = UpdateContext(operations=operations)
     result = worker_context_call(context, arguments)
-    assert (
-        result.kind == "onboarding" and result.binding is not None and not result.ready
-    )
+    assert result.kind == "onboarding" and result.binding is not None and result.ready
+    assert result.unresolved == 0 and "apply_update" in result.next_actions
+    assert result.publication == "not_started"
     page = worker_context_call(context, {"command": "page", "binding": result.binding})
     assert page.status == "available"
     note = next(
@@ -436,7 +437,7 @@ def test_onboarding_worker_preserves_separate_original_evidence_input(
         for row in page.page.items
         if row.item_id == "22222222-2222-4222-8222-222222222222"
     )
-    assert note.original == ORIGINAL and note.current == CURRENT
+    assert note.original == ORIGINAL and note.current == note.result == CURRENT
     for kind in ("source_update", "format_transition", "attachment_cleanup"):
         with pytest.raises(ValueError):
             WorkerRequest(
@@ -450,6 +451,7 @@ def test_onboarding_worker_preserves_separate_original_evidence_input(
         for path in vault.rglob("*")
         if path.is_file()
     } == before
+    assert (archive.read_bytes(), reference.read_bytes()) == source_before
 
 
 def test_worker_pages_bound_consent_and_identity_choices_from_real_preparation(

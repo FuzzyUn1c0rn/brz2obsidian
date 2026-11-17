@@ -94,13 +94,41 @@ def test_cold_worker_prepares_image_archive_with_idle_control_pipe(tmp_path):
             )
             assert len(results) == 1 and results[0].phase == "completed"
             opened = results[0].response.result
-            assert progress and not opened.ready
+            assert progress
             if cancel_preparation:
+                assert not opened.ready and "apply_update" not in opened.next_actions
                 assert opened.status == "cancelled_before_publication", opened
                 assert opened.publication in ("not_started", "not_published")
             else:
                 assert opened.status == "prepared_review" and opened.binding is not None
+                assert opened.ready and opened.unresolved == 0
+                assert "apply_update" in opened.next_actions
                 assert opened.publication == "not_started"
+                page = channel.run(
+                    WorkerRequest(
+                        request_id=str(uuid4()),
+                        operation="update",
+                        sequence=1,
+                        arguments={"command": "page", "binding": opened.binding},
+                    )
+                )
+                assert page.phase == "completed"
+                observed = page.response.result
+                assert observed.status == "available"
+                assert observed.binding == opened.binding
+                asset = next(
+                    row
+                    for row in observed.page.items
+                    if row.item_id == "66666666-6666-4666-8666-666666666666"
+                    and row.facet == "asset"
+                )
+                assert (
+                    asset.original
+                    == asset.current
+                    == asset.incoming
+                    == asset.result
+                    == PNG
+                )
             close = channel.run(
                 WorkerRequest(
                     request_id=str(uuid4()),

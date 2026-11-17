@@ -241,7 +241,7 @@
     "tests/application/test_attachment_cleanup_application.py::test_saved_unready_cleanup_resumes_from_current_source_and_fresh_ownership",
     "tests/application/test_attachment_cleanup_application.py::test_cleanup_preparation_binds_recorded_asset_and_independent_manual_references",
     "tests/application/test_attachment_cleanup_application.py::test_cleanup_resolution_and_refresh_keep_only_unaffected_current_choices",
-    "tests/application/test_attachment_cleanup_application.py::test_new_source_attachment_requires_binary_approval_without_format_adoption",
+    "tests/application/test_attachment_cleanup_application.py::test_new_source_attachment_uses_proven_absence_without_format_adoption",
     "tests/application/test_attachment_cleanup_application.py::test_cleanup_preparation_keeps_recovery_and_uncertain_references_out_of_ready_state",
     "tests/application/test_attachment_cleanup_application.py::test_cleanup_cancellation_projection_preserves_actual_intent_and_publication",
     "tests/gui/test_update_history_controls.py::test_history_controls_use_current_admitted_setup_recovery_undo_and_repair",

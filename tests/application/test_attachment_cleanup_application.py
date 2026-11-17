@@ -40,7 +40,7 @@ from tests.reconciliation.test_resolution import action, preflight
 @pytest.mark.parametrize(
     "case", ("new", "existing_current", "unsupported", "configuration")
 )
-def test_new_source_attachment_requires_binary_approval_without_format_adoption(case):
+def test_new_source_attachment_uses_proven_absence_without_format_adoption(case):
     from brz2obsidian.application.update_facts import assemble_facts
     from tests.application.test_attachment_cleanup_lifecycle import incoming_attachment
     from tests.application.test_update_lifecycle_contracts import preparation
@@ -73,15 +73,38 @@ def test_new_source_attachment_requires_binary_approval_without_format_adoption(
     prepared = preparation(facts)
     plan = prepared.review
     change = next(c for c in plan.proposal.changes if c.item_id == item)
+    if case in ("new", "configuration"):
+        assert facts.format_operation.recorded_generation == "supported"
+        assert facts.inventory == "complete"
+        assert all(
+            (row.item_id, row.facet) != (subject.item_id, subject.facet)
+            for row in facts.format_operation.established_baseline.outputs
+        )
+        assert subject.current.existence == "absent" and subject.current.content is None
+        assert plan.ready and plan.requirements == ()
+        assert all(row.provenance == "automatic_merge" for row in plan.approvals)
+        assert plan.facts.format_operation.kind == "source_update"
+        assert plan.facts.baseline_identity == facts.baseline_identity
+        assert plan.facts.incoming_identity == facts.incoming_identity
+        assert change.format_review is None
+        if case == "configuration":
+            assert subject.output_role == "configuration"
+        else:
+            approval = next(
+                a for a in plan.approvals if a.change_id == change.change_id
+            )
+            assert approval.choice == "incoming"
+            assert approval.attachment_candidate.outputs[0].content.data == raw
+        selected = select_review_effects(plan)
+        assert selected.status == "selected" and selected.remove_paths == ()
+        assert (
+            next(row.content.data for row in selected.files if row.path == path) == raw
+        )
+        return
     requirement = next(r for r in plan.requirements if r.change_id == change.change_id)
     assert not plan.ready and not any(
         a.change_id == change.change_id for a in plan.approvals
     )
-    if case == "configuration":
-        assert (
-            requirement.domain == "configuration" and change.format_review is not None
-        )
-        return
     selection, candidate = incoming_attachment(plan, change)
     result = Operations().resolve_update(
         prepared,
@@ -97,34 +120,16 @@ def test_new_source_attachment_requires_binary_approval_without_format_adoption(
             attachment_candidate=candidate,
         ),
     )
-    if case != "new":
-        assert change.format_review is not None
-        assert (
-            result.status == "refused"
-            and result.code
-            == {
-                "existing_current": "choice_not_admitted",
-                "unsupported": "unsafe_producer_choice",
-            }[case]
-        )
-        assert result.preparation.review.approvals == plan.approvals
-        return
-    assert result.code == "accepted", (
-        result.code,
-        requirement.domain,
-        requirement.choices,
-        change.identity_review.status,
-        change.disposition,
-        change.format_review is not None,
-        tuple((a.choice, a.eligible) for a in change.attachment_review.alternatives),
+    assert change.format_review is not None
+    assert (
+        result.status == "refused"
+        and result.code
+        == {
+            "existing_current": "choice_not_admitted",
+            "unsupported": "unsafe_producer_choice",
+        }[case]
     )
-    assert change.format_review is None and requirement.domain == "restoration"
-    approval = next(
-        a
-        for a in result.preparation.review.approvals
-        if a.change_id == change.change_id
-    )
-    assert approval.attachment_candidate.outputs[0].content.data == raw
+    assert result.preparation.review.approvals == plan.approvals
 
 
 @pytest.mark.parametrize("condition", ("recovery", "incomplete_references"))
