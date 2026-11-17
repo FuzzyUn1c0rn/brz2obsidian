@@ -918,6 +918,12 @@ def test_distinct_original_onboarding_cold_resume_keeps_original_and_choice():
     from tests.application.test_update_lifecycle import _user_state
 
     operations, vault, archive = first_setup_operations()
+    backup_path = "Attachments/22222222/Notes.md.original"
+    assert (vault / backup_path).read_bytes() == b"Authored body.\r\n"
+    # Leave a genuine overlapping binary edit after choosing the note version.
+    # A source-only backup change needs no routine confirmation.
+    backup_current = b"Current backup edit.\r\n"
+    (vault / backup_path).write_bytes(backup_current)
     user_before, files_before = _user_state(vault), authored_files(vault)
     incoming = archive.with_name("distinct-incoming.brz")
     with ZipFile(archive) as old, ZipFile(incoming, "w") as new:
@@ -952,11 +958,17 @@ def test_distinct_original_onboarding_cold_resume_keeps_original_and_choice():
         r
         for r in page.page.items
         if r.item_id == "22222222-2222-4222-8222-222222222222"
+        and r.current_path == "Home \u2014 Entry thought.md"
     )
     assert note.original == ORIGINAL and note.current == CURRENT
     assert note.incoming == ORIGINAL.replace(
         b"Authored body.\r\n", b"Incoming prose.\r\n"
     )
+    backup = next(r for r in page.page.items if r.current_path == backup_path)
+    assert backup.original == b"Authored body.\r\n"
+    assert backup.current == backup_current
+    assert backup.incoming == b"Incoming prose.\r\n"
+    assert backup.result is None
     offer = next(r for r in page.offers if r.change_id == note.change_id)
     selected = send(
         "choose",
@@ -986,9 +998,10 @@ context=UpdateContext()
 state=context.resume(sys.argv[1],selection_id="22222222-2222-4222-8222-222222222222")
 assert state.binding is not None,state
 page=context.page(state.binding)
-note=next(r for r in page.page.items if r.item_id=="22222222-2222-4222-8222-222222222222")
+note=next(r for r in page.page.items if r.item_id=="22222222-2222-4222-8222-222222222222" and r.current_path=="Home \u2014 Entry thought.md")
+backup=next(r for r in page.page.items if r.current_path=="Attachments/22222222/Notes.md.original")
 offer=next(r for r in context.choice_page(state.binding).offers if r.change_id==note.change_id)
-Path(sys.argv[2]).write_text(json.dumps({"original":None if note.original is None else note.original.hex(),"current":note.current.hex(),"incoming":note.incoming.hex(),"selected":offer.selected,"decision_id":offer.decision_id,"unresolved":state.unresolved,"stale":state.stale}),encoding="utf-8")
+Path(sys.argv[2]).write_text(json.dumps({"original":None if note.original is None else note.original.hex(),"current":note.current.hex(),"incoming":note.incoming.hex(),"result":None if note.result is None else note.result.hex(),"selected":offer.selected,"decision_id":offer.decision_id,"unresolved":state.unresolved,"stale":state.stale,"backup_original":None if backup.original is None else backup.original.hex(),"backup_current":backup.current.hex(),"backup_incoming":backup.incoming.hex(),"backup_result":None if backup.result is None else backup.result.hex()}),encoding="utf-8")
 context.close(state.binding,choice="discard")
 """
     completed = subprocess.run(
@@ -1005,6 +1018,11 @@ context.close(state.binding,choice="discard")
         == ORIGINAL.replace(b"Authored body.\r\n", b"Incoming prose.\r\n").hex()
     )
     assert cold["selected"] == "current" and cold["decision_id"] == decision_id
+    assert cold["result"] == CURRENT.hex()
+    assert cold["backup_original"] == b"Authored body.\r\n".hex()
+    assert cold["backup_current"] == backup_current.hex()
+    assert cold["backup_incoming"] == b"Incoming prose.\r\n".hex()
+    assert cold["backup_result"] is None
     assert cold["unresolved"] == saved.unresolved and cold["stale"] == 0
     assert authored_files(vault) == files_before and _user_state(vault) == user_before
     assert (

@@ -224,8 +224,12 @@ def test_output8_attachment_reference_choice_preserves_player_and_external_uri()
     ]
 
 
-@pytest.mark.parametrize("output_format", (7, 8))
-def test_migration_record_choice_keeps_source_markup_as_data(output_format):
+@pytest.mark.parametrize(
+    "output_format,automatic",
+    ((7, False), (8, False), (8, True)),
+    ids=("legacy7-manual", "supported8-manual", "supported8-automatic"),
+)
+def test_migration_record_choice_keeps_source_markup_as_data(output_format, automatic):
     baseline = graph_payload()
     baseline["Categories/A.md"] = note("category:A", icon="[[Attachments/A.svg]]")
     record = json.loads(baseline["migration-record.json"])
@@ -245,29 +249,56 @@ def test_migration_record_choice_keeps_source_markup_as_data(output_format):
     ]
     raw = json.dumps(record).encode()
     incoming["migration-record.json"] = raw
-    prepared = preparation(
-        assemble_facts(
-            baseline,
-            incoming,
-            baseline,
-            proposal_id="raw-evidence-record",
-            generation=1,
+    facts = assemble_facts(
+        baseline,
+        incoming,
+        baseline,
+        proposal_id="raw-evidence-record",
+        generation=1,
+    )
+    if not automatic:
+        # Retained manual-policy reviews still require a qualified Incoming
+        # decision; fresh supported reviews select the same exact data safely.
+        facts = facts.model_copy(
+            update={
+                "format_operation": facts.format_operation.model_copy(
+                    update={"automatic_merge": False}
+                )
+            }
         )
+    prepared = preparation(facts)
+    plan = prepared.review
+    if automatic:
+        assert output_format == 8 and plan.ready and plan.requirements == ()
+        assert plan.actions == plan.approvals == ()
+    else:
+        offer = next(
+            row for row in inspect_review_choices(plan) if row.domain == "text"
+        )
+        selected = Operations().resolve_update_choice(
+            prepared,
+            requirement_id=offer.requirement_id,
+            choice="incoming",
+            assumptions_digest=requirement_digest(offer),
+        )
+        if output_format == 7:
+            assert selected.code == "invalid_candidate" and not selected.ready
+            return
+        assert selected.code == "accepted" and selected.ready, selected.code
+        plan = selected.preparation.review
+        choice = next(a for a in plan.approvals if a.domain == "text")
+        assert choice.provenance == "explicit_user" and choice.result.data == raw
+    original = next(
+        s for s in plan.producer_facts.subjects if s.path == "migration-record.json"
     )
-    offer = next(
-        row for row in inspect_review_choices(prepared.review) if row.domain == "text"
+    assert original.baseline.status == "known"
+    assert (
+        original.baseline.content.data
+        == original.current.content.data
+        == baseline["migration-record.json"]
     )
-    selected = Operations().resolve_update_choice(
-        prepared,
-        requirement_id=offer.requirement_id,
-        choice="incoming",
-        assumptions_digest=requirement_digest(offer),
-    )
-    if output_format == 7:
-        assert selected.code == "invalid_candidate" and not selected.ready
-        return
-    assert selected.code == "accepted" and selected.ready, selected.code
-    effects = select_review_effects(selected.preparation.review)
+    assert original.incoming.data == raw
+    effects = select_review_effects(plan)
     assert effects.status == "selected"
     assert (
         next(
@@ -277,10 +308,6 @@ def test_migration_record_choice_keeps_source_markup_as_data(output_format):
         )
         == raw
     )
-    choice = next(
-        a for a in selected.preparation.review.approvals if a.domain == "text"
-    )
-    assert choice.provenance == "explicit_user" and choice.result.data == raw
 
 
 def test_migration_record_data_dialect_keeps_note_and_legacy_guards():
@@ -519,7 +546,8 @@ def test_transition_qualifies_current_record_from_recorded_identity(
     ),
     ids=("backtick", "fence", "markdown"),
 )
-def test_metadata_choice_never_lexes_source_strings_as_markdown(source_note):
+@pytest.mark.parametrize("automatic", (False, True), ids=("manual", "automatic"))
+def test_metadata_choice_never_lexes_source_strings_as_markdown(source_note, automatic):
     baseline = graph_payload()
     baseline["Categories/A.md"] = note("category:A", icon="[[Attachments/A.svg]]")
     incoming = dict(baseline)
@@ -528,26 +556,51 @@ def test_metadata_choice_never_lexes_source_strings_as_markdown(source_note):
     record["original_evidence"] = [{"records": [{"Note": source_note}]}]
     raw = json.dumps(record).encode()
     incoming["migration-record.json"] = raw
-    prepared = preparation(
-        assemble_facts(
-            baseline,
-            incoming,
-            baseline,
-            proposal_id="literal-source-data",
-            generation=1,
+    facts = assemble_facts(
+        baseline,
+        incoming,
+        baseline,
+        proposal_id="literal-source-data",
+        generation=1,
+    )
+    if not automatic:
+        facts = facts.model_copy(
+            update={
+                "format_operation": facts.format_operation.model_copy(
+                    update={"automatic_merge": False}
+                )
+            }
         )
+    prepared = preparation(facts)
+    plan = prepared.review
+    if automatic:
+        assert plan.ready and plan.requirements == ()
+        assert plan.actions == plan.approvals == ()
+    else:
+        offer = next(
+            row for row in inspect_review_choices(plan) if row.domain == "text"
+        )
+        chosen = Operations().resolve_update_choice(
+            prepared,
+            requirement_id=offer.requirement_id,
+            choice="incoming",
+            assumptions_digest=requirement_digest(offer),
+        )
+        assert chosen.code == "accepted" and chosen.ready, chosen.code
+        plan = chosen.preparation.review
+        choice = next(a for a in plan.approvals if a.domain == "text")
+        assert choice.provenance == "explicit_user" and choice.result.data == raw
+    original = next(
+        s for s in plan.producer_facts.subjects if s.path == "migration-record.json"
     )
-    offer = next(
-        row for row in inspect_review_choices(prepared.review) if row.domain == "text"
+    assert original.baseline.status == "known"
+    assert (
+        original.baseline.content.data
+        == original.current.content.data
+        == baseline["migration-record.json"]
     )
-    chosen = Operations().resolve_update_choice(
-        prepared,
-        requirement_id=offer.requirement_id,
-        choice="incoming",
-        assumptions_digest=requirement_digest(offer),
-    )
-    assert chosen.code == "accepted" and chosen.ready, chosen.code
-    effects = select_review_effects(chosen.preparation.review)
+    assert original.incoming.data == raw
+    effects = select_review_effects(plan)
     assert effects.status == "selected"
     assert (
         next(
