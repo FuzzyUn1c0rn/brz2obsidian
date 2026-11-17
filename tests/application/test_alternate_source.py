@@ -517,6 +517,10 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
             "brz2obsidian.application.vault_update_contracts",
         },
         "application/update_facts.py": {
+            # This outer producer reuses attachment interpretation/reference
+            # builders for compatible results; Core still admits the evidence.
+            "brz2obsidian.application.attachment_choices",
+            "brz2obsidian.application.review_choices",
             "brz2obsidian.obsidian",
             "brz2obsidian.obsidian_dialect",
         },
@@ -706,6 +710,10 @@ def test_reusable_modules_import_only_inward_packages_including_initializers():
         "application/history_workflow.py": {
             "brz2obsidian.application.checkpoint_contracts",
             "brz2obsidian.application.history_workflow_contracts",
+            # This Operations facade shares review-reason projection with its
+            # sibling update lifecycle. Generic Workflow and initializers keep
+            # their separate inward-only permissions.
+            "brz2obsidian.application.update_lifecycle",
             "brz2obsidian.application.vault_recovery_contracts",
             "brz2obsidian.application.vault_repair_contracts",
             "brz2obsidian.application.vault_update_contracts",
