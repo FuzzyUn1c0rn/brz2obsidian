@@ -329,7 +329,12 @@ def interpret_links(
                 else _query(
                     target_text,
                     source_path,
-                    path_mode,
+                    "relative"
+                    if output_format == 8
+                    and path_mode == "vault"
+                    and not wiki
+                    and target_text.startswith(("./", "../"))
+                    else path_mode,
                     (f"[[{target_text}]]", f"[[{target_text}|{display}]]")
                     if wiki
                     else (),

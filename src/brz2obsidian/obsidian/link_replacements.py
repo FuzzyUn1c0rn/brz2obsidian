@@ -24,7 +24,7 @@ def render_link_replacement(
     ):
         raise ValueError("A bound resolved link occurrence is required")
 
-    def agrees(raw):
+    def agrees(raw, *, output_format=7):
         parsed = interpret_links(
             ExactContent(data=raw),
             document_id=document.document_id,
@@ -33,6 +33,7 @@ def render_link_replacement(
             targets=targets,
             target_facts=target_facts,
             inventory=document.inventory,
+            output_format=output_format,
         )
         return (
             parsed.status == "supported"
@@ -43,7 +44,12 @@ def render_link_replacement(
             and parsed.occurrences[0].meaning == selected
         )
 
-    if agrees(occurrence.raw):
+    if agrees(occurrence.raw) or (
+        occurrence.syntax == "markdown"
+        and occurrence.query is not None
+        and occurrence.meaning == selected
+        and agrees(occurrence.raw, output_format=8)
+    ):
         return occurrence.raw
     path = selected.path
     if document.path_mode == "relative":
