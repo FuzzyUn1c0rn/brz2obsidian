@@ -1,5 +1,6 @@
 """Recovery controls render backend admission and retain honest outcome facts."""
 
+import json
 import os
 from threading import Event
 from time import monotonic
@@ -116,7 +117,37 @@ def test_published_ui_requires_new_attempt_before_editing_and_creates_another_va
         assert window.snapshot.destination == str(tmp_path / "Another vault")
         assert inventory(tmp_path / "Fresh vault") == original
     finally:
-        finish(app, window)
+        try:
+            (tmp_path / "recovery-diagnostic.json").write_text(
+                json.dumps(
+                    {
+                        "snapshot": window.snapshot.model_dump(mode="json"),
+                        "name": name.text() if "name" in locals() else None,
+                        "name_enabled": name.isEnabled()
+                        if "name" in locals()
+                        else None,
+                        "name_focus": name.hasFocus() if "name" in locals() else None,
+                        "buttons": [
+                            {
+                                "name": row.accessibleName(),
+                                "visible": row.isVisible(),
+                                "enabled": row.isEnabled(),
+                            }
+                            for row in window.findChildren(QPushButton)
+                            if row.accessibleName()
+                            in (
+                                "Inspect archive",
+                                "Convert",
+                                "Start another conversion",
+                            )
+                        ],
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+        finally:
+            finish(app, window)
 
 
 def test_unknown_ui_acknowledgment_retains_path_during_edits_and_failed_exports(

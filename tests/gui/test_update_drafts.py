@@ -357,6 +357,27 @@ def test_owned_draft_preserves_review_until_explicit_commit_or_discard(
                         }
                         for row in transport.replies
                     ],
+                    "reference_ui": {
+                        "queue": window.workbench.queue.currentIndex().data(),
+                        "busy": window.workbench.busy,
+                        "pending_read": window.workbench._pending_read,
+                        "pending_choice": window.workbench._pending_choice,
+                        "reference_dirty": window.workbench._reference_dirty,
+                        "reference_pending": bool(window.workbench._reference_pending),
+                        "reply_next_offset": state.reply.next_reference_offset
+                        if state.reply
+                        else None,
+                        "buttons": [
+                            {
+                                "name": row.accessibleName(),
+                                "visible": row.isVisible(),
+                                "enabled": row.isEnabled(),
+                            }
+                            for row in window.findChildren(QPushButton)
+                            if row.accessibleName()
+                            in ("Next reference page", "Stage reference choices")
+                        ],
+                    },
                     "snapshot": {
                         name: getattr(state, name)
                         for name in (
