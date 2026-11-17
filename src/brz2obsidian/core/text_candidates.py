@@ -1,8 +1,11 @@
 """Selected explicit candidate consistency; no YAML, Markdown or path parsing."""
 
+from collections import Counter
+from hashlib import sha256
+
 from brz2obsidian.content_values import same_content
 from brz2obsidian.contracts import LinkValidationBaseline, ReferenceTarget
-from brz2obsidian.core.link_meanings import matches_exact_note_path
+from brz2obsidian.core.link_meanings import matches_exact_note_path, same_canonical_path
 from brz2obsidian.core.link_validation import _validate_link_document
 from brz2obsidian.core.reference_targets import validate_targets
 
@@ -115,59 +118,63 @@ def _navigation_entries(reference, occurrences):
     )
 
 
-def _generated_navigation_entry(reference, entries, *, require_boundary):
-    if not entries:
-        return None
-    if len(entries) == 1 and not require_boundary:
-        return entries[0]
-    if reference.section_boundary is None:
-        return None
-    anchored = tuple(
+def _other_destination_links(reference, occurrences):
+    # Include local links outside the generated heading and with other labels.
+    return [
         link
-        for link in entries
-        if link.relationship_boundary == reference.section_boundary
-    )
-    return anchored[0] if len(anchored) == 1 else None
-
-
-def _authored_navigation_entries(entries, generated):
-    return tuple(
-        (
-            link.raw,
-            link.relationship_boundary,
-            link.meaning.model_copy(update={"target_version": None}),
+        for link in occurrences
+        if link.meaning.target_identity != reference.identity
+        and (
+            link.meaning.path is not None
+            and same_canonical_path(link.meaning.path, reference.source_path)
+            or link.query is not None
+            and matches_exact_note_path(link.query, reference.source_path)
         )
-        for link in entries
-        if link != generated
+    ]
+
+
+def _link_meaning_counts(occurrences):
+    return Counter(
+        (link.raw, link.meaning.model_copy(update={"target_version": None}))
+        for link in occurrences
     )
 
 
 def moved_navigation_valid(references, occurrences, current_occurrences):
     for reference in references:
-        current = _navigation_entries(reference, current_occurrences)
-        selected = _navigation_entries(reference, occurrences)
-        # A repeated heading cannot grant ownership. Disambiguate against the
-        # unique boundary observed in the exact generated output and retain
-        # the other entries with their independently observed destinations.
-        require_boundary = len(current) > 1 or len(selected) > 1
-        before = _generated_navigation_entry(
-            reference, current, require_boundary=require_boundary
-        )
-        after = _generated_navigation_entry(
-            reference, selected, require_boundary=require_boundary
-        )
+        after = _navigation_entries(reference, occurrences)
+        if len(after) != 1:
+            return False
+        (generated,) = after
+        meaning = generated.meaning
         if (
-            len(current) > 1
-            and before is None
-            or after is None
-            or after.meaning.status != "resolved"
-            or after.meaning.target_identity != reference.identity
-            or after.meaning.path is None
-            or after.query is None
-            or not matches_exact_note_path(after.query, after.meaning.path)
-            or _authored_navigation_entries(current, before)
-            != _authored_navigation_entries(selected, after)
+            meaning.status != "resolved"
+            or meaning.target_identity != reference.identity
+            or meaning.path is None
+            or generated.query is None
+            or not matches_exact_note_path(generated.query, meaning.path)
         ):
+            return False
+        current = _link_meaning_counts(
+            _other_destination_links(reference, current_occurrences)
+        )
+        selected = _link_meaning_counts(
+            _other_destination_links(reference, occurrences)
+        )
+        # Exact retained output authorizes replacement of one generated token.
+        # Identical copies have no positional proof. The edited result must
+        # distinguish their roles and retain every other observed link.
+        prior = _link_meaning_counts(
+            _navigation_entries(reference, current_occurrences)
+        )
+        if reference.retained_token_sha256 is not None and len(prior) == 1:
+            (slot,) = prior
+            if (
+                current[slot]
+                and sha256(slot[0]).hexdigest() == reference.retained_token_sha256
+            ):
+                current[slot] -= 1
+        if current != selected:
             return False
     return True
 

@@ -1328,7 +1328,7 @@ class MovedNavigationReference(ReconciliationContract):
     identity: ImportedItemIdentity
     source_path: str
     observed_path: str
-    section_boundary: str | None = Field(
+    retained_token_sha256: str | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
 
@@ -2231,9 +2231,6 @@ class LinkOccurrence(ReconciliationContract):
     query: LinkQuery | None
     meaning: LinkMeaning
     relationship_heading: Literal["Parents", "Children", "Related"] | None = Field(
-        default=None, exclude_if=lambda value: value is None
-    )
-    relationship_boundary: str | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
 

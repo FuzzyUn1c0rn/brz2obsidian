@@ -634,10 +634,26 @@ def _review_explanation(result, *, review=None):
     selected = tuple(
         row for row in messages if review is not None and row[0] in review.blockers
     )
-    if selected:
-        guidance = tuple(row[2] for row in selected)
+    guidance = tuple(row[2] for row in selected)
+    if review is not None:
+        pending = {row.change_id for row in review.requirements}
+        if any(
+            change.change_id in pending and change.provenance.rule == "moved_navigation"
+            for change in review.proposal.changes
+        ):
+            guidance += (
+                (
+                    "Edit the generated relationship to point to the reviewed note's "
+                    "actual path. Keep authored links at their original destinations. "
+                    "If an authored section repeats the generated heading and link, "
+                    "give your section a distinct heading and keep its link unchanged."
+                ),
+            )
+    if guidance:
         updates = {
-            "summary": " ".join(row[1] for row in selected),
+            "summary": " ".join(row[1] for row in selected)
+            if selected
+            else result.summary,
             "guidance": (*guidance, *result.guidance)
             if isinstance(result.guidance, tuple)
             else " ".join((*guidance, result.guidance)),

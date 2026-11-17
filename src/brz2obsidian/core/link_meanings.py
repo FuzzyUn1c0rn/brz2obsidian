@@ -22,6 +22,10 @@ def _key(value):
     return unicodedata.normalize("NFC", value).casefold()
 
 
+def same_canonical_path(left, right):
+    return _key(left) == _key(right)
+
+
 def _path_spellings(path, *, note):
     normalized = _key(path)
     if note and normalized.endswith(".md"):
@@ -216,13 +220,7 @@ def _semantic(value):
         result = {
             name: _semantic(getattr(value, name))
             for name in type(value).model_fields
-            if name
-            not in (
-                "file_roles",
-                "resource_origin",
-                "relationship_heading",
-                "relationship_boundary",
-            )
+            if name not in ("file_roles", "resource_origin", "relationship_heading")
             or getattr(value, name) is not None
         }
         # These spellings are lookup alternatives, not authored occurrence order.

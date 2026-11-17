@@ -622,16 +622,79 @@ def assemble_facts(
     )
 
     if qualified_scope:
-        facts = _bind_moved_navigation(facts, new_record)
+        facts = _bind_moved_navigation(facts, old_record, new_record)
     return automatic_merge_facts(facts, _owner=_owner)
 
 
-def _bind_moved_navigation(facts, source_record):
+def _navigation_edges(source_record):
+    items = {row["item_key"]: row for row in source_record["item_targets"]}
+    for relation in source_record.get("relationships", ()):
+        if relation["kind"] not in ("related", "hierarchy"):
+            continue
+        left, right = (items.get(relation[side]) for side in ("item_a", "item_b"))
+        if left is None or right is None:
+            continue
+        first, second = (
+            ("Related", "Related")
+            if relation["kind"] == "related"
+            else ("Children", "Parents")
+        )
+        for owner, peer, heading in ((left, right, first), (right, left, second)):
+            yield (
+                owner["original_identity"],
+                peer["original_identity"],
+                heading,
+                peer["relative_path"],
+            )
+
+
+def _retained_navigation_tokens(facts, subject, links, prior):
+    if subject.baseline.content is None or not any(
+        (subject.item_id, ref.identity.item_id, ref.heading, ref.source_path) in prior
+        for ref in links.values()
+    ):
+        return links
+    context = facts.link_context
+    document = interpret_links(
+        subject.baseline.content,
+        document_id=f"subject:{subject.item_id}:{subject.facet}",
+        source_path=subject.path,
+        path_mode="vault",
+        targets=context.current_targets,
+        target_facts=context.current_target_facts,
+        inventory=context.inventory,
+        output_format=9,
+    )
+    if document.status != "supported":
+        return links
+    for key, reference in links.items():
+        if (
+            subject.item_id,
+            reference.identity.item_id,
+            reference.heading,
+            reference.source_path,
+        ) not in prior:
+            continue
+        original = tuple(
+            link.raw
+            for link in document.occurrences
+            if link.relationship_heading == reference.heading
+            and not link.embedded
+            and link.query is not None
+            and link.query.value == reference.source_path
+            and link.meaning.display_text == reference.label
+        )
+        if len(original) == 1:
+            links[key] = reference.model_copy(
+                update={
+                    "retained_token_sha256": hashlib.sha256(original[0]).hexdigest()
+                }
+            )
+    return links
+
+
+def _bind_moved_navigation(facts, old_record, source_record):
     """Bind generated relationship entries independently of vault lookup."""
-    items = {
-        row["item_key"]: row["original_identity"]
-        for row in source_record["item_targets"]
-    }
     observed = defaultdict(list)
     for entry in facts.identity_inventory:
         if entry.identity_state == "valid" and entry.facet == "content":
@@ -651,23 +714,15 @@ def _bind_moved_navigation(facts, source_record):
     if not moved:
         return facts
 
+    prior = (
+        set(_navigation_edges(old_record))
+        if facts.baseline_identity.output_format in QUALIFIED_OUTPUT_FORMATS
+        else set()
+    )
     destinations = defaultdict(dict)
-    for relation in source_record["relationships"]:
-        if relation["kind"] not in ("related", "hierarchy"):
-            continue
-        left, right = (items.get(relation[side]) for side in ("item_a", "item_b"))
-        headings = (
-            ("Related", "Related")
-            if relation["kind"] == "related"
-            else ("Children", "Parents")
-        )
-        for owner, peer, heading in (
-            (left, right, headings[0]),
-            (right, left, headings[1]),
-        ):
-            if owner is not None and peer in moved:
-                subject, identity = moved[peer]
-                destinations[owner][heading, subject.path] = subject, identity
+    for owner, peer, heading, path in _navigation_edges(source_record):
+        if peer in moved:
+            destinations[owner][heading, path] = moved[peer]
     documents = {
         (d.document_id, d.source_path): d for d in facts.link_context.incoming_documents
     }
@@ -698,10 +753,9 @@ def _bind_moved_navigation(facts, source_record):
                         identity=identity,
                         source_path=peer.path,
                         observed_path=peer.current.path,
-                        section_boundary=occurrence.relationship_boundary
-                        if key not in links
-                        else None,
                     )
+        if links:
+            links = _retained_navigation_tokens(facts, subject, links, prior)
         current = current_documents.get((document_id, subject.current.path))
         if (
             links

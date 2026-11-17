@@ -320,13 +320,39 @@ def test_obsolete_listing_retains_current_bytes_and_has_no_incoming_file():
     assert listing.result.data == local and not listing.requires_decision
 
 
-@pytest.mark.parametrize("placement", ("free", "occupied", "authored-before"))
+@pytest.mark.parametrize(
+    "placement",
+    ("free", "occupied", "authored-before", "authored-after", "distinct-label"),
+)
 def test_generated_navigation_requires_the_approved_moved_note_destination(placement):
     occupied = placement != "free"
-    authored = placement == "authored-before"
+    duplicate = placement in ("authored-before", "authored-after")
+    authored = duplicate or placement == "distinct-label"
     canonical, relocated = b"[[Notes/Leaf.md|Leaf]]", b"[[Moved/Leaf.md|Leaf]]"
+    authored_link = (
+        b"[[Notes/Leaf.md|My occupant]]" if placement == "distinct-label" else canonical
+    )
     heading = b"## Children\n\n"
-    authored_block = heading + b"- " + canonical + b"\n\nAuthored context.\n\n"
+    explanation = b"Authored context.\n\n"
+    authored_block = (
+        heading + b"- " + authored_link + b"\n\n" + explanation
+        if placement == "authored-before"
+        else explanation + heading + b"- " + authored_link + b"\n\n"
+    )
+
+    def add_authored(body):
+        if placement == "authored-before":
+            return body.replace(heading, authored_block + heading, 1)
+        if placement == "authored-after":
+            return body.replace(
+                b"## Categories\n", authored_block + b"## Categories\n", 1
+            )
+        if placement == "distinct-label":
+            return body.replace(
+                b"- " + canonical, b"- " + authored_link + b"\n- " + canonical, 1
+            )
+        return body
+
     moved = "Moved/Leaf.md"
     local = (
         b'---\nsource_collection_id: "collection"\n'
@@ -337,9 +363,7 @@ def test_generated_navigation_requires_the_approved_moved_note_destination(place
         occupant=occupant,
         observer=LINK if occupied else b"Independent local prose.\r\n",
         extra={moved: local},
-        owner_edit=lambda body: (
-            body.replace(heading, authored_block + heading, 1) if authored else body
-        ),
+        owner_edit=add_authored,
     )
     leaf = comparison(review, "leaf")
     assert leaf.target_path == moved and leaf.original is None
@@ -363,20 +387,45 @@ def test_generated_navigation_requires_the_approved_moved_note_destination(place
         ),
     )
     assert refused.status == "refused"
-    prefix, generated, suffix = initial.rpartition(canonical)
-    assert generated == canonical
-    corrected = prefix + relocated + suffix
-    if authored:
-        assert authored_block in corrected
-        requested = action(chosen, entry, domain=offer.domain, choice="edited")
-        for wrong in (
-            initial.replace(canonical, relocated, 1),
-            initial.replace(canonical, relocated),
-        ):
-            outcome = resolve_review(
-                chosen, text_choice_action(chosen, requested, edited=wrong)
+    requested = action(chosen, entry, domain=offer.domain, choice="edited")
+
+    def edit_selection(candidate):
+        return resolve_review(
+            chosen, text_choice_action(chosen, requested, edited=candidate)
+        )
+
+    if duplicate:
+        owned = initial.replace(authored_block, b"", 1).replace(canonical, relocated, 1)
+        generated_only = (
+            owned.replace(heading, authored_block + heading, 1)
+            if placement == "authored-before"
+            else owned.replace(
+                b"## Categories\n", authored_block + b"## Categories\n", 1
             )
-            assert outcome.status == "refused"
+        )
+        authored_only = initial.replace(
+            authored_block, authored_block.replace(canonical, relocated), 1
+        )
+        assert edit_selection(generated_only).status == "refused"
+        assert edit_selection(authored_only).status == "refused"
+        assert edit_selection(initial.replace(canonical, relocated)).status == "refused"
+        distinguished = authored_block.replace(heading, b"## My links\n\n", 1)
+        corrected = generated_only.replace(authored_block, distinguished, 1)
+        assert distinguished in corrected and corrected.count(canonical) == 1
+    else:
+        corrected = initial.replace(canonical, relocated, 1)
+        if authored:
+            redirect_authored = authored_link.replace(b"Notes/", b"Moved/")
+            assert (
+                edit_selection(initial.replace(authored_link, redirect_authored)).status
+                == "refused"
+            )
+            assert (
+                edit_selection(
+                    corrected.replace(authored_link, redirect_authored)
+                ).status
+                == "refused"
+            )
     final = choose(chosen, "entry", offer.domain, "edited", edited=corrected)
     effects = select_review_effects(final)
     assert effects.status == "selected", (final.blockers, final.requirements)
@@ -396,7 +445,7 @@ def test_generated_navigation_requires_the_approved_moved_note_destination(place
         (retained,) = [
             link
             for link in approval.candidate.links.occurrences
-            if link.raw == canonical
+            if link.raw == authored_link
         ]
         assert retained.meaning.status == "resolved"
         assert (

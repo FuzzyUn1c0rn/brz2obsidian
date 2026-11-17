@@ -1,7 +1,6 @@
 """Bounded in-memory Obsidian link interpretation; never reads vault files."""
 
 import re
-from hashlib import sha256
 from urllib.parse import unquote_to_bytes
 
 import yaml
@@ -236,19 +235,16 @@ def _relationship_entries(text):
         "## Related": "Related",
     }
     offset, heading = 0, None
-    entries, pending = {}, []
+    entries = {}
     for line in text.splitlines(keepends=True):
         body = line.rstrip("\r\n")
-        if heading is not None and body.startswith("- "):
-            pending.append((offset + 2, offset + len(body)))
+        if body in headings:
+            heading = headings[body]
+        elif heading is not None and body.startswith("- "):
+            entries[offset + 2, offset + len(body)] = heading
         elif body:
-            if pending:
-                boundary = sha256(body.encode()).hexdigest()
-                entries.update((span, (heading, boundary)) for span in pending)
-                pending.clear()
-            heading = headings.get(body)
+            heading = None
         offset += len(line)
-    entries.update((span, (heading, None)) for span in pending)
     return entries
 
 
@@ -411,7 +407,6 @@ def interpret_links(
             len(text[: match.end()].encode()),
         )
         destination_start = len(text[: match.start("w" if wiki else "m")].encode())
-        heading, boundary = relationship_entries.get(match.span(), (None, None))
         occurrences.append(
             LinkOccurrence(
                 occurrence_id=f"{document_id}:link:{len(occurrences)}",
@@ -425,8 +420,7 @@ def interpret_links(
                 raw=content.data[start:end],
                 query=query,
                 meaning=meaning,
-                relationship_heading=heading,
-                relationship_boundary=boundary,
+                relationship_heading=relationship_entries.get(match.span()),
             )
         )
     residue = list(text)
