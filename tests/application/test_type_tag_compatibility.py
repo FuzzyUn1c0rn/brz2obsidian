@@ -6,7 +6,6 @@ import shutil
 import pytest
 
 from brz2obsidian.application.operations import Operations
-from brz2obsidian.application.wiring import default_workflow
 from brz2obsidian.contracts import ExactContent, OutputIdentity
 from brz2obsidian.obsidian import interpret_attachment_mapping
 from tests.application.test_format_transition_completion import finish_transition
@@ -22,6 +21,7 @@ from tests.reconciliation.test_resolution import action
 from tests.support.recorded_format6 import changed_source
 from tests.support.recorded_format6 import historical_payload as format6_payload
 from tests.support.recorded_format7 import FIXTURE, NOTE, ORIGINAL, historical_payload
+from tests.support.recorded_format8 import format8_workflow
 from tests.support.type_tag_sources import BRAIN, ICON, PNG, brz_source
 
 __all__ = ["update_root"]
@@ -515,7 +515,7 @@ def test_attachment_mapping_keeps_qualified7_and_current8_distinct_from_legacy6(
 ):
     if version == 8:
         vault = tmp_path / "fresh8"
-        result = default_workflow().convert(brz_source(tmp_path / "source.brz"), vault)
+        result = format8_workflow().convert(brz_source(tmp_path / "source.brz"), vault)
         assert result.outcome == "clean", result.issues
         raw = (vault / "migration-record.json").read_bytes()
         collection = BRAIN
