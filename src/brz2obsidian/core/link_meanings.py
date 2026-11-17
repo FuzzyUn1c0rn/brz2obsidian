@@ -22,13 +22,24 @@ def _key(value):
     return unicodedata.normalize("NFC", value).casefold()
 
 
+def _path_spellings(path, *, note):
+    normalized = _key(path)
+    if note and normalized.endswith(".md"):
+        return normalized, normalized[:-3]
+    return (normalized,)
+
+
+def matches_exact_note_path(query, path):
+    """Match a canonical note path, without short names or alias resolution."""
+    return query.mode == "exact" and _key(query.value) in _path_spellings(
+        path, note=True
+    )
+
+
 def _query_matches_target(query, target):
     if target.canonical_path is None:
         return False
-    path = _key(target.canonical_path)
-    paths = {path}
-    if target.kind != "resource" and path.endswith(".md"):
-        paths.add(path[:-3])
+    paths = _path_spellings(target.canonical_path, note=target.kind != "resource")
     aliases = {_key(name) for name in target.representations}
     value = _key(query.value)
     return (

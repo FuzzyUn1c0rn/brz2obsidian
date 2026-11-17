@@ -3,7 +3,7 @@
 from brz2obsidian.content_fingerprints import canonical_equal
 from brz2obsidian.content_values import same_content
 from brz2obsidian.contracts import LinkTargetFacts
-from brz2obsidian.core.link_meanings import resolve_occurrence
+from brz2obsidian.core.link_meanings import matches_exact_note_path, resolve_occurrence
 from brz2obsidian.core.link_validation import _validate_link_document
 from brz2obsidian.core.review_appearance import provider_chain_blockers
 from brz2obsidian.core.review_composition import (
@@ -35,9 +35,8 @@ def _promoted_reservation(occurrence, actual, adopted_ids):
     query = occurrence.query
     if (
         query is None
-        or query.mode != "exact"
         or before.path is None
-        or query.value not in (before.path, before.path.removesuffix(".md"))
+        or not matches_exact_note_path(query, before.path)
         or actual.status != "resolved"
         or actual.target_identity is None
     ):

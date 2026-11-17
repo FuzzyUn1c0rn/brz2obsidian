@@ -21,6 +21,7 @@ from tests.reconciliation.test_resolution import action, preflight
 PATH = "Notes/Leaf.md"
 MANUAL = "Manual.md"
 LINK = b"Read [[Notes/Leaf.md|Leaf]].\r\n"
+CASE_EQUIVALENT_LINK = b"Read [[notes/LEAF.md|Leaf]].\r\n"
 
 
 def generated(analysis, generation):
@@ -75,15 +76,20 @@ def choose(review, item_id, domain, choice, **parameters):
 
 
 def test_promotion_keeps_the_reserved_identity_of_an_unchanged_authored_exact_link():
-    review = navigation_review()
+    review = navigation_review(
+        observer=LINK + CASE_EQUIVALENT_LINK + b"Read [Leaf](./notes/LEAF).\r\n"
+    )
     context = review.facts.link_context
     (local,) = [d for d in context.current_documents if d.source_path == MANUAL]
-    (meaning,) = [o.meaning for o in local.occurrences]
-    assert (meaning.status, meaning.path, meaning.target_identity.item_id) == (
-        "intentionally_uncreated",
-        PATH,
-        "leaf",
-    )
+    assert [
+        (
+            occurrence.query.mode,
+            occurrence.meaning.status,
+            occurrence.meaning.path,
+            occurrence.meaning.target_identity.item_id,
+        )
+        for occurrence in local.occurrences
+    ] == [("exact", "intentionally_uncreated", PATH, "leaf")] * 3
     row = comparison(review, "leaf")
     assert row.original is None and row.current is None
     assert b"## Parents\n\n- [[Home \xe2\x80\x94 Entry.md|Entry]]" in row.incoming.data
@@ -194,7 +200,19 @@ def test_unrelated_claim_at_a_reserved_path_cannot_be_adopted():
         b'---\nsource_collection_id: "collection"\n'
         b'source_item_id: "unrelated"\n---\n\n# Independent\n'
     )
-    review = navigation_review(occupant=occupant)
+    review = navigation_review(occupant=occupant, observer=CASE_EQUIVALENT_LINK)
+    (observer,) = [
+        doc
+        for doc in review.facts.link_context.current_documents
+        if doc.source_path == MANUAL
+    ]
+    (link,) = observer.occurrences
+    assert (link.query.mode, link.meaning.status, link.meaning.path) == (
+        "exact",
+        "resolved",
+        PATH,
+    )
+    assert link.meaning.target_identity.item_id == "unrelated"
     row = comparison(review, "leaf")
     assert row.original is None and row.current.data == occupant
     assert row.identity_review.status != "matched"
