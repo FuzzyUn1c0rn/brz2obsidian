@@ -5,11 +5,15 @@ import shutil
 
 from brz2obsidian.application.operations import Operations
 from brz2obsidian.application.update_facts import output_identity
+from brz2obsidian.application.update_lifecycle import text_choice_action
 from brz2obsidian.application.wiring import default_workflow
+from brz2obsidian.core import inspect_review_choices
+from tests.application.test_format_transition_completion import StopAfterPublication
 from tests.application.test_format_transition_native import user_git_state
 from tests.application.test_graph_workflow import graph_archive, identity
 from tests.application.test_type_tag_updates import fresh_resume, use_incoming
 from tests.application.test_update_lifecycle import case_path, git
+from tests.reconciliation.test_resolution import action
 from tests.support.recorded_format6 import NOTE, ORIGINAL
 from tests.support.recorded_format7 import FIXTURE, historical_payload
 from tests.support.recorded_format8 import format8_workflow
@@ -193,6 +197,39 @@ def test_format9_retirement_and_requalification_keep_local_deletion_after_cold_r
     assert b"## Related" in retained_note.incoming.data
     assert moved.read_bytes() == retained and not kept_path.exists()
     assert not (vault / LEAF).exists()
+    kept = choose_text(
+        operations,
+        resumed,
+        retained_note,
+        retained_note.incoming.data + b"\nAuthored during the first import.\r\n",
+    )
+    home = next(c for c in kept.review.proposal.changes if c.item_id == identity(1))
+    edited = home.incoming.data.replace(
+        b"[[Notes/Kept.md|Kept]]", b"[[Moved/Kept.md|Kept]]"
+    )
+    ready = use_incoming(operations, choose_text(operations, kept, home, edited))
+    assert operations.apply_update(ready).status == "applied"
+    assert edited == (vault / home.path).read_bytes()
+    assert b"Authored during the first import." in moved.read_bytes()
+    assert not kept_path.exists() and not (vault / LEAF).exists()
+    identical = review_plan(operations.prepare_update(vault, qualifying))
+    assert identical.review.ready
+    assert operations.apply_update(identical).code == "already_current"
+
+
+def choose_text(operations, prepared, change, edited):
+    (offer,) = [
+        row
+        for row in inspect_review_choices(prepared.review)
+        if row.change_id == change.change_id and "edited" in row.enabled_choices
+    ]
+    result = operations.resolve_update(
+        prepared,
+        action(prepared.review, change, domain=offer.domain, choice="edited"),
+        edited=edited,
+    )
+    assert result.code == "accepted", result
+    return result.preparation
 
 
 def test_recorded_format7_routes_to_current_and_reopens_saved_format8(case_path):
@@ -235,3 +272,53 @@ def test_recorded_format7_routes_to_current_and_reopens_saved_format8(case_path)
     assert resumed.review.facts.format_operation.baseline_source_version == (
         resumed.review.facts.format_operation.target_source_version
     )
+
+
+def test_interrupted_format9_upgrade_finishes_with_authored_reserved_links(case_path):
+    source = graph_archive(case_path / "original.brz", TITLES, RELATIONSHIPS)
+    vault, _, authored = checkpoint(case_path, source, format8_workflow())
+    warm = Operations(vault_executor=StopAfterPublication())
+    prepared = use_incoming(
+        warm, review_plan(warm.prepare_format_transition(vault, source))
+    )
+    stopped = warm.apply_update(prepared)
+    assert (
+        stopped.status == "recovery_required" and warm.vault_executor.moved is not None
+    )
+    assert stopped.application.published_files == 1
+
+    cold = Operations()
+    assert cold.inspect_update_status(vault).recovery_required
+    recovery = cold.prepare_recovery(vault, direction="finish")
+    assert recovery.status == "offered"
+    for index in range(len(recovery.review.proposal.changes)):
+        plan = recovery.review
+        if plan.ready:
+            break
+        assert plan.requirements, plan.blockers
+        requirement = plan.requirements[0]
+        change = next(
+            row
+            for row in plan.proposal.changes
+            if row.change_id == requirement.change_id
+        )
+        decision = action(
+            plan,
+            change,
+            domain=requirement.domain,
+            choice="incoming",
+            decision_id=f"finish-9:{index}",
+        )
+        recovery = cold.resolve_recovery(
+            vault, recovery, text_choice_action(plan, decision)
+        )
+        assert recovery.status == "offered", recovery
+    assert recovery.review.ready, (
+        recovery.review.requirements,
+        recovery.review.blockers,
+    )
+    result = cold.execute_recovery(vault, recovery)
+    assert result.status == "applied" and not result.recovery_required, result
+    assert b"## Parents" in (vault / LEAF).read_bytes()
+    assert (vault / "Manual.md").read_bytes() == authored
+    assert json.loads((vault / RECORD).read_bytes())["schema_version"] == 9

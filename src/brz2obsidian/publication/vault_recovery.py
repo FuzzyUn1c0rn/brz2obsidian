@@ -403,10 +403,14 @@ def _review_observation(
                 continue
             old = state_by_id[target.target_id]
             observed_target = current.get(target.canonical_path)
+            retained_absence = old.existence == "missing" or (
+                original_facts.incoming_identity.output_format == 9
+                and old.existence == "intentionally_uncreated"
+            )
             if observed_target is None or (
                 observed_target.content == old.content
                 and observed_target.existence
-                == ("absent" if old.existence == "missing" else old.existence)
+                == ("absent" if retained_absence else old.existence)
             ):
                 target_facts.append(old)
             else:
@@ -425,7 +429,7 @@ def _review_observation(
                         if original_facts.baseline_identity.output_format == 6
                         else original_facts.baseline_identity.output_format,
                         qualify_roles=original_facts.incoming_identity.output_format
-                        == 8,
+                        in QUALIFIED_OUTPUT_FORMATS,
                         _owner=None if _owner is None else _owner._session,
                     )
                 )

@@ -3,9 +3,11 @@
 import hashlib
 import json
 import unicodedata
+from collections import defaultdict
 from pathlib import PurePosixPath
 from types import SimpleNamespace
 
+from brz2obsidian.content_values import same_content
 from brz2obsidian.contracts import (
     AttachmentDestination,
     AttachmentFacts,
@@ -19,6 +21,7 @@ from brz2obsidian.contracts import (
     ImportedItemIdentity,
     InlineExactContent,
     LinkContext,
+    MovedNavigationReference,
     OpaqueContent,
     OutputIdentity,
     ReconciliationInput,
@@ -27,6 +30,7 @@ from brz2obsidian.contracts import (
     SafetyFact,
     SupportedFormatBaseline,
 )
+from brz2obsidian.core.text_candidates import moved_navigation_valid
 from brz2obsidian.obsidian import (
     align_structure,
     inspect_text_candidate,
@@ -349,8 +353,8 @@ def assemble_facts(
     retired = set()
     historical = {}
     if qualified_scope:
-        known_items = {row["original_identity"] for row in new_record["item_targets"]}
-        retired.update(set(retired_note_ids) & known_items)
+        # The checkpoint retains the association even across source omissions.
+        retired.update(retired_note_ids)
         retired.update(
             key[0]
             for key in old.keys() & new_reserved.keys()
@@ -556,8 +560,9 @@ def assemble_facts(
                 prior_reservation=received is not None
                 and old_reserved.get(key) == path,
                 source_still_reserved=received is None and key in new_reserved,
-                previously_generated=item in retired
-                and (key in old_reserved or key in new_reserved),
+                previously_generated=facet == "content"
+                and item in retired
+                and (key not in old or key in new_reserved),
             )
         )
         if original is not None:
@@ -616,7 +621,100 @@ def assemble_facts(
         }
     )
 
+    if qualified_scope:
+        facts = _bind_moved_navigation(facts, new_record)
     return automatic_merge_facts(facts, _owner=_owner)
+
+
+def _bind_moved_navigation(facts, source_record):
+    """Bind generated relationship entries independently of vault lookup."""
+    items = {
+        row["item_key"]: row["original_identity"]
+        for row in source_record["item_targets"]
+    }
+    observed = defaultdict(list)
+    for entry in facts.identity_inventory:
+        if entry.identity_state == "valid" and entry.facet == "content":
+            observed[entry.identity].append(entry.current)
+    moved = {}
+    for subject in facts.subjects:
+        if subject.facet != "content" or subject.incoming is None:
+            continue
+        identity = _identity(facts.incoming_identity, subject.item_id)
+        matches = observed.get(identity, ())
+        if (
+            len(matches) == 1
+            and matches[0].existence == "present"
+            and matches[0].path != subject.path
+        ):
+            moved[subject.item_id] = subject, identity
+    if not moved:
+        return facts
+
+    destinations = defaultdict(dict)
+    for relation in source_record["relationships"]:
+        if relation["kind"] not in ("related", "hierarchy"):
+            continue
+        left, right = (items.get(relation[side]) for side in ("item_a", "item_b"))
+        headings = (
+            ("Related", "Related")
+            if relation["kind"] == "related"
+            else ("Children", "Parents")
+        )
+        for owner, peer, heading in (
+            (left, right, headings[0]),
+            (right, left, headings[1]),
+        ):
+            if owner is not None and peer in moved:
+                subject, identity = moved[peer]
+                destinations[owner][heading, subject.path] = subject, identity
+    documents = {
+        (d.document_id, d.source_path): d for d in facts.link_context.incoming_documents
+    }
+    current_documents = {
+        (d.document_id, d.source_path): d for d in facts.link_context.current_documents
+    }
+    subjects = []
+    for subject in facts.subjects:
+        document_id = f"subject:{subject.item_id}:{subject.facet}"
+        document = documents.get((document_id, subject.path))
+        links = {}
+        if document is not None and (
+            subject.current.existence == "present" or subject.baseline.status != "known"
+        ):
+            for occurrence in document.occurrences:
+                query = occurrence.query
+                if query is None or occurrence.embedded:
+                    continue
+                match = destinations[subject.item_id].get(
+                    (occurrence.relationship_heading, query.value)
+                )
+                if match is not None:
+                    peer, identity = match
+                    links[occurrence.relationship_heading, identity.item_id] = (
+                        MovedNavigationReference(
+                            heading=occurrence.relationship_heading,
+                            label=occurrence.meaning.display_text,
+                            identity=identity,
+                            source_path=peer.path,
+                            observed_path=peer.current.path,
+                        )
+                    )
+        current = current_documents.get((document_id, subject.current.path))
+        if (
+            links
+            and current is not None
+            and current.status == "supported"
+            and same_content(subject.baseline.content, subject.incoming)
+            and moved_navigation_valid(links.values(), current.occurrences)
+        ):
+            links.clear()
+        subjects.append(
+            subject.model_copy(update={"moved_navigation": tuple(links.values())})
+            if links
+            else subject
+        )
+    return facts.model_copy(update={"subjects": tuple(subjects)})
 
 
 def automatic_merge_facts(facts, *, _owner=None):
@@ -882,7 +980,11 @@ def _link_context(
         received = row.current.content if generated is None else generated.incoming
         reserved = (
             subject is not None
-            and (subject.prior_reservation or subject.source_still_reserved)
+            and (
+                subject.prior_reservation
+                or subject.source_still_reserved
+                or subject.previously_generated
+            )
             and row.current.path == subject.path
             and row.current.existence == "absent"
         )

@@ -225,6 +225,7 @@ def selected_effect_blockers(facts, proposal, actions, approvals, *, composition
     operation_documents = set()
     changed_ids = set()
     adopted_ids = set()
+    edited_navigation_ids = set()
     blockers = []
     composed_documents = dict(composition.documents)
     composition_conflict = composition.conflict
@@ -596,6 +597,8 @@ def selected_effect_blockers(facts, proposal, actions, approvals, *, composition
                     None,
                 )
             write(target, content, selected_path, state)
+            if subject.moved_navigation and approval is not None:
+                edited_navigation_ids.add(target.target_id)
         if document is None:
             if (
                 any(
@@ -722,6 +725,7 @@ def selected_effect_blockers(facts, proposal, actions, approvals, *, composition
             ordinary_renewal
             or operation_renewal
             or document.document_id in attachment_documents
+            or any(m.target_id in edited_navigation_ids for m in resolved)
         ):
             # A proven reversal document can also retain a destination's later prose.
             # A retained note's unrelated prose version is not a link redirect. Resource choices
@@ -735,6 +739,7 @@ def selected_effect_blockers(facts, proposal, actions, approvals, *, composition
                     and (
                         ordinary_renewal
                         or operation_renewal
+                        or actual.target_id in edited_navigation_ids
                         or prior is not None
                         and (document.document_id, occurrence.occurrence_id)
                         not in attachment_links

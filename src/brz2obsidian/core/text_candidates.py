@@ -2,6 +2,7 @@
 
 from brz2obsidian.content_values import same_content
 from brz2obsidian.contracts import LinkValidationBaseline, ReferenceTarget
+from brz2obsidian.core.link_meanings import matches_exact_note_path
 from brz2obsidian.core.link_validation import _validate_link_document
 from brz2obsidian.core.reference_targets import validate_targets
 
@@ -96,6 +97,35 @@ def _known_memberships(subject, document, choice, *, mapping_choice):
     return True
 
 
+def moved_navigation_valid(references, occurrences):
+    for reference in references:
+        matches = [
+            link
+            for link in occurrences
+            if link.relationship_heading == reference.heading
+            and not link.embedded
+            and link.meaning.display_text == reference.label
+            and (
+                link.meaning.target_identity == reference.identity
+                or link.query is not None
+                and (
+                    matches_exact_note_path(link.query, reference.source_path)
+                    or matches_exact_note_path(link.query, reference.observed_path)
+                )
+            )
+        ]
+        if not matches or any(
+            link.meaning.status != "resolved"
+            or link.meaning.target_identity != reference.identity
+            or link.meaning.path is None
+            or link.query is None
+            or not matches_exact_note_path(link.query, link.meaning.path)
+            for link in matches
+        ):
+            return False
+    return True
+
+
 def validate_text_candidate(facts, change, candidate, choice, *, mapping_choice=False):
     subject = next(
         s
@@ -165,6 +195,10 @@ def validate_text_candidate(facts, change, candidate, choice, *, mapping_choice=
         baseline=baseline,
     ).valid:
         return False
+    if not moved_navigation_valid(
+        subject.moved_navigation, candidate.links.occurrences
+    ):
+        return False
     if any(
         t.identity is not None and t.identity != candidate.identity
         for t in candidate.link_targets
@@ -227,6 +261,15 @@ def validate_text_candidate(facts, change, candidate, choice, *, mapping_choice=
                     )
         if not _known_memberships(
             subject, document, choice, mapping_choice=mapping_choice
+        ):
+            return False
+        if (
+            change.identity_review.reason == "reserved_path_adoption"
+            and not {
+                ("source_collection_id", "collection"),
+                ("source_item_id", "item"),
+            }
+            <= declared
         ):
             return False
         if subject.structure is not None:

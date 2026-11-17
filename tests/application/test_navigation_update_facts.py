@@ -6,6 +6,7 @@ from brz2obsidian.application.update_facts import assemble_facts, automatic_merg
 from brz2obsidian.application.update_lifecycle import text_choice_action
 from brz2obsidian.core import (
     analyze,
+    inspect_review_choices,
     load_review,
     plan,
     prepare_review,
@@ -121,16 +122,38 @@ def test_same_path_occupant_needs_identity_and_result_approval(local):
     row = comparison(agreed, "leaf")
     assert row.original is None and row.current.data == local and not agreed.ready
     assert b"## Parents" in row.incoming.data
+    (required,) = [
+        offer
+        for offer in inspect_review_choices(agreed)
+        if offer.change_id == row.change_id
+    ]
+    assert required.domain == "format"
+    assert required.enabled_choices == (
+        ("edited",) if local else ("incoming", "edited")
+    )
+    assert select_review_effects(agreed).status != "selected"
     if local:
         result = row.incoming.data.replace(
             b"---\n\n# Leaf\n\n",
             b"custom: analyst\n---\n\n# Leaf\n\nVault prose.\n\n",
         )
+        unsigned = b"".join(
+            line
+            for line in result.splitlines(keepends=True)
+            if not line.startswith((b"source_collection_id:", b"source_item_id:"))
+        )
+        requested = action(agreed, row, domain="format", choice="edited")
+        invalid = resolve_review(
+            agreed, text_choice_action(agreed, requested, edited=unsigned)
+        )
+        assert invalid.status == "refused" and not invalid.plan.ready
         chosen = choose(agreed, "leaf", "format", "edited", edited=result)
     else:
         result = row.incoming.data
         chosen = choose(agreed, "leaf", "format", "incoming")
     assert chosen.ready, (chosen.blockers, chosen.requirements)
+    (approval,) = [a for a in chosen.approvals if a.change_id == row.change_id]
+    assert approval.domain == "format" and approval.result.data == result
     effects = select_review_effects(chosen)
     assert effects.status == "selected"
     assert next(f for f in effects.files if f.path == PATH).content.data == result
@@ -179,6 +202,49 @@ def test_retirement_of_a_locally_deleted_note_survives_review_serialization():
     effects = select_review_effects(reopened)
     assert effects.status == "selected", (reopened.blockers, reopened.requirements)
     assert all(f.path != PATH for f in effects.files)
+
+    omitted_graph = snapshot((), ())
+    omitted_graph = omitted_graph.model_copy(
+        update={
+            "identity": omitted_graph.identity.model_copy(
+                update={"snapshot_digest": "d" * 64}
+            )
+        }
+    )
+    omitted = generated(analyze(omitted_graph, POLICY), 9)
+    omission = prepare_review(
+        assemble_facts(
+            dormant,
+            omitted,
+            dormant,
+            proposal_id="omission",
+            generation=1,
+            retired_note_ids=loaded.saved.plan.facts.retired_note_ids,
+        ),
+        preflight=preflight(),
+    )
+    assert omission.facts.retired_note_ids == ("leaf",)
+    assert all(subject.item_id != "leaf" for subject in omission.facts.subjects)
+    selected = select_review_effects(omission)
+    assert selected.status == "selected", (omission.blockers, omission.requirements)
+    current = {f.path: f.content.data for f in selected.files}
+    current.pop("Uncreated targets.md", None)
+    returned = prepare_review(
+        assemble_facts(
+            omitted,
+            qualifying,
+            current,
+            proposal_id="return",
+            generation=1,
+            retired_note_ids=omission.facts.retired_note_ids,
+        ),
+        preflight=preflight(),
+    )
+    deletion = comparison(returned, "leaf")
+    assert deletion.original is None and deletion.disposition == "local_deleted"
+    selected = select_review_effects(returned)
+    assert selected.status == "selected", (returned.blockers, returned.requirements)
+    assert all(f.path != PATH for f in selected.files)
 
 
 def test_authored_short_name_blocks_a_promotion_to_an_ambiguous_destination():
@@ -249,3 +315,67 @@ def test_obsolete_listing_retains_current_bytes_and_has_no_incoming_file():
     listing = comparison(review, "support:" + path)
     assert listing.incoming is None and listing.disposition == "source_absent"
     assert listing.result.data == local and not listing.requires_decision
+
+
+@pytest.mark.parametrize("occupied", (False, True), ids=("free", "occupied"))
+def test_generated_navigation_requires_the_approved_moved_note_destination(occupied):
+    moved = "Moved/Leaf.md"
+    local = (
+        b'---\nsource_collection_id: "collection"\n'
+        b'source_item_id: "leaf"\n---\n\n# Leaf\n\nLocal prose.\r\n'
+    )
+    occupant = b"# Unrelated local file\r\n" if occupied else None
+    review = navigation_review(
+        occupant=occupant,
+        observer=LINK if occupied else b"Independent local prose.\r\n",
+        extra={moved: local},
+    )
+    leaf = comparison(review, "leaf")
+    assert leaf.target_path == moved and leaf.original is None
+    leaf_result = leaf.incoming.data + b"\nLocal prose.\r\n"
+    chosen = choose(review, "leaf", "format", "edited", edited=leaf_result)
+    entry = comparison(chosen, "entry")
+    (offer,) = [
+        offer
+        for offer in inspect_review_choices(chosen)
+        if offer.change_id == entry.change_id
+    ]
+    assert offer.enabled_choices == ("edited",) and not chosen.ready
+    initial = entry.current.data
+    assert b"[[Notes/Leaf.md|Leaf]]" in initial
+    refused = resolve_review(
+        chosen,
+        text_choice_action(
+            chosen,
+            action(chosen, entry, domain=offer.domain, choice="edited"),
+            edited=initial,
+        ),
+    )
+    assert refused.status == "refused"
+    corrected = initial.replace(b"[[Notes/Leaf.md|Leaf]]", b"[[Moved/Leaf.md|Leaf]]")
+    final = choose(chosen, "entry", offer.domain, "edited", edited=corrected)
+    effects = select_review_effects(final)
+    assert effects.status == "selected", (final.blockers, final.requirements)
+    published = {f.path: f.content.data for f in effects.files}
+    assert published[moved] == leaf_result and published[entry.path] == corrected
+    assert (
+        PATH not in published and MANUAL not in published and not effects.remove_paths
+    )
+    (approval,) = [a for a in final.actions if a.change_id == entry.change_id]
+    (changed,) = [
+        link
+        for link in approval.candidate.links.occurrences
+        if link.meaning.path == moved
+    ]
+    assert changed.meaning.target_identity.item_id == "leaf"
+
+    if not occupied:
+        source = {s.path: s.incoming.data for s in final.facts.subjects if s.incoming}
+        repeated = prepare_review(
+            assemble_facts(
+                source, source, published, proposal_id="repeated", generation=1
+            ),
+            preflight=preflight(),
+        )
+        assert repeated.ready, (repeated.blockers, repeated.requirements)
+        assert comparison(repeated, "entry").result.data == corrected

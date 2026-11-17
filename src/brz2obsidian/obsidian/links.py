@@ -228,6 +228,26 @@ def interpret_link_target(
     )
 
 
+def _relationship_entries(text):
+    headings = {
+        "## Parents": "Parents",
+        "## Children": "Children",
+        "## Related": "Related",
+    }
+    offset, heading = 0, None
+    entries = {}
+    for line in text.splitlines(keepends=True):
+        body = line.rstrip("\r\n")
+        if body in headings:
+            heading = headings[body]
+        elif heading is not None and body.startswith("- "):
+            entries[offset + 2, offset + len(body)] = heading
+        elif body:
+            heading = None
+        offset += len(line)
+    return entries
+
+
 def interpret_links(
     content,
     *,
@@ -274,6 +294,7 @@ def interpret_links(
     if output_format in QUALIFIED_OUTPUT_FORMATS:
         masked.extend(canonical_player_ranges(text))
     issues.extend(code_issues)
+    relationship_entries = _relationship_entries(text) if output_format == 9 else {}
     pattern = (
         r"!?\[\[(?P<w>[^\r\n]*?)\]\]|!?\[(?P<label>[^\[\]\r\n]*)\]\((?P<m>[^()\r\n]*)\)"
     )
@@ -399,6 +420,7 @@ def interpret_links(
                 raw=content.data[start:end],
                 query=query,
                 meaning=meaning,
+                relationship_heading=relationship_entries.get(match.span()),
             )
         )
     residue = list(text)

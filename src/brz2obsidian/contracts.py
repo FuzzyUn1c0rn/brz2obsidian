@@ -1322,6 +1322,14 @@ class OperationReversalTarget(ReconciliationContract):
         return self
 
 
+class MovedNavigationReference(ReconciliationContract):
+    heading: Literal["Parents", "Children", "Related"]
+    label: str
+    identity: ImportedItemIdentity
+    source_path: str
+    observed_path: str
+
+
 class ReconciliationSubject(ReconciliationContract):
     item_id: str = Field(min_length=1)
     facet: str = Field(min_length=1)
@@ -1335,6 +1343,9 @@ class ReconciliationSubject(ReconciliationContract):
     output_role: Literal["note", "dashboard", "template", "guide", "configuration"]
     structure: StructureComparison | None
     attachment: AttachmentFacts | None
+    moved_navigation: tuple[MovedNavigationReference, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
     prior_reservation: bool = Field(default=False, exclude_if=lambda value: not value)
     previously_generated: bool = Field(
         default=False, exclude_if=lambda value: not value
@@ -1499,6 +1510,7 @@ class ChangeProvenance(ReconciliationContract):
         "onboarding_required",
         "format_review",
         "format_source_uncertain",
+        "moved_navigation",
         "structure_combined",
         "structure_conflict",
         "structure_unbound",
@@ -2215,6 +2227,9 @@ class LinkOccurrence(ReconciliationContract):
     raw: bytes
     query: LinkQuery | None
     meaning: LinkMeaning
+    relationship_heading: Literal["Parents", "Children", "Related"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class LinkDocument(ReconciliationContract):
