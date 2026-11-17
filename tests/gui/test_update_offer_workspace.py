@@ -1,5 +1,6 @@
 """Offer-driven controls and bounded navigation at the typed worker boundary."""
 
+import json
 import os
 from uuid import uuid4
 
@@ -37,7 +38,7 @@ from tests.reconciliation.test_attachments import (
     linked_attachment_request,
 )
 from tests.reconciliation.test_identity import with_subjects
-from tests.reconciliation.test_proposals import request
+from tests.reconciliation.test_proposals import request as reconciliation_request
 from tests.reconciliation.test_refresh import two_items
 from tests.reconciliation.test_resolution import preflight, with_review_links
 
@@ -45,7 +46,7 @@ pytestmark = pytest.mark.gui
 
 
 def test_offer_workspace_routes_admitted_choices_and_reaches_bounded_review_pages(
-    tmp_path,
+    tmp_path, request
 ):
     from brz2obsidian_ui.window import MainWindow
 
@@ -74,7 +75,7 @@ def test_offer_workspace_routes_admitted_choices_and_reaches_bounded_review_page
         subjects=(),
     )
     consent_review = prepare_review(
-        with_review_links(request()),
+        with_review_links(reconciliation_request()),
         preflight=preflight().model_copy(update={"consents": (storage,)}),
     )
     consent = compatible.model_copy(update={"review": consent_review})
@@ -138,7 +139,7 @@ def test_offer_workspace_routes_admitted_choices_and_reaches_bounded_review_page
         row.choice == "both" and not row.enabled
         for row in unsafe_offer.unavailable_choices
     )
-    text = preparation(with_review_links(request(current=b"authored")))
+    text = preparation(with_review_links(reconciliation_request(current=b"authored")))
     text_offer = next(row for row in choice_offers(text) if row.domain == "text")
     assert text_offer.detail_count == 0
     offers = (group_offer, consent_offer, binary_offer, unsafe_offer, text_offer)
@@ -152,6 +153,9 @@ def test_offer_workspace_routes_admitted_choices_and_reaches_bounded_review_page
         poisoned = False
         binding = None
         selected = None
+
+        def __init__(self):
+            self.replies = []
 
         def run(self, actual, **callbacks):
             if callbacks.get("on_dispatched") is not None:
@@ -305,6 +309,7 @@ def test_offer_workspace_routes_admitted_choices_and_reaches_bounded_review_page
                     raise AssertionError(
                         "This workspace must only issue its admitted bounded requests"
                     )
+            self.replies.append(result)
             return Terminal(
                 phase="completed",
                 response=WorkerResponse(
@@ -452,7 +457,49 @@ def test_offer_workspace_routes_admitted_choices_and_reaches_bounded_review_page
         assert any(row.command == "references" and row.offset == 1 for row in calls)
         assert sum(row.command == "choose" for row in calls) == 1
         select("Compatible changes")
+
+        def wait_for_comparison_page(expected_offset):
+            while True:
+                if request.session.shouldstop:
+                    pytest.exit(str(request.session.shouldstop))
+                app.processEvents()
+                state = window.workbench.snapshot
+                if state is not None and (
+                    state.needs_inspection
+                    or state.transport_phase in ("not_started", "may_have_executed")
+                ):
+                    pytest.fail(
+                        "Comparison read did not complete safely: "
+                        f"{state.transport_phase}, {state.transport_code}"
+                    )
+                if (
+                    state is not None
+                    and not state.active_request_id
+                    and not window.workbench.busy
+                ):
+                    pages = [row for row in channel.replies if row.page is not None]
+                    requests = [row for row in calls if row.command == "page"]
+                    if not pages or not requests:
+                        pytest.fail("Comparison review became idle without a page.")
+                    if (
+                        pages[-1].status != "available"
+                        or pages[-1].page.offset != expected_offset
+                        or requests[-1].offset != expected_offset
+                        or requests[-1].queue != "all"
+                        or requests[-1].binding != state.binding
+                    ):
+                        pytest.fail(
+                            "Comparison review became idle on an unexpected page: "
+                            f"expected={expected_offset}, request={requests[-1]}, reply={pages[-1]}"
+                        )
+                    return
+                QTest.qWait(10)
+
+        wait_for_comparison_page(0)
         click("Next comparison items")
+        wait_for_comparison_page(1)
+        click("Next comparison items")
+        wait_for_comparison_page(2)
         version_names = {
             "Original version",
             "Current version",
@@ -528,8 +575,111 @@ def test_offer_workspace_routes_admitted_choices_and_reaches_bounded_review_page
             == b"Declared worker source; no Native preparation is claimed"
         )
     finally:
-        window.shutdown()
-        channel.close()
-        window.hide()
-        window.deleteLater()
-        app.processEvents()
+        try:
+            state = window.runner.session.update_snapshot
+            presented = window.workbench.snapshot
+            page = state.reply.page if state.reply is not None else None
+            cached_page = window.workbench._page
+            (tmp_path / "offer-workspace-diagnostic.json").write_text(
+                json.dumps(
+                    {
+                        "queue": window.workbench.queue.currentIndex().data(),
+                        "busy": window.workbench.busy,
+                        "pending_read": window.workbench._pending_read,
+                        "read_request": window.workbench._read_request,
+                        "page_queue": window.workbench._page_queue,
+                        "presented_revision": presented.revision if presented else None,
+                        "snapshot": {
+                            "revision": state.revision,
+                            "active_request_id": state.active_request_id,
+                            "active_command": state.active_command,
+                            "needs_inspection": state.needs_inspection,
+                            "transport_phase": state.transport_phase,
+                            "transport_code": state.transport_code,
+                            "binding_revision": state.binding.revision
+                            if state.binding
+                            else None,
+                            "reply_status": state.reply.status if state.reply else None,
+                            "reply_code": state.reply.code if state.reply else None,
+                        },
+                        "page": {
+                            "offset": page.offset,
+                            "next_offset": page.next_offset,
+                            "items": [
+                                {
+                                    "path": row.current_path,
+                                    "disposition": row.disposition,
+                                    "byte_offset": row.offset,
+                                    "next_byte_offset": row.next_byte_offset,
+                                    "available_versions": [
+                                        title
+                                        for title in (
+                                            "original",
+                                            "current",
+                                            "incoming",
+                                            "result",
+                                        )
+                                        if getattr(row, title) is not None
+                                    ],
+                                }
+                                for row in page.items
+                            ],
+                        }
+                        if page is not None
+                        else None,
+                        "cached_page": {
+                            "offset": cached_page.offset,
+                            "next_offset": cached_page.next_offset,
+                            "items": [
+                                {
+                                    "path": row.current_path,
+                                    "disposition": row.disposition,
+                                    "byte_offset": row.offset,
+                                    "next_byte_offset": row.next_byte_offset,
+                                }
+                                for row in cached_page.items
+                            ],
+                        }
+                        if cached_page is not None
+                        else None,
+                        "buttons": [
+                            {
+                                "name": row.accessibleName(),
+                                "visible": row.isVisible(),
+                                "enabled": row.isEnabled(),
+                            }
+                            for row in window.findChildren(QPushButton)
+                            if row.accessibleName() == "Next comparison items"
+                        ],
+                        "editors": [
+                            {
+                                "name": row.accessibleName(),
+                                "visible": row.isVisible(),
+                                "enabled": row.isEnabled(),
+                                "text": row.toPlainText(),
+                            }
+                            for row in window.findChildren(QPlainTextEdit)
+                        ],
+                        "calls": [row.model_dump(mode="json") for row in calls[-12:]],
+                        "replies": [
+                            {
+                                "status": row.status,
+                                "code": row.code,
+                                "page_offset": row.page.offset if row.page else None,
+                                "next_offset": row.page.next_offset
+                                if row.page
+                                else None,
+                            }
+                            for row in channel.replies[-12:]
+                        ],
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+        finally:
+            window.shutdown()
+            channel.close()
+            window.hide()
+            window.deleteLater()
+            app.processEvents()
