@@ -33,12 +33,14 @@ TITLES = {
     7: "Topic",
     8: "Assigned only",
     9: "Isolated",
+    11: "Child",
 }
 EDGES = (
     (1, HUB, 1, 1, -1),
     (HUB, TWIN, 1, 1, -1),
-    (HUB, 4, 1, 1, -1),
-    (HUB, 7, 1, 1, -1),
+    (HUB, 11, 1, 1, -1),
+    (1, 4, 1, 1, -1),
+    (1, 7, 1, 1, -1),
     (5, 6, 3, 1, -1),
     (7, 4, 1, 5, -1),
     (7, 8, 1, 5, -1),
@@ -47,10 +49,10 @@ TOKEN = base64.urlsafe_b64encode(UUID(int=HUB).bytes_le).decode().rstrip("=")
 TWIN_BODY = (
     f"[Authored twin](brain://{TOKEN}/Twin)\r\n\r\nLocal source prose.\r\n"
 ).encode()
+NOTE_BODIES = {TWIN: TWIN_BODY, 11: b"Independently substantive child.\r\n"}
 HUB_PATH = "Notes/Twin — 11111111.md"
 TWIN_PATH = "Notes/Twin — 22222222.md"
 LISTING = "Uncreated targets.md"
-NOTE = identity(900)
 KINDS = {7: 4}
 
 
@@ -60,7 +62,7 @@ def paired_source(path):
         TITLES | {10: "System"},
         (*EDGES, (10, 9, 1, 6, -1)),
         kinds=KINDS | {10: 5},
-        notes={TWIN: (TWIN_BODY, 4)},
+        notes={owner: (body, 4) for owner, body in NOTE_BODIES.items()},
     )
     api = TypeTagApi(edges=EDGES, type_fields={})
     api.thoughts = {
@@ -81,12 +83,13 @@ def paired_source(path):
         }
         for key in api.thoughts
     ]
-    api.attachments = {
-        NOTE: attachment(
-            NOTE, identity(TWIN), 1, "Notes.md", is_notes=True, length=len(TWIN_BODY)
+    api.attachments, api.payloads = {}, {}
+    for index, (owner, body) in enumerate(NOTE_BODIES.items(), 900):
+        note = identity(index)
+        api.attachments[note] = attachment(
+            note, identity(owner), 1, "Notes.md", is_notes=True, length=len(body)
         )
-    }
-    api.payloads = {NOTE: TWIN_BODY}
+        api.payloads[note] = body
     api.overrides["/api/v1/docs.json"] = (200, SCHEMA)
     return source, api
 
@@ -178,7 +181,8 @@ def test_source_bound_conversion_and_audit_challenges(
         for row in record["item_targets"]
     }
     assert planned == targets
-    assert inspection.counts.planned_notes == record["counts"]["planned_notes"] == 7
+    assert old_record["counts"]["planned_notes"] == 3
+    assert inspection.counts.planned_notes == record["counts"]["planned_notes"] == 8
     assert (
         record["source_identity"]["snapshot_digest"]
         == old_record["source_identity"]["snapshot_digest"]
@@ -190,11 +194,34 @@ def test_source_bound_conversion_and_audit_challenges(
     assert targets[identity(HUB)] == (HUB_PATH, True, ["navigation"])
     assert targets[identity(TWIN)] == (TWIN_PATH, True, ["content"])
     assert targets[identity(7)] == ("Notes/Topic.md", True, ["navigation"])
+    home = identity(1) if adapter == "brz" else HOME
+    assert {
+        row["original_identity"] for row in old_record["item_targets"] if row["created"]
+    } == {home, identity(TWIN), identity(11)}
+    assert {key for key, (_, created, _) in targets.items() if created} == {
+        home,
+        *(identity(number) for number in (HUB, TWIN, 4, 5, 6, 7, 11)),
+    }
     assert not (prior / HUB_PATH).exists()
     assert (vault / HUB_PATH).is_file()
+    assert (
+        "## Children\n\n- [[Notes/Child.md|Child]]\n- [[Notes/Twin — 22222222.md|Twin]]\n"
+        in (vault / HUB_PATH).read_text(encoding="utf-8")
+    )
     assert "[[Notes/Twin — 11111111.md|Authored twin]]" in (
         vault / TWIN_PATH
     ).read_text(encoding="utf-8")
+    assert {
+        row["item_key"]: row["native"] for row in old_record["tag_memberships"]
+    } == {identity(4): False, identity(8): False}
+    assert {row["item_key"]: row["native"] for row in record["tag_memberships"]} == {
+        identity(4): True,
+        identity(8): False,
+    }
+    assert (vault / LISTING).read_bytes() == (
+        b"# Uncreated targets\n\n## Isolated thoughts\n\n"
+        b"- [[Notes/Isolated.md|Isolated]]\n"
+    )
 
     def challenge(name, action, expected):
         altered = tmp_path / name
@@ -206,7 +233,7 @@ def test_source_bound_conversion_and_audit_challenges(
     challenge(
         "missing",
         lambda altered: (altered / HUB_PATH).unlink(),
-        "materialization|created/uncreated file|navigation note unavailable",
+        "created/uncreated file|required materialized imported note",
     )
 
     def wrong_destination(altered):
